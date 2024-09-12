@@ -2,7 +2,7 @@
 
 IPA Dashboard Solution for Data Management Systems.
 
-### Development set up
+## Development set up
 
 Development relies on the following software
 
@@ -41,12 +41,11 @@ This will make sure that you have the latest version of `Just`, as well as
 [Quarto](https://quarto.org/docs/guide/) (for writing and compiling scientific and
 technical documents).
 
-
 - We use `Just` in order to make it easier for all IPA users to be productive with data
   and technology systems. The goal of using a `Justfile` is to help make the end goal of
   the user easier to achieve without needing to know or remember all of the technical
   details of how we get to that goal.
-- We use `uv` to help ease use of Python. Rye provides a global system for creating and
+- We use `uv` to help ease use of Python. `uv` provides a global system for creating and
   building computing environments for Python.
 - We use Quarto to allow users to focus on writing and data analytics. Writing in
   markdown, jupyter notebooks, python scripts, R scripts, etc. makes it easier to
