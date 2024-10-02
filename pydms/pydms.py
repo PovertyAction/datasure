@@ -1,10 +1,22 @@
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+import pandas as pd
+=======
+>>>>>>> 801c54a (init commit)
+>>>>>>> 15d81c3 (init commit)
 import streamlit as st
 import pandas as pd
 
 # --- PAGE SETUP --- #
 
 # initialize session states
+<<<<<<< HEAD
 if 'show_prep_section' not in st.session_state:
+=======
+<<<<<<< HEAD
+if "show_prep_section" not in st.session_state:
+>>>>>>> 15d81c3 (init commit)
     st.session_state.show_prep_section = True
 
 if 'show_config_section' not in st.session_state:
@@ -45,36 +57,96 @@ if 'alias_list_index' not in st.session_state:
 	
 # config data import page
 import_data_page = st.Page(
+<<<<<<< HEAD
     page = "views/import_view.py", 
     title = "Import Data", 
     icon = ":material/sync:", 
     default = True,
+=======
+    page="views/import_view.py",
+    title="Import Data",
+    icon=":material/sync:",
+    default=True,
+=======
+if 'prep_section' not in st.session_state:
+    st.session_state.prep_section = False
+
+if 'config_section' not in st.session_state:
+    st.session_state.config_section = False
+
+if 'checks_section' not in st.session_state:
+    st.session_state.checks_section = False
+
+# config data import page
+import_data_page = st.Page(
+    page = "views/01_import_data.py", 
+    title = "Import Data", 
+    icon = ":material/sync:", 
+    default = True,
+>>>>>>> 801c54a (init commit)
+>>>>>>> 15d81c3 (init commit)
 )
 
 # config data prep page
 prep_data_page = st.Page(
+<<<<<<< HEAD
     page = "views/prep_view.py", 
     title = "Prepare Data", 
     icon = ":material/rule_settings:"
+=======
+<<<<<<< HEAD
+    page="views/prep_view.py", title="Prepare Data", icon=":material/rule_settings:"
+=======
+    page = "views/02_prep_data.py", 
+    title = "Prepare Data", 
+    icon = ":material/rule_settings:"
+>>>>>>> 801c54a (init commit)
+>>>>>>> 15d81c3 (init commit)
 )
 
 # config data checks config page
 config_checks_page = st.Page(
+<<<<<<< HEAD
     page = "views/config_view.py", 
     title = "Configure Checks", 
     icon = ":material/manufacturing:"
+=======
+<<<<<<< HEAD
+    page="views/config_view.py",
+    title="Configure Checks",
+    icon=":material/manufacturing:",
+>>>>>>> 15d81c3 (init commit)
 )
 
 # config check output pages
 check_output_page_1 = st.Page(
+<<<<<<< HEAD
     page = "views/output_view_1.py", 
     title = f'{st.session_state.config_page_1}', 
     icon = ":material/frame_inspect:"
+=======
+    page="views/output_view_1.py",
+    title=f"{st.session_state.config_page_1}",
+    icon=":material/frame_inspect:",
+=======
+    page = "views/03_config_checks.py", 
+    title = "Configure Checks", 
+    icon = ":material/manufacturing:"
+)
+
+# config check output page
+check_output_page = st.Page(
+    page = "views/04_check_output.py", 
+    title = "Data Quality Checks", 
+    icon = ":material/frame_inspect:"
+>>>>>>> 801c54a (init commit)
+>>>>>>> 15d81c3 (init commit)
 )
 
 # --- NAVIGATION MENU --- #
 
 # Dynamically load pages
+<<<<<<< HEAD
 if st.session_state.show_checks_page_1:
     nav_menu = st.navigation(
         {
@@ -85,6 +157,9 @@ if st.session_state.show_checks_page_1:
         }
     )
 elif st.session_state.show_prep_section:
+=======
+if st.session_state.prep_section:
+>>>>>>> 801c54a (init commit)
     nav_menu = st.navigation(
         {
             "Import Data": [import_data_page],
@@ -99,6 +174,22 @@ else:
         }
     )
 
+<<<<<<< HEAD
+# --- GLOBAL ASSERTS --- #
+=======
+<<<<<<< HEAD
+# --- GLOBAL ASSETS --- #
+>>>>>>> 15d81c3 (init commit)
+
+st.logo("asserts/IPA-primary-full-color-abbreviated.png")
+
+# --- RUN NAVIGATION --- #
+
+<<<<<<< HEAD
+nav_menu.run()
+=======
+nav_menu.run()
+=======
 # --- GLOBAL ASSERTS --- #
 
 st.logo("asserts/IPA-primary-full-color-abbreviated.png")
@@ -106,3 +197,5 @@ st.logo("asserts/IPA-primary-full-color-abbreviated.png")
 # --- RUN NAVIGATION --- #
 
 nav_menu.run()
+>>>>>>> 801c54a (init commit)
+>>>>>>> 15d81c3 (init commit)

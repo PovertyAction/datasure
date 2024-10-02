@@ -168,9 +168,19 @@ cython_debug/
 /.quarto/
 
 
+<<<<<<< HEAD
 # Data Folders
+<<<<<<< HEAD
 archived/code/*test*.ipynb
 archived/notebooks/*test*.ipynb
 cache/*.json
 cache/data/*
 cache/settings/*
+=======
+pydms/data/*
+pydms/cache/*.json
+=======
+# Ishmail's Data Folders
+pydms/data/*
+>>>>>>> 801c54a (init commit)
+>>>>>>> 15d81c3 (init commit)
