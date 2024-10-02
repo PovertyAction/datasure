@@ -162,3 +162,7 @@ cython_debug/
 #.idea/
 
 /.quarto/
+
+
+# Ishmail's Data Folders
+pydms/data/*
