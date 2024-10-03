@@ -28,6 +28,8 @@ if 'show_forms' not in st.session_state:
 	st.session_state['show_forms'] = False
 if 'disable_download_btn' not in st.session_state:
 	st.session_state['disable_download_btn'] = True
+if 'show_preview' not in st.session_state:
+	st.session_state['show_preview'] = False
 if 'show_prep_section' not in st.session_state:
 	st.session_state['show_prep_section'] = False
 	
@@ -41,7 +43,8 @@ scto, azure, local, script = st.tabs(["SurveyCTO",
 
 with scto:
 	# tab description
-	st.title("Sync data from SurveyCTO")
+	
+	st.title("Sync your data")
 	st.markdown("Enter the details required for fetching your data from the SurveyCTO server")
 
 	# server & form details
@@ -54,6 +57,7 @@ with scto:
 			
 			# define server details input
 			with st.form(key="server_form"):
+				st.image("asserts/SurveyCTO-Logo-CMYK.png", width = 200)
 				st.markdown("*Server Details:*")
 
 				name_default, user_default = scto_load_login()
@@ -148,7 +152,7 @@ with scto:
 					server_dataset = edited_form_inputs['server dataset'][i - 1]
 					saveas = edited_form_inputs['save as'][i - 1]
 
-					st.session_state[f'raw_data{i}'] = scto_import_data(scto = st.session_state.scto, 
+					st.session_state[f'raw_data{i}'], new_data_count = scto_import_data(scto = st.session_state.scto, 
 																		form_id = form_id,
 																		key = key, 
 																		server_dataset = server_dataset, 
@@ -157,11 +161,36 @@ with scto:
 					progress_bar.progress(i/form_count, text = f'Download in progress...{i}/{form_count}')
 
 					if saveas is not '':
-						st.write(f'{i}/{form_count}: downloaded successfully and saved as {saveas}')
+						st.write(f'{i}/{form_count}: downloaded {new_data_count} new data successfully and saved as {saveas}')
 					else:
 						st.write(f'{i}/{form_count}: downloaded successfully')
 
 			st.success("Data download complete")
-			
 
+			# modify session state for preview
+			st.session_state.show_preview = True
+			
+if st.session_state.show_preview:
+	with st.container(border = True):
+		st.subheader("Preview Downloaded Data")
+		st.write('---')
+		
+		select_col, mc1, mc2, mc3, empty_col = st.columns((0.2, 0.1, 0.1, 0.1, 0.5))
+		
+		st.session_state.alias_list = edited_form_inputs['alias'].tolist()
+
+		with select_col:	
+			preview_data = st.selectbox("Select Dataset to preview:", options = st.session_state.alias_list)
+			row_num = st.session_state['alias_list'].index(preview_data)
+		
+		row_count: int = len(st.session_state[f'raw_data{row_num + 1}'].index)
+		col_count: int = len(st.session_state[f'raw_data{row_num + 1}'].columns)
+		miss_count: int = st.session_state[f'raw_data{row_num + 1}'].isnull().sum().sum()
+		miss_perc: float = round((miss_count / (row_count * col_count)) * 100, 2)
+
+		mc1, mc2, mc3 = st.columns(3)
+		mc1.metric(label = "Rows", value = row_count)
+		mc2.metric(label = "Columns", value = col_count)
+		mc3.metric(label = "Missing Values", value = f'{miss_perc}%')
 	
+		st.dataframe(st.session_state[f'raw_data{row_num + 1}'])
