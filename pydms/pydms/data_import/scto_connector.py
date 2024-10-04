@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 import datetime
 import re
+import os
 
 
 import pysurveycto
@@ -21,7 +22,9 @@ def scto_server_connect(servername: str, username: str , password: str ) -> str:
 	username: SurveyCTO account username (email address)
 	password: SurveyCTO account password
 
-	Return: SurveyCTO object
+	RETURN:
+	------- 
+	SurveyCTO object
 
 	"""
 	# check that required field are supplied
@@ -54,7 +57,12 @@ def scto_load_login() -> tuple:
 	-------
 	servername: SurveyCTO server name
 
-	return: tuple of servername and username
+	RETURN:
+	-------
+	tuple of servername and username. Returns empty tuple if no previous session
+	servername: SurveyCTO server name
+	username: SurveyCTO account username (email address) 
+	   
 	"""
 	
 	# load server login details from last session
@@ -99,8 +107,28 @@ def scto_load_forms(servername: str) -> pd.DataFrame:
 
 # Using pysurveycto library, import survey data
 
-def scto_import_data(scto, form_id, key = None, server_dataset = False, saveas = None) -> tuple:
+def scto_import_data(scto: object, form_id: str, key: str = None, server_dataset: bool = False, saveas: str = None, media: bool = False) -> tuple:
 
+	"""
+	- Import SurveyCTO Data and save to file
+	- Adjust data types based on XLS form definition
+	- Also import media files
+
+	PARAMS:
+	-------	
+	scto: SurveyCTO object
+	form_id: SurveyCTO form ID
+	key: SurveyCTO encryption key
+	server_dataset: boolean, True if using server dataset
+	saveas: string, path to save dataset
+	media: boolean, True if downloading media files
+
+	RETURN:
+	-------
+	tuple of (scto_data, new_data_count)
+	scto_data: pandas dataframe of imported data
+	new_data_count: number of new data imported
+	"""
 	# download server databases
 	if server_dataset:
 		scto_data = scto.get_server_dataset(form_id)
@@ -187,36 +215,92 @@ def scto_import_data(scto, form_id, key = None, server_dataset = False, saveas =
 				current_group = '/'.join(current_group)
 			else: 
 				fields.at[i, 'group'] = current_group
-
-		# drop rows with that contain meta info eg, groups, begin repeat, end repeat
-		fields = fields[fields['type'].str.contains('select_one') | \
-				 		fields['type'].isin(['datetime', 'date', 'time', 'sensor_statistic', \
-									 		 'interger', 'decimal'])]
-		
+	
 		# convert default str datetime cols to datetime
 		for col in ['CompletionDate', 'SubmissionDate', 'starttime', 'endtime']:
 			if col in scto_data.columns:
 				scto_data[col] = pd.to_datetime(scto_data[col])
 
 		# convert default numeric variables to numeric
-		scto_data['duration'] = pd.to_numeric(scto_data['duration'], errors = 'ignore')
+		for col in ['duration', 'formdef_version']:
+			if col in scto_data.columns:
+				scto_data[col] = pd.to_numeric(scto_data[col], errors = 'ignore')
 
 		# loop through fields and convert numeric variables to appropriate data types
+		scto_data_cols = list(scto_data.columns)
 		for i, row in fields.iterrows():
-			if row['type'] is ['date']:
-				scto_data[row['name']] = datetime.datetime.strptime(scto_data[row['name']], '%Y-%m-%d')
-			elif row['type'] in ['datetime', 'time']:
-				scto_data[row['name']] = pd.to_datetime(scto_data[row['name']], errors = 'ignore')
+			# check if field is a repeat group col, if yes, get all repeat columns
+			if row['group'] != '':
+				cols = row['name']
+				regex = r'\b' + col + r'_[0-9]+[_]{,1}.*\b'
+				cols = [x for x in scto_data_cols if re.fullmatch(regex, x)]
 			else:
-				try:
-					scto_data[row['name']] = pd.to_numeric(scto_data[row['name']], errors = 'ignore')
-				except KeyError:
-					pass
+				cols = row['name']
+			
+			if row['type'] in ['date']:
+				scto_data[cols] = pd.to_datetime(scto_data[cols], errors = 'ignore')
+			elif row['type'] in ['datetime', 'time']:
+				scto_data[cols] = pd.to_datetime(scto_data[cols], errors = 'ignore')
+			elif row['type'] in ['integer', 'decimal']:
+				scto_data[cols] = pd.to_numeric(scto_data[cols], errors = 'ignore')
+			elif row['type'] in ['note']:
+				if cols in scto_data_cols:
+					# remove note fields from dataset
+					scto_data.drop(columns = cols, axis = 1, inplace = True)
+			else:
+				# for all other types, ignore
+				pass
 		
-		# convert col with object type to str
-		object_cols = scto_data.select_dtypes(include = ['object']).columns
-		scto_data[object_cols] = scto_data[object_cols].astype(str)
-					
+		# -- download media files --# 
+
+		# get a list of media fields form fields
+		if media:
+			media_fields = fields[fields['type'].isin(['image', 'audio', 'video', 
+											 		  'file', 
+													  'comments', 'text audit', 'audio audit', 'sensor stream'])]
+			
+			# use default saveas folder as media folder, removing filename
+			media_folder = saveas.split('/')
+			media_folder = '/'.join(media_folder[:-1]) + '/media'
+
+			# check if director exist, create if not
+			if not os.path.exists(media_folder):
+				os.makedirs(media_folder)
+
+			# loop through media fields and download media files
+			media_prog_col, empty_col = st.columns((0.3, 0.7))
+			for i, row in media_fields.iterrows():
+				# get repeat group columns
+				if row['group'] != '':
+					cols = row['name']
+					regex = r'\b' + col + r'_[0-9]+[_]{,1}.*\b'
+					cols = [x for x in scto_data_cols if re.fullmatch(regex, x)]
+				else:
+					cols = row['name'].split()
+
+				# get media files
+				for col in cols:
+
+					with media_prog_col:
+						media_progress_bar = st.progress(0, text = f'Downloading media files for {col} ...')
+
+					for j in range(0, len(new_data.index)):
+						# count number of non-missing urls
+						media_count = new_data[col].count()
+
+						# get url at index j or row['name']
+						url = new_data[col][j]
+						submission_key = new_data['KEY'][j].replace("uuid:", "")
+						fileext = url.split('.')[-1] or "csv"
+						filename = row['type'].upper() + "_" + col + '_' + submission_key + '.' + fileext
+						media_file = scto.get_attachment(url, key = key)
+						
+						# save media files
+						with open(f'{media_folder}/{filename}', 'wb') as file:
+							file.write(media_file)
+						progress = round((j + 1/media_count) * 100, 2)
+						media_progress_bar.progress(j + 1/media_count, text = f'Download in progress...{progress}')
+
 	# save dataset
 	if saveas:
 		scto_data.to_csv(saveas, index = False)
