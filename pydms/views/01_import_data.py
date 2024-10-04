@@ -6,6 +6,7 @@ import time
 import pysurveycto
 
 from pydms.data_import import scto_import_data, scto_server_connect, scto_load_login, scto_load_forms
+from pydms.data_import import get_excel_sheet_names
 
 # --- CONFIGURE PAGE ---#
 
@@ -35,16 +36,17 @@ if 'show_prep_section' not in st.session_state:
 	
 # --- CONFIGURE CONNECTOR TABS ---#
 
-scto, azure, local, script = st.tabs(["SurveyCTO", 
+scto, azure, local, pyscript = st.tabs(["SurveyCTO", 
 									 "Microsoft Azure", 
-									 "Local Disk", 
+									 "Local Storage", 
 									 "Python Script"])
 
+# --- SURVEYCTO CONNECTOR ---#
 
 with scto:
-	# tab description
 	
-	st.title("Sync your data")
+	# tab description
+	st.title("Sync your SurveyCTO")
 	st.markdown("Enter the details required for fetching your data from the SurveyCTO server")
 
 	# server & form details
@@ -151,12 +153,14 @@ with scto:
 					key = edited_form_inputs['encryption key'][i - 1]
 					server_dataset = edited_form_inputs['server dataset'][i - 1]
 					saveas = edited_form_inputs['save as'][i - 1]
+					media = edited_form_inputs['get media'][i - 1]
 
 					st.session_state[f'raw_data{i}'], new_data_count = scto_import_data(scto = st.session_state.scto, 
 																		form_id = form_id,
 																		key = key, 
 																		server_dataset = server_dataset, 
-																		saveas = saveas)
+																		saveas = saveas, 
+																		media = media)
 					time.sleep(3)
 					progress_bar.progress(i/form_count, text = f'Download in progress...{i}/{form_count}')
 
@@ -194,3 +198,50 @@ if st.session_state.show_preview:
 		mc3.metric(label = "Missing Values", value = f'{miss_perc}%')
 	
 		st.dataframe(st.session_state[f'raw_data{row_num + 1}'])
+
+
+# --- Microsoft Azure Connector ---#
+
+
+
+
+# --- Local Disk Connector ---#
+
+with local:
+	# tab description
+	st.title("Sync data from Local Storage")
+	st.markdown("Add multiple data files from your local storage")
+
+	# define cols adding files and added files
+	add_file_col, show_file_col = st.columns((0.4, 0.6))
+
+	with add_file_col:
+		with st.container(border = True):
+			st.image("asserts/storage.png", width = 100)
+			
+			
+			st.markdown("Add a new file")
+			# input for file type
+			file_type = st.selectbox(label = "Select File Type", 
+										options = ['csv', 'xlsx', 'json'], 
+										key = 'file_type')
+			
+			# adjust for excel file types
+			if file_type == 'xlsx':
+				file_type = ['xlsx', 'xls']
+		
+			# file uploader. Limit to 1 file and allow only file types selected
+			added_file = st.file_uploader(label = "Upload File", 
+										type = file_type)
+
+			if file_type == ['xlsx', 'xls']:
+				if added_file:		
+					sheets  = get_excel_sheet_names(added_file)
+					sheet_name = st.selectbox(label = "Sheet Name", 
+											options = sheets)
+				
+			
+
+			
+
+# --- Python Script Connector ---#
