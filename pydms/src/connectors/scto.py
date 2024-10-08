@@ -417,4 +417,8 @@ def scto_import_data(scto: object, form_id: str, key: str = None, server_dataset
 	if saveas:
 		scto_data.to_csv(saveas, index = False)
 
+<<<<<<< HEAD
 	return (scto_data, new_data_count)
+=======
+	return (scto_data, new_data_count)
+>>>>>>> fa2837e (restructured)

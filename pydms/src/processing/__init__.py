@@ -26,4 +26,8 @@ DP_NUM_FUNCS: tuple = ('add', 'multiple', 'subtract', 'divide',
 					  'extract pattern')
 
 DP_DATETIME_FUNCS: tuple = ('day', 'week', 'month', 'year', 
+<<<<<<< HEAD
 							'second', 'minute', 'hour')
+=======
+							'second', 'minute', 'hour')
+>>>>>>> fa2837e (restructured)

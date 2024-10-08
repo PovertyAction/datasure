@@ -24,4 +24,8 @@ def get_excel_sheet_names(file_path: str) -> list:
 	sheets = []
 	with zipfile.ZipFile(file_path, 'r') as zip_ref: xml = zip_ref.read("xl/workbook.xml").decode("utf-8")
 	for s_tag in  re.findall("<sheet [^>]*", xml) : sheets.append(  re.search('name="[^"]*', s_tag).group(0)[6:])
+<<<<<<< HEAD
 	return sheets
+=======
+	return sheets
+>>>>>>> fa2837e (restructured)
