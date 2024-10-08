@@ -79,7 +79,7 @@ if 'checks_section' not in st.session_state:
 
 # config data import page
 import_data_page = st.Page(
-    page = "views/01_import_data.py", 
+    page = "views/import.py", 
     title = "Import Data", 
     icon = ":material/sync:", 
     default = True,
@@ -90,14 +90,20 @@ import_data_page = st.Page(
 # config data prep page
 prep_data_page = st.Page(
 <<<<<<< HEAD
+<<<<<<< HEAD
     page = "views/prep_view.py", 
     title = "Prepare Data", 
     icon = ":material/rule_settings:"
 =======
+=======
+>>>>>>> 4b35f05 (restructured)
 <<<<<<< HEAD
     page="views/prep_view.py", title="Prepare Data", icon=":material/rule_settings:"
 =======
     page = "views/02_prep_data.py", 
+=======
+    page = "views/prep.py", 
+>>>>>>> a279fb4 (restructured)
     title = "Prepare Data", 
     icon = ":material/rule_settings:"
 >>>>>>> 801c54a (init commit)
@@ -107,10 +113,13 @@ prep_data_page = st.Page(
 # config data checks config page
 config_checks_page = st.Page(
 <<<<<<< HEAD
+<<<<<<< HEAD
     page = "views/config_view.py", 
     title = "Configure Checks", 
     icon = ":material/manufacturing:"
 =======
+=======
+>>>>>>> 4b35f05 (restructured)
 <<<<<<< HEAD
     page="views/config_view.py",
     title="Configure Checks",
@@ -130,13 +139,16 @@ check_output_page_1 = st.Page(
     icon=":material/frame_inspect:",
 =======
     page = "views/03_config_checks.py", 
+=======
+    page = "views/config.py", 
+>>>>>>> a279fb4 (restructured)
     title = "Configure Checks", 
     icon = ":material/manufacturing:"
 )
 
 # config check output page
 check_output_page = st.Page(
-    page = "views/04_check_output.py", 
+    page = "views/output.py", 
     title = "Data Quality Checks", 
     icon = ":material/frame_inspect:"
 >>>>>>> 801c54a (init commit)

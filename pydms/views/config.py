@@ -20,8 +20,7 @@ with add_page:
 	with st.form(key = "new_tab"):
 		st.markdown("*New Check Tab:*")
 
-		new_page_name = 
-			st.text_input(label = "Page name*", 
+		new_page_name = st.text_input(label = "Page name*", 
 			help = "Enter the name of the new check page. eg. Household Survey")
 		
 		new_page_data = st.selectbox("Dataset*:", options = alias_list)

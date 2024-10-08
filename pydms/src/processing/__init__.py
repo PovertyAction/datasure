@@ -1,5 +1,8 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> a279fb4 (restructured)
 #-- DEFINE CONSTANTS FOR DATA PREP --#
 
 # Data prep actions
@@ -29,6 +32,7 @@ DP_NUM_FUNCS: tuple = ('add', 'multiple', 'subtract', 'divide',
 
 DP_DATETIME_FUNCS: tuple = ('day', 'week', 'month', 'year', 
 <<<<<<< HEAD
+<<<<<<< HEAD
 							'second', 'minute', 'hour')
 =======
 							'second', 'minute', 'hour')
@@ -41,3 +45,6 @@ from .prep import prep_load_log
 
 __all__ = ["prep_load_log"]
 >>>>>>> f7ca733 (format and lint pydms/src/processing)
+=======
+							'second', 'minute', 'hour')
+>>>>>>> a279fb4 (restructured)

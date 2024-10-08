@@ -1,5 +1,6 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 from .scto import scto_import_data, scto_server_connect, scto_load_login, scto_load_forms
 <<<<<<< HEAD
 from .local import get_excel_sheet_names
@@ -50,3 +51,7 @@ __all__ = [
     "scto_server_connect",
 ]
 >>>>>>> 5efff5e (format and lint pydms/src/connectors)
+=======
+from .scto import scto_import_data, scto_server_connect, scto_load_login, scto_load_forms
+from .local import get_excel_sheet_names
+>>>>>>> a279fb4 (restructured)
