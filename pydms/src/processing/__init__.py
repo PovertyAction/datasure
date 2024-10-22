@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 #-- DEFINE CONSTANTS FOR DATA PREP --#
 
 # Data prep actions
@@ -31,3 +32,6 @@ DP_DATETIME_FUNCS: tuple = ('day', 'week', 'month', 'year',
 =======
 							'second', 'minute', 'hour')
 >>>>>>> fa2837e (restructured)
+=======
+from .prep import prep_load_log
+>>>>>>> 9b1a5b9 (prep)

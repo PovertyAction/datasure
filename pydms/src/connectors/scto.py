@@ -2,8 +2,10 @@ from io import StringIO
 import streamlit as st
 import pandas as pd
 import datetime
+import time
 import re
 import os
+from functools import lru_cache
 
 
 import pysurveycto
@@ -71,7 +73,7 @@ def scto_load_login() -> tuple:
 	# load server login details from last session
 	try:
 		file = pd.read_json(f'cache/pyDMS_server_cache.json')
-		server_details = file.to_dict(orient='data')
+		server_details = file.to_dict()
 		return (server_details['name'][0], server_details['user'][0])
 
 	except FileNotFoundError:
@@ -94,7 +96,7 @@ def scto_load_forms(servername: str) -> pd.DataFrame:
 	# load form details from last session
 	try:
 		file = pd.read_json(f'cache/{servername}_pyDMS_forms_cache.json')
-		form_inputs = file.to_dict(orient='data')
+		form_inputs = file.to_dict()
 		return pd.DataFrame(form_inputs)
 
 	# if file not found, return empty dataframe
@@ -198,7 +200,6 @@ def scto_get_xls(scto: object, form_id: str) -> tuple:
 	return (questions, choices)
 
 # --- Get List of Repeat Fields in SurveyCTO Form --- #
-
 def scto_get_repeat_fields(questions: pd.DataFrame) -> list:
 
 	"""
@@ -268,7 +269,6 @@ def scto_get_repeat_cols(field: str, repeat_fields: list) -> list:
 def scto_download_media(scto: object, media_fields: list, repeat_fields: list, new_data: pd.DataFrame, media_folder: str, key: str = None) -> None:
 
 	# loop through media fields and download media files
-	media_prog_col, _ = st.columns((0.3, 0.7))
 	for field in media_fields:
 		# get repeat group columns
 		cols = scto_get_repeat_cols(field, repeat_fields)
@@ -276,29 +276,33 @@ def scto_download_media(scto: object, media_fields: list, repeat_fields: list, n
 		# get media files
 		for col in cols:
 
-			with media_prog_col:
-				media_progress_bar = st.progress(0, text = f'Downloading media files for {col} ...')
-
-			for j in range(0, len(new_data.index)):
-				# count number of non-missing urls
-				media_count = new_data[col].count()
-
-				# get url at index j or row['name']
-				url = new_data[col][j]
-				submission_key = new_data['KEY'][j].replace("uuid:", "")
-				fileext = url.split('.')[-1] or "csv"
-				filename = col + '_' + submission_key + '.' + fileext
-				media_file = scto.get_attachment(url, key = key)
+			media_data = new_data[new_data[col].notna()]
+			media_data = media_data[[col, 'KEY']].reset_index()
+			media_count = len(media_data.index)	
+			
+			if media_count > 0:
+					media_progress_bar = st.progress(0, text = f'Downloading media files for {col} ...')
 				
-				# save media files
-				with open(f'{media_folder}/{filename}', 'wb') as file:
-					file.write(media_file)
-				progress = round((j + 1/media_count) * 100, 2)
-				media_progress_bar.progress(j + 1/media_count, text = f'Download in progress...{progress}')
+					for j in range(0, len(media_data.index)):
+
+						# get url at index j or row['name']
+
+						url = media_data[col][j]
+						submission_key = media_data['KEY'][j].replace("uuid:", "")
+						fileext = url.split('.')[-1] or "csv"
+						filename = col + '_' + submission_key + '.' + fileext
+						media_file = scto.get_attachment(url, key = key)
+						
+						# save media files
+						with open(f'{media_folder}/{filename}', 'wb') as file:
+							file.write(media_file)
+						progress = round(((j + 1)/media_count) * 100, 2)
+						media_progress_bar.progress((j + 1)/media_count, \
+								  text = f'Downloading media files for {col} ... % complete')
 	
 
 # Using pysurveycto library, import survey data from SurveyCTO
-def scto_import_data(scto: object, form_id: str, key: str = None, server_dataset: bool = False, saveas: str = None, media: bool = False) -> tuple():
+def scto_import_data(scto: object, form_id: str, key: str = None, server_dataset: bool = False, saveas: str = None, media: bool = False) -> tuple:
 
 	"""
 	- Import SurveyCTO Data and save to file
@@ -321,6 +325,8 @@ def scto_import_data(scto: object, form_id: str, key: str = None, server_dataset
 
 	Returns tuple of (scto_data, new_data_count)
 	"""
+
+	
 	# download server databases
 	if server_dataset:
 		scto_data = scto.get_server_dataset(form_id)
@@ -345,7 +351,7 @@ def scto_import_data(scto: object, form_id: str, key: str = None, server_dataset
 
 		# if scto_data is not empty, append new_data to scto_data, else set scto_data to new_data
 		if not scto_data.empty:
-			scto_data = scto_data.append(new_data, ignore_index = True)
+			scto_data = pd.concat([scto_data, new_data], ignore_index = True)
 
 			# drop duplicates from the dataset on key column (key) and keep the first
 			scto_data.drop_duplicates(subset = 'KEY', keep = 'first', inplace = True)
@@ -378,11 +384,11 @@ def scto_import_data(scto: object, form_id: str, key: str = None, server_dataset
 			cols = scto_get_repeat_cols(row['name'], repeat_fields)
 			
 			if row['type'] in ['date']:
-				scto_data[cols] = pd.to_datetime(scto_data[cols], errors = 'ignore')
+				scto_data[cols] = scto_data[cols].astype('datetime64[ns]')
 			elif row['type'] in ['datetime', 'time']:
-				scto_data[cols] = pd.to_datetime(scto_data[cols], errors = 'ignore')
+				scto_data[cols] = pd.to_datetime(scto_data[cols])
 			elif row['type'] in ['integer', 'decimal']:
-				scto_data[cols] = pd.to_numeric(scto_data[cols], errors = 'ignore')
+				scto_data[cols] = pd.to_numeric(scto_data[cols])
 			elif row['type'] in ['note']:
 				if cols in scto_data_cols:
 					# remove note fields from dataset
@@ -418,7 +424,123 @@ def scto_import_data(scto: object, form_id: str, key: str = None, server_dataset
 		scto_data.to_csv(saveas, index = False)
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	return (scto_data, new_data_count)
 =======
 	return (scto_data, new_data_count)
 >>>>>>> fa2837e (restructured)
+=======
+	return (scto_data, new_data_count)
+
+# Configure SurveyCTO form
+def scto_login_form() -> pd.DataFrame:
+	
+	"""
+	Creats input form for SurveyCTO login
+
+	PARAMS:
+	------
+
+	None
+
+	RETURNS:
+	-------
+
+	pd.DataFrame - Dataframe of forms from previous session or empty dataset
+
+	"""
+	# define server details input
+	with st.form(key="server_form"):
+		st.image("asserts/SurveyCTO-Logo-CMYK.png", width = 200)
+		st.markdown("*Server Details:*")
+
+		name_default, user_default = scto_load_login()
+
+		scto_server_name = st.text_input(label = "Server name*", 
+									value = name_default, 
+									help = "Enter SurveyCTO server name. eg. girlpower")
+		scto_server_user = st.text_input(label = "Email address*", 
+									value = user_default, 
+									help = "Enter valid email username")
+		scto_server_password = st.text_input(label = "Password*", 
+										type = "password")
+
+		# mark required fields
+		st.markdown("**required*")
+
+		# create submit button
+		submit_button = st.form_submit_button(label="Connect to server")
+
+		if submit_button:
+
+			# modify session state
+			st.session_state.scto = scto_server_connect(scto_server_name, 
+											   			scto_server_user, 
+														scto_server_password)
+			st.session_state.scto_show_forms = True
+			st.session_state.scto_disable_download_btn = False
+
+		scto_forms = scto_load_forms(scto_server_name)
+
+		return scto_forms, scto_server_name, scto_server_user
+	
+
+# --- SCTO Download button action --- #
+def scto_download_action(form_inputs: pd.DataFrame) -> None:
+
+	"""
+	Trigger Action to download SurveyCTO data based on form inputs
+
+	PARAMS:
+	-------
+	form_inputs: pandas dataframe of form inputs
+
+	RETURN:
+	-------
+	None
+	
+	"""
+	
+	# remove empty rows
+	form_inputs = form_inputs[form_inputs['get data'] == True]
+
+	# Check data and flag errors
+	if form_inputs.empty:
+		st.warning("No data selected for download. Please select data to download")
+		st.stop()
+
+	form_count = len(form_inputs.index)
+
+	progress_bar = st.progress(0, text = "Downloading from SurveyCTO ...")
+
+	st.write(f'Downloading {form_count} datasets from SurveyCTO')
+
+	# download data
+	for i in range(0, form_count):
+		if f'scto_raw_data{i}' in st.session_state:
+			
+			form_id = form_inputs['form id'][i]
+			key = form_inputs['encryption key'][i]
+			server_dataset = form_inputs['server dataset'][i]
+			saveas = form_inputs['save as'][i]
+			media = form_inputs['get media'][i]
+
+			st.session_state[f'scto_raw_data{i}'], new_data_count = scto_import_data(scto = st.session_state.scto, 
+																form_id = form_id,
+																key = key, 
+																server_dataset = server_dataset, 
+																saveas = saveas, 
+																media = media)
+			time.sleep(3)
+			progress_bar.progress((i + 1)/form_count, text = f'Download in progress...{i + 1}/{form_count}')
+
+			if saveas is not None:
+				st.write(f'{i + 1}/{form_count}: downloaded {new_data_count} new data successfully and saved as {saveas}')
+			else:
+				st.write(f'{i + 1}/{form_count}: downloaded successfully')
+
+	st.success("Data download complete")
+
+	# modify session state for preview
+	st.session_state.scto_show_preview = True
+>>>>>>> 9b1a5b9 (prep)
