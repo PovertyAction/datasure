@@ -1,6 +1,7 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> a279fb4 (restructured)
 #-- DEFINE CONSTANTS FOR DATA PREP --#
@@ -48,3 +49,6 @@ __all__ = ["prep_load_log"]
 =======
 							'second', 'minute', 'hour')
 >>>>>>> a279fb4 (restructured)
+=======
+from .prep import prep_load_log
+>>>>>>> 1d12b2d (prep)
