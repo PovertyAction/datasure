@@ -22,7 +22,7 @@ import streamlit as st
 import pandas as pd
 import os
 
-from src.connectors import scto_login_form, scto_download_action
+from src.connectors import scto_login_form, scto_forms_edit, scto_download_action
 from src.connectors import local_load_files,local_add_form, local_load_action
 from src.connectors import script_add_form, script_load_action, script_load_files
 
@@ -205,6 +205,7 @@ with scto:
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 				# displat forms and additional functions
 				scto_forms_edit()	
 =======
@@ -237,6 +238,11 @@ with scto:
 					st.session_state.scto_forms = scto_form_inputs_mod
 					st.success("Configuration saved successfully!")
 >>>>>>> 495c39b (prep)
+=======
+				# displat forms and additional functions
+				scto_forms_edit()	
+				
+>>>>>>> 31b8063 (scto_connector_new)
 	
 	# --- DOWNLOAD DATA FROM SURVEYCTO --- #
 
