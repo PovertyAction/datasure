@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 
-from src.connectors import scto_login_form, scto_download_action
+from src.connectors import scto_login_form, scto_forms_edit, scto_download_action
 from src.connectors import local_load_files,local_add_form, local_load_action
 from src.connectors import script_add_form, script_load_action, script_load_files
 
@@ -60,29 +60,9 @@ with scto:
 		with scto_forms_col:
 			if st.session_state.scto_show_forms:
 
-				scto_form_inputs_mod = st.data_editor(st.session_state.scto_forms, 
-													hide_index = True, 
-													use_container_width = True, 
-													num_rows = "dynamic")	
+				# displat forms and additional functions
+				scto_forms_edit()	
 				
-				# Save configuration File
-				scto_save_config = st.button(label = "Save setting", 
-								 			 type="secondary", 
-											 key = "scto_save_config_key")
-
-				# change type to pandas dataframe
-				scto_form_inputs_mod = pd.DataFrame(scto_form_inputs_mod)	
-
-				if scto_save_config:
-
-					pd.DataFrame(data = {'name':[scto_servername], 'user':[scto_username]}). \
-						to_json("cache/pyDMS_server_cache.json")
-					
-					# save form information
-					scto_config_filename = "cache/" + scto_servername + "_pyDMS_forms_cache.json"
-					scto_form_inputs_mod.to_json(scto_config_filename)
-					st.session_state.scto_forms = scto_form_inputs_mod
-					st.success("Configuration saved successfully!")
 	
 	# --- DOWNLOAD DATA FROM SURVEYCTO --- #
 

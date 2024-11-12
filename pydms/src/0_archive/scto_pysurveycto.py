@@ -5,10 +5,10 @@ import datetime
 import time
 import re
 import os
+from functools import lru_cache
+
 
 import pysurveycto
-
-from src.utils import move_row, add_row, remove_row
 
 # --- SurveyCTO Server Connect Button Click Action --- #
 
@@ -48,7 +48,7 @@ def scto_server_connect(servername: str, username: str , password: str ) -> str:
 		# Future Improvements: After SurveyCTO API improvements, add try-except block to catch connection errors
 	else:
 		scto = pysurveycto.SurveyCTOObject(servername, username, password)
-		st.success("Connection successful")
+		st.write("Connection successful")
 		return scto
 
 # --- Load Login Information --- #
@@ -423,51 +423,13 @@ def scto_import_data(scto: object, form_id: str, key: str = None, server_dataset
 	if saveas:
 		scto_data.to_csv(saveas, index = False)
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 	return (scto_data, new_data_count)
-=======
-	return (scto_data, new_data_count)
->>>>>>> fa2837e (restructured)
-=======
-	return (scto_data, new_data_count)
-
-# configure additional buttons for surveycto forms
-def scto_forms_edit() -> None:
-
-	st.session_state.scto_forms = st.data_editor(st.session_state.scto_forms, 
-										hide_index = True, 
-										use_container_width = True)	
-				
-	# add add, delete, move up and move down buttons
-	move_up_col, move_down_col, add_col, del_col = st.columns((0.25, 0.25, 0.25, 0.25))
-	with move_up_col:
-		move_up_btn = st.button("Move Up:material/arrow_upward:", key = "scto_move_up_key")
-
-		if move_up_btn:
-			move_row(st.session_state.scto_forms, index, "up")
-	with move_down_col:
-		move_down_btn = st.button("Move Down:material/arrow_downward:", key = "scto_move_down_key")
-
-		if move_down_btn:
-			move_row(st.session_state.scto_forms, index, "down")
-	with add_col:
-		add_btn = st.button("Add:material/add:", key = "scto_add_key")
-
-		if add_btn:
-			add_row(st.session_state.scto_forms)
-
-	with del_col:
-		del_btn = st.button("Delete:material/delete:", key = "scto_del_key")
-
-		if del_btn:
-			remove_row(st.session_state.scto_forms, index)	
 
 # Configure SurveyCTO form
-def scto_login_form() -> tuple:
+def scto_login_form() -> pd.DataFrame:
 	
 	"""
-	Creates input form for SurveyCTO login
+	Creats input form for SurveyCTO login
 
 	PARAMS:
 	------
@@ -482,29 +444,25 @@ def scto_login_form() -> tuple:
 	"""
 	# define server details input
 	with st.form(key="server_form"):
-
 		st.image("asserts/SurveyCTO-Logo-CMYK.png", width = 200)
+		st.markdown("*Server Details:*")
 
-		with st.popover(label = "Connect", use_container_width = True, icon = ":material/login:"):
-		
-			st.markdown("*Server Details:*")
+		name_default, user_default = scto_load_login()
 
-			name_default, user_default = scto_load_login()
+		scto_server_name = st.text_input(label = "Server name*", 
+									value = name_default, 
+									help = "Enter SurveyCTO server name. eg. girlpower")
+		scto_server_user = st.text_input(label = "Email address*", 
+									value = user_default, 
+									help = "Enter valid email username")
+		scto_server_password = st.text_input(label = "Password*", 
+										type = "password")
 
-			scto_server_name = st.text_input(label = "Server name*", 
-										value = name_default, 
-										help = "Enter SurveyCTO server name. eg. girlpower")
-			scto_server_user = st.text_input(label = "Email address*", 
-										value = user_default, 
-										help = "Enter valid email username")
-			scto_server_password = st.text_input(label = "Password*", 
-											type = "password")
+		# mark required fields
+		st.markdown("**required*")
 
-			# mark required fields
-			st.markdown("**required*")
-
-			# create submit button
-			submit_button = st.form_submit_button(label="Connect to server")
+		# create submit button
+		submit_button = st.form_submit_button(label="Connect to server")
 
 		if submit_button:
 
@@ -578,4 +536,3 @@ def scto_download_action(form_inputs: pd.DataFrame) -> None:
 
 	# modify session state for preview
 	st.session_state.scto_show_preview = True
->>>>>>> 9b1a5b9 (prep)
