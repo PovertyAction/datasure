@@ -206,6 +206,7 @@ with scto:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 				# displat forms and additional functions
 				scto_forms_edit()	
 =======
@@ -240,6 +241,9 @@ with scto:
 >>>>>>> 495c39b (prep)
 =======
 				# displat forms and additional functions
+=======
+				# display forms and additional functions
+>>>>>>> d72d672 (wp - scto)
 				scto_forms_edit()	
 				
 >>>>>>> 31b8063 (scto_connector_new)

@@ -78,11 +78,12 @@ def move_row(df, row_index, direction='up'):
 # Function to add a row to a DataFrame from a dictionary
 def add_row(df, row_dict):
 	row = pd.DataFrame(row_dict, index=[0])
-	df = pd.concat([df, row]).reset_index(drop=True)
+	df = pd.concat([df, row]).reset_index(drop = True)
 	return df
 
 # Function to remove a row from a DataFrame
 def remove_row(df, row_index):
+<<<<<<< HEAD
 	df = df.drop(row_index).reset_index(drop=True)
 <<<<<<< HEAD
 >>>>>>> a9d57df (scto_connector_new)
@@ -91,4 +92,10 @@ def remove_row(df, row_index):
 =======
 =======
 >>>>>>> 224f63f (added form editor)
+<<<<<<< HEAD
 >>>>>>> d1b4532 (added form editor)
+=======
+=======
+	df = df.drop(row_index).reset_index(drop = True)
+>>>>>>> 38921a1 (wp - scto)
+>>>>>>> d72d672 (wp - scto)
