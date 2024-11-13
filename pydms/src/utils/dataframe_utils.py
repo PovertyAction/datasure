@@ -24,9 +24,9 @@ def move_row(df, row_index, direction='up'):
 # Function to add a row to a DataFrame from a dictionary
 def add_row(df, row_dict):
 	row = pd.DataFrame(row_dict, index=[0])
-	df = pd.concat([df, row]).reset_index(drop=True)
+	df = pd.concat([df, row]).reset_index(drop = True)
 	return df
 
 # Function to remove a row from a DataFrame
 def remove_row(df, row_index):
-	df = df.drop(row_index).reset_index(drop=True)
+	df = df.drop(row_index).reset_index(drop = True)
