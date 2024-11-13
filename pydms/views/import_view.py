@@ -60,7 +60,7 @@ with scto:
 		with scto_forms_col:
 			if st.session_state.scto_show_forms:
 
-				# displat forms and additional functions
+				# display forms and additional functions
 				scto_forms_edit()	
 				
 	
