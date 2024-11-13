@@ -84,5 +84,11 @@ def add_row(df, row_dict):
 # Function to remove a row from a DataFrame
 def remove_row(df, row_index):
 	df = df.drop(row_index).reset_index(drop=True)
+<<<<<<< HEAD
 >>>>>>> a9d57df (scto_connector_new)
+<<<<<<< HEAD
 >>>>>>> 31b8063 (scto_connector_new)
+=======
+=======
+>>>>>>> 224f63f (added form editor)
+>>>>>>> d1b4532 (added form editor)
