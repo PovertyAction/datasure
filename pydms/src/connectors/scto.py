@@ -90,7 +90,7 @@ def scto_load_forms(servername: str) -> pd.DataFrame:
 	-------
 	servername: SurveyCTO server name
 
-	return: pandas dataframe of form details
+	return: pandas dataframe of form details or empty dataframe if file not found
 	"""
 	
 	# load form details from last session
@@ -103,9 +103,7 @@ def scto_load_forms(servername: str) -> pd.DataFrame:
 	except FileNotFoundError:
 		return pd.DataFrame(
 			[						
-				{"alias":"", "server dataset":False, "get data":False, "get media":False, "form id": "", "encryption key":"", "save as":""},
-				{"alias":"", "server dataset":False, "get data":False, "get media":False, "form id": "", "encryption key":"", "save as":""},
-				{"alias":"", "server dataset":False, "get data":False, "get media":False, "form id": "", "encryption key":"", "save as":""},
+
 			]
 		)
 	
@@ -432,33 +430,67 @@ def scto_import_data(scto: object, form_id: str, key: str = None, server_dataset
 =======
 	return (scto_data, new_data_count)
 
+# edit surveycto form details 
+
+def edit_form(scto_forms: pd.DataFrame) -> None:
+	pass
+
+# define form for adding new surveycto form
+def add_new_form(scto_forms: pd.DataFrame) -> None:
+
+	with st.popover(label = "Add New Form", use_container_width = True, icon = ":material/add:"):
+		st.markdown("Add new SurveyCTO form details")
+
+		form_id = st.text_input(label = "Form ID", help = "Enter SurveyCTO form ID")
+		encryption_key = st.file_uploader(label = "Encryption Key", type = ['txt'], help = "Upload SurveyCTO encryption key")
+		server_dataset = st.checkbox(label = "Use server dataset", help = "Check if using server dataset")
+		save_as = st.text_input(label = "Save as", help = "Enter path to save dataset")
+		get_media = st.checkbox(label = "Download media files", help = "Check to download media files")
+
+		# add form details to form list
+		if st.button("Add"):
+			scto_forms = scto_forms.append({'form id': form_id, 
+											'encryption key': encryption_key, 
+											'server dataset': server_dataset, 
+											'save as': save_as, 
+											'get media': get_media}, ignore_index = True)
+			st.session_state.scto_forms = scto_forms
+
 # configure additional buttons for surveycto forms
 def scto_forms_edit() -> None:
 
-	st.session_state.scto_forms = st.data_editor(st.session_state.scto_forms, 
+	if st.session_state.scto_forms.empty:
+		st.warning("No forms added. Click on the add button to add forms")
+	else:
+		st.session_state.scto_forms = st.data_editor(st.session_state.scto_forms, 
 										hide_index = True, 
 										use_container_width = True)	
 				
 	# add add, delete, move up and move down buttons
-	move_up_col, move_down_col, add_col, del_col = st.columns((0.25, 0.25, 0.25, 0.25))
+	add_col, edit_col, move_up_col, move_down_col, del_col = st.columns((5))
+	with edit_col:
+		edit_btn = st.button("Edit:material/edit_note:", key = "scto_edit_key")
+
+		if edit_btn:
+			edit_form(st.session_state.scto_forms)
 	with move_up_col:
-		move_up_btn = st.button("Move Up:material/arrow_upward:", key = "scto_move_up_key")
+		move_up_btn = st.button("Move Up:material/arrow_upward:", key = "scto_move_up_key", use_container_width=True)
 
 		if move_up_btn:
 			move_row(st.session_state.scto_forms, index, "up")
 	with move_down_col:
-		move_down_btn = st.button("Move Down:material/arrow_downward:", key = "scto_move_down_key")
+		move_down_btn = st.button("Move Down:material/arrow_downward:", key = "scto_move_down_key", use_container_width=True)
 
 		if move_down_btn:
 			move_row(st.session_state.scto_forms, index, "down")
 	with add_col:
-		add_btn = st.button("Add:material/add:", key = "scto_add_key")
+		add_btn = st.button("Add:material/add:", key = "scto_add_key", use_container_width=True)
 
 		if add_btn:
 			add_row(st.session_state.scto_forms)
 
 	with del_col:
-		del_btn = st.button("Delete:material/delete:", key = "scto_del_key")
+		del_btn = st.button("Delete:material/delete:", key = "scto_del_key", use_container_width=True)
 
 		if del_btn:
 			remove_row(st.session_state.scto_forms, index)	
