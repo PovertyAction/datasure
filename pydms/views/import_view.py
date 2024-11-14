@@ -61,7 +61,7 @@ with scto:
 			if st.session_state.scto_show_forms:
 
 				# display forms and additional functions
-				scto_forms_edit()	
+				scto_forms_edit(scto_servername)	
 				
 	
 	# --- DOWNLOAD DATA FROM SURVEYCTO --- #
