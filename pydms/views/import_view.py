@@ -243,8 +243,12 @@ with scto:
 				# displat forms and additional functions
 =======
 				# display forms and additional functions
+<<<<<<< HEAD
 >>>>>>> d72d672 (wp - scto)
 				scto_forms_edit()	
+=======
+				scto_forms_edit(scto_servername)	
+>>>>>>> 00a502e (check_settings)
 				
 >>>>>>> 31b8063 (scto_connector_new)
 	

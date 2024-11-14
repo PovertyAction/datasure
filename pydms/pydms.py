@@ -83,6 +83,12 @@ if 'show_config_section' not in st.session_state:
 
 if 'show_checks_section' not in st.session_state:
     st.session_state.show_checks_section = False
+	
+for i in range(0, 10):
+	if f'check_page_name_{i}' not in st.session_state:
+		st.session_state[f'check_page_name_{i}'] = ''
+	if f'show_checks_page_{i}' not in st.session_state:
+		st.session_state[f'show_checks_page_{i}'] = False
 
 # initiate session states for 10 datasets from SCTO
 for i in range(0, 10):
@@ -189,10 +195,10 @@ check_output_page_1 = st.Page(
     icon = ":material/manufacturing:"
 )
 
-# config check output page
-check_output_page = st.Page(
-    page = "views/output_view.py", 
-    title = "Data Quality Checks", 
+# config check output pages
+check_output_page_1 = st.Page(
+    page = "views/output_view_1.py", 
+    title = f'{st.session_state.config_page_1}', 
     icon = ":material/frame_inspect:"
 >>>>>>> 801c54a (init commit)
 >>>>>>> 15d81c3 (init commit)
@@ -203,6 +209,9 @@ check_output_page = st.Page(
 # Dynamically load pages
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> ff3f469 (check_settings)
 if st.session_state.show_checks_page_1:
     nav_menu = st.navigation(
         {
@@ -213,12 +222,15 @@ if st.session_state.show_checks_page_1:
         }
     )
 elif st.session_state.show_prep_section:
+<<<<<<< HEAD
 =======
 if st.session_state.prep_section:
 >>>>>>> 801c54a (init commit)
 =======
 if st.session_state.show_prep_section:
 >>>>>>> 1d12b2d (prep)
+=======
+>>>>>>> ff3f469 (check_settings)
     nav_menu = st.navigation(
         {
             "Import Data": [import_data_page],
