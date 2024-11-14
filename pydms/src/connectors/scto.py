@@ -97,6 +97,7 @@ def scto_load_forms(servername: str) -> pd.DataFrame:
 	try:
 		file = pd.read_json(f'cache/{servername}_pyDMS_forms_cache.json')
 		form_inputs = file.to_dict()
+
 		return pd.DataFrame(form_inputs)
 
 	# if file not found, return empty dataframe
@@ -386,7 +387,8 @@ def scto_import_data(scto: object, form_id: str, key: str = None, server_dataset
 			elif row['type'] in ['datetime', 'time']:
 				scto_data[cols] = pd.to_datetime(scto_data[cols])
 			elif row['type'] in ['integer', 'decimal']:
-				scto_data[cols] = pd.to_numeric(scto_data[cols])
+				# scto_data[cols] = pd.to_numeric(scto_data[cols])
+				pass
 			elif row['type'] in ['note']:
 				if cols in scto_data_cols:
 					# remove note fields from dataset
@@ -429,12 +431,13 @@ def scto_import_data(scto: object, form_id: str, key: str = None, server_dataset
 >>>>>>> fa2837e (restructured)
 =======
 	return (scto_data, new_data_count)
+				
+# configure additional buttons for surveycto forms
+def scto_forms_edit(servername) -> None:
 
-# edit surveycto form details 
+	
 
-def edit_form(scto_forms: pd.DataFrame) -> None:
-	pass
-
+<<<<<<< HEAD
 # define form for adding new surveycto form
 def add_new_form(scto_forms: pd.DataFrame) -> None:
 
@@ -491,6 +494,77 @@ def scto_forms_edit() -> None:
 
 	with del_col:
 		del_btn = st.button("Delete:material/delete:", key = "scto_del_key", use_container_width=True)
+=======
+	# add add, delete, move up and move down buttons
+	add_col, move_up_col, move_down_col, del_col = st.columns((4))
+
+	with move_up_col:
+		move_up_btn = st.button("Move Up:material/arrow_upward:", key = "scto_move_up_key", use_container_width=True)
+	with move_down_col:
+		move_down_btn = st.button("Move Down:material/arrow_downward:", key = "scto_move_down_key", use_container_width=True)
+	with add_col:
+		with st.popover(label = "Add", use_container_width = True, icon = ":material/add:"):
+			st.markdown("Add new SurveyCTO form details")
+
+			form_alias = st.text_input(label = "Alias", help = "Enter form alias eg. Household Survey, Community Survey")
+
+			form_id = st.text_input(label = "Form ID", help = "Enter SurveyCTO form ID")
+			if form_id:
+				if not re.fullmatch(r'\b[a-z]+[a-z0-9_]+\b', form_id):
+					st.warning("Invalid form ID")
+
+			encryption_key = st.text_input(label = "Encryption Key", help = "Enter file path for SurveyCTO encryption key")
+			if encryption_key:
+				# check that key file exist
+				if not os.path.isfile(encryption_key):
+					st.warning("Key file not found")
+
+			server_dataset = st.checkbox(label = "Server dataset?", help = "Check if this is a server dataset")
+			
+			save_as = st.text_input(label = "Save as", help = "Enter path to save dataset")
+			if save_as:
+				path = save_as.split('/')[-1]
+				path = save_as.replace(path, '')
+				if not os.path.isdir(path):
+					st.warning(f"file path not found")
+
+			get_media = st.checkbox(label = "Download media files", help = "Check to download media files", disabled = server_dataset)
+
+			# add form details to form list
+			add_form_btn = st.button("Add", key = "add_form_key", disabled = save_as is None or form_id is None or encryption_key is None)
+			if add_form_btn:
+
+				new_form = pd.DataFrame(data = [[False, form_alias, form_id, encryption_key, server_dataset, save_as, get_media]], 
+									columns = ['select', 'alias', 'form ID', 'encryption key', 'server dataset', 'save as', 'get media'])
+		
+				scto_forms = pd.concat([st.session_state.scto_forms, new_form], ignore_index = True)
+
+				# save form details to cache
+				scto_forms.to_json(f'cache/{servername}_pyDMS_forms_cache.json')
+
+	with del_col:
+		# delete selected form
+		del_form_btn = st.button("Delete", key = "del_form_key", use_container_width = True)
+
+		scto_forms = scto_load_forms(servername)
+		
+		if del_form_btn:
+			
+			# remove row if column select is true
+			scto_forms = scto_forms[scto_forms['select'] == True]
+			
+			scto_forms.to_json(f'cache/{servername}_pyDMS_forms_cache.json')
+
+	
+	# load existing form detailss
+	st.session_state.scto_forms = scto_load_forms(servername)
+
+	# st.session_state.scto_forms
+	if st.session_state.scto_forms is None or st.session_state.scto_forms.empty:
+		st.warning("No form details found, click to add new form details")
+	else:
+		st.session_state.scto_forms = st.data_editor(scto_forms, hide_index = True, key = "scto_forms_key")
+>>>>>>> 633b475 (check_settings)
 
 		if del_btn:
 			remove_row(st.session_state.scto_forms, index)	
@@ -567,9 +641,6 @@ def scto_download_action(form_inputs: pd.DataFrame) -> None:
 	None
 	
 	"""
-	
-	# remove empty rows
-	form_inputs = form_inputs[form_inputs['get data'] == True]
 
 	# Check data and flag errors
 	if form_inputs.empty:
@@ -586,7 +657,7 @@ def scto_download_action(form_inputs: pd.DataFrame) -> None:
 	for i in range(0, form_count):
 		if f'scto_raw_data{i}' in st.session_state:
 			
-			form_id = form_inputs['form id'][i]
+			form_id = form_inputs['form ID'][i]
 			key = form_inputs['encryption key'][i]
 			server_dataset = form_inputs['server dataset'][i]
 			saveas = form_inputs['save as'][i]

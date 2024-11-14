@@ -60,8 +60,13 @@ with scto:
 		with scto_forms_col:
 			if st.session_state.scto_show_forms:
 
+<<<<<<< HEAD
 				# displat forms and additional functions
 				scto_forms_edit()	
+=======
+				# display forms and additional functions
+				scto_forms_edit(scto_servername)	
+>>>>>>> 633b475 (check_settings)
 				
 	
 	# --- DOWNLOAD DATA FROM SURVEYCTO --- #
