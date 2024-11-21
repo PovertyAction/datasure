@@ -299,7 +299,7 @@ with st.sidebar:
 
     # define enumeration area / region to sample gps points
     if gps_data_available == "Yes":
-        file_name = "tests/data/gps_data.csv"
+        file_name = "data/gps_data.csv"
         gps_data = pd.read_csv(file_name)
         gps_data = gps_data[gps_data["latitude"].isna() == False].reset_index(drop=True)  # noqa: E712
         sample_df = gps_data.sample(1)
