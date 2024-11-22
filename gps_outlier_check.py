@@ -67,8 +67,12 @@ def generate_random_gps_data(num_gps_points, ea_latitude, ea_longitude, num_clus
     max_lat = int(ea_latitude) + 1.4
     min_lon = int(ea_longitude) - 1
     max_lon = int(ea_longitude) + 1
-    lat_vals = np.random.uniform(min_lat, max_lat, num_gps_points)
-    lon_vals = np.random.uniform(min_lon, max_lon, num_gps_points)
+    lat_vals = [
+        round(x, 6) for x in np.random.uniform(min_lat, max_lat, num_gps_points)
+    ]
+    lon_vals = [
+        round(x, 6) for x in np.random.uniform(min_lon, max_lon, num_gps_points)
+    ]
     gps_data = pd.DataFrame(
         {
             "key": unique_identifiers,
@@ -193,17 +197,6 @@ def flag_gps_distance_outliers(df, ea_column, method):
     return df
 
 
-# outliers summary
-# gps_outlier_summary = gps_distances_df["is_outlier"].value_counts().reset_index()
-# st.write('Outliers Summary')
-# st.write(gps_outlier_summary)
-
-# gps distances
-# gps_distance_summary = gps_distances_df.distance_from_center.describe()
-# st.write('GPS Distance Summary')
-# st.write(gps_distance_summary)
-
-
 # flag outliers using intra-distances by enumeration area/enumerator
 def flag_too_clustered_gps_points(df, ea_column, min_distance_threshold):
     """Flag GPS points that are too clustered based on a minimum distance threshold.
@@ -299,7 +292,7 @@ with st.sidebar:
 
     # define enumeration area / region to sample gps points
     if gps_data_available == "Yes":
-        file_name = "data/gps_data.csv"
+        file_name = "data/gps_test_data.csv"
         gps_data = pd.read_csv(file_name)
         gps_data = gps_data[gps_data["latitude"].isna() == False].reset_index(drop=True)  # noqa: E712
         sample_df = gps_data.sample(1)
