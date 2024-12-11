@@ -235,7 +235,7 @@ if 'script_show_files' not in st.session_state:
 	st.session_state.script_show_files = False
 # show/hide preview page
 if 'script_show_preview' not in st.session_state:
-	st.session_state.script_show_preview = True
+	st.session_state.script_show_preview = False
 # enable/disable load data button
 if 'script_disable_load' not in st.session_state:
 	st.session_state.script_disable_load = True
