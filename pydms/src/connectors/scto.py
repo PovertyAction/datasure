@@ -717,14 +717,23 @@ def scto_import_data(scto: object, form_id: str, key: str = None, server_dataset
 		for col in ['CompletionDate', 'SubmissionDate', 'starttime', 'endtime']:
 			if col in scto_data.columns:
 <<<<<<< HEAD
+<<<<<<< HEAD
 				scto_data[col] = pd.to_datetime(scto_data[col])
 =======
+=======
+>>>>>>> 9ad363e (before integration)
 <<<<<<< HEAD
 				scto_data[col] = pd.to_datetime(scto_data[col], format = 'mixed', errors = 'ignore')
 =======
 				scto_data[col] = pd.to_datetime(scto_data[col])
 >>>>>>> a279fb4 (restructured)
+<<<<<<< HEAD
 >>>>>>> 4b35f05 (restructured)
+=======
+=======
+				scto_data[col] = pd.to_datetime(scto_data[col], format = 'mixed', errors = 'ignore')
+>>>>>>> eb8223d (before integration)
+>>>>>>> 9ad363e (before integration)
 
 		# convert default numeric variables to numeric
 		for col in ['duration', 'formdef_version']:

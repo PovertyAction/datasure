@@ -73,8 +73,8 @@ DP_DEL_METHODS: tuple = ('by row index',
 					   'by condition')
 
 DP_FUNCS: tuple = ('string', 
-						  'numeric', 
-						  'date')
+					'numeric', 
+					'date')
 
 DP_STR_FUNCS: tuple = ('substr', 'subinstr', 'strip', 
 						 'lower', 'upper', 
@@ -321,6 +321,7 @@ for i, (label, tab) in enumerate(zip(alias_list, tabs)):
 
 	# collate all string columns in dataset
 	string_cols = st.session_state[f'prepped_data{i}'].select_dtypes(include=['object']).columns
+	all_cols = st.session_state[f'prepped_data{i}'].columns
 	
 	# display tab features
 	with tab:
@@ -343,25 +344,67 @@ for i, (label, tab) in enumerate(zip(alias_list, tabs)):
 						dp_action = st.selectbox(label = "Select Action:", 
 									 options = DP_ACTIONS, 
 									 key = f'st_sb_dp_action{i}')
+						
+						# selectbox for adding new columns functions
+						if dp_action in ["add column"]:
+							dp_prep_add_col = st.text_input(label = "Enter column name", 
+											help="Enter name of new column to add", 
+											key = f'st_sb_add_col{i}')
+							
+							dp_prep_add_col_val = st.text_input(label = "Enter value", 
+											help="Enter value to populate new column", 
+											key = f'st_sb_add_col_val{i}')
 
-						# selectbox for transforming or adding columns functions
-						if dp_action in ["transform column(s)", "add column"]:
-							dp_prep_func = st.selectbox(label = "Function type:", 
-									 options = DP_FUNCS, 
-									 key = f'st_sb_dp_funcs{i}')
+						# selectbox for transforming columns functions
+						if dp_action in ["transform column(s)"]:
+							# select column to transform
+							dp_prep_trf_col = st.selectbox(label = "Select column to transform", 
+											   options = st.session_state[f'prepped_data{i}'].columns, 
+											   key = f'st_sb_trf_col{i}')
+							
+							if dp_prep_trf_col:
+								# show functions based on column type
+								col_type = st.session_state[f'prepped_data{i}'][dp_prep_trf_col].dtype
+								st.write(f"Column type: {col_type}")
+								if col_type == 'object':
+									dp_prep_trf_func = st.selectbox(label = "Select Function", 
+														options = DP_STR_FUNCS, 
+														key = f'st_sb_trf_func{i}')
+								elif col_type == 'int64' or col_type == 'float64':
+									dp_prep_trf_func = st.selectbox(label = "Select Function", 
+														options = DP_NUM_FUNCS, 
+														key = f'st_sb_trf_func{i}')
+								elif col_type == 'datetime64':
+									dp_prep_trf_func = st.selectbox(label = "Select Function", 
+														options = DP_DATETIME_FUNCS, 
+														key = f'st_sb_trf_func{i}')
+							
+
+							
+
 
 						# selectbox (multi) for deleting column functions
 						if dp_action in ["delete column(s)"]:
-							dp_prep_del_cols = st.multiselect(label = "Select columns", 
+							dp_prep_del_cols = st.multiselect(label = "Select columns to delete", 
 											   options = string_cols, 
 											   key = f'st_sb_del_cols{i}')
 
 						# selectbox (multi) for deleting rows functions
-						if dp_action in ["delete rows(s)"]:
+						if dp_action in ["delete row(s)"]:
 							dp_prep_del_rows = st.selectbox(label = "Select Method", 
 											   options = DP_DEL_METHODS, 
 											   key = f'st_sb_del_rows{i}')
 							
+							if dp_prep_del_rows == "by row index":
+								dp_prep_del_rows_idx = st.text_input(label = "Enter row index", 
+													help="Enter row index to delete eg. 1, 2, 3, -5, 5:-2",
+													key = f'st_sb_del_rows_idx{i}')
+								
+							if dp_prep_del_rows == "by condition":
+								dp_prep_del_rows_cond = st.text_input(label = "Enter condition", 
+													help="Enter condition to delete rows eg. 'column_name == value'",
+													key = f'st_sb_del_rows_cond{i}')
+
 						# apply button
 						dp_prep_apply_btn = st.button(label = "Apply", 
 												key = f'st_sb_del_button{i}', 
