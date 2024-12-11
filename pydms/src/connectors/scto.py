@@ -368,7 +368,7 @@ def scto_import_data(scto: object, form_id: str, key: str = None, server_dataset
 		# convert default str datetime cols to datetime
 		for col in ['CompletionDate', 'SubmissionDate', 'starttime', 'endtime']:
 			if col in scto_data.columns:
-				scto_data[col] = pd.to_datetime(scto_data[col])
+				scto_data[col] = pd.to_datetime(scto_data[col], format = 'mixed', errors = 'ignore')
 
 		# convert default numeric variables to numeric
 		for col in ['duration', 'formdef_version']:

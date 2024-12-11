@@ -4,11 +4,13 @@ from datetime import datetime
 
 st.title(st.session_state.config_page_1)
 
-summary, survey_progress, duplicates, enum_stats, missing, outliers = \
-    st.tabs(("Summary", "Survey Progress", "Duplicates", "Enumerator Stats", "Missing Data", "Outliers"))
+summary, survey_progress, duplicates, missing, outliers, enum_stats = \
+    st.tabs(("Summary", "Survey Progress", "Duplicates", "Missing Data", "Outliers", "Enumerator Stats"))
 
 alias_list = list(filter(None, st.session_state.alias_list))
 new_page_data = st.session_state[f'prepped_data{1}']
+
+# load data from 
 
 with summary:
     
@@ -43,7 +45,6 @@ with summary:
                 format = "YYYY-MM-DD", value = (datetime(2024, 1, 1), datetime(2024, 12, 31))
         )
 
-        
 
 
 
