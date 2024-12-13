@@ -33,6 +33,11 @@ for i in range(0, 10):
 for i in range(0, 10):
 	if f'script_raw_data{i}' not in st.session_state:
 		st.session_state[f'script_raw_data{i}'] = pd.DataFrame()
+
+# initiate session states for 10 output pages
+for i in range(0, 10):
+    if f'config_page_{i}' not in st.session_state:
+        st.session_state[f'config_page_{i}'] = False
 		
 # collate data aliases
 if 'alias_list' not in st.session_state:
