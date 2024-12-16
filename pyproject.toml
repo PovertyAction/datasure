@@ -10,6 +10,7 @@ dependencies = [
     "pandas>=2.2.2",
     "plotly>=5.24.1",
     "seaborn>=0.13.2",
+<<<<<<< HEAD
     "streamlit-folium>=0.23.2",
     "folium>=0.18.0",
     "scikit-learn>=1.5.2",
@@ -20,6 +21,9 @@ dependencies = [
     "pyarrow==16.0.0",
     "opencv-python>=4.11.0.86",
     "numpy>=2.2.3",
+=======
+    "streamlit>=1.41.1",
+>>>>>>> 5ac1794 (update uv requirements)
 ]
 
 [tool.uv]
