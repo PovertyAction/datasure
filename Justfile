@@ -41,6 +41,10 @@ activate-venv:
 lab:
     uv run jupyter lab
 
+# Format a single python file, "f"
+streamlit-run f:
+    uv run streamlit run {{ f }}
+
 # Preview the handbook
 preview-docs:
     quarto preview
@@ -61,10 +65,6 @@ fmt-python:
 fmt-py f:
     uv run ruff format {{ f }}
 
-# Lint sql scripts
-lint-sql:
-    uv run sqlfluff fix --dialect duckdb
-
 # Format all markdown and config files
 fmt-markdown:
     uv run mdformat .
@@ -77,7 +77,7 @@ fmt-md f:
 fmt-check-markdown:
     uv run mdformat --check .
 
-fmt-all: lint-py fmt-python lint-sql fmt-markdown
+fmt-all: lint-py fmt-python fmt-markdown
 
 # Run pre-commit hooks
 pre-commit-run:
