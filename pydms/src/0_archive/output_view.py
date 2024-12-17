@@ -15,7 +15,7 @@ Data Management system for research data
 
 # Import survey data 
 
-survey = pd.read_csv("C:/Users/IBaako/Documents/learning/streamlit/pyDMS/data/household_survey.csv")
+survey = st.session_state[f'prepped_data1']
 
 
 # Prepare Data
