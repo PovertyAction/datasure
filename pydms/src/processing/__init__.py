@@ -1,4 +1,5 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 #-- DEFINE CONSTANTS FOR DATA PREP --#
 
 # Data prep actions
@@ -35,3 +36,8 @@ DP_DATETIME_FUNCS: tuple = ('day', 'week', 'month', 'year',
 =======
 from .prep import prep_load_log
 >>>>>>> 9b1a5b9 (prep)
+=======
+from .prep import prep_load_log
+
+__all__ = ["prep_load_log"]
+>>>>>>> f7ca733 (format and lint pydms/src/processing)
