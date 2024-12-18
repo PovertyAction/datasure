@@ -1396,80 +1396,82 @@ def scto_forms_edit(servername) -> None:
             key="scto_move_down_key",
             use_container_width=True,
         )
-    with add_col:  # noqa: SIM117
-        with st.popover(label="Add", use_container_width=True, icon=":material/add:"):
-            st.markdown("Add new SurveyCTO form details")
+    with (
+        add_col,
+        st.popover(label="Add", use_container_width=True, icon=":material/add:"),
+    ):
+        st.markdown("Add new SurveyCTO form details")
 
-            form_alias = st.text_input(
-                label="Alias",
-                help="Enter form alias eg. Household Survey, Community Survey",
+        form_alias = st.text_input(
+            label="Alias",
+            help="Enter form alias eg. Household Survey, Community Survey",
+        )
+
+        form_id = st.text_input(label="Form ID", help="Enter SurveyCTO form ID")
+        if form_id and not re.fullmatch(r"\b[a-z]+[a-z0-9_]+\b", form_id):
+            st.warning("Invalid form ID")
+
+        encryption_key = st.text_input(
+            label="Encryption Key",
+            help="Enter file path for SurveyCTO encryption key",
+        )
+        if encryption_key and not os.path.isfile(encryption_key):
+            # check that key file exist
+            st.warning("Key file not found")
+
+        server_dataset = st.checkbox(
+            label="Server dataset?", help="Check if this is a server dataset"
+        )
+
+        save_as = st.text_input(label="Save as", help="Enter path to save dataset")
+        if save_as:
+            path = save_as.split("/")[-1]
+            path = save_as.replace(path, "")
+            if not os.path.isdir(path):
+                st.warning("file path not found")
+
+        get_media = st.checkbox(
+            label="Download media files",
+            help="Check to download media files",
+            disabled=server_dataset,
+        )
+
+        # add form details to form list
+        add_form_btn = st.button(
+            "Add",
+            key="add_form_key",
+            disabled=save_as is None or form_id is None or encryption_key is None,
+        )
+        if add_form_btn:
+            new_form = pd.DataFrame(
+                data=[
+                    [
+                        False,
+                        form_alias,
+                        form_id,
+                        encryption_key,
+                        server_dataset,
+                        save_as,
+                        get_media,
+                    ]
+                ],
+                columns=[
+                    "select",
+                    "alias",
+                    "form ID",
+                    "encryption key",
+                    "server dataset",
+                    "save as",
+                    "get media",
+                ],
             )
 
-            form_id = st.text_input(label="Form ID", help="Enter SurveyCTO form ID")
-            if form_id and not re.fullmatch(r"\b[a-z]+[a-z0-9_]+\b", form_id):
-                st.warning("Invalid form ID")
-
-            encryption_key = st.text_input(
-                label="Encryption Key",
-                help="Enter file path for SurveyCTO encryption key",
-            )
-            if encryption_key and not os.path.isfile(encryption_key):
-                # check that key file exist
-                st.warning("Key file not found")
-
-            server_dataset = st.checkbox(
-                label="Server dataset?", help="Check if this is a server dataset"
+            scto_forms = pd.concat(
+                [st.session_state.scto_forms, new_form], ignore_index=True
             )
 
-            save_as = st.text_input(label="Save as", help="Enter path to save dataset")
-            if save_as:
-                path = save_as.split("/")[-1]
-                path = save_as.replace(path, "")
-                if not os.path.isdir(path):
-                    st.warning("file path not found")
-
-            get_media = st.checkbox(
-                label="Download media files",
-                help="Check to download media files",
-                disabled=server_dataset,
-            )
-
-            # add form details to form list
-            add_form_btn = st.button(
-                "Add",
-                key="add_form_key",
-                disabled=save_as is None or form_id is None or encryption_key is None,
-            )
-            if add_form_btn:
-                new_form = pd.DataFrame(
-                    data=[
-                        [
-                            False,
-                            form_alias,
-                            form_id,
-                            encryption_key,
-                            server_dataset,
-                            save_as,
-                            get_media,
-                        ]
-                    ],
-                    columns=[
-                        "select",
-                        "alias",
-                        "form ID",
-                        "encryption key",
-                        "server dataset",
-                        "save as",
-                        "get media",
-                    ],
-                )
-
-                scto_forms = pd.concat(
-                    [st.session_state.scto_forms, new_form], ignore_index=True
-                )
-
-                # save form details to cache
-                scto_forms.to_json(f"cache/{servername}_pyDMS_forms_cache.json")
+            # save form details to cache
+            scto_forms.to_json(f"cache/{servername}_pyDMS_forms_cache.json")
 
     with del_col:
         # delete selected form

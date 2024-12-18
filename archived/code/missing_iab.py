@@ -440,43 +440,61 @@ def missing_report(data) -> None:  # noqa: D417
             },
         )
 
-    with miss_inspect:  # noqa: SIM117
-        with st.container(border=True):
-            st.markdown("### Inspect variables with missing data")
+    with miss_inspect, st.container(border=True):
+        st.markdown("### Inspect variables with missing data")
 
-            inspect_cols = st.multiselect(
-                "Select columns to inspect", options=miss_cols
+        inspect_cols = st.multiselect("Select columns to inspect", options=miss_cols)
+
+        st.write("---")
+
+        if inspect_cols:
+            # count the number columns selected
+            num_cols = len(inspect_cols)
+
+            st.write(f"Inspecting {num_cols} columns")
+
+            inspect_vars_mc1, inspect_vars_mc2, inspect_vars_mc3 = st.columns(3)
+
+            inspect_vars_mc1.metric(label=r"\# of columns", value=num_cols, border=True)
+            # total number of missing values
+            inspect_vars_mc2.metric(
+                label=r"\# of missing values",
+                value=data[inspect_cols].isnull().sum().sum(),
+                border=True,
+            )
+            # percentage of missing values
+            inspect_vars_miss_perc = (
+                data[inspect_cols].isnull().sum().sum() / (len(data) * num_cols)
+            ) * 100
+            inspect_vars_mc3.metric(
+                label="% of missing values",
+                value=f"{round(inspect_vars_miss_perc, 2)}%",
+                border=True,
             )
 
-            st.write("---")
+            if num_cols == 1:
+                st.write("---")
+                st.markdown(f"### Missing data correlation for {inspect_cols}")
 
-            if inspect_cols:
-                # count the number columns selected
-                num_cols = len(inspect_cols)
-
-                st.write(f"Inspecting {num_cols} columns")
-
-                inspect_vars_mc1, inspect_vars_mc2, inspect_vars_mc3 = st.columns(3)
-
-                inspect_vars_mc1.metric(
-                    label=r"\# of columns", value=num_cols, border=True
-                )
-                # total number of missing values
-                inspect_vars_mc2.metric(
-                    label=r"\# of missing values",
-                    value=data[inspect_cols].isnull().sum().sum(),
-                    border=True,
-                )
-                # percentage of missing values
-                inspect_vars_miss_perc = (
-                    data[inspect_cols].isnull().sum().sum() / (len(data) * num_cols)
-                ) * 100
-                inspect_vars_mc3.metric(
-                    label="% of missing values",
-                    value=f"{round(inspect_vars_miss_perc, 2)}%",
-                    border=True,
+                # create a table showing the correlation between missing values of selected column and all other columns, sort data from highest to lowest
+                missing_data_corr = (
+                    data.isnull().corr()[inspect_cols[0]].sort_values(ascending=False)
                 )
 
+                st.data_editor(
+                    missing_data_corr,
+                    hide_index=False,
+                    column_config={
+                        inspect_cols[0]: st.column_config.ProgressColumn(
+                            label=inspect_cols[0],
+                            help="Correlation between missing values in selected column and other columns",
+                            min_value=-1,
+                            max_value=1.0,
+                        ),
+                    },
+                )
+
+<<<<<<< HEAD
                 if num_cols == 1:
                     st.write("---")
                     st.markdown(f"### Missing data correlation for {inspect_cols}")
@@ -512,3 +530,15 @@ def missing_report(data) -> None:  # noqa: D417
 
                     st.pyplot(missing_heatmap)
 >>>>>>> 240f636 (ruff format and lint pydms/src/checks)
+=======
+            elif num_cols > 1:
+                st.write("---")
+                st.markdown("### Missing data correlation for selected columns")
+
+                # create a table showing the correlation between missing values of selected columns and all other columns, sort data from highest to lowest
+                missing_data_corr = data[inspect_cols].isnull().corr()
+                missing_heatmap = plt.figure(figsize=(6, 4))
+                sns.heatmap(data=missing_data_corr, cmap="rocket", annot=True)
+
+                st.pyplot(missing_heatmap)
+>>>>>>> a88010e (simplify SIM117 checks)
