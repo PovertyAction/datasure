@@ -1,8 +1,11 @@
 import streamlit as st
 <<<<<<< HEAD
+<<<<<<< HEAD
 import pandas as pd
 from datetime import datetime
 =======
+=======
+>>>>>>> 81f69f0 (format and lint pydms/src/views)
 <<<<<<< HEAD
 from src.checks import missing_report, progress_report, summary_report
 >>>>>>> 00a502e (check_settings)
@@ -65,31 +68,40 @@ import matplotlib.pyplot as plt
 
 from src.checks import summary_report, missing_report, progress_report
 
+=======
+from src.checks import missing_report, progress_report, summary_report
+>>>>>>> a5ebaa4 (format and lint pydms/src/views)
 
 # define page number
 page_number = 1
 
-st.title(st.session_state[f'config_page_{page_number}'])
+st.title(st.session_state[f"config_page_{page_number}"])
 
-summary, survey_progress, duplicates, missing, outliers, enum_stats = \
-    st.tabs(("Summary", "Survey Progress", "Duplicates", "Missing Data", "Outliers", "Enumerator Stats"))
+summary, survey_progress, duplicates, missing, outliers, enum_stats = st.tabs(
+    (
+        "Summary",
+        "Survey Progress",
+        "Duplicates",
+        "Missing Data",
+        "Outliers",
+        "Enumerator Stats",
+    )
+)
 
 alias_list = list(filter(None, st.session_state.alias_list))
 
-# load data from 
+# load data from
 
 with summary:
-    
-    summary_report(st.session_state[f'prepped_data{page_number}']) 
+    summary_report(st.session_state[f"prepped_data{page_number}"])
 
 
 with missing:
+    missing_report(st.session_state[f"prepped_data{page_number}"])
 
-    missing_report(st.session_state[f'prepped_data{page_number}'])
 
-
-                    
 with survey_progress:
+<<<<<<< HEAD
     
     progress_report(st.session_state[f'prepped_data{page_number}'])
 
@@ -104,4 +116,10 @@ with survey_progress:
    
     
 >>>>>>> e006032 (added_missing_check)
+<<<<<<< HEAD
 >>>>>>> dfddc4f (added_missing_check)
+=======
+=======
+    progress_report(st.session_state[f"prepped_data{page_number}"])
+>>>>>>> a5ebaa4 (format and lint pydms/src/views)
+>>>>>>> 81f69f0 (format and lint pydms/src/views)
