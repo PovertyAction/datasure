@@ -68,7 +68,8 @@ st.write("""
 	Information about form versions
 	""")
 
-outdated_stats
+# commenting out as this is not used
+# outdated_stats
 
 st.write("""
 	All surveys that were completed with outdated form version
