@@ -63,7 +63,7 @@ from datetime import datetime
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-from src.checks import summary_report, missing_report
+from src.checks import summary_report, missing_report, progress_report
 
 
 # define page number
@@ -89,7 +89,9 @@ with missing:
 
 
                     
-
+with survey_progress:
+    
+    progress_report(st.session_state[f'prepped_data{page_number}'])
 
 <<<<<<< HEAD
 >>>>>>> ff3f469 (check_settings)
