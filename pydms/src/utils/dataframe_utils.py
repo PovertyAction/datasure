@@ -9,6 +9,7 @@ import pandas as pd
 
 >>>>>>> 31b8063 (scto_connector_new)
 # Function to move a row up or down in a DataFrame
+<<<<<<< HEAD
 def move_row(df, row_index, direction='up'):
 	if direction == 'up':
 		if row_index == 0:
@@ -29,6 +30,54 @@ def move_row(df, row_index, direction='up'):
 	else:
 		raise ValueError('Invalid direction. Please choose either "up" or "down".')
 	
+=======
+def move_row(df, row_index, direction="up"):  # noqa: D417, RUF100
+<<<<<<< HEAD
+    """Move a row up or down in a DataFrame.
+
+    Parameters
+    ----------
+    df (pd.DataFrame): The DataFrame to modify.
+        The DataFrame in which the row will be moved.
+    row_index (int): The index of the row to move.
+        The position of the row to be moved.
+    direction (str): The direction to move the row, either "up" or "down".
+        The direction in which to move the row.
+
+    Returns
+    -------
+    pd.DataFrame: The modified DataFrame with the row moved.
+
+    """
+    if direction == "up":
+        if row_index == 0:
+            return df
+        else:
+            row = df.iloc[row_index]
+            df = df.drop(row_index)
+            df = pd.concat(
+                [
+                    df.iloc[: row_index - 1],
+                    pd.DataFrame(row).T,
+                    df.iloc[row_index - 1 :],
+                ]
+            ).reset_index(drop=True)
+            return df
+    elif direction == "down":
+        if row_index == len(df) - 1:
+            return df
+        else:
+            row = df.iloc[row_index]
+            df = df.drop(row_index)
+            df = pd.concat(
+                [df.iloc[:row_index], pd.DataFrame(row).T, df.iloc[row_index:]]
+            ).reset_index(drop=True)
+            return df
+    else:
+        raise ValueError('Invalid direction. Please choose either "up" or "down".')
+
+
+>>>>>>> 8bdaf0d (linter clean-up)
 # Function to add a row to a DataFrame from a dictionary
 def add_row(df, row_dict):
 	row = pd.DataFrame(row_dict, index=[0])
@@ -62,6 +111,8 @@ def remove_row(df, row_index):  # noqa: D417, RUF100
 >>>>>>> 809bfa0 (format and lint pydms/src/utils)
 # Function to move a row up or down in a DataFrame
 def move_row(df, row_index, direction="up"):  # noqa: D417
+=======
+>>>>>>> c350dfc (linter clean-up)
     """Move a row up or down in a DataFrame.
 
     Parameters
@@ -107,7 +158,7 @@ def move_row(df, row_index, direction="up"):  # noqa: D417
 
 
 # Function to add a row to a DataFrame from a dictionary
-def add_row(df, row_dict):  # noqa: D417
+def add_row(df, row_dict):  # noqa: D417, RUF100
     """Add a row to a DataFrame from a dictionary.
 
     Parameters
@@ -128,6 +179,7 @@ def add_row(df, row_dict):  # noqa: D417
 
 
 # Function to remove a row from a DataFrame
+<<<<<<< HEAD
 <<<<<<< HEAD
 def remove_row(df, row_index):
 <<<<<<< HEAD
@@ -150,6 +202,9 @@ def remove_row(df, row_index):
 =======
 =======
 def remove_row(df, row_index):  # noqa: D417
+=======
+def remove_row(df, row_index):  # noqa: D417, RUF100
+>>>>>>> c350dfc (linter clean-up)
     """Remove a row from a DataFrame.
 
     Parameters

@@ -126,7 +126,10 @@ alias_index: list[int] = st.session_state.alias_list_index
 tabs = st.tabs(alias_list)
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
+=======
+>>>>>>> 8bdaf0d (linter clean-up)
 <<<<<<< HEAD
 for i, (label, tab) in enumerate(zip(alias_list, tabs, strict=False)):
     # get index for the dataset
@@ -484,6 +487,9 @@ for i, (label, tab) in enumerate(zip(alias_list, tabs)):
 >>>>>>> 495c39b (prep)
 =======
 =======
+=======
+for i, (label, tab) in enumerate(zip(alias_list, tabs, strict=False)):
+>>>>>>> c350dfc (linter clean-up)
     # get index for the dataset
     if i < sum(alias_index[0:1]):
         d_i = st.session_state["scto_alias_list"].index(label)

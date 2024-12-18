@@ -131,7 +131,7 @@ with summary, st.expander("settings", icon=":material/settings:"):
     )
 
 
-with missing:  # noqa: SIM117
+with missing:
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for missing data report")
 
@@ -498,7 +498,9 @@ with missing:  # noqa: SIM117
                     st.write("---")
                     st.markdown(f"### Missing data correlation for {inspect_cols}")
 
-                    # create a table showing the correlation between missing values of selected column and all other columns, sort data from highest to lowest
+                    # create a table showing the correlation between missing
+                    # values of selected column and all other columns, sort
+                    # data from highest to lowest
                     missing_data_corr = (
                         st.session_state["prepped_data1"]
                         .isnull()
@@ -523,7 +525,9 @@ with missing:  # noqa: SIM117
                     st.write("---")
                     st.markdown("### Missing data correlation for selected columns")
 
-                    # create a table showing the correlation between missing values of selected columns and all other columns, sort data from highest to lowest
+                    # create a table showing the correlation between missing
+                    # values of selected columns and all other columns,
+                    # sort data from highest to lowest
                     missing_data_corr = (
                         st.session_state["prepped_data1"][inspect_cols].isnull().corr()
                     )

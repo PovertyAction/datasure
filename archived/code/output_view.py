@@ -151,11 +151,16 @@ st.write("""
 	""")
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 # commenting out as this is not used
 # outdated_stats
 =======
 outdated_stats
 >>>>>>> ad3f479 (added summary report)
+=======
+# commenting out as this is not used
+# outdated_stats
+>>>>>>> c350dfc (linter clean-up)
 
 st.write("""
 	All surveys that were completed with outdated form version
