@@ -2,6 +2,7 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> a279fb4 (restructured)
 #-- DEFINE CONSTANTS FOR DATA PREP --#
@@ -52,3 +53,8 @@ __all__ = ["prep_load_log"]
 =======
 from .prep import prep_load_log
 >>>>>>> 1d12b2d (prep)
+=======
+from .prep import prep_load_log
+
+__all__ = ["prep_load_log"]
+>>>>>>> d644543 (format and lint pydms/src/processing)
