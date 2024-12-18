@@ -23,7 +23,15 @@ dependencies = [
     "numpy>=2.2.3",
 =======
     "streamlit>=1.41.1",
+<<<<<<< HEAD
 >>>>>>> 5ac1794 (update uv requirements)
+=======
+    "streamlit-folium>=0.23.2",
+    "folium>=0.18.0",
+    "scikit-learn>=1.5.2",
+    "geopy>=2.4.1",
+    "pysurveycto>=0.0.14",
+>>>>>>> 4ec1e94 (update venv requirements)
 ]
 
 [tool.uv]
