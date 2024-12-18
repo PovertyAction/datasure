@@ -1,4 +1,5 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 import datetime
 import os
 import re
@@ -328,306 +329,332 @@ def scto_import_data(scto: object, form_id: str, key: str = None, server_dataset
 from io import StringIO
 import streamlit as st
 import pandas as pd
+=======
+>>>>>>> 952e544 (format and lint pydms/src/connectors)
 import datetime
-import time
-import re
 import os
+import re
+import time
+from io import StringIO
 
+import pandas as pd
 import pysurveycto
-
-from src.utils import move_row, add_row, remove_row
+import streamlit as st
 
 # --- SurveyCTO Server Connect Button Click Action --- #
 
-def scto_server_connect(servername: str, username: str , password: str ) -> str:
-	
-	"""
-	
-	Validate SurveyCTO account details and load user data
 
-	PARAMS
-	------
-	servername: SurveyCTO server name
-	username: SurveyCTO account username (email address)
-	password: SurveyCTO account password
+def scto_server_connect(servername: str, username: str, password: str) -> str:
+    """Validate SurveyCTO account details and load user data.
 
-	RETURN:
-	------- 
-	SurveyCTO object
+    PARAMS
+    ------
+    servername: SurveyCTO server name
+    username: SurveyCTO account username (email address)
+    password: SurveyCTO account password
 
-	"""
-	# check that required fields are not empty
-	if not servername or not username or not password:
-		st.warning("Complete all required fields.")
-		st.stop()
+    Return:
+    ------
+    SurveyCTO object
 
-	# check that servername is valid
-	elif not re.fullmatch(r'\b[a-z]+[a-z0-9]+\b', servername):
-		st.warning("Invalid server name.")
-		st.stop()
+    """
+    # check that required fields are not empty
+    if not servername or not username or not password:
+        st.warning("Complete all required fields.")
+        st.stop()
 
-	# check that user field is a valid email
-	elif not re.fullmatch(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b', username):
-		st.warning("Invalid email address")
-		st.stop()
+    # check that servername is valid
+    elif not re.fullmatch(r"\b[a-z]+[a-z0-9]+\b", servername):
+        st.warning("Invalid server name.")
+        st.stop()
 
-	# if all fields are valid, create SurveyCTO object
-		# Future Improvements: After SurveyCTO API improvements, add try-except block to catch connection errors
-	else:
-		scto = pysurveycto.SurveyCTOObject(servername, username, password)
-		st.success("Connection successful")
-		return scto
+    # check that user field is a valid email
+    elif not re.fullmatch(
+        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b", username
+    ):
+        st.warning("Invalid email address")
+        st.stop()
+
+    # if all fields are valid, create SurveyCTO object
+    # Future Improvements: After SurveyCTO API improvements, add try-except block to catch connection errors
+    else:
+        scto = pysurveycto.SurveyCTOObject(servername, username, password)
+        st.success("Connection successful")
+        return scto
+
 
 # --- Load Login Information --- #
 def scto_load_login() -> tuple:
-	
-	"""
-	Load Login details from previous session
+    """Load Login details from previous session.
 
-	PARAMS:
-	-------
-	servername: SurveyCTO server name
+    PARAMS:
+    -------
+    servername: SurveyCTO server name
 
-	RETURN:
-	-------
-	servername: SurveyCTO server name
-	username: SurveyCTO account username (email address) 
-	   
-	Returned as tuple of servername and username. 
-	Returns empty tuple if no previous session
-	"""
-	
-	# load server login details from last session
-	try:
-		file = pd.read_json(f'cache/pyDMS_server_cache.json')
-		server_details = file.to_dict()
-		return (server_details['name'][0], server_details['user'][0])
+    Return:
+    ------
+    servername: SurveyCTO server name
+    username: SurveyCTO account username (email address)
 
-	except FileNotFoundError:
-		return ('', '')
-	
+    Returned as tuple of servername and username.
+    Returns empty tuple if no previous session
+
+    """
+    # load server login details from last session
+    try:
+        file = pd.read_json("cache/pyDMS_server_cache.json")
+        server_details = file.to_dict()
+        return (server_details["name"][0], server_details["user"][0])
+
+    except FileNotFoundError:
+        return ("", "")
+
+
 # --- SurveyCTO load form details --- #
 
+
 def scto_load_forms(servername: str) -> pd.DataFrame:
-	
-	"""
-	Load saved form details from previous session
+    """Load saved form details from previous session.
 
-	PARAMS:
-	-------
-	servername: SurveyCTO server name
+    PARAMS:
+    -------
+    servername: SurveyCTO server name
 
-	return: pandas dataframe of form details or empty dataframe if file not found
-	"""
-	
-	# load form details from last session
-	try:
-		file = pd.read_json(f'cache/{servername}_pyDMS_forms_cache.json')
-		form_inputs = file.to_dict()
+    return: pandas dataframe of form details or empty dataframe if file not found
+    """
+    # load form details from last session
+    try:
+        file = pd.read_json(f"cache/{servername}_pyDMS_forms_cache.json")
+        form_inputs = file.to_dict()
 
-		return pd.DataFrame(form_inputs)
+        return pd.DataFrame(form_inputs)
 
-	# if file not found, return empty dataframe
-	except FileNotFoundError:
-		return pd.DataFrame(
-			[						
+    # if file not found, return empty dataframe
+    except FileNotFoundError:
+        return pd.DataFrame([])
 
-			]
-		)
-	
+
 # --- Import SurveyCTO KEY --- #
 
+
 def scto_import_key(key_file: str) -> str:
-	
-	"""
-	Import SurveyCTO key from file
+    """Import SurveyCTO key from file.
 
-	PARAMS:
-	-------
-	key_file: path to key file
+    PARAMS:
+    -------
+    key_file: path to key file
 
-	RETURN:
-	-------
-	key: SurveyCTO key
-	"""
+    Return:
+    ------
+    key: SurveyCTO key
 
-	# check if key file exist
-	try:
-		with open(key_file, 'r') as file:
-			key = file.read()
-			return key
+    """
+    # check if key file exist
+    try:
+        with open(key_file) as file:
+            key = file.read()
+            return key
 
-	except FileNotFoundError:
-		st.warning("Key file not found.")
-		st.stop()
+    except FileNotFoundError:
+        st.warning("Key file not found.")
+        st.stop()
+
 
 # --- Load existing SurveyCTO in storage --- #
 
+
 def scto_load_existing_data(saveas: str) -> tuple:
-	
-	"""
-	Load existing SurveyCTO data from storage
+    """Load existing SurveyCTO data from storage.
 
-	PARAMS:
-	-------
-	saveas: path to saved data
+    PARAMS:
+    -------
+    saveas: path to saved data
 
-	RETURN:
-	-------
-	scto_data: pandas dataframe of existing data
-	oldest_completion_date: datetime of oldest completion date in the dataset
+    Return:
+    ------
+    scto_data: pandas dataframe of existing data
+    oldest_completion_date: datetime of oldest completion date in the dataset
 
-	Returns tuple of (scto_data, oldest_completion_date)
-	Returns empty dataframe and datetime(2024, 1, 1, 13, 40, 40) if file not found or saveas not specified
-	"""
+    Returns tuple of (scto_data, oldest_completion_date)
+    Returns empty dataframe and datetime(2024, 1, 1, 13, 40, 40) if file not found or saveas not specified
 
-	try:
-		scto_data = pd.DataFrame(pd.read_csv(saveas))
-	except FileNotFoundError:
-		return (pd.DataFrame(), datetime.datetime(2024, 1, 1, 13, 40, 40))
-	except pd.errors.EmptyDataError:
-		return (pd.DataFrame(), datetime.datetime(2024, 1, 1, 13, 40, 40))
-	else:
-		# convert the SubmissionDate field to datetime
-		scto_data['SubmissionDate'] = pd.to_datetime(scto_data['SubmissionDate'])
+    """
+    try:
+        scto_data = pd.DataFrame(pd.read_csv(saveas))
+    except FileNotFoundError:
+        return (pd.DataFrame(), datetime.datetime(2024, 1, 1, 13, 40, 40))
+    except pd.errors.EmptyDataError:
+        return (pd.DataFrame(), datetime.datetime(2024, 1, 1, 13, 40, 40))
+    else:
+        # convert the SubmissionDate field to datetime
+        scto_data["SubmissionDate"] = pd.to_datetime(scto_data["SubmissionDate"])
 
-		# get the latest date in the dataset
-		return (scto_data, scto_data['SubmissionDate'].max())
-	
+        # get the latest date in the dataset
+        return (scto_data, scto_data["SubmissionDate"].max())
+
+
 # --- Import SurveyCTO form definition --- #
 
+
 def scto_get_xls(scto: object, form_id: str) -> tuple:
-	
-	"""
-	Import SurveyCTO form definition
+    """Import SurveyCTO form definition.
 
-	PARAMS:
-	-------
-	scto: SurveyCTO object
-	form_id: SurveyCTO form ID
+    PARAMS:
+    -------
+    scto: SurveyCTO object
+    form_id: SurveyCTO form ID
 
-	RETURN:
-	-------
-	questions: pandas dataframe of questions
-	choices: pandas dataframe of choices
+    Return:
+    ------
+    questions: pandas dataframe of questions
+    choices: pandas dataframe of choices
 
-	Returns tuple of (questions, choices)
-	"""
+    Returns tuple of (questions, choices)
 
-	# download form definition
-	scto_form = scto.get_form_definition(form_id)
+    """
+    # download form definition
+    scto_form = scto.get_form_definition(form_id)
 
-	questions = pd.DataFrame(scto_form['fieldsRowsAndColumns'][1:], 
-						   		 columns = scto_form['fieldsRowsAndColumns'][0],)
+    questions = pd.DataFrame(
+        scto_form["fieldsRowsAndColumns"][1:],
+        columns=scto_form["fieldsRowsAndColumns"][0],
+    )
 
-	choices = pd.DataFrame(scto_form['choicesRowsAndColumns'][1:],
-								 columns = scto_form['choicesRowsAndColumns'][0],)
+    choices = pd.DataFrame(
+        scto_form["choicesRowsAndColumns"][1:],
+        columns=scto_form["choicesRowsAndColumns"][0],
+    )
 
-	return (questions, choices)
+    return (questions, choices)
+
 
 # --- Get List of Repeat Fields in SurveyCTO Form --- #
 def scto_get_repeat_fields(questions: pd.DataFrame) -> list:
+    """Get list of repeat fields in SurveyCTO form.
 
-	"""
-	Get list of repeat fields in SurveyCTO form
+    PARAMS:
+    -------
+    questions: pandas dataframe of questions
 
-	PARAMS:
-	-------
-	questions: pandas dataframe of questions
+    Return:
+    ------
+    list of repeat fields
 
-	RETURN:
-	-------
-	list of repeat fields
-	"""
+    """
+    fields: pd.DataFrame = questions[["type", "name"]]
 
-	fields: pd.DataFrame = questions[['type', 'name']]
+    current_group: str = ""
 
-	current_group: str = ''
+    # Iterate through rows
+    for i, row in fields.iterrows():
+        if "begin repeat" in row["type"]:
+            if current_group == "":
+                current_group = row["name"]
+            else:
+                current_group = "/".join(row["name"])
 
-	# Iterate through rows
-	for i, row in fields.iterrows():
-		if 'begin repeat' in row['type']:
-			if current_group == '':
-				current_group = row['name']
-			else:
-				current_group = '/'.join(row['name'])
-				
-			fields.at[i, 'group'] = current_group 
-				
-		elif 'end repeat' in row['type']:
-			
-			fields.at[i, 'group'] = current_group
-			current_group = current_group.split("/")[1:]
-			current_group = '/'.join(current_group)
-		else: 
-			questions.at[i, 'group'] = current_group
-		
-		repeat_fields = questions[questions['group'].notna()]['name'].tolist()
+            fields.at[i, "group"] = current_group
 
-	# Return list of repeat fields as a list
-	return repeat_fields
+        elif "end repeat" in row["type"]:
+            fields.at[i, "group"] = current_group
+            current_group = current_group.split("/")[1:]
+            current_group = "/".join(current_group)
+        else:
+            questions.at[i, "group"] = current_group
+
+        repeat_fields = questions[questions["group"].notna()]["name"].tolist()
+
+    # Return list of repeat fields as a list
+    return repeat_fields
+
 
 # --- Get repeat columns from repeat fields --- #
 
+
 def scto_get_repeat_cols(field: str, repeat_fields: list) -> list:
+    """Get repeat columns from repeat fields.
 
-	"""
-	Get repeat columns from repeat fields
+    PARAMS:
+    -------
+    field: field name
+    repeat_fields: list of repeat fields
 
-	PARAMS:
-	-------
-	field: field name
-	repeat_fields: list of repeat fields
+    Return:
+    ------
+    list of repeat columns
 
-	RETURN:
-	-------
-	list of repeat columns
-	"""
+    """
+    regex = r"\b" + field + r"_[0-9]+[_]{,1}.*\b"
+    cols = [x for x in repeat_fields if re.fullmatch(regex, x)]
 
-	regex = r'\b' + field + r'_[0-9]+[_]{,1}.*\b'
-	cols = [x for x in repeat_fields if re.fullmatch(regex, x)]
-		
-	cols = cols or field.split()
-	return cols
+    cols = cols or field.split()
+    return cols
+
 
 # --- Download SurveyCTO Media Files --- #
 
-def scto_download_media(scto: object, media_fields: list, repeat_fields: list, new_data: pd.DataFrame, media_folder: str, key: str = None) -> None:
 
-	# loop through media fields and download media files
-	for field in media_fields:
-		# get repeat group columns
-		cols = scto_get_repeat_cols(field, repeat_fields)
+def scto_download_media(
+    scto: object,
+    media_fields: list,
+    repeat_fields: list,
+    new_data: pd.DataFrame,
+    media_folder: str,
+    key: str = None,
+) -> None:
+    """Download media files from SurveyCTO.
 
-		# get media files
-		for col in cols:
+    PARAMS:
+    -------
+    scto: SurveyCTO object
+    media_fields: list of media fields
+    repeat_fields: list of repeat fields
+    new_data: pandas dataframe of new data
+    media_folder: path to save media files
+    key: SurveyCTO encryption key (optional)
 
-			media_data = new_data[new_data[col].notna()]
-			media_data = media_data[[col, 'KEY']].reset_index()
-			media_count = len(media_data.index)	
-			
-			if media_count > 0:
-					media_progress_bar = st.progress(0, text = f'Downloading media files for {col} ...')
-				
-					for j in range(0, len(media_data.index)):
+    Return:
+    ------
+    None
 
-						# get url at index j or row['name']
+    """
+    # loop through media fields and download media files
+    for field in media_fields:
+        # get repeat group columns
+        cols = scto_get_repeat_cols(field, repeat_fields)
 
-						url = media_data[col][j]
-						submission_key = media_data['KEY'][j].replace("uuid:", "")
-						fileext = url.split('.')[-1] or "csv"
-						filename = col + '_' + submission_key + '.' + fileext
-						media_file = scto.get_attachment(url, key = key)
-						
-						# save media files
-						with open(f'{media_folder}/{filename}', 'wb') as file:
-							file.write(media_file)
-						progress = round(((j + 1)/media_count) * 100, 2)
-						media_progress_bar.progress((j + 1)/media_count, \
-								  text = f'Downloading media files for {col} ... % complete')
-	
+        # get media files
+        for col in cols:
+            media_data = new_data[new_data[col].notna()]
+            media_data = media_data[[col, "KEY"]].reset_index()
+            media_count = len(media_data.index)
+
+            if media_count > 0:
+                media_progress_bar = st.progress(
+                    0, text=f"Downloading media files for {col} ..."
+                )
+
+                for j in range(0, len(media_data.index)):
+                    # get url at index j or row['name']
+
+                    url = media_data[col][j]
+                    submission_key = media_data["KEY"][j].replace("uuid:", "")
+                    fileext = url.split(".")[-1] or "csv"
+                    filename = col + "_" + submission_key + "." + fileext
+                    media_file = scto.get_attachment(url, key=key)
+
+                    # save media files
+                    with open(f"{media_folder}/{filename}", "wb") as file:
+                        file.write(media_file)
+                    progress = round(((j + 1) / media_count) * 100, 2)  # noqa: F841
+                    media_progress_bar.progress(
+                        (j + 1) / media_count,
+                        text=f"Downloading media files for {col} ... % complete",
+                    )
+
 
 # Using pysurveycto library, import survey data from SurveyCTO
+<<<<<<< HEAD
 <<<<<<< HEAD
 def scto_import_data(scto: object, form_id: str, key: str = None, server_dataset: bool = False, saveas: str = None, media: bool = False) -> tuple():
 >>>>>>> a279fb4 (restructured)
@@ -824,12 +851,33 @@ def scto_import_data(
     form_id: str,
     key: str = None,
     server_dataset: bool = False,
+<<<<<<< HEAD
     saveas: str = None,
+=======
+    saveas: str | None = None,
+=======
+def scto_import_data(
+    scto: object,
+    form_id: str,
+    key: str = None,
+    server_dataset: bool = False,
+    saveas: str = None,
+>>>>>>> 952e544 (format and lint pydms/src/connectors)
+>>>>>>> 291498b (format and lint pydms/src/connectors)
     media: bool = False,
 ) -> tuple:
     """Import SurveyCTO data.
 
+<<<<<<< HEAD
     Import SurveyCTO Data and save to file, adjust data types based on XLS form definition, and import media files.
+=======
+<<<<<<< HEAD
+    Import SurveyCTO Data and save to file, adjust data types based on XLS
+    form definition, and import media files.
+=======
+    Import SurveyCTO Data and save to file, adjust data types based on XLS form definition, and import media files.
+>>>>>>> 952e544 (format and lint pydms/src/connectors)
+>>>>>>> 291498b (format and lint pydms/src/connectors)
 
     PARAMS:
     -------
@@ -874,7 +922,16 @@ def scto_import_data(
         new_data: pd.DataFrame = pd.DataFrame(new_data)
         new_data_count = len(new_data.index)
 
+<<<<<<< HEAD
         # if scto_data is not empty, append new_data to scto_data, else set scto_data to new_data
+=======
+<<<<<<< HEAD
+        # if scto_data is not empty, append new_data to scto_data, else set
+        # scto_data to new_data
+=======
+        # if scto_data is not empty, append new_data to scto_data, else set scto_data to new_data
+>>>>>>> 952e544 (format and lint pydms/src/connectors)
+>>>>>>> 291498b (format and lint pydms/src/connectors)
         if not scto_data.empty:
             scto_data = pd.concat([scto_data, new_data], ignore_index=True)
 
@@ -903,11 +960,29 @@ def scto_import_data(
             if col in scto_data.columns:
                 scto_data[col] = pd.to_numeric(scto_data[col], errors="ignore")
 
+<<<<<<< HEAD
         # loop through fields and convert numeric variables to appropriate data types
         fields: pd.DataFrame = questions[["type", "name"]]
         scto_data_cols = list(scto_data.columns)
         for i, row in fields.iterrows():
             # check if field is a repeat group col, if yes, get all repeat columns
+=======
+<<<<<<< HEAD
+        # loop through fields and convert numeric variables to appropriate
+        # data types
+        fields: pd.DataFrame = questions[["type", "name"]]
+        scto_data_cols = list(scto_data.columns)
+        for row in fields.iterrows():
+            # check if field is a repeat group col, if yes, get all repeat
+            # columns
+=======
+        # loop through fields and convert numeric variables to appropriate data types
+        fields: pd.DataFrame = questions[["type", "name"]]
+        scto_data_cols = list(scto_data.columns)
+        for i, row in fields.iterrows():
+            # check if field is a repeat group col, if yes, get all repeat columns
+>>>>>>> 952e544 (format and lint pydms/src/connectors)
+>>>>>>> 291498b (format and lint pydms/src/connectors)
             cols = scto_get_repeat_cols(row["name"], repeat_fields)
 
             if row["type"] in ["date"]:
@@ -964,6 +1039,7 @@ def scto_import_data(
     return (scto_data, new_data_count)
 
 
+<<<<<<< HEAD
 >>>>>>> 5efff5e (format and lint pydms/src/connectors)
 # configure additional buttons for surveycto forms
 def scto_forms_edit(servername) -> None:
@@ -1290,141 +1366,194 @@ def scto_download_action(form_inputs: pd.DataFrame) -> None:
 =======
 	return (scto_data, new_data_count)
 				
+=======
+>>>>>>> 952e544 (format and lint pydms/src/connectors)
 # configure additional buttons for surveycto forms
 def scto_forms_edit(servername) -> None:
+    """Edit SurveyCTO forms.
 
-	
+    PARAMS:
+    -------
+    servername: SurveyCTO server name
 
-	# add add, delete, move up and move down buttons
-	add_col, move_up_col, move_down_col, del_col = st.columns((4))
+    Return:
+    ------
+    None
 
-	with move_up_col:
-		move_up_btn = st.button("Move Up:material/arrow_upward:", key = "scto_move_up_key", use_container_width=True)
-	with move_down_col:
-		move_down_btn = st.button("Move Down:material/arrow_downward:", key = "scto_move_down_key", use_container_width=True)
-	with add_col:
-		with st.popover(label = "Add", use_container_width = True, icon = ":material/add:"):
-			st.markdown("Add new SurveyCTO form details")
+    """
+    # add add, delete, move up and move down buttons
+    add_col, move_up_col, move_down_col, del_col = st.columns(4)
 
-			form_alias = st.text_input(label = "Alias", help = "Enter form alias eg. Household Survey, Community Survey")
+    with move_up_col:
+        move_up_btn = st.button(  # noqa: F841
+            "Move Up:material/arrow_upward:",
+            key="scto_move_up_key",
+            use_container_width=True,
+        )
+    with move_down_col:
+        move_down_btn = st.button(  # noqa: F841
+            "Move Down:material/arrow_downward:",
+            key="scto_move_down_key",
+            use_container_width=True,
+        )
+    with add_col:  # noqa: SIM117
+        with st.popover(label="Add", use_container_width=True, icon=":material/add:"):
+            st.markdown("Add new SurveyCTO form details")
 
-			form_id = st.text_input(label = "Form ID", help = "Enter SurveyCTO form ID")
-			if form_id:
-				if not re.fullmatch(r'\b[a-z]+[a-z0-9_]+\b', form_id):
-					st.warning("Invalid form ID")
+            form_alias = st.text_input(
+                label="Alias",
+                help="Enter form alias eg. Household Survey, Community Survey",
+            )
 
-			encryption_key = st.text_input(label = "Encryption Key", help = "Enter file path for SurveyCTO encryption key")
-			if encryption_key:
-				# check that key file exist
-				if not os.path.isfile(encryption_key):
-					st.warning("Key file not found")
+            form_id = st.text_input(label="Form ID", help="Enter SurveyCTO form ID")
+            if form_id and not re.fullmatch(r"\b[a-z]+[a-z0-9_]+\b", form_id):
+                st.warning("Invalid form ID")
 
-			server_dataset = st.checkbox(label = "Server dataset?", help = "Check if this is a server dataset")
-			
-			save_as = st.text_input(label = "Save as", help = "Enter path to save dataset")
-			if save_as:
-				path = save_as.split('/')[-1]
-				path = save_as.replace(path, '')
-				if not os.path.isdir(path):
-					st.warning(f"file path not found")
+            encryption_key = st.text_input(
+                label="Encryption Key",
+                help="Enter file path for SurveyCTO encryption key",
+            )
+            if encryption_key and not os.path.isfile(encryption_key):
+                # check that key file exist
+                st.warning("Key file not found")
 
-			get_media = st.checkbox(label = "Download media files", help = "Check to download media files", disabled = server_dataset)
+            server_dataset = st.checkbox(
+                label="Server dataset?", help="Check if this is a server dataset"
+            )
 
-			# add form details to form list
-			add_form_btn = st.button("Add", key = "add_form_key", disabled = save_as is None or form_id is None or encryption_key is None)
-			if add_form_btn:
+            save_as = st.text_input(label="Save as", help="Enter path to save dataset")
+            if save_as:
+                path = save_as.split("/")[-1]
+                path = save_as.replace(path, "")
+                if not os.path.isdir(path):
+                    st.warning("file path not found")
 
-				new_form = pd.DataFrame(data = [[False, form_alias, form_id, encryption_key, server_dataset, save_as, get_media]], 
-									columns = ['select', 'alias', 'form ID', 'encryption key', 'server dataset', 'save as', 'get media'])
-		
-				scto_forms = pd.concat([st.session_state.scto_forms, new_form], ignore_index = True)
+            get_media = st.checkbox(
+                label="Download media files",
+                help="Check to download media files",
+                disabled=server_dataset,
+            )
 
-				# save form details to cache
-				scto_forms.to_json(f'cache/{servername}_pyDMS_forms_cache.json')
+            # add form details to form list
+            add_form_btn = st.button(
+                "Add",
+                key="add_form_key",
+                disabled=save_as is None or form_id is None or encryption_key is None,
+            )
+            if add_form_btn:
+                new_form = pd.DataFrame(
+                    data=[
+                        [
+                            False,
+                            form_alias,
+                            form_id,
+                            encryption_key,
+                            server_dataset,
+                            save_as,
+                            get_media,
+                        ]
+                    ],
+                    columns=[
+                        "select",
+                        "alias",
+                        "form ID",
+                        "encryption key",
+                        "server dataset",
+                        "save as",
+                        "get media",
+                    ],
+                )
 
-	with del_col:
-		# delete selected form
-		del_form_btn = st.button("Delete", key = "del_form_key", use_container_width = True)
+                scto_forms = pd.concat(
+                    [st.session_state.scto_forms, new_form], ignore_index=True
+                )
 
-		scto_forms = scto_load_forms(servername)
-		
-		if del_form_btn:
-			
-			# remove row if column select is true
-			scto_forms = scto_forms[scto_forms['select'] == True]
-			
-			scto_forms.to_json(f'cache/{servername}_pyDMS_forms_cache.json')
+                # save form details to cache
+                scto_forms.to_json(f"cache/{servername}_pyDMS_forms_cache.json")
 
-	
-	# load existing form detailss
-	st.session_state.scto_forms = scto_load_forms(servername)
+    with del_col:
+        # delete selected form
+        del_form_btn = st.button("Delete", key="del_form_key", use_container_width=True)
 
-	# st.session_state.scto_forms
-	if st.session_state.scto_forms is None or st.session_state.scto_forms.empty:
-		st.warning("No form details found, click to add new form details")
-	else:
-		st.session_state.scto_forms = st.data_editor(scto_forms, hide_index = True, key = "scto_forms_key")
+        scto_forms = scto_load_forms(servername)
+
+        if del_form_btn:
+            # remove row if column select is true
+            scto_forms = scto_forms[scto_forms["select"] == True]  # noqa: E712
+
+            scto_forms.to_json(f"cache/{servername}_pyDMS_forms_cache.json")
+
+    # load existing form detailss
+    st.session_state.scto_forms = scto_load_forms(servername)
+
+    # st.session_state.scto_forms
+    if st.session_state.scto_forms is None or st.session_state.scto_forms.empty:
+        st.warning("No form details found, click to add new form details")
+    else:
+        st.session_state.scto_forms = st.data_editor(
+            scto_forms, hide_index=True, key="scto_forms_key"
+        )
 
 
 # Configure SurveyCTO form
 def scto_login_form() -> tuple:
-	
-	"""
-	Creates input form for SurveyCTO login
+    """Create input form for SurveyCTO login.
 
-	PARAMS:
-	------
+    PARAMS:
+    ------
 
-	None
+    None
 
-	RETURNS:
-	-------
+    Returns
+    -------
+    pd.DataFrame - Dataframe of forms from previous session or empty dataset
 
-	pd.DataFrame - Dataframe of forms from previous session or empty dataset
+    """
+    # define server details input
+    with st.form(key="server_form"):
+        st.image("asserts/SurveyCTO-Logo-CMYK.png", width=200)
 
-	"""
-	# define server details input
-	with st.form(key="server_form"):
+        with st.popover(
+            label="Connect", use_container_width=True, icon=":material/login:"
+        ):
+            st.markdown("*Server Details:*")
 
-		st.image("asserts/SurveyCTO-Logo-CMYK.png", width = 200)
+            name_default, user_default = scto_load_login()
 
-		with st.popover(label = "Connect", use_container_width = True, icon = ":material/login:"):
-		
-			st.markdown("*Server Details:*")
+            scto_server_name = st.text_input(
+                label="Server name*",
+                value=name_default,
+                help="Enter SurveyCTO server name. eg. girlpower",
+            )
+            scto_server_user = st.text_input(
+                label="Email address*",
+                value=user_default,
+                help="Enter valid email username",
+            )
+            scto_server_password = st.text_input(label="Password*", type="password")
 
-			name_default, user_default = scto_load_login()
+            # mark required fields
+            st.markdown("**required*")
 
-			scto_server_name = st.text_input(label = "Server name*", 
-										value = name_default, 
-										help = "Enter SurveyCTO server name. eg. girlpower")
-			scto_server_user = st.text_input(label = "Email address*", 
-										value = user_default, 
-										help = "Enter valid email username")
-			scto_server_password = st.text_input(label = "Password*", 
-											type = "password")
+            # create submit button
+            submit_button = st.form_submit_button(label="Connect to server")
 
-			# mark required fields
-			st.markdown("**required*")
+        if submit_button:
+            # modify session state
+            st.session_state.scto = scto_server_connect(
+                scto_server_name, scto_server_user, scto_server_password
+            )
+            st.session_state.scto_show_forms = True
+            st.session_state.scto_disable_download_btn = False
 
-			# create submit button
-			submit_button = st.form_submit_button(label="Connect to server")
+        scto_forms = scto_load_forms(scto_server_name)
 
-		if submit_button:
+        return scto_forms, scto_server_name, scto_server_user
 
-			# modify session state
-			st.session_state.scto = scto_server_connect(scto_server_name, 
-											   			scto_server_user, 
-														scto_server_password)
-			st.session_state.scto_show_forms = True
-			st.session_state.scto_disable_download_btn = False
-
-		scto_forms = scto_load_forms(scto_server_name)
-
-		return scto_forms, scto_server_name, scto_server_user
-	
 
 # --- SCTO Download button action --- #
 def scto_download_action(form_inputs: pd.DataFrame) -> None:
+<<<<<<< HEAD
 >>>>>>> 1d12b2d (prep)
 
 	"""
@@ -1499,6 +1628,8 @@ def scto_download_action(form_inputs: pd.DataFrame) -> None:
 	st.session_state.scto_show_preview = True
 >>>>>>> 9b1a5b9 (prep)
 =======
+=======
+>>>>>>> 952e544 (format and lint pydms/src/connectors)
     """Trigger Action to download SurveyCTO data based on form inputs.
 
     PARAMS:
@@ -1555,6 +1686,7 @@ def scto_download_action(form_inputs: pd.DataFrame) -> None:
 
     # modify session state for preview
     st.session_state.scto_show_preview = True
+<<<<<<< HEAD
 >>>>>>> 5efff5e (format and lint pydms/src/connectors)
 =======
 	return (scto_data, new_data_count)
@@ -1562,3 +1694,5 @@ def scto_download_action(form_inputs: pd.DataFrame) -> None:
 =======
 	st.session_state.scto_show_preview = True
 >>>>>>> 1d12b2d (prep)
+=======
+>>>>>>> 952e544 (format and lint pydms/src/connectors)
