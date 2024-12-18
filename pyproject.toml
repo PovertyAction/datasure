@@ -25,21 +25,33 @@ dependencies = [
     "streamlit>=1.41.1",
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> 5ac1794 (update uv requirements)
 =======
 =======
 >>>>>>> 8913909 (resolving_uv_toml)
+=======
+=======
+>>>>>>> 564b791 (update venv requirements)
+>>>>>>> dad835b (update venv requirements)
     "streamlit-folium>=0.23.2",
     "folium>=0.18.0",
     "scikit-learn>=1.5.2",
     "geopy>=2.4.1",
     "pysurveycto>=0.0.14",
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> 4ec1e94 (update venv requirements)
 =======
 =======
 >>>>>>> 89d13a1 (resolving_uv_toml)
 >>>>>>> 8913909 (resolving_uv_toml)
+=======
+=======
+>>>>>>> 89d13a1 (resolving_uv_toml)
+=======
+>>>>>>> 564b791 (update venv requirements)
+>>>>>>> dad835b (update venv requirements)
 ]
 
 [tool.uv]
@@ -51,11 +63,6 @@ dev-dependencies = [
     "mdformat-pyproject>=0.0.1",
     "ruff>=0.6.4",
     "sqlfluff>=3.1.1",
-    "folium>=0.18.0",
-    "scikit-learn>=1.5.2",
-    "geopy>=2.4.1",
-    "streamlit>=1.40.1",
-    "streamlit-folium>=0.23.2",
 ]
 
 
