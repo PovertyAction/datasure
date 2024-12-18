@@ -56,7 +56,7 @@ alias_index: list[int] = st.session_state.alias_list_index
 # create new tab for each dataset
 tabs = st.tabs(alias_list)
 
-for i, (label, tab) in enumerate(zip(alias_list, tabs)):
+for i, (label, tab) in enumerate(zip(alias_list, tabs, strict=False)):
     # get index for the dataset
     if i < sum(alias_index[0:1]):
         d_i = st.session_state["scto_alias_list"].index(label)

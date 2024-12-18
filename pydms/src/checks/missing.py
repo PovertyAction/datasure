@@ -4,15 +4,15 @@ import streamlit as st
 
 
 # define function to create summary report
-def missing_report(data) -> None:  # noqa: D417
+def missing_report(data) -> None:  # noqa: D417, RUF100
     """Generate a report on missing data in the dataset. The report includes a
     summary of missing data, a table showing the percentage of missing values
     in each column, and an option to inspect variables with missing data.
 
     Parameters
     ----------
-            data (pd.DataFrame): The dataset to generate the missing data
-            report for.
+        data (pd.DataFrame): The dataset to generate the missing data
+                report for.
 
     Returns
     -------
@@ -143,7 +143,9 @@ def missing_report(data) -> None:  # noqa: D417
                 st.write("---")
                 st.markdown(f"### Missing data correlation for {inspect_cols}")
 
-                # create a table showing the correlation between missing values of selected column and all other columns, sort data from highest to lowest
+                # create a table showing the correlation between missing values
+                # of selected column and all other columns, sort data from
+                # highest to lowest
                 missing_data_corr = (
                     data.isnull().corr()[inspect_cols[0]].sort_values(ascending=False)
                 )
@@ -165,7 +167,9 @@ def missing_report(data) -> None:  # noqa: D417
                 st.write("---")
                 st.markdown("### Missing data correlation for selected columns")
 
-                # create a table showing the correlation between missing values of selected columns and all other columns, sort data from highest to lowest
+                # create a table showing the correlation between missing
+                # values of selected columns and all other columns, sort data
+                # from highest to lowest
                 missing_data_corr = data[inspect_cols].isnull().corr()
                 missing_heatmap = plt.figure(figsize=(6, 4))
                 sns.heatmap(data=missing_data_corr, cmap="rocket", annot=True)

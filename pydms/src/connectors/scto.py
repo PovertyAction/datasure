@@ -43,7 +43,8 @@ def scto_server_connect(servername: str, username: str, password: str) -> str:
         st.stop()
 
     # if all fields are valid, create SurveyCTO object
-    # Future Improvements: After SurveyCTO API improvements, add try-except block to catch connection errors
+    # Future Improvements: After SurveyCTO API improvements, add try-except
+    # block to catch connection errors
     else:
         scto = pysurveycto.SurveyCTOObject(servername, username, password)
         st.success("Connection successful")
@@ -143,7 +144,8 @@ def scto_load_existing_data(saveas: str) -> tuple:
     oldest_completion_date: datetime of oldest completion date in the dataset
 
     Returns tuple of (scto_data, oldest_completion_date)
-    Returns empty dataframe and datetime(2024, 1, 1, 13, 40, 40) if file not found or saveas not specified
+    Returns empty dataframe and datetime(2024, 1, 1, 13, 40, 40) if file not
+    found or saveas not specified
 
     """
     try:
@@ -267,7 +269,7 @@ def scto_download_media(
     repeat_fields: list,
     new_data: pd.DataFrame,
     media_folder: str,
-    key: str = None,
+    key: str | None = None,
 ) -> None:
     """Download media files from SurveyCTO.
 
@@ -324,14 +326,15 @@ def scto_download_media(
 def scto_import_data(
     scto: object,
     form_id: str,
-    key: str = None,
+    key: str | None = None,
     server_dataset: bool = False,
-    saveas: str = None,
+    saveas: str | None = None,
     media: bool = False,
 ) -> tuple:
     """Import SurveyCTO data.
 
-    Import SurveyCTO Data and save to file, adjust data types based on XLS form definition, and import media files.
+    Import SurveyCTO Data and save to file, adjust data types based on XLS
+    form definition, and import media files.
 
     PARAMS:
     -------
@@ -376,7 +379,8 @@ def scto_import_data(
         new_data: pd.DataFrame = pd.DataFrame(new_data)
         new_data_count = len(new_data.index)
 
-        # if scto_data is not empty, append new_data to scto_data, else set scto_data to new_data
+        # if scto_data is not empty, append new_data to scto_data, else set
+        # scto_data to new_data
         if not scto_data.empty:
             scto_data = pd.concat([scto_data, new_data], ignore_index=True)
 
@@ -405,11 +409,13 @@ def scto_import_data(
             if col in scto_data.columns:
                 scto_data[col] = pd.to_numeric(scto_data[col], errors="ignore")
 
-        # loop through fields and convert numeric variables to appropriate data types
+        # loop through fields and convert numeric variables to appropriate
+        # data types
         fields: pd.DataFrame = questions[["type", "name"]]
         scto_data_cols = list(scto_data.columns)
-        for i, row in fields.iterrows():
-            # check if field is a repeat group col, if yes, get all repeat columns
+        for row in fields.iterrows():
+            # check if field is a repeat group col, if yes, get all repeat
+            # columns
             cols = scto_get_repeat_cols(row["name"], repeat_fields)
 
             if row["type"] in ["date"]:

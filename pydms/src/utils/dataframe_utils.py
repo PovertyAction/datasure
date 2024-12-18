@@ -2,7 +2,7 @@ import pandas as pd
 
 
 # Function to move a row up or down in a DataFrame
-def move_row(df, row_index, direction="up"):  # noqa: D417
+def move_row(df, row_index, direction="up"):  # noqa: D417, RUF100
     """Move a row up or down in a DataFrame.
 
     Parameters
@@ -48,7 +48,7 @@ def move_row(df, row_index, direction="up"):  # noqa: D417
 
 
 # Function to add a row to a DataFrame from a dictionary
-def add_row(df, row_dict):  # noqa: D417
+def add_row(df, row_dict):  # noqa: D417, RUF100
     """Add a row to a DataFrame from a dictionary.
 
     Parameters
@@ -69,7 +69,7 @@ def add_row(df, row_dict):  # noqa: D417
 
 
 # Function to remove a row from a DataFrame
-def remove_row(df, row_index):  # noqa: D417
+def remove_row(df, row_index):  # noqa: D417, RUF100
     """Remove a row from a DataFrame.
 
     Parameters

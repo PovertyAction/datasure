@@ -53,7 +53,7 @@ def local_load_files() -> pd.DataFrame:
 # --- Read data from file ---#
 
 
-def local_read_data(filename: str, sheet_name: str = None) -> pd.DataFrame:
+def local_read_data(filename: str, sheet_name: str | None = None) -> pd.DataFrame:
     """Import data from a file.
 
     PARAMS:
