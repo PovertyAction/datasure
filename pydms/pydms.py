@@ -102,9 +102,9 @@ else:
         }
     )
 
-# --- GLOBAL ASSERTS --- #
+# --- GLOBAL ASSETS --- #
 
-st.logo("asserts/IPA-primary-full-color-abbreviated.png")
+st.logo("assets/IPA-primary-full-color-abbreviated.png")
 
 # --- RUN NAVIGATION --- #
 
