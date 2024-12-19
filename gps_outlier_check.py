@@ -120,7 +120,7 @@ def create_gps_distribution_map(df, ea_column, latitude, longitude, colors_list)
         zoom_start=8,
     )
     # add gps markers
-    for index, row in df.iterrows():
+    for _index, row in df.iterrows():
         folium.CircleMarker(
             location=[row["latitude"], row["longitude"]],
             radius=1,
@@ -274,11 +274,11 @@ def plot_gps_distance_outliers(df, latitude, longitude):
         location=[latitude, longitude], height="80%", width="80%", zoom_start=8
     )
 
-    for index, row in non_outlier_gps_vals_df.iterrows():
+    for _index, row in non_outlier_gps_vals_df.iterrows():
         folium.CircleMarker(
             location=[row["latitude"], row["longitude"]], radius=1.5, color="darkgreen"
         ).add_to(outliers_map)
-    for index, row in outlier_gps_vals_df.iterrows():
+    for _index, row in outlier_gps_vals_df.iterrows():
         folium.CircleMarker(
             location=[row["latitude"], row["longitude"]], radius=1.5, color="red"
         ).add_to(outliers_map)

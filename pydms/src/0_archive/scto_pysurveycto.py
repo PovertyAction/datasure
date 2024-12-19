@@ -441,7 +441,7 @@ def scto_import_data(
         # data types
         fields: pd.DataFrame = questions[["type", "name"]]
         scto_data_cols = list(scto_data.columns)
-        for row in fields.iterrows():
+        for _index, row in fields.iterrows():
             # check if field is a repeat group col, if yes, get all repeat
             # columns
             cols = scto_get_repeat_cols(row["name"], repeat_fields)

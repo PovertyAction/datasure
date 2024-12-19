@@ -1,5 +1,4 @@
 import datetime
-import re
 from collections import defaultdict
 from datetime import datetime  # noqa: F811
 from io import BytesIO
@@ -42,12 +41,15 @@ with tab1:
         Args:
             file_path (str): The path or URL to the file.
 
-        Returns:
+        Returns
+        -------
             pd.DataFrame: The loaded dataframe.
 
-        Raises:
+        Raises
+        ------
             ValueError: If the file format is unsupported.
-            requests.exceptions.RequestException: If there is an error downloading the file.
+            requests.exceptions.RequestException: If there is an error
+            downloading the file.
 
         """
         if file_path.startswith("http"):
@@ -105,19 +107,21 @@ with tab1:
             st.error("No data found in the file.")
         except pd.errors.ParserError:
             st.error("Error parsing the file. Please check its format.")
-        except requests.exceptions.RequestException as re:
-            st.error(f"Error downloading the file: {re}")
+        except requests.exceptions.RequestException as req_err:
+            st.error(f"Error downloading the file: {req_err}")
 
-        ##### Basic set up #####
+        # Basic set up
         df = df_original.copy()
 
         # Change all variables names to lower case
         df.columns = df.columns.str.lower()
 
-        #### NOTE: In the following please replace with your own variables ####
+        # NOTE: In the following please replace with your own variables
 
         # Select "CONSENT" variable (either numeric or categorical)
-        # Define a mapping from categorical to numeric. NOTE: The default is english, but might change depending on the language (eg. Sí, No in Spanish)
+        # Define a mapping from categorical to numeric. NOTE: The default is
+        # english, but might change depending on the language (eg. Sí, No in
+        # Spanish)
         mapping = {"No": 0, "Yes": 1}
 
         if pd.api.types.is_numeric_dtype(df["c_consent"]):
@@ -133,7 +137,9 @@ with tab1:
         enumid_var = "a_enum_id"
         df["enumid"] = df[enumid_var]
 
-        #### NOTE: For consent variables including recording and gps consent please use "#" to comment them if there are no such variables in the working df.
+        # NOTE: For consent variables including recording and gps consent
+        # please use "#" to comment them if there are no such variables in the
+        # working df.
 
         # Select "RECORDING CONSENT" variable (if any)
         if pd.api.types.is_numeric_dtype(df["aud_consent"]):
@@ -144,10 +150,10 @@ with tab1:
             )  # If categorical
 
         # Select "GPS CONSENT" variable (if any)
-        # if pd.api.types.is_numeric_dtype(df['gps_consent']):
-        #    df['gps_consent'] = df['gps_consent']  # If numeric
-        # else:
-        #    df['gps_consent'] = df['gps_consent'].map({'Yes': 1, 'No': 0}) # If categorical
+        # if pd.api.types.is_numeric_dtype(df['gps_consent']):  # If numeric
+        #    df['gps_consent'] = df['gps_consent']
+        # else: # If categorical
+        #    df['gps_consent'] = df['gps_consent'].map({'Yes': 1, 'No': 0})
 
         # Select "SUBMISSION DATE" variable
         df["submissiondate"] = df["submissiondate"]
@@ -168,10 +174,13 @@ with tab1:
         # Define total number of interviews expected (target number of interviews)
         total_goal = 950
 
-        # Define percentage of completed interviews that should be flagged. For example, write 50 if less than 50% of the interviews are complete and should be flagged as warning
+        # Define percentage of completed interviews that should be flagged. For
+        # example, write 50 if less than 50% of the interviews are complete and
+        # should be flagged as warning
         warning_finished = 50
 
-        # Define flagged percentage of missing. For example, write 50 if there are more than 50% of missing and should be flagged as warning
+        # Define flagged percentage of missing. For example, write 50 if there
+        # are more than 50% of missing and should be flagged as warning
         percentage_warning = 50
 
         ##### Changes to data #####
@@ -183,7 +192,8 @@ with tab1:
             Args:
                 date_series (pd.Series): Series of date strings.
 
-            Returns:
+            Returns
+            -------
                 pd.Series: Series of datetime objects.
 
             """
@@ -208,7 +218,7 @@ with tab1:
                     day, month, rest = date_string.split("-")
                     year, time = rest.split(" ")
                     month_num = month_map[month.lower()]
-                    return f"{day}-{month_num}-{year} {time}"
+                    return f"{day}-{month_num}-{year} {time}"  # noqa: TRY300
                 except ValueError:
                     return date_string
 
@@ -262,7 +272,9 @@ with tab1:
         # Filter rows where "consent" is not NA
         df1 = df1[df1["consent"].notna()]
 
-        #### Note: Enter all validity conditions to filter data. Comment if not in use, add new conditions in the form of varname_filter = value if needed.
+        # Note: Enter all validity conditions to filter data. Comment if not
+        # in use, add new conditions in the form of varname_filter = value if
+        # needed.
 
         # Define filters (add any here)
         consent_filter = 1  # Consent value (1 for "Yes")
@@ -271,7 +283,9 @@ with tab1:
         recording_consent_filter = 1  # Recording consent (1 for "Yes")
         # gps_consent_filter = 1      # Recording consent (1 for "Yes")
 
-        # Create new filtered df. Eliminate conditions not in use, add new conditions using & (df[newvar] == varname_filter) where varname_filter should be previously defined
+        # Create new filtered df. Eliminate conditions not in use, add new
+        # conditions using & (df[newvar] == varname_filter) where
+        # varname_filter should be previously defined
         filtered_df = df[
             (df["consent"] == consent_filter)
             # &
@@ -294,7 +308,8 @@ with tab1:
             Args:
             file_path (str): The path or URL to the file.
 
-            Returns:
+            Returns
+            -------
             pd.DataFrame: The loaded dataframe.
 
             """
@@ -364,11 +379,13 @@ with tab1:
                 if merge_variable:
                     # Add a "Calculate Backchecks" button
                     if st.button("Calculate Backchecks"):
-                        # Create copies of the DataFrames to avoid modifying the originals
+                        # Create copies of the DataFrames to avoid modifying
+                        # the originals
                         existing_df_copy = existing_df.copy()
                         backcheck_df_copy = backcheck_df.copy()
 
-                        # Before merging, create backup columns for the values we want to preserve (ids of enumerators and backcheckers)
+                        # Before merging, create backup columns for the values
+                        # we want to preserve (ids of enumerators and backcheckers)
                         existing_df_copy["original_enum_id"] = existing_df_copy[
                             enumid_var
                         ]
@@ -379,7 +396,8 @@ with tab1:
                         # Columns to exclude from prefixing
                         exclude_columns = {merge_variable, enumid_var, *enum_bcer}
 
-                        # Add prefixes to columns except merge_variable, enumid and enum_bcer
+                        # Add prefixes to columns except merge_variable,
+                        # enumid and enum_bcer
                         existing_df_columns = {
                             col: f"svy_{col}"
                             for col in existing_df_copy.columns
@@ -958,7 +976,8 @@ with tab1:
                     # Calculate standard deviation
                     std_dev = average_duration["avg_duration"].std()
 
-                    # Calculate how many standard deviations away each average is from the overall average
+                    # Calculate how many standard deviations away each average
+                    # is from the overall average
                     average_duration["std_dev_away"] = (
                         average_duration["avg_duration"] - overall_avg_duration
                     ) / std_dev
@@ -1095,12 +1114,15 @@ with tab1:
 
                         # Count mismatches for each enumerator
                         def count_mismatches(group):
-                            """Count mismatches between survey and backcheck values for a given group.
+                            """Count mismatches between survey and backcheck
+                            values for a given group.
 
                             Args:
-                                group (pd.DataFrame): DataFrame containing survey and backcheck values.
+                                group (pd.DataFrame): DataFrame containing
+                                survey and backcheck values.
 
-                            Returns:
+                            Returns
+                            -------
                                 int: Number of mismatches.
 
                             """
@@ -1127,7 +1149,8 @@ with tab1:
                                     backcheck_counts, on="enumid", how="left"
                                 )
 
-                                # Fill NaN values with 0 for enumerators with no backchecks
+                                # Fill NaN values with 0 for enumerators with
+                                # no backchecks
                                 backcheck_data["Backchecked Interviews"] = (
                                     backcheck_data["Backchecked Interviews"]
                                     .fillna(0)
@@ -1247,9 +1270,7 @@ with tab1:
                                 )
 
                             except Exception as e:
-                                st.error(
-                                    f"Error calculating combined metrics: {str(e)}"
-                                )
+                                st.error(f"Error calculating combined metrics: {e!s}")
                         else:
                             st.warning(
                                 "No comparable variables found for backcheck analysis."
@@ -1411,7 +1432,8 @@ with tab1:
                     codes (list): List of codes representing missing values.
                     labels (list): List of labels corresponding to the codes.
 
-                Returns:
+                Returns
+                -------
                     None
 
                 """
@@ -1434,7 +1456,7 @@ with tab1:
                     }
 
                     # Add counts and update total for each code/label pair
-                    for code, label in zip(codes, labels):
+                    for code, label in zip(codes, labels, strict=False):
                         count = (df6[column] == code).sum()
                         row_dict[f"{label} ({code})"] = count
                         row_dict["Total Missing"] += count  # Add to total
@@ -1447,7 +1469,7 @@ with tab1:
                     row_dict["Not Coded (%)"] = (not_coded / total_rows) * 100
 
                     # Add percentages for each code/label pair
-                    for code, label in zip(codes, labels):
+                    for code, label in zip(codes, labels, strict=False):
                         count = row_dict[f"{label} ({code})"]
                         row_dict[f"{label} ({code}) (%)"] = (count / total_rows) * 100
 
@@ -1480,7 +1502,7 @@ with tab1:
                         pct_columns.extend(
                             [
                                 f"{label} ({code}) (%)"
-                                for code, label in zip(codes, labels)
+                                for code, label in zip(codes, labels, strict=False)
                             ]
                         )
 
@@ -1509,7 +1531,10 @@ with tab1:
                         # Create list of columns for counts
                         count_columns = ["Variable", "Total Missing", "Not Coded"]
                         count_columns.extend(
-                            [f"{label} ({code})" for code, label in zip(codes, labels)]
+                            [
+                                f"{label} ({code})"
+                                for code, label in zip(codes, labels, strict=False)
+                            ]
                         )
 
                         # Display counts DataFrame
@@ -1653,8 +1678,10 @@ with tab1:
                     Args:
                         columns (list): List of column names.
 
-                    Returns:
-                        dict: Dictionary with base patterns as keys and lists of matching columns as values.
+                    Returns
+                    -------
+                        dict: Dictionary with base patterns as keys and lists
+                        of matching columns as values.
 
                     """
                     patterns = defaultdict(list)
@@ -1672,14 +1699,17 @@ with tab1:
                     return {k: v for k, v in patterns.items() if len(v) > 1}
 
                 def show_pattern_selection(df, numeric_columns):
-                    """Display a pattern selection dropdown for variable names and return the selected columns and melted DataFrame.
+                    """Display a pattern selection dropdown for variable names
+                    and return the selected columns and melted DataFrame.
 
                     Args:
                         df (pd.DataFrame): The input DataFrame.
                         numeric_columns (list): List of numeric column names.
 
-                    Returns:
-                        tuple: A tuple containing the selected columns and the melted DataFrame.
+                    Returns
+                    -------
+                        tuple: A tuple containing the selected columns and the
+                        melted DataFrame.
 
                     """
                     pattern_groups = find_variable_patterns(numeric_columns)
@@ -1692,13 +1722,20 @@ with tab1:
                     ]
                     pattern_to_base = {
                         display: pattern
-                        for pattern, display in zip(pattern_groups, pattern_options)
+                        for pattern, display in zip(
+                            pattern_groups, pattern_options, strict=False
+                        )
                     }
 
                     selected_pattern = st.selectbox(
-                        "If you'd like to detect outliers based on a joint distribution of several variables (for example, same variable corresponding to different household members), please select the set of variables",
+                        """If you'd like to detect outliers based on a joint
+                        distribution of several variables (for example,
+                        same variable corresponding to different household
+                        members), please select the set of variables""",
                         options=sorted(pattern_options),
-                        help="Choose a group of related variables to analyze. Only numeric variables are shown.",
+                        help="""Choose a group of related variables to analyze.
+                                Only numeric variables are shown.
+                             """,
                     )
 
                     if selected_pattern:
@@ -1710,7 +1747,7 @@ with tab1:
                         ):
                             st.write(", ".join(selected_cols))
 
-                        df_subset = df[["id"] + selected_cols]
+                        df_subset = df[["id", *selected_cols]]
                         df_melted = pd.melt(
                             df_subset,
                             id_vars=["id"],
@@ -1789,12 +1826,14 @@ with tab1:
 
                 # Function to find the common prefix
                 def common_prefix(strs):
-                    """Find the longest common prefix string amongst an array of strings.
+                    """Find the longest common prefix string amongst an array
+                    of strings.
 
                     Args:
                         strs (list): List of strings.
 
-                    Returns:
+                    Returns
+                    -------
                         str: The longest common prefix.
 
                     """
@@ -1860,8 +1899,8 @@ with tab1:
                             "General Results",
                             "Enumerator Statistics",
                             "Backchecker Statistics",
+                            *selected_vars,
                         ]
-                        + selected_vars
                     )
                     var_summary = {}
                     mismatches_dict = {}
@@ -1993,7 +2032,8 @@ with tab1:
                             # Group by enumerator and update statistics
                             for enum_id in comparison["enumerator_id"].unique():
                                 if enum_id not in enumerator_detailed_stats:
-                                    # Handle case where enumerator is in backcheck but not in original data
+                                    # Handle case where enumerator is in
+                                    # backcheck but not in original data
                                     enumerator_detailed_stats[enum_id] = {
                                         "total_surveys": 0,
                                         "total_backchecks": 0,
@@ -2158,12 +2198,14 @@ with tab1:
                         # Initialize dictionary to store backchecker statistics
                         backchecker_stats = {}
 
-                        # Given that enum_bcer is a list, access the first element
+                        # Given that enum_bcer is a list, access the first
+                        # element
                         enum_bcer_column = (
                             enum_bcer[0] if isinstance(enum_bcer, list) else enum_bcer
                         )
 
-                        # For each selected variable, calculate statistics per backchecker
+                        # For each selected variable, calculate statistics per
+                        # backchecker
                         for var in selected_vars:
                             svy_col = f"svy_{var}"
                             back_col = f"back_{var}"
@@ -2264,7 +2306,7 @@ with tab1:
                         )
 
                     # Process the selected variables
-                    for tab, var in zip(tabs[3:], selected_vars):
+                    for tab, var in zip(tabs[3:], selected_vars, strict=False):
                         with tab:
                             st.subheader(f"Mismatches for {var}")
 
@@ -2310,7 +2352,7 @@ with tab1:
                                     )
                                 except Exception as e:
                                     st.warning(
-                                        f"Could not calculate differences for {var}. Error: {str(e)}"
+                                        f"Could not calculate differences for {var}. Error: {e!s}"
                                     )
 
                             # Add comparison column
@@ -2353,10 +2395,12 @@ with tab1:
         with tab9:
 
             def visualize_data_distribution(df6):
-                """Visualize the distribution of categorical and numeric variables in the dataframe.
+                """Visualize the distribution of categorical and numeric
+                variables in the dataframe.
 
                 Args:
-                    df6 (pd.DataFrame): The dataframe containing the data to visualize.
+                    df6 (pd.DataFrame): The dataframe containing the data to
+                    visualize.
 
                 """
                 # Separate categorical and numeric columns
