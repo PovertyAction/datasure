@@ -364,8 +364,19 @@ def scto_import_data(scto: object, form_id: str, key: str = None, server_dataset
 			# drop duplicates from the dataset on key column (key) and keep the first
 			scto_data.drop_duplicates(subset = 'KEY', keep = 'first', inplace = True)
 
+<<<<<<< HEAD
 		else:
 			scto_data = new_data
+=======
+        # loop through fields and convert numeric variables to appropriate
+        # data types
+        fields: pd.DataFrame = questions[["type", "name"]]
+        scto_data_cols = list(scto_data.columns)
+        for _index, row in fields.iterrows():
+            # check if field is a repeat group col, if yes, get all repeat
+            # columns
+            cols = scto_get_repeat_cols(row["name"], repeat_fields)
+>>>>>>> f2f669e (clean up files)
 
 		# download form definition
 		questions, _ = scto_get_xls(scto, form_id)
