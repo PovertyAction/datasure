@@ -1,12 +1,104 @@
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+=======
+>>>>>>> b1612c0 (format and lint pydms core script)
+<<<<<<< HEAD
+import pandas as pd
+=======
+>>>>>>> 801c54a (init commit)
+>>>>>>> 15d81c3 (init commit)
+import streamlit as st
+=======
+>>>>>>> 0728a5e (format and lint pydms core script)
+>>>>>>> 7f9f3dd (restructured files and folders)
 import pandas as pd
 import streamlit as st
 
 # --- PAGE SETUP --- #
 
 # initialize session states
+<<<<<<< HEAD
 if "show_prep_section" not in st.session_state:
     st.session_state.show_prep_section = True
 
+=======
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+if 'show_prep_section' not in st.session_state:
+=======
+=======
+>>>>>>> 495c39b (prep)
+=======
+>>>>>>> b1612c0 (format and lint pydms core script)
+<<<<<<< HEAD
+if "show_prep_section" not in st.session_state:
+>>>>>>> 15d81c3 (init commit)
+    st.session_state.show_prep_section = True
+
+if 'show_config_section' not in st.session_state:
+    st.session_state.show_config_section = False
+
+if 'show_checks_section' not in st.session_state:
+    st.session_state.show_checks_section = False
+	
+for i in range(0, 10):
+	if f'check_page_name_{i}' not in st.session_state:
+		st.session_state[f'check_page_name_{i}'] = ''
+	if f'show_checks_page_{i}' not in st.session_state:
+		st.session_state[f'show_checks_page_{i}'] = False
+
+# initiate session states for 10 datasets from SCTO
+for i in range(0, 10):
+	if f'scto_raw_data{i}' not in st.session_state:
+		st.session_state[f'scto_raw_data{i}'] = pd.DataFrame()
+          
+# initiate session states for 10 datasets from local storage
+for i in range(0, 10):
+	if f'local_raw_data{i}' not in st.session_state:
+		st.session_state[f'local_raw_data{i}'] = pd.DataFrame()
+            
+# initiate session states for 10 datasets from script
+for i in range(0, 10):
+	if f'script_raw_data{i}' not in st.session_state:
+		st.session_state[f'script_raw_data{i}'] = pd.DataFrame()
+		
+# collate data aliases
+if 'alias_list' not in st.session_state:
+	st.session_state.alias_list = []
+else:
+    st.session_state.alias_list = list(filter(None, st.session_state.alias_list))
+	
+if 'alias_list_index' not in st.session_state:
+	st.session_state.alias_list_index = [0, 0, 0, 0]
+	
+# config data import page
+import_data_page = st.Page(
+<<<<<<< HEAD
+    page = "views/import_view.py", 
+    title = "Import Data", 
+    icon = ":material/sync:", 
+    default = True,
+=======
+    page="views/import_view.py",
+    title="Import Data",
+    icon=":material/sync:",
+    default=True,
+=======
+if 'prep_section' not in st.session_state:
+    st.session_state.prep_section = False
+=======
+if 'show_prep_section' not in st.session_state:
+=======
+if "show_prep_section" not in st.session_state:
+>>>>>>> 0728a5e (format and lint pydms core script)
+    st.session_state.show_prep_section = True
+>>>>>>> 1d12b2d (prep)
+
+>>>>>>> 7f9f3dd (restructured files and folders)
 if "show_config_section" not in st.session_state:
     st.session_state.show_config_section = False
 
@@ -50,34 +142,163 @@ if "alias_list_index" not in st.session_state:
 
 # config data import page
 import_data_page = st.Page(
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+    page = "views/import_view.py", 
+    title = "Import Data", 
+    icon = ":material/sync:", 
+    default = True,
+>>>>>>> 801c54a (init commit)
+<<<<<<< HEAD
+>>>>>>> 15d81c3 (init commit)
+=======
+=======
+>>>>>>> 7f9f3dd (restructured files and folders)
     page="views/import_view.py",
     title="Import Data",
     icon=":material/sync:",
     default=True,
+<<<<<<< HEAD
+=======
+>>>>>>> 0728a5e (format and lint pydms core script)
+>>>>>>> b1612c0 (format and lint pydms core script)
+>>>>>>> 7f9f3dd (restructured files and folders)
 )
 
 # config data prep page
 prep_data_page = st.Page(
+<<<<<<< HEAD
     page="views/prep_view.py", title="Prepare Data", icon=":material/rule_settings:"
+=======
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+    page = "views/prep_view.py", 
+    title = "Prepare Data", 
+    icon = ":material/rule_settings:"
+=======
+=======
+>>>>>>> 4b35f05 (restructured)
+=======
+>>>>>>> 495c39b (prep)
+=======
+>>>>>>> b1612c0 (format and lint pydms core script)
+<<<<<<< HEAD
+    page="views/prep_view.py", title="Prepare Data", icon=":material/rule_settings:"
+=======
+    page = "views/02_prep_data.py", 
+=======
+    page = "views/prep.py", 
+>>>>>>> a279fb4 (restructured)
+=======
+    page = "views/prep_view.py", 
+>>>>>>> 1d12b2d (prep)
+    title = "Prepare Data", 
+    icon = ":material/rule_settings:"
+>>>>>>> 801c54a (init commit)
+<<<<<<< HEAD
+>>>>>>> 15d81c3 (init commit)
+=======
+=======
+    page="views/prep_view.py", title="Prepare Data", icon=":material/rule_settings:"
+>>>>>>> 0728a5e (format and lint pydms core script)
+>>>>>>> b1612c0 (format and lint pydms core script)
+>>>>>>> 7f9f3dd (restructured files and folders)
 )
 
 # config data checks config page
 config_checks_page = st.Page(
+<<<<<<< HEAD
     page="views/config_view.py",
     title="Configure Checks",
     icon=":material/manufacturing:",
+=======
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+    page = "views/config_view.py", 
+    title = "Configure Checks", 
+    icon = ":material/manufacturing:"
+=======
+=======
+>>>>>>> 4b35f05 (restructured)
+=======
+>>>>>>> 495c39b (prep)
+=======
+>>>>>>> b1612c0 (format and lint pydms core script)
+<<<<<<< HEAD
+    page="views/config_view.py",
+    title="Configure Checks",
+    icon=":material/manufacturing:",
+>>>>>>> 15d81c3 (init commit)
+>>>>>>> 7f9f3dd (restructured files and folders)
 )
 
 # config check output pages
 check_output_page_1 = st.Page(
+<<<<<<< HEAD
     page="views/output_view_1.py",
     title=f"{st.session_state.config_page_1}",
     icon=":material/frame_inspect:",
+=======
+<<<<<<< HEAD
+    page = "views/output_view_1.py", 
+    title = f'{st.session_state.config_page_1}', 
+    icon = ":material/frame_inspect:"
+=======
+    page="views/output_view_1.py",
+    title=f"{st.session_state.config_page_1}",
+    icon=":material/frame_inspect:",
+=======
+    page = "views/03_config_checks.py", 
+=======
+    page = "views/config.py", 
+>>>>>>> a279fb4 (restructured)
+=======
+    page = "views/config_view.py", 
+>>>>>>> 1d12b2d (prep)
+    title = "Configure Checks", 
+    icon = ":material/manufacturing:"
+=======
+    page="views/config_view.py",
+    title="Configure Checks",
+    icon=":material/manufacturing:",
+>>>>>>> 0728a5e (format and lint pydms core script)
+)
+
+# config check output pages
+check_output_page_1 = st.Page(
+<<<<<<< HEAD
+    page = "views/output_view_1.py", 
+    title = f'{st.session_state.config_page_1}', 
+    icon = ":material/frame_inspect:"
+>>>>>>> 801c54a (init commit)
+<<<<<<< HEAD
+>>>>>>> 15d81c3 (init commit)
+=======
+=======
+    page="views/output_view_1.py",
+    title=f"{st.session_state.config_page_1}",
+    icon=":material/frame_inspect:",
+>>>>>>> 0728a5e (format and lint pydms core script)
+>>>>>>> b1612c0 (format and lint pydms core script)
+>>>>>>> 7f9f3dd (restructured files and folders)
 )
 
 # --- NAVIGATION MENU --- #
 
 # Dynamically load pages
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> ff3f469 (check_settings)
+>>>>>>> 7f9f3dd (restructured files and folders)
 if st.session_state.show_checks_page_1:
     nav_menu = st.navigation(
         {
@@ -88,6 +309,18 @@ if st.session_state.show_checks_page_1:
         }
     )
 elif st.session_state.show_prep_section:
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+=======
+if st.session_state.prep_section:
+>>>>>>> 801c54a (init commit)
+=======
+if st.session_state.show_prep_section:
+>>>>>>> 1d12b2d (prep)
+=======
+>>>>>>> ff3f469 (check_settings)
+>>>>>>> 7f9f3dd (restructured files and folders)
     nav_menu = st.navigation(
         {
             "Import Data": [import_data_page],
@@ -102,10 +335,47 @@ else:
         }
     )
 
+<<<<<<< HEAD
 # --- GLOBAL ASSETS --- #
+=======
+<<<<<<< HEAD
+<<<<<<< HEAD
+# --- GLOBAL ASSERTS --- #
+=======
+=======
+>>>>>>> 62e0ba0 (fix assets typo)
+<<<<<<< HEAD
+# --- GLOBAL ASSETS --- #
+>>>>>>> 15d81c3 (init commit)
+
+st.logo("asserts/IPA-primary-full-color-abbreviated.png")
+
+# --- RUN NAVIGATION --- #
+
+<<<<<<< HEAD
+nav_menu.run()
+=======
+nav_menu.run()
+=======
+# --- GLOBAL ASSERTS --- #
+=======
+# --- GLOBAL ASSETS --- #
+>>>>>>> 67992ee (fix assets typo)
+>>>>>>> 7f9f3dd (restructured files and folders)
 
 st.logo("assets/IPA-primary-full-color-abbreviated.png")
 
 # --- RUN NAVIGATION --- #
 
 nav_menu.run()
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> 801c54a (init commit)
+<<<<<<< HEAD
+>>>>>>> 15d81c3 (init commit)
+=======
+=======
+>>>>>>> 0728a5e (format and lint pydms core script)
+>>>>>>> b1612c0 (format and lint pydms core script)
+>>>>>>> 7f9f3dd (restructured files and folders)

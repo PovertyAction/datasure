@@ -172,12 +172,15 @@ cython_debug/
 <<<<<<< HEAD
 # Data Folders
 <<<<<<< HEAD
+<<<<<<< HEAD
 archived/code/*test*.ipynb
 archived/notebooks/*test*.ipynb
 cache/*.json
 cache/data/*
 cache/settings/*
 =======
+=======
+>>>>>>> 7f9f3dd (restructured files and folders)
 pydms/data/*
 pydms/cache/*.json
 =======
@@ -192,4 +195,11 @@ pydms/data/*
 pydms/data/*
 pydms/cache/*.json
 >>>>>>> c74021d (update .gitignore)
+<<<<<<< HEAD
 >>>>>>> b79d9db (update .gitignore)
+=======
+=======
+cache/data/*
+cache/settings/*
+>>>>>>> 0c48cd5 (restructured files and folders)
+>>>>>>> 7f9f3dd (restructured files and folders)
