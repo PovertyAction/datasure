@@ -50,6 +50,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+.ruff_cache/
 
 # Translations
 *.mo
@@ -161,4 +162,12 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# Secrets
+*secrets.toml
+
 /.quarto/
+
+
+# Data Folders
+pydms/data/*
+pydms/cache/*.json

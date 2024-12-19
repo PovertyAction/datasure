@@ -11,6 +11,11 @@ dependencies = [
     "plotly>=5.24.1",
     "seaborn>=0.13.2",
     "streamlit>=1.41.1",
+    "streamlit-folium>=0.23.2",
+    "folium>=0.18.0",
+    "scikit-learn>=1.5.2",
+    "geopy>=2.4.1",
+    "pysurveycto>=0.0.14",
 ]
 
 [tool.uv]
@@ -21,13 +26,7 @@ dev-dependencies = [
     "mdformat-gfm>=0.3.6",
     "mdformat-pyproject>=0.0.1",
     "ruff>=0.6.4",
-    "seaborn>=0.13.2",
     "sqlfluff>=3.1.1",
-    "folium>=0.18.0",
-    "scikit-learn>=1.5.2",
-    "geopy>=2.4.1",
-    "streamlit>=1.40.1",
-    "streamlit-folium>=0.23.2",
 ]
 
 
@@ -47,6 +46,9 @@ select = [
     "D",   # flake8-docstrings
     "UP",  # pyupgrade
     "SIM", # flake8-simplify
+    "RUF", # ruff
+    "B",   # bugbear
+    "TRY", # tryceratops
 ]
 
 ignore = [
@@ -68,6 +70,12 @@ ignore = [
     "D203",
     "D213",
 ]
+
+[tool.ruff.lint.pycodestyle]
+max-doc-length = 88
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
 
 [tool.ruff.format]
 docstring-code-format = true

@@ -1,29 +1,29 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v5.0.0
     hooks:
       - id: check-yaml
-        stages: [commit]
+        stages: [pre-commit]
       - id: check-json
-        stages: [commit]
+        stages: [pre-commit]
         exclude: ^\.devcontainer/devcontainer\.json$
       - id: check-toml
-        stages: [commit]
+        stages: [pre-commit]
       - id: check-merge-conflict
-        stages: [commit]
+        stages: [pre-commit]
 
   - repo: https://github.com/abravalheri/validate-pyproject
-    rev: v0.19
+    rev: v0.23
     hooks:
       - id: validate-pyproject
 
   - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.41.0
+    rev: v0.43.0
     hooks:
       - id: markdownlint-fix
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.4
+    rev: v0.8.3
     hooks:
       - id: ruff-format
         types_or: [python, pyi, jupyter]
@@ -33,6 +33,6 @@ repos:
         require_serial: true
 
   - repo: https://github.com/crate-ci/typos
-    rev: v1.24.5
+    rev: v1.28.4
     hooks:
       - id: typos
