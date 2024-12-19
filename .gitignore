@@ -169,5 +169,5 @@ cython_debug/
 
 
 # Data Folders
-pydms/data/*
-pydms/cache/*.json
+cache/data/*
+cache/settings/*
