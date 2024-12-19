@@ -118,7 +118,7 @@ def local_add_form() -> None:
     None
 
     """
-    st.image("asserts/storage.png", width=100)
+    st.image("assets/storage.png", width=100)
 
     st.markdown("Add a new file")
     # input file alias
