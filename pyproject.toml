@@ -46,6 +46,9 @@ select = [
     "D",   # flake8-docstrings
     "UP",  # pyupgrade
     "SIM", # flake8-simplify
+    "RUF", # ruff
+    "B",   # bugbear
+    "TRY", # tryceratops
 ]
 
 ignore = [
@@ -67,6 +70,12 @@ ignore = [
     "D203",
     "D213",
 ]
+
+[tool.ruff.lint.pycodestyle]
+max-doc-length = 88
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
 
 [tool.ruff.format]
 docstring-code-format = true
