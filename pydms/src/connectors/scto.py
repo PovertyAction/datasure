@@ -1557,7 +1557,7 @@ def scto_login_form() -> tuple:
     """
     # define server details input
     with st.form(key="server_form"):
-        st.image("asserts/SurveyCTO-Logo-CMYK.png", width=200)
+        st.image("assets/SurveyCTO-Logo-CMYK.png", width=200)
 
         with st.popover(
             label="Connect", use_container_width=True, icon=":material/login:"

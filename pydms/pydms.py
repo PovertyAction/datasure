@@ -299,8 +299,11 @@ else:
     )
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 # --- GLOBAL ASSERTS --- #
 =======
+=======
+>>>>>>> 62e0ba0 (fix assets typo)
 <<<<<<< HEAD
 # --- GLOBAL ASSETS --- #
 >>>>>>> 15d81c3 (init commit)
@@ -315,8 +318,11 @@ nav_menu.run()
 nav_menu.run()
 =======
 # --- GLOBAL ASSERTS --- #
+=======
+# --- GLOBAL ASSETS --- #
+>>>>>>> 67992ee (fix assets typo)
 
-st.logo("asserts/IPA-primary-full-color-abbreviated.png")
+st.logo("assets/IPA-primary-full-color-abbreviated.png")
 
 # --- RUN NAVIGATION --- #
 

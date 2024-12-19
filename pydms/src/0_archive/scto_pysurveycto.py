@@ -1072,7 +1072,7 @@ def scto_login_form() -> pd.DataFrame:
     """
     # define server details input
     with st.form(key="server_form"):
-        st.image("asserts/SurveyCTO-Logo-CMYK.png", width=200)
+        st.image("assets/SurveyCTO-Logo-CMYK.png", width=200)
         st.markdown("*Server Details:*")
 
         name_default, user_default = scto_load_login()
