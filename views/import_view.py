@@ -12,12 +12,23 @@ import streamlit as st
 import pandas as pd
 >>>>>>> 495c39b (prep)
 import streamlit as st
+<<<<<<< HEAD
 import pandas as pd
 import os
 
 from src.connectors import scto_login_form, scto_forms_edit, scto_download_action
 from src.connectors import local_load_files,local_add_form, local_load_action
 from src.connectors import script_add_form, script_load_action, script_load_files
+=======
+from src.connectors import (
+    local_add_form,
+    local_load_action,
+    local_load_files,
+    scto_download_action,
+    scto_forms_edit,
+    scto_login_form,
+)
+>>>>>>> 69e4192 (removing python script connector)
 
 # --- CONFIGURE PAGE --- #
 
@@ -623,10 +634,14 @@ if "local_show_files" not in st.session_state:
 # show/hide preview page
 if "local_show_preview" not in st.session_state:
 <<<<<<< HEAD
+<<<<<<< HEAD
     st.session_state.local_show_preview = False
 =======
     st.session_state.local_show_preview = True
 >>>>>>> 7f9f3dd (restructured files and folders)
+=======
+    st.session_state.local_show_preview = False
+>>>>>>> 69e4192 (removing python script connector)
 # enable/disable load data button
 if "local_disable_load" not in st.session_state:
     st.session_state.local_disable_load = False
@@ -774,10 +789,14 @@ with local:
         # Get data
         load_local_data = st.button(
 <<<<<<< HEAD
+<<<<<<< HEAD
             label="Load Data",
 =======
             "Load Data",
 >>>>>>> 7f9f3dd (restructured files and folders)
+=======
+            label="Load Data",
+>>>>>>> 69e4192 (removing python script connector)
             type="primary",
             key="local_get_data_key",
             use_container_width=True,
@@ -788,10 +807,14 @@ with local:
     if load_local_data:
         with local_load_prog_col:
 <<<<<<< HEAD
+<<<<<<< HEAD
             local_load_action(st.session_state.local_files)
 =======
             local_load_action(local_inputs_mod)
 >>>>>>> 7f9f3dd (restructured files and folders)
+=======
+            local_load_action(st.session_state.local_files)
+>>>>>>> 69e4192 (removing python script connector)
 
     # --- PREVIEW LOCAL DATA --- #
 
@@ -805,12 +828,16 @@ with local:
             )
 
 <<<<<<< HEAD
+<<<<<<< HEAD
             st.session_state.local_alias_list = st.session_state.local_files[
                 "alias"
             ].tolist()
 =======
             st.session_state.local_alias_list = local_inputs_mod["alias"].tolist()
 >>>>>>> 7f9f3dd (restructured files and folders)
+=======
+            st.session_state.local_alias_list = st.session_state.local_files["alias"].tolist()
+>>>>>>> 69e4192 (removing python script connector)
             st.session_state.alias_list_index[2] = len(
                 st.session_state.local_alias_list
             )
@@ -853,6 +880,7 @@ st.session_state.alias_list = (
 >>>>>>> a5ebaa4 (format and lint pydms/src/views)
 >>>>>>> 81f69f0 (format and lint pydms/src/views)
 
+<<<<<<< HEAD
 
 # --- PYTHON SCRIPT CONNECTOR ---#
 
@@ -1207,6 +1235,8 @@ with script:
 >>>>>>> 81f69f0 (format and lint pydms/src/views)
 
 
+=======
+>>>>>>> 8f3771a (removing python script connector)
 # --- Collate List of Data Aliases --- #
 
 <<<<<<< HEAD
@@ -1224,7 +1254,6 @@ st.session_state.alias_list = st.session_state.scto_alias_list + \
 st.session_state.alias_list = (
     st.session_state.scto_alias_list
     + st.session_state.local_alias_list
-    + st.session_state.script_alias_list
 )
 <<<<<<< HEAD
 =======
