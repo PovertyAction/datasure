@@ -1,5 +1,5 @@
 import streamlit as st
-from src.checks import missing_report, progress_report, summary_report
+from src.checks import missing_report, progress_report, summary_report, duplicates_report
 
 # define page number
 page_number = 1
@@ -31,3 +31,6 @@ with missing:
 
 with survey_progress:
     progress_report(st.session_state[f"prepped_data{page_number}"])
+
+with duplicates:
+    duplicates_report(st.session_state[f"prepped_data{page_number}"])
