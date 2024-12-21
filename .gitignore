@@ -173,6 +173,7 @@ cython_debug/
 # Data Folders
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 archived/code/*test*.ipynb
 archived/notebooks/*test*.ipynb
 cache/*.json
@@ -181,6 +182,8 @@ cache/settings/*
 =======
 =======
 >>>>>>> 7f9f3dd (restructured files and folders)
+=======
+>>>>>>> fbd01f5 (adding duplicates check file)
 pydms/data/*
 pydms/cache/*.json
 =======
@@ -199,6 +202,10 @@ pydms/cache/*.json
 >>>>>>> b79d9db (update .gitignore)
 =======
 =======
+=======
+archived/code/test_notebook.ipynb
+cache/*.json
+>>>>>>> 0160683 (adding duplicates check file)
 cache/data/*
 cache/settings/*
 >>>>>>> 0c48cd5 (restructured files and folders)

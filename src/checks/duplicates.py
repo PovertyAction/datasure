@@ -1,8 +1,17 @@
 import streamlit as st
+<<<<<<< HEAD
 
 
 # define function to create duplicates report
 def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
+=======
+import pandas as pd
+
+
+# define function to create duplicates report
+def duplicates_report(data) -> None:  # noqa: D417, RUF100
+
+>>>>>>> fbd01f5 (adding duplicates check file)
     """
     Generate a report on duplicate data in the dataset. The report includes a
     summary of duplicate data, a table showing the number of duplicate rows, and
@@ -12,12 +21,23 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
     ----------
         data (pd.DataFrame): The dataset to generate the duplicate data
                 report for.
+<<<<<<< HEAD
 
     Returns
     -------
         None
 
     """
+=======
+        
+    Returns 
+    -------
+    
+        None
+
+    """
+
+>>>>>>> fbd01f5 (adding duplicates check file)
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for survey duplicates report")
 
@@ -27,6 +47,7 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
         st.markdown("### Select columns to check for duplicates")
         dup_cols = st.multiselect("Columns", options=survey_cols, key="dup_cols")
 
+<<<<<<< HEAD
         id_col, key_col, date_col = st.columns(3)
 
         with id_col:
@@ -80,10 +101,28 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
         display_cols = st.multiselect(
             "Columns", options=survey_cols, key="display_cols"
         )
+=======
+        st.markdown("### Select survey ID column")
+        survey_id = st.selectbox("Survey ID", options=survey_cols, key="survey_id_duplicates", index=None)
+
+        st.markdown("### Select survey key column")
+        survey_key = st.selectbox("Survey Key", options=survey_cols, key="survey_key_duplicates", index=None)
+
+        st.markdown("### Select date column")
+        date = st.selectbox("Date", options=survey_cols, key="date_duplicates", index=None)
+
+        st.write("---")
+        st.markdown("### Report options")
+        
+        st.markdown("### Select additional columns to display in the report")
+
+        display_cols = st.multiselect("Columns", options=survey_cols, key="display_cols")
+>>>>>>> fbd01f5 (adding duplicates check file)
 
         # add button for saving settings
         st.write("---")
         st.write("Save settings")
+<<<<<<< HEAD
         save_settings = st.button("Save settings", key="save_settings_duplicates")  # noqa: F841
 
     # ---- Show report --- #
@@ -92,6 +131,11 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
         st.info("Please select all required options to generate the progress report")
         return
 
+=======
+        save_settings = st.button("Save settings", key="save_settings_duplicates")
+
+    
+>>>>>>> fbd01f5 (adding duplicates check file)
     # Add CSS for consistent width
     st.markdown(
         """
@@ -108,10 +152,17 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
     )
 
     # Count duplicates by ID
+<<<<<<< HEAD
     data["num_dups"] = data.groupby(dup_cols)[survey_key].transform("count")
 
     # Filter rows with duplicates and without missing
     dups_data = data[data["num_dups"] > 1]
+=======
+    data['num_dups'] = data.groupby(dup_cols)[survey_key].transform('count')
+   
+    # Filter rows with duplicates and without missing
+    dups_data = data[data['num_dups'] > 1]
+>>>>>>> fbd01f5 (adding duplicates check file)
 
     if dups_data.empty:
         st.write("No duplicates")
@@ -129,8 +180,19 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
         st.dataframe(
             result,
             hide_index=True,
+<<<<<<< HEAD
             use_container_width=True,
             column_config={
                 "num_dups": st.column_config.Column(label="# of duplicates")
             },
         )
+=======
+            use_container_width=True, 
+            column_config={
+                'num_dups':st.column_config.Column(
+                    label="# of duplicates"
+                )
+            }
+        )
+
+>>>>>>> fbd01f5 (adding duplicates check file)

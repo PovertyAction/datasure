@@ -28,7 +28,9 @@ __all__ = [
 from .missing import missing_report
 from .progress import progress_report
 from .summary import summary_report
+from .duplicates import duplicates_report
 
+<<<<<<< HEAD
 __all__ = ["missing_report", "progress_report", "summary_report"]
 =======
 from .summary import summary_report
@@ -45,5 +47,14 @@ from .summary import summary_report
 
 __all__ = ["missing_report", "progress_report", "summary_report"]
 >>>>>>> 240f636 (ruff format and lint pydms/src/checks)
+<<<<<<< HEAD
 >>>>>>> 644ed60 (ruff format and lint pydms/src/checks)
 >>>>>>> 7f9f3dd (restructured files and folders)
+=======
+=======
+__all__ = ["missing_report", 
+           "progress_report", 
+           "summary_report", 
+           "duplicates_report"]
+>>>>>>> 0160683 (adding duplicates check file)
+>>>>>>> fbd01f5 (adding duplicates check file)

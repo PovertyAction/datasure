@@ -1,5 +1,6 @@
 import streamlit as st
 <<<<<<< HEAD
+<<<<<<< HEAD
 
 from src.checks import (
     backchecks_report,
@@ -11,6 +12,14 @@ from src.checks import (
     progress_report,
     summary_report,
 )
+=======
+<<<<<<< HEAD
+<<<<<<< HEAD
+from src.checks import missing_report, progress_report, summary_report
+=======
+from src.checks import missing_report, progress_report, summary_report, duplicates_report
+>>>>>>> 0160683 (adding duplicates check file)
+>>>>>>> fbd01f5 (adding duplicates check file)
 
 # define page number
 page_number = 1
@@ -90,6 +99,7 @@ with summary:
 =======
 with survey_progress:
     progress_report(st.session_state[f"prepped_data{page_number}"])
+<<<<<<< HEAD
 =======
 import pandas as pd
 from datetime import datetime
@@ -200,5 +210,13 @@ with survey_progress:
 =======
     progress_report(st.session_state[f"prepped_data{page_number}"])
 >>>>>>> a5ebaa4 (format and lint pydms/src/views)
+<<<<<<< HEAD
 >>>>>>> 81f69f0 (format and lint pydms/src/views)
 >>>>>>> 7f9f3dd (restructured files and folders)
+=======
+=======
+
+with duplicates:
+    duplicates_report(st.session_state[f"prepped_data{page_number}"])
+>>>>>>> 0160683 (adding duplicates check file)
+>>>>>>> fbd01f5 (adding duplicates check file)
