@@ -218,5 +218,12 @@ with survey_progress:
 
 with duplicates:
     duplicates_report(st.session_state[f"prepped_data{page_number}"])
+<<<<<<< HEAD
 >>>>>>> 0160683 (adding duplicates check file)
+<<<<<<< HEAD
 >>>>>>> fbd01f5 (adding duplicates check file)
+=======
+=======
+
+>>>>>>> 2a401cd (replacing missing check with mx version)
+>>>>>>> d267c72 (replacing missing check with mx version)
