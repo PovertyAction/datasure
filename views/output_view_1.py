@@ -15,11 +15,18 @@ from src.checks import (
 =======
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 from src.checks import missing_report, progress_report, summary_report
 =======
 from src.checks import missing_report, progress_report, summary_report, duplicates_report
 >>>>>>> 0160683 (adding duplicates check file)
+<<<<<<< HEAD
 >>>>>>> fbd01f5 (adding duplicates check file)
+=======
+=======
+from src.checks import missing_report, progress_report, summary_report, duplicates_report, outliers_report
+>>>>>>> 5a9d5bd (adding outlier check)
+>>>>>>> b597f57 (adding outlier check)
 
 # define page number
 page_number = 1
@@ -62,6 +69,7 @@ with summary:
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for summary report")
 
+<<<<<<< HEAD
         survey_cols = st.session_state[f'prepped_data{1}'].columns
 
         st.write("---")
@@ -97,6 +105,11 @@ with summary:
 
 <<<<<<< HEAD
 =======
+=======
+with missing:
+    missing_report(st.session_state[f"prepped_data{page_number}"])
+
+>>>>>>> b597f57 (adding outlier check)
 with survey_progress:
     progress_report(st.session_state[f"prepped_data{page_number}"])
 <<<<<<< HEAD
@@ -225,5 +238,13 @@ with duplicates:
 =======
 =======
 
+<<<<<<< HEAD
 >>>>>>> 2a401cd (replacing missing check with mx version)
+<<<<<<< HEAD
 >>>>>>> d267c72 (replacing missing check with mx version)
+=======
+=======
+with outliers:
+    outliers_report(st.session_state[f"prepped_data{page_number}"])
+>>>>>>> 5a9d5bd (adding outlier check)
+>>>>>>> b597f57 (adding outlier check)

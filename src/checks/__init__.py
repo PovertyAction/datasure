@@ -29,6 +29,7 @@ from .missing import missing_report
 from .progress import progress_report
 from .summary import summary_report
 from .duplicates import duplicates_report
+from .outliers import outliers_report
 
 <<<<<<< HEAD
 __all__ = ["missing_report", "progress_report", "summary_report"]
@@ -55,6 +56,14 @@ __all__ = ["missing_report", "progress_report", "summary_report"]
 __all__ = ["missing_report", 
            "progress_report", 
            "summary_report", 
+<<<<<<< HEAD
            "duplicates_report"]
 >>>>>>> 0160683 (adding duplicates check file)
+<<<<<<< HEAD
 >>>>>>> fbd01f5 (adding duplicates check file)
+=======
+=======
+           "duplicates_report", 
+           "outliers_report"]
+>>>>>>> 5a9d5bd (adding outlier check)
+>>>>>>> b597f57 (adding outlier check)
