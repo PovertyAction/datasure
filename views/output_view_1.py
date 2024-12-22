@@ -1,5 +1,13 @@
 import streamlit as st
-from src.checks import missing_report, progress_report, summary_report, duplicates_report, outliers_report
+
+from src.checks import (
+    missing_report, 
+    progress_report, 
+    summary_report, 
+    duplicates_report, 
+    outliers_report, 
+    enumerator_report
+)
 
 # define page number
 page_number = 1
@@ -23,15 +31,18 @@ alias_list = list(filter(None, st.session_state.alias_list))
 
 with summary:
     summary_report(st.session_state[f"prepped_data{page_number}"])
-
+    
 with missing:
     missing_report(st.session_state[f"prepped_data{page_number}"])
-
+    
 with survey_progress:
     progress_report(st.session_state[f"prepped_data{page_number}"])
-
+    
 with duplicates:
     duplicates_report(st.session_state[f"prepped_data{page_number}"])
-
+    
 with outliers:
     outliers_report(st.session_state[f"prepped_data{page_number}"])
+    
+with enum_stats:
+    enumerator_report(st.session_state[f"prepped_data{page_number}"])
