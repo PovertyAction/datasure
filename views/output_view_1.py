@@ -16,6 +16,7 @@ from src.checks import (
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 from src.checks import missing_report, progress_report, summary_report
 =======
 from src.checks import missing_report, progress_report, summary_report, duplicates_report
@@ -26,7 +27,21 @@ from src.checks import missing_report, progress_report, summary_report, duplicat
 =======
 from src.checks import missing_report, progress_report, summary_report, duplicates_report, outliers_report
 >>>>>>> 5a9d5bd (adding outlier check)
+<<<<<<< HEAD
 >>>>>>> b597f57 (adding outlier check)
+=======
+=======
+
+from src.checks import (
+    missing_report, 
+    progress_report, 
+    summary_report, 
+    duplicates_report, 
+    outliers_report, 
+    enumerator_report
+)
+>>>>>>> 7beb6ff (added enumerator check)
+>>>>>>> a57c513 (added enumerator check)
 
 # define page number
 page_number = 1
@@ -65,6 +80,7 @@ alias_list = list(filter(None, st.session_state.alias_list))
 new_page_data = st.session_state[f'prepped_data{1}']
 
 with summary:
+<<<<<<< HEAD
     
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for summary report")
@@ -110,8 +126,16 @@ with missing:
     missing_report(st.session_state[f"prepped_data{page_number}"])
 
 >>>>>>> b597f57 (adding outlier check)
+=======
+    summary_report(st.session_state[f"prepped_data{page_number}"])
+    
+with missing:
+    missing_report(st.session_state[f"prepped_data{page_number}"])
+    
+>>>>>>> a57c513 (added enumerator check)
 with survey_progress:
     progress_report(st.session_state[f"prepped_data{page_number}"])
+<<<<<<< HEAD
 <<<<<<< HEAD
 =======
 import pandas as pd
@@ -247,4 +271,18 @@ with duplicates:
 with outliers:
     outliers_report(st.session_state[f"prepped_data{page_number}"])
 >>>>>>> 5a9d5bd (adding outlier check)
+<<<<<<< HEAD
 >>>>>>> b597f57 (adding outlier check)
+=======
+=======
+    
+with duplicates:
+    duplicates_report(st.session_state[f"prepped_data{page_number}"])
+    
+with outliers:
+    outliers_report(st.session_state[f"prepped_data{page_number}"])
+    
+with enum_stats:
+    enumerator_report(st.session_state[f"prepped_data{page_number}"])
+>>>>>>> 7beb6ff (added enumerator check)
+>>>>>>> a57c513 (added enumerator check)
