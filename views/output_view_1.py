@@ -38,7 +38,8 @@ from src.checks import (
     summary_report, 
     duplicates_report, 
     outliers_report, 
-    enumerator_report
+    enumerator_report,
+    descriptive_report
 )
 >>>>>>> 7beb6ff (added enumerator check)
 >>>>>>> a57c513 (added enumerator check)
@@ -49,6 +50,7 @@ page_data_index = page_number - 1
 
 st.title(st.session_state[f"config_page_{page_number}"])
 
+<<<<<<< HEAD
 (
     summary,
     survey_progress,
@@ -70,6 +72,19 @@ from datetime import datetime
 <<<<<<< HEAD
 from src.checks import missing_report, progress_report, summary_report
 >>>>>>> 00a502e (check_settings)
+=======
+summary, survey_progress, duplicates, missing, outliers, enum_stats, desc_stats = st.tabs(
+    (
+        "Summary",
+        "Survey Progress",
+        "Duplicates",
+        "Missing Data",
+        "Outliers",
+        "Enumerator Stats",
+        "Descriptive Stats"
+    )
+)
+>>>>>>> 3565c46 (adding descriptive stats check)
 
 st.title(st.session_state.config_page_1)
 
@@ -284,5 +299,15 @@ with outliers:
     
 with enum_stats:
     enumerator_report(st.session_state[f"prepped_data{page_number}"])
+<<<<<<< HEAD
 >>>>>>> 7beb6ff (added enumerator check)
+<<<<<<< HEAD
 >>>>>>> a57c513 (added enumerator check)
+=======
+=======
+    
+
+with desc_stats:
+    descriptive_report(st.session_state[f"prepped_data{page_number}"])
+>>>>>>> 602bf45 (adding descriptive stats check)
+>>>>>>> 3565c46 (adding descriptive stats check)
