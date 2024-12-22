@@ -6,7 +6,8 @@ from src.checks import (
     summary_report, 
     duplicates_report, 
     outliers_report, 
-    enumerator_report
+    enumerator_report,
+    descriptive_report
 )
 
 # define page number
@@ -14,7 +15,7 @@ page_number = 1
 
 st.title(st.session_state[f"config_page_{page_number}"])
 
-summary, survey_progress, duplicates, missing, outliers, enum_stats = st.tabs(
+summary, survey_progress, duplicates, missing, outliers, enum_stats, desc_stats = st.tabs(
     (
         "Summary",
         "Survey Progress",
@@ -22,6 +23,7 @@ summary, survey_progress, duplicates, missing, outliers, enum_stats = st.tabs(
         "Missing Data",
         "Outliers",
         "Enumerator Stats",
+        "Descriptive Stats"
     )
 )
 
@@ -46,3 +48,7 @@ with outliers:
     
 with enum_stats:
     enumerator_report(st.session_state[f"prepped_data{page_number}"])
+    
+
+with desc_stats:
+    descriptive_report(st.session_state[f"prepped_data{page_number}"])
