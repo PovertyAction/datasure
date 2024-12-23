@@ -39,7 +39,8 @@ from src.checks import (
     duplicates_report, 
     outliers_report, 
     enumerator_report,
-    descriptive_report
+    descriptive_report, 
+    backchecks_report
 )
 >>>>>>> 7beb6ff (added enumerator check)
 >>>>>>> a57c513 (added enumerator check)
@@ -50,6 +51,7 @@ page_data_index = page_number - 1
 
 st.title(st.session_state[f"config_page_{page_number}"])
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 (
     summary,
@@ -74,6 +76,9 @@ from src.checks import missing_report, progress_report, summary_report
 >>>>>>> 00a502e (check_settings)
 =======
 summary, survey_progress, duplicates, missing, outliers, enum_stats, desc_stats = st.tabs(
+=======
+summary, survey_progress, duplicates, missing, outliers, enum_stats, desc_stats, back_checks = st.tabs(
+>>>>>>> 1205bf5 (adding back check)
     (
         "Summary",
         "Survey Progress",
@@ -81,7 +86,8 @@ summary, survey_progress, duplicates, missing, outliers, enum_stats, desc_stats 
         "Missing Data",
         "Outliers",
         "Enumerator Stats",
-        "Descriptive Stats"
+        "Descriptive Stats", 
+        "Back Checks"
     )
 )
 >>>>>>> 3565c46 (adding descriptive stats check)
@@ -95,6 +101,7 @@ alias_list = list(filter(None, st.session_state.alias_list))
 new_page_data = st.session_state[f'prepped_data{1}']
 
 with summary:
+<<<<<<< HEAD
 <<<<<<< HEAD
     
     with st.expander("settings", icon=":material/settings:"):
@@ -148,7 +155,15 @@ with missing:
     missing_report(st.session_state[f"prepped_data{page_number}"])
     
 >>>>>>> a57c513 (added enumerator check)
+=======
+    #summary_report(st.session_state[f"prepped_data{page_number}"])
+    pass
+with missing:
+    #missing_report(st.session_state[f"prepped_data{page_number}"])
+    pass
+>>>>>>> 1205bf5 (adding back check)
 with survey_progress:
+<<<<<<< HEAD
     progress_report(st.session_state[f"prepped_data{page_number}"])
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -291,13 +306,18 @@ with outliers:
 =======
 =======
     
+=======
+    #progress_report(st.session_state[f"prepped_data{page_number}"])
+    pass
+>>>>>>> d69d05e (adding back check)
 with duplicates:
-    duplicates_report(st.session_state[f"prepped_data{page_number}"])
-    
+    #duplicates_report(st.session_state[f"prepped_data{page_number}"])
+    pass
 with outliers:
-    outliers_report(st.session_state[f"prepped_data{page_number}"])
-    
+    #outliers_report(st.session_state[f"prepped_data{page_number}"])
+    pass
 with enum_stats:
+<<<<<<< HEAD
     enumerator_report(st.session_state[f"prepped_data{page_number}"])
 <<<<<<< HEAD
 >>>>>>> 7beb6ff (added enumerator check)
@@ -310,4 +330,18 @@ with enum_stats:
 with desc_stats:
     descriptive_report(st.session_state[f"prepped_data{page_number}"])
 >>>>>>> 602bf45 (adding descriptive stats check)
+<<<<<<< HEAD
 >>>>>>> 3565c46 (adding descriptive stats check)
+=======
+=======
+    #enumerator_report(st.session_state[f"prepped_data{page_number}"])
+    pass
+
+with desc_stats:
+    #descriptive_report(st.session_state[f"prepped_data{page_number}"])
+    pass
+
+with back_checks:
+    backchecks_report(st.session_state[f"prepped_data{page_number}"], st.session_state[f"prepped_data{page_number}"])
+>>>>>>> d69d05e (adding back check)
+>>>>>>> 1205bf5 (adding back check)

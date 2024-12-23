@@ -32,6 +32,7 @@ from .duplicates import duplicates_report
 from .outliers import outliers_report
 from .enumerator import enumerator_report
 from .descriptive import descriptive_report
+from .backchecks import backchecks_report
 
 <<<<<<< HEAD
 __all__ = ["missing_report", "progress_report", "summary_report"]
@@ -82,6 +83,14 @@ __all__ = ["missing_report",
 =======
 =======
            "enumerator_report", 
+<<<<<<< HEAD
            "descriptive_report"]
 >>>>>>> 602bf45 (adding descriptive stats check)
+<<<<<<< HEAD
 >>>>>>> 3565c46 (adding descriptive stats check)
+=======
+=======
+           "descriptive_report", 
+           "backchecks_report"]
+>>>>>>> d69d05e (adding back check)
+>>>>>>> 1205bf5 (adding back check)
