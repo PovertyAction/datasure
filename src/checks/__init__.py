@@ -5,6 +5,7 @@ from .duplicates import duplicates_report
 from .outliers import outliers_report
 from .enumerator import enumerator_report
 from .descriptive import descriptive_report
+from .backchecks import backchecks_report
 
 __all__ = ["missing_report", 
            "progress_report", 
@@ -12,4 +13,5 @@ __all__ = ["missing_report",
            "duplicates_report", 
            "outliers_report", 
            "enumerator_report", 
-           "descriptive_report"]
+           "descriptive_report", 
+           "backchecks_report"]
