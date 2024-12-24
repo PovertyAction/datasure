@@ -64,16 +64,42 @@ if "config_tabs" not in st.session_state:
 
 alias_list = list(filter(None, st.session_state.alias_list))
 
+<<<<<<< HEAD
 add_page, check_pages = st.columns((0.35,0.65))
 
 new_page_data = ''
 
 survey_cols = ['enum_id', 'enum_name']
+=======
+# define column names
+column_names={
+            "Page Name":'',
+            "Survey Data":'',
+            "Survey KEY":'',
+            "Survey ID":'',
+            "Enumerator":'',
+            "Survey Date":'',
+            "Back check data":'',
+            "Back Checker":'',
+            "Tracking Data":''      
+}
+
+add_page, check_pages = st.columns((0.35, 0.65))
+
+with add_page, st.container(border=True):
+    new_page_name = st.text_input("Page Name")
+    new_page_survey_data = st.selectbox(label="Select Dataset", options=alias_list, index=None)
+
+    if new_page_survey_data:
+        # get index for the dataset
+        row_num = alias_list.index(new_page_survey_data)
+>>>>>>> c8a436c (adding default values from config page)
 
 with add_page:
 	with st.form(key = "new_tab"):
 		st.markdown("*New Check Tab:*")
 
+<<<<<<< HEAD
 		new_page_name = st.text_input(label = "Page name*", 
 			help = "Enter the name of the new check page. eg. Household Survey")
 		
@@ -90,15 +116,90 @@ with add_page:
 			new_page_id = st.selectbox("Survey ID:", options = survey_cols)
 			new_page_enum = st.selectbox("Enumerator ID:", options = survey_cols)
 			new_page_date = st.selectbox("Date:", options = survey_cols)
+=======
+        new_page_key = st.selectbox(
+            label="Select KEY column*:",
+            options=all_cols,
+            help="Select dataset unique identifier column",
+            index=None
+        )
+
+        new_page_id = st.selectbox(
+            label="Select Survey ID column*:",
+            options=all_cols,
+            help="Select survey ID column",
+            index=None
+        )
+        new_page_enum = st.selectbox(
+            label="Select Enumerator column:",
+            options=all_cols,
+            help="Select enumerator column",
+            index=None
+        )
+
+        new_page_date = st.selectbox(
+            label="Select Survey Date",
+            options=all_date_cols,
+            help="Select date column",
+            index=None
+        )
+
+        # define additional details for the page
+        new_page_backcheck_data = st.selectbox(
+            label="Select Back Check Data", 
+            options=alias_list, 
+            help="Select back check data",
+            index=None
+        )
+
+        if new_page_backcheck_data:
+            # get index for the dataset
+            bc_row_num = alias_list.index(new_page_backcheck_data)
+
+            # get list of columns in the selected dataset
+            all_bc_cols = st.session_state[f"prepped_data{row_num}"].columns
+
+            new_page_bcer = st.selectbox(
+                label="Select Back Checker column",
+                options=all_bc_cols,
+                help="Select back checker column",
+                index=None
+            )
+
+        new_page_tracking_data = st.selectbox(
+            label="Select Tracking Dataset", options=alias_list, index=None
+        )
+
+    submit_button = st.button(
+        "Add Page",
+        key="submit_button",
+        type="primary",
+        use_container_width=True,
+        disabled=not new_page_name or not new_page_survey_data,
+    )
+>>>>>>> c8a436c (adding default values from config page)
 
 		submit_button = st.form_submit_button(label="Create checks page")
 
+<<<<<<< HEAD
 # load existing pages
 
 try:
 	st.session_state.config_pages = pd.read_json('cache/pyDMS_config_tabs_cache.json')
 except:
 	st.session_state.config_pages = pd.DataFrame(columns = ['Page Name', 'Data', 'Tracking Data', 'KEY', 'ID', 'Enumerator', 'Date'])
+=======
+with check_pages, st.container(border=True):
+    try:
+        st.session_state.config_pages = pd.read_json(
+            "cache/settings/pyDMS_config_pages_cache.json"
+        )
+
+    except Exception:
+        st.session_state.config_pages = pd.DataFrame(
+            columns=column_names,
+        )
+>>>>>>> c8a436c (adding default values from config page)
 
 if submit_button:
 <<<<<<< HEAD
@@ -113,7 +214,12 @@ if submit_button:
 	
 	config_pages = pd.concat([st.session_state.config_pages, new_page], ignore_index = True)
 
+<<<<<<< HEAD
 	config_pages.to_json(f'cache/pyDMS_config_tabs_cache.json')
+=======
+    if save_check_config:
+        check_page_mod.to_json("cache/settings/pyDMS_config_pages_cache.json")
+>>>>>>> c8a436c (adding default values from config page)
 
 
 for i in range(len(st.session_state.config_pages)):
@@ -124,36 +230,31 @@ for i in range(len(st.session_state.config_pages)):
 =======
     if new_page_name == "":
         st.warning("Please enter a name for the new check page")
-    elif new_page_data == "":
+    elif new_page_survey_data == "":
         st.warning("Please select a dataset for the new check page")
 
     new_page = pd.DataFrame(
         data=[
             [
                 new_page_name,
-                new_page_data,
-                new_page_tracking_data,
+                new_page_survey_data,
                 new_page_key,
                 new_page_id,
                 new_page_enum,
                 new_page_date,
+                new_page_backcheck_data,
+                new_page_bcer,
+                 new_page_tracking_data
             ]
         ],
-        columns=[
-            "Page Name",
-            "Data",
-            "Tracking Data",
-            "KEY",
-            "ID",
-            "Enumerator",
-            "Date",
-        ],
+        columns=column_names
     )
 
     config_pages = pd.concat(
         [st.session_state.config_pages, new_page], ignore_index=True
     )
 
+<<<<<<< HEAD
     config_pages.to_json("cache/pyDMS_config_tabs_cache.json")
 =======
 if 'config_tabs' not in st.session_state:
@@ -526,5 +627,11 @@ for i in range(len(st.session_state.config_pages)):
 =======
     config_pages.to_json("cache/pyDMS_config_tabs_cache.json")
 >>>>>>> a5ebaa4 (format and lint pydms/src/views)
+<<<<<<< HEAD
 >>>>>>> 81f69f0 (format and lint pydms/src/views)
 >>>>>>> 7f9f3dd (restructured files and folders)
+=======
+=======
+    config_pages.to_json("cache/settings/pyDMS_config_pages_cache.json")
+>>>>>>> fa264c2 (adding default values from config page)
+>>>>>>> c8a436c (adding default values from config page)

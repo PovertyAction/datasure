@@ -22,7 +22,7 @@ from plotly.subplots import make_subplots
 
 
 # define function to create duplicates report
-def outliers_report(data) -> None:  # noqa: D417, RUF100
+def outliers_report(data, page_num) -> None:  # noqa: D417, RUF100
 
     """	
     Function to create a report on survey duplicates
@@ -83,7 +83,7 @@ def outliers_report(data) -> None:  # noqa: D417, RUF100
         survey_id = st.selectbox("Survey ID", options=survey_cols, key="survey_id_outliers", index=None)
 
         st.markdown("### Select enumerator ID column")
-        enum_id = st.selectbox("Enumerator ID", options=survey_cols, key="enum_id_outliers", index=None)
+        enumerator = st.selectbox("Enumerator ID", options=survey_cols, key="enumerator_outliers", index=None)
 
         st.markdown("### Select survey key column")
         survey_key = st.selectbox("Survey Key", options=survey_cols, key="survey_key_outliers", index=None)
@@ -119,6 +119,7 @@ def outliers_report(data) -> None:  # noqa: D417, RUF100
         st.write("---")
         st.write("Save settings")
 <<<<<<< HEAD
+<<<<<<< HEAD
         save_settings = st.button("Save settings", key="save_settings_outliers")  # noqa: F841
 
     col1, col2 = st.columns(2)
@@ -131,6 +132,9 @@ def outliers_report(data) -> None:  # noqa: D417, RUF100
         return
 =======
         save_settings = st.button("Save settings", key="save_settings_duplicates")
+=======
+        save_settings = st.button("Save settings", key="save_settings_outliers")
+>>>>>>> c8a436c (adding default values from config page)
 
 
     col1, col2 = st.columns(2)
@@ -159,10 +163,14 @@ def outliers_report(data) -> None:  # noqa: D417, RUF100
 
         # Prepare data for the table
 <<<<<<< HEAD
+<<<<<<< HEAD
         table_data = outliers_df[[survey_id, enumerator]].copy()
 =======
         table_data = outliers_df[[survey_id, enum_id]].copy()
 >>>>>>> b597f57 (adding outlier check)
+=======
+        table_data = outliers_df[[survey_id, enumerator]].copy()
+>>>>>>> c8a436c (adding default values from config page)
         table_data["variable_value"] = outliers_df[outliers_cols].round(2)
         table_data["mean"] = round(series.mean(), 2)
         table_data["lower_bound"] = round(lower_bound, 2)

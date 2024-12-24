@@ -1,5 +1,6 @@
 from datetime import datetime
 
+<<<<<<< HEAD
 import pandas as pd
 import streamlit as st
 
@@ -124,6 +125,71 @@ def summary_report(data, page_num) -> None:
                     help="Value(s) indicating completed survey",
                     key="outcome_val_summary",
                 )
+=======
+# define function to create summary report
+def summary_report(data, page_num) -> None: 
+
+	"""	
+	Generates a summary report for the survey data
+
+	Parameters
+	----------
+
+	data : pd.DataFrame
+		The survey data
+
+	Returns
+	-------
+	None
+
+	"""
+
+	with st.expander("settings", icon=":material/settings:"):
+		st.markdown("## Configure settings for summary report")
+
+		survey_cols = data.columns
+
+		st.write("---")
+		st.markdown("### Select columns to include in summary report")
+
+		meta_col, enum_col, agg_col = st.columns(spec = 3, border= True)
+
+		with meta_col:
+			duration = st.selectbox("Duration", options = survey_cols, help = "Column containing survey duration", index=None, key="duration_summary")
+			# get date column name from dataset & get index
+			default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
+			default_date_index = survey_cols.get_loc(default_date)
+			date = st.selectbox("Date", options = survey_cols, help = "Column containing survey date", index=default_date_index, key="date_summary")
+			formversion = st.selectbox("Form Version", options = survey_cols, help = "Column containing survey form version", index = None, key="formversion_summary")
+
+		with enum_col:
+			by = st.selectbox("Group by", options = survey_cols, help = "Column to group summary report by by", index = None, key="by_summary")
+			# get enumerator column name from dataset & get index
+			default_enumerator = st.session_state["config_pages"]["Enumerator"][page_num - 1]
+			default_enumerator_index = survey_cols.get_loc(default_enumerator)
+			enumerator = st.selectbox("Enumerator", options = survey_cols, index=default_enumerator_index, key="enumerator_summary")
+			team = st.selectbox("Team", options = survey_cols, index=None)
+		
+		with agg_col:
+			# get survey id column name from dataset & get index
+			default_survey_id = st.session_state["config_pages"]["Survey ID"][page_num - 1]
+			default_survey_id_index = survey_cols.get_loc(default_survey_id)
+			survey_id = st.selectbox("Survey ID", options = survey_cols, help = "Column containing survey ID", index=default_survey_id_index, key="survey_id_summary")
+			
+			consent = st.selectbox("Consent", options = survey_cols, help = "Column containing survey consent", index = None, key="consent_summary")
+			if consent:
+				consent_options = data[consent].unique().tolist()
+				consent_val = st.multiselect("Consent value(s)", options = consent_options, help = "Value(s) indicating valid consent")
+
+			outcome = st.selectbox("Outcome", options = survey_cols, help = "Column containing survey outcome", index = None)
+			if outcome:
+				outcome_options = data[outcome].unique().tolist()
+				outcome_val = st.multiselect("Outcome value(s)", options = outcome_options, help = "Value(s) indicating completed survey")
+
+		# >>> TEMP: CHANGE VARIABLE TYPES, REMOVE AFTER TESTING
+		# convert date column to datetime
+		data[date] = pd.to_datetime(data[date])
+>>>>>>> c8a436c (adding default values from config page)
 
         st.write("---")
         st.markdown("### Additional Options")
@@ -181,8 +247,19 @@ def summary_report(data, page_num) -> None:
     # Identify the date of the first interview
     earliest_date = data[date].min()
 
+<<<<<<< HEAD
     # Todays date
     today = pd.Timestamp.now()
+=======
+		# get first and last date from date column in dataset
+		min_date = data[date].min().date()
+		max_date = data[date].max().date()
+		date_filter = st.slider(
+			"Select date range", 
+				min_value=min_date, max_value=max_date, 
+				format = "YYYY-MM-DD", value = (min_date, max_date)
+		)
+>>>>>>> c8a436c (adding default values from config page)
 
     # Calculate the number of days since the first interview/launch
     days_since_start = (today - earliest_date).days
@@ -201,12 +278,19 @@ def summary_report(data, page_num) -> None:
     # Format the percentage
     formatted_missing_percentage = f"{missing_percentage:.2f}%"
 
+<<<<<<< HEAD
     ### Value box 4 ###
     # Group by date and count number of IDs
     count_by_date = data.groupby(date).size()
 
     # Calculate the average number of interviews per day
     average_interviews_per_day = count_by_date.mean()
+=======
+	### Value box 1 ###
+    
+	# count the number of valid consent
+	valid_interviews = data[consent].isin(consent_val).sum()
+>>>>>>> c8a436c (adding default values from config page)
 
     # Round number of interviews per day
     rounded_average_day = round(average_interviews_per_day, 2)

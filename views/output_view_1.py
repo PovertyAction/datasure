@@ -103,6 +103,7 @@ new_page_data = st.session_state[f'prepped_data{1}']
 with summary:
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for summary report")
@@ -162,7 +163,21 @@ with missing:
     #missing_report(st.session_state[f"prepped_data{page_number}"])
     pass
 >>>>>>> 1205bf5 (adding back check)
+=======
+    summary_report(
+        data=st.session_state[f"prepped_data{page_number}"], 
+        page_num=page_number
+    )
+
+with missing:
+    missing_report(
+        data=st.session_state[f"prepped_data{page_number}"], 
+        page_num=page_number
+    )
+    
+>>>>>>> c8a436c (adding default values from config page)
 with survey_progress:
+<<<<<<< HEAD
 <<<<<<< HEAD
     progress_report(st.session_state[f"prepped_data{page_number}"])
 <<<<<<< HEAD
@@ -310,13 +325,27 @@ with outliers:
     #progress_report(st.session_state[f"prepped_data{page_number}"])
     pass
 >>>>>>> d69d05e (adding back check)
+=======
+    progress_report(
+        data=st.session_state[f"prepped_data{page_number}"], 
+        page_num=page_number
+    )
+    
+>>>>>>> fa264c2 (adding default values from config page)
 with duplicates:
-    #duplicates_report(st.session_state[f"prepped_data{page_number}"])
-    pass
+    duplicates_report(
+        data=st.session_state[f"prepped_data{page_number}"], 
+        page_num=page_number
+    )
+    
 with outliers:
-    #outliers_report(st.session_state[f"prepped_data{page_number}"])
-    pass
+    outliers_report(
+        data=st.session_state[f"prepped_data{page_number}"], 
+        page_num=page_number
+    )
+
 with enum_stats:
+<<<<<<< HEAD
 <<<<<<< HEAD
     enumerator_report(st.session_state[f"prepped_data{page_number}"])
 <<<<<<< HEAD
@@ -336,12 +365,31 @@ with desc_stats:
 =======
     #enumerator_report(st.session_state[f"prepped_data{page_number}"])
     pass
+=======
+    enumerator_report(
+        data=st.session_state[f"prepped_data{page_number}"], 
+        page_num=page_number
+    )
+>>>>>>> fa264c2 (adding default values from config page)
 
 with desc_stats:
-    #descriptive_report(st.session_state[f"prepped_data{page_number}"])
-    pass
+    descriptive_report(
+        data=st.session_state[f"prepped_data{page_number}"], 
+        page_num=page_number
+    )
 
 with back_checks:
+<<<<<<< HEAD
     backchecks_report(st.session_state[f"prepped_data{page_number}"], st.session_state[f"prepped_data{page_number}"])
 >>>>>>> d69d05e (adding back check)
+<<<<<<< HEAD
 >>>>>>> 1205bf5 (adding back check)
+=======
+=======
+    backchecks_report(
+        survey_data=st.session_state[f"prepped_data{page_number}"], 
+        backcheck_data=st.session_state[f"prepped_data{page_number}"], 
+        page_num=page_number
+    )
+>>>>>>> fa264c2 (adding default values from config page)
+>>>>>>> c8a436c (adding default values from config page)

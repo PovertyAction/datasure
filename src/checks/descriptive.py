@@ -16,7 +16,7 @@ import plotly.express as px
 
 
 # define function to create summary report
-def descriptive_report(data) -> None:  # noqa: D417, RUF100
+def descriptive_report(data, page_num) -> None:  # noqa: D417, RUF100
     
 >>>>>>> 3565c46 (adding descriptive stats check)
     """
