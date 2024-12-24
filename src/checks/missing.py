@@ -1,11 +1,9 @@
-import matplotlib.pyplot as plt
-import seaborn as sns
 import streamlit as st
 import pandas as pd
 
 
 # define function to create summary report
-def missing_report(data) -> None:  # noqa: D417, RUF100
+def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
     """Generate a report on missing data in the dataset. The report includes a
     summary of missing data, a table showing the percentage of missing values
     in each column, and an option to inspect variables with missing data.
@@ -32,10 +30,10 @@ def missing_report(data) -> None:  # noqa: D417, RUF100
         if not miss_cols:
             miss_cols = survey_cols
 
-        missing_codes_input = st.text_input("Enter missing codes separated by comma eg. -999, -888, 777 etc.") # noqa: F841
+        missing_codes_input = st.text_input("Enter missing codes separated by comma eg. -999, -888, 777 etc.", value="-999, -888") # noqa: F841
         if missing_codes_input:
             missing_codes = missing_codes_input.split(",") # noqa: F841
-        missing_labels_input = st.text_input("Enter missing labels separated by comma eg. Missing, Not applicable, Don't know etc.") # noqa: F841
+        missing_labels_input = st.text_input("Enter missing labels separated by comma eg. Missing, Not applicable, Don't know etc.", value="Don't Know, Refuse to Answer") # noqa: F841
         if missing_labels_input:
             missing_labels = missing_labels_input.split(",")
 

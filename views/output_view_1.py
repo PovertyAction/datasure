@@ -34,27 +34,50 @@ alias_list = list(filter(None, st.session_state.alias_list))
 # load data from
 
 with summary:
-    #summary_report(st.session_state[f"prepped_data{page_number}"])
-    pass
+    summary_report(
+        data=st.session_state[f"prepped_data{page_number}"], 
+        page_num=page_number
+    )
+
 with missing:
-    #missing_report(st.session_state[f"prepped_data{page_number}"])
-    pass
+    missing_report(
+        data=st.session_state[f"prepped_data{page_number}"], 
+        page_num=page_number
+    )
+    
 with survey_progress:
-    #progress_report(st.session_state[f"prepped_data{page_number}"])
-    pass
+    progress_report(
+        data=st.session_state[f"prepped_data{page_number}"], 
+        page_num=page_number
+    )
+    
 with duplicates:
-    #duplicates_report(st.session_state[f"prepped_data{page_number}"])
-    pass
+    duplicates_report(
+        data=st.session_state[f"prepped_data{page_number}"], 
+        page_num=page_number
+    )
+    
 with outliers:
-    #outliers_report(st.session_state[f"prepped_data{page_number}"])
-    pass
+    outliers_report(
+        data=st.session_state[f"prepped_data{page_number}"], 
+        page_num=page_number
+    )
+
 with enum_stats:
-    #enumerator_report(st.session_state[f"prepped_data{page_number}"])
-    pass
+    enumerator_report(
+        data=st.session_state[f"prepped_data{page_number}"], 
+        page_num=page_number
+    )
 
 with desc_stats:
-    #descriptive_report(st.session_state[f"prepped_data{page_number}"])
-    pass
+    descriptive_report(
+        data=st.session_state[f"prepped_data{page_number}"], 
+        page_num=page_number
+    )
 
 with back_checks:
-    backchecks_report(st.session_state[f"prepped_data{page_number}"], st.session_state[f"prepped_data{page_number}"])
+    backchecks_report(
+        survey_data=st.session_state[f"prepped_data{page_number}"], 
+        backcheck_data=st.session_state[f"prepped_data{page_number}"], 
+        page_num=page_number
+    )

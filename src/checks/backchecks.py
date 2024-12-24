@@ -1,18 +1,12 @@
 import pandas as pd
-
-import seaborn as sns
-import matplotlib.pyplot as plt
-
 import streamlit as st
-from datetime import datetime
-
 
 ##### Backchecks #####
 
-def backchecks_report(survey_data, backcheck_data) -> None:
+def backchecks_report(survey_data, backcheck_data, page_num) -> None:
     
 	with st.expander("settings", icon=":material/settings:"):
-		st.markdown("## Configure settings for progress report")
+		st.markdown("## Configure settings for backcheck report")
 
 		survey_cols = survey_data.columns.tolist()
 
@@ -36,9 +30,9 @@ def backchecks_report(survey_data, backcheck_data) -> None:
 
 		with enum_col:
 			enumerator = st.selectbox("Enumerator", options = survey_cols, help = "Column containing survey enumerator", key = "enumerator_backcheck", index=None)
-			team = st.selectbox("Enumerator Team", options = survey_cols, help = "Column containing survey team", key = "team_progress", index=None)
+			team = st.selectbox("Enumerator Team", options = survey_cols, help = "Column containing survey team", key = "team_backcheck", index=None)
 			backchecker = st.selectbox("Back Checker", options = survey_cols, help = "Column containing back check enumerator", key = "backchecker_backcheck", index=None)
-			team = st.selectbox("Back Check Team", options = survey_cols, help = "Column containing survey team", key = "backcheck_team_progress", index=None)
+			team = st.selectbox("Back Check Team", options = survey_cols, help = "Column containing survey team", key = "backcheck_team_backcheck", index=None)
 		
 		with agg_col:
 			
@@ -61,7 +55,7 @@ def backchecks_report(survey_data, backcheck_data) -> None:
 		st.markdown("### Tracking Options")
 
 		# number of interviews expected 
-		total_goal = st.number_input("Total goal", min_value = 0, help = "Total number of interviews expected", key = "total_goal_progress")
+		total_goal = st.number_input("Total goal", min_value = 0, help = "Total number of interviews expected", key = "total_goal_backcheck")
 
 		# define a save settings button
 		save_settings = st.button("Save settings", key = "save_settings_backcheck")

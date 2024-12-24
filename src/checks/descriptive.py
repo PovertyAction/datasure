@@ -7,7 +7,7 @@ import plotly.express as px
 
 
 # define function to create summary report
-def descriptive_report(data) -> None:  # noqa: D417, RUF100
+def descriptive_report(data, page_num) -> None:  # noqa: D417, RUF100
     
     """
     Visualize the distribution of categorical and numeric variables in the dataframe.

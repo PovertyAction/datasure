@@ -41,7 +41,7 @@ def local_load_files() -> pd.DataFrame:
     """
     # load form details from last session
     try:
-        file = pd.read_json("cache/pyDMS_local_files_cache.json")
+        file = pd.read_json("cache/settings/pyDMS_local_files_cache.json")
         form_inputs = file.to_dict()
         return pd.DataFrame(form_inputs)
 

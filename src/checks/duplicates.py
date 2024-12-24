@@ -3,7 +3,7 @@ import pandas as pd
 
 
 # define function to create duplicates report
-def duplicates_report(data) -> None:  # noqa: D417, RUF100
+def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
 
     """
     Generate a report on duplicate data in the dataset. The report includes a
@@ -31,14 +31,31 @@ def duplicates_report(data) -> None:  # noqa: D417, RUF100
         st.markdown("### Select columns to check for duplicates")
         dup_cols = st.multiselect("Columns", options=survey_cols, key="dup_cols")
 
-        st.markdown("### Select survey ID column")
-        survey_id = st.selectbox("Survey ID", options=survey_cols, key="survey_id_duplicates", index=None)
+        id_col, key_col, date_col = st.columns(3)
 
-        st.markdown("### Select survey key column")
-        survey_key = st.selectbox("Survey Key", options=survey_cols, key="survey_key_duplicates", index=None)
+        with id_col:
+            # get survey id column name from dataset & get index
+            default_survey_id = st.session_state["config_pages"]["Survey ID"][page_num - 1]
+            default_survey_id_index = survey_cols.get_loc(default_survey_id)
 
-        st.markdown("### Select date column")
-        date = st.selectbox("Date", options=survey_cols, key="date_duplicates", index=None)
+            st.markdown("### Select survey ID column")
+            survey_id = st.selectbox("Survey ID", options=survey_cols, key="survey_id_duplicates", index=default_survey_id_index)
+
+        with key_col:
+            # get survey key column name from dataset & get index
+            default_survey_key = st.session_state["config_pages"]["Survey KEY"][page_num - 1]
+            default_survey_key_index = survey_cols.get_loc(default_survey_key)
+
+            st.markdown("### Select survey key column")
+            survey_key = st.selectbox("Survey Key", options=survey_cols, key="survey_key_duplicates", index=default_survey_key_index)
+
+        with date_col:
+            # get date column name from dataset & get index
+            default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
+            default_date_index = survey_cols.get_loc(default_date)
+
+            st.markdown("### Select date column")
+            date = st.selectbox("Date", options=survey_cols, key="date_duplicates", index=default_date_index)
 
         st.write("---")
         st.markdown("### Report options")
