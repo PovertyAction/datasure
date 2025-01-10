@@ -16,6 +16,7 @@ dependencies = [
     "scikit-learn>=1.5.2",
     "geopy>=2.4.1",
     "pysurveycto>=0.0.14",
+    "surveydata>=0.1.13",
 ]
 
 [tool.uv]
@@ -69,6 +70,8 @@ ignore = [
     "D205",   # 1 blank line required between summary line and description
     "D203",
     "D213",
+    "D400",   # First line should end with a period
+    "D401",   # First line of docstring should be in imperative mood
 ]
 
 [tool.ruff.lint.pycodestyle]
