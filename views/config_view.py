@@ -72,23 +72,25 @@ new_page_data = ''
 survey_cols = ['enum_id', 'enum_name']
 =======
 # define column names
-column_names={
-            "Page Name":'',
-            "Survey Data":'',
-            "Survey KEY":'',
-            "Survey ID":'',
-            "Enumerator":'',
-            "Survey Date":'',
-            "Back check data":'',
-            "Back Checker":'',
-            "Tracking Data":''      
+column_names = {
+    "Page Name": "",
+    "Survey Data": "",
+    "Survey KEY": "",
+    "Survey ID": "",
+    "Enumerator": "",
+    "Survey Date": "",
+    "Back check data": "",
+    "Back Checker": "",
+    "Tracking Data": "",
 }
 
 add_page, check_pages = st.columns((0.35, 0.65))
 
 with add_page, st.container(border=True):
     new_page_name = st.text_input("Page Name")
-    new_page_survey_data = st.selectbox(label="Select Dataset", options=alias_list, index=None)
+    new_page_survey_data = st.selectbox(
+        label="Select Dataset", options=alias_list, index=None
+    )
 
     if new_page_survey_data:
         # get index for the dataset
@@ -121,35 +123,35 @@ with add_page:
             label="Select KEY column*:",
             options=all_cols,
             help="Select dataset unique identifier column",
-            index=None
+            index=None,
         )
 
         new_page_id = st.selectbox(
             label="Select Survey ID column*:",
             options=all_cols,
             help="Select survey ID column",
-            index=None
+            index=None,
         )
         new_page_enum = st.selectbox(
             label="Select Enumerator column:",
             options=all_cols,
             help="Select enumerator column",
-            index=None
+            index=None,
         )
 
         new_page_date = st.selectbox(
             label="Select Survey Date",
             options=all_date_cols,
             help="Select date column",
-            index=None
+            index=None,
         )
 
         # define additional details for the page
         new_page_backcheck_data = st.selectbox(
-            label="Select Back Check Data", 
-            options=alias_list, 
+            label="Select Back Check Data",
+            options=alias_list,
             help="Select back check data",
-            index=None
+            index=None,
         )
 
         if new_page_backcheck_data:
@@ -163,7 +165,7 @@ with add_page:
                 label="Select Back Checker column",
                 options=all_bc_cols,
                 help="Select back checker column",
-                index=None
+                index=None,
             )
 
         new_page_tracking_data = st.selectbox(
@@ -244,10 +246,10 @@ for i in range(len(st.session_state.config_pages)):
                 new_page_date,
                 new_page_backcheck_data,
                 new_page_bcer,
-                 new_page_tracking_data
+                new_page_tracking_data,
             ]
         ],
-        columns=column_names
+        columns=column_names,
     )
 
     config_pages = pd.concat(

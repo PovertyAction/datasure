@@ -4,6 +4,7 @@ import pandas as pd
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 import matplotlib.pyplot as plt
 import seaborn as sns
 <<<<<<< HEAD
@@ -13,7 +14,10 @@ import seaborn as sns
 >>>>>>> fa264c2 (adding default values from config page)
 >>>>>>> c8a436c (adding default values from config page)
 import streamlit as st
+=======
+>>>>>>> 68e0d23 (lint formatting)
 import pandas as pd
+import streamlit as st
 
 
 # define function to create summary report
@@ -60,10 +64,14 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> e2bf5f5 (lint formatting)
         missing_codes_input = st.text_input(
             "Enter missing codes separated by comma eg. -999, -888, 777 etc.",
             value="-999, -888",
         )
+<<<<<<< HEAD
         if missing_codes_input:
             missing_codes = missing_codes_input.split(",")
         missing_labels_input = st.text_input(
@@ -80,9 +88,14 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
 =======
         missing_codes_input = st.text_input("Enter missing codes separated by comma eg. -999, -888, 777 etc.", value="-999, -888") # noqa: F841
 >>>>>>> c8a436c (adding default values from config page)
+=======
+>>>>>>> e2bf5f5 (lint formatting)
         if missing_codes_input:
-            missing_codes = missing_codes_input.split(",") # noqa: F841
-        missing_labels_input = st.text_input("Enter missing labels separated by comma eg. Missing, Not applicable, Don't know etc.", value="Don't Know, Refuse to Answer") # noqa: F841
+            missing_codes = missing_codes_input.split(",")
+        missing_labels_input = st.text_input(
+            "Enter missing labels separated by comma eg. Missing, Not applicable, Don't know etc.",
+            value="Don't Know, Refuse to Answer",
+        )
         if missing_labels_input:
             missing_labels = missing_labels_input.split(",")
 
@@ -132,6 +145,7 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
         # Calculate and add percentages
         total_rows = len(data)
         row_dict["Total Missing (%)"] = (row_dict["Total Missing"] / total_rows) * 100
+<<<<<<< HEAD
         row_dict["Not Coded (%)"] = (not_coded / total_rows) * 100
 
         # Add percentages for each code/label pair
@@ -264,6 +278,8 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
         row_dict["Total Missing (%)"] = (
             row_dict["Total Missing"] / total_rows
         ) * 100
+=======
+>>>>>>> e2bf5f5 (lint formatting)
         row_dict["Not Coded (%)"] = (not_coded / total_rows) * 100
 
         # Add percentages for each code/label pair
@@ -308,9 +324,7 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
             percentages_df = missing_data_filtered[pct_columns]
 
             # Create column config for percentages
-            pct_config = {
-                "Variable": st.column_config.Column(width="medium")
-            }
+            pct_config = {"Variable": st.column_config.Column(width="medium")}
 
             # Add percentage format for all percentage columns
             for col in pct_columns[1:]:  # Skip 'Column'
@@ -339,9 +353,7 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
             counts_df = missing_data_filtered[count_columns]
 
             # Create column config for counts
-            count_config = {
-                "Variable": st.column_config.Column(width="medium")
-            }
+            count_config = {"Variable": st.column_config.Column(width="medium")}
 
             # Add number format for all count columns
             for col in count_columns[1:]:  # Skip 'Column'
@@ -363,6 +375,7 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
             "% missing values.",
         )
 
+<<<<<<< HEAD
 
 <<<<<<< HEAD
                 st.pyplot(missing_heatmap)
@@ -741,6 +754,8 @@ def missing_report(data) -> None:  # noqa: D417
 >>>>>>> 7f9f3dd (restructured files and folders)
 =======
 =======
+=======
+>>>>>>> 68e0d23 (lint formatting)
     st.write(
         "Note: The calculations for 'Not Coded' includes values of ' . ', 'NA' and empty cells."
     )

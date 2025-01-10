@@ -31,12 +31,15 @@ from .local import (
 )
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 from .script import script_add_form, script_load_action, script_load_files
 >>>>>>> 7f9f3dd (restructured files and folders)
 =======
 
 >>>>>>> 69e4192 (removing python script connector)
+=======
+>>>>>>> e2bf5f5 (lint formatting)
 from .scto import (
     scto_download_action,
     scto_forms_edit,

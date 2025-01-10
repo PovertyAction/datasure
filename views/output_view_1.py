@@ -33,14 +33,14 @@ from src.checks import missing_report, progress_report, summary_report, duplicat
 =======
 
 from src.checks import (
-    missing_report, 
-    progress_report, 
-    summary_report, 
-    duplicates_report, 
-    outliers_report, 
+    backchecks_report,
+    descriptive_report,
+    duplicates_report,
     enumerator_report,
-    descriptive_report, 
-    backchecks_report
+    missing_report,
+    outliers_report,
+    progress_report,
+    summary_report,
 )
 >>>>>>> 7beb6ff (added enumerator check)
 >>>>>>> a57c513 (added enumerator check)
@@ -53,6 +53,9 @@ st.title(st.session_state[f"config_page_{page_number}"])
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> e2bf5f5 (lint formatting)
 (
     summary,
     survey_progress,
@@ -63,6 +66,7 @@ st.title(st.session_state[f"config_page_{page_number}"])
     desc_stats,
     back_checks,
 ) = st.tabs(
+<<<<<<< HEAD
 =======
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -79,6 +83,8 @@ summary, survey_progress, duplicates, missing, outliers, enum_stats, desc_stats 
 =======
 summary, survey_progress, duplicates, missing, outliers, enum_stats, desc_stats, back_checks = st.tabs(
 >>>>>>> 1205bf5 (adding back check)
+=======
+>>>>>>> e2bf5f5 (lint formatting)
     (
         "Summary",
         "Survey Progress",
@@ -86,8 +92,8 @@ summary, survey_progress, duplicates, missing, outliers, enum_stats, desc_stats,
         "Missing Data",
         "Outliers",
         "Enumerator Stats",
-        "Descriptive Stats", 
-        "Back Checks"
+        "Descriptive Stats",
+        "Back Checks",
     )
 )
 >>>>>>> 3565c46 (adding descriptive stats check)
@@ -165,17 +171,19 @@ with missing:
 >>>>>>> 1205bf5 (adding back check)
 =======
     summary_report(
-        data=st.session_state[f"prepped_data{page_number}"], 
-        page_num=page_number
+        data=st.session_state[f"prepped_data{page_number}"], page_num=page_number
     )
 
 with missing:
     missing_report(
-        data=st.session_state[f"prepped_data{page_number}"], 
-        page_num=page_number
+        data=st.session_state[f"prepped_data{page_number}"], page_num=page_number
     )
+<<<<<<< HEAD
     
 >>>>>>> c8a436c (adding default values from config page)
+=======
+
+>>>>>>> e2bf5f5 (lint formatting)
 with survey_progress:
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -327,21 +335,22 @@ with outliers:
 >>>>>>> d69d05e (adding back check)
 =======
     progress_report(
-        data=st.session_state[f"prepped_data{page_number}"], 
-        page_num=page_number
+        data=st.session_state[f"prepped_data{page_number}"], page_num=page_number
     )
+<<<<<<< HEAD
     
 >>>>>>> fa264c2 (adding default values from config page)
+=======
+
+>>>>>>> 68e0d23 (lint formatting)
 with duplicates:
     duplicates_report(
-        data=st.session_state[f"prepped_data{page_number}"], 
-        page_num=page_number
+        data=st.session_state[f"prepped_data{page_number}"], page_num=page_number
     )
-    
+
 with outliers:
     outliers_report(
-        data=st.session_state[f"prepped_data{page_number}"], 
-        page_num=page_number
+        data=st.session_state[f"prepped_data{page_number}"], page_num=page_number
     )
 
 with enum_stats:
@@ -367,15 +376,13 @@ with desc_stats:
     pass
 =======
     enumerator_report(
-        data=st.session_state[f"prepped_data{page_number}"], 
-        page_num=page_number
+        data=st.session_state[f"prepped_data{page_number}"], page_num=page_number
     )
 >>>>>>> fa264c2 (adding default values from config page)
 
 with desc_stats:
     descriptive_report(
-        data=st.session_state[f"prepped_data{page_number}"], 
-        page_num=page_number
+        data=st.session_state[f"prepped_data{page_number}"], page_num=page_number
     )
 
 with back_checks:
@@ -387,9 +394,19 @@ with back_checks:
 =======
 =======
     backchecks_report(
+<<<<<<< HEAD
         survey_data=st.session_state[f"prepped_data{page_number}"], 
         backcheck_data=st.session_state[f"prepped_data{page_number}"], 
         page_num=page_number
     )
 >>>>>>> fa264c2 (adding default values from config page)
+<<<<<<< HEAD
 >>>>>>> c8a436c (adding default values from config page)
+=======
+=======
+        survey_data=st.session_state[f"prepped_data{page_number}"],
+        backcheck_data=st.session_state[f"prepped_data{page_number}"],
+        page_num=page_number,
+    )
+>>>>>>> 68e0d23 (lint formatting)
+>>>>>>> e2bf5f5 (lint formatting)

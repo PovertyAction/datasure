@@ -1,4 +1,5 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 from collections import defaultdict
 
 import pandas as pd
@@ -14,24 +15,30 @@ def outliers_report(data, page_num) -> None:  # noqa: D417, RUF100
 =======
 import streamlit as st
 import pandas as pd
+=======
+>>>>>>> e2bf5f5 (lint formatting)
 from collections import defaultdict
 
-import plotly.express as px
+import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+import streamlit as st
 
 
 # define function to create duplicates report
 def outliers_report(data, page_num) -> None:  # noqa: D417, RUF100
-
-    """	
+    """
     Function to create a report on survey duplicates
+<<<<<<< HEAD
     Args:	
 >>>>>>> b597f57 (adding outlier check)
+=======
+    Args:
+>>>>>>> e2bf5f5 (lint formatting)
         data: DataFrame
     Returns:
 
     """
+<<<<<<< HEAD
 <<<<<<< HEAD
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for outliers report")
@@ -44,10 +51,17 @@ def outliers_report(data, page_num) -> None:  # noqa: D417, RUF100
 
         numeric_cols = data.select_dtypes(include=['int']).columns
 >>>>>>> b597f57 (adding outlier check)
+=======
+    with st.expander("settings", icon=":material/settings:"):
+        st.markdown("## Configure settings for outliers report")
+
+        numeric_cols = data.select_dtypes(include=["int"]).columns
+>>>>>>> e2bf5f5 (lint formatting)
         survey_cols = data.columns
 
         st.write("---")
         st.markdown("### Select columns to check for outliers")
+<<<<<<< HEAD
 <<<<<<< HEAD
         outliers_cols = st.multiselect(
             "Columns", options=numeric_cols, key="outlier_cols"
@@ -78,29 +92,47 @@ def outliers_report(data, page_num) -> None:  # noqa: D417, RUF100
 
 =======
         outliers_cols = st.multiselect("Columns", options=numeric_cols, key="outlier_cols")
+=======
+        outliers_cols = st.multiselect(
+            "Columns", options=numeric_cols, key="outlier_cols"
+        )
+>>>>>>> e2bf5f5 (lint formatting)
 
         st.markdown("### Select survey ID column")
-        survey_id = st.selectbox("Survey ID", options=survey_cols, key="survey_id_outliers", index=None)
+        survey_id = st.selectbox(
+            "Survey ID", options=survey_cols, key="survey_id_outliers", index=None
+        )
 
         st.markdown("### Select enumerator ID column")
-        enumerator = st.selectbox("Enumerator ID", options=survey_cols, key="enumerator_outliers", index=None)
+        enumerator = st.selectbox(
+            "Enumerator ID", options=survey_cols, key="enumerator_outliers", index=None
+        )
 
         st.markdown("### Select survey key column")
-        survey_key = st.selectbox("Survey Key", options=survey_cols, key="survey_key_outliers", index=None)
+        survey_key = st.selectbox(  # noqa: F841
+            "Survey Key", options=survey_cols, key="survey_key_outliers", index=None
+        )
 
         st.markdown("### Select date column")
-        date = st.selectbox("Date", options=survey_cols, key="date_outliers", index=None)
+        date = st.selectbox(  # noqa: F841
+            "Date", options=survey_cols, key="date_outliers", index=None
+        )
 
         st.write("---")
         st.markdown("### Outlier Options")
+<<<<<<< HEAD
         
 >>>>>>> b597f57 (adding outlier check)
+=======
+
+>>>>>>> e2bf5f5 (lint formatting)
         outlier_method = st.radio(
             "Select your preferred method for outlier detection:",
             options=["Interquartile Range (IQR)", "Standard Deviation (SD)"],
         )
 
         if outlier_method == "Standard Deviation (SD)":
+<<<<<<< HEAD
 <<<<<<< HEAD
             sd_value = st.number_input(
                 "Number of Standard Deviations:", value=3, key="sd_value_outliers"
@@ -114,10 +146,20 @@ def outliers_report(data, page_num) -> None:  # noqa: D417, RUF100
         else:
             iqr_value = st.number_input("IQR Value:", value = 1.5, key="iqr_value_outliers")
 >>>>>>> b597f57 (adding outlier check)
+=======
+            sd_value = st.number_input(
+                "Number of Standard Deviations:", value=3, key="sd_value_outliers"
+            )
+        else:
+            iqr_value = st.number_input(  # noqa: F841
+                "IQR Value:", value=1.5, key="iqr_value_outliers"
+            )
+>>>>>>> e2bf5f5 (lint formatting)
 
         # add button for saving settings
         st.write("---")
         st.write("Save settings")
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
         save_settings = st.button("Save settings", key="save_settings_outliers")  # noqa: F841
@@ -136,6 +178,9 @@ def outliers_report(data, page_num) -> None:  # noqa: D417, RUF100
         save_settings = st.button("Save settings", key="save_settings_outliers")
 >>>>>>> c8a436c (adding default values from config page)
 
+=======
+        save_settings = st.button("Save settings", key="save_settings_outliers")  # noqa: F841
+>>>>>>> e2bf5f5 (lint formatting)
 
     col1, col2 = st.columns(2)
 >>>>>>> b597f57 (adding outlier check)
@@ -209,12 +254,16 @@ def outliers_report(data, page_num) -> None:  # noqa: D417, RUF100
             formatted_outlier_percentage = f"{outlier_percentage:.2f}%"
 
 <<<<<<< HEAD
+<<<<<<< HEAD
             st.metric(value=formatted_outlier_percentage, label="Share of outliers")
 =======
             st.metric(
                 value=formatted_outlier_percentage, label="Share of outliers"
             )
 >>>>>>> b597f57 (adding outlier check)
+=======
+            st.metric(value=formatted_outlier_percentage, label="Share of outliers")
+>>>>>>> e2bf5f5 (lint formatting)
 
         fig = go.Figure(
             data=go.Violin(
@@ -260,10 +309,14 @@ def outliers_report(data, page_num) -> None:  # noqa: D417, RUF100
             # Filter out single-variable patterns
             return {k: v for k, v in patterns.items() if len(v) > 1}
 <<<<<<< HEAD
+<<<<<<< HEAD
 
 =======
         
 >>>>>>> b597f57 (adding outlier check)
+=======
+
+>>>>>>> e2bf5f5 (lint formatting)
         def show_pattern_selection(df, numeric_columns):
             """Display a pattern selection dropdown for variable names
             and return the selected columns and melted DataFrame.
@@ -309,12 +362,16 @@ def outliers_report(data, page_num) -> None:  # noqa: D417, RUF100
                 selected_cols = pattern_groups[base_pattern]
 
 <<<<<<< HEAD
+<<<<<<< HEAD
                 with st.expander(f"Show selected variables for '{base_pattern}'"):
 =======
                 with st.expander(
                     f"Show selected variables for '{base_pattern}'"
                 ):
 >>>>>>> b597f57 (adding outlier check)
+=======
+                with st.expander(f"Show selected variables for '{base_pattern}'"):
+>>>>>>> e2bf5f5 (lint formatting)
                     st.write(", ".join(selected_cols))
 
                 df_subset = df[[survey_id, *selected_cols]]
@@ -358,6 +415,9 @@ def outliers_report(data, page_num) -> None:  # noqa: D417, RUF100
 
             st.dataframe(
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> e2bf5f5 (lint formatting)
                 table_data,
                 hide_index=True,
                 use_container_width=True,
@@ -378,6 +438,7 @@ def outliers_report(data, page_num) -> None:  # noqa: D417, RUF100
                     ),
                 },
             )
+<<<<<<< HEAD
 =======
                         table_data,
                         hide_index=True,
@@ -401,6 +462,8 @@ def outliers_report(data, page_num) -> None:  # noqa: D417, RUF100
                     )
             
 >>>>>>> b597f57 (adding outlier check)
+=======
+>>>>>>> e2bf5f5 (lint formatting)
 
     with col2:
         # Check if outliers_df is not empty
@@ -415,12 +478,16 @@ def outliers_report(data, page_num) -> None:  # noqa: D417, RUF100
             formatted_outlier_percentage = f"{outlier_percentage:.2f}%"
 
 <<<<<<< HEAD
+<<<<<<< HEAD
             st.metric(value=formatted_outlier_percentage, label="Share of outliers")
 =======
             st.metric(
                 value=formatted_outlier_percentage, label="Share of outliers"
             )
 >>>>>>> b597f57 (adding outlier check)
+=======
+            st.metric(value=formatted_outlier_percentage, label="Share of outliers")
+>>>>>>> e2bf5f5 (lint formatting)
 
         # Function to find the common prefix
         def common_prefix(strs):
@@ -461,7 +528,11 @@ def outliers_report(data, page_num) -> None:  # noqa: D417, RUF100
         )
 
 <<<<<<< HEAD
+<<<<<<< HEAD
         st.plotly_chart(fig, theme="streamlit", use_container_width=True)
 =======
         st.plotly_chart(fig, theme="streamlit", use_container_width=True)
 >>>>>>> b597f57 (adding outlier check)
+=======
+        st.plotly_chart(fig, theme="streamlit", use_container_width=True)
+>>>>>>> e2bf5f5 (lint formatting)

@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 <<<<<<< HEAD
+<<<<<<< HEAD
 import plotly.express as px
 import seaborn as sns
 import streamlit as st
@@ -8,31 +9,38 @@ import streamlit as st
 # define function to create summary report
 def descriptive_report(data, page_num) -> None:  # noqa: D417, RUF100
 =======
+=======
+import plotly.express as px
+>>>>>>> e2bf5f5 (lint formatting)
 import seaborn as sns
 import streamlit as st
-import pandas as pd
-
-import plotly.express as px
 
 
 # define function to create summary report
 def descriptive_report(data, page_num) -> None:  # noqa: D417, RUF100
+<<<<<<< HEAD
     
 >>>>>>> 3565c46 (adding descriptive stats check)
+=======
+>>>>>>> e2bf5f5 (lint formatting)
     """
     Visualize the distribution of categorical and numeric variables in the dataframe.
 
     Parameters
     ----------
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 
 >>>>>>> 3565c46 (adding descriptive stats check)
+=======
+>>>>>>> e2bf5f5 (lint formatting)
     data : pd.DataFrame
         The input dataframe to visualize.
 
     Returns
     -------
+<<<<<<< HEAD
 <<<<<<< HEAD
     None
 
@@ -43,24 +51,34 @@ def descriptive_report(data, page_num) -> None:  # noqa: D417, RUF100
         survey_cols = data.columns  # noqa: F841
 =======
     None           
+=======
+    None
+>>>>>>> e2bf5f5 (lint formatting)
 
     """
-    
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for descriptive statistics")
 
+<<<<<<< HEAD
         survey_cols = data.columns
 >>>>>>> 3565c46 (adding descriptive stats check)
+=======
+        survey_cols = data.columns  # noqa: F841
+>>>>>>> e2bf5f5 (lint formatting)
 
         st.write("---")
         st.markdown("### Select columns to include in missing data report")
 
     st.markdown("## Descriptive Statistics")
 <<<<<<< HEAD
+<<<<<<< HEAD
 
 =======
                 
 >>>>>>> 3565c46 (adding descriptive stats check)
+=======
+
+>>>>>>> e2bf5f5 (lint formatting)
     # Separate categorical and numeric columns
     cat_vars = data.select_dtypes(include=["object", "category"]).columns
     num_vars = data.select_dtypes(include=["int64", "float64"]).columns
@@ -119,7 +137,10 @@ def descriptive_report(data, page_num) -> None:  # noqa: D417, RUF100
             plt.tight_layout()
             st.pyplot(fig)
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 
 
 >>>>>>> 3565c46 (adding descriptive stats check)
+=======
+>>>>>>> e2bf5f5 (lint formatting)

@@ -13,6 +13,7 @@ import pandas as pd
 >>>>>>> 495c39b (prep)
 import streamlit as st
 <<<<<<< HEAD
+<<<<<<< HEAD
 import pandas as pd
 import os
 
@@ -20,6 +21,9 @@ from src.connectors import scto_login_form, scto_forms_edit, scto_download_actio
 from src.connectors import local_load_files,local_add_form, local_load_action
 from src.connectors import script_add_form, script_load_action, script_load_files
 =======
+=======
+
+>>>>>>> e2bf5f5 (lint formatting)
 from src.connectors import (
     local_add_form,
     local_load_action,
@@ -829,6 +833,7 @@ with local:
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             st.session_state.local_alias_list = st.session_state.local_files[
                 "alias"
             ].tolist()
@@ -838,6 +843,11 @@ with local:
 =======
             st.session_state.local_alias_list = st.session_state.local_files["alias"].tolist()
 >>>>>>> 69e4192 (removing python script connector)
+=======
+            st.session_state.local_alias_list = st.session_state.local_files[
+                "alias"
+            ].tolist()
+>>>>>>> e2bf5f5 (lint formatting)
             st.session_state.alias_list_index[2] = len(
                 st.session_state.local_alias_list
             )
@@ -1252,8 +1262,7 @@ st.session_state.alias_list = st.session_state.scto_alias_list + \
 >>>>>>> a5ebaa4 (format and lint pydms/src/views)
 >>>>>>> 81f69f0 (format and lint pydms/src/views)
 st.session_state.alias_list = (
-    st.session_state.scto_alias_list
-    + st.session_state.local_alias_list
+    st.session_state.scto_alias_list + st.session_state.local_alias_list
 )
 <<<<<<< HEAD
 =======

@@ -12,9 +12,12 @@ from src.processing import prep_apply_action, prep_load_log
 import pandas as pd
 >>>>>>> 495c39b (prep)
 import streamlit as st
+<<<<<<< HEAD
 import pandas as pd
 import numpy as np
 
+=======
+>>>>>>> e2bf5f5 (lint formatting)
 
 from src.processing import prep_load_log
 
