@@ -5,7 +5,6 @@ from .local import (
     local_load_files,
     local_read_data,
 )
-
 from .scto import (
     scto_download_action,
     scto_forms_edit,

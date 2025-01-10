@@ -1,5 +1,6 @@
 import pandas as pd
 import streamlit as st
+
 from src.connectors import (
     local_add_form,
     local_load_action,
@@ -224,7 +225,9 @@ with local:
                 st.columns((0.2, 0.1, 0.1, 0.1, 0.5))
             )
 
-            st.session_state.local_alias_list = st.session_state.local_files["alias"].tolist()
+            st.session_state.local_alias_list = st.session_state.local_files[
+                "alias"
+            ].tolist()
             st.session_state.alias_list_index[2] = len(
                 st.session_state.local_alias_list
             )
@@ -260,6 +263,5 @@ with local:
 # --- Collate List of Data Aliases --- #
 
 st.session_state.alias_list = (
-    st.session_state.scto_alias_list
-    + st.session_state.local_alias_list
+    st.session_state.scto_alias_list + st.session_state.local_alias_list
 )

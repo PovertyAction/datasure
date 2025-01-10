@@ -72,6 +72,7 @@ ignore = [
     "D213",
     "D400",   # First line should end with a period
     "D401",   # First line of docstring should be in imperative mood
+    "RUF005", # Code suggestions
 ]
 
 [tool.ruff.lint.pycodestyle]

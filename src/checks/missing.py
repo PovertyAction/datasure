@@ -1,5 +1,5 @@
-import streamlit as st
 import pandas as pd
+import streamlit as st
 
 
 # define function to create summary report
@@ -30,10 +30,16 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
         if not miss_cols:
             miss_cols = survey_cols
 
-        missing_codes_input = st.text_input("Enter missing codes separated by comma eg. -999, -888, 777 etc.", value="-999, -888") # noqa: F841
+        missing_codes_input = st.text_input(
+            "Enter missing codes separated by comma eg. -999, -888, 777 etc.",
+            value="-999, -888",
+        )
         if missing_codes_input:
-            missing_codes = missing_codes_input.split(",") # noqa: F841
-        missing_labels_input = st.text_input("Enter missing labels separated by comma eg. Missing, Not applicable, Don't know etc.", value="Don't Know, Refuse to Answer") # noqa: F841
+            missing_codes = missing_codes_input.split(",")
+        missing_labels_input = st.text_input(
+            "Enter missing labels separated by comma eg. Missing, Not applicable, Don't know etc.",
+            value="Don't Know, Refuse to Answer",
+        )
         if missing_labels_input:
             missing_labels = missing_labels_input.split(",")
 
@@ -79,9 +85,7 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
 
         # Calculate and add percentages
         total_rows = len(data)
-        row_dict["Total Missing (%)"] = (
-            row_dict["Total Missing"] / total_rows
-        ) * 100
+        row_dict["Total Missing (%)"] = (row_dict["Total Missing"] / total_rows) * 100
         row_dict["Not Coded (%)"] = (not_coded / total_rows) * 100
 
         # Add percentages for each code/label pair
@@ -126,9 +130,7 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
             percentages_df = missing_data_filtered[pct_columns]
 
             # Create column config for percentages
-            pct_config = {
-                "Variable": st.column_config.Column(width="medium")
-            }
+            pct_config = {"Variable": st.column_config.Column(width="medium")}
 
             # Add percentage format for all percentage columns
             for col in pct_columns[1:]:  # Skip 'Column'
@@ -157,9 +159,7 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
             counts_df = missing_data_filtered[count_columns]
 
             # Create column config for counts
-            count_config = {
-                "Variable": st.column_config.Column(width="medium")
-            }
+            count_config = {"Variable": st.column_config.Column(width="medium")}
 
             # Add number format for all count columns
             for col in count_columns[1:]:  # Skip 'Column'
@@ -180,7 +180,6 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
             missing_threshold,
             "% missing values.",
         )
-
 
     st.write(
         "Note: The calculations for 'Not Coded' includes values of ' . ', 'NA' and empty cells."

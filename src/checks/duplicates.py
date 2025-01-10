@@ -1,10 +1,8 @@
 import streamlit as st
-import pandas as pd
 
 
 # define function to create duplicates report
 def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
-
     """
     Generate a report on duplicate data in the dataset. The report includes a
     summary of duplicate data, a table showing the number of duplicate rows, and
@@ -14,14 +12,12 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
     ----------
         data (pd.DataFrame): The dataset to generate the duplicate data
                 report for.
-        
-    Returns 
+
+    Returns
     -------
-    
         None
 
     """
-
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for survey duplicates report")
 
@@ -35,19 +31,33 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
 
         with id_col:
             # get survey id column name from dataset & get index
-            default_survey_id = st.session_state["config_pages"]["Survey ID"][page_num - 1]
+            default_survey_id = st.session_state["config_pages"]["Survey ID"][
+                page_num - 1
+            ]
             default_survey_id_index = survey_cols.get_loc(default_survey_id)
 
             st.markdown("### Select survey ID column")
-            survey_id = st.selectbox("Survey ID", options=survey_cols, key="survey_id_duplicates", index=default_survey_id_index)
+            survey_id = st.selectbox(
+                "Survey ID",
+                options=survey_cols,
+                key="survey_id_duplicates",
+                index=default_survey_id_index,
+            )
 
         with key_col:
             # get survey key column name from dataset & get index
-            default_survey_key = st.session_state["config_pages"]["Survey KEY"][page_num - 1]
+            default_survey_key = st.session_state["config_pages"]["Survey KEY"][
+                page_num - 1
+            ]
             default_survey_key_index = survey_cols.get_loc(default_survey_key)
 
             st.markdown("### Select survey key column")
-            survey_key = st.selectbox("Survey Key", options=survey_cols, key="survey_key_duplicates", index=default_survey_key_index)
+            survey_key = st.selectbox(
+                "Survey Key",
+                options=survey_cols,
+                key="survey_key_duplicates",
+                index=default_survey_key_index,
+            )
 
         with date_col:
             # get date column name from dataset & get index
@@ -55,21 +65,27 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
             default_date_index = survey_cols.get_loc(default_date)
 
             st.markdown("### Select date column")
-            date = st.selectbox("Date", options=survey_cols, key="date_duplicates", index=default_date_index)
+            date = st.selectbox(
+                "Date",
+                options=survey_cols,
+                key="date_duplicates",
+                index=default_date_index,
+            )
 
         st.write("---")
         st.markdown("### Report options")
-        
+
         st.markdown("### Select additional columns to display in the report")
 
-        display_cols = st.multiselect("Columns", options=survey_cols, key="display_cols")
+        display_cols = st.multiselect(  # noqa: F841
+            "Columns", options=survey_cols, key="display_cols"
+        )
 
         # add button for saving settings
         st.write("---")
         st.write("Save settings")
-        save_settings = st.button("Save settings", key="save_settings_duplicates")
+        save_settings = st.button("Save settings", key="save_settings_duplicates")  # noqa: F841
 
-    
     # Add CSS for consistent width
     st.markdown(
         """
@@ -86,10 +102,10 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
     )
 
     # Count duplicates by ID
-    data['num_dups'] = data.groupby(dup_cols)[survey_key].transform('count')
-   
+    data["num_dups"] = data.groupby(dup_cols)[survey_key].transform("count")
+
     # Filter rows with duplicates and without missing
-    dups_data = data[data['num_dups'] > 1]
+    dups_data = data[data["num_dups"] > 1]
 
     if dups_data.empty:
         st.write("No duplicates")
@@ -107,11 +123,8 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
         st.dataframe(
             result,
             hide_index=True,
-            use_container_width=True, 
+            use_container_width=True,
             column_config={
-                'num_dups':st.column_config.Column(
-                    label="# of duplicates"
-                )
-            }
+                "num_dups": st.column_config.Column(label="# of duplicates")
+            },
         )
-
