@@ -3,6 +3,7 @@ import streamlit as st
 ##### Survey Progress #####
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 def progress_report(data, page_num) -> None:
     
@@ -67,6 +68,10 @@ def progress_report(data, page_num) -> None:
 >>>>>>> c8a436c (adding default values from config page)
 
 def progress_report(data, page_num) -> None:
+=======
+
+def progress_report(data, page_num) -> None:
+>>>>>>> 4b8ec10 (formatting changes)
     """Display progress report
 
     PARAMS:
@@ -206,11 +211,14 @@ def progress_report(data, page_num) -> None:
 
     col1, col2, col3 = st.columns(3)
 
+<<<<<<< HEAD
     # Check that required options have been selected. If not, display a info message
     if not all([survey_id, survey_key, consent, outcome]):
         st.info("Please select all required options to generate the progress report")
         return
 
+=======
+>>>>>>> 4b8ec10 (formatting changes)
     with col1:
         # Add CSS to ensure table width matches selectbox
         st.markdown(

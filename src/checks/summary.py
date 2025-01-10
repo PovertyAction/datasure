@@ -1,4 +1,5 @@
 from datetime import datetime
+<<<<<<< HEAD
 
 <<<<<<< HEAD
 import pandas as pd
@@ -153,43 +154,144 @@ def summary_report(data, page_num) -> None:
 		st.markdown("### Select columns to include in summary report")
 
 		meta_col, enum_col, agg_col = st.columns(spec = 3, border= True)
+=======
 
-		with meta_col:
-			duration = st.selectbox("Duration", options = survey_cols, help = "Column containing survey duration", index=None, key="duration_summary")
-			# get date column name from dataset & get index
-			default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
-			default_date_index = survey_cols.get_loc(default_date)
-			date = st.selectbox("Date", options = survey_cols, help = "Column containing survey date", index=default_date_index, key="date_summary")
-			formversion = st.selectbox("Form Version", options = survey_cols, help = "Column containing survey form version", index = None, key="formversion_summary")
+import pandas as pd
+import streamlit as st
+>>>>>>> 4b8ec10 (formatting changes)
 
-		with enum_col:
-			by = st.selectbox("Group by", options = survey_cols, help = "Column to group summary report by by", index = None, key="by_summary")
-			# get enumerator column name from dataset & get index
-			default_enumerator = st.session_state["config_pages"]["Enumerator"][page_num - 1]
-			default_enumerator_index = survey_cols.get_loc(default_enumerator)
-			enumerator = st.selectbox("Enumerator", options = survey_cols, index=default_enumerator_index, key="enumerator_summary")
-			team = st.selectbox("Team", options = survey_cols, index=None)
-		
-		with agg_col:
-			# get survey id column name from dataset & get index
-			default_survey_id = st.session_state["config_pages"]["Survey ID"][page_num - 1]
-			default_survey_id_index = survey_cols.get_loc(default_survey_id)
-			survey_id = st.selectbox("Survey ID", options = survey_cols, help = "Column containing survey ID", index=default_survey_id_index, key="survey_id_summary")
-			
-			consent = st.selectbox("Consent", options = survey_cols, help = "Column containing survey consent", index = None, key="consent_summary")
-			if consent:
-				consent_options = data[consent].unique().tolist()
-				consent_val = st.multiselect("Consent value(s)", options = consent_options, help = "Value(s) indicating valid consent")
 
-			outcome = st.selectbox("Outcome", options = survey_cols, help = "Column containing survey outcome", index = None)
-			if outcome:
-				outcome_options = data[outcome].unique().tolist()
-				outcome_val = st.multiselect("Outcome value(s)", options = outcome_options, help = "Value(s) indicating completed survey")
+# define function to create summary report
+def summary_report(data, page_num) -> None:
+    """
+    Generates a summary report for the survey data
 
+    Parameters
+    ----------
+    data : pd.DataFrame
+            The survey data
+
+    Returns
+    -------
+    None
+
+    """
+    with st.expander("settings", icon=":material/settings:"):
+        st.markdown("## Configure settings for summary report")
+
+        survey_cols = data.columns
+
+        st.write("---")
+        st.markdown("### Select columns to include in summary report")
+
+        meta_col, enum_col, agg_col = st.columns(spec=3, border=True)
+
+        with meta_col:
+            duration = st.selectbox(  # noqa: F841
+                label="Duration",
+                options=survey_cols,
+                help="Column containing survey duration",
+                index=None,
+                key="duration_summary",
+            )
+
+            # get date column name from dataset & get index
+            default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
+            default_date_index = survey_cols.get_loc(default_date)
+            date = st.selectbox(
+                label="Date",
+                options=survey_cols,
+                help="Column containing survey date",
+                index=default_date_index,
+                key="date_summary",
+            )
+
+            formversion = st.selectbox(  # noqa: F841
+                label="Form Version",
+                options=survey_cols,
+                help="Column containing survey form version",
+                index=None,
+                key="formversion_summary",
+            )
+
+        with enum_col:
+            by = st.selectbox(  # noqa: F841
+                label="Group by",
+                options=survey_cols,
+                help="Column to group summary report by by",
+                index=None,
+                key="by_summary",
+            )
+
+            # get enumerator column name from dataset & get index
+            default_enumerator = st.session_state["config_pages"]["Enumerator"][
+                page_num - 1
+            ]
+            default_enumerator_index = survey_cols.get_loc(default_enumerator)
+            enumerator = st.selectbox(
+                label="Enumerator",
+                options=survey_cols,
+                index=default_enumerator_index,
+                key="enumerator_summary",
+            )
+            team = st.selectbox("Team", options=survey_cols, index=None)  # noqa: F841
+
+        with agg_col:
+            # get survey id column name from dataset & get index
+            default_survey_id = st.session_state["config_pages"]["Survey ID"][
+                page_num - 1
+            ]
+            default_survey_id_index = survey_cols.get_loc(default_survey_id)
+            survey_id = st.selectbox(
+                label="Survey ID",
+                options=survey_cols,
+                help="Column containing survey ID",
+                index=default_survey_id_index,
+                key="survey_id_summary",
+            )
+
+            consent = st.selectbox(
+                label="Consent",
+                options=survey_cols,
+                help="Column containing survey consent",
+                index=None,
+                key="consent_summary",
+            )
+
+            if consent:
+                consent_options = data[consent].unique().tolist()
+                consent_val = st.multiselect(
+                    label="Consent value(s)",
+                    options=consent_options,
+                    help="Value(s) indicating valid consent",
+                    key="consent_val_summary",
+                )
+
+            outcome = st.selectbox(
+                label="Outcome",
+                options=survey_cols,
+                help="Column containing survey outcome",
+                index=None,
+            )
+            if outcome:
+                outcome_options = data[outcome].unique().tolist()
+                outcome_val = st.multiselect(  # noqa: F841
+                    label="Outcome value(s)",
+                    options=outcome_options,
+                    help="Value(s) indicating completed survey",
+                    key="outcome_val_summary",
+                )
+
+<<<<<<< HEAD
 		# >>> TEMP: CHANGE VARIABLE TYPES, REMOVE AFTER TESTING
 		# convert date column to datetime
 		data[date] = pd.to_datetime(data[date])
 >>>>>>> c8a436c (adding default values from config page)
+=======
+        # >>> TEMP: CHANGE VARIABLE TYPES, REMOVE AFTER TESTING
+        # convert date column to datetime
+        data[date] = pd.to_datetime(data[date])
+>>>>>>> 4b8ec10 (formatting changes)
 
         st.write("---")
         st.markdown("### Additional Options")
@@ -223,11 +325,14 @@ def summary_report(data, page_num) -> None:
         # define a save settings button
         save_settings = st.button("Save settings")  # noqa: F841
 
+<<<<<<< HEAD
     # Check that required options have been selected. If not, display a info message
     if not all([date, enumerator, survey_id, consent, outcome]):
         st.info("Please select all required columns to generate the summary report")
         return
 
+=======
+>>>>>>> 4b8ec10 (formatting changes)
     # Define flagged percentage of missing. For example, write 50 if there are
     # more than 50% of missing and should be flagged as warning
     percentage_warning = 50
@@ -248,6 +353,7 @@ def summary_report(data, page_num) -> None:
     earliest_date = data[date].min()
 
 <<<<<<< HEAD
+<<<<<<< HEAD
     # Todays date
     today = pd.Timestamp.now()
 =======
@@ -264,6 +370,14 @@ def summary_report(data, page_num) -> None:
     # Calculate the number of days since the first interview/launch
     days_since_start = (today - earliest_date).days
 
+=======
+    # Todays date
+    today = pd.Timestamp.now()
+
+    # Calculate the number of days since the first interview/launch
+    days_since_start = (today - earliest_date).days
+
+>>>>>>> 4b8ec10 (formatting changes)
     # Set the color
     color = "black"  # noqa: F841
 
@@ -279,18 +393,24 @@ def summary_report(data, page_num) -> None:
     formatted_missing_percentage = f"{missing_percentage:.2f}%"
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 4b8ec10 (formatting changes)
     ### Value box 4 ###
     # Group by date and count number of IDs
     count_by_date = data.groupby(date).size()
 
     # Calculate the average number of interviews per day
     average_interviews_per_day = count_by_date.mean()
+<<<<<<< HEAD
 =======
 	### Value box 1 ###
     
 	# count the number of valid consent
 	valid_interviews = data[consent].isin(consent_val).sum()
 >>>>>>> c8a436c (adding default values from config page)
+=======
+>>>>>>> 4b8ec10 (formatting changes)
 
     # Round number of interviews per day
     rounded_average_day = round(average_interviews_per_day, 2)

@@ -41,6 +41,7 @@ dependencies = [
     "pysurveycto>=0.0.14",
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> 4ec1e94 (update venv requirements)
 =======
 =======
@@ -48,10 +49,18 @@ dependencies = [
 >>>>>>> 8913909 (resolving_uv_toml)
 =======
 =======
+>>>>>>> 4b8ec10 (formatting changes)
+=======
 >>>>>>> 89d13a1 (resolving_uv_toml)
 =======
 >>>>>>> 564b791 (update venv requirements)
+<<<<<<< HEAD
 >>>>>>> dad835b (update venv requirements)
+=======
+=======
+    "surveydata>=0.1.13",
+>>>>>>> bf38eb9 (formatting changes)
+>>>>>>> 4b8ec10 (formatting changes)
 ]
 
 [tool.uv]
@@ -107,8 +116,11 @@ ignore = [
     "D213",
     "D400",   # First line should end with a period
     "D401",   # First line of docstring should be in imperative mood
+<<<<<<< HEAD
     "RUF005", # Code suggestions
     "E722", #bare-exception
+=======
+>>>>>>> 4b8ec10 (formatting changes)
 ]
 
 [tool.ruff.lint.pycodestyle]
