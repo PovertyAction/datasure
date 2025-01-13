@@ -1,6 +1,0 @@
-streamlit
-pandas
-numpy
-datetime
-re
-pysurveycto
