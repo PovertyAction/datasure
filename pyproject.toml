@@ -59,8 +59,15 @@ dependencies = [
 =======
 =======
     "surveydata>=0.1.13",
+<<<<<<< HEAD
 >>>>>>> bf38eb9 (formatting changes)
+<<<<<<< HEAD
 >>>>>>> 4b8ec10 (formatting changes)
+=======
+=======
+    "requests>=2.32.3",
+>>>>>>> b5b2d1b (E722)
+>>>>>>> 646ad42 (E722)
 ]
 
 [tool.uv]
@@ -124,7 +131,11 @@ ignore = [
 >>>>>>> 4b8ec10 (formatting changes)
 =======
     "RUF005", # Code suggestions
+<<<<<<< HEAD
 >>>>>>> e2bf5f5 (lint formatting)
+=======
+    "E722", #bare-exception
+>>>>>>> 646ad42 (E722)
 ]
 
 [tool.ruff.lint.pycodestyle]
