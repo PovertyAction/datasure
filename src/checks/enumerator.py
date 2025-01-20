@@ -48,7 +48,7 @@ def enumerator_report(data, page_num) -> None:
                 key="date_enumerator",
                 index=None,
             )
-            formversion = st.selectbox(  # noqa: F841
+            formversion = st.selectbox(
                 "Form Version",
                 options=survey_cols,
                 help="Column containing survey form version",
@@ -57,7 +57,7 @@ def enumerator_report(data, page_num) -> None:
             )
 
         with enum_col:
-            by = st.selectbox(  # noqa: F841
+            by = st.selectbox(
                 "Group by",
                 options=survey_cols,
                 help="Column to group summary report by by",
@@ -71,7 +71,7 @@ def enumerator_report(data, page_num) -> None:
                 key="enumerator_enumerator",
                 index=None,
             )
-            team = st.selectbox(  # noqa: F841
+            team = st.selectbox(
                 "Team",
                 options=survey_cols,
                 help="Column containing survey team",
@@ -144,6 +144,24 @@ def enumerator_report(data, page_num) -> None:
         save_settings = st.button("Save settings", key="save_settings_enumerator")  # noqa: F841
 
     col1, col2 = st.columns(2)
+
+    # Check that required options have been selected. If not, display a info message
+    if not all(
+        [
+            duration,
+            date,
+            formversion,
+            by,
+            enumerator,
+            team,
+            survey_id,
+            survey_key,
+            consent,
+            outcome,
+        ]
+    ):
+        st.info("Please select all required options to generate the enumerator report")
+        return
 
     with col1:
         # Radio button for calculations

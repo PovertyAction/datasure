@@ -125,10 +125,6 @@ def summary_report(data, page_num) -> None:
                     key="outcome_val_summary",
                 )
 
-        # >>> TEMP: CHANGE VARIABLE TYPES, REMOVE AFTER TESTING
-        # convert date column to datetime
-        data[date] = pd.to_datetime(data[date])
-
         st.write("---")
         st.markdown("### Additional Options")
 
@@ -160,6 +156,11 @@ def summary_report(data, page_num) -> None:
 
         # define a save settings button
         save_settings = st.button("Save settings")  # noqa: F841
+
+    # Check that required options have been selected. If not, display a info message
+    if not all([date, enumerator, survey_id, consent, outcome]):
+        st.info("Please select all required columns to generate the summary report")
+        return
 
     # Define flagged percentage of missing. For example, write 50 if there are
     # more than 50% of missing and should be flagged as warning

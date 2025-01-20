@@ -486,20 +486,8 @@ def scto_forms_edit(servername) -> None:
 
     """
     # add add, delete, move up and move down buttons
-    add_col, move_up_col, move_down_col, del_col = st.columns(4)
+    add_col, _, _, del_col = st.columns(4)
 
-    with move_up_col:
-        move_up_btn = st.button(  # noqa: F841
-            "Move Up:material/arrow_upward:",
-            key="scto_move_up_key",
-            use_container_width=True,
-        )
-    with move_down_col:
-        move_down_btn = st.button(  # noqa: F841
-            "Move Down:material/arrow_downward:",
-            key="scto_move_down_key",
-            use_container_width=True,
-        )
     with (
         add_col,
         st.popover(label="Add", use_container_width=True, icon=":material/add:"),
@@ -542,7 +530,7 @@ def scto_forms_edit(servername) -> None:
 
         # add form details to form list
         add_form_btn = st.button(
-            "Add",
+            label="Add",
             key="add_form_key",
             disabled=save_as is None or form_id is None or encryption_key is None,
         )
@@ -577,18 +565,6 @@ def scto_forms_edit(servername) -> None:
             # save form details to cache
             scto_forms.to_json(f"cache/{servername}_pyDMS_forms_cache.json")
 
-    with del_col:
-        # delete selected form
-        del_form_btn = st.button("Delete", key="del_form_key", use_container_width=True)
-
-        scto_forms = scto_load_forms(servername)
-
-        if del_form_btn:
-            # remove row if column select is true
-            scto_forms = scto_forms[scto_forms["select"] == True]  # noqa: E712
-
-            scto_forms.to_json(f"cache/{servername}_pyDMS_forms_cache.json")
-
     # load existing form detailss
     st.session_state.scto_forms = scto_load_forms(servername)
 
@@ -597,8 +573,34 @@ def scto_forms_edit(servername) -> None:
         st.warning("No form details found, click to add new form details")
     else:
         st.session_state.scto_forms = st.data_editor(
-            scto_forms, hide_index=True, key="scto_forms_key"
+            st.session_state.scto_forms,
+            hide_index=True,
+            key="scto_forms_key",
+            num_rows="dynamic",
+            column_config={
+                "select": st.column_config.CheckboxColumn(
+                    "download data?",
+                    default=False,
+                ),
+                "server dataset": st.column_config.CheckboxColumn(
+                    "download sever dataset?",
+                    default=False,
+                ),
+                "get media": st.column_config.CheckboxColumn(
+                    "download attachments?",
+                    default=False,
+                ),
+            },
+            disabled=["_index"],
         )
+
+    # add save button
+    save_forms = st.button(label="Save", key="save_forms_key", use_container_width=True)
+    if save_forms:
+        st.session_state.scto_forms.to_json(
+            f"cache/{servername}_pyDMS_forms_cache.json"
+        )
+        st.success("Form details saved successfully")
 
 
 # Configure SurveyCTO form
@@ -649,6 +651,13 @@ def scto_login_form() -> tuple:
             st.session_state.scto = scto_server_connect(
                 scto_server_name, scto_server_user, scto_server_password
             )
+
+            # save server details to cache
+            server_details = pd.DataFrame(
+                data=[[scto_server_name, scto_server_user]],
+                columns=["name", "user"],
+            )
+            server_details.to_json("cache/pyDMS_server_cache.json")
             st.session_state.scto_show_forms = True
             st.session_state.scto_disable_download_btn = False
 
