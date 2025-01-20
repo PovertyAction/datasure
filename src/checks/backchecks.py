@@ -749,21 +749,21 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
         meta_col, enum_col, agg_col = st.columns(spec=3, border=True)
 
         with meta_col:
-            duration = st.selectbox(  # noqa: F841
+            duration = st.selectbox(
                 "Duration",
                 options=survey_cols,
                 help="Column containing survey duration",
                 key="duration_backcheck",
                 index=None,
             )
-            date = st.selectbox(  # noqa: F841
+            date = st.selectbox(
                 "Date",
                 options=survey_cols,
                 help="Column containing survey date",
                 key="date_backcheck",
                 index=None,
             )
-            formversion = st.selectbox(  # noqa: F841
+            formversion = st.selectbox(
                 "Form Version",
                 options=survey_cols,
                 help="Column containing survey form version",
@@ -779,7 +779,7 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 key="enumerator_backcheck",
                 index=None,
             )
-            team = st.selectbox(  # noqa: F841
+            team = st.selectbox(
                 "Enumerator Team",
                 options=survey_cols,
                 help="Column containing survey team",
@@ -809,7 +809,7 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 key="surveyid_backcheck",
                 index=None,
             )
-            survey_key = st.selectbox(  # noqa: F841
+            survey_key = st.selectbox(
                 "Survey Key",
                 options=survey_cols,
                 help="Column containing survey key",
@@ -864,6 +864,24 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
 
         # define a save settings button
         save_settings = st.button("Save settings", key="save_settings_backcheck")  # noqa: F841
+
+    # Check that required options have been selected. If not, display a info message
+    if not all(
+        [
+            duration,
+            date,
+            formversion,
+            enumerator,
+            team,
+            backchecker,
+            survey_id,
+            survey_key,
+            consent,
+            outcome,
+        ]
+    ):
+        st.info("Please select all required options to generate the progress report")
+        return
 
     if backcheck_data.empty:
         st.warning("No back check data available")

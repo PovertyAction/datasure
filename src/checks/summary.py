@@ -236,6 +236,7 @@ def summary_report(data, page_num) -> None:
             )
             team = st.selectbox("Team", options=survey_cols, index=None)  # noqa: F841
 
+<<<<<<< HEAD
         with agg_col:
             # get survey id column name from dataset & get index
             default_survey_id = st.session_state["config_pages"]["Survey ID"][
@@ -293,6 +294,8 @@ def summary_report(data, page_num) -> None:
         data[date] = pd.to_datetime(data[date])
 >>>>>>> 4b8ec10 (formatting changes)
 
+=======
+>>>>>>> a27188c (adding default values and views)
         st.write("---")
         st.markdown("### Additional Options")
 
@@ -326,13 +329,19 @@ def summary_report(data, page_num) -> None:
         save_settings = st.button("Save settings")  # noqa: F841
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> a27188c (adding default values and views)
     # Check that required options have been selected. If not, display a info message
     if not all([date, enumerator, survey_id, consent, outcome]):
         st.info("Please select all required columns to generate the summary report")
         return
 
+<<<<<<< HEAD
 =======
 >>>>>>> 4b8ec10 (formatting changes)
+=======
+>>>>>>> a27188c (adding default values and views)
     # Define flagged percentage of missing. For example, write 50 if there are
     # more than 50% of missing and should be flagged as warning
     percentage_warning = 50

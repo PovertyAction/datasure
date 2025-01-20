@@ -171,12 +171,12 @@ with missing:
 >>>>>>> 1205bf5 (adding back check)
 =======
     summary_report(
-        data=st.session_state[f"prepped_data{page_number}"], page_num=page_number
+        data=st.session_state[f"prepped_data{page_data_index}"], page_num=page_number
     )
 
 with missing:
     missing_report(
-        data=st.session_state[f"prepped_data{page_number}"], page_num=page_number
+        data=st.session_state[f"prepped_data{page_data_index}"], page_num=page_number
     )
 <<<<<<< HEAD
     
@@ -335,7 +335,7 @@ with outliers:
 >>>>>>> d69d05e (adding back check)
 =======
     progress_report(
-        data=st.session_state[f"prepped_data{page_number}"], page_num=page_number
+        data=st.session_state[f"prepped_data{page_data_index}"], page_num=page_number
     )
 <<<<<<< HEAD
     
@@ -345,12 +345,12 @@ with outliers:
 >>>>>>> 68e0d23 (lint formatting)
 with duplicates:
     duplicates_report(
-        data=st.session_state[f"prepped_data{page_number}"], page_num=page_number
+        data=st.session_state[f"prepped_data{page_data_index}"], page_num=page_number
     )
 
 with outliers:
     outliers_report(
-        data=st.session_state[f"prepped_data{page_number}"], page_num=page_number
+        data=st.session_state[f"prepped_data{page_data_index}"], page_num=page_number
     )
 
 with enum_stats:
@@ -376,13 +376,13 @@ with desc_stats:
     pass
 =======
     enumerator_report(
-        data=st.session_state[f"prepped_data{page_number}"], page_num=page_number
+        data=st.session_state[f"prepped_data{page_data_index}"], page_num=page_number
     )
 >>>>>>> fa264c2 (adding default values from config page)
 
 with desc_stats:
     descriptive_report(
-        data=st.session_state[f"prepped_data{page_number}"], page_num=page_number
+        data=st.session_state[f"prepped_data{page_data_index}"], page_num=page_number
     )
 
 with back_checks:
@@ -395,6 +395,7 @@ with back_checks:
 =======
     backchecks_report(
 <<<<<<< HEAD
+<<<<<<< HEAD
         survey_data=st.session_state[f"prepped_data{page_number}"], 
         backcheck_data=st.session_state[f"prepped_data{page_number}"], 
         page_num=page_number
@@ -406,6 +407,10 @@ with back_checks:
 =======
         survey_data=st.session_state[f"prepped_data{page_number}"],
         backcheck_data=st.session_state[f"prepped_data{page_number}"],
+=======
+        survey_data=st.session_state[f"prepped_data{page_data_index}"],
+        backcheck_data=st.session_state[f"prepped_data{page_data_index}"],
+>>>>>>> 8b259eb (adding default values and views)
         page_num=page_number,
     )
 >>>>>>> 68e0d23 (lint formatting)

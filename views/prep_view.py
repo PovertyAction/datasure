@@ -9,8 +9,14 @@ from src.processing import prep_apply_action, prep_load_log
 =======
 >>>>>>> 81f69f0 (format and lint pydms/src/views)
 <<<<<<< HEAD
+<<<<<<< HEAD
 import pandas as pd
+<<<<<<< HEAD
 >>>>>>> 495c39b (prep)
+=======
+=======
+>>>>>>> 8b259eb (adding default values and views)
+>>>>>>> a27188c (adding default values and views)
 import streamlit as st
 <<<<<<< HEAD
 import pandas as pd
@@ -19,7 +25,7 @@ import numpy as np
 =======
 >>>>>>> e2bf5f5 (lint formatting)
 
-from src.processing import prep_load_log
+from src.processing import prep_apply_action, prep_load_log
 
 
 #-- DEFINE CONSTANTS FOR DATA PREP --#
@@ -627,6 +633,7 @@ if show_prep_page_info:
 alias_list: list[str] = list(filter(None, st.session_state.alias_list))
 alias_index: list[int] = st.session_state.alias_list_index
 
+<<<<<<< HEAD
 # create new tab for each dataset
 tabs = st.tabs(alias_list)
 
@@ -1046,137 +1053,228 @@ for i, (label, tab) in enumerate(zip(alias_list, tabs, strict=False)):
                     options=DP_ACTIONS,
                     key=f"st_sb_dp_action{i}",
                 )
+=======
+# show/hide data prep page
+>>>>>>> 8b259eb (adding default values and views)
 
-                # selectbox for adding new columns functions
-                if dp_action in ["add column"]:
-                    dp_prep_add_col = st.text_input(
-                        label="Enter column name",
-                        help="Enter name of new column to add",
-                        key=f"st_sb_add_col{i}",
+show_prep_page_info = False
+try:
+    tabs = st.tabs(alias_list)
+    show_prep_page_info = True
+except:
+    st.info(
+        "No data available to prepare. Load a dataset from the import page to continue."
+    )
+
+if show_prep_page_info:
+    for i, (label, tab) in enumerate(zip(alias_list, tabs, strict=False)):
+        # get index for the dataset
+        if i < sum(alias_index[0:1]):
+            d_i = st.session_state["scto_alias_list"].index(label)
+            data_name = f"scto_raw_data{d_i}"
+        elif i < sum(alias_index[0:2]):
+            d_i = st.session_state["azure_alias_list"].index(label)
+            data_name = f"azure_raw_data{d_i}"
+        elif i < sum(alias_index[0:3]):
+            d_i = st.session_state["local_alias_list"].index(label)
+            data_name = f"local_raw_data{d_i}"
+        else:
+            d_i = st.session_state["script_alias_list"].index(label)
+            data_name = f"script_raw_data{d_i}"
+
+        # save a copy of the raw dataset as the initial prepped dataset
+        st.session_state[f"prepped_data{i}"] = st.session_state[f"{data_name}"].copy()
+
+        # count rows, columns, number missing & percent missing
+        row_count: int = len(st.session_state[f"prepped_data{i}"].index)
+        col_count: int = len(st.session_state[f"prepped_data{i}"].columns)
+        miss_count: int = st.session_state[f"prepped_data{i}"].isnull().sum().sum()
+        miss_perc: float = round((miss_count / (row_count * col_count)) * 100, 2)
+
+        # collate all string columns in dataset
+        string_cols = (
+            st.session_state[f"prepped_data{i}"]
+            .select_dtypes(include=["object"])
+            .columns
+        )
+        all_cols = st.session_state[f"prepped_data{i}"].columns
+
+        # display tab features
+        with tab:
+            # create columns for change log (& actions) & data view
+            prep_task_col, prep_log_view_col = st.columns((0.3, 0.7))
+
+            # populate actions and change log
+            with prep_task_col, st.container(border=True):
+                st.subheader("Apply Changes:")
+                st.write("---")
+
+                # create a popver box to accept inputs for new prep actions
+                with st.popover(
+                    ":material/add: Add data prep step", use_container_width=True
+                ):
+                    st.markdown("*Add new data preparation steps*")
+
+                    # selectbox for action type
+                    dp_action = st.selectbox(
+                        label="Select Action:",
+                        options=DP_ACTIONS,
+                        key=f"st_sb_dp_action{i}",
                     )
 
-                    dp_prep_add_col_val = st.text_input(
-                        label="Enter value",
-                        help="Enter value to populate new column",
-                        key=f"st_sb_add_col_val{i}",
-                    )
-
-                # selectbox for transforming columns functions
-                if dp_action in ["transform column(s)"]:
-                    # select column to transform
-                    dp_prep_trf_col = st.selectbox(
-                        label="Select column to transform",
-                        options=st.session_state[f"prepped_data{i}"].columns,
-                        key=f"st_sb_trf_col{i}",
-                    )
-
-                    if dp_prep_trf_col:
-                        # show functions based on column type
-                        col_type = st.session_state[f"prepped_data{i}"][
-                            dp_prep_trf_col
-                        ].dtype
-                        st.write(f"Column type: {col_type}")
-                        if col_type == "object":
-                            dp_prep_trf_func = st.selectbox(
-                                label="Select Function",
-                                options=DP_STR_FUNCS,
-                                key=f"st_sb_trf_func{i}",
-                            )
-                        elif col_type == "int64" or col_type == "float64":
-                            dp_prep_trf_func = st.selectbox(
-                                label="Select Function",
-                                options=DP_NUM_FUNCS,
-                                key=f"st_sb_trf_func{i}",
-                            )
-                        elif col_type == "datetime64":
-                            dp_prep_trf_func = st.selectbox(
-                                label="Select Function",
-                                options=DP_DATETIME_FUNCS,
-                                key=f"st_sb_trf_func{i}",
-                            )
-
-                # selectbox (multi) for deleting column functions
-                if dp_action in ["delete column(s)"]:
-                    dp_prep_del_cols = st.multiselect(
-                        label="Select columns to delete",
-                        options=string_cols,
-                        key=f"st_sb_del_cols{i}",
-                    )
-
-                # selectbox (multi) for deleting rows functions
-                if dp_action in ["delete row(s)"]:
-                    dp_prep_del_rows = st.selectbox(
-                        label="Select Method",
-                        options=DP_DEL_METHODS,
-                        key=f"st_sb_del_rows{i}",
-                    )
-
-                    if dp_prep_del_rows == "by row index":
-                        dp_prep_del_rows_idx = st.text_input(
-                            label="Enter row index",
-                            help="Enter row index to delete eg. 1, 2, 3, -5, 5:-2",
-                            key=f"st_sb_del_rows_idx{i}",
+                    # selectbox for adding new columns functions
+                    if dp_action in ["add column"]:
+                        dp_prep_add_col = st.text_input(
+                            label="Enter column name",
+                            help="Enter name of new column to add",
+                            key=f"st_sb_add_col{i}",
                         )
 
-                    if dp_prep_del_rows == "by condition":
-                        dp_prep_del_rows_cond = st.text_input(
-                            label="Enter condition",
-                            help="Enter condition to delete rows eg. 'column_name == value'",
-                            key=f"st_sb_del_rows_cond{i}",
+                        dp_prep_add_col_val = st.text_input(
+                            label="Enter value",
+                            help="Enter value to populate new column",
+                            key=f"st_sb_add_col_val{i}",
                         )
 
-                # apply button
-                dp_prep_apply_btn = st.button(
-                    label="Apply",
-                    key=f"st_sb_del_button{i}",
+                        description = f"Add column '{dp_prep_add_col}' with value '{dp_prep_add_col_val}'"
+
+                    # selectbox for transforming columns functions
+                    if dp_action in ["transform column(s)"]:
+                        # select column to transform
+                        dp_prep_trf_col = st.selectbox(
+                            label="Select column to transform",
+                            options=st.session_state[f"prepped_data{i}"].columns,
+                            key=f"st_sb_trf_col{i}",
+                        )
+
+                        if dp_prep_trf_col:
+                            # show functions based on column type
+                            col_type = st.session_state[f"prepped_data{i}"][
+                                dp_prep_trf_col
+                            ].dtype
+                            st.write(f"Column type: {col_type}")
+                            if col_type == "object":
+                                dp_prep_trf_func = st.selectbox(
+                                    label="Select Function",
+                                    options=DP_STR_FUNCS,
+                                    key=f"st_sb_trf_func{i}",
+                                )
+                                description = f"Transform column '{dp_prep_trf_col}' using '{dp_prep_trf_func}'"
+                            elif col_type == "int64" or col_type == "float64":
+                                dp_prep_trf_func = st.selectbox(
+                                    label="Select Function",
+                                    options=DP_NUM_FUNCS,
+                                    key=f"st_sb_trf_func{i}",
+                                )
+                                description = f"Transform column '{dp_prep_trf_col}' using '{dp_prep_trf_func}'"
+                            elif col_type == "datetime64":
+                                dp_prep_trf_func = st.selectbox(
+                                    label="Select Function",
+                                    options=DP_DATETIME_FUNCS,
+                                    key=f"st_sb_trf_func{i}",
+                                )
+                                description = f"Transform column '{dp_prep_trf_col}' using '{dp_prep_trf_func}'"
+
+                    # selectbox (multi) for deleting column functions
+                    if dp_action in ["delete column(s)"]:
+                        dp_prep_del_cols = st.multiselect(
+                            label="Select columns to delete",
+                            options=string_cols,
+                            key=f"st_sb_del_cols{i}",
+                        )
+
+                        description = f"delete column(s) {dp_prep_del_cols}"
+
+                    # selectbox (multi) for deleting rows functions
+                    if dp_action in ["delete row(s)"]:
+                        dp_prep_del_rows = st.selectbox(
+                            label="Select Method",
+                            options=DP_DEL_METHODS,
+                            key=f"st_sb_del_rows{i}",
+                        )
+
+                        if dp_prep_del_rows == "by row index":
+                            dp_prep_del_rows_idx = st.text_input(
+                                label="Enter row index",
+                                help="Enter row index to delete eg. 1, 2, 3, -5, 5:-2",
+                                key=f"st_sb_del_rows_idx{i}",
+                            )
+
+                            description = f"Delete row(s) '{dp_prep_del_rows_idx}'"
+
+                        if dp_prep_del_rows == "by condition":
+                            dp_prep_del_rows_cond = st.text_input(
+                                label="Enter condition",
+                                help="Enter condition to delete rows eg. 'column_name == value'",
+                                key=f"st_sb_del_rows_cond{i}",
+                            )
+                            description = f"delete row(s) '{dp_prep_del_rows_cond}'"
+
+                    # apply button
+                    dp_prep_apply_btn = st.button(
+                        label="Apply",
+                        key=f"st_sb_del_button{i}",
+                        use_container_width=True,
+                    )
+
+                    # if apply button is clicked add new action to log
+                    if dp_prep_apply_btn:
+                        prep_apply_action(dp_action, description, i)
+
+            with prep_log_view_col, st.container(border=True):
+                st.subheader("Change Log:")
+                st.write("---")
+
+                st.session_state[f"prep_log{i}"] = prep_load_log(i)
+
+                prep_logs_mod = st.data_editor(
+                    data=st.session_state[f"prep_log{i}"],
                     use_container_width=True,
+                    num_rows="dynamic",
+                    key=label,
+                    hide_index=True,
+                    disabled=["_index"],
                 )
 
-                # if apply button is clicked add new action to log
-                if dp_prep_apply_btn:
-                    st.session_state[f"prep_log{i}"] = st.session_state.get(
-                        f"prep_log{i}", []
-                    )
+                # Save configuration File
+                prep_save_config = st.button(
+                    label="save & re-apply changes",
+                    type="secondary",
+                    key="prep_save_config_key",
+                    use_container_width=True,
+                )
+                if prep_save_config:
+                    # save form information
+                    prep_config_filename = f"cache/pyDMS_prep_cache_{i}.json"
+                    prep_logs_mod.to_json(prep_config_filename)
 
-                    new_file = pd.DataFrame(
-                        data=[[dp_action, f"Applied {dp_action}"]],
-                        columns=["action", "description"],
-                    )
+                    st.session_state[f"prep_log{i}"] = prep_logs_mod
 
-                    st.session_state.local_files = pd.concat(
-                        [st.session_state[f"prep_log{i}"], new_file],
-                        ignore_index=True,
-                    )
+                    st.success("Configuration saved successfully!")
 
-                    # save log to file
-                    log = pd.DataFrame(st.session_state[f"prep_log{i}"])
-                    log.to_json(f"cache/pyDMS_prep_cache_{label}.json")
+            # display preview of peppered data
+            with st.container(border=True):
+                st.subheader("Preview Downloaded Data")
+                st.write("---")
 
-        with prep_log_view_col, st.container(border=True):
-            st.subheader("Change Log:")
-            st.write("---")
+                mc1, mc2, mc3 = st.columns((0.3, 0.3, 0.4))
 
-            st.session_state[f"prep_log{i}"] = prep_load_log(label)
+                mc1.metric(label="Rows", value=row_count)
+                mc2.metric(label="Columns", value=col_count)
+                mc3.metric(label="Missing Values", value=f"{miss_perc}%")
 
-            prep_logs_mod = st.data_editor(
-                data=st.session_state[f"prep_log{i}"],
-                use_container_width=True,
-                num_rows="dynamic",
-                key=label,
-            )
-
-        # display preview of peppered data
-        with st.container(border=True):
-            st.subheader("Preview Downloaded Data")
-            st.write("---")
-
-            mc1, mc2, mc3 = st.columns((0.3, 0.3, 0.4))
-
-            mc1.metric(label="Rows", value=row_count)
-            mc2.metric(label="Columns", value=col_count)
-            mc3.metric(label="Missing Values", value=f"{miss_perc}%")
-
+<<<<<<< HEAD
             st.dataframe(st.session_state[f"prepped_data{i}"])
 >>>>>>> a5ebaa4 (format and lint pydms/src/views)
+<<<<<<< HEAD
 >>>>>>> 81f69f0 (format and lint pydms/src/views)
 >>>>>>> 7f9f3dd (restructured files and folders)
+=======
+=======
+                if len(st.session_state[f"prepped_data{i}"]) > 1000:
+                    st.warning("Data preview limited to 1000 rows")
+                    st.dataframe(st.session_state[f"prepped_data{i}"][:1000])
+                else:
+                    st.dataframe(st.session_state[f"prepped_data{i}"])
+>>>>>>> 8b259eb (adding default values and views)
+>>>>>>> a27188c (adding default values and views)

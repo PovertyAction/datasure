@@ -1469,8 +1469,9 @@ def scto_forms_edit(servername) -> None:
 
     """
     # add add, delete, move up and move down buttons
-    add_col, move_up_col, move_down_col, del_col = st.columns(4)
+    add_col, _, _, del_col = st.columns(4)
 
+<<<<<<< HEAD
     with move_up_col:
         move_up_btn = st.button(  # noqa: F841
             "Move Up:material/arrow_upward:",
@@ -1484,6 +1485,8 @@ def scto_forms_edit(servername) -> None:
             use_container_width=True,
         )
 >>>>>>> 7f9f3dd (restructured files and folders)
+=======
+>>>>>>> a27188c (adding default values and views)
     with (
         add_col,
         st.popover(label="Add", use_container_width=True, icon=":material/add:"),
@@ -1527,10 +1530,14 @@ def scto_forms_edit(servername) -> None:
         # add form details to form list
         add_form_btn = st.button(
 <<<<<<< HEAD
+<<<<<<< HEAD
             label="Add",
 =======
             "Add",
 >>>>>>> 7f9f3dd (restructured files and folders)
+=======
+            label="Add",
+>>>>>>> a27188c (adding default values and views)
             key="add_form_key",
             disabled=save_as is None or form_id is None or encryption_key is None,
         )
@@ -1566,6 +1573,7 @@ def scto_forms_edit(servername) -> None:
             scto_forms.to_json(f"cache/{servername}_pyDMS_forms_cache.json")
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
     with del_col:
         # delete selected form
@@ -1580,6 +1588,8 @@ def scto_forms_edit(servername) -> None:
             scto_forms.to_json(f"cache/{servername}_pyDMS_forms_cache.json")
 
 >>>>>>> 7f9f3dd (restructured files and folders)
+=======
+>>>>>>> a27188c (adding default values and views)
     # load existing form detailss
     st.session_state.scto_forms = scto_load_forms(servername)
 
@@ -1589,6 +1599,9 @@ def scto_forms_edit(servername) -> None:
     else:
         st.session_state.scto_forms = st.data_editor(
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> a27188c (adding default values and views)
             st.session_state.scto_forms,
             hide_index=True,
             key="scto_forms_key",
@@ -1608,6 +1621,7 @@ def scto_forms_edit(servername) -> None:
                 ),
             },
             disabled=["_index"],
+<<<<<<< HEAD
         )
 
     # add save button
@@ -1623,6 +1637,18 @@ def scto_forms_edit(servername) -> None:
         )
 
 >>>>>>> 7f9f3dd (restructured files and folders)
+=======
+        )
+
+    # add save button
+    save_forms = st.button(label="Save", key="save_forms_key", use_container_width=True)
+    if save_forms:
+        st.session_state.scto_forms.to_json(
+            f"cache/{servername}_pyDMS_forms_cache.json"
+        )
+        st.success("Form details saved successfully")
+
+>>>>>>> a27188c (adding default values and views)
 
 # Configure SurveyCTO form
 def scto_login_form() -> tuple:
@@ -1673,6 +1699,9 @@ def scto_login_form() -> tuple:
                 scto_server_name, scto_server_user, scto_server_password
             )
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> a27188c (adding default values and views)
 
             # save server details to cache
             server_details = pd.DataFrame(
@@ -1680,8 +1709,11 @@ def scto_login_form() -> tuple:
                 columns=["name", "user"],
             )
             server_details.to_json("cache/pyDMS_server_cache.json")
+<<<<<<< HEAD
 =======
 >>>>>>> 7f9f3dd (restructured files and folders)
+=======
+>>>>>>> a27188c (adding default values and views)
             st.session_state.scto_show_forms = True
             st.session_state.scto_disable_download_btn = False
 

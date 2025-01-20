@@ -9,12 +9,20 @@ import streamlit as st
 def prep_load_log(index) -> pd.DataFrame:
 =======
 import pandas as pd
+import streamlit as st
 
 
+<<<<<<< HEAD
 def prep_load_log(label) -> pd.DataFrame:
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> 7f9f3dd (restructured files and folders)
+=======
+=======
+def prep_load_log(index) -> pd.DataFrame:
+>>>>>>> 8b259eb (adding default values and views)
+>>>>>>> a27188c (adding default values and views)
     """Load existing log or return empty dataframe.
 
     PARAMS:
@@ -24,16 +32,21 @@ def prep_load_log(label) -> pd.DataFrame:
     # load form details from last session
     try:
 <<<<<<< HEAD
+<<<<<<< HEAD
         file = pd.read_json(f"cache/pyDMS_prep_cache_{index}.json")
 =======
         file = pd.read_json(f"cache/pyDMS_prep_cache_{label}.json")
 >>>>>>> 7f9f3dd (restructured files and folders)
+=======
+        file = pd.read_json(f"cache/pyDMS_prep_cache_{index}.json")
+>>>>>>> a27188c (adding default values and views)
         logs = file.to_dict()
         return pd.DataFrame(logs)
 
     # if file not found, return empty dataframe
     except FileNotFoundError:
         return pd.DataFrame(columns=["action", "description"])
+<<<<<<< HEAD
 <<<<<<< HEAD
 
 
@@ -489,6 +502,8 @@ def prep_add_new_column(index: int, description: str):
             )
 =======
 =======
+>>>>>>> a27188c (adding default values and views)
+=======
 	
 	"""
 	Load existing log or return empty dataframe
@@ -516,4 +531,46 @@ def prep_add_new_column(index: int, description: str):
     except FileNotFoundError:
         return pd.DataFrame(columns=["action", "description"])
 >>>>>>> d644543 (format and lint pydms/src/processing)
+<<<<<<< HEAD
 >>>>>>> 7f9f3dd (restructured files and folders)
+=======
+=======
+
+
+def prep_apply_action(
+    action: str | None = None,
+    description: str | None = None,
+    index: int | None = None,
+) -> None:
+    """Update Log * Apply action in log to dataset.
+
+    PARAMS:
+    -------
+    action: action to be logged
+    description: description of action
+    index: index for dataset and log
+
+    return: None
+    """
+    if all([action, description]):
+        # load existing logs
+        logs = st.session_state[f"prep_log{index}"]
+
+        # append new action
+        new_log = pd.DataFrame(
+            {"action": action, "description": description}, index=[0]
+        )
+        logs = pd.concat([logs, new_log], ignore_index=True)
+
+        # save logs
+        logs.to_json(f"cache/pyDMS_prep_cache_{index}.json")
+
+        # update session state
+        st.session_state[f"prep_log{index}"] = logs
+
+    # loop through logs and apply actions to dataset
+    for i in range(len(st.session_state[f"prep_log{index}"])):
+        action = st.session_state[f"prep_log{index}"].iloc[i]["action"]
+        description = st.session_state[f"prep_log{index}"].iloc[i]["description"]
+>>>>>>> 8b259eb (adding default values and views)
+>>>>>>> a27188c (adding default values and views)
