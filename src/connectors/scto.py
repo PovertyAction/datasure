@@ -392,6 +392,7 @@ def scto_import_data(
 
         # download form definition
         questions, _ = scto_get_xls(scto, form_id)
+        questions = questions[questions["disabled"] != "yes"]
 
         # Mark all repeat fields in the XLS file
 
@@ -418,10 +419,8 @@ def scto_import_data(
             # columns
             cols = scto_get_repeat_cols(row["name"], repeat_fields)
 
-            if row["type"] in ["date"]:
+            if row["type"] in ["date", "datetime", "time"]:
                 scto_data[cols] = scto_data[cols].astype("datetime64[ns]")
-            elif row["type"] in ["datetime", "time"]:
-                scto_data[cols] = pd.to_datetime(scto_data[cols])
             elif row["type"] in ["integer", "decimal"]:
                 # scto_data[cols] = pd.to_numeric(scto_data[cols])
                 pass
