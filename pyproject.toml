@@ -17,6 +17,7 @@ dependencies = [
     "geopy>=2.4.1",
     "pysurveycto>=0.0.14",
     "surveydata>=0.1.13",
+    "requests>=2.32.3",
 ]
 
 [tool.uv]
@@ -73,6 +74,7 @@ ignore = [
     "D400",   # First line should end with a period
     "D401",   # First line of docstring should be in imperative mood
     "RUF005", # Code suggestions
+    "E722", #bare-exception
 ]
 
 [tool.ruff.lint.pycodestyle]

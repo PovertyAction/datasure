@@ -56,6 +56,16 @@ with add_page, st.container(border=True):
             help="Select survey ID column",
             index=None,
         )
+
+        # define default values for options
+        (
+            new_page_enum,
+            new_page_date,
+            new_page_backcheck_data,
+            new_page_bcer,
+            new_page_tracking_data,
+        ) = (None, None, None, None, None)
+
         new_page_enum = st.selectbox(
             label="Select Enumerator column:",
             options=all_cols,

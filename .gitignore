@@ -169,7 +169,8 @@ cython_debug/
 
 
 # Data Folders
-archived/code/test_notebook.ipynb
+archived/code/*test*.ipynb
+archived/notebooks/*test*.ipynb
 cache/*.json
 cache/data/*
 cache/settings/*

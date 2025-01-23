@@ -14,3 +14,13 @@
 
 [client]
 toolbarMode = "minimal"
+
+
+[server]
+
+# maximum amount of data in MB that can be handled by streamlit, default is 200
+maxMessageSize = 1000
+maxUploadSize = 1000
+
+# Number of seconds of inactivity before session state is reset, default is 120
+disconnectedSessionTTL = 480

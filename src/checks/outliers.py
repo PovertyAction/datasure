@@ -37,12 +37,12 @@ def outliers_report(data, page_num) -> None:  # noqa: D417, RUF100
         )
 
         st.markdown("### Select survey key column")
-        survey_key = st.selectbox(  # noqa: F841
+        survey_key = st.selectbox(
             "Survey Key", options=survey_cols, key="survey_key_outliers", index=None
         )
 
         st.markdown("### Select date column")
-        date = st.selectbox(  # noqa: F841
+        date = st.selectbox(
             "Date", options=survey_cols, key="date_outliers", index=None
         )
 
@@ -69,6 +69,13 @@ def outliers_report(data, page_num) -> None:  # noqa: D417, RUF100
         save_settings = st.button("Save settings", key="save_settings_outliers")  # noqa: F841
 
     col1, col2 = st.columns(2)
+
+    # Check that required options have been selected. If not, display a info message
+    if not all(
+        [outliers_cols, survey_id, enumerator, survey_key, date, outlier_method]
+    ):
+        st.info("Please select all required options to generate the outliers report")
+        return
 
     with col1:
         # Define bounds

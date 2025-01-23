@@ -70,3 +70,68 @@ environment:
 | Bash       | `.venv/Scripts/activate`                |
 | Powershell | `.venv/Scripts/activate.ps1`            |
 | Nushell    | `overlay use .venv/Scripts/activate.nu` |
+
+## Testing the Streamlit App
+
+Follow these steps to test the app:
+
+### 1. Prepare Your Environment
+
+- Ensure all necessary files are on your local machine. To do this, pull the latest updates from the GitHub repository:
+  - **Using Visual Studio Code (VS Code):** Sync files through the Source Control panel.
+  - **Using Command Line:** Run the following command in your terminal:
+
+    ```bash
+    git pull
+    ```
+
+### 2. Navigate to the Repository
+
+- Open your terminal (VS Code terminal, Command Prompt, or PowerShell).
+- Navigate to the folder where the repository is located. This folder should contain the `pydms.py` file.
+
+### 3. Start the App
+
+- Run one of the following commands to launch the app:
+
+    ```bash
+    just streamlit-run pydms.py
+    ```
+
+    or
+
+    ```bash
+    uv run streamlit run pydms.py
+    ```
+
+---
+
+### App Features
+
+### Import Data Page
+
+- When the app starts, the **Import Data** page is displayed.
+- This page includes four tabs for connecting datasets. Currently, only the **SurveyCTO** and **Local Storage** tabs are functional.
+- Use these tabs to upload or connect your datasets.
+
+### Prepare Data Page
+
+- After importing data, go to the **Prepare Data** page to preview your datasets. Each dataset will appear in a separate tab.
+- **Note:** This section is still under development. While the functions listed won't work yet, you can review them and suggest additional features.
+
+### Configure Checks Page
+
+- Set up **HFCs** (High-Frequency Checks) on this page:
+  1. Enter a name in the **Page Name** input box.
+  2. Select a dataset from the **Select Data** dropdown.
+  3. Additional input fields will appear as you provide information.
+  4. Once the form is complete, click **Add Page** and save the settings.
+- This will create an HFC page, but currently, you can only set up one HFC page at a time.
+- If the HFC page doesn’t appear immediately, select another page from the left navigation menu and return.
+
+### HFC Page
+
+- The HFC page contains dashboards for various checks, organized into tabs.
+- To set up the checks:
+  1. Open a tab and expand the **Settings Expander** at the top.
+  2. Configure the settings as needed for the check to display the required output.

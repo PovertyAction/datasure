@@ -77,7 +77,7 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
 
         st.markdown("### Select additional columns to display in the report")
 
-        display_cols = st.multiselect(  # noqa: F841
+        display_cols = st.multiselect(
             "Columns", options=survey_cols, key="display_cols"
         )
 
@@ -85,6 +85,12 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
         st.write("---")
         st.write("Save settings")
         save_settings = st.button("Save settings", key="save_settings_duplicates")  # noqa: F841
+
+    # ---- Show report --- #
+    # Check that required options have been selected. If not, display a info message
+    if not all([survey_id, survey_key, date, display_cols]):
+        st.info("Please select all required options to generate the progress report")
+        return
 
     # Add CSS for consistent width
     st.markdown(

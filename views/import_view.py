@@ -92,7 +92,7 @@ with scto:
             st.write("---")
 
             scto_prev_select_col, scto_prev_mc1, scto_prev_mc2, scto_prev_mc3, _ = (
-                st.columns((0.2, 0.1, 0.1, 0.1, 0.5))
+                st.columns((0.2, 0.2, 0.2, 0.2, 0.2))
             )
 
             st.session_state.scto_alias_list = st.session_state.scto_forms[
@@ -135,7 +135,13 @@ with scto:
                     )
 
             if scto_preview_data is not None:
-                st.dataframe(st.session_state[f"scto_raw_data{scto_row_num}"])
+                if len(st.session_state[f"scto_raw_data{scto_row_num}"]) > 1000:
+                    st.warning("Data preview is limited to 1000 rows.")
+                    st.dataframe(
+                        st.session_state[f"scto_raw_data{scto_row_num}"][:1000]
+                    )
+                else:
+                    st.dataframe(st.session_state[f"scto_raw_data{scto_row_num}"])
 
 
 # --- LOCAL STORAGE CONNECTOR ---#

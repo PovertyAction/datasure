@@ -143,6 +143,11 @@ def progress_report(data, page_num) -> None:
 
     col1, col2, col3 = st.columns(3)
 
+    # Check that required options have been selected. If not, display a info message
+    if not all([survey_id, survey_key, consent, outcome]):
+        st.info("Please select all required options to generate the progress report")
+        return
+
     with col1:
         # Add CSS to ensure table width matches selectbox
         st.markdown(
