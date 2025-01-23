@@ -993,9 +993,13 @@ def scto_import_data(
         # download form definition
         questions, _ = scto_get_xls(scto, form_id)
 <<<<<<< HEAD
+<<<<<<< HEAD
         questions = questions[questions["disabled"] != "yes"]
 =======
 >>>>>>> 7f9f3dd (restructured files and folders)
+=======
+        questions = questions[questions["disabled"] != "yes"]
+>>>>>>> fd2808e (fixed date conversion error in import)
 
         # Mark all repeat fields in the XLS file
 
@@ -1062,11 +1066,14 @@ def scto_import_data(
 >>>>>>> 8bdaf0d (linter clean-up)
             cols = scto_get_repeat_cols(row["name"], repeat_fields)
 
-            if row["type"] in ["date"]:
+            if row["type"] in ["date", "datetime", "time"]:
                 scto_data[cols] = scto_data[cols].astype("datetime64[ns]")
+<<<<<<< HEAD
             elif row["type"] in ["datetime", "time"]:
                 scto_data[cols] = pd.to_datetime(scto_data[cols])
 >>>>>>> 7f9f3dd (restructured files and folders)
+=======
+>>>>>>> fd2808e (fixed date conversion error in import)
             elif row["type"] in ["integer", "decimal"]:
                 # scto_data[cols] = pd.to_numeric(scto_data[cols])
                 pass
