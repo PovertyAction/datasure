@@ -43,6 +43,23 @@ DP_NUM_FUNCS: tuple = (
 
 DP_DATETIME_FUNCS: tuple = ("day", "week", "month", "year", "second", "minute", "hour")
 
+DP_ROW_CONDITIONS: tuple = (
+    "value is missing",
+    "value is not missing",
+    "value is equal to",
+    "value is not equal to",
+    "value is greater than",
+    "value is less than",
+    "value is greater than or equal to",
+    "value is less than or equal to",
+    "value is between",
+    "value is not between",
+    "value is in list",
+    "value is not in list",
+    "value is like",
+    "value is not like",
+)
+
 # -- DATA PREP PAGE --#
 # Creates page for data preprocessing
 
@@ -81,7 +98,11 @@ if show_prep_page_info:
             data_name = f"script_raw_data{d_i}"
 
         # save a copy of the raw dataset as the initial prepped dataset
-        st.session_state[f"prepped_data{i}"] = st.session_state[f"{data_name}"].copy()
+        st.session_state[f"raw_data_prep{i}"] = st.session_state[f"{data_name}"].copy()
+        if f"prepped_data{i}" not in st.session_state:
+            st.session_state[f"prepped_data{i}"] = st.session_state[
+                f"{data_name}"
+            ].copy()
 
         # count rows, columns, number missing & percent missing
         row_count: int = len(st.session_state[f"prepped_data{i}"].index)
@@ -197,16 +218,44 @@ if show_prep_page_info:
                                 help="Enter row index to delete eg. 1, 2, 3, -5, 5:-2",
                                 key=f"st_sb_del_rows_idx{i}",
                             )
+                            if dp_prep_del_rows_idx:
+                                dp_prep_del_rows_idx_list = (
+                                    dp_prep_del_rows_idx.replace(" ", "").split(",")
+                                )
+                                dp_prep_del_rows_idx_list = [
+                                    int(i) for i in dp_prep_del_rows_idx_list
+                                ]
 
-                            description = f"Delete row(s) '{dp_prep_del_rows_idx}'"
+                                description = f"delete row(s) by index {dp_prep_del_rows_idx_list}"
 
                         if dp_prep_del_rows == "by condition":
-                            dp_prep_del_rows_cond = st.text_input(
+                            dp_prep_del_rows_cond = st.selectbox(
                                 label="Enter condition",
+                                options=DP_ROW_CONDITIONS,
                                 help="Enter condition to delete rows eg. 'column_name == value'",
                                 key=f"st_sb_del_rows_cond{i}",
                             )
-                            description = f"delete row(s) '{dp_prep_del_rows_cond}'"
+                            if dp_prep_del_rows_cond:
+                                dp_prep_del_rows_cond_cols = st.multiselect(
+                                    label="Select column to apply conditions to",
+                                    options=all_cols,
+                                    help="Select column to apply conditions to, you may select multiple columns",
+                                    key=f"st_sb_del_rows_cond_cols{i}",
+                                )
+
+                                description = f"delete row(s) by condition '{dp_prep_del_rows_cond}' on columns {dp_prep_del_rows_cond_cols}"
+
+                                if dp_prep_del_rows_cond in [
+                                    "value is equal to",
+                                    "value is not equal to",
+                                ]:
+                                    dp_prep_del_rows_cond_val = st.text_input(
+                                        label="Enter value",
+                                        help="Enter value to compare",
+                                        key=f"st_sb_del_rows_cond_val{i}",
+                                    )
+
+                                    description = f"delete row(s) by condition '{dp_prep_del_rows_cond}' on columns {dp_prep_del_rows_cond_cols} with value '{dp_prep_del_rows_cond_val}'"
 
                     # apply button
                     dp_prep_apply_btn = st.button(
@@ -245,9 +294,9 @@ if show_prep_page_info:
                     # save form information
                     prep_config_filename = f"cache/pyDMS_prep_cache_{i}.json"
                     prep_logs_mod.to_json(prep_config_filename)
-
                     st.session_state[f"prep_log{i}"] = prep_logs_mod
 
+                    prep_apply_action(index=i)
                     st.success("Configuration saved successfully!")
 
             # display preview of peppered data
