@@ -143,8 +143,6 @@ def enumerator_report(data, page_num) -> None:
         # define a save settings button
         save_settings = st.button("Save settings", key="save_settings_enumerator")  # noqa: F841
 
-    col1, col2 = st.columns(2)
-
     # Check that required options have been selected. If not, display a info message
     if not all(
         [
@@ -162,6 +160,169 @@ def enumerator_report(data, page_num) -> None:
     ):
         st.info("Please select all required options to generate the enumerator report")
         return
+
+    # quick overview metrics
+    st.subheader("Enumerator Statistics Overview")
+    data[date] = pd.to_datetime(data[date])
+    data = data.sort_values(by=[enumerator, date])
+    data["submission_date_clean"] = data[date].dt.strftime("%b %d, %Y")
+    daily_submissions_sum = (
+        data.groupby(["submission_date_clean", enumerator])[survey_key]
+        .count()
+        .rename("count")
+        .reset_index()
+    )
+    active_date_cut_off = pd.to_datetime("today").date() - pd.Timedelta(weeks=1)
+    daily_submissions_sum["active"] = pd.to_datetime(
+        data["submission_date_clean"]
+    ) > pd.to_datetime(active_date_cut_off)
+    num_active_enumerators = daily_submissions_sum[daily_submissions_sum["active"]][
+        enumerator
+    ].unique()
+
+    m1, m2, m3 = st.columns(3)
+    num_enumerators = data[enumerator].nunique()
+    num_teams = data[team].nunique() if team else "NA"
+    min_submissions = daily_submissions_sum["count"].min()
+    max_submissions = daily_submissions_sum["count"].max()
+    avg_submissions = int(daily_submissions_sum["count"].mean())
+
+    pct_active_enumerators = (
+        f"{(len(num_active_enumerators) / num_enumerators) * 100:.0f}%"
+    )
+
+    m1.metric("Total number of enumerators", num_enumerators)
+    m2.metric("Total number of teams", num_teams)
+    m3.metric("Active enumerators (past 1 week)", pct_active_enumerators)
+
+    n1, n2, n3 = st.columns(3)
+    n1.metric("Minimum number of submissions", min_submissions)
+    n2.metric("Highest number of submissions", max_submissions)
+    n3.metric("Average number of submissions", avg_submissions)
+
+    # Enumerator summary table
+    summary_df = (
+        data.groupby(enumerator)
+        .agg(
+            first_submission=("submission_date_clean", "first"),
+            last_submission=("submission_date_clean", "last"),
+            total_submissions=(survey_key, "count"),
+            total_days_worked=("submission_date_clean", "nunique"),
+        )
+        .reset_index()
+        .rename(
+            columns={
+                "first_submission": "first date",
+                "last_submission": "last date",
+                "total_submissions": "# of submissions",
+                "total_days_worked": "# of days worked",
+            }
+        )
+    )
+
+    # Calculate number of submissions this month, week, and day
+    today = pd.to_datetime("today").normalize()
+    start_of_month = today.replace(day=1)
+    start_of_week = today - pd.Timedelta(days=today.weekday())
+
+    data["submission_date_clean"] = pd.to_datetime(data["submission_date_clean"])
+    summary_df["# of submissions (today)"] = (
+        data[data["submission_date_clean"] == today.strftime("%b %d, %Y")]
+        .groupby(enumerator)[survey_key]
+        .count()
+        .reindex(summary_df[enumerator])
+        .fillna(0)
+        .astype(int)
+        .values
+    )
+    summary_df["# of submissions (this week)"] = (
+        data[data["submission_date_clean"] >= start_of_week]
+        .groupby(enumerator)[survey_key]
+        .count()
+        .reindex(summary_df[enumerator])
+        .fillna(0)
+        .astype(int)
+        .values
+    )
+    summary_df["# of submissions (this month)"] = (
+        data[data["submission_date_clean"] >= start_of_month]
+        .groupby(enumerator)[survey_key]
+        .count()
+        .reindex(summary_df[enumerator])
+        .fillna(0)
+        .astype(int)
+        .values
+    )
+
+    summary_df["minimum duration"] = (
+        data.groupby(enumerator)[duration].min().reindex(summary_df[enumerator]).values
+    )
+    summary_df["median duration"] = (
+        data.groupby(enumerator)[duration]
+        .median()
+        .reindex(summary_df[enumerator])
+        .values
+    )
+    summary_df["mean duration"] = (
+        data.groupby(enumerator)[duration].mean().reindex(summary_df[enumerator]).values
+    )
+    summary_df["maximum duration"] = (
+        data.groupby(enumerator)[duration].max().reindex(summary_df[enumerator]).values
+    )
+
+    # Calculate percentage of missing values for each enumerator
+    data_cols = [x for x in data.columns if x != enumerator]
+    max_vals_count = data.shape[0] * len(data_cols)
+    missing_values_df = data.pivot_table(
+        index=enumerator, values=data_cols, aggfunc=lambda x: x.isna().sum()
+    ).reset_index()
+    missing_values_df["missing"] = missing_values_df.iloc[:, 1:].sum(axis=1)
+    missing_values_df["% missing"] = (
+        missing_values_df["missing"] / max_vals_count * 100
+    ).apply(lambda x: f"{x:.0f}%")
+    missing_values_df = missing_values_df[[enumerator, "% missing"]]
+
+    # Merge missing values percentage with summary_df
+    summary_df = summary_df.merge(missing_values_df, on=enumerator, how="left")
+    st.dataframe(summary_df, hide_index=True)
+
+    # Toggle for days, weeks, or months view
+    st.subheader("Enumerator Productivity")
+    view_option = st.radio(
+        "Select View:",
+        ("Days", "Weeks", "Months"),
+        index=0,
+        key="view_option_enumerator",
+        horizontal=True,
+    )
+
+    # Create a new column for the selected view option
+    if view_option == "Days":
+        data["view_period"] = data[date].dt.strftime("%d-%m-%Y")
+    elif view_option == "Weeks":
+        data["view_period"] = data[date].dt.strftime("%U-%Y")
+    else:
+        data["view_period"] = data[date].dt.strftime("%b-%Y")
+
+    # Group by enumerator and the selected view period
+    view_summary_df = (
+        data.groupby([enumerator, "view_period"])
+        .agg(total_submissions=(survey_key, "count"))
+        .reset_index()
+    )
+
+    # Pivot the table to have view periods as columns
+    view_summary_pivot = view_summary_df.pivot_table(
+        index=enumerator,
+        columns="view_period",
+        values="total_submissions",
+        fill_value=0,
+    ).reset_index()
+
+    # Display view summary
+    st.dataframe(view_summary_pivot, hide_index=True, use_container_width=True)
+
+    col1, col2 = st.columns(2)
 
     with col1:
         # Radio button for calculations
