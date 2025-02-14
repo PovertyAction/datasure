@@ -60,7 +60,7 @@ def enumerator_report(data, page_num) -> None:
             by = st.selectbox(
                 "Group by",
                 options=survey_cols,
-                help="Column to group summary report by by",
+                help="Column to group summary report by",
                 key="groupby_enumerator",
                 index=None,
             )
@@ -162,7 +162,7 @@ def enumerator_report(data, page_num) -> None:
         return
 
     # quick overview metrics
-    st.subheader("Enumerator Statistics Overview")
+    st.subheader("Overview")
     data[date] = pd.to_datetime(data[date])
     data = data.sort_values(by=[enumerator, date])
     data["submission_date_clean"] = data[date].dt.strftime("%b %d, %Y")
@@ -182,7 +182,7 @@ def enumerator_report(data, page_num) -> None:
 
     m1, m2, m3 = st.columns(3)
     num_enumerators = data[enumerator].nunique()
-    num_teams = data[team].nunique() if team else "NA"
+    num_teams = data[team].nunique() if team else "n/a"
     min_submissions = daily_submissions_sum["count"].min()
     max_submissions = daily_submissions_sum["count"].max()
     avg_submissions = int(daily_submissions_sum["count"].mean())
@@ -287,7 +287,7 @@ def enumerator_report(data, page_num) -> None:
     st.dataframe(summary_df, hide_index=True)
 
     # Toggle for days, weeks, or months view
-    st.subheader("Enumerator Productivity")
+    st.markdown("##### Productivity")
     view_option = st.radio(
         "Select View:",
         ("Days", "Weeks", "Months"),
@@ -304,14 +304,14 @@ def enumerator_report(data, page_num) -> None:
     else:
         data["view_period"] = data[date].dt.strftime("%b-%Y")
 
-    # Group by enumerator and the selected view period
+    # create summary for the selected period
     view_summary_df = (
         data.groupby([enumerator, "view_period"])
         .agg(total_submissions=(survey_key, "count"))
         .reset_index()
     )
 
-    # Pivot the table to have view periods as columns
+    # create a pivot table for the view summary
     view_summary_pivot = view_summary_df.pivot_table(
         index=enumerator,
         columns="view_period",
@@ -321,6 +321,38 @@ def enumerator_report(data, page_num) -> None:
 
     # Display view summary
     st.dataframe(view_summary_pivot, hide_index=True, use_container_width=True)
+
+    # create enumerator statistics
+    st.markdown("##### Statistics")
+    selected_columns = st.multiselect(
+        "Select columns:",
+        options=survey_cols,
+        help="Select columns to include in statistics",
+        key="selected_columns_enumerator",
+    )
+
+    if selected_columns:
+        # Create pivot table
+        enum_statistics = (
+            data.pivot_table(
+                index=enumerator,
+                values=selected_columns,
+                aggfunc=["count", "min", "mean", "median", "max"],
+            )
+            .swaplevel(1, 0, axis=1)
+            .sort_index(axis=1)
+            .reset_index()
+        )
+
+        # clean multi-index columns
+        enum_statistics = enum_statistics.rename(
+            columns={enumerator: "", "": enumerator}
+        )
+
+        # display enumerator statistics
+        st.dataframe(enum_statistics, hide_index=True, use_container_width=True)
+    else:
+        st.info("Please select columns for enumerator statistics.")
 
     col1, col2 = st.columns(2)
 
