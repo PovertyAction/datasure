@@ -165,16 +165,16 @@ def enumerator_report(data, page_num) -> None:
     st.subheader("Overview")
     data[date] = pd.to_datetime(data[date])
     data = data.sort_values(by=[enumerator, date])
-    data["submission_date_clean"] = data[date].dt.strftime("%b %d, %Y")
+    data["submission_date_format"] = data[date].dt.strftime("%b %d, %Y")
     daily_submissions_sum = (
-        data.groupby(["submission_date_clean", enumerator])[survey_key]
+        data.groupby(["submission_date_format", enumerator])[survey_key]
         .count()
         .rename("count")
         .reset_index()
     )
     active_date_cut_off = pd.to_datetime("today").date() - pd.Timedelta(weeks=1)
     daily_submissions_sum["active"] = pd.to_datetime(
-        data["submission_date_clean"]
+        data["submission_date_format"]
     ) > pd.to_datetime(active_date_cut_off)
     num_active_enumerators = daily_submissions_sum[daily_submissions_sum["active"]][
         enumerator
@@ -204,10 +204,10 @@ def enumerator_report(data, page_num) -> None:
     summary_df = (
         data.groupby(enumerator)
         .agg(
-            first_submission=("submission_date_clean", "first"),
-            last_submission=("submission_date_clean", "last"),
+            first_submission=("submission_date_format", "first"),
+            last_submission=("submission_date_format", "last"),
             total_submissions=(survey_key, "count"),
-            total_days_worked=("submission_date_clean", "nunique"),
+            total_days_worked=("submission_date_format", "nunique"),
         )
         .reset_index()
         .rename(
@@ -225,9 +225,9 @@ def enumerator_report(data, page_num) -> None:
     start_of_month = today.replace(day=1)
     start_of_week = today - pd.Timedelta(days=today.weekday())
 
-    data["submission_date_clean"] = pd.to_datetime(data["submission_date_clean"])
+    data["submission_date_format"] = pd.to_datetime(data["submission_date_format"])
     summary_df["# of submissions (today)"] = (
-        data[data["submission_date_clean"] == today.strftime("%b %d, %Y")]
+        data[data["submission_date_format"] == today.strftime("%b %d, %Y")]
         .groupby(enumerator)[survey_key]
         .count()
         .reindex(summary_df[enumerator])
@@ -236,7 +236,7 @@ def enumerator_report(data, page_num) -> None:
         .values
     )
     summary_df["# of submissions (this week)"] = (
-        data[data["submission_date_clean"] >= start_of_week]
+        data[data["submission_date_format"] >= start_of_week]
         .groupby(enumerator)[survey_key]
         .count()
         .reindex(summary_df[enumerator])
@@ -245,7 +245,7 @@ def enumerator_report(data, page_num) -> None:
         .values
     )
     summary_df["# of submissions (this month)"] = (
-        data[data["submission_date_clean"] >= start_of_month]
+        data[data["submission_date_format"] >= start_of_month]
         .groupby(enumerator)[survey_key]
         .count()
         .reindex(summary_df[enumerator])
