@@ -72,8 +72,6 @@ DP_ROW_CONDITIONS: tuple = (
     "value is less than or equal to",
     "value is between",
     "value is not between",
-    "value is in list",
-    "value is not in list",
     "value is like",
     "value is not like",
 )
@@ -1254,6 +1252,10 @@ if show_prep_page_info:
                                 if dp_prep_del_rows_cond in [
                                     "value is equal to",
                                     "value is not equal to",
+                                    "value is greater than",
+                                    "value is less than",
+                                    "value is greater than or equal to",
+                                    "value is less than or equal to",
                                 ]:
                                     dp_prep_del_rows_cond_val = st.text_input(
                                         label="Enter value",
@@ -1262,6 +1264,34 @@ if show_prep_page_info:
                                     )
 
                                     description = f"delete row(s) by condition '{dp_prep_del_rows_cond}' on columns {dp_prep_del_rows_cond_cols} with value '{dp_prep_del_rows_cond_val}'"
+
+                                if dp_prep_del_rows_cond in [
+                                    "value is between",
+                                    "value is not between",
+                                ]:
+                                    dp_prep_del_rows_cond_val_min = st.text_input(
+                                        label="Enter minimum value",
+                                        help="Enter minimum value to compare",
+                                        key=f"st_sb_del_rows_cond_val_min{i}",
+                                    )
+                                    dp_prep_del_rows_cond_val_max = st.text_input(
+                                        label="Enter maximum value",
+                                        help="Enter maximum value to compare",
+                                        key=f"st_sb_del_rows_cond_val_max{i}",
+                                    )
+
+                                    description = f"delete row(s) by condition '{dp_prep_del_rows_cond}' on columns {dp_prep_del_rows_cond_cols} with values {dp_prep_del_rows_cond_val_min} and {dp_prep_del_rows_cond_val_max}"
+                                if dp_prep_del_rows_cond in [
+                                    "value is like",
+                                    "value is not like",
+                                ]:
+                                    dp_prep_del_rows_cond_val = st.text_input(
+                                        label="Enter pattern",
+                                        help="Enter pattern to match. You can use regular expressions",
+                                        key=f"st_sb_del_rows_cond_val{i}",
+                                    )
+
+                                    description = f"delete row(s) by condition '{dp_prep_del_rows_cond}' on columns {dp_prep_del_rows_cond_cols} with pattern '{dp_prep_del_rows_cond_val}'"
 
                     # apply button
                     dp_prep_apply_btn = st.button(

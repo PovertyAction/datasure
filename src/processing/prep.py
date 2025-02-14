@@ -677,5 +677,81 @@ def prep_delete_rows(index: int, description: str):
                 st.session_state[f"prepped_data{index}"].query(
                     f"{cols} in {values_use}", inplace=True
                 )
+<<<<<<< HEAD
 >>>>>>> bfec7b1 (added 6 initial functions for deleting rows)
+<<<<<<< HEAD
 >>>>>>> 519bdc1 (added 6 initial functions for deleting rows)
+=======
+=======
+        elif condition in [
+            "value is greater than",
+            "value is greater than or equal to",
+            "value is less than",
+            "" "value is less than or equal to",
+        ]:
+            value = (
+                re.search(r"with value.+", description)
+                .group(0)
+                .replace("with value ", "")
+                .replace("'", "")
+            )
+            value = int(value)
+            cols = eval(cols)[0]
+            if condition == "value is greater than":
+                st.session_state[f"prepped_data{index}"] = st.session_state[
+                    f"prepped_data{index}"
+                ].query(f"{cols} <= {value}")
+            elif condition == "value is greater than or equal to":
+                st.session_state[f"prepped_data{index}"] = st.session_state[
+                    f"prepped_data{index}"
+                ].query(f"{cols} < {value}")
+            elif condition == "value is less than":
+                st.session_state[f"prepped_data{index}"] = st.session_state[
+                    f"prepped_data{index}"
+                ].query(f"{cols} >= {value}")
+            elif condition == "value is less than or equal to":
+                st.session_state[f"prepped_data{index}"] = st.session_state[
+                    f"prepped_data{index}"
+                ].query(f"{cols} > {value}")
+        elif condition in ["value is between", "value is not between"]:
+            values = (
+                re.search(r"with values.+", description)
+                .group(0)
+                .replace("with values ", "")
+                .replace("'", "")
+            )
+            values = values.split(" and ")
+            values_use = []
+            for value in values:
+                if value.isdigit():
+                    values_use.append(int(value))
+                else:
+                    values_use.append(value)
+
+            cols = eval(cols)[0]
+            if condition == "value is between":
+                st.session_state[f"prepped_data{index}"] = st.session_state[
+                    f"prepped_data{index}"
+                ].query(f"{cols} < {values_use[0]} or {cols} > {values_use[1]}")
+            else:
+                st.session_state[f"prepped_data{index}"] = st.session_state[
+                    f"prepped_data{index}"
+                ].query(f"{cols} >= {values_use[0]} and {cols} <= {values_use[1]}")
+        elif condition in ["value is like", "value is not like"]:
+            value = (
+                re.search(r"with pattern.+", description)
+                .group(0)
+                .replace("with pattern ", "")
+                .replace("'", "")
+            )
+            cols = eval(cols)[0]
+            if condition == "value is like":
+                st.session_state[f"prepped_data{index}"] = st.session_state[
+                    f"prepped_data{index}"
+                ].query(f"not {cols}.str.contains('{value}')", engine="python")
+            else:
+                st.session_state[f"prepped_data{index}"] = st.session_state[
+                    f"prepped_data{index}"
+                ].query(f"{cols}.str.contains('{value}')", engine="python")
+>>>>>>> dbb7780 (add other prep delete rows func)
+>>>>>>> b379602 (add other prep delete rows func)
