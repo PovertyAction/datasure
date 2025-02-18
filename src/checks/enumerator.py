@@ -105,7 +105,7 @@ def enumerator_report(data, page_num) -> None:
 
             if consent:
                 consent_options = data[consent].unique().tolist()
-                consent_val = st.multiselect(  # noqa: F841
+                consent_val = st.multiselect(
                     "Consent value(s)",
                     options=consent_options,
                     help="Value(s) indicating valid consent",
@@ -301,6 +301,14 @@ def enumerator_report(data, page_num) -> None:
         data["view_period"] = data[date].dt.strftime("%d-%m-%Y")
     elif view_option == "Weeks":
         data["view_period"] = data[date].dt.strftime("%U-%Y")
+        data["view_period"] = data["view_period"].astype(str)
+        data = data.sort_values(by=["view_period"])
+        data["view_period"] = (
+            data["view_period"]
+            .rank(method="dense")
+            .astype(int)
+            .apply(lambda x: f"week {x}")
+        )
     else:
         data["view_period"] = data[date].dt.strftime("%b-%Y")
 
@@ -318,6 +326,9 @@ def enumerator_report(data, page_num) -> None:
         values="total_submissions",
         fill_value=0,
     ).reset_index()
+    view_summary_pivot.insert(
+        1, "Total submissions", view_summary_pivot.sum(axis=1, numeric_only=True)
+    )
 
     # Display view summary
     st.dataframe(view_summary_pivot, hide_index=True, use_container_width=True)
@@ -466,7 +477,7 @@ def enumerator_report(data, page_num) -> None:
                 filtered_df.groupby(enumerator, observed=False)
                 .agg(
                     total_persons=(survey_id, "size"),
-                    consented_persons=(consent, lambda x: (x == 1).sum()),
+                    consented_persons=(consent, lambda x: (x.isin(consent_val)).sum()),
                 )
                 .reset_index()
             )
