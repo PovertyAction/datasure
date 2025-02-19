@@ -299,25 +299,105 @@ def enumerator_report(data, page_num) -> None:
     # Create a new column for the selected view option
     if view_option == "Days":
         data["view_period"] = data[date].dt.strftime("%d-%m-%Y")
-    elif view_option == "Weeks":
-        data["view_period"] = data[date].dt.strftime("%U-%Y")
-        data["view_period"] = data["view_period"].astype(str)
-        data = data.sort_values(by=["view_period"])
-        data["view_period"] = (
-            data["view_period"]
-            .rank(method="dense")
-            .astype(int)
-            .apply(lambda x: f"week {x}")
+        view_summary_df = (
+            data.groupby([enumerator, "view_period"])
+            .agg(total_submissions=(survey_key, "count"))
+            .reset_index()
         )
+    elif view_option == "Weeks":
+        week_start_day_options = st.selectbox(
+            label="Select the first day of the week",
+            options=[
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday",
+                "Saturday",
+                "Sunday",
+            ],
+            index=0,
+            key="project_week_start_day",
+        )
+        week_start_day = "W-" + str.upper(week_start_day_options[:3])
+        week_start_end_dict = {
+            "W-SUN": "W-SAT",
+            "W-MON": "W-SUN",
+            "W-TUE": "W-MON",
+            "W-WED": "W-TUE",
+            "W-THU": "W-WED",
+            "W-FRI": "W-THU",
+            "W-SAT": "W-FRI",
+        }
+        week_end_day = week_start_end_dict[week_start_day]
+
+        data["view_period"] = pd.to_datetime(
+            data[date].dt.strftime("%d-%m-%Y"), dayfirst=True
+        )
+        data["view_period"] = (
+            data["view_period"].dt.to_period(week_end_day).dt.start_time
+        )
+
+        first_submission_date = min([d.date() for d in data["view_period"].unique()])
+        last_submission_date = max([d.date() for d in data["view_period"].unique()])
+
+        first_submission_week_date = (
+            pd.to_datetime(first_submission_date)
+            .to_period(week_end_day)
+            .to_timestamp()
+            .date()
+        )
+        last_submission_week_date = (
+            pd.to_datetime(last_submission_date)
+            .to_period(week_end_day)
+            .to_timestamp()
+            .date()
+        )
+
+        starting_week_dates = pd.date_range(
+            start=first_submission_week_date,
+            end=last_submission_week_date,
+            freq=week_start_day,
+        )
+
+        starting_week_dates_dict = {}
+        enum_list = [c for c in data[enumerator].unique()]
+        for d in starting_week_dates:
+            starting_week_dates_dict[d] = enum_list
+
+        starting_week_dates_df = pd.DataFrame(
+            starting_week_dates_dict.items(), columns=["view_period", enumerator]
+        )
+        enum_list_df = pd.DataFrame(starting_week_dates_df[enumerator].explode())
+        starting_week_dates_df = pd.merge(
+            enum_list_df,
+            starting_week_dates_df["view_period"],
+            left_index=True,
+            right_index=True,
+        )
+
+        view_summary_df = (
+            data.groupby([enumerator, "view_period"])
+            .agg(total_submissions=(survey_key, "count"))
+            .reset_index()
+        )
+        view_summary_df = pd.merge(
+            starting_week_dates_df,
+            view_summary_df,
+            on=["enumerator", "view_period"],
+            how="left",
+        ).fillna(0)
+        view_summary_df["view_period"] = pd.to_datetime(
+            view_summary_df["view_period"]
+        ).dt.strftime("%d-%m-%Y")
+
     else:
         data["view_period"] = data[date].dt.strftime("%b-%Y")
-
-    # create summary for the selected period
-    view_summary_df = (
-        data.groupby([enumerator, "view_period"])
-        .agg(total_submissions=(survey_key, "count"))
-        .reset_index()
-    )
+        view_summary_df = (
+            data.groupby([enumerator, "view_period"])
+            .agg(total_submissions=(survey_key, "count"))
+            .reset_index()
+        )
 
     # create a pivot table for the view summary
     view_summary_pivot = view_summary_df.pivot_table(
@@ -335,35 +415,66 @@ def enumerator_report(data, page_num) -> None:
 
     # create enumerator statistics
     st.markdown("##### Statistics")
-    selected_columns = st.multiselect(
-        "Select columns:",
-        options=survey_cols,
-        help="Select columns to include in statistics",
-        key="selected_columns_enumerator",
-    )
-
-    if selected_columns:
-        # Create pivot table
-        enum_statistics = (
-            data.pivot_table(
-                index=enumerator,
-                values=selected_columns,
-                aggfunc=["count", "min", "mean", "median", "max"],
+    s1, s2 = st.columns(2)
+    with s1:
+        selected_columns = st.multiselect(
+            "Select columns:",
+            options=data.select_dtypes("number").columns,
+            help="Select columns to include in statistics",
+            key="selected_columns_enumerator",
+        )
+    with s2:
+        statistics_options = st.multiselect(
+            "Select statistics:",
+            options=[
+                "count",
+                "min",
+                "mean",
+                "median",
+                "max",
+                "std",
+                "25th percentile",
+                "75th percentile",
+            ],
+            default=["count", "min", "mean", "max"],
+            help="Select statistics to calculate",
+            key="statistics_options_enumerator",
+        )
+    if selected_columns and statistics_options:
+        try:
+            stats_options_list = {
+                "count": "count",
+                "min": "min",
+                "mean": "mean",
+                "median": "median",
+                "max": "max",
+                "std": "std",
+                "25th percentile": pd.NamedAgg(
+                    column="25th percentile", aggfunc=lambda x: x.quantile(0.25)
+                ),
+                "75th percentile": pd.NamedAgg(
+                    column="75th percentile", aggfunc=lambda x: x.quantile(0.75)
+                ),
+            }
+            stat_func_list = [stats_options_list[col] for col in statistics_options]
+            enum_statistics = (
+                data[[enumerator] + selected_columns]
+                .groupby(enumerator)
+                .agg(stat_func_list)
+                .reset_index()
             )
-            .swaplevel(1, 0, axis=1)
-            .sort_index(axis=1)
-            .reset_index()
-        )
 
-        # clean multi-index columns
-        enum_statistics = enum_statistics.rename(
-            columns={enumerator: "", "": enumerator}
-        )
+            # # clean multi-index columns
+            enum_statistics = enum_statistics.rename(
+                columns={enumerator: "", "": enumerator}
+            )
 
-        # display enumerator statistics
-        st.dataframe(enum_statistics, hide_index=True, use_container_width=True)
+            # display enumerator statistics
+            st.dataframe(enum_statistics, hide_index=True, use_container_width=True)
+        except Exception as e:
+            st.write(e)
     else:
-        st.info("Please select columns for enumerator statistics.")
+        st.info("Please select columns and statistics to display.")
 
     col1, col2 = st.columns(2)
 
