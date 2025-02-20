@@ -41,6 +41,9 @@ def enumerator_report(data, page_num) -> None:
                 key="duration_enumerator",
                 index=None,
             )
+            if duration:
+                duration_in_minutes = st.toggle("Calculate duration in minutes")
+
             date = st.selectbox(
                 "Date",
                 options=survey_cols,
@@ -254,6 +257,10 @@ def enumerator_report(data, page_num) -> None:
         .values
     )
 
+    # convert duration to minutes if necessary
+    if duration_in_minutes:
+        data[duration] = data[duration].apply(lambda x: round(x / 60, 1))
+
     summary_df["minimum duration"] = (
         data.groupby(enumerator)[duration].min().reindex(summary_df[enumerator]).values
     )
@@ -271,16 +278,22 @@ def enumerator_report(data, page_num) -> None:
     )
 
     # Calculate percentage of missing values for each enumerator
+    def calculate_missing_values(data, data_cols, index_cols):
+        max_vals_count = data.shape[0] * len(data_cols)
+        missing_values_df = data.pivot_table(
+            index=index_cols, values=data_cols, aggfunc=lambda x: x.isna().sum()
+        ).reset_index()
+        missing_values_df["missing"] = missing_values_df.iloc[:, len(index_cols) :].sum(
+            axis=1
+        )
+        missing_values_df["% missing"] = (
+            missing_values_df["missing"] / max_vals_count * 100
+        ).apply(lambda x: f"{x:.0f}%")
+        return missing_values_df[index_cols + ["% missing"]]
+
+    index_cols = ["enumerator"]
     data_cols = [x for x in data.columns if x != enumerator]
-    max_vals_count = data.shape[0] * len(data_cols)
-    missing_values_df = data.pivot_table(
-        index=enumerator, values=data_cols, aggfunc=lambda x: x.isna().sum()
-    ).reset_index()
-    missing_values_df["missing"] = missing_values_df.iloc[:, 1:].sum(axis=1)
-    missing_values_df["% missing"] = (
-        missing_values_df["missing"] / max_vals_count * 100
-    ).apply(lambda x: f"{x:.0f}%")
-    missing_values_df = missing_values_df[[enumerator, "% missing"]]
+    missing_values_df = calculate_missing_values(data, data_cols, index_cols)
 
     # Merge missing values percentage with summary_df
     summary_df = summary_df.merge(missing_values_df, on=enumerator, how="left")
@@ -414,12 +427,14 @@ def enumerator_report(data, page_num) -> None:
     st.dataframe(view_summary_pivot, hide_index=True, use_container_width=True)
 
     # create enumerator statistics
+
     st.markdown("##### Statistics")
     s1, s2 = st.columns(2)
     with s1:
         selected_columns = st.multiselect(
             "Select columns:",
             options=data.select_dtypes("number").columns,
+            default=duration,
             help="Select columns to include in statistics",
             key="selected_columns_enumerator",
         )
@@ -476,471 +491,429 @@ def enumerator_report(data, page_num) -> None:
     else:
         st.info("Please select columns and statistics to display.")
 
-    col1, col2 = st.columns(2)
+    # Graph enumerator statistics
 
-    with col1:
-        # Radio button for calculations
-        calculation_type = st.radio(
-            "Select calculation type:",
-            ("Graph with Overall Results", "Graph with Results per Date"),
-        )
+    # Radio button for calculations
+    calculation_type = st.radio(
+        "Select calculation type:",
+        ("Graph with Overall Results", "Graph with Results per Date"),
+    )
 
-        # Date input for filtering if "Calculations per Date" is selected
-        if calculation_type == "Graph with Results per Date":
-            date_filter = st.date_input("Select date")
-            filtered_df = data[data[date] == pd.to_datetime(date_filter)]
-        else:
-            filtered_df = data
+    # Date input for filtering if "Calculations per Date" is selected
+    if calculation_type == "Graph with Results per Date":
+        date_filter = st.date_input("Select date")
+        filtered_df = data[data[date] == pd.to_datetime(date_filter)]
+    else:
+        filtered_df = data
 
-        # Calculate average duration time per enumerator
-        if filtered_df.shape[0] > 0:
-            average_duration = (
-                filtered_df.groupby(enumerator, observed=False)
-                .agg(avg_duration=(duration, "mean"))
-                .reset_index()
-            )
+    # Calculate average duration time per enumerator
 
-            # Sort values by avg_duration
-            average_duration = average_duration.sort_values(
-                by="avg_duration", ascending=True
-            )
-
-            # Calculate overall average duration
-            overall_avg_duration = average_duration["avg_duration"].mean()
-
-            # Calculate standard deviation
-            std_dev = average_duration["avg_duration"].std()
-
-            # Calculate how many standard deviations away each average
-            # is from the overall average
-            average_duration["std_dev_away"] = (
-                average_duration["avg_duration"] - overall_avg_duration
-            ) / std_dev
-
-            # Create the plot with different colors for each bar
-            fig = px.bar(
-                average_duration,
-                x=enumerator,
-                y="avg_duration",
-                title="Average Duration per Enumerator",
-                labels={
-                    "avg_duration": "Average Duration (minutes)",
-                    enumerator: "Enumerator ID",
-                },
-                color="std_dev_away",  # Color by how many std dev away from the mean
-                color_continuous_scale=px.colors.sequential.Viridis[::-1],
-            )
-
-            fig.update_xaxes(tickangle=90, tickmode="auto")
-
-            # Customize hover template
-            fig.update_traces(
-                hovertemplate="<b>Enumerator ID:</b> %{x}<br>"
-                + "<b>Average Duration:</b> %{y} minutes<br>"
-                + f"<b>Overall Average:</b> {overall_avg_duration:.2f} minutes<br>"
-                + "<b>Standard Deviations Away:</b> %{customdata:.2f}",
-                customdata=average_duration["std_dev_away"].values,
-            )
-
-            # Add overall average line
-            fig.add_hline(y=overall_avg_duration, line_color="red", line_dash="dash")
-
-            fig.update_layout(xaxis=dict(type="category"))
-
-            # Show the figure
-            st.plotly_chart(fig, theme="streamlit", use_container_width=True)
-        else:
-            st.warning("No data available for the selected criteria.")
-
-    with col2:
-        # Add CSS for consistent width
-        st.markdown(
-            """
-		<style>
-			.stDataFrame {
-				width: 100%;
-			}
-			.dataframe {
-				width: 25%;
-			}
-		</style>
-		""",
-            unsafe_allow_html=True,
-        )
-
-        # Checkbox for calculations
-        calculation_type = st.radio(
-            "Select calculation type:",
-            ("Calculations per Period", "Calculations per Date"),
-        )
-
-        # Date input for filtering
-        if calculation_type == "Calculations per Date":
-            date_filter = st.date_input("Select a date")
-            data[date] = pd.to_datetime(data["date_only"])
-            filtered_df = data[data[date] == pd.to_datetime(date_filter)]
-        else:
-            filtered_df = data
-
-        if filtered_df.shape[0] > 0:
-            # Summary calculation for consent data
-            summary = (
-                filtered_df.groupby(enumerator, observed=False)
-                .agg(
-                    total_persons=(survey_id, "size"),
-                    consented_persons=(consent, lambda x: (x.isin(consent_val)).sum()),
-                )
-                .reset_index()
-            )
-
-            # Convert to numeric and calculate consent percentage
-            summary["consented_persons"] = pd.to_numeric(
-                summary["consented_persons"], errors="coerce"
-            )
-            summary["total_persons"] = pd.to_numeric(
-                summary["total_persons"], errors="coerce"
-            )
-            summary["consent_percentage"] = (
-                summary["consented_persons"] / summary["total_persons"]
-            ) * 100
-
-            # Rename columns for consent data
-            summary.rename(
-                columns={
-                    enumerate: "Enumerator ID",
-                    "total_persons": "Total Interviews",
-                    "consented_persons": "Consented Interviews",
-                    "consent_percentage": "Consent Percentage",
-                },
-                inplace=True,
-            )
-
-            # Backcheck analysis
-
-            if analyze_backcheck:
-                # Calculate statistics for original enumerators
-                survey_counts = (
-                    data.groupby("enumid").size().reset_index(name="Total Surveys")
-                )
-
-                # Count how many times each enumerator's work was backchecked
-                backcheck_counts = (
-                    merged_df.groupby("enumid")
-                    .size()
-                    .reset_index(name="Backchecked Interviews")
-                )
-
-                # Get comparable variables
-                comparable_vars = []
-                prefix_pairs = []
-                svy_cols = [col for col in merged_df.columns if col.startswith("svy_")]
-
-                for svy_col in svy_cols:
-                    base_var = svy_col[4:]
-                    back_col = f"back_{base_var}"
-                    if back_col in merged_df.columns:
-                        comparable_vars.append(base_var)
-                        prefix_pairs.append((svy_col, back_col))
-
-                # Count mismatches for each enumerator
-                def count_mismatches(group):
-                    """Count mismatches between survey and backcheck
-                    values for a given group.
-
-                    Args:
-                            group (pd.DataFrame): DataFrame containing
-                            survey and backcheck values.
-
-                    Returns
-                    -------
-                            int: Number of mismatches.
-
-                    """
-                    mismatch_count = 0
-                    for svy_col, back_col in prefix_pairs:
-                        svy_values = group[svy_col].astype(str)
-                        back_values = group[back_col].astype(str)
-                        svy_values = svy_values.replace("nan", "")
-                        back_values = back_values.replace("nan", "")
-                        mismatch_count += (svy_values != back_values).sum()
-                    return mismatch_count
-
-                if len(comparable_vars) > 0:
-                    try:
-                        # Calculate mismatches by enumerator
-                        mismatch_counts = (
-                            merged_df.groupby("enumid")
-                            .apply(count_mismatches)
-                            .reset_index(name="Total Mismatches")
-                        )
-
-                        # Calculate backcheck metrics
-                        backcheck_data = survey_counts.merge(
-                            backcheck_counts, on="enumid", how="left"
-                        )
-
-                        # Fill NaN values with 0 for enumerators with
-                        # no backchecks
-                        backcheck_data["Backchecked Interviews"] = (
-                            backcheck_data["Backchecked Interviews"]
-                            .fillna(0)
-                            .astype(int)
-                        )
-
-                        # Calculate total surveys that can be compared
-                        backcheck_data["Values Compared"] = (
-                            backcheck_data["Backchecked Interviews"]
-                            * len(comparable_vars)
-                        ).astype(int)
-
-                        # Merge with mismatch counts
-                        backcheck_data = backcheck_data.merge(
-                            mismatch_counts, on="enumid", how="left"
-                        )
-
-                        # Fill NaN values for mismatches
-                        backcheck_data["Total Mismatches"] = (
-                            backcheck_data["Total Mismatches"].fillna(0).astype(int)
-                        )
-
-                        # Calculate percentages
-                        backcheck_data["Backchecked Percentage"] = (
-                            backcheck_data["Backchecked Interviews"]
-                            / backcheck_data["Total Surveys"]
-                            * 100
-                        ).round(2)
-
-                        backcheck_data["Mismatch Percentage"] = (
-                            backcheck_data["Total Mismatches"]
-                            / backcheck_data["Values Compared"]
-                            * 100
-                        ).round(2)
-
-                        # Merge consent summary with backcheck data
-                        combined_summary = summary.merge(
-                            backcheck_data,
-                            left_on="Enumerator ID",
-                            right_on="enumid",
-                            how="outer",
-                        )
-
-                        # Clean up the merged dataframe
-                        combined_summary = combined_summary.drop(
-                            ["enumid", "Total Surveys"], axis=1
-                        )
-
-                        # Format percentage columns
-                        combined_summary["Consent Percentage"] = combined_summary[
-                            "Consent Percentage"
-                        ].round(2)
-                        combined_summary["Backchecked Percentage"] = combined_summary[
-                            "Backchecked Percentage"
-                        ].round(2)
-                        combined_summary["Mismatch Percentage"] = combined_summary[
-                            "Mismatch Percentage"
-                        ].round(2)
-
-                        # Define the desired column order
-                        column_order = [
-                            "Enumerator ID",
-                            "Total Interviews",
-                            "Consented Interviews",
-                            "Consent Percentage",
-                            "Backchecked Interviews",
-                            "Backchecked Percentage",
-                            "Values Compared",
-                            "Total Mismatches",
-                            "Mismatch Percentage",
-                        ]
-
-                        # Reorder the columns in the combined_summary DataFrame
-                        combined_summary = combined_summary[column_order]
-
-                        # Display combined summary with the new column order
-                        st.dataframe(
-                            combined_summary,
-                            hide_index=True,
-                            use_container_width=True,
-                            column_config={
-                                "Enumerator ID": st.column_config.Column(width="small"),
-                                "Total Interviews": st.column_config.NumberColumn(
-                                    format="%d", width="small"
-                                ),
-                                "Consented Interviews": st.column_config.NumberColumn(
-                                    format="%d", width="small"
-                                ),
-                                "Consent Percentage": st.column_config.NumberColumn(
-                                    format="%.2f%%", width="small"
-                                ),
-                                "Backchecked Interviews": st.column_config.NumberColumn(
-                                    format="%d", width="small"
-                                ),
-                                "Backchecked Percentage": st.column_config.NumberColumn(
-                                    format="%.2f%%", width="small"
-                                ),
-                                "Values Compared": st.column_config.NumberColumn(
-                                    format="%d", width="small"
-                                ),
-                                "Total Mismatches": st.column_config.NumberColumn(
-                                    format="%d", width="small"
-                                ),
-                                "Mismatch Percentage": st.column_config.NumberColumn(
-                                    format="%.2f%%", width="small"
-                                ),
-                            },
-                        )
-
-                        # Display number of comparable variables
-                        st.write(
-                            f"Note: For backchecks calculations there were found {len(comparable_vars)} comparable variables."
-                        )
-
-                    except Exception as e:
-                        st.error(f"Error calculating combined metrics: {e!s}")
-                else:
-                    st.warning("No comparable variables found for backcheck analysis.")
-            else:
-                st.warning("No backcheck data available. Displaying only consent data.")
-                st.dataframe(
-                    summary,
-                    hide_index=True,
-                    use_container_width=True,
-                    column_config={
-                        "Enumerator ID": st.column_config.Column(width="small"),
-                        "Total Interviews": st.column_config.NumberColumn(
-                            format="%d", width="small"
-                        ),
-                        "Consent Percentage": st.column_config.NumberColumn(
-                            format="%.2f%%", width="small"
-                        ),
-                    },
-                )
-        else:
-            st.warning("No data available for the selected criteria.")
-
-    col3 = st.columns(1)[0]
-
-    with col3:
-        enum_stats_df = data[[date, enumerator, survey_key, duration]].copy()
-
-        # Rename columns for consistency
-        enum_stats_df[date] = pd.to_datetime(enum_stats_df[date])
-
-        # Ensure enumid is of type string
-        enum_stats_df[enumerator] = enum_stats_df[enumerator].astype(str)
-
-        # Calculate average duration time per enumerator
+    if filtered_df.shape[0] > 0:
         average_duration = (
-            enum_stats_df.groupby(enumerator, observed=False)
+            filtered_df.groupby(enumerator, observed=False)
             .agg(avg_duration=(duration, "mean"))
             .reset_index()
         )
 
-        # Calculate overall average duration
-        current_avg_duration = average_duration["avg_duration"].mean()
+        # Sort values by avg_duration
+        average_duration = average_duration.sort_values(
+            by="avg_duration", ascending=True
+        )
 
-        # Compute cumulative count of surveys by enumerator and date
-        enum_stats_df = (
-            enum_stats_df.groupby([date, enumerator])
-            .agg({survey_key: "nunique", duration: "mean"})
+        # Calculate overall average duration
+        overall_avg_duration = average_duration["avg_duration"].mean()
+
+        # Calculate standard deviation
+        std_dev = average_duration["avg_duration"].std()
+
+        # Calculate how many standard deviations away each average
+        duration_units = "minutes" if duration_in_minutes else "seconds"
+
+        # is from the overall average
+        average_duration["std_dev_away"] = (
+            average_duration["avg_duration"] - overall_avg_duration
+        ) / std_dev
+
+        # Create the plot with different colors for each bar
+        fig = px.bar(
+            average_duration,
+            x=enumerator,
+            y="avg_duration",
+            title="Average Duration per Enumerator",
+            labels={
+                "avg_duration": "Average Duration (" + duration_units + ")",
+                enumerator: "Enumerator ID",
+            },
+            color="std_dev_away",  # Color by how many std dev away from the mean
+            color_continuous_scale=px.colors.sequential.Viridis[::-1],
+        )
+
+        fig.update_xaxes(tickangle=90, tickmode="auto")
+
+        # Customize hover template
+        fig.update_traces(
+            hovertemplate="<b>Enumerator ID:</b> %{x}<br>"
+            + "<b>Average Duration:</b> %{y} <br>"
+            + f"<b>Overall Average:</b> {overall_avg_duration:.2f} <br>"
+            + "<b>Standard Deviations Away:</b> %{customdata:.2f}",
+            customdata=average_duration["std_dev_away"].values,
+        )
+
+        # Add overall average line
+        fig.add_hline(y=overall_avg_duration, line_color="red", line_dash="dash")
+
+        fig.update_layout(xaxis=dict(type="category"))
+
+        # Show the figure
+        st.plotly_chart(fig, theme="streamlit", use_container_width=True)
+    else:
+        st.warning("No data available for the selected criteria.")
+
+    # with col2:
+    # Add CSS for consistent width
+    st.markdown(
+        """
+    <style>
+        .stDataFrame {
+            width: 100%;
+        }
+        .dataframe {
+            width: 25%;
+        }
+    </style>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    # Checkbox for calculations
+    calculation_type = st.radio(
+        "Select calculation type:",
+        ("Calculations per Period", "Calculations per Date"),
+    )
+
+    # Date input for filtering
+    if calculation_type == "Calculations per Date":
+        date_filter = st.date_input("Select a date")
+        data[date] = pd.to_datetime(data["date_only"])
+        filtered_df = data[data[date] == pd.to_datetime(date_filter)]
+    else:
+        filtered_df = data
+
+    if filtered_df.shape[0] > 0:
+        # Summary calculation for consent data
+        summary = (
+            filtered_df.groupby(enumerator, observed=False)
+            .agg(
+                total_persons=(survey_id, "size"),
+                consented_persons=(consent, lambda x: (x.isin(consent_val)).sum()),
+            )
             .reset_index()
         )
-        enum_stats_df = enum_stats_df.sort_values(
-            [enumerator, date], ascending=[False, True]
+
+        # Convert to numeric and calculate consent percentage
+        summary["consented_persons"] = pd.to_numeric(
+            summary["consented_persons"], errors="coerce"
         )
-        enum_stats_df["cumsum_surveys"] = enum_stats_df.groupby([enumerator])[
-            survey_key
-        ].cumsum()
-        enum_stats_df = enum_stats_df.sort_values(date, ascending=True)
-
-        # Calculate the min and max of the duration variable
-        y_min = enum_stats_df[duration].min()
-        y_max = enum_stats_df[duration].max()
-
-        # Create cross join of dates and enumerators
-        dates = pd.DataFrame({date: enum_stats_df[date].unique()}).sort_values(
-            date, ascending=True
+        summary["total_persons"] = pd.to_numeric(
+            summary["total_persons"], errors="coerce"
         )
-        enums = pd.DataFrame(
-            {enumerator: enum_stats_df[enumerator].unique()}
-        ).sort_values(enumerator, ascending=True)
-        crossjoin = dates.merge(enums, how="cross")
+        summary["consent_percentage"] = (
+            summary["consented_persons"] / summary["total_persons"]
+        ) * 100
 
-        # Merge the cross join with the original data
-        merged = crossjoin.merge(
-            enum_stats_df, how="left", on=[date, enumerator]
-        ).sort_values([enumerator, date], ascending=[False, True])
-        merged.update(merged.groupby([enumerator]).ffill())
+        # Rename columns for consent data
+        summary.rename(
+            columns={
+                enumerate: "Enumerator ID",
+                "total_persons": "Total Interviews",
+                "consented_persons": "Consented Interviews",
+                "consent_percentage": "Consent Percentage",
+            },
+            inplace=True,
+        )
 
-        # Fill remaining NaN values with 0
-        merged = merged.fillna(0)
+        # Backcheck analysis
 
-        # Ensure all columns are of the correct type
-        merged["cumsum_surveys"] = merged["cumsum_surveys"].astype(float)
-        merged[duration] = merged[duration].astype(float)
+        if analyze_backcheck:
+            # Calculate statistics for original enumerators
+            survey_counts = (
+                data.groupby("enumid").size().reset_index(name="Total Surveys")
+            )
 
-        # Calculate the min and max of the cumulative count
-        x_min = enum_stats_df["cumsum_surveys"].min()
-        x_max = enum_stats_df["cumsum_surveys"].max()
+            # Count how many times each enumerator's work was backchecked
+            backcheck_counts = (
+                merged_df.groupby("enumid")
+                .size()
+                .reset_index(name="Backchecked Interviews")
+            )
 
-        # Create a new format for the date
-        merged["display_date"] = pd.to_datetime(merged[date]).dt.strftime("%m/%d")
+            # Get comparable variables
+            comparable_vars = []
+            prefix_pairs = []
+            svy_cols = [col for col in merged_df.columns if col.startswith("svy_")]
 
-        # Create scatter plot
-        fig = px.scatter(
-            merged,
-            x="cumsum_surveys",
-            y=duration,
-            animation_frame="display_date",
+            for svy_col in svy_cols:
+                base_var = svy_col[4:]
+                back_col = f"back_{base_var}"
+                if back_col in merged_df.columns:
+                    comparable_vars.append(base_var)
+                    prefix_pairs.append((svy_col, back_col))
+
+            # Count mismatches for each enumerator
+            def count_mismatches(group):
+                """Count mismatches between survey and backcheck
+                values for a given group.
+
+                Args:
+                        group (pd.DataFrame): DataFrame containing
+                        survey and backcheck values.
+
+                Returns
+                -------
+                        int: Number of mismatches.
+
+                """
+                mismatch_count = 0
+                for svy_col, back_col in prefix_pairs:
+                    svy_values = group[svy_col].astype(str)
+                    back_values = group[back_col].astype(str)
+                    svy_values = svy_values.replace("nan", "")
+                    back_values = back_values.replace("nan", "")
+                    mismatch_count += (svy_values != back_values).sum()
+                return mismatch_count
+
+            if len(comparable_vars) > 0:
+                try:
+                    # Calculate mismatches by enumerator
+                    mismatch_counts = (
+                        merged_df.groupby("enumid")
+                        .apply(count_mismatches)
+                        .reset_index(name="Total Mismatches")
+                    )
+
+                    # Calculate backcheck metrics
+                    backcheck_data = survey_counts.merge(
+                        backcheck_counts, on="enumid", how="left"
+                    )
+
+                    # Fill NaN values with 0 for enumerators with
+                    # no backchecks
+                    backcheck_data["Backchecked Interviews"] = (
+                        backcheck_data["Backchecked Interviews"].fillna(0).astype(int)
+                    )
+
+                    # Calculate total surveys that can be compared
+                    backcheck_data["Values Compared"] = (
+                        backcheck_data["Backchecked Interviews"] * len(comparable_vars)
+                    ).astype(int)
+
+                    # Merge with mismatch counts
+                    backcheck_data = backcheck_data.merge(
+                        mismatch_counts, on="enumid", how="left"
+                    )
+
+                    # Fill NaN values for mismatches
+                    backcheck_data["Total Mismatches"] = (
+                        backcheck_data["Total Mismatches"].fillna(0).astype(int)
+                    )
+
+                    # Calculate percentages
+                    backcheck_data["Backchecked Percentage"] = (
+                        backcheck_data["Backchecked Interviews"]
+                        / backcheck_data["Total Surveys"]
+                        * 100
+                    ).round(2)
+
+                    backcheck_data["Mismatch Percentage"] = (
+                        backcheck_data["Total Mismatches"]
+                        / backcheck_data["Values Compared"]
+                        * 100
+                    ).round(2)
+
+                    # Merge consent summary with backcheck data
+                    combined_summary = summary.merge(
+                        backcheck_data,
+                        left_on="Enumerator ID",
+                        right_on="enumid",
+                        how="outer",
+                    )
+
+                    # Clean up the merged dataframe
+                    combined_summary = combined_summary.drop(
+                        ["enumid", "Total Surveys"], axis=1
+                    )
+
+                    # Format percentage columns
+                    combined_summary["Consent Percentage"] = combined_summary[
+                        "Consent Percentage"
+                    ].round(2)
+                    combined_summary["Backchecked Percentage"] = combined_summary[
+                        "Backchecked Percentage"
+                    ].round(2)
+                    combined_summary["Mismatch Percentage"] = combined_summary[
+                        "Mismatch Percentage"
+                    ].round(2)
+
+                    # Define the desired column order
+                    column_order = [
+                        "Enumerator ID",
+                        "Total Interviews",
+                        "Consented Interviews",
+                        "Consent Percentage",
+                        "Backchecked Interviews",
+                        "Backchecked Percentage",
+                        "Values Compared",
+                        "Total Mismatches",
+                        "Mismatch Percentage",
+                    ]
+
+                    # Reorder the columns in the combined_summary DataFrame
+                    combined_summary = combined_summary[column_order]
+
+                    # Display combined summary with the new column order
+                    st.dataframe(
+                        combined_summary,
+                        hide_index=True,
+                        use_container_width=True,
+                        column_config={
+                            "Enumerator ID": st.column_config.Column(width="small"),
+                            "Total Interviews": st.column_config.NumberColumn(
+                                format="%d", width="small"
+                            ),
+                            "Consented Interviews": st.column_config.NumberColumn(
+                                format="%d", width="small"
+                            ),
+                            "Consent Percentage": st.column_config.NumberColumn(
+                                format="%.2f%%", width="small"
+                            ),
+                            "Backchecked Interviews": st.column_config.NumberColumn(
+                                format="%d", width="small"
+                            ),
+                            "Backchecked Percentage": st.column_config.NumberColumn(
+                                format="%.2f%%", width="small"
+                            ),
+                            "Values Compared": st.column_config.NumberColumn(
+                                format="%d", width="small"
+                            ),
+                            "Total Mismatches": st.column_config.NumberColumn(
+                                format="%d", width="small"
+                            ),
+                            "Mismatch Percentage": st.column_config.NumberColumn(
+                                format="%.2f%%", width="small"
+                            ),
+                        },
+                    )
+
+                    # Display number of comparable variables
+                    st.write(
+                        f"Note: For backchecks calculations there were found {len(comparable_vars)} comparable variables."
+                    )
+
+                except Exception as e:
+                    st.error(f"Error calculating combined metrics: {e!s}")
+            else:
+                st.warning("No comparable variables found for backcheck analysis.")
+        else:
+            st.warning("No backcheck data available. Displaying only consent data.")
+            st.dataframe(
+                summary,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Enumerator ID": st.column_config.Column(width="small"),
+                    "Total Interviews": st.column_config.NumberColumn(
+                        format="%d", width="small"
+                    ),
+                    "Consent Percentage": st.column_config.NumberColumn(
+                        format="%.2f%%", width="small"
+                    ),
+                },
+            )
+    else:
+        st.warning("No data available for the selected criteria.")
+
+    # enumerator statistics over time
+
+    st.markdown("##### Enumerator Statistics Over Time")
+
+    # Select enumerators to display
+    selected_enumerators = st.multiselect(
+        "Select enumerators:",
+        options=data[enumerator].unique(),
+        default=data[enumerator].unique(),
+        help="Select enumerators to include in the graph",
+        key="selected_enumerators",
+    )
+
+    # Filter data based on selected enumerators
+    filtered_data = data[data[enumerator].isin(selected_enumerators)]
+    filtered_data["submission_date_format"] = pd.to_datetime(
+        filtered_data["submission_date_format"]
+    ).dt.date
+
+    # Select columns to display
+    selected_column = st.selectbox(
+        "Select columns:",
+        options=filtered_data.columns,
+        index=0,
+        help="Select columns to include in the graph",
+        key="selected_columns_graph",
+    )
+
+    # Select statistics to display
+    statistics_option = st.selectbox(
+        "Select a statistic:",
+        options=["count", "mean", "median", "min", "max", "std", "missing"],
+        help="Select statistics to calculate",
+        key="statistics_options_graph",
+    )
+
+    # Calculate statistics
+    if selected_column and statistics_option:
+        # select specific columns
+        filtered_data = filtered_data[
+            [enumerator, "submission_date_format"] + [selected_column]
+        ]
+
+        if statistics_option == "missing":
+            index_cols = [enumerator, "submission_date_format"]
+            data_cols = [x for x in filtered_data.columns if x != enumerator]
+            filtered_enum_statistics = calculate_missing_values(
+                filtered_data, data_cols, index_cols
+            )
+            filtered_enum_statistics["% missing"] = filtered_enum_statistics[
+                "% missing"
+            ].apply(lambda x: int(x.replace("%", "")))
+            selected_column = "% missing"
+        else:
+            filtered_enum_statistics = (
+                filtered_data.groupby([enumerator, "submission_date_format"])
+                .agg(statistics_option)
+                .reset_index()
+                .fillna(0)
+            )
+            filtered_enum_statistics.columns = [
+                enumerator,
+                "submission_date_format",
+            ] + [selected_column]
+        # Create line graph
+        fig = px.line(
+            filtered_enum_statistics,
+            x="submission_date_format",
+            y=selected_column,
             color=enumerator,
-            animation_group=enumerator,
-            size="cumsum_surveys",
-            hover_name=enumerator,
-            range_x=[x_min, x_max],
-            range_y=[y_min, y_max],
-            width=1300,
-            height=600,
+            labels={"value": "Value", "variable": "Statistic"},
+            title="Enumerator Statistics Over Time",
         )
 
-        # Update layout to set axis titles and hide legend
+        # Update layout
         fig.update_layout(
-            xaxis_title="Cumulative Surveys",
-            yaxis_title="Average Duration (minutes)",
-            showlegend=False,
-            sliders=[
-                {
-                    "currentvalue": {
-                        "font": {"size": 8},
-                        "prefix": "Date: ",
-                        "xanchor": "right",
-                        "offset": 10,
-                    },
-                    "pad": {"t": 40},
-                    "len": 0.9,
-                    "x": 0.1,
-                    "y": 0,
-                }
-            ],
+            xaxis_title="",
+            yaxis_title=selected_column,
+            legend_title="Enumerator",
         )
 
-        # Add a dashed line for the overall average duration
-        fig.add_shape(
-            type="line",
-            x0=0,
-            y0=current_avg_duration,
-            x1=30,
-            y1=current_avg_duration,
-            line=dict(color="red", width=2, dash="dash"),
-            name="Overall Average",
-        )
-
-        # Add notes to the shape
-        fig.add_annotation(
-            x=x_max,
-            y=current_avg_duration,
-            text=f"Overall Average: {current_avg_duration:.2f}",
-            showarrow=False,
-            font=dict(color="red"),
-        )
-
+        # Show the figure
         st.plotly_chart(fig, theme="streamlit", use_container_width=True)
+    else:
+        st.info("Please select columns and statistics to display.")
