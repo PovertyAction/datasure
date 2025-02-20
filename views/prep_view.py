@@ -31,10 +31,19 @@ from src.processing import prep_apply_action, prep_load_log
 #-- DEFINE CONSTANTS FOR DATA PREP --#
 
 # Data prep actions
+<<<<<<< HEAD
 DP_ACTIONS: tuple = ('transform column(s)', 
 							'add column', 
 							'delete column(s)', 
 							'delete row(s)')
+=======
+DP_ACTIONS: tuple = (
+    "transform column(s)",
+    "add column",
+    "remove column(s)",
+    "remove row(s)",
+)
+>>>>>>> 620f30c (transform funcs)
 
 # Methods for deleting rows
 DP_DEL_METHODS: tuple = ('by row index', 
@@ -44,6 +53,7 @@ DP_FUNCS: tuple = ('string',
 						  'numeric', 
 						  'date')
 
+<<<<<<< HEAD
 DP_STR_FUNCS: tuple = ('substr', 'subinstr', 'strip', 
 						 'lower', 'upper', 
 						 'sting to number',
@@ -57,6 +67,41 @@ DP_NUM_FUNCS: tuple = ('add', 'multiple', 'subtract', 'divide',
 
 DP_DATETIME_FUNCS: tuple = ('day', 'week', 'month', 'year', 
 							'second', 'minute', 'hour')
+=======
+DP_STR_FUNCS: tuple = (
+    "substring",
+    "replace",
+    "strip",
+    "lower",
+    "upper",
+    "string to number",
+    "string to date",
+    "string to datetime",
+    "extract pattern",
+    "get dummies",
+)
+
+DP_NUM_FUNCS: tuple = (
+    "add",
+    "multiple",
+    "subtract",
+    "divide",
+    "round",
+    "floor",
+    "ceil",
+    "abs",
+)
+
+DP_DATETIME_FUNCS: tuple = (
+    "day",
+    "week",
+    "month",
+    "quarter" "year",
+    "second",
+    "minute",
+    "hour",
+)
+>>>>>>> 620f30c (transform funcs)
 
 <<<<<<< HEAD
 #-- DATA PREP PAGE --#
@@ -1124,17 +1169,19 @@ if show_prep_page_info:
 
         # display tab features
         with tab:
-            # create columns for change log (& actions) & data view
-            prep_task_col, prep_log_view_col = st.columns((0.3, 0.7))
+            # create for text and form
+            prep_task_title_col, prep_task_add_col = st.columns((0.5, 0.5))
 
             # populate actions and change log
-            with prep_task_col, st.container(border=True):
+            with prep_task_title_col, st.container(border=True):
                 st.subheader("Apply Changes:")
-                st.write("---")
 
                 # create a popver box to accept inputs for new prep actions
-                with st.popover(
-                    ":material/add: Add data prep step", use_container_width=True
+                with (
+                    prep_task_add_col,
+                    st.popover(
+                        ":material/add: Add data prep step", use_container_width=True
+                    ),
                 ):
                     st.markdown("*Add new data preparation steps*")
 
@@ -1175,41 +1222,67 @@ if show_prep_page_info:
                             col_type = st.session_state[f"prepped_data{i}"][
                                 dp_prep_trf_col
                             ].dtype
-                            st.write(f"Column type: {col_type}")
-                            if col_type == "object":
+                            st.info(f"Column type: {col_type}")
+                            if col_type in ["object", "string"]:
                                 dp_prep_trf_func = st.selectbox(
                                     label="Select Function",
                                     options=DP_STR_FUNCS,
                                     key=f"st_sb_trf_func{i}",
                                 )
-                                description = f"Transform column '{dp_prep_trf_col}' using '{dp_prep_trf_func}'"
+                                if dp_prep_trf_func == "replace":
+                                    dp_prep_trf_old_val = st.text_input(
+                                        label="Enter value",
+                                        help="Enter value to replace",
+                                        key=f"st_sb_trf_val{i}",
+                                    )
+                                    dp_prep_trf_new_val = st.text_input(
+                                        label="Enter new value",
+                                        help="Enter new value to replace with",
+                                        key=f"st_sb_trf_new_val{i}",
+                                    )
+                                    description = f"Transform column '{dp_prep_trf_col}' to '{dp_prep_trf_func}' by replacing '{dp_prep_trf_old_val}' with '{dp_prep_trf_new_val}'"
+                                else:
+                                    description = f"Transform column '{dp_prep_trf_col}' to '{dp_prep_trf_func}'"
                             elif col_type == "int64" or col_type == "float64":
                                 dp_prep_trf_func = st.selectbox(
                                     label="Select Function",
                                     options=DP_NUM_FUNCS,
                                     key=f"st_sb_trf_func{i}",
                                 )
-                                description = f"Transform column '{dp_prep_trf_col}' using '{dp_prep_trf_func}'"
-                            elif col_type == "datetime64":
+                                if dp_prep_trf_func in [
+                                    "add",
+                                    "multiple",
+                                    "subtract",
+                                    "divide",
+                                ]:
+                                    dp_prep_trf_val = st.number_input(
+                                        label="Enter value",
+                                        help="Enter value to perform operation on column",
+                                        key=f"st_sb_trf_val{i}",
+                                    )
+                                    description = f"Transform column '{dp_prep_trf_col}' to '{dp_prep_trf_func}' by {dp_prep_trf_val}"
+                                else:
+                                    description = f"Transform column '{dp_prep_trf_col}' to '{dp_prep_trf_func}'"
+                            elif col_type == "datetime64[ns]":
                                 dp_prep_trf_func = st.selectbox(
                                     label="Select Function",
                                     options=DP_DATETIME_FUNCS,
                                     key=f"st_sb_trf_func{i}",
                                 )
-                                description = f"Transform column '{dp_prep_trf_col}' using '{dp_prep_trf_func}'"
+                                description = f"Transform column '{dp_prep_trf_col}' to '{dp_prep_trf_func}'"
 
                     # selectbox (multi) for deleting column functions
-                    if dp_action in ["delete column(s)"]:
+                    if dp_action in ["remove column(s)"]:
                         dp_prep_del_cols = st.multiselect(
-                            label="Select columns to delete",
+                            label="Select columns to remove",
                             options=string_cols,
                             key=f"st_sb_del_cols{i}",
                         )
 
-                        description = f"delete column(s) {dp_prep_del_cols}"
+                        description = f"remove column(s) {dp_prep_del_cols}"
 
                     # selectbox (multi) for deleting rows functions
-                    if dp_action in ["delete row(s)"]:
+                    if dp_action in ["remove row(s)"]:
                         dp_prep_del_rows = st.selectbox(
                             label="Select Method",
                             options=DP_DEL_METHODS,
@@ -1219,7 +1292,7 @@ if show_prep_page_info:
                         if dp_prep_del_rows == "by row index":
                             dp_prep_del_rows_idx = st.text_input(
                                 label="Enter row index",
-                                help="Enter row index to delete eg. 1, 2, 3, -5, 5:-2",
+                                help="Enter row index to remove eg. 1, 2, 3, -5, 5:-2",
                                 key=f"st_sb_del_rows_idx{i}",
                             )
                             if dp_prep_del_rows_idx:
@@ -1230,25 +1303,16 @@ if show_prep_page_info:
                                     int(i) for i in dp_prep_del_rows_idx_list
                                 ]
 
-                                description = f"delete row(s) by index {dp_prep_del_rows_idx_list}"
+                                description = f"remove row(s) by index {dp_prep_del_rows_idx_list}"
 
                         if dp_prep_del_rows == "by condition":
                             dp_prep_del_rows_cond = st.selectbox(
                                 label="Enter condition",
                                 options=DP_ROW_CONDITIONS,
-                                help="Enter condition to delete rows eg. 'column_name == value'",
+                                help="Enter condition for removing rows",
                                 key=f"st_sb_del_rows_cond{i}",
                             )
                             if dp_prep_del_rows_cond:
-                                dp_prep_del_rows_cond_cols = st.multiselect(
-                                    label="Select column to apply conditions to",
-                                    options=all_cols,
-                                    help="Select column to apply conditions to, you may select multiple columns",
-                                    key=f"st_sb_del_rows_cond_cols{i}",
-                                )
-
-                                description = f"delete row(s) by condition '{dp_prep_del_rows_cond}' on columns {dp_prep_del_rows_cond_cols}"
-
                                 if dp_prep_del_rows_cond in [
                                     "value is equal to",
                                     "value is not equal to",
@@ -1257,13 +1321,59 @@ if show_prep_page_info:
                                     "value is greater than or equal to",
                                     "value is less than or equal to",
                                 ]:
-                                    dp_prep_del_rows_cond_val = st.text_input(
-                                        label="Enter value",
-                                        help="Enter value to compare",
-                                        key=f"st_sb_del_rows_cond_val{i}",
-                                    )
+                                    max_selections = 1
+                                else:
+                                    max_selections = len(all_cols)
 
-                                    description = f"delete row(s) by condition '{dp_prep_del_rows_cond}' on columns {dp_prep_del_rows_cond_cols} with value '{dp_prep_del_rows_cond_val}'"
+                                if dp_prep_del_rows_cond in [
+                                    "value is greater than",
+                                    "value is less than",
+                                    "value is greater than or equal to",
+                                    "value is less than or equal to",
+                                ]:
+                                    col_options = (
+                                        st.session_state[f"prepped_data{i}"]
+                                        .select_dtypes(include=["number"])
+                                        .columns
+                                    )
+                                else:
+                                    col_options = all_cols
+
+                                dp_prep_del_rows_cond_cols = st.multiselect(
+                                    label="Select column to apply conditions to",
+                                    options=col_options,
+                                    help="Select column to apply conditions to, you may select multiple columns",
+                                    key=f"st_sb_del_rows_cond_cols{i}",
+                                    max_selections=max_selections,
+                                )
+
+                                description = f"remove row(s) by condition '{dp_prep_del_rows_cond}' on columns {dp_prep_del_rows_cond_cols}"
+
+                                if dp_prep_del_rows_cond in [  # noqa: SIM102
+                                    "value is equal to",
+                                    "value is not equal to",
+                                    "value is greater than",
+                                    "value is less than",
+                                    "value is greater than or equal to",
+                                    "value is less than or equal to",
+                                ]:
+                                    if dp_prep_del_rows_cond_cols:
+                                        # get a list of unique values in select column
+                                        unique_vals = (
+                                            st.session_state[f"prepped_data{i}"][
+                                                dp_prep_del_rows_cond_cols[0]
+                                            ]
+                                            .unique()
+                                            .tolist()
+                                        )
+                                        dp_prep_del_rows_cond_val = st.multiselect(
+                                            label="Select value",
+                                            options=sorted(unique_vals),
+                                            help="Select value to compare",
+                                            key=f"st_sb_del_rows_cond_val{i}",
+                                        )
+
+                                        description = f"remove row(s) by condition '{dp_prep_del_rows_cond}' on columns {dp_prep_del_rows_cond_cols} with value {dp_prep_del_rows_cond_val}"
 
                                 if dp_prep_del_rows_cond in [
                                     "value is between",
@@ -1280,7 +1390,7 @@ if show_prep_page_info:
                                         key=f"st_sb_del_rows_cond_val_max{i}",
                                     )
 
-                                    description = f"delete row(s) by condition '{dp_prep_del_rows_cond}' on columns {dp_prep_del_rows_cond_cols} with values {dp_prep_del_rows_cond_val_min} and {dp_prep_del_rows_cond_val_max}"
+                                    description = f"remove row(s) by condition '{dp_prep_del_rows_cond}' on columns {dp_prep_del_rows_cond_cols} with values {dp_prep_del_rows_cond_val_min} and {dp_prep_del_rows_cond_val_max}"
                                 if dp_prep_del_rows_cond in [
                                     "value is like",
                                     "value is not like",
@@ -1291,7 +1401,7 @@ if show_prep_page_info:
                                         key=f"st_sb_del_rows_cond_val{i}",
                                     )
 
-                                    description = f"delete row(s) by condition '{dp_prep_del_rows_cond}' on columns {dp_prep_del_rows_cond_cols} with pattern '{dp_prep_del_rows_cond_val}'"
+                                    description = f"remove row(s) by condition '{dp_prep_del_rows_cond}' on columns {dp_prep_del_rows_cond_cols} with pattern '{dp_prep_del_rows_cond_val}'"
 
                     # apply button
                     dp_prep_apply_btn = st.button(
@@ -1304,9 +1414,8 @@ if show_prep_page_info:
                     if dp_prep_apply_btn:
                         prep_apply_action(dp_action, description, i)
 
-            with prep_log_view_col, st.container(border=True):
+            with st.container(border=True):
                 st.subheader("Change Log:")
-                st.write("---")
 
                 st.session_state[f"prep_log{i}"] = prep_load_log(i)
 
@@ -1317,6 +1426,18 @@ if show_prep_page_info:
                     key=label,
                     hide_index=True,
                     disabled=["_index"],
+                    column_config={
+                        "action": st.column_config.TextColumn(
+                            "action",
+                            help="Action to be logged",
+                            disabled=True,
+                        ),
+                        "description": st.column_config.TextColumn(
+                            "description of action",
+                            help="Description of action",
+                            disabled=True,
+                        ),
+                    },
                 )
 
                 # Save configuration File
