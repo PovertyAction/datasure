@@ -198,6 +198,35 @@ if show_prep_page_info:
                                         key=f"st_sb_trf_new_val{i}",
                                     )
                                     description = f"Transform column '{dp_prep_trf_col}' to '{dp_prep_trf_func}' by replacing '{dp_prep_trf_old_val}' with '{dp_prep_trf_new_val}'"
+                                elif dp_prep_trf_func == "substring":
+                                    start_col, end_col = st.columns(2)
+                                    with start_col:
+                                        dp_prep_trf_start = st.number_input(
+                                            label="Enter start index",
+                                            help="Enter start index for substring",
+                                            key=f"st_sb_trf_start{i}",
+                                            step=1,
+                                        )
+                                    with end_col:
+                                        dp_prep_trf_end = st.number_input(
+                                            label="Enter end index",
+                                            help="Enter end index for substring",
+                                            key=f"st_sb_trf_end{i}",
+                                            step=1,
+                                        )
+                                    if dp_prep_trf_start and dp_prep_trf_end:  # noqa: SIM102
+                                        if dp_prep_trf_start > dp_prep_trf_end:
+                                            st.error(
+                                                "Start index cannot be greater than end index"
+                                            )
+                                    description = f"Transform column '{dp_prep_trf_col}' to '{dp_prep_trf_func}' by extracting substring from {dp_prep_trf_start} to {dp_prep_trf_end}"
+                                elif dp_prep_trf_func == "extract pattern":
+                                    dp_prep_trf_pattern = st.text_input(
+                                        label="Enter pattern",
+                                        help="Enter pattern to extract from column",
+                                        key=f"st_sb_trf_pattern{i}",
+                                    )
+                                    description = f"Transform column '{dp_prep_trf_col}' to '{dp_prep_trf_func}' by extracting pattern '{dp_prep_trf_pattern}'"
                                 else:
                                     description = f"Transform column '{dp_prep_trf_col}' to '{dp_prep_trf_func}'"
                             elif col_type == "int64" or col_type == "float64":
