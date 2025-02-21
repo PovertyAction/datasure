@@ -897,5 +897,31 @@ def prep_transform_columns(index: int, description: str):
         st.session_state[f"prepped_data{index}"][columns] = st.session_state[
             f"prepped_data{index}"
         ][columns].str.replace(old_txt, new_text)
+<<<<<<< HEAD
 >>>>>>> 6e69e31 (transform funcs)
+<<<<<<< HEAD
 >>>>>>> 620f30c (transform funcs)
+=======
+=======
+    elif func == "substring":
+        # get start and end index for substring
+        start, end = (
+            re.search(r"from [0-9]+ to [0-9]+", description)
+            .group(0)
+            .replace("from ", "")
+            .split(" to ")
+        )
+        # replace column with substring
+        st.session_state[f"prepped_data{index}"][columns] = st.session_state[
+            f"prepped_data{index}"
+        ][columns].str[int(start) : int(end)]
+    elif "extract pattern" in func:
+        pattern_str = func.replace("extract pattern by extracting pattern ", "")
+        pattern_str = re.compile(rf"({pattern_str})")
+        st.write(pattern_str)
+        # replace column with extracted pattern
+        st.session_state[f"prepped_data{index}"][columns] = st.session_state[
+            f"prepped_data{index}"
+        ][columns].str.extract(pattern_str)
+>>>>>>> e63297a (added all tranform col funcs)
+>>>>>>> 80fae65 (added all tranform col funcs)
