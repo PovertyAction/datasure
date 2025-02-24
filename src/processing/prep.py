@@ -69,6 +69,8 @@ def prep_apply_action(
             prep_remove_rows(index, description)
         elif action == "transform column(s)":
             prep_transform_columns(index, description)
+        elif action == "add column":
+            prep_add_new_column(index, description)
 
 
 # function to remove columns from dataset
@@ -372,8 +374,76 @@ def prep_transform_columns(index: int, description: str):
     elif "extract pattern" in func:
         pattern_str = func.replace("extract pattern by extracting pattern ", "")
         pattern_str = re.compile(rf"({pattern_str})")
-        st.write(pattern_str)
         # replace column with extracted pattern
         st.session_state[f"prepped_data{index}"][columns] = st.session_state[
             f"prepped_data{index}"
         ][columns].str.extract(pattern_str)
+
+
+# functions for adding new columns
+def prep_add_new_column(index: int, description: str):
+    """Transform columns in dataset.
+
+    PARAMS:
+    -------
+    index: index for dataset and log
+    action: action to be logged
+    description: description of action
+
+    return: None
+    """
+    # get columns names from description
+    new_col, value = (
+        re.search(r"\'.+\'", description).group(0).replace("'", "").split(" with ")
+    )
+
+    if "constant value" in value:
+        value = value.replace("constant value ", "")
+        # add new column to dataset
+        st.session_state[f"prepped_data{index}"][new_col] = value
+    else:
+        # get function from value
+        func = re.search(r"with [a-z]+", description).group(0).replace("with ", "")
+        # get list of columns from description
+        columns = re.search(r"\[.+\]", description).group(0)
+        # create new column using funct eg sum, multiply, divide
+        if func == "sum":
+            st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
+                f"prepped_data{index}"
+            ][eval(columns)].sum(axis=1)
+        elif func == "product":
+            st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
+                f"prepped_data{index}"
+            ][eval(columns)].product(axis=1)
+        elif func == "mean":
+            st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
+                f"prepped_data{index}"
+            ][eval(columns)].mean(axis=1)
+        elif func == "median":
+            st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
+                f"prepped_data{index}"
+            ][eval(columns)].median(axis=1)
+        elif func == "mode":
+            st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
+                f"prepped_data{index}"
+            ][eval(columns)].mode(axis=1)
+        elif func == "max":
+            st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
+                f"prepped_data{index}"
+            ][eval(columns)].max(axis=1)
+        elif func == "min":
+            st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
+                f"prepped_data{index}"
+            ][eval(columns)].min(axis=1)
+        elif func == "count":
+            st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
+                f"prepped_data{index}"
+            ][eval(columns)].count(axis=1)
+        elif func == "std":
+            st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
+                f"prepped_data{index}"
+            ][eval(columns)].std(axis=1)
+        elif func == "nunique":
+            st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
+                f"prepped_data{index}"
+            ][eval(columns)].nunique(axis=1)

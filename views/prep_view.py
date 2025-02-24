@@ -12,6 +12,25 @@ DP_ACTIONS: tuple = (
     "remove row(s)",
 )
 
+DP_ADD_METHODS: tuple = (
+    "constant",
+    "sum",
+    "mean",
+    "median",
+    "mode",
+    "min",
+    "max",
+    "std",
+    "var",
+    "first",
+    "last",
+    "count",
+    "nunique",
+    "product",
+    "diff",
+    "quotient",
+)
+
 # Methods for deleting rows
 DP_DEL_METHODS: tuple = ("by row index", "by condition")
 
@@ -157,13 +176,48 @@ if show_prep_page_info:
                             key=f"st_sb_add_col{i}",
                         )
 
-                        dp_prep_add_col_val = st.text_input(
-                            label="Enter value",
-                            help="Enter value to populate new column",
-                            key=f"st_sb_add_col_val{i}",
-                        )
+                        if dp_prep_add_col:
+                            # select method for adding new column
+                            dp_prep_add_method = st.selectbox(
+                                label="Select Method",
+                                options=DP_ADD_METHODS,
+                                key=f"st_sb_add_method{i}",
+                            )
 
-                        description = f"Add column '{dp_prep_add_col}' with value '{dp_prep_add_col_val}'"
+                            if dp_prep_add_method == "constant":
+                                dp_prep_add_val = st.text_input(
+                                    label="Enter value",
+                                    help="Enter value to add to new column",
+                                    key=f"st_sb_add_val{i}",
+                                )
+                                description = f"Add column '{dp_prep_add_col}' with constant value '{dp_prep_add_val}'"
+                            elif dp_prep_add_method in [
+                                "sum",
+                                "mean",
+                                "median",
+                                "mode",
+                                "min",
+                                "max",
+                                "std",
+                                "var",
+                                "first",
+                                "last",
+                                "count",
+                                "nunique",
+                                "product",
+                            ]:
+                                # get list of numeric columns
+                                num_cols = (
+                                    st.session_state[f"prepped_data{i}"]
+                                    .select_dtypes(include=["number"])
+                                    .columns
+                                )
+                                dp_prep_add_col_select = st.multiselect(
+                                    label="Select column",
+                                    options=num_cols,
+                                    key=f"st_sb_add_col_select{i}",
+                                )
+                                description = f"Add column '{dp_prep_add_col}' with {dp_prep_add_method} of column {dp_prep_add_col_select}"
 
                     # selectbox for transforming columns functions
                     if dp_action in ["transform column(s)"]:
