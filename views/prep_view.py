@@ -1248,6 +1248,8 @@ if show_prep_page_info:
                                 "count",
                                 "nunique",
                                 "product",
+                                "quotient",
+                                "diff",
                             ]:
                                 # get list of numeric columns
                                 num_cols = (
@@ -1255,10 +1257,16 @@ if show_prep_page_info:
                                     .select_dtypes(include=["number"])
                                     .columns
                                 )
+                                if dp_prep_add_method in ["quotient", "diff"]:
+                                    max_selections = 2
+                                else:
+                                    max_selections = len(num_cols)
+
                                 dp_prep_add_col_select = st.multiselect(
                                     label="Select column",
                                     options=num_cols,
                                     key=f"st_sb_add_col_select{i}",
+                                    max_selections=max_selections,
                                 )
                                 description = f"Add column '{dp_prep_add_col}' with {dp_prep_add_method} of column {dp_prep_add_col_select}"
 
@@ -1382,9 +1390,6 @@ if show_prep_page_info:
                                 dp_prep_del_rows_idx_list = (
                                     dp_prep_del_rows_idx.replace(" ", "").split(",")
                                 )
-                                dp_prep_del_rows_idx_list = [
-                                    int(i) for i in dp_prep_del_rows_idx_list
-                                ]
 
                                 description = f"remove row(s) by index {dp_prep_del_rows_idx_list}"
 
@@ -1527,7 +1532,7 @@ if show_prep_page_info:
                 prep_save_config = st.button(
                     label="save & re-apply changes",
                     type="secondary",
-                    key="prep_save_config_key",
+                    key=f"prep_save_config_key{i}",
                     use_container_width=True,
                 )
                 if prep_save_config:
