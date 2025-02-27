@@ -108,10 +108,17 @@ def prep_remove_rows(index: int, description: str):
     # get row indexes from description
     if "remove row(s) by index" in description:
         rows = description.replace("remove row(s) by index", "")
-        rows = eval(rows)
+
+        rows_drop = []
+        for row in eval(rows):
+            if ":" in row:
+                start, end = row.split(":")
+                rows_drop.extend(list(range(int(start), int(end) + 1)))
+            else:
+                rows_drop.append(int(row))
 
         # drop rows from dataset
-        st.session_state[f"prepped_data{index}"].drop(index=rows, inplace=True)
+        st.session_state[f"prepped_data{index}"].drop(index=rows_drop, inplace=True)
 
     if "remove row(s) by condition" in description:
         condition = re.search(r"'[a-z ]+'", description).group(0).replace("'", "")
@@ -138,7 +145,15 @@ def prep_remove_rows(index: int, description: str):
                 .replace("with value ", "")
             )
 
-            values_use = eval(values)
+            # check if column type is datetime
+            if (
+                st.session_state[f"prepped_data{index}"][eval(cols)[0]].dtype
+                == "datetime64[ns]"
+            ):
+                values_use = [val for val in eval(values.replace("Timestamp", ""))]
+            else:
+                values_use = eval(values)
+
             cols = eval(cols)[0]
             if condition == "value is equal to":
                 st.session_state[f"prepped_data{index}"].query(
@@ -152,7 +167,7 @@ def prep_remove_rows(index: int, description: str):
             "value is greater than",
             "value is greater than or equal to",
             "value is less than",
-            "" "value is less than or equal to",
+            "value is less than or equal to",
         ]:
             value = (
                 re.search(r"with value.+", description)
@@ -160,7 +175,8 @@ def prep_remove_rows(index: int, description: str):
                 .replace("with value ", "")
                 .replace("'", "")
             )
-            value = int(value)
+
+            value = eval(value)[0]
             cols = eval(cols)[0]
             if condition == "value is greater than":
                 st.session_state[f"prepped_data{index}"] = st.session_state[
@@ -447,3 +463,13 @@ def prep_add_new_column(index: int, description: str):
             st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
                 f"prepped_data{index}"
             ][eval(columns)].nunique(axis=1)
+        elif func == "quotient":
+            st.session_state[f"prepped_data{index}"][new_col] = (
+                st.session_state[f"prepped_data{index}"][eval(columns)[0]]
+                / st.session_state[f"prepped_data{index}"][eval(columns)[1]]
+            )
+        elif func == "diff":
+            st.session_state[f"prepped_data{index}"][new_col] = (
+                st.session_state[f"prepped_data{index}"][eval(columns)[0]]
+                - st.session_state[f"prepped_data{index}"][eval(columns)[1]]
+            )
