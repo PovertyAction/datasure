@@ -297,6 +297,30 @@ def enumerator_report(data, page_num) -> None:
 
     # Merge missing values percentage with summary_df
     summary_df = summary_df.merge(missing_values_df, on=enumerator, how="left")
+
+    # Flag outdated form versions
+    current_formversion = max([int(c) for c in data[formversion].unique()])
+    current_formversion_date = pd.to_datetime(
+        "20" + str(current_formversion), format="%Y%m%d%H%M"
+    )
+    data["current_formversion_date"] = current_formversion_date
+    data["outdated_form_version"] = data["submissiondate"] < current_formversion_date
+
+    outdated_form_versions_df = data[data["outdated_form_version"]]
+    outdated_formversion_summary = (
+        outdated_form_versions_df.groupby(enumerator)[survey_key]
+        .count()
+        .rename("outdated forms")
+        .reset_index()
+    )
+    summary_df = pd.merge(
+        summary_df, outdated_formversion_summary, on=enumerator, how="left"
+    ).fillna(0)
+    summary_df["% outdated form versions"] = (
+        (summary_df["outdated forms"] / summary_df["# of submissions"]) * 100
+    ).apply(lambda x: f"{x:.0f}%")
+    summary_df = summary_df.drop(columns="outdated forms")
+
     st.dataframe(summary_df, hide_index=True)
 
     # Toggle for days, weeks, or months view
