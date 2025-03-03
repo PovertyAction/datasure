@@ -291,7 +291,7 @@ def enumerator_report(data, page_num) -> None:
         ).apply(lambda x: f"{x:.0f}%")
         return missing_values_df[index_cols + ["% missing"]]
 
-    index_cols = ["enumerator"]
+    index_cols = [enumerator]
     data_cols = [x for x in data.columns if x != enumerator]
     missing_values_df = calculate_missing_values(data, data_cols, index_cols)
 
@@ -299,12 +299,15 @@ def enumerator_report(data, page_num) -> None:
     summary_df = summary_df.merge(missing_values_df, on=enumerator, how="left")
 
     # Flag outdated form versions
+    data[formversion] = data[formversion].astype(float)
     current_formversion = max([int(c) for c in data[formversion].unique()])
     current_formversion_date = pd.to_datetime(
         "20" + str(current_formversion), format="%Y%m%d%H%M"
     )
     data["current_formversion_date"] = current_formversion_date
-    data["outdated_form_version"] = data["submissiondate"] < current_formversion_date
+    data["outdated_form_version"] = (data[date] < current_formversion_date) & (
+        data[formversion] < current_formversion
+    )
 
     outdated_form_versions_df = data[data["outdated_form_version"]]
     outdated_formversion_summary = (
