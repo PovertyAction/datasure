@@ -10,10 +10,10 @@ from plotly.subplots import make_subplots
 def donut_chart(
     actual_value: int,
     target_value: int = 100,
-    title: str = None,
+    title: str | None = None,
     prefix: str = "",
     suffix: str = "%",
-    colours: list = ["#2C5F2D", "#CCCCCC"],
+    colours: list | None = None,
 ):
     """
     Create a donut chart with the specified parameters.
@@ -49,7 +49,7 @@ def donut_chart(
     # Create the pie chart
     pie = ax.pie(
         [actual_value, target_value - actual_value],
-        colors=colours,
+        colours=colours or ["#2C5F2D", "#CCCCCC"],
         startangle=90,
         labeldistance=1.15,
         counterclock=False,
@@ -129,15 +129,6 @@ def progress_report(data, page_num) -> None:
             )
             data["date_only"] = data[date].dt.date
 
-        with enum_col:
-            by = st.selectbox(
-                "Group by",
-                options=survey_cols,
-                help="Column to group summary report by by",
-                key="groupby_progress",
-                index=None,
-            )
-
             # get enumerator column name from dataset & get index
             default_enumerator = st.session_state["config_pages"]["Enumerator"][
                 page_num - 1
@@ -149,13 +140,6 @@ def progress_report(data, page_num) -> None:
                 help="Column containing survey enumerator",
                 key="enumerator_progress",
                 index=default_enumerator_index,
-            )
-            team = st.selectbox(
-                "Team",
-                options=survey_cols,
-                help="Column containing survey team",
-                key="team_progress",
-                index=None,
             )
 
         with agg_col:
@@ -409,14 +393,6 @@ def progress_report(data, page_num) -> None:
         )
 
         st.plotly_chart(fig, theme="streamlit", use_container_width=True)
-
-        # Group by date and count number of IDs
-        count_by_date = (
-            data.groupby("date_only").size().reset_index(name="num_interviews")
-        )
-
-        # Calculate the average of interviews per day
-        average_interviews_per_day = count_by_date["num_interviews"].mean()
 
         # Create the figure with secondary y-axis
         fig = make_subplots(specs=[[{"secondary_y": True}]])
