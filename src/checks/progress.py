@@ -1,9 +1,10 @@
-import streamlit as st
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import pandas as pd
-import matplotlib.pyplot as plt
 import io
+
+import matplotlib.pyplot as plt
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+from plotly.subplots import make_subplots
 
 
 def donut_chart(
@@ -17,8 +18,8 @@ def donut_chart(
     """
     Create a donut chart with the specified parameters.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     actual_value: int
         The value to display (e.g., percentage complete)
     target_value: int
@@ -32,8 +33,8 @@ def donut_chart(
     colours: list
         List of colour codes for the chart segments
 
-    Returns:
-    --------
+    Returns
+    -------
     fig: matplotlib figure
         The created figure
     """
@@ -221,7 +222,7 @@ def progress_report(data, page_num) -> None:
         st.markdown("### Tracking Options")
 
         # number of interviews expected
-        total_goal = st.number_input(  # noqa: F841
+        total_goal = st.number_input(
             "Total goal",
             min_value=0,
             help="Total number of interviews expected",
@@ -361,7 +362,7 @@ def progress_report(data, page_num) -> None:
         unique_counts.columns = [survey_id, "unique_key_count"]
 
         # Count unique ids from the new df
-        count_unique_ids = unique_counts[survey_id].nunique()  # noqa: F841
+        count_unique_ids = unique_counts[survey_id].nunique()
 
     with col2:
         # Group by 'id' and count unique values of "key"
