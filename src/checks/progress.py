@@ -72,7 +72,7 @@ def fig_to_streamlit(fig):
     buf.seek(0)
     return buf
 
-##### Survey Progress #####
+##### Survey Progress ####
 
 
 def progress_report(data, page_num) -> None:
