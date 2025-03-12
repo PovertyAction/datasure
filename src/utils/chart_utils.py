@@ -1,5 +1,6 @@
+
 import matplotlib.pyplot as plt
-import io
+
 
 def donut_chart(
     actual_value: int,
@@ -74,5 +75,3 @@ def donut_chart(
     plt.axis("off")
 
     return fig
-
-
