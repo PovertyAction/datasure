@@ -6,80 +6,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
-
-def donut_chart(
-    actual_value: int,
-    target_value: int = 100,
-    title: str | None = None,
-    prefix: str = "",
-    suffix: str = "%",
-    colours: list | None = None,
-):
-    """
-    Create a donut chart with the specified parameters.
-
-    Parameters
-    ----------
-    actual_value: int
-        The value to display (e.g., percentage complete)
-    target_value: int
-        The maximum value (default 100)
-    title: str
-        Title of the chart
-    prefix: str
-        Prefix to add to actual value eg "$"
-    suffix: str
-        Suffix to add to actual value eg "%" or "K"
-    colours: list
-        List of colour codes for the chart segments
-
-    Returns
-    -------
-    fig: matplotlib figure
-        The created figure
-    """
-    fig = plt.figure(
-        figsize=(2, 2), dpi=100, facecolor="#FFFFFF", constrained_layout=True
-    )
-    ax = fig.add_subplot(1, 1, 1)
-
-    if title:
-        ax.set_title(title, fontsize=14)
-
-    # Create the pie chart
-    pie = ax.pie(
-        [actual_value, target_value - actual_value],
-        colours=colours or ["#2C5F2D", "#CCCCCC"],
-        startangle=90,
-        labeldistance=1.15,
-        counterclock=False,
-    )
-
-    # Make the background segment semi-transparent
-    pie[0][1].set_alpha(0.4)
-
-    # Add center circle to create donut
-    centre_circle = plt.Circle((0, 0), 0.7, fc="#FFFFFF")
-    fig.gca().add_artist(centre_circle)
-
-    # Add center text
-    centre_text = f"{prefix}{actual_value}{suffix}"
-    ax.text(
-        0,
-        0,
-        centre_text,
-        horizontalalignment="center",
-        verticalalignment="center",
-        fontsize=20,
-        fontweight="bold",
-        color=colours[0],
-    )
-
-    # Remove axes
-    ax.axis("equal")
-    plt.axis("off")
-
-    return fig
+from src.utils import donut_chart
 
 
 def fig_to_streamlit(fig):
@@ -127,7 +54,15 @@ def progress_report(data, page_num) -> None:
                 key="date_progress",
                 index=default_date_index,
             )
-            data["date_only"] = data[date].dt.date
+
+        with enum_col:
+            by = st.selectbox(  # noqa: F841
+                "Group by",
+                options=survey_cols,
+                help="Column to group summary report by by",
+                key="groupby_progress",
+                index=None,
+            )
 
             # get enumerator column name from dataset & get index
             default_enumerator = st.session_state["config_pages"]["Enumerator"][
@@ -140,6 +75,13 @@ def progress_report(data, page_num) -> None:
                 help="Column containing survey enumerator",
                 key="enumerator_progress",
                 index=default_enumerator_index,
+            )
+            team = st.selectbox(  # noqa: F841
+                "Team",
+                options=survey_cols,
+                help="Column containing survey team",
+                key="team_progress",
+                index=None,
             )
 
         with agg_col:
@@ -264,7 +206,7 @@ def progress_report(data, page_num) -> None:
             fig = donut_chart(
                 actual_value=int(consent_percentage),
                 suffix="%",
-                colours=["#2C5F2D", "#CCCCCC"],
+                colors=["#2C5F2D", "#CCCCCC"],
             )
             # Use use_column_width parameter to make image responsive to column width
             st.image(fig_to_streamlit(fig), use_container_width=False)
@@ -296,7 +238,7 @@ def progress_report(data, page_num) -> None:
             fig = donut_chart(
                 actual_value=int(completion_percentage),
                 suffix="%",
-                colours=["#2C5F2D", "#CCCCCC"],
+                colors=["#2C5F2D", "#CCCCCC"],
             )
             # Use use_column_width parameter to make image responsive to column width
             st.image(fig_to_streamlit(fig), use_container_width=False)
@@ -342,17 +284,18 @@ def progress_report(data, page_num) -> None:
         data[consent] = data[consent].map(mapping)
 
         # Group by 'id' and count unique values of "key"
-        unique_counts = data.groupby(survey_id)[survey_key].nunique().reset_index()
+        unique_counts = (
+            data.groupby(survey_id)[survey_key]
+            .nunique()
+            .rename("unique_key_count")
+            .reset_index()
+        )
         unique_counts.columns = [survey_id, "unique_key_count"]
 
         # Count unique ids from the new df
         count_unique_ids = unique_counts[survey_id].nunique()
 
     with col2:
-        # Group by 'id' and count unique values of "key"
-        unique_counts = data.groupby(survey_id)[survey_key].nunique().reset_index()
-        unique_counts.columns = [survey_id, "unique_key_count"]
-
         # Count unique ids by number of counts from the new df
         count_unique_ids = (
             unique_counts.groupby("unique_key_count").count().reset_index()
@@ -420,18 +363,19 @@ def progress_report(data, page_num) -> None:
             unsafe_allow_html=True,
         )
 
-        query = st.text_input("Filter by number of attempts")
+        # Get unique number of attempts for the dropdown options
+        attempt_options = sorted(table_data["number_of_attempts"].unique().tolist())
+
+        # Create a multiselect dropdown instead of text input
+        selected_attempts = st.multiselect(
+            "Filter by number of attempts", options=attempt_options, default=[]
+        )
 
         # Filter logic
-        if query:
-            try:
-                query_num = int(query)
-                filtered_table = table_data[
-                    table_data["number_of_attempts"] >= query_num
-                ]
-            except ValueError:
-                st.warning("Please enter a valid number")
-                filtered_table = table_data
+        if selected_attempts:
+            filtered_table = table_data[
+                table_data["number_of_attempts"].isin(selected_attempts)
+            ]
         else:
             filtered_table = table_data
 
