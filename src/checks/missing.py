@@ -9,17 +9,12 @@ def missing_settings(data) -> tuple:
     """Generate the settings for the missing data report."""
     survey_cols = data.columns.tolist()
 
-    miss_cols, miss_codes, miss_labels = ([], [], [])
+    miss_codes, miss_labels = ([], [])
 
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for missing data report")
 
         st.write("---")
-        st.markdown("### Select columns to include in missing data report")
-
-        miss_cols = st.multiselect("Columns", options=survey_cols)
-        if not miss_cols:
-            miss_cols = survey_cols
 
         miss_codes = st.text_input(
             label="Enter missing codes separated by comma eg. -999, -888, 777 etc.",
@@ -39,7 +34,7 @@ def missing_settings(data) -> tuple:
         if len(miss_codes_lst) != len(miss_labels_lst):
             st.warning("Number of missing codes and labels must be the same.")
 
-    return miss_cols, miss_codes_lst, miss_labels_lst
+    return survey_cols, miss_codes_lst, miss_labels_lst
 
 
 def missing_summary(data, miss_cols) -> None:
@@ -142,7 +137,7 @@ def missing_columns(data, miss_cols, missing_codes, missing_labels) -> None:
     )
 
 
-def missing_over_time(data, miss_cols) -> None:
+def missing_over_time(data, miss_cols, color_map) -> None:
     """Generate a report on missing data over time."""
     # missingness over time
     st.write("---")
@@ -187,12 +182,19 @@ def missing_over_time(data, miss_cols) -> None:
     ) * 100
 
     # display area plot of missingness over time
-    st.area_chart(
-        missingness_over_time.set_index("missingness_trend_date"),
+    fig = px.area(
+        missingness_over_time,
+        x="missingness_trend_date",
         y="missingness_rate",
-        use_container_width=True,
-        color=["#FF8000"],
+        title="Missingness over time",
+        labels={
+            "missingness_trend_date": select_date_col,
+            "missingness_rate": "Missingness rate (%)",
+        },
+        color_discrete_sequence=["#e8848b"],
     )
+    fig.update_layout(width=1000, height=500)
+    st.plotly_chart(fig)
 
 
 def missing_correlation(data, miss_cols, color_map) -> None:
@@ -286,6 +288,6 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
     miss_cols, missing_codes, missing_labels = missing_settings(data)
     missing_summary(data, miss_cols)
     missing_columns(data, miss_cols, missing_codes, missing_labels)
-    missing_over_time(data, miss_cols)
+    missing_over_time(data, miss_cols, color_map=sns_colormap)
     missing_correlation(data, miss_cols, sns_colormap)
     missing_matrix(data, sns_colormap)
