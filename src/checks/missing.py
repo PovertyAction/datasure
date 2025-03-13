@@ -5,26 +5,14 @@ import streamlit as st
 from streamlit_extras.stylable_container import stylable_container
 
 
-# define function to create summary report
-def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
-    """Generate a report on missing data in the dataset. The report includes a
-    summary of missing data, a table showing the percentage of missing values
-    in each column, and an option to inspect variables with missing data.
+def missing_settings(data) -> tuple:
+    """Generate the settings for the missing data report."""
+    survey_cols = data.columns.tolist()
 
-    Parameters
-    ----------
-        data (pd.DataFrame): The dataset to generate the missing data
-                report for.
+    miss_cols, miss_codes, miss_labels = ([], [], [])
 
-    Returns
-    -------
-            None
-
-    """
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for missing data report")
-
-        survey_cols = data.columns
 
         st.write("---")
         st.markdown("### Select columns to include in missing data report")
@@ -33,33 +21,29 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
         if not miss_cols:
             miss_cols = survey_cols
 
-        missing_codes_input = st.text_input(
-            "Enter missing codes separated by comma eg. -999, -888, 777 etc.",
+        miss_codes = st.text_input(
+            label="Enter missing codes separated by comma eg. -999, -888, 777 etc.",
             value="-999, -888",
         )
-        if missing_codes_input:
-            missing_codes = missing_codes_input.split(",")
-        missing_labels_input = st.text_input(
-            "Enter missing labels separated by comma eg. Missing, Not applicable, Don't know etc.",
+        if miss_codes:
+            miss_codes_lst = miss_codes.split(",")
+
+        miss_labels = st.text_input(
+            label="Enter missing labels separated by comma eg. Missing, Not applicable, Don't know etc.",
+            help="The labels should correspond to the missing codes entered above",
             value="Don't Know, Refuse to Answer",
         )
-        if missing_labels_input:
-            missing_labels = missing_labels_input.split(",")
+        if miss_labels:
+            miss_labels_lst = miss_labels.split(",")
 
-        st.write("---")
-        st.markdown("### Report filter options")
-        miss_filter_options = ["All", "Top N", "Bottom N", "Greater than", "Less than"]
-        miss_filter = st.selectbox("Filter by", options=miss_filter_options)
-        if miss_filter and miss_filter != "All":
-            if miss_filter == "Top N" or miss_filter == "Bottom N":
-                miss_filter_val = st.number_input(
-                    "Number of columns", min_value=1, value=5
-                )
-            else:
-                miss_filter_val = st.number_input(  # noqa: F841
-                    "Percentage", min_value=0, max_value=100, value=10
-                )
+        if len(miss_codes_lst) != len(miss_labels_lst):
+            st.warning("Number of missing codes and labels must be the same.")
 
+    return miss_cols, miss_codes_lst, miss_labels_lst
+
+
+def missing_summary(data, miss_cols) -> None:
+    """Generate a summary of missing data in the dataset."""
     st.markdown("## Missing data")
 
     with stylable_container(
@@ -100,12 +84,14 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
             value=f"{no_missing.mean():.2f}%",
         )
 
-    # calculate the number of missing values in each column
+
+def missing_columns(data, miss_cols, missing_codes, missing_labels) -> None:
+    """Generate a table showing the percentage of missing values in each column."""
+    # Create a table of number of missing values and percentage of missing values
     mv_data = data[miss_cols].isnull().sum()
     mv_data = pd.DataFrame({"Column": mv_data.index, "Null Values": mv_data.values})
     mv_data["% Null Values"] = (mv_data["Null Values"] / len(data)) * 100
-
-    mv_data["Total Missing"] = 0
+    mv_data["Total Missing"] = mv_data["Null Values"]
     mv_data["% Total Missing"] = 0
     mv_data = mv_data[
         ["Column", "Total Missing", "% Total Missing", "Null Values", "% Null Values"]
@@ -139,7 +125,13 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
 
     # Create the slider
     with slider_col:
-        mv_threshold = st.slider("Variables with % of missing values above:", 0, 100, 0)
+        mv_threshold = st.slider(
+            label="Variables with % of missing values above:",
+            help="Select the threshold for filtering variables based on missing values",
+            min_value=0,
+            max_value=100,
+            value=0,
+        )
 
     # Filter based on total missing percentage
     mv_data_filtered = mv_data[mv_data["% Null Values"] >= mv_threshold]
@@ -149,11 +141,13 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
         use_container_width=True,
     )
 
+
+def missing_over_time(data, miss_cols) -> None:
+    """Generate a report on missing data over time."""
     # missingness over time
     st.write("---")
     st.markdown("## Missingness over time")
 
-    # using the submission date column to show missingness over time
     # get the date columns from dataset
     date_cols = data.select_dtypes(include=["datetime64"]).columns
     select_date_col = st.selectbox("Select date column", options=date_cols)
@@ -200,19 +194,20 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
         color=["#FF8000"],
     )
 
+
+def missing_correlation(data, miss_cols, color_map) -> None:
+    """Generate a report on missing data correlation."""
     ## nullity correlation
     st.write("---")
     st.markdown("## Nullity correlation")
 
-    # get default columns to include in the nullity correlation heatmap.
-    # These are columns with at least one missing value and les 100% missing values
-    null_cols = mv_data[
-        (mv_data["% Null Values"] > 0) & (mv_data["% Null Values"] < 100)
-    ]["Column"].tolist()
+    # get columns with at least one missing value and not all missing values
+    null_cols = [col for col in data.columns if data[col].isnull().any()]
+    null_cols = [col for col in null_cols if not data[col].isnull().all()]
 
-    # allow users to select columns to include in the nullity correlation heatmap
+    # user define columns for nullity correlation
     null_cols_sel = st.multiselect(
-        "Select columns to include in the nullity correlation heatmap",
+        label="Select columns to include in the nullity correlation heatmap",
         options=null_cols,
     )
     if null_cols_sel and len(null_cols_sel) > 1:
@@ -220,35 +215,18 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
     else:
         nullity_cols = null_cols
 
-    # build correlation matrix
     nullity_corr = data[nullity_cols].isnull().corr()
-    # remove top half of the correlation matrix
     nullity_corr = nullity_corr.where(
         np.tril(np.ones(nullity_corr.shape)).astype(np.bool)
     )
 
-    sns_colormap = [
-        [0.0, "#3f7f93"],
-        [0.1, "#6397a7"],
-        [0.2, "#88b1bd"],
-        [0.3, "#acc9d2"],
-        [0.4, "#d1e2e7"],
-        [0.5, "#f2f2f2"],
-        [0.6, "#f6cdd0"],
-        [0.7, "#efa8ad"],
-        [0.8, "#e8848b"],
-        [0.9, "#e15e68"],
-        [1.0, "#da3b46"],
-    ]
-
-    # sns_colormap = px.colors.sequential.Darkmint
-
-    # create a heatmap
-    fig = px.imshow(nullity_corr, color_continuous_scale=sns_colormap)
+    fig = px.imshow(nullity_corr, color_continuous_scale=color_map)
     fig.update_layout(width=1000, height=1000)
     st.plotly_chart(fig)
 
-    # Nullity matrix
+
+def missing_matrix(data, color_map) -> None:
+    """Generate a report on missing data matrix."""
     st.write("---")
     st.markdown("## Nullity matrix")
 
@@ -268,7 +246,46 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
     nullity_matrix = null_data.isnull().astype(int)
 
     # display as heatmap
-    fig1 = px.imshow(nullity_matrix, color_continuous_scale=sns_colormap)
+    fig1 = px.imshow(nullity_matrix, color_continuous_scale=color_map)
     fig1.layout.coloraxis.showscale = False
     fig1.update_layout(width=1000, height=1000)
     st.plotly_chart(fig1)
+
+
+# define function to create summary report
+def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
+    """Generate a report on missing data in the dataset. The report includes a
+    summary of missing data, a table showing the percentage of missing values
+    in each column, and an option to inspect variables with missing data.
+
+    Parameters
+    ----------
+        data (pd.DataFrame): The dataset to generate the missing data
+                report for.
+
+    Returns
+    -------
+            None
+
+    """
+    # define the color palette for the nullity correlation heatmap
+    sns_colormap = [
+        [0.0, "#3f7f93"],
+        [0.1, "#6397a7"],
+        [0.2, "#88b1bd"],
+        [0.3, "#acc9d2"],
+        [0.4, "#d1e2e7"],
+        [0.5, "#f2f2f2"],
+        [0.6, "#f6cdd0"],
+        [0.7, "#efa8ad"],
+        [0.8, "#e8848b"],
+        [0.9, "#e15e68"],
+        [1.0, "#da3b46"],
+    ]
+
+    miss_cols, missing_codes, missing_labels = missing_settings(data)
+    missing_summary(data, miss_cols)
+    missing_columns(data, miss_cols, missing_codes, missing_labels)
+    missing_over_time(data, miss_cols)
+    missing_correlation(data, miss_cols, sns_colormap)
+    missing_matrix(data, sns_colormap)
