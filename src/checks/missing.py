@@ -34,6 +34,12 @@ def missing_settings(data) -> tuple:
         if len(miss_codes_lst) != len(miss_labels_lst):
             st.warning("Number of missing codes and labels must be the same.")
 
+        st.write("---")
+        # add save settings button
+        save_settings = st.button(label="Save settings", key="save_settings_missing")
+        if save_settings:
+            st.success("Settings saved successfully.")
+
     return survey_cols, miss_codes_lst, miss_labels_lst
 
 
@@ -254,6 +260,42 @@ def missing_matrix(data, color_map) -> None:
     st.plotly_chart(fig1)
 
 
+def missing_compare(data, miss_cols, color_map) -> None:
+    """Generate a report comparing missing data in the dataset."""
+    # missing data comparison
+    st.write("---")
+    st.markdown("## Compare missing data within groups")
+
+    mc_1, mc_2 = st.columns([0.3, 0.7])
+
+    with mc_1:
+        group_by_col = st.selectbox(
+            label="Select column to group missing data by",
+            options=miss_cols,
+            index=None,
+        )
+
+    with mc_2:
+        compare_col = st.multiselect(
+            label="Select column to compare missing data",
+            options=data.columns,
+        )
+
+    if group_by_col and compare_col:
+        missing_compare = data.groupby(group_by_col)[compare_col].apply(
+            lambda x: x.isnull().mean()
+        )
+
+        fig = px.imshow(missing_compare, color_continuous_scale=color_map)
+        fig.layout.coloraxis.showscale = False
+        fig.update_layout(width=1000, height=500)
+        st.plotly_chart(fig)
+    else:
+        st.warning(
+            "Please select a column to group missing data by and a column to compare missing data."
+        )
+
+
 # define function to create summary report
 def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
     """Generate a report on missing data in the dataset. The report includes a
@@ -289,5 +331,6 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
     missing_summary(data, miss_cols)
     missing_columns(data, miss_cols, missing_codes, missing_labels)
     missing_over_time(data, miss_cols, color_map=sns_colormap)
+    missing_compare(data, miss_cols, sns_colormap)
     missing_correlation(data, miss_cols, sns_colormap)
     missing_matrix(data, sns_colormap)
