@@ -139,25 +139,15 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
 
     # Create the slider
     with slider_col:
-        mv_threshold = st.slider("Variables with % of missing values above:", 0, 100, 1)
+        mv_threshold = st.slider("Variables with % of missing values above:", 0, 100, 0)
 
     # Filter based on total missing percentage
     mv_data_filtered = mv_data[mv_data["% Null Values"] >= mv_threshold]
 
-    with stylable_container(
-        key="missing_table",
-        css_styles="""
-            {
-                background-color: #F9F9F9;
-                border: 1px solid rgba(49, 51, 63, 0.2);
-                border-radius: 0.5rem;
-            }
-            """,
-    ):
-        st.dataframe(
-            mv_data_filtered.reset_index(drop=True),
-            use_container_width=True,
-        )
+    st.dataframe(
+        mv_data_filtered.reset_index(drop=True),
+        use_container_width=True,
+    )
 
     # missingness over time
     st.write("---")
@@ -237,7 +227,6 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
         np.tril(np.ones(nullity_corr.shape)).astype(np.bool)
     )
 
-    # define colors for heatmap
     sns_colormap = [
         [0.0, "#3f7f93"],
         [0.1, "#6397a7"],
@@ -252,7 +241,34 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
         [1.0, "#da3b46"],
     ]
 
+    # sns_colormap = px.colors.sequential.Darkmint
+
     # create a heatmap
     fig = px.imshow(nullity_corr, color_continuous_scale=sns_colormap)
     fig.update_layout(width=1000, height=1000)
     st.plotly_chart(fig)
+
+    # Nullity matrix
+    st.write("---")
+    st.markdown("## Nullity matrix")
+
+    # select columns to group nullity matrix by
+    group_by_col = st.selectbox(
+        "Select columns to group nullity matrix by", options=data.columns, index=None
+    )
+
+    if group_by_col:
+        null_data = data.set_index(group_by_col)
+        null_data.sort_index(inplace=True)
+
+    else:
+        null_data = data
+
+    # convert data into a giant matrix of 1s and 0s depending on missingness
+    nullity_matrix = null_data.isnull().astype(int)
+
+    # display as heatmap
+    fig1 = px.imshow(nullity_matrix, color_continuous_scale=sns_colormap)
+    fig1.layout.coloraxis.showscale = False
+    fig1.update_layout(width=1000, height=1000)
+    st.plotly_chart(fig1)
