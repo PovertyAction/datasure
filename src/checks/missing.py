@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -6,45 +8,76 @@ import streamlit as st
 from streamlit_extras.stylable_container import stylable_container
 
 
-def missing_settings(data) -> tuple:
-    """Generate the settings for the missing data report."""
-    survey_cols = data.columns.tolist()
+def missing_settings(data: pd.DataFrame, setting_file: str) -> pd.DataFrame:
+    """Generate the settings for the missing data report.
 
-    miss_codes, miss_labels = ([], [])
+    Parameters
+    ----------
+    data : pd.DataFrame
+        The dataset to generate the missing data report for.
+    setting_file : str
+        The file to save the settings to.
 
+    Returns
+    -------
+    pd.DataFrame
+        The settings for the missing data report
+    """
     with st.expander("settings", icon=":material/settings:"):
-        st.markdown("## Configure settings for missing data report")
+        st.markdown("### Configure settings for missing data report")
 
         st.write("---")
 
-        miss_codes = st.text_input(
-            label="Enter missing codes separated by comma eg. -999, -888, 777 etc.",
-            value="-999, -888",
+        st.markdown("#### Add missing codes and labels for the dataset.")
+        info_col, table_col = st.columns([0.3, 0.7])
+        info_col.info(
+            "Add missing codes and labels for the dataset. These codes and labels will be used to "
+            "identify missing values in the dataset. You may edit the default values or add new ones."
         )
-        if miss_codes:
-            miss_codes_lst = miss_codes.split(",")
+        with table_col:
+            try:
+                with open(setting_file) as f:
+                    settings_dict = json.load(f)
+                    settings_df = pd.DataFrame(settings_dict)
 
-        miss_labels = st.text_input(
-            label="Enter missing labels separated by comma eg. Missing, Not applicable, Don't know etc.",
-            help="The labels should correspond to the missing codes entered above",
-            value="Don't Know, Refuse to Answer",
-        )
-        if miss_labels:
-            miss_labels_lst = miss_labels.split(",")
+            except FileNotFoundError:
+                # create new dataframe with default values
+                settings_df = pd.DataFrame(
+                    {
+                        "Missing Labels": [
+                            "Don't Know",
+                            "Refuse to Answer",
+                            "Not Applicable",
+                        ],
+                        "Missing Codes": ["-999, .999", "-888, .888", "-777, .777"],
+                    }
+                )
 
-        if len(miss_codes_lst) != len(miss_labels_lst):
-            st.warning("Number of missing codes and labels must be the same.")
+            settings_df_edited = st.data_editor(
+                settings_df,
+                key="missing_codes_labels",
+                num_rows="dynamic",
+                use_container_width=True,
+            )
+
+        # check that rows are either completely empty or completely filled
+        if settings_df_edited.isnull().sum().sum() > 0:
+            st.warning("Please fill in all missing codes and labels.")
 
         st.write("---")
         # add save settings button
+
         save_settings = st.button(label="Save settings", key="save_settings_missing")
         if save_settings:
+            with open(setting_file, "w") as f:
+                json.dump(settings_df_edited.to_dict(), f)
+
             st.success("Settings saved successfully.")
 
-    return survey_cols, miss_codes_lst, miss_labels_lst
+    return settings_df_edited
 
 
-def missing_summary(data, miss_cols) -> None:
+def missing_summary(data: pd.DataFrame) -> None:
     """Generate a summary of missing data in the dataset."""
     st.markdown("## Missing data")
 
@@ -61,36 +94,40 @@ def missing_summary(data, miss_cols) -> None:
     ):
         mc1, mc2, mc3, mc4 = st.columns(4)
 
-        missing_values = data[miss_cols].isnull().mean() * 100
-        all_missing = data[miss_cols].isnull().all() * 100
-        any_missing = data[miss_cols].isnull().any() * 100
+        missing_values = data.isnull().mean() * 100
+        all_missing = data.isnull().all() * 100
+        any_missing = data.isnull().any() * 100
         no_missing = 100 - any_missing
 
         mc1.metric(
-            label="% of missing values",
+            label="% MISSING VALUES",
             value=f"{missing_values.mean():.2f}%",
+            help="Percentage of missing values in the dataset",
         )
 
         mc2.metric(
-            label="% of columns with all missing values",
+            label="% ALL MISSING (COLUMNS)",
             value=f"{all_missing.mean():.2f}%",
+            help="Percentage of columns with all missing values",
         )
 
         mc3.metric(
-            label="% of columns with at least one missing value",
+            label="% AT LEAST ONE MISSING VALUE (COLUMNS)",
             value=f"{any_missing.mean():.2f}%",
+            help="Percentage of columns with at least one missing value",
         )
 
         mc4.metric(
-            label="% of columns with no missing values",
+            label="% NO MISSING VALUES (COLUMNS)",
             value=f"{no_missing.mean():.2f}%",
+            help="Percentage of columns with no missing values",
         )
 
 
-def missing_columns(data, miss_cols, missing_codes, missing_labels) -> None:
+def missing_columns(data: pd.DataFrame, missing_codes) -> None:
     """Generate a table showing the percentage of missing values in each column."""
     # Create a table of number of missing values and percentage of missing values
-    mv_data = data[miss_cols].isnull().sum()
+    mv_data = data.isnull().sum()
     mv_data = pd.DataFrame({"Column": mv_data.index, "Null Values": mv_data.values})
     mv_data["% Null Values"] = (mv_data["Null Values"] / len(data)) * 100
     mv_data["Total Missing"] = mv_data["Null Values"]
@@ -99,18 +136,19 @@ def missing_columns(data, miss_cols, missing_codes, missing_labels) -> None:
         ["Column", "Total Missing", "% Total Missing", "Null Values", "% Null Values"]
     ]
 
-    for i, mcode in enumerate(missing_codes):
-        new_col = data[miss_cols].apply(lambda x: x == mcode).sum()  # noqa: B023
+    for i in range(len(missing_codes)):
+        miss_label = missing_codes["Missing Labels"][i]
+        miss_codes = missing_codes["Missing Codes"][i].split(",")
+        new_col = data.apply(lambda x: x.isin(miss_codes)).sum()  # noqa: B023
+
         new_col = pd.DataFrame(
-            {"Column": new_col.index, f"{missing_labels[i]}": new_col.values}
+            {"Column": new_col.index, f"{miss_label}": new_col.values}
         )
-        new_col[f"% {missing_labels[i]}"] = (
-            new_col[f"{missing_labels[i]}"] / len(data)
-        ) * 100
+        new_col[f"% {miss_label}"] = (new_col[f"{miss_label}"] / len(data)) * 100
 
         # join new column to mv_data using column name
         mv_data = mv_data.merge(new_col, on="Column", how="left")
-        mv_data["Total Missing"] += mv_data[f"{missing_labels[i]}"]
+        mv_data["Total Missing"] += mv_data[f"{miss_label}"]
 
     mv_data["% Total Missing"] = (mv_data["Total Missing"] / len(data)) * 100
 
@@ -138,13 +176,25 @@ def missing_columns(data, miss_cols, missing_codes, missing_labels) -> None:
     # Filter based on total missing percentage
     mv_data_filtered = mv_data[mv_data["% Null Values"] >= mv_threshold]
 
+    perc_cols = [col for col in mv_data.columns if "%" in col]
+    cmap = sns.light_palette("pink", as_cmap=True)
+    vmin_val = mv_data_filtered[perc_cols].min().min()
+    vmax_val = mv_data_filtered[perc_cols].max().max()
     st.dataframe(
-        mv_data_filtered.reset_index(drop=True),
+        mv_data_filtered.style.background_gradient(
+            subset=perc_cols, cmap=cmap, axis=1, vmin=vmin_val, vmax=vmax_val
+        ),
         use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Column": st.column_config.Column(pinned=True),
+            "Total Missing": st.column_config.Column(pinned=True),
+            "% Total Missing": st.column_config.Column(pinned=True),
+        },
     )
 
 
-def missing_over_time(data, miss_cols, color_map) -> None:
+def missing_over_time(data: pd.DataFrame) -> None:
     """Generate a report on missing data over time."""
     # missingness over time
     st.write("---")
@@ -163,8 +213,9 @@ def missing_over_time(data, miss_cols, color_map) -> None:
     miss_trend_date_count = miss_trend_date_count.value_counts().reset_index()
 
     # calculate missingness over time
+    stat_cols = [col for col in data.columns if col != "missingness_trend_date"]
     missingness_over_time = miss_trend_data.groupby("missingness_trend_date")[
-        miss_cols
+        stat_cols
     ].apply(lambda x: x.isnull().sum())
     missingness_over_time = missingness_over_time.reset_index()
 
@@ -205,7 +256,7 @@ def missing_over_time(data, miss_cols, color_map) -> None:
     st.plotly_chart(fig)
 
 
-def missing_correlation(data, miss_cols, color_map) -> None:
+def missing_correlation(data: pd.DataFrame, color_map: str) -> None:
     """Generate a report on missing data correlation."""
     ## nullity correlation
     st.write("---")
@@ -217,7 +268,7 @@ def missing_correlation(data, miss_cols, color_map) -> None:
 
     # user define columns for nullity correlation
     null_cols_sel = st.multiselect(
-        label="Select columns to include in the nullity correlation heatmap",
+        label="Sort Nullity Matrix by column",
         options=null_cols,
     )
     if null_cols_sel and len(null_cols_sel) > 1:
@@ -235,7 +286,7 @@ def missing_correlation(data, miss_cols, color_map) -> None:
     st.plotly_chart(fig)
 
 
-def missing_matrix(data, color_map) -> None:
+def missing_matrix(data: pd.DataFrame, color_map: str) -> None:
     """Generate a report on missing data matrix."""
     st.write("---")
     st.markdown("## Nullity matrix")
@@ -262,7 +313,7 @@ def missing_matrix(data, color_map) -> None:
     st.plotly_chart(fig1)
 
 
-def missing_compare(data, miss_cols, color_map) -> None:
+def missing_compare(data: pd.DataFrame) -> None:
     """Generate a report comparing missing data in the dataset."""
     # missing data comparison
     st.write("---")
@@ -273,14 +324,16 @@ def missing_compare(data, miss_cols, color_map) -> None:
     with mc_1:
         group_by_col = st.selectbox(
             label="Select column to group missing data by",
-            options=miss_cols,
+            options=data.columns,
             index=None,
         )
+        allowed_cols = [col for col in data.columns if col != group_by_col]
 
     with mc_2:
         compare_col = st.multiselect(
             label="Select column to compare missing data",
-            options=data.columns,
+            options=allowed_cols,
+            disabled=not group_by_col,
         )
 
     if group_by_col:
@@ -315,6 +368,10 @@ def missing_compare(data, miss_cols, color_map) -> None:
                 subset=compare_col, cmap=cmap, axis=1, vmin=vmin_val, vmax=vmax_val
             ),
             use_container_width=True,
+            column_config={
+                "values (count)": st.column_config.Column(pinned=True),
+                "values (%)": st.column_config.Column(pinned=True),
+            },
         )
 
     else:
@@ -324,7 +381,7 @@ def missing_compare(data, miss_cols, color_map) -> None:
 
 
 # define function to create summary report
-def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
+def missing_report(data: pd.DataFrame, page_num: int) -> None:  # noqa: D417, RUF100
     """Generate a report on missing data in the dataset. The report includes a
     summary of missing data, a table showing the percentage of missing values
     in each column, and an option to inspect variables with missing data.
@@ -354,10 +411,13 @@ def missing_report(data, page_num) -> None:  # noqa: D417, RUF100
         [1.0, "#da3b46"],
     ]
 
-    miss_cols, missing_codes, missing_labels = missing_settings(data)
-    missing_summary(data, miss_cols)
-    missing_columns(data, miss_cols, missing_codes, missing_labels)
-    missing_over_time(data, miss_cols, color_map=sns_colormap)
-    missing_compare(data, miss_cols, sns_colormap)
-    missing_correlation(data, miss_cols, sns_colormap)
-    missing_matrix(data, sns_colormap)
+    page_name = st.session_state.config_pages["Page Name"][page_num - 1]
+    setting_file = f"cache/settings/pyDMS_missing_settings_{page_name}.json"
+
+    missing_codes = missing_settings(data=data, setting_file=setting_file)
+    missing_summary(data=data)
+    missing_columns(data=data, missing_codes=missing_codes)
+    missing_over_time(data=data)
+    missing_compare(data=data)
+    missing_correlation(data=data, color_map=sns_colormap)
+    missing_matrix(data=data, color_map=sns_colormap)
