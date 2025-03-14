@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import seaborn as sns
 import streamlit as st
 from streamlit_extras.stylable_container import stylable_container
 
@@ -200,6 +201,7 @@ def missing_over_time(data, miss_cols, color_map) -> None:
         color_discrete_sequence=["#e8848b"],
     )
     fig.update_layout(width=1000, height=500)
+    fig.update_layout(yaxis_range=[0, 100])
     st.plotly_chart(fig)
 
 
@@ -281,15 +283,40 @@ def missing_compare(data, miss_cols, color_map) -> None:
             options=data.columns,
         )
 
-    if group_by_col and compare_col:
-        missing_compare = data.groupby(group_by_col)[compare_col].apply(
-            lambda x: x.isnull().mean()
+    if group_by_col:
+        group_by_data = data[group_by_col].value_counts(dropna=False).reset_index()
+        group_by_data.columns = [group_by_col, "values (count)"]
+        group_by_data["values (%)"] = (
+            group_by_data["values (count)"] / len(data)
+        ) * 100
+
+    if group_by_col and not compare_col:
+        st.dataframe(group_by_data, use_container_width=True, hide_index=True)
+    elif group_by_col and compare_col:
+        missing_compare = data.groupby(group_by_col, dropna=False)[compare_col].apply(
+            lambda x: x.isnull().mean() * 100
         )
 
-        fig = px.imshow(missing_compare, color_continuous_scale=color_map)
-        fig.layout.coloraxis.showscale = False
-        fig.update_layout(width=1000, height=500)
-        st.plotly_chart(fig)
+        group_by_data = group_by_data.merge(
+            missing_compare, left_on=group_by_col, right_index=True
+        )
+        group_by_data.reset_index(drop=True, inplace=True)
+        group_by_data.set_index(group_by_col, inplace=True)
+
+        vmin_val = group_by_data[compare_col].min().min()
+        vmax_val = group_by_data[compare_col].max().max()
+
+        cmap = sns.light_palette("pink", as_cmap=True)
+        st.dataframe(
+            group_by_data.style.format(subset=compare_col, precision=2)
+            .format(subset=["values (count)"], thousands=",")
+            .format(subset=["values (%)"], precision=2)
+            .background_gradient(
+                subset=compare_col, cmap=cmap, axis=1, vmin=vmin_val, vmax=vmax_val
+            ),
+            use_container_width=True,
+        )
+
     else:
         st.warning(
             "Please select a column to group missing data by and a column to compare missing data."
