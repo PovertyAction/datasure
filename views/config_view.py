@@ -4,7 +4,7 @@ import streamlit as st
 st.title("Configure Checks")
 st.markdown("Add a page for each dataset you want to check")
 
-if "config_tabs" not in st.session_state:
+if "config_pages" not in st.session_state:
     st.session_state.config_pages = ""
 
 alias_list = list(filter(None, st.session_state.alias_list))
