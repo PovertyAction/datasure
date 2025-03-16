@@ -683,6 +683,7 @@ def scto_download_action(form_inputs: pd.DataFrame) -> None:
         st.warning("No data selected for download. Please select data to download")
         st.stop()
 
+    form_inputs.reset_index(inplace=True)
     form_count = len(form_inputs.index)
 
     progress_bar = st.progress(0, text="Downloading from SurveyCTO ...")
