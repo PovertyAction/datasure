@@ -241,7 +241,7 @@ def scto_get_repeat_fields(questions: pd.DataFrame) -> list:
 # --- Get repeat columns from repeat fields --- #
 
 
-def scto_get_repeat_cols(field: str, repeat_fields: list) -> list:
+def scto_get_repeat_cols(field: str, data_cols: list) -> list:
     """Get repeat columns from repeat fields.
 
     PARAMS:
@@ -254,8 +254,8 @@ def scto_get_repeat_cols(field: str, repeat_fields: list) -> list:
     list of repeat columns
 
     """
-    regex = r"\b" + field + r"_[0-9]+[_]{,1}.*\b"
-    cols = [x for x in repeat_fields if re.fullmatch(regex, x)]
+    regex = r"\b" + field + r"_[0-9]+_{,1}[0-9]*_{,1}[0-9]*\b"
+    cols = [x for x in data_cols if re.fullmatch(regex, x)]
 
     cols = cols or field.split()
     return cols
@@ -432,19 +432,19 @@ def scto_import_data(
         # data types
         fields: pd.DataFrame = questions[["type", "name"]]
         scto_data_cols = list(scto_data.columns)
-        for _index, row in fields.iterrows():
+        for _, row in fields.iterrows():
             # check if field is a repeat group col, if yes, get all repeat
             # columns
-            cols = scto_get_repeat_cols(row["name"], repeat_fields)
+            cols = scto_get_repeat_cols(field=row["name"], data_cols=scto_data_cols)
 
             if row["type"] in ["date", "datetime", "time"]:
                 scto_data[cols] = scto_data[cols].astype("datetime64[ns]")
             elif row["type"] in ["integer", "decimal"]:
                 # scto_data[cols] = pd.to_numeric(scto_data[cols])
                 pass
-            elif row["type"] in ["note"]:
-                if cols in scto_data_cols:
-                    # remove note fields from dataset
+            elif row["type"] == "note":
+                del_cols = [x for x in cols if x in scto_data.columns]
+                if del_cols:
                     scto_data.drop(columns=cols, axis=1, inplace=True)
             else:
                 # for all other types, ignore
