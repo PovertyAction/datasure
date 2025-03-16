@@ -6,6 +6,7 @@ from io import StringIO
 
 import pandas as pd
 import pysurveycto
+import requests
 import streamlit as st
 
 # --- SurveyCTO Server Connect Button Click Action --- #
@@ -370,12 +371,29 @@ def scto_import_data(
         scto_data, oldest_completion_date = scto_load_existing_data(saveas)
 
         # Download new data (from the oldest completion date)
-        new_data: pd.DataFrame = scto.get_form_data(
-            form_id=form_id,
-            format="json",
-            oldest_completion_date=oldest_completion_date,
-            key=key,
-        )
+        try:
+            new_data: pd.DataFrame = scto.get_form_data(
+                form_id=form_id,
+                format="json",
+                oldest_completion_date=oldest_completion_date,
+                key=key,
+            )
+        except requests.ConnectionError as conn_err:
+            st.warning(f"{conn_err}. Check your internet connection and try again.")
+            st.stop()
+        except requests.HTTPError as http_error:
+            st.warning(f"{http_error}")
+            if http_error.response.status_code == 401:
+                st.warning("Unauthorized access. Check your credentials and try again.")
+            elif http_error.response.status_code == 403:
+                st.warning("Form not found. Check form ID and try again.")
+            elif http_error.response.status_code == 500:
+                st.warning("Server error. Try again later.")
+            else:
+                st.warning("An error occurred. Try again later.")
+
+            st.stop()
+
         new_data: pd.DataFrame = pd.DataFrame(new_data)
         new_data_count = len(new_data.index)
 
