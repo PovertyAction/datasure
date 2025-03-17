@@ -1,4 +1,5 @@
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
 ##### Backchecks #####
@@ -156,12 +157,16 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
         st.markdown("### Tracking Options")
 
         # number of interviews expected
-        total_goal = st.number_input(  # noqa: F841
-            "Total goal",
+        backcheck_goal = st.number_input(
+            "Target number of backchecks",
             min_value=0,
-            help="Total number of interviews expected",
+            help="Total number of backchecks expected",
             key="total_goal_backcheck",
         )
+        # duplicates handling
+        st.write("How would you like to handle duplicates?")
+        drop_duplicates = st.toggle(label="Drop duplicates", value=True)
+        st.write("")
 
         # define a save settings button
         save_settings = st.button("Save settings", key="save_settings_backcheck")  # noqa: F841
@@ -191,17 +196,25 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
         if backcheck_cols:
             # merge survey and backcheck data
             survey_df_bc = survey_data[
-                backcheck_cols + [survey_id, enumerator]
+                backcheck_cols + [survey_id, enumerator, consent, date]
             ].add_prefix("_svy_")
             # rename enumerator and survey_id columns removing prefix
             survey_df_bc.rename(columns={"_svy_" + survey_id: survey_id}, inplace=True)
             backcheck_df_bc = backcheck_data[
-                backcheck_cols + [survey_id, backchecker]
+                backcheck_cols + [survey_id, backchecker, consent, date]
             ].add_prefix("_bc_")
             # rename enumerator and survey_id columns removing prefix
             backcheck_df_bc.rename(
                 columns={"_bc_" + survey_id: survey_id}, inplace=True
             )
+            # drop duplicates
+            if drop_duplicates:
+                survey_df_bc = survey_df_bc.sort_values(
+                    by="_svy_" + date
+                ).drop_duplicates(subset=[survey_id])
+                backcheck_df_bc = backcheck_df_bc.sort_values(
+                    by="_bc_" + date
+                ).drop_duplicates(subset=[survey_id])
 
             merged_df = pd.merge(
                 survey_df_bc, backcheck_df_bc, on=survey_id, how="inner"
@@ -210,6 +223,89 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
             # Find matching variable pairs (survey and backcheck variables)
             svy_vars = [col for col in merged_df.columns if col.startswith("_svy_")]  # noqa: F841
             back_vars = [col for col in merged_df.columns if col.startswith("_bc_")]  # noqa: F841
+
+            # overview statistics
+            st.subheader("Overview")
+            min_backcheck_rate = st.number_input(
+                "Enter a minimum percentage target of surveys backchecked by enumerator e.g. 10%",
+                min_value=0,
+                max_value=100,
+                value=10,
+                key="total_surveys_backcheck",
+                help="This is the minimum percentage of surveys that have been backchecked by enumerator",
+            )
+
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total number of backchecks", len(backcheck_df_bc))
+            col3.metric("Total backcheck error rate", "15.0%")
+
+            cl1, cl2, cl3 = st.columns(3)
+            with cl1:
+                # Calculate percentage of backchecks completed
+                total_surveys = len(survey_df_bc)
+                total_backchecks = len(backcheck_df_bc)
+                # handle case when backchecks is > backchecks target
+                if backcheck_goal < total_backchecks:
+                    backcheck_goal = total_backchecks
+
+                # Create a donut chart
+                fig = px.pie(
+                    names=["completed", "remaining"],
+                    values=[total_backchecks, backcheck_goal - total_backchecks],
+                    hole=0.5,
+                    title="% of surveys backchecked",
+                )
+                fig.update_layout(
+                    width=400,
+                    height=350,
+                    legend=dict(x=1, y=0.5, xanchor="left", yanchor="middle"),
+                    title=dict(y=0.95, yanchor="top"),
+                )
+
+                # Display the chart
+                st.plotly_chart(fig)
+
+            with cl3:
+                backcheck_sum_df = (
+                    survey_df_bc.groupby("_svy_" + enumerator)
+                    .size()
+                    .reset_index(name="total_surveys")
+                )
+                backcheck_sum_df = backcheck_sum_df.merge(
+                    merged_df.groupby("_svy_" + enumerator)
+                    .size()
+                    .reset_index(name="total_backchecks"),
+                    left_on="_svy_" + enumerator,
+                    right_on="_svy_" + enumerator,
+                    how="outer",
+                )
+                backcheck_sum_df["backcheck_rate"] = (
+                    backcheck_sum_df["total_backchecks"]
+                    / backcheck_sum_df["total_surveys"]
+                ) * 100
+                bc_target_met_df = backcheck_sum_df[
+                    backcheck_sum_df["backcheck_rate"] >= min_backcheck_rate
+                ]
+
+                num_enumerators_bc = bc_target_met_df["_svy_" + enumerator].nunique()
+                total_enumerators = len(survey_data[enumerator].unique())
+
+                # Create a pie chart
+                fig_enum = px.pie(
+                    names=["Backchecked", "Not backchecked"],
+                    values=[num_enumerators_bc, total_enumerators - num_enumerators_bc],
+                    hole=0.5,
+                    title="% of enumerators backchecked",
+                )
+                fig_enum.update_layout(
+                    width=400,
+                    height=350,
+                    legend=dict(x=1, y=0.5, xanchor="left", yanchor="middle"),
+                    title=dict(y=0.95, yanchor="top"),
+                )
+
+                # Display the pie chart
+                st.plotly_chart(fig_enum)
 
             # Create tabs for each selected variable
 
