@@ -1,15 +1,19 @@
 [theme]
+
+# use light theme as base
+base = "light"
+
 # Primary accent color for interactive elements
-# primaryColor = "#d33682"
+# primaryColor = "#6eb52f"
 
 # Background color for the main content area
-# backgroundColor = "#F1F2F2"
+backgroundColor = "#FAF9F6"
 
 # Background color used for the sidebar and most interactive widgets
-# secondaryBackgroundColor = "#586e75"
+# secondaryBackgroundColor = "#84d0d4"
 
 # Color used for almost all text
-# textColor = "#000000"
+# textColor = "#262730"
 
 
 [client]

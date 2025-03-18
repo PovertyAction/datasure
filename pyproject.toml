@@ -18,6 +18,8 @@ dependencies = [
     "pysurveycto>=0.0.14",
     "surveydata>=0.1.13",
     "requests>=2.32.3",
+    "streamlit-extras>=0.5.5",
+    "missingno>=0.5.2",
 ]
 
 [tool.uv]
