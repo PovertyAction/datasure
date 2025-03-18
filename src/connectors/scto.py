@@ -435,20 +435,24 @@ def scto_import_data(
         for _, row in fields.iterrows():
             # check if field is a repeat group col, if yes, get all repeat
             # columns
-            cols = scto_get_repeat_cols(field=row["name"], data_cols=scto_data_cols)
-
-            if row["type"] in ["date", "datetime", "time"]:
-                scto_data[cols] = scto_data[cols].astype("datetime64[ns]")
-            elif row["type"] in ["integer", "decimal"]:
-                # scto_data[cols] = pd.to_numeric(scto_data[cols])
-                pass
-            elif row["type"] == "note":
-                del_cols = [x for x in cols if x in scto_data.columns]
-                if del_cols:
-                    scto_data.drop(columns=cols, axis=1, inplace=True)
+            if row["name"] in repeat_fields:
+                cols = scto_get_repeat_cols(field=row["name"], data_cols=scto_data_cols)
             else:
-                # for all other types, ignore
-                pass
+                cols = row["name"]
+
+            cols = [col for col in cols if col in scto_data_cols]
+
+            if cols:
+                if row["type"] in ["date", "datetime", "time"]:
+                    scto_data[cols] = scto_data[cols].astype("datetime64[ns]")
+                elif row["type"] in ["integer", "decimal"]:
+                    # scto_data[cols] = pd.to_numeric(scto_data[cols])
+                    pass
+                elif row["type"] == "note":
+                    scto_data.drop(columns=cols, axis=1, inplace=True)
+                else:
+                    # for all other types, ignore
+                    pass
 
         # -- download media files --#
 
