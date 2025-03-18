@@ -142,6 +142,7 @@ with check_pages, st.container(border=True):
 
         for i in range(len(st.session_state.config_pages)):
             page_num = i + 1
+            st.session_state.config_pages.reset_index(inplace=True)
             st.session_state[f"config_page_{page_num}"] = st.session_state.config_pages[
                 "Page Name"
             ][i]

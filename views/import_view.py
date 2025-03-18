@@ -83,6 +83,9 @@ with scto:
         # import data
         with scto_download_prog_col:
             if scto_download_btn:
+                st.session_state.scto_forms = st.session_state.scto_forms[
+                    st.session_state.scto_forms["select"] == 1
+                ].reset_index()
                 scto_download_action(st.session_state.scto_forms)
 
     # --- PREVIEW SURVEYCTO DATA --- #

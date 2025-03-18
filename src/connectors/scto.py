@@ -6,6 +6,7 @@ from io import StringIO
 
 import pandas as pd
 import pysurveycto
+import requests
 import streamlit as st
 
 # --- SurveyCTO Server Connect Button Click Action --- #
@@ -240,7 +241,7 @@ def scto_get_repeat_fields(questions: pd.DataFrame) -> list:
 # --- Get repeat columns from repeat fields --- #
 
 
-def scto_get_repeat_cols(field: str, repeat_fields: list) -> list:
+def scto_get_repeat_cols(field: str, data_cols: list) -> list:
     """Get repeat columns from repeat fields.
 
     PARAMS:
@@ -253,8 +254,8 @@ def scto_get_repeat_cols(field: str, repeat_fields: list) -> list:
     list of repeat columns
 
     """
-    regex = r"\b" + field + r"_[0-9]+[_]{,1}.*\b"
-    cols = [x for x in repeat_fields if re.fullmatch(regex, x)]
+    regex = r"\b" + field + r"_[0-9]+_{,1}[0-9]*_{,1}[0-9]*\b"
+    cols = [x for x in data_cols if re.fullmatch(regex, x)]
 
     cols = cols or field.split()
     return cols
@@ -370,12 +371,29 @@ def scto_import_data(
         scto_data, oldest_completion_date = scto_load_existing_data(saveas)
 
         # Download new data (from the oldest completion date)
-        new_data: pd.DataFrame = scto.get_form_data(
-            form_id=form_id,
-            format="json",
-            oldest_completion_date=oldest_completion_date,
-            key=key,
-        )
+        try:
+            new_data: pd.DataFrame = scto.get_form_data(
+                form_id=form_id,
+                format="json",
+                oldest_completion_date=oldest_completion_date,
+                key=key,
+            )
+        except requests.ConnectionError as conn_err:
+            st.warning(f"{conn_err}. Check your internet connection and try again.")
+            st.stop()
+        except requests.HTTPError as http_error:
+            st.warning(f"{http_error}")
+            if http_error.response.status_code == 401:
+                st.warning("Unauthorized access. Check your credentials and try again.")
+            elif http_error.response.status_code == 403:
+                st.warning("Form not found. Check form ID and try again.")
+            elif http_error.response.status_code == 500:
+                st.warning("Server error. Try again later.")
+            else:
+                st.warning("An error occurred. Try again later.")
+
+            st.stop()
+
         new_data: pd.DataFrame = pd.DataFrame(new_data)
         new_data_count = len(new_data.index)
 
@@ -414,23 +432,27 @@ def scto_import_data(
         # data types
         fields: pd.DataFrame = questions[["type", "name"]]
         scto_data_cols = list(scto_data.columns)
-        for _index, row in fields.iterrows():
+        for _, row in fields.iterrows():
             # check if field is a repeat group col, if yes, get all repeat
             # columns
-            cols = scto_get_repeat_cols(row["name"], repeat_fields)
-
-            if row["type"] in ["date", "datetime", "time"]:
-                scto_data[cols] = scto_data[cols].astype("datetime64[ns]")
-            elif row["type"] in ["integer", "decimal"]:
-                # scto_data[cols] = pd.to_numeric(scto_data[cols])
-                pass
-            elif row["type"] in ["note"]:
-                if cols in scto_data_cols:
-                    # remove note fields from dataset
-                    scto_data.drop(columns=cols, axis=1, inplace=True)
+            if row["name"] in repeat_fields:
+                cols = scto_get_repeat_cols(field=row["name"], data_cols=scto_data_cols)
             else:
-                # for all other types, ignore
-                pass
+                cols = row["name"]
+
+            cols = [col for col in cols if col in scto_data_cols]
+
+            if cols:
+                if row["type"] in ["date", "datetime", "time"]:
+                    scto_data[cols] = scto_data[cols].astype("datetime64[ns]")
+                elif row["type"] in ["integer", "decimal"]:
+                    # scto_data[cols] = pd.to_numeric(scto_data[cols])
+                    pass
+                elif row["type"] == "note":
+                    scto_data.drop(columns=cols, axis=1, inplace=True)
+                else:
+                    # for all other types, ignore
+                    pass
 
         # -- download media files --#
 
@@ -683,6 +705,7 @@ def scto_download_action(form_inputs: pd.DataFrame) -> None:
         st.warning("No data selected for download. Please select data to download")
         st.stop()
 
+    form_inputs.reset_index(inplace=True)
     form_count = len(form_inputs.index)
 
     progress_bar = st.progress(0, text="Downloading from SurveyCTO ...")

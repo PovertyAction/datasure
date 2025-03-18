@@ -80,14 +80,12 @@ with desc_stats:
 
 with back_checks:
     bc_data_name = st.session_state.config_pages["Back check data"][page_number - 1]
-    if bc_data_name:
+    if bc_data_name and bc_data_name in alias_list:
         page_bc_data_index = st.session_state.alias_list.index(bc_data_name)
         backcheck_data = st.session_state[f"prepped_data{page_bc_data_index}"]
-    else:
-        backcheck_data = None
 
-    backchecks_report(
-        survey_data=st.session_state[f"prepped_data{page_data_index}"],
-        backcheck_data=backcheck_data,
-        page_num=page_number,
-    )
+        backchecks_report(
+            survey_data=st.session_state[f"prepped_data{page_data_index}"],
+            backcheck_data=backcheck_data,
+            page_num=page_number,
+        )
