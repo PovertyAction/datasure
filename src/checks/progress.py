@@ -120,7 +120,7 @@ def progress_report(data, page_num) -> None:
 
             if consent:
                 consent_options = data[consent].unique().tolist()
-                consent_val = st.multiselect(  # noqa: F841
+                consent_val = st.multiselect(
                     "Consent value(s)",
                     options=consent_options,
                     help="Value(s) indicating valid consent",
@@ -226,7 +226,7 @@ def progress_report(data, page_num) -> None:
                 data[outcome].isin(st.session_state["outcome_val_progress"])
             ][survey_id].nunique()
             completion_percentage = (
-                round((completed_count / total_submitted * 100), 0)
+                round((completed_count / total_goal * 100), 0)
                 if total_submitted > 0
                 else 0
             )
@@ -275,13 +275,24 @@ def progress_report(data, page_num) -> None:
         summary = (
             data.groupby(consent, observed=True)[survey_id].nunique().reset_index()
         )
+
+        # Define which values should be considered as given "consent" or "no consent"
+        consent_vals = [x for x in consent_val]
+        no_consent_vals = [x for x in data[consent].unique() if x not in consent_vals]
+
+        # Create mapping
+        mapping = {
+            **{x: "Consent" for x in consent_vals},
+            **{x: "No Consent" for x in no_consent_vals},
+        }
+
+        # Apply the mapping to the consent column
+        summary[consent] = summary[consent].map(mapping)
+
+        # Rename the columns AFTER applying the mapping
         summary.columns = ["Consent Status", "Unique ID Count"]
 
         st.table(summary)
-
-        # Modify consent variable - Define values of consent/no consent
-        mapping = {1: "Consent", 0: "No Consent"}
-        data[consent] = data[consent].map(mapping)
 
         # Group by 'id' and count unique values of "key"
         unique_counts = (
@@ -346,6 +357,7 @@ def progress_report(data, page_num) -> None:
 
     with col3:
         # Create a new DataFrame for the table
+        data["date_only"] = pd.to_datetime(data[date]).dt.date
         table_data = data[[survey_id, "date_only", consent]].copy()
         table_data["number_of_attempts"] = table_data[survey_id].map(
             unique_counts.set_index(survey_id)["unique_key_count"]
