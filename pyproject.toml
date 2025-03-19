@@ -3,13 +3,14 @@ name = "dms-dashboard"
 version = "0.1.0"
 description = "IPA Data Management System Dashboard."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "jupyter>=1.1.1",
     "openpyxl>=3.1.5",
     "pandas>=2.2.2",
     "plotly>=5.24.1",
     "seaborn>=0.13.2",
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
     "streamlit-folium>=0.23.2",
@@ -85,6 +86,9 @@ dependencies = [
     "numpy>=2.2.3",
 >>>>>>> a505d9c (set up for mac)
 >>>>>>> 7bb3a4f (set up for mac)
+=======
+    "streamlit>=1.41.1",
+>>>>>>> 0930b86 (rebase)
 ]
 
 [tool.uv]
@@ -95,6 +99,7 @@ dev-dependencies = [
     "mdformat-gfm>=0.3.6",
     "mdformat-pyproject>=0.0.1",
     "ruff>=0.6.4",
+    "seaborn>=0.13.2",
     "sqlfluff>=3.1.1",
 ]
 
@@ -115,9 +120,6 @@ select = [
     "D",   # flake8-docstrings
     "UP",  # pyupgrade
     "SIM", # flake8-simplify
-    "RUF", # ruff
-    "B",   # bugbear
-    "TRY", # tryceratops
 ]
 
 ignore = [
@@ -138,6 +140,7 @@ ignore = [
     "D205",   # 1 blank line required between summary line and description
     "D203",
     "D213",
+<<<<<<< HEAD
     "D400",   # First line should end with a period
     "D401",   # First line of docstring should be in imperative mood
 <<<<<<< HEAD
@@ -153,13 +156,9 @@ ignore = [
 =======
     "E722", #bare-exception
 >>>>>>> 646ad42 (E722)
+=======
+>>>>>>> 0930b86 (rebase)
 ]
-
-[tool.ruff.lint.pycodestyle]
-max-doc-length = 88
-
-[tool.ruff.lint.pydocstyle]
-convention = "numpy"
 
 [tool.ruff.format]
 docstring-code-format = true

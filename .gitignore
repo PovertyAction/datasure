@@ -166,6 +166,7 @@ cython_debug/
 *secrets.toml
 
 /.quarto/
+<<<<<<< HEAD
 
 
 <<<<<<< HEAD
@@ -217,3 +218,5 @@ cache/data/*
 cache/settings/*
 >>>>>>> 0c48cd5 (restructured files and folders)
 >>>>>>> 7f9f3dd (restructured files and folders)
+=======
+>>>>>>> 0930b86 (rebase)
