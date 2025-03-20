@@ -174,3 +174,5 @@ archived/notebooks/*test*.ipynb
 cache/*.json
 cache/data/*
 cache/settings/*
+
+**.DS_Store
