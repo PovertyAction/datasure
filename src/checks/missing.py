@@ -253,7 +253,7 @@ def missing_over_time(data: pd.DataFrame) -> None:
     )
     fig.update_layout(width=1000, height=500)
     fig.update_layout(yaxis_range=[0, 100])
-    st.plotly_chart(fig)
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def missing_correlation(data: pd.DataFrame, color_map: str) -> None:
@@ -283,7 +283,7 @@ def missing_correlation(data: pd.DataFrame, color_map: str) -> None:
 
     fig = px.imshow(nullity_corr, color_continuous_scale=color_map)
     fig.update_layout(width=1000, height=1000)
-    st.plotly_chart(fig)
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def missing_matrix(data: pd.DataFrame, color_map: str) -> None:
@@ -310,7 +310,7 @@ def missing_matrix(data: pd.DataFrame, color_map: str) -> None:
     fig1 = px.imshow(nullity_matrix, color_continuous_scale=color_map)
     fig1.layout.coloraxis.showscale = False
     fig1.update_layout(width=1000, height=1000)
-    st.plotly_chart(fig1)
+    st.plotly_chart(fig1, use_container_width=True)
 
 
 def missing_compare(data: pd.DataFrame) -> None:
