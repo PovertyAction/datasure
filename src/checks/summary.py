@@ -1,5 +1,6 @@
 import pandas as pd
 import plotly.express as px
+import seaborn as sns
 import streamlit as st
 from millify import millify
 
@@ -131,7 +132,7 @@ def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
 
         # number of interviews expected
         st.markdown("##### Target number of interviews")
-        total_goal = st.number_input(  # noqa: F841
+        target = st.number_input(
             label="Total goal",
             min_value=0,
             help="Total number of interviews expected",
@@ -142,10 +143,10 @@ def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
         # define a save settings button
         save_settings = st.button("Save settings")  # noqa: F841
 
-    return date, enumerator
+    return date, enumerator, target
 
 
-def summary_submissions(data: pd.DataFrame, date: str = None) -> None:  # noqa: RUF013
+def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
     """
     Generates a summary report for the survey data
 
@@ -163,6 +164,21 @@ def summary_submissions(data: pd.DataFrame, date: str = None) -> None:  # noqa: 
     """
     st.markdown("## Submission details")
     if date:
+        first_submission_date = data[date].min()
+        last_submission_date = data[date].max()
+
+        dc1, _, _, dc2 = st.columns(spec=4)
+        dc1.metric(
+            label="First Submission",
+            value=str(first_submission_date.date()),
+            help="Date of the first submission",
+        )
+        dc2.metric(
+            label="Last Submission",
+            value=str(last_submission_date.date()),
+            help="Date of the last submission",
+        )
+
         mc1, mc2, mc3, mc4 = st.columns(spec=4, border=True)
         submissions_today = data[data[date] == pd.Timestamp.now().normalize()].shape[0]
         submissions_yesterday = data[
@@ -239,6 +255,139 @@ def summary_submissions(data: pd.DataFrame, date: str = None) -> None:  # noqa: 
         st.warning("Please select a date column to view submissions details")
 
 
+def summary_progress(
+    data: pd.DataFrame,
+    date: str,
+    enumerator: str | None = None,
+    target: int | None = None,
+) -> None:
+    """
+    Generates a summary progress report for the survey data
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+            The survey data
+
+    enumerator : str
+            The enumerator column in the survey data
+
+    Returns
+    -------
+    None
+    """
+    st.write("---")
+    st.markdown("## Progress")
+
+    if target:
+        progress = (data.shape[0] / target) * 100
+        progress_color = "green" if progress >= 100 else "red"
+    else:
+        progress = 0
+        progress_color = "red"  # noqa: F841
+
+    average_submission_per_day = data[date].value_counts().mean()
+    data["week"] = data[date].dt.to_period("W").dt.to_timestamp()
+    average_submission_per_week = data.groupby("week").size().mean()
+    data["month"] = data[date].dt.to_period("M").dt.to_timestamp()
+    average_submission_per_month = data.groupby("month").size().mean()
+
+    mc1, mc2, mc3, mc4 = st.columns(spec=4, border=True)
+    with mc1:
+        st.write("Submission progress")
+        sp1, sp2 = st.columns([0.80, 0.20])
+        sp1.progress(value=int(progress))
+        sp2.write(f"{progress:.2f}%")
+    mc2.metric(
+        label="Average submissions per day",
+        value=f"{average_submission_per_day:.2f}",
+        help="Average number of submissions per day",
+    )
+    mc3.metric(
+        label="Average submissions per week",
+        value=f"{average_submission_per_week:.2f}",
+        help="Average number of submissions per week",
+    )
+    mc4.metric(
+        label="Average submissions per month",
+        value=f"{average_submission_per_month:.2f}",
+        help="Average number of submissions per month",
+    )
+
+    # progress by column
+    pc1, _ = st.columns([0.3, 0.7])
+    with pc1:
+        progress_options = data.columns.tolist()
+        progress_options.remove(date)
+        progress_by_col = st.selectbox(
+            "Progress by", options=progress_options, index=None, key="progress_by_col"
+        )
+
+    if progress_by_col:
+        _, pil1 = st.columns([0.80, 0.20])
+        with pil1:
+            progress_time_period = st.pills(
+                label="Progress time period",
+                options=["Auto", "Daily", "Weekly", "Monthly"],
+                default="Auto",
+                key="progress_time_period",
+            )
+
+        if progress_time_period == "Auto":
+            total_submissions = data.shape[0]
+            if total_submissions > 0:
+                if total_submissions < 20:
+                    progress_time_period_use = "Daily"
+                elif total_submissions < 140:
+                    progress_time_period_use = "Weekly"
+                else:
+                    progress_time_period_use = "Monthly"
+        else:
+            progress_time_period_use = progress_time_period
+
+        progress_data = data[[date, progress_by_col]].copy()
+        progress_data["time period"] = data[date].dt.to_period("D").dt.to_timestamp()
+        progress_data = (
+            progress_data.groupby(["time period", progress_by_col])
+            .size()
+            .reset_index(name="count")
+        )
+
+        if progress_time_period_use == "Weekly":
+            progress_data["time period"] = (
+                progress_data["time period"].dt.to_period("W").dt.to_timestamp()
+            )
+            progress_data = (
+                progress_data.groupby(["time period", progress_by_col])
+                .sum("count")
+                .reset_index()
+            )
+        elif progress_time_period_use == "Monthly":
+            progress_data["time period"] = (
+                progress_data["time period"].dt.to_period("M").dt.to_timestamp()
+            )
+            progress_data = (
+                progress_data.groupby(["time period", progress_by_col])
+                .sum("count")
+                .reset_index()
+            )
+
+        progress_data["time period"] = progress_data["time period"].dt.date
+        progress_data = progress_data.pivot(
+            index=progress_by_col, columns="time period", values="count"
+        ).fillna(0)
+
+        cmap = sns.light_palette("pink", as_cmap=True)
+        vmin_val = progress_data.min().min()
+        vmax_val = progress_data.max().max()
+        st.dataframe(
+            progress_data.style.format("{:.0f}").background_gradient(
+                cmap=cmap, axis=1, vmin=vmin_val, vmax=vmax_val
+            ),
+            use_container_width=True,
+        )
+
+
 def summary_report(data: pd.DataFrame, page_num: int) -> None:
     """
     Generates a summary report for the survey data
@@ -258,7 +407,11 @@ def summary_report(data: pd.DataFrame, page_num: int) -> None:
     page_name = st.session_state.config_pages["Page Name"][page_num - 1]
     setting_file = f"cache/settings/pyDMS_hfc_settings_{page_name}.json"
 
-    date, _ = summary_settings(data=data, setting_file=setting_file, page_num=page_num)
-    summary_submissions(
-        data=data, date=st.session_state["config_pages"]["Survey Date"][page_num - 1]
+    date, enumerator, target = summary_settings(
+        data=data, setting_file=setting_file, page_num=page_num
     )
+    summary_submissions(
+        data=data[[date]],
+        date=date,
+    )
+    summary_progress(data=data, date=date, enumerator=enumerator, target=target)
