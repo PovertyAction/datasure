@@ -268,8 +268,9 @@ def missing_correlation(data: pd.DataFrame, color_map: str) -> None:
 
     # user define columns for nullity correlation
     null_cols_sel = st.multiselect(
-        label="Sort Nullity Matrix by column",
+        label="Select columns for nullity correlation",
         options=null_cols,
+        help="Select columns to calculate nullity correlation, by default all columns with missing values are selected",
     )
     if null_cols_sel and len(null_cols_sel) > 1:
         nullity_cols = null_cols_sel
