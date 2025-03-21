@@ -1,8 +1,11 @@
+import matplotlib.pyplot as plt
 import pandas as pd
 import plotly.express as px
 import seaborn as sns
 import streamlit as st
 from millify import millify
+
+from src.utils import donut_chart2
 
 
 # define function to create summary report
@@ -87,7 +90,7 @@ def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
                 page_num - 1
             ]
             default_survey_id_index = survey_cols.get_loc(default_survey_id)
-            survey_id = st.selectbox(  # noqa: F841
+            survey_id = st.selectbox(
                 label="Survey ID",
                 options=survey_cols,
                 help="Column containing survey ID",
@@ -143,7 +146,7 @@ def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
         # define a save settings button
         save_settings = st.button("Save settings")  # noqa: F841
 
-    return date, enumerator, target
+    return date, enumerator, target, survey_id or None
 
 
 def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
@@ -221,19 +224,19 @@ def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
         mc1.metric(
             label="Today",
             value=submissions_today,
-            delta=millify(submissions_today_delta, precision=2),
+            delta=f"{millify(submissions_today_delta, precision=2)}%",
             help="Number of submissions today. Delta is the percentage change from yesterday.",
         )
         mc2.metric(
             label="This week",
             value=submissions_this_week,
-            delta=millify(submissions_this_week_delta, precision=2),
+            delta=f"{millify(submissions_this_week_delta, precision=2)}%",
             help="Number of submissions this week. Delta is the percentage change from last week.",
         )
         mc3.metric(
             label="This month",
             value=submissions_this_month,
-            delta=millify(submissions_this_month_delta, precision=2),
+            delta=f"{millify(submissions_this_month_delta, precision=2)}%",
             help="Number of submissions this month. Delta is the percentage change from last month",
         )
         mc4.metric(
@@ -279,13 +282,7 @@ def summary_progress(
     st.write("---")
     st.markdown("## Progress")
 
-    if target:
-        progress = (data.shape[0] / target) * 100
-        progress_color = "green" if progress >= 100 else "red"
-    else:
-        progress = 0
-        progress_color = "red"  # noqa: F841
-
+    progress = (data.shape[0] / target) * 100 if target else 0
     average_submission_per_day = data[date].value_counts().mean()
     data["week"] = data[date].dt.to_period("W").dt.to_timestamp()
     average_submission_per_week = data.groupby("week").size().mean()
@@ -380,12 +377,119 @@ def summary_progress(
         cmap = sns.light_palette("pink", as_cmap=True)
         vmin_val = progress_data.min().min()
         vmax_val = progress_data.max().max()
+
+        progress_data["trend"] = progress_data.apply(
+            lambda col_val: ", ".join(map(str, col_val)), axis=1
+        )
+        format_cols = [col for col in progress_data.columns if col != "trend"]
+        progress_data = progress_data[["trend"] + format_cols]
+
         st.dataframe(
-            progress_data.style.format("{:.0f}").background_gradient(
-                cmap=cmap, axis=1, vmin=vmin_val, vmax=vmax_val
+            progress_data.style.format(
+                subset=format_cols, precision=0
+            ).background_gradient(
+                subset=format_cols, cmap=cmap, axis=1, vmin=vmin_val, vmax=vmax_val
             ),
             use_container_width=True,
+            column_config={
+                "trend": st.column_config.AreaChartColumn(
+                    "Trend of submissions",
+                    width="medium",
+                    help="Trend of submissions over time",
+                    y_min=vmin_val,
+                    y_max=vmax_val,
+                ),
+            },
         )
+
+
+def summary_data_summary(data: pd.DataFrame) -> None:
+    """
+    Generates summary details of for the survey data
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+            The survey data
+
+    Returns
+    -------
+    None
+    """
+    st.write("---")
+    st.markdown("## Data Summary")
+
+    num_str_cols = data.select_dtypes(include=["object"]).shape[1]
+    num_num_cols = data.select_dtypes(include=["number"]).shape[1]
+    num_date_cols = data.select_dtypes(include=["datetime"]).shape[1]
+    col_count = data.shape[1]
+
+    ds1, ds2, ds3, ds4 = st.columns(spec=4, border=True)
+    ds1.metric(
+        label="String Columns", value=num_str_cols, help="Number of string columns"
+    )
+    ds2.metric(
+        label="Numeric Columns", value=num_num_cols, help="Number of numeric columns"
+    )
+    ds3.metric(label="Date Columns", value=num_date_cols, help="Number of date columns")
+    ds4.metric(label="Total Columns", value=col_count, help="Total number of columns")
+
+
+def summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> None:
+    """
+    Generates a summary report for the survey data
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+            The survey data
+
+    Returns
+    -------
+    None
+    """
+    st.write("---")
+    st.markdown("## Data Quality")
+
+    if survey_id:
+        # calculate number of duplicates in survey id column
+        perc_duplicates = data.duplicated(subset=[survey_id]).mean() * 100
+        perc_outliers = 0
+        perc_missing = data.isnull().mean().mean() * 100
+        perc_back_check_error_rate = 0
+
+        perc_duplicates_chart = donut_chart2(
+            actual_value=perc_duplicates,
+        )
+        plt.close(perc_duplicates_chart)
+        perc_outliers_chart = donut_chart2(
+            actual_value=perc_outliers,
+        )
+        plt.close(perc_outliers_chart)
+        perc_missing_chart = donut_chart2(
+            actual_value=perc_missing,
+        )
+        plt.close(perc_missing_chart)
+        perc_back_check_error_rate_chart = donut_chart2(
+            actual_value=perc_back_check_error_rate,
+        )
+
+        dq1, dq2, dq3, dq4 = st.columns(spec=4, border=True)
+        with dq1:
+            st.markdown(f"**% of duplicates values on {survey_id}**")
+            st.pyplot(perc_duplicates_chart)
+        with dq2:
+            st.markdown("**% of values in XX columns**")
+            st.pyplot(perc_outliers_chart)
+        with dq3:
+            st.markdown("**% of missing values in survey dataset**")
+            st.pyplot(perc_missing_chart)
+        with dq4:
+            st.markdown("**Back check error rate**")
+            st.pyplot(perc_back_check_error_rate_chart)
+
+    else:
+        st.warning("Please select a survey ID column to view data quality details")
 
 
 def summary_report(data: pd.DataFrame, page_num: int) -> None:
@@ -407,7 +511,7 @@ def summary_report(data: pd.DataFrame, page_num: int) -> None:
     page_name = st.session_state.config_pages["Page Name"][page_num - 1]
     setting_file = f"cache/settings/pyDMS_hfc_settings_{page_name}.json"
 
-    date, enumerator, target = summary_settings(
+    date, enumerator, target, survey_id = summary_settings(
         data=data, setting_file=setting_file, page_num=page_num
     )
     summary_submissions(
@@ -415,3 +519,5 @@ def summary_report(data: pd.DataFrame, page_num: int) -> None:
         date=date,
     )
     summary_progress(data=data, date=date, enumerator=enumerator, target=target)
+    summary_data_summary(data=data)
+    summary_data_quality(data=data, survey_id=survey_id)
