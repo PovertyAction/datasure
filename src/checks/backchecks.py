@@ -165,7 +165,9 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
         )
         # duplicates handling
         st.write("How would you like to handle duplicates?")
-        drop_duplicates = st.toggle(label="Drop duplicates", value=True)
+        drop_duplicates = st.toggle(
+            label="Drop duplicates", value=True, key="drop_duplicates_backcheck"
+        )
         st.write("")
 
         # define a save settings button
@@ -194,6 +196,15 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
 
     else:
         if backcheck_cols:
+            # drop duplicates
+            if drop_duplicates:
+                survey_data = survey_data.sort_values(
+                    by=date, ascending=False
+                ).drop_duplicates(subset=[survey_id], keep="first")
+                backcheck_data = backcheck_data.sort_values(
+                    by=date, ascending=False
+                ).drop_duplicates(subset=[survey_id], keep="first")
+
             # merge survey and backcheck data
             survey_df_bc = survey_data[
                 backcheck_cols + [survey_id, enumerator, consent, date]
@@ -207,14 +218,6 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
             backcheck_df_bc.rename(
                 columns={"_bc_" + survey_id: survey_id}, inplace=True
             )
-            # drop duplicates
-            if drop_duplicates:
-                survey_df_bc = survey_df_bc.sort_values(
-                    by="_svy_" + date
-                ).drop_duplicates(subset=[survey_id])
-                backcheck_df_bc = backcheck_df_bc.sort_values(
-                    by="_bc_" + date
-                ).drop_duplicates(subset=[survey_id])
 
             merged_df = pd.merge(
                 survey_df_bc, backcheck_df_bc, on=survey_id, how="inner"
@@ -237,33 +240,67 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
 
             col1, col2, col3 = st.columns(3)
             col1.metric("Total number of backchecks", len(backcheck_df_bc))
-            col3.metric("Total backcheck error rate", "15.0%")
+            with col3:
+                if st.session_state.total_backcheck_error_rate:
+                    st.metric(
+                        "Total backcheck error rate",
+                        f"{st.session_state.total_backcheck_error_rate:.0f}%",
+                    )
+                else:
+                    st.warning("Backcheck column settings not configured")
 
             cl1, cl2, cl3 = st.columns(3)
+            # define chart colors
+            chart_colors = ["#35904A", "lightgrey"]
             with cl1:
-                # Calculate percentage of backchecks completed
-                total_surveys = len(survey_df_bc)
-                total_backchecks = len(backcheck_df_bc)
-                # handle case when backchecks is > backchecks target
-                if backcheck_goal < total_backchecks:
-                    backcheck_goal = total_backchecks
+                if backcheck_goal == 0:
+                    st.warning("Please set a target for backchecks")
+                else:
+                    # Calculate percentage of backchecks completed
+                    total_surveys = len(survey_df_bc)
+                    total_backchecks = len(backcheck_df_bc)
+                    # handle case when backchecks is > backchecks target
+                    if backcheck_goal < total_backchecks:
+                        backcheck_goal_update = total_backchecks
+                    else:
+                        backcheck_goal_update = backcheck_goal
 
-                # Create a donut chart
-                fig = px.pie(
-                    names=["completed", "remaining"],
-                    values=[total_backchecks, backcheck_goal - total_backchecks],
-                    hole=0.5,
-                    title="% of surveys backchecked",
-                )
-                fig.update_layout(
-                    width=400,
-                    height=350,
-                    legend=dict(x=1, y=0.5, xanchor="left", yanchor="middle"),
-                    title=dict(y=0.95, yanchor="top"),
-                )
+                    # Create a donut chart
 
-                # Display the chart
-                st.plotly_chart(fig)
+                    fig = px.pie(
+                        names=["Backchecked", "Not backchecked"],
+                        values=[
+                            total_backchecks,
+                            backcheck_goal_update - total_backchecks,
+                        ],
+                        hole=0.6,
+                        title="% of surveys backchecked",
+                    )
+                    fig.update_layout(
+                        width=400,
+                        height=350,
+                        showlegend=False,
+                        title=dict(xanchor="left", y=0.9, yanchor="top"),
+                    )
+                    fig.update_traces(
+                        textinfo="none",
+                        marker=dict(colors=chart_colors),
+                        direction="clockwise",
+                    )
+
+                    fig.add_annotation(
+                        dict(
+                            text=f"{(total_backchecks / backcheck_goal) * 100:.0f}%",
+                            x=0.5,
+                            y=0.5,
+                            font_size=30,
+                            font_weight="bold",
+                            showarrow=False,
+                        )
+                    )
+
+                    # Display the chart
+                    st.plotly_chart(fig)
 
             with cl3:
                 backcheck_sum_df = (
@@ -288,24 +325,361 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 ]
 
                 num_enumerators_bc = bc_target_met_df["_svy_" + enumerator].nunique()
-                total_enumerators = len(survey_data[enumerator].unique())
+                total_enumerators = len(survey_df_bc["_svy_" + enumerator].unique())
 
                 # Create a pie chart
                 fig_enum = px.pie(
                     names=["Backchecked", "Not backchecked"],
                     values=[num_enumerators_bc, total_enumerators - num_enumerators_bc],
-                    hole=0.5,
+                    hole=0.6,
                     title="% of enumerators backchecked",
                 )
                 fig_enum.update_layout(
                     width=400,
                     height=350,
-                    legend=dict(x=1, y=0.5, xanchor="left", yanchor="middle"),
-                    title=dict(y=0.95, yanchor="top"),
+                    showlegend=False,
+                    title=dict(xanchor="left", y=0.9, yanchor="top"),
+                )
+                fig_enum.update_traces(
+                    textinfo="none",
+                    marker=dict(colors=chart_colors),
+                    direction="clockwise",
+                )
+
+                fig_enum.add_annotation(
+                    dict(
+                        text=f"{(num_enumerators_bc / total_enumerators) * 100:.0f}%",
+                        x=0.5,
+                        y=0.5,
+                        font_size=30,
+                        font_weight="bold",
+                        showarrow=False,
+                    )
                 )
 
                 # Display the pie chart
                 st.plotly_chart(fig_enum)
+
+            # Column types selection
+            with st.expander("Backcheck Columns Setting", expanded=True):
+                # Initialize session state for table data if not already present
+                if "column_config_data" not in st.session_state:
+                    st.session_state.column_config_data = pd.DataFrame(
+                        columns=["Column Name", "Column Type", "OK Range", "Conditions"]
+                    )
+
+                # Display the table and allow user interaction
+                with st.popover("Add a backcheck column", icon=":material/add:"):
+                    # st.markdown("### Add backcheck column type")
+                    column_name = st.selectbox(
+                        "Column Name",
+                        options=common_cols,
+                        help="Select a column to configure",
+                    )
+                    column_type = st.selectbox(
+                        "Column Type",
+                        options=["Type 1", "Type 2", "Type 3"],
+                        help="Select the backcheck category of the column",
+                    )
+                    ok_range_type = st.selectbox(
+                        "OK Range Type",
+                        options=[
+                            "None",
+                            "equals to",
+                            "less than",
+                            "greater than",
+                            "between",
+                        ],
+                        help="Select the type of range condition",
+                    )
+
+                    if ok_range_type == "between":
+                        range_min = st.number_input(
+                            "Minimum Value", help="Enter the minimum value"
+                        )
+                        range_max = st.number_input(
+                            "Maximum Value", help="Enter the maximum value"
+                        )
+                        ok_range = f"between {range_min} and {range_max}"
+                    elif ok_range_type == "None":
+                        ok_range = ""
+                    else:
+                        single_value = st.number_input("Value", help="Enter the value")
+                        ok_range = f"{ok_range_type} {single_value}"
+
+                    compare_condition = st.selectbox(
+                        label="Compare Condition",
+                        options=[
+                            "None",
+                            "Do not compare missing values or null values",
+                            "Do not compare if the value contain:",
+                            "Treat these values as the same:",
+                        ],
+                        help="Specify any additional conditions (e.g., do compare if values are missing)",
+                    )
+                    if compare_condition == "Do not compare if the value contains:":
+                        contains_condition = st.text_input(
+                            "Enter the values separated by a comma",
+                            help="Enter the values separated by a comma",
+                        )
+                        conditions = f"{compare_condition} {contains_condition}"
+                    elif compare_condition == "Treat these values as the same:":
+                        same_condition = st.text_input(
+                            "Enter the values separated by a comma",
+                            help="Enter the values separated by a comma",
+                        )
+                        conditions = f"{compare_condition} {same_condition}"
+                    elif (
+                        compare_condition
+                        == "Do not compare missing values or null values"
+                    ):
+                        conditions = "ignore_missing_values"
+                    else:
+                        conditions = ""
+
+                    if st.button("Add Column"):
+                        new_row = {
+                            "Column Name": column_name,
+                            "Column Type": column_type,
+                            "OK Range": ok_range,
+                            "Conditions": conditions,
+                        }
+                        st.session_state.column_config_data = pd.concat(
+                            [
+                                st.session_state.column_config_data,
+                                pd.DataFrame([new_row]),
+                            ],
+                            ignore_index=True,
+                        )
+                st.data_editor(
+                    st.session_state.column_config_data,
+                    num_rows="dynamic",
+                    use_container_width=True,
+                )
+
+            # Create a data category report
+            def generate_column_summary(
+                column_config_data, survey_data, backcheck_data, survey_id
+            ):
+                """
+                Generate a summary for each column configuration.
+
+                Parameters
+                ----------
+                column_config_data: pd.DataFrame
+                    DataFrame containing column configuration with columns:
+                    ["Column Name", "Column Type", "OK Range", "Conditions"]
+
+                survey_data: pd.DataFrame
+                    Survey data to be used for comparison.
+
+                backcheck_data: pd.DataFrame
+                    Backcheck data to be used for comparison.
+
+                survey_id: str
+                    Column name for the unique survey identifier.
+
+                Returns
+                -------
+                pd.DataFrame
+                    Summary DataFrame with columns:
+                    ["Column", "Data Type", "Category", "# Surveys", "# Backchecks",
+                     "# Compared", "# Different", "Error Rate"]
+                """
+                summary_data = []
+
+                for _, row in column_config_data.iterrows():
+                    column_name = row["Column Name"]
+                    column_type = row["Column Type"]
+                    ok_range = row["OK Range"]
+                    conditions = row["Conditions"]
+
+                    # Prepare survey and backcheck data for the column
+                    svy_col = f"_svy_{column_name}"
+                    bc_col = f"_bc_{column_name}"
+
+                    survey_col_data = (
+                        survey_data[[survey_id, column_name]]
+                        .add_prefix("_svy_")
+                        .rename(columns={"_svy_" + survey_id: survey_id})
+                    )
+                    backcheck_col_data = (
+                        backcheck_data[[survey_id, column_name]]
+                        .add_prefix("_bc_")
+                        .rename(columns={"_bc_" + survey_id: survey_id})
+                    )
+
+                    # Merge survey and backcheck data
+                    merged_df = pd.merge(
+                        survey_col_data, backcheck_col_data, on=survey_id, how="inner"
+                    )
+
+                    # Apply OK Range filtering
+                    if ok_range:
+                        if "between" in ok_range:
+                            range_min, range_max = map(
+                                float, ok_range.replace("between", "").split("and")
+                            )
+                            merged_df = merged_df[
+                                (
+                                    merged_df[svy_col]
+                                    .astype(float)
+                                    .between(range_min, range_max)
+                                )
+                                & (
+                                    merged_df[bc_col]
+                                    .astype(float)
+                                    .between(range_min, range_max)
+                                )
+                            ]
+                        elif "less than" in ok_range:
+                            value = float(ok_range.replace("less than", "").strip())
+                            merged_df = merged_df[
+                                (merged_df[svy_col].astype(float) < value)
+                                & (merged_df[bc_col].astype(float) < value)
+                            ]
+                        elif "greater than" in ok_range:
+                            value = float(ok_range.replace("greater than", "").strip())
+                            merged_df = merged_df[
+                                (merged_df[svy_col].astype(float) > value)
+                                & (merged_df[bc_col].astype(float) > value)
+                            ]
+                        elif "equals to" in ok_range:
+                            value = ok_range.replace("equals to", "").strip()
+                            merged_df = merged_df[
+                                (merged_df[svy_col].astype(str) == value)
+                                & (merged_df[bc_col].astype(str) == value)
+                            ]
+
+                    # Apply Conditions filtering
+                    if conditions:
+                        if "Do not compare missing values" in conditions:
+                            merged_df = merged_df.dropna(subset=[svy_col, bc_col])
+                        elif "Do not compare if the value contains:" in conditions:
+                            exclude_values = conditions.split(":")[1].strip().split(",")
+                            merged_df = merged_df[
+                                ~merged_df[svy_col].astype(str).isin(exclude_values)
+                                & ~merged_df[bc_col].astype(str).isin(exclude_values)
+                            ]
+                        elif "Treat these values as the same:" in conditions:
+                            same_values = conditions.split(":")[1].strip().split(",")
+                            merged_df[svy_col] = merged_df[svy_col].replace(
+                                same_values[1], same_values[0]
+                            )
+                            merged_df[bc_col] = merged_df[bc_col].replace(
+                                same_values[1], same_values[0]
+                            )
+
+                    # Calculate metrics
+                    data_types_dict = {
+                        "float64": "Numeric",
+                        "int64": "Numeric",
+                        "object": "String",
+                        "datetime64[ns]": "Date",
+                    }
+                    data_type = data_types_dict[survey_data[column_name].dtype.name]
+                    total_surveys = len(survey_data)
+                    total_backchecks = len(backcheck_data)
+                    total_compared = len(merged_df)
+                    total_different = (merged_df[svy_col] != merged_df[bc_col]).sum()
+                    error_rate = (
+                        (total_different / total_compared * 100)
+                        if total_compared > 0
+                        else 0
+                    )
+
+                    # Append to summary
+                    summary_data.append(
+                        {
+                            "Column": column_name,
+                            "Data Type": data_type,
+                            "Category": column_type,
+                            "# Surveys": total_surveys,
+                            "# Backchecks": total_backchecks,
+                            "# Compared": total_compared,
+                            "# Different": total_different,
+                            "Error Rate": f"{error_rate:.2f}%",
+                        }
+                    )
+
+                # Convert to DataFrame and return
+                return pd.DataFrame(summary_data)
+
+            # generate the column summary
+            column_category_summary = generate_column_summary(
+                st.session_state.column_config_data,
+                survey_data,
+                backcheck_data,
+                survey_id,
+            )
+
+            # st.dataframe(column_category_summary)
+
+            # backcheck category 1 error rate
+            st.markdown("##### Backcheck category 1 error rates")
+            type1_1, type1_2, type1_3 = st.columns(3)
+            category_1_summary = column_category_summary[
+                column_category_summary["Category"] == "Type 1"
+            ]
+            type1_1.metric(
+                "Number of category 1 columns",
+                len(category_1_summary["Column"].unique()),
+            )
+            type1_2.metric(
+                "Number of category 1 values compared",
+                category_1_summary["# Compared"].sum(),
+            )
+            type1_3.metric(
+                "% of category 1 error rate",
+                f"{((category_1_summary["# Different"].sum()/category_1_summary["# Compared"].sum())*100):.0f}%",
+            )
+            st.write("")
+
+            # backcheck category 2 error rate
+            st.markdown("##### Backcheck category 2 error rates")
+            type2_1, type2_2, type2_3 = st.columns(3)
+            category_2_summary = column_category_summary[
+                column_category_summary["Category"] == "Type 2"
+            ]
+            type2_1.metric(
+                "Number of category 2 columns",
+                len(category_2_summary["Column"].unique()),
+            )
+            type2_2.metric(
+                "Number of category 2 values compared",
+                category_2_summary["# Compared"].sum(),
+            )
+            type2_3.metric(
+                "% of category 2 error rate",
+                f"{((category_2_summary["# Different"].sum()/category_2_summary["# Compared"].sum())*100):.0f}%",
+            )
+            st.write("")
+
+            # backcheck category 3 error rate
+            st.markdown("##### Backcheck category 2 error rates")
+            type3_1, type3_2, type3_3 = st.columns(3)
+            category_3_summary = column_category_summary[
+                column_category_summary["Category"] == "Type 3"
+            ]
+            type3_1.metric(
+                "Number of category 3 columns",
+                len(category_3_summary["Column"].unique()),
+            )
+            type3_2.metric(
+                "Number of category 3 values compared",
+                category_3_summary["# Compared"].sum(),
+            )
+            type3_3.metric(
+                "% of category 3 error rate",
+                f"{((category_3_summary["# Different"].sum()/category_3_summary["# Compared"].sum())*100):.0f}%",
+            )
+            st.write("")
+
+            total_backcheck_error_rate = (
+                column_category_summary["# Different"].sum()
+                / column_category_summary["# Compared"].sum()
+            ) * 100
+            st.session_state.total_backcheck_error_rate = total_backcheck_error_rate
 
             # Create tabs for each selected variable
 
