@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 import seaborn as sns
 import streamlit as st
-from millify import millify
+from millify import millify, prettify
 
 from src.utils import donut_chart2
 
@@ -32,116 +32,62 @@ def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
         st.write("---")
         st.markdown("### Select columns to include in summary report")
 
-        meta_col, enum_col, agg_col = st.columns(spec=3, border=True)
+        with st.container(border=True):
+            sc1, sc2, sc3 = st.columns(spec=3)
 
-        with meta_col:
-            duration = st.selectbox(  # noqa: F841
-                label="Duration",
-                options=survey_cols,
-                help="Column containing survey duration",
-                index=None,
-                key="duration_summary",
-            )
-
-            # get date column name from dataset & get index
-            default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
-            default_date_index = survey_cols.get_loc(default_date)
-            date = st.selectbox(
-                label="Date",
-                options=survey_cols,
-                help="Column containing survey date",
-                index=default_date_index,
-                key="date_summary",
-            )
-
-            formversion = st.selectbox(  # noqa: F841
-                label="Form Version",
-                options=survey_cols,
-                help="Column containing survey form version",
-                index=None,
-                key="formversion_summary",
-            )
-
-        with enum_col:
-            by = st.selectbox(  # noqa: F841
-                label="Group by",
-                options=survey_cols,
-                help="Column to group summary report by by",
-                index=None,
-                key="by_summary",
-            )
+            with sc1:
+                # get date column name from dataset & get index
+                default_date = st.session_state["config_pages"]["Survey Date"][
+                    page_num - 1
+                ]
+                default_date_index = survey_cols.get_loc(default_date)
+                date = st.selectbox(
+                    label="Date",
+                    options=survey_cols,
+                    help="Column containing survey date",
+                    index=default_date_index,
+                    key="date_summary",
+                )
 
             # get enumerator column name from dataset & get index
             default_enumerator = st.session_state["config_pages"]["Enumerator"][
                 page_num - 1
             ]
             default_enumerator_index = survey_cols.get_loc(default_enumerator)
-            enumerator = st.selectbox(
-                label="Enumerator",
-                options=survey_cols,
-                index=default_enumerator_index,
-                key="enumerator_summary",
-            )
-            team = st.selectbox("Team", options=survey_cols, index=None)  # noqa: F841
 
-        with agg_col:
-            # get survey id column name from dataset & get index
-            default_survey_id = st.session_state["config_pages"]["Survey ID"][
-                page_num - 1
-            ]
-            default_survey_id_index = survey_cols.get_loc(default_survey_id)
-            survey_id = st.selectbox(
-                label="Survey ID",
-                options=survey_cols,
-                help="Column containing survey ID",
-                index=default_survey_id_index,
-                key="survey_id_summary",
-            )
-
-            consent = st.selectbox(
-                label="Consent",
-                options=survey_cols,
-                help="Column containing survey consent",
-                index=None,
-                key="consent_summary",
-            )
-
-            if consent:
-                consent_options = data[consent].unique().tolist()
-                consent_val = st.multiselect(  # noqa: F841
-                    label="Consent value(s)",
-                    options=consent_options,
-                    help="Value(s) indicating valid consent",
-                    key="consent_val_summary",
+            with sc2:
+                enumerator = st.selectbox(
+                    label="Enumerator",
+                    options=survey_cols,
+                    index=default_enumerator_index,
+                    key="enumerator_summary",
                 )
 
-            outcome = st.selectbox(
-                label="Outcome",
-                options=survey_cols,
-                help="Column containing survey outcome",
-                index=None,
-            )
-            if outcome:
-                outcome_options = data[outcome].unique().tolist()
-                outcome_val = st.multiselect(  # noqa: F841
-                    label="Outcome value(s)",
-                    options=outcome_options,
-                    help="Value(s) indicating completed survey",
-                    key="outcome_val_summary",
+            with sc3:
+                # get survey id column name from dataset & get index
+                default_survey_id = st.session_state["config_pages"]["Survey ID"][
+                    page_num - 1
+                ]
+                default_survey_id_index = survey_cols.get_loc(default_survey_id)
+                survey_id = st.selectbox(
+                    label="Survey ID",
+                    options=survey_cols,
+                    help="Column containing survey ID",
+                    index=default_survey_id_index,
+                    key="survey_id_summary",
                 )
 
-        st.write("---")
-        st.markdown("### Additional Options")
-
-        # number of interviews expected
-        st.markdown("##### Target number of interviews")
-        target = st.number_input(
-            label="Total goal",
-            min_value=0,
-            help="Total number of interviews expected",
-            label_visibility="collapsed",
-            key="total_goal_summary",
-        )
+            st.write("---")
+            tc1, tc2 = st.columns([0.4, 0.6])
+            tc1.markdown("##### Target number of interviews")
+            with tc2:
+                target = st.number_input(
+                    label="Total goal",
+                    min_value=0,
+                    help="Total number of interviews expected",
+                    label_visibility="collapsed",
+                    key="total_goal_summary",
+                )
 
         # define a save settings button
         save_settings = st.button("Save settings")  # noqa: F841
@@ -224,26 +170,30 @@ def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
         mc1.metric(
             label="Today",
             value=submissions_today,
-            delta=f"{millify(submissions_today_delta, precision=2)}%",
+            delta=f"{prettify(millify(submissions_today_delta, precision=2))}%",
             help="Number of submissions today. Delta is the percentage change from yesterday.",
         )
         mc2.metric(
             label="This week",
             value=submissions_this_week,
-            delta=f"{millify(submissions_this_week_delta, precision=2)}%",
+            delta=f"{prettify(millify(submissions_this_week_delta, precision=2))}%",
             help="Number of submissions this week. Delta is the percentage change from last week.",
         )
         mc3.metric(
             label="This month",
             value=submissions_this_month,
-            delta=f"{millify(submissions_this_month_delta, precision=2)}%",
+            delta=f"{prettify(millify(submissions_this_month_delta, precision=2))}%",
             help="Number of submissions this month. Delta is the percentage change from last month",
         )
         mc4.metric(
-            label="Total", value=submissions_total, help="Total number of submissions"
+            label="Total",
+            value=f"{prettify(submissions_total)}",
+            help="Total number of submissions",
         )
 
+        data[date] = data[date].dt.date
         submissions_by_date = data.groupby(date).size().reset_index(name="submissions")
+
         fig = px.area(
             submissions_by_date,
             x=date,
@@ -252,7 +202,7 @@ def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
             color_discrete_sequence=["#e8848b"],
         )
         fig.update_layout(width=1000, height=500)
-        fig.update_yaxes(tick0=0, dtick=1)
+        fig.update_yaxes(tick0=0)
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning("Please select a date column to view submissions details")
@@ -283,7 +233,7 @@ def summary_progress(
     st.markdown("## Progress")
 
     progress = (data.shape[0] / target) * 100 if target else 0
-    average_submission_per_day = data[date].value_counts().mean()
+    average_submission_per_day = data[date].dt.date.value_counts().mean()
     data["week"] = data[date].dt.to_period("W").dt.to_timestamp()
     average_submission_per_week = data.groupby("week").size().mean()
     data["month"] = data[date].dt.to_period("M").dt.to_timestamp()
@@ -297,17 +247,17 @@ def summary_progress(
         sp2.write(f"{progress:.2f}%")
     mc2.metric(
         label="Average submissions per day",
-        value=f"{average_submission_per_day:.2f}",
+        value=f"{prettify(millify(average_submission_per_day, precision=2))}",
         help="Average number of submissions per day",
     )
     mc3.metric(
         label="Average submissions per week",
-        value=f"{average_submission_per_week:.2f}",
+        value=f"{prettify(millify(average_submission_per_week, precision=2))}",
         help="Average number of submissions per week",
     )
     mc4.metric(
         label="Average submissions per month",
-        value=f"{average_submission_per_month:.2f}",
+        value=f"{prettify(millify(average_submission_per_month, precision=2))}",
         help="Average number of submissions per month",
     )
 
