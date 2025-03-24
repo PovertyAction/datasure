@@ -111,7 +111,7 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
     )
 
     # ---- Duplicates Statistics Overview Section ---- #
-    st.markdown("## Duplicates Statistics Overview (of selected variables)")
+    st.markdown("## Duplicates Statistics Overview")
 
     # Calculate statistics for ID duplicates
     id_dups_data = data[data.duplicated(subset=[survey_id], keep=False)]
@@ -120,7 +120,7 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
     data["num_dups"] = data.groupby(dup_cols)[survey_key].transform("count")
     dups_data = data[data["num_dups"] > 1]
 
-    # Count columns with duplicates
+    # Determine duplicates for each selected column
     columns_with_dups = []
     columns_no_dups = []
 
@@ -168,18 +168,15 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
     # Add a separator
     st.markdown("---")
 
-    # Create tab for ID duplicates and selected variables duplicates
-    tabs = [f"{survey_id} Duplicates"]
-    tabs.extend([f"{col} Duplicates" for col in dup_cols])
-
-    selected_tab = st.tabs(tabs)
+    # Create tabs for ID duplicates and selected variables duplicates
+    tab1, tab2 = st.tabs(["Survey ID Duplicates", "Selected Variables Duplicates"])
 
     # Tab for ID duplicates
-    with selected_tab[0]:
+    with tab1:
         st.markdown(f"## Duplicate Entries for {survey_id}")
 
         if id_dups_data.empty:
-            st.write("No duplicates found for survey ID")
+            st.write(f"No duplicates found for {survey_id}")
         else:
             # Count duplicates by ID
             id_dups_data["id_dup_count"] = id_dups_data.groupby(survey_id)[
@@ -205,7 +202,7 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
                 if col not in id_display_columns and col in id_dups_data.columns:
                     id_display_columns.append(col)
 
-            # Insert the duplicate count and percentage after the ID column
+            # Insert the duplicate count and percentage
             if "id_dup_count" not in id_display_columns:
                 id_display_columns.insert(1, "id_dup_count")
             if "id_dup_percent" not in id_display_columns:
@@ -230,63 +227,79 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
                 },
             )
 
-    # Tabs for each variable in dup_cols
-    for i, col in enumerate(dup_cols):
-        with selected_tab[i + 1]:
-            st.markdown(f"## Duplicate Entries for {col}")
+    # Tab for selected variables duplicates
+    with tab2:
+        st.markdown("## Duplicate Entries for Selected Variables")
 
-            # Filter by this specific column
-            var_dups_data = data[data.duplicated(subset=[col], keep=False)]
+        # Only allow selection if dup_cols is not empty
+        if dup_cols:
+            # Create dropdown for variable selection
+            selected_var = st.selectbox(
+                "Select variable to display duplicates for:",
+                options=dup_cols,
+                key="selected_var_duplicates",
+            )
 
-            if var_dups_data.empty:
-                st.write(f"No duplicates found for {col}")
-            else:
-                # Count duplicates by this column
-                var_dups_data[f"{col}_dup_count"] = var_dups_data.groupby(col)[
-                    survey_key
-                ].transform("count")
+            # Display duplicates for the selected variable
+            if selected_var:
+                # Check if the selected variable has duplicates
+                if selected_var in columns_with_dups:
+                    # Filter by this specific column
+                    var_dups_data = data[
+                        data.duplicated(subset=[selected_var], keep=False)
+                    ]
 
-                # Calculate percentage of total records
-                var_dups_data[f"{col}_dup_percent"] = (
-                    var_dups_data[f"{col}_dup_count"] / total_records
-                ) * 100
+                    # Count duplicates by this column
+                    var_dups_data[f"{selected_var}_dup_count"] = var_dups_data.groupby(
+                        selected_var
+                    )[survey_key].transform("count")
 
-                # Sort by count in descending order
-                var_dups_data = var_dups_data.sort_values(
-                    [f"{col}_dup_count", col], ascending=[False, True]
-                )
+                    # Calculate percentage of total records
+                    var_dups_data[f"{selected_var}_dup_percent"] = (
+                        var_dups_data[f"{selected_var}_dup_count"] / total_records
+                    ) * 100
 
-                # Create list of columns to display
-                # Start with the current variable and mandatory columns
-                var_display_columns = [survey_id, col, date, survey_key]
+                    # Sort by count in descending order
+                    var_dups_data = var_dups_data.sort_values(
+                        [f"{selected_var}_dup_count", selected_var],
+                        ascending=[False, True],
+                    )
 
-                # Add user-selected display columns
-                for display_col in display_cols:
-                    if (
-                        display_col not in var_display_columns
-                        and display_col in var_dups_data.columns
-                    ):
-                        var_display_columns.append(display_col)
+                    # Create list of columns to display
+                    # Start with the current variable and mandatory columns
+                    var_display_columns = [survey_id, selected_var, date, survey_key]
 
-                # Insert the duplicate count and percentage after the variable column
-                var_display_columns.insert(2, f"{col}_dup_count")
-                var_display_columns.insert(3, f"{col}_dup_percent")
+                    # Add user-selected display columns
+                    for display_col in display_cols:
+                        if (
+                            display_col not in var_display_columns
+                            and display_col in var_dups_data.columns
+                        ):
+                            var_display_columns.append(display_col)
 
-                # Filter to ensure all columns exist in the dataframe
-                existing_columns = [
-                    c for c in var_display_columns if c in var_dups_data.columns
-                ]
+                    # Insert the duplicate count and percentage
+                    var_display_columns.insert(2, f"{selected_var}_dup_count")
+                    var_display_columns.insert(3, f"{selected_var}_dup_percent")
 
-                st.dataframe(
-                    var_dups_data[existing_columns],
-                    hide_index=True,
-                    use_container_width=True,
-                    column_config={
-                        f"{col}_dup_count": st.column_config.Column(
-                            label=f"# of {col} duplicates"
-                        ),
-                        f"{col}_dup_percent": st.column_config.NumberColumn(
-                            label="% of total records", format="%.2f%%"
-                        ),
-                    },
-                )
+                    # Filter to ensure all columns exist in the dataframe
+                    existing_columns = [
+                        c for c in var_display_columns if c in var_dups_data.columns
+                    ]
+
+                    st.dataframe(
+                        var_dups_data[existing_columns],
+                        hide_index=True,
+                        use_container_width=True,
+                        column_config={
+                            f"{selected_var}_dup_count": st.column_config.Column(
+                                label=f"# of {selected_var} duplicates"
+                            ),
+                            f"{selected_var}_dup_percent": st.column_config.NumberColumn(
+                                label="% of total records", format="%.2f%%"
+                            ),
+                        },
+                    )
+                else:
+                    st.warning(f"No duplicates found for {selected_var}")
+        else:
+            st.info("Please select columns to check for duplicates in the settings.")
