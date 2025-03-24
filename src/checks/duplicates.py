@@ -1,3 +1,4 @@
+import pandas as pd
 import streamlit as st
 
 
@@ -91,7 +92,8 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
 
     # ---- Show report --- #
     # Check that required options have been selected. If not, display a info message
-    if not all([survey_id, survey_key, date, display_cols]):
+    # Modified to always allow survey_id, survey_key, and date to be processed
+    if not all([survey_id, survey_key, date]):
         st.info("Please select all required options to generate the progress report")
         return
 
@@ -116,9 +118,13 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
     # Calculate statistics for ID duplicates
     id_dups_data = data[data.duplicated(subset=[survey_id], keep=False)]
 
-    # Calculate statistics for selected columns
-    data["num_dups"] = data.groupby(dup_cols)[survey_key].transform("count")
-    dups_data = data[data["num_dups"] > 1]
+    # Calculate statistics for selected columns (only if dup_cols is not empty)
+    total_duplicates = 0
+    dups_data = pd.DataFrame()
+    if dup_cols:
+        data["num_dups"] = data.groupby(dup_cols)[survey_key].transform("count")
+        dups_data = data[data["num_dups"] > 1]
+        total_duplicates = len(dups_data)
 
     # Determine duplicates for each selected column
     columns_with_dups = []
@@ -134,7 +140,6 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
     total_columns_checked = len(dup_cols)
     total_columns_no_dups = len(columns_no_dups)
     total_columns_with_dups = len(columns_with_dups)
-    total_duplicates = len(dups_data)
     id_duplicates = len(id_dups_data)
 
     # Calculate total records for percentage calculations
@@ -197,7 +202,7 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
             # Start with mandatory columns
             id_display_columns = [survey_id, date, survey_key]
 
-            # Add user-selected display columns
+            # Add user-selected display columns (if any)
             for col in display_cols:
                 if col not in id_display_columns and col in id_dups_data.columns:
                     id_display_columns.append(col)
