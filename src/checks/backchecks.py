@@ -241,13 +241,14 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
             col1, col2, col3 = st.columns(3)
             col1.metric("Total number of backchecks", len(backcheck_df_bc))
             with col3:
-                if st.session_state.total_backcheck_error_rate:
+                st.session_state.total_backcheck_error_rate = None
+                if st.session_state.total_backcheck_error_rate is None:
+                    st.warning("Backcheck column settings not configured")
+                else:
                     st.metric(
                         "Total backcheck error rate",
                         f"{st.session_state.total_backcheck_error_rate:.0f}%",
                     )
-                else:
-                    st.warning("Backcheck column settings not configured")
 
             cl1, cl2, cl3 = st.columns(3)
             # define chart colors
@@ -361,28 +362,35 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 st.plotly_chart(fig_enum)
 
             # Column types selection
-            with st.expander("Backcheck Columns Setting", expanded=True):
+            with st.expander("Backcheck columns settings", expanded=True):
                 # Initialize session state for table data if not already present
                 if "column_config_data" not in st.session_state:
                     st.session_state.column_config_data = pd.DataFrame(
-                        columns=["Column Name", "Column Type", "OK Range", "Conditions"]
+                        columns=[
+                            "column",
+                            "category",
+                            "ok range",
+                            "comparison condition",
+                        ]
                     )
 
                 # Display the table and allow user interaction
                 with st.popover("Add a backcheck column", icon=":material/add:"):
                     # st.markdown("### Add backcheck column type")
                     column_name = st.selectbox(
-                        "Column Name",
+                        "column",
                         options=common_cols,
                         help="Select a column to configure",
+                        key="column",
                     )
                     column_type = st.selectbox(
-                        "Column Type",
-                        options=["Type 1", "Type 2", "Type 3"],
+                        "category",
+                        options=[1, 2, 3],
                         help="Select the backcheck category of the column",
+                        key="category",
                     )
                     ok_range_type = st.selectbox(
-                        "OK Range Type",
+                        "ok range",
                         options=[
                             "None",
                             "equals to",
@@ -391,6 +399,7 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                             "between",
                         ],
                         help="Select the type of range condition",
+                        key="ok range",
                     )
 
                     if ok_range_type == "between":
@@ -408,41 +417,44 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                         ok_range = f"{ok_range_type} {single_value}"
 
                     compare_condition = st.selectbox(
-                        label="Compare Condition",
+                        label="comparison condition",
                         options=[
                             "None",
                             "Do not compare missing values or null values",
-                            "Do not compare if the value contain:",
+                            "Do not compare if the values contain:",
                             "Treat these values as the same:",
                         ],
                         help="Specify any additional conditions (e.g., do compare if values are missing)",
+                        key="comparison condition",
                     )
-                    if compare_condition == "Do not compare if the value contains:":
+                    if compare_condition == "Do not compare if the values contain:":
                         contains_condition = st.text_input(
                             "Enter the values separated by a comma",
                             help="Enter the values separated by a comma",
                         )
-                        conditions = f"{compare_condition} {contains_condition}"
+                        comparison_condition = (
+                            f"{compare_condition} {contains_condition}"
+                        )
                     elif compare_condition == "Treat these values as the same:":
                         same_condition = st.text_input(
                             "Enter the values separated by a comma",
                             help="Enter the values separated by a comma",
                         )
-                        conditions = f"{compare_condition} {same_condition}"
+                        comparison_condition = f"{compare_condition} {same_condition}"
                     elif (
                         compare_condition
                         == "Do not compare missing values or null values"
                     ):
-                        conditions = "ignore_missing_values"
+                        comparison_condition = "ignore_missing_values"
                     else:
-                        conditions = ""
+                        comparison_condition = ""
 
                     if st.button("Add Column"):
                         new_row = {
-                            "Column Name": column_name,
-                            "Column Type": column_type,
-                            "OK Range": ok_range,
-                            "Conditions": conditions,
+                            "column": column_name,
+                            "category": column_type,
+                            "ok range": ok_range,
+                            "comparison condition": comparison_condition,
                         }
                         st.session_state.column_config_data = pd.concat(
                             [
@@ -451,11 +463,21 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                             ],
                             ignore_index=True,
                         )
-                st.data_editor(
+                # create an editable dataframe
+                bc_column_config_df = st.data_editor(
                     st.session_state.column_config_data,
                     num_rows="dynamic",
                     use_container_width=True,
                 )
+                # drop any deleted rowss
+                if len(st.session_state.column_config_data) > len(bc_column_config_df):
+                    deleted_rows = st.session_state.column_config_data[
+                        ~st.session_state.column_config_data.isin(
+                            bc_column_config_df.to_dict(orient="list")
+                        ).all(axis=1)
+                    ]
+                    if not deleted_rows.empty:
+                        st.session_state.column_config_data = bc_column_config_df
 
             # Create a data category report
             def generate_column_summary(
@@ -489,10 +511,10 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 summary_data = []
 
                 for _, row in column_config_data.iterrows():
-                    column_name = row["Column Name"]
-                    column_type = row["Column Type"]
-                    ok_range = row["OK Range"]
-                    conditions = row["Conditions"]
+                    column_name = row["column"]
+                    column_type = row["category"]
+                    ok_range = row["ok range"]
+                    comparison_condition = row["comparison condition"]
 
                     # Prepare survey and backcheck data for the column
                     svy_col = f"_svy_{column_name}"
@@ -552,17 +574,24 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                             ]
 
                     # Apply Conditions filtering
-                    if conditions:
-                        if "Do not compare missing values" in conditions:
+                    if comparison_condition:
+                        if "Do not compare missing values" in comparison_condition:
                             merged_df = merged_df.dropna(subset=[svy_col, bc_col])
-                        elif "Do not compare if the value contains:" in conditions:
-                            exclude_values = conditions.split(":")[1].strip().split(",")
+                        elif (
+                            "Do not compare if the value contains:"
+                            in comparison_condition
+                        ):
+                            exclude_values = (
+                                comparison_condition.split(":")[1].strip().split(",")
+                            )
                             merged_df = merged_df[
                                 ~merged_df[svy_col].astype(str).isin(exclude_values)
                                 & ~merged_df[bc_col].astype(str).isin(exclude_values)
                             ]
-                        elif "Treat these values as the same:" in conditions:
-                            same_values = conditions.split(":")[1].strip().split(",")
+                        elif "Treat these values as the same:" in comparison_condition:
+                            same_values = (
+                                comparison_condition.split(":")[1].strip().split(",")
+                            )
                             merged_df[svy_col] = merged_df[svy_col].replace(
                                 same_values[1], same_values[0]
                             )
@@ -591,14 +620,14 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                     # Append to summary
                     summary_data.append(
                         {
-                            "Column": column_name,
-                            "Data Type": data_type,
-                            "Category": column_type,
-                            "# Surveys": total_surveys,
-                            "# Backchecks": total_backchecks,
-                            "# Compared": total_compared,
-                            "# Different": total_different,
-                            "Error Rate": f"{error_rate:.2f}%",
+                            "column": column_name,
+                            "data type": data_type,
+                            "category": column_type,
+                            "# surveys": total_surveys,
+                            "# backchecks": total_backchecks,
+                            "# compared": total_compared,
+                            "# different": total_different,
+                            "error rate": f"{error_rate:.2f}%",
                         }
                     )
 
@@ -607,79 +636,95 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
 
             # generate the column summary
             column_category_summary = generate_column_summary(
-                st.session_state.column_config_data,
+                bc_column_config_df,
                 survey_data,
                 backcheck_data,
                 survey_id,
             )
 
-            # st.dataframe(column_category_summary)
+            st.dataframe(column_category_summary, use_container_width=True)
 
-            # backcheck category 1 error rate
-            st.markdown("##### Backcheck category 1 error rates")
-            type1_1, type1_2, type1_3 = st.columns(3)
-            category_1_summary = column_category_summary[
-                column_category_summary["Category"] == "Type 1"
-            ]
-            type1_1.metric(
-                "Number of category 1 columns",
-                len(category_1_summary["Column"].unique()),
-            )
-            type1_2.metric(
-                "Number of category 1 values compared",
-                category_1_summary["# Compared"].sum(),
-            )
-            type1_3.metric(
-                "% of category 1 error rate",
-                f"{((category_1_summary["# Different"].sum()/category_1_summary["# Compared"].sum())*100):.0f}%",
-            )
-            st.write("")
+            # backcheck category columns
+            if column_category_summary.empty:
+                st.warning("No backcheck columns set")
+            else:
+                # backcheck category 1 error rate
+                category_1_summary = column_category_summary[
+                    column_category_summary["category"] == 1
+                ]
+                if category_1_summary.shape[0] > 0:
+                    st.markdown("##### Backcheck category 1 error rates")
+                    type1_1, type1_2, type1_3 = st.columns(3)
+                    category_1_summary = column_category_summary[
+                        column_category_summary["category"] == 1
+                    ]
+                    type1_1.metric(
+                        "Number of category 1 columns",
+                        len(category_1_summary["column"].unique()),
+                    )
+                    type1_2.metric(
+                        "Number of category 1 values compared",
+                        category_1_summary["# compared"].sum(),
+                    )
+                    type1_3.metric(
+                        "% of category 1 error rate",
+                        f"{((category_1_summary["# different"].sum()/category_1_summary["# compared"].sum())*100):.0f}%",
+                    )
+                    st.write("")
 
-            # backcheck category 2 error rate
-            st.markdown("##### Backcheck category 2 error rates")
-            type2_1, type2_2, type2_3 = st.columns(3)
-            category_2_summary = column_category_summary[
-                column_category_summary["Category"] == "Type 2"
-            ]
-            type2_1.metric(
-                "Number of category 2 columns",
-                len(category_2_summary["Column"].unique()),
-            )
-            type2_2.metric(
-                "Number of category 2 values compared",
-                category_2_summary["# Compared"].sum(),
-            )
-            type2_3.metric(
-                "% of category 2 error rate",
-                f"{((category_2_summary["# Different"].sum()/category_2_summary["# Compared"].sum())*100):.0f}%",
-            )
-            st.write("")
+                # backcheck category 2 error rate
+                category_2_summary = column_category_summary[
+                    column_category_summary["category"] == 2
+                ]
+                if category_2_summary.shape[0] > 0:
+                    st.markdown("##### Backcheck category 2 error rates")
+                    type2_1, type2_2, type2_3 = st.columns(3)
+                    category_2_summary = column_category_summary[
+                        column_category_summary["category"] == 2
+                    ]
+                    type2_1.metric(
+                        "Number of category 2 columns",
+                        len(category_2_summary["column"].unique()),
+                    )
+                    type2_2.metric(
+                        "Number of category 2 values compared",
+                        category_2_summary["# compared"].sum(),
+                    )
+                    type2_3.metric(
+                        "% of category 2 error rate",
+                        f"{((category_2_summary["# different"].sum()/category_2_summary["# compared"].sum())*100):.0f}%",
+                    )
+                    st.write("")
 
-            # backcheck category 3 error rate
-            st.markdown("##### Backcheck category 2 error rates")
-            type3_1, type3_2, type3_3 = st.columns(3)
-            category_3_summary = column_category_summary[
-                column_category_summary["Category"] == "Type 3"
-            ]
-            type3_1.metric(
-                "Number of category 3 columns",
-                len(category_3_summary["Column"].unique()),
-            )
-            type3_2.metric(
-                "Number of category 3 values compared",
-                category_3_summary["# Compared"].sum(),
-            )
-            type3_3.metric(
-                "% of category 3 error rate",
-                f"{((category_3_summary["# Different"].sum()/category_3_summary["# Compared"].sum())*100):.0f}%",
-            )
-            st.write("")
+                # backcheck category 3 error rate
+                category_3_summary = column_category_summary[
+                    column_category_summary["category"] == 3
+                ]
+                if category_3_summary.shape[0] > 0:
+                    st.markdown("##### Backcheck category 3 error rates")
+                    type3_1, type3_2, type3_3 = st.columns(3)
+                    category_3_summary = column_category_summary[
+                        column_category_summary["category"] == 3
+                    ]
+                    type3_1.metric(
+                        "Number of category 3 columns",
+                        len(category_3_summary["column"].unique()),
+                    )
+                    type3_2.metric(
+                        "Number of category 3 values compared",
+                        category_3_summary["# compared"].sum(),
+                    )
+                    type3_3.metric(
+                        "% of category 3 error rate",
+                        f"{((category_3_summary["# different"].sum()/category_3_summary["# compared"].sum())*100):.0f}%",
+                    )
+                st.write("")
 
-            total_backcheck_error_rate = (
-                column_category_summary["# Different"].sum()
-                / column_category_summary["# Compared"].sum()
-            ) * 100
-            st.session_state.total_backcheck_error_rate = total_backcheck_error_rate
+                total_backcheck_error_rate = (
+                    column_category_summary["# different"].sum()
+                    / column_category_summary["# compared"].sum()
+                ) * 100
+                st.session_state.total_backcheck_error_rate = total_backcheck_error_rate
 
             # Create tabs for each selected variable
 
