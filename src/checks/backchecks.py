@@ -227,141 +227,7 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
             svy_vars = [col for col in merged_df.columns if col.startswith("_svy_")]  # noqa: F841
             back_vars = [col for col in merged_df.columns if col.startswith("_bc_")]  # noqa: F841
 
-            # overview statistics
-            st.subheader("Overview")
-            min_backcheck_rate = st.number_input(
-                "Enter a minimum percentage target of surveys backchecked by enumerator e.g. 10%",
-                min_value=0,
-                max_value=100,
-                value=10,
-                key="total_surveys_backcheck",
-                help="This is the minimum percentage of surveys that have been backchecked by enumerator",
-            )
-
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total number of backchecks", len(backcheck_df_bc))
-            with col3:
-                st.session_state.total_backcheck_error_rate = None
-                if st.session_state.total_backcheck_error_rate is None:
-                    st.warning("Backcheck column settings not configured")
-                else:
-                    st.metric(
-                        "Total backcheck error rate",
-                        f"{st.session_state.total_backcheck_error_rate:.0f}%",
-                    )
-
-            cl1, cl2, cl3 = st.columns(3)
-            # define chart colors
-            chart_colors = ["#35904A", "lightgrey"]
-            with cl1:
-                if backcheck_goal == 0:
-                    st.warning("Please set a target for backchecks")
-                else:
-                    # Calculate percentage of backchecks completed
-                    total_surveys = len(survey_df_bc)
-                    total_backchecks = len(backcheck_df_bc)
-                    # handle case when backchecks is > backchecks target
-                    if backcheck_goal < total_backchecks:
-                        backcheck_goal_update = total_backchecks
-                    else:
-                        backcheck_goal_update = backcheck_goal
-
-                    # Create a donut chart
-
-                    fig = px.pie(
-                        names=["Backchecked", "Not backchecked"],
-                        values=[
-                            total_backchecks,
-                            backcheck_goal_update - total_backchecks,
-                        ],
-                        hole=0.6,
-                        title="% of surveys backchecked",
-                    )
-                    fig.update_layout(
-                        width=400,
-                        height=350,
-                        showlegend=False,
-                        title=dict(xanchor="left", y=0.9, yanchor="top"),
-                    )
-                    fig.update_traces(
-                        textinfo="none",
-                        marker=dict(colors=chart_colors),
-                        direction="clockwise",
-                    )
-
-                    fig.add_annotation(
-                        dict(
-                            text=f"{(total_backchecks / backcheck_goal) * 100:.0f}%",
-                            x=0.5,
-                            y=0.5,
-                            font_size=30,
-                            font_weight="bold",
-                            showarrow=False,
-                        )
-                    )
-
-                    # Display the chart
-                    st.plotly_chart(fig)
-
-            with cl3:
-                backcheck_sum_df = (
-                    survey_df_bc.groupby("_svy_" + enumerator)
-                    .size()
-                    .reset_index(name="total_surveys")
-                )
-                backcheck_sum_df = backcheck_sum_df.merge(
-                    merged_df.groupby("_svy_" + enumerator)
-                    .size()
-                    .reset_index(name="total_backchecks"),
-                    left_on="_svy_" + enumerator,
-                    right_on="_svy_" + enumerator,
-                    how="outer",
-                )
-                backcheck_sum_df["backcheck_rate"] = (
-                    backcheck_sum_df["total_backchecks"]
-                    / backcheck_sum_df["total_surveys"]
-                ) * 100
-                bc_target_met_df = backcheck_sum_df[
-                    backcheck_sum_df["backcheck_rate"] >= min_backcheck_rate
-                ]
-
-                num_enumerators_bc = bc_target_met_df["_svy_" + enumerator].nunique()
-                total_enumerators = len(survey_df_bc["_svy_" + enumerator].unique())
-
-                # Create a pie chart
-                fig_enum = px.pie(
-                    names=["Backchecked", "Not backchecked"],
-                    values=[num_enumerators_bc, total_enumerators - num_enumerators_bc],
-                    hole=0.6,
-                    title="% of enumerators backchecked",
-                )
-                fig_enum.update_layout(
-                    width=400,
-                    height=350,
-                    showlegend=False,
-                    title=dict(xanchor="left", y=0.9, yanchor="top"),
-                )
-                fig_enum.update_traces(
-                    textinfo="none",
-                    marker=dict(colors=chart_colors),
-                    direction="clockwise",
-                )
-
-                fig_enum.add_annotation(
-                    dict(
-                        text=f"{(num_enumerators_bc / total_enumerators) * 100:.0f}%",
-                        x=0.5,
-                        y=0.5,
-                        font_size=30,
-                        font_weight="bold",
-                        showarrow=False,
-                    )
-                )
-
-                # Display the pie chart
-                st.plotly_chart(fig_enum)
-
-            # Column types selection
+            # Column category selection
             with st.expander("Backcheck columns settings", expanded=True):
                 # Initialize session state for table data if not already present
                 if "column_config_data" not in st.session_state:
@@ -642,12 +508,161 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 survey_id,
             )
 
-            st.dataframe(column_category_summary, use_container_width=True)
+            # st.dataframe(column_category_summary, use_container_width=True)
+
+            # Calculate total backcheck error rate
+            if column_category_summary.shape[0] > 0:
+                total_backcheck_error_rate = (
+                    column_category_summary["# different"].sum()
+                    / column_category_summary["# compared"].sum()
+                ) * 100
+                st.session_state.total_backcheck_error_rate = total_backcheck_error_rate
+
+            else:
+                st.session_state.total_backcheck_error_rate = "n/a"
+
+            # Overview Statistics
+            st.subheader("Overview")
+            min_backcheck_rate = st.number_input(
+                "Enter a minimum percentage target of surveys backchecked by enumerator e.g. 10%",
+                min_value=0,
+                max_value=100,
+                value=10,
+                key="total_surveys_backcheck",
+                help="This is the minimum percentage of surveys that have been backchecked by enumerator",
+            )
+
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total number of backchecks", len(backcheck_df_bc))
+            with col3:
+                try:
+                    st.metric(
+                        "Total backcheck error rate",
+                        f"{st.session_state.total_backcheck_error_rate:.0f}%",
+                    )
+                except:
+                    st.metric("Total backcheck error rate", "n/a")
+
+            cl1, cl2, cl3 = st.columns(3)
+            # define chart colors
+            chart_colors = ["#35904A", "lightgrey"]
+            with cl1:
+                if backcheck_goal == 0:
+                    st.warning("Please set a target for backchecks")
+                else:
+                    # Calculate percentage of backchecks completed
+                    total_surveys = len(survey_df_bc)
+                    total_backchecks = len(backcheck_df_bc)
+                    # handle case when backchecks is > backchecks target
+                    if backcheck_goal < total_backchecks:
+                        backcheck_goal_update = total_backchecks
+                    else:
+                        backcheck_goal_update = backcheck_goal
+
+                    # Create a donut chart
+
+                    fig = px.pie(
+                        names=["Backchecked", "Not backchecked"],
+                        values=[
+                            total_backchecks,
+                            backcheck_goal_update - total_backchecks,
+                        ],
+                        hole=0.6,
+                        title="% of surveys backchecked",
+                    )
+                    fig.update_layout(
+                        width=400,
+                        height=350,
+                        showlegend=False,
+                        title=dict(xanchor="left", y=0.9, yanchor="top"),
+                    )
+                    fig.update_traces(
+                        textinfo="none",
+                        marker=dict(colors=chart_colors),
+                        direction="clockwise",
+                    )
+
+                    fig.add_annotation(
+                        dict(
+                            text=f"{(total_backchecks / backcheck_goal) * 100:.0f}%",
+                            x=0.5,
+                            y=0.5,
+                            font_size=30,
+                            font_weight="bold",
+                            showarrow=False,
+                        )
+                    )
+
+                    # Display the chart
+                    st.plotly_chart(fig)
+
+            with cl3:
+                backcheck_sum_df = (
+                    survey_df_bc.groupby("_svy_" + enumerator)
+                    .size()
+                    .reset_index(name="total_surveys")
+                )
+                backcheck_sum_df = backcheck_sum_df.merge(
+                    merged_df.groupby("_svy_" + enumerator)
+                    .size()
+                    .reset_index(name="total_backchecks"),
+                    left_on="_svy_" + enumerator,
+                    right_on="_svy_" + enumerator,
+                    how="outer",
+                )
+                backcheck_sum_df["backcheck_rate"] = (
+                    backcheck_sum_df["total_backchecks"]
+                    / backcheck_sum_df["total_surveys"]
+                ) * 100
+                bc_target_met_df = backcheck_sum_df[
+                    backcheck_sum_df["backcheck_rate"] >= min_backcheck_rate
+                ]
+
+                num_enumerators_bc = bc_target_met_df["_svy_" + enumerator].nunique()
+                total_enumerators = len(survey_df_bc["_svy_" + enumerator].unique())
+
+                # Create a pie chart
+                fig_enum = px.pie(
+                    names=["Backchecked", "Not backchecked"],
+                    values=[num_enumerators_bc, total_enumerators - num_enumerators_bc],
+                    hole=0.6,
+                    title="% of enumerators backchecked",
+                )
+                fig_enum.update_layout(
+                    width=400,
+                    height=350,
+                    showlegend=False,
+                    title=dict(xanchor="left", y=0.9, yanchor="top"),
+                )
+                fig_enum.update_traces(
+                    textinfo="none",
+                    marker=dict(colors=chart_colors),
+                    direction="clockwise",
+                )
+
+                fig_enum.add_annotation(
+                    dict(
+                        text=f"{(num_enumerators_bc / total_enumerators) * 100:.0f}%",
+                        x=0.5,
+                        y=0.5,
+                        font_size=30,
+                        font_weight="bold",
+                        showarrow=False,
+                    )
+                )
+
+                # Display the pie chart
+                st.plotly_chart(fig_enum)
 
             # backcheck category columns
             if column_category_summary.empty:
+                st.markdown("#### Backcheck category summary")
                 st.warning("No backcheck columns set")
+                st.write("")
             else:
+                st.markdown("#### Backcheck category summary")
+                st.write("")
+
                 # backcheck category 1 error rate
                 category_1_summary = column_category_summary[
                     column_category_summary["category"] == 1
@@ -719,12 +734,6 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                         f"{((category_3_summary["# different"].sum()/category_3_summary["# compared"].sum())*100):.0f}%",
                     )
                 st.write("")
-
-                total_backcheck_error_rate = (
-                    column_category_summary["# different"].sum()
-                    / column_category_summary["# compared"].sum()
-                ) * 100
-                st.session_state.total_backcheck_error_rate = total_backcheck_error_rate
 
             # Create tabs for each selected variable
 
