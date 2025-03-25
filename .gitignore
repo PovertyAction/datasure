@@ -176,3 +176,4 @@ cache/data/*
 !cache/data/.gitkeep
 cache/settings/*
 !cache/settings/.gitkeep
+**.DS_Store
