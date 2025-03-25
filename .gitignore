@@ -173,4 +173,6 @@ archived/code/*test*.ipynb
 archived/notebooks/*test*.ipynb
 cache/*.json
 cache/data/*
+!cache/data/.gitkeep
 cache/settings/*
+!cache/settings/.gitkeep
