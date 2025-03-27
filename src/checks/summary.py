@@ -5,7 +5,7 @@ import seaborn as sns
 import streamlit as st
 from millify import millify, prettify
 
-from src.utils import donut_chart2
+from src.utils import donut_chart2, load_check_settings, save_check_settings
 
 
 # define function to create summary report
@@ -32,14 +32,29 @@ def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
         st.write("---")
         st.markdown("### Select columns to include in summary report")
 
+        # load default settings in the following order:
+        # - if settings file exists, load settings from file
+        # - if settings file does not exist, load default settings from config
+        default_settings = load_check_settings(setting_file, "summary")
+        if default_settings:
+            default_date = default_settings.get("date")
+            default_enumerator = default_settings.get("enumerator")
+            default_target = default_settings.get("target")
+            default_survey_id = default_settings.get("survey_id")
+        else:
+            default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
+            default_enumerator = st.session_state["config_pages"]["Enumerator"][
+                page_num - 1
+            ]
+            default_survey_id = st.session_state["config_pages"]["Survey ID"][
+                page_num - 1
+            ]
+            default_target = None
+
         with st.container(border=True):
             sc1, sc2, sc3 = st.columns(spec=3)
 
             with sc1:
-                # get date column name from dataset & get index
-                default_date = st.session_state["config_pages"]["Survey Date"][
-                    page_num - 1
-                ]
                 default_date_index = survey_cols.get_loc(default_date)
                 date = st.selectbox(
                     label="Date",
@@ -49,13 +64,8 @@ def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
                     key="date_summary",
                 )
 
-            # get enumerator column name from dataset & get index
-            default_enumerator = st.session_state["config_pages"]["Enumerator"][
-                page_num - 1
-            ]
-            default_enumerator_index = survey_cols.get_loc(default_enumerator)
-
             with sc2:
+                default_enumerator_index = survey_cols.get_loc(default_enumerator)
                 enumerator = st.selectbox(
                     label="Enumerator",
                     options=survey_cols,
@@ -64,10 +74,6 @@ def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
                 )
 
             with sc3:
-                # get survey id column name from dataset & get index
-                default_survey_id = st.session_state["config_pages"]["Survey ID"][
-                    page_num - 1
-                ]
                 default_survey_id_index = survey_cols.get_loc(default_survey_id)
                 survey_id = st.selectbox(
                     label="Survey ID",
@@ -84,14 +90,28 @@ def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
                 target = st.number_input(
                     label="Total goal",
                     min_value=0,
+                    value=default_target,
                     help="Total number of interviews expected",
                     label_visibility="collapsed",
                     key="total_goal_summary",
                 )
 
         # define a save settings button
-        save_settings = st.button("Save settings")  # noqa: F841
-
+        st.button(
+            label="Save settings",
+            on_click=save_check_settings,
+            key="save_summary_settings",
+            kwargs={
+                "settings_file": setting_file,
+                "check_name": "summary",
+                "check_settings": {
+                    "date": date,
+                    "enumerator": enumerator,
+                    "target": target,
+                    "survey_id": survey_id,
+                },
+            },
+        )
     return date, enumerator, target, survey_id or None
 
 
