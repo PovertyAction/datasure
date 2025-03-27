@@ -1,5 +1,4 @@
 import matplotlib.pyplot as plt
-from typing import Optional
 
 
 def donut_chart(
@@ -80,10 +79,10 @@ def donut_chart(
 def donut_chart2(
     actual_value: int,
     target_value: int = 100,
-    title: Optional[str] = None,
+    title: str | None = None,
     prefix: str = "",
     suffix: str = "%",
-    colours: Optional[list] = None,
+    colours: list | None = None,
 ):
     """
     actual_value: int
