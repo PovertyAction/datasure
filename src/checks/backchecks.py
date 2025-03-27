@@ -347,7 +347,11 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
 
             # Create a data category report
             def generate_column_summary(
-                column_config_data, survey_data, backcheck_data, survey_id
+                column_config_data,
+                survey_data,
+                backcheck_data,
+                survey_id,
+                summary_col=None,
             ):
                 """
                 Generate a summary for each column configuration.
@@ -367,6 +371,9 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 survey_id: str
                     Column name for the unique survey identifier.
 
+                summary_col: str, optional
+                    Column name to group results by. If None, returns ungrouped summary.
+
                 Returns
                 -------
                 pd.DataFrame
@@ -374,6 +381,37 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                     ["Column", "Data Type", "Category", "# Surveys", "# Backchecks",
                      "# Compared", "# Different", "Error Rate"]
                 """
+                # update datasets
+                survey_data = survey_data.add_prefix("_svy_").rename(
+                    columns={"_svy_" + survey_id: survey_id}
+                )
+                backcheck_data = backcheck_data.add_prefix("_bc_").rename(
+                    columns={"_bc_" + survey_id: survey_id}
+                )
+
+                svy_col = None
+                bc_col = None
+
+                # summary column logic
+                if summary_col:
+                    # backchecker case
+                    if summary_col == "backchecker":
+                        summary_col = [
+                            c for c in backcheck_data.columns if backchecker in c
+                        ]
+                        svy_summary_cols = [survey_id, svy_col]
+                        bc_summary_cols = [survey_id, bc_col] + summary_col
+
+                    else:
+                        summary_col = [
+                            c for c in survey_data.columns if summary_col in c
+                        ]
+                        svy_summary_cols = [survey_id, svy_col] + summary_col
+                        bc_summary_cols = [survey_id, bc_col]
+                else:
+                    svy_summary_cols = [survey_id, svy_col]
+                    bc_summary_cols = [survey_id, bc_col]
+
                 summary_data = []
 
                 for _, row in column_config_data.iterrows():
@@ -382,22 +420,18 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                     ok_range = row["ok range"]
                     comparison_condition = row["comparison condition"]
 
-                    # Prepare survey and backcheck data for the column
+                    # Prepare survey and backcheck data
                     svy_col = f"_svy_{column_name}"
                     bc_col = f"_bc_{column_name}"
 
-                    survey_col_data = (
-                        survey_data[[survey_id, column_name]]
-                        .add_prefix("_svy_")
-                        .rename(columns={"_svy_" + survey_id: survey_id})
-                    )
-                    backcheck_col_data = (
-                        backcheck_data[[survey_id, column_name]]
-                        .add_prefix("_bc_")
-                        .rename(columns={"_bc_" + survey_id: survey_id})
-                    )
+                    # update summary columns
+                    svy_summary_cols[1] = svy_col
+                    bc_summary_cols[1] = bc_col
 
-                    # Merge survey and backcheck data
+                    survey_col_data = survey_data[svy_summary_cols]
+                    backcheck_col_data = backcheck_data[bc_summary_cols]
+
+                    # # Merge survey and backcheck data
                     merged_df = pd.merge(
                         survey_col_data, backcheck_col_data, on=survey_id, how="inner"
                     )
@@ -439,12 +473,12 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                                 & (merged_df[bc_col].astype(str) == value)
                             ]
 
-                    # Apply Conditions filtering
+                    # Apply comparison conditions
                     if comparison_condition:
-                        if "Do not compare missing values" in comparison_condition:
+                        if comparison_condition == "ignore_missing_values":
                             merged_df = merged_df.dropna(subset=[svy_col, bc_col])
                         elif (
-                            "Do not compare if the value contains:"
+                            "Do not compare if the values contain:"
                             in comparison_condition
                         ):
                             exclude_values = (
@@ -472,32 +506,70 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                         "object": "String",
                         "datetime64[ns]": "Date",
                     }
-                    data_type = data_types_dict[survey_data[column_name].dtype.name]
-                    total_surveys = len(survey_data)
-                    total_backchecks = len(backcheck_data)
-                    total_compared = len(merged_df)
-                    total_different = (merged_df[svy_col] != merged_df[bc_col]).sum()
-                    error_rate = (
-                        (total_different / total_compared * 100)
-                        if total_compared > 0
-                        else 0
-                    )
+                    data_type = data_types_dict[survey_data[svy_col].dtype.name]
 
-                    # Append to summary
-                    summary_data.append(
-                        {
-                            "column": column_name,
-                            "data type": data_type,
-                            "category": column_type,
-                            "# surveys": total_surveys,
-                            "# backchecks": total_backchecks,
-                            "# compared": total_compared,
-                            "# different": total_different,
-                            "error rate": f"{error_rate:.2f}%",
-                        }
-                    )
+                    if summary_col:
+                        # Group by summary column
+                        groupby_obj = merged_df.groupby(summary_col)
+                        for group_name, group_df in groupby_obj:
+                            total_surveys = len(
+                                merged_df[merged_df[summary_col] == group_name]
+                            )
+                            total_backchecks = len(
+                                merged_df[
+                                    merged_df[survey_id].isin(group_df[survey_id])
+                                ]
+                            )
+                            total_compared = len(group_df)
+                            total_different = (
+                                group_df[svy_col] != group_df[bc_col]
+                            ).sum()
+                            error_rate = (
+                                (total_different / total_compared * 100)
+                                if total_compared > 0
+                                else 0
+                            )
 
-                # Convert to DataFrame and return
+                            summary_data.append(
+                                {
+                                    "column": column_name,
+                                    "data type": data_type,
+                                    "category": column_type,
+                                    summary_col[0]: group_name,
+                                    "# surveys": total_surveys,
+                                    "# backchecks": total_backchecks,
+                                    "# compared": total_compared,
+                                    "# different": total_different,
+                                    "error rate": f"{error_rate:.2f}%",
+                                }
+                            )
+                    else:
+                        # Calculate overall metrics
+                        total_surveys = len(survey_data)
+                        total_backchecks = len(backcheck_data)
+                        total_compared = len(merged_df)
+                        total_different = (
+                            merged_df[svy_col] != merged_df[bc_col]
+                        ).sum()
+                        error_rate = (
+                            (total_different / total_compared * 100)
+                            if total_compared > 0
+                            else 0
+                        )
+
+                        summary_data.append(
+                            {
+                                "column": column_name,
+                                "data type": data_type,
+                                "category": column_type,
+                                "# surveys": total_surveys,
+                                "# backchecks": total_backchecks,
+                                "# compared": total_compared,
+                                "# different": total_different,
+                                "error rate": f"{error_rate:.2f}%",
+                            }
+                        )
+
                 return pd.DataFrame(summary_data)
 
             # generate the column summary
@@ -506,9 +578,8 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 survey_data,
                 backcheck_data,
                 survey_id,
+                summary_col=None,
             )
-
-            # st.dataframe(column_category_summary, use_container_width=True)
 
             # Calculate total backcheck error rate
             if column_category_summary.shape[0] > 0:
@@ -574,7 +645,12 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                         width=400,
                         height=350,
                         showlegend=False,
-                        title=dict(xanchor="left", y=0.9, yanchor="top"),
+                        title=dict(
+                            xanchor="left",
+                            y=0.9,
+                            yanchor="top",
+                            font=dict(weight="normal"),
+                        ),
                     )
                     fig.update_traces(
                         textinfo="none",
@@ -588,7 +664,6 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                             x=0.5,
                             y=0.5,
                             font_size=30,
-                            font_weight="bold",
                             showarrow=False,
                         )
                     )
@@ -632,7 +707,9 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                     width=400,
                     height=350,
                     showlegend=False,
-                    title=dict(xanchor="left", y=0.9, yanchor="top"),
+                    title=dict(
+                        xanchor="left", y=0.9, yanchor="top", font=dict(weight="normal")
+                    ),
                 )
                 fig_enum.update_traces(
                     textinfo="none",
@@ -646,7 +723,6 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                         x=0.5,
                         y=0.5,
                         font_size=30,
-                        font_weight="bold",
                         showarrow=False,
                     )
                 )
@@ -656,19 +732,17 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
 
             # backcheck category columns
             if column_category_summary.empty:
-                st.markdown("#### Backcheck category summary")
+                st.write("Backcheck category summary")
                 st.warning("No backcheck columns set")
                 st.write("")
             else:
-                st.markdown("#### Backcheck category summary")
                 st.write("")
-
                 # backcheck category 1 error rate
                 category_1_summary = column_category_summary[
                     column_category_summary["category"] == 1
                 ]
                 if category_1_summary.shape[0] > 0:
-                    st.markdown("##### Backcheck category 1 error rates")
+                    st.write("Backcheck category 1 error rates")
                     type1_1, type1_2, type1_3 = st.columns(3)
                     category_1_summary = column_category_summary[
                         column_category_summary["category"] == 1
@@ -692,7 +766,7 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                     column_category_summary["category"] == 2
                 ]
                 if category_2_summary.shape[0] > 0:
-                    st.markdown("##### Backcheck category 2 error rates")
+                    st.write("Backcheck category 2 error rates")
                     type2_1, type2_2, type2_3 = st.columns(3)
                     category_2_summary = column_category_summary[
                         column_category_summary["category"] == 2
@@ -716,7 +790,7 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                     column_category_summary["category"] == 3
                 ]
                 if category_3_summary.shape[0] > 0:
-                    st.markdown("##### Backcheck category 3 error rates")
+                    st.write("Backcheck category 3 error rates")
                     type3_1, type3_2, type3_3 = st.columns(3)
                     category_3_summary = column_category_summary[
                         column_category_summary["category"] == 3
