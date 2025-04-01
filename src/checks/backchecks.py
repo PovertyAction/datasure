@@ -28,12 +28,11 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for backcheck report")
 
-        survey_cols = survey_data.columns.tolist()
+        survey_cols = survey_data.columns
+        backcheck_cols_list = backcheck_data.columns
 
         # get list of columns in both surey and backcheck data
-        common_cols = [
-            col for col in survey_data.columns if col in backcheck_data.columns
-        ]
+        common_cols = [col for col in survey_data.columns if col in backcheck_cols_list]
 
         st.write("---")
         st.markdown("### Select columns to include in backcheck report")
@@ -58,12 +57,14 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 key="duration_backcheck",
                 index=None,
             )
+            default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
+            default_date_index = survey_cols.get_loc(default_date)
             date = st.selectbox(
                 "Date",
                 options=survey_cols,
                 help="Column containing survey date",
                 key="date_backcheck",
-                index=None,
+                index=default_date_index,
             )
             formversion = st.selectbox(
                 "Form Version",
@@ -74,49 +75,66 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
             )
 
         with enum_col:
+            default_enumerator = st.session_state["config_pages"]["Enumerator"][
+                page_num - 1
+            ]
+            default_enumerator_index = survey_cols.get_loc(default_enumerator)
+
             enumerator = st.selectbox(
                 "Enumerator",
                 options=survey_cols,
                 help="Column containing survey enumerator",
                 key="enumerator_backcheck",
-                index=None,
+                index=default_enumerator_index,
             )
-            team = st.selectbox(
+            team = st.selectbox(  # noqa: F841
                 "Enumerator Team",
                 options=survey_cols,
                 help="Column containing survey team",
                 key="team_backcheck",
                 index=None,
             )
+            default_backchecker = st.session_state["config_pages"]["Back Checker"][
+                page_num - 1
+            ]
+            default_backchecker_index = backcheck_cols_list.get_loc(default_backchecker)
             backchecker = st.selectbox(
                 "Back Checker",
-                options=survey_cols,
+                options=backcheck_cols_list,
                 help="Column containing back check enumerator",
                 key="backchecker_backcheck",
-                index=None,
+                index=default_backchecker_index,
             )
             bc_team = st.selectbox(  # noqa: F841
                 "Back Check Team",
-                options=survey_cols,
+                options=backcheck_cols_list,
                 help="Column containing survey team",
                 key="backcheck_team_backcheck",
                 index=None,
             )
 
         with agg_col:
+            default_survey_id = st.session_state["config_pages"]["Survey ID"][
+                page_num - 1
+            ]
+            default_survey_id_index = survey_cols.get_loc(default_survey_id)
             survey_id = st.selectbox(
                 "Survey ID",
                 options=survey_cols,
                 help="Column containing survey ID",
                 key="surveyid_backcheck",
-                index=None,
+                index=default_survey_id_index,
             )
+            default_survey_key = st.session_state["config_pages"]["Survey KEY"][
+                page_num - 1
+            ]
+            default_survey_key_index = survey_cols.get_loc(default_survey_key)
             survey_key = st.selectbox(
                 "Survey Key",
                 options=survey_cols,
                 help="Column containing survey key",
                 key="surveykey_backcheck",
-                index=None,
+                index=default_survey_key_index,
             )
 
             consent = st.selectbox(
@@ -180,7 +198,6 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
             date,
             formversion,
             enumerator,
-            team,
             backchecker,
             survey_id,
             survey_key,
@@ -808,6 +825,159 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                         f"{((category_3_summary["# different"].sum()/category_3_summary["# compared"].sum())*100):.0f}%",
                     )
                 st.write("")
+
+            # error trends
+            error_trends_category_summary = generate_column_summary(
+                bc_column_config_df,
+                survey_data,
+                backcheck_data,
+                survey_id,
+                summary_col=date,
+            )
+
+            if error_trends_category_summary.empty:
+                st.write("Error Trends")
+                st.warning("No backcheck columns set")
+                st.write("")
+            else:
+                st.subheader("Error Trends")
+                trend_cols = st.columns([2, 1])
+
+                # get the list of categories
+                category_list = (
+                    error_trends_category_summary["category"].unique().tolist()
+                )
+                date_col = [  # noqa: RUF015
+                    col for col in error_trends_category_summary if date in col
+                ][0]
+
+                error_trends_category_summary[date_col] = error_trends_category_summary[
+                    date_col
+                ].apply(
+                    lambda x: pd.to_datetime(x[0])
+                    if isinstance(x, tuple)
+                    else pd.to_datetime(x)
+                )
+
+                with trend_cols[0]:
+                    selected_categories = st.multiselect(
+                        "Select backcheck categories",
+                        options=category_list,
+                        default=category_list,
+                        key="trend_categories",
+                    )
+
+                with trend_cols[1]:
+                    time_period = st.selectbox(
+                        "Select time period",
+                        options=["Daily", "Weekly", "Monthly"],
+                        key="time_period",
+                    )
+
+                if selected_categories:
+                    # Create trends dataframe
+                    trends_df = error_trends_category_summary[
+                        error_trends_category_summary["category"].isin(
+                            selected_categories
+                        )
+                    ].copy()
+                    trends_df["date"] = pd.to_datetime(trends_df["_svy_" + date])
+
+                    # Resample based on selected time period
+                    if time_period == "Weekly":
+                        trends_df["date"] = (
+                            trends_df["date"].dt.to_period("W-SUN").dt.start_time
+                        )
+                    elif time_period == "Monthly":
+                        trends_df["date"] = (
+                            trends_df["date"].dt.to_period("M").astype(str)
+                        )
+                    else:  # Daily
+                        trends_df["date"] = trends_df["date"].dt.date
+
+                    # Calculate error rates for each category and date
+                    error_trends_df = (
+                        trends_df.groupby(["date", "category"])
+                        .aggregate({"# compared": "sum", "# different": "sum"})
+                        .reset_index()
+                    )
+                    error_trends_df["error_rate"] = (
+                        error_trends_df["# different"] / error_trends_df["# compared"]
+                    ) * 100
+                    error_trends_df["error_rate"] = (
+                        error_trends_df["error_rate"].fillna(0).round(0)
+                    )
+
+                    # Create line chart
+                    fig = px.line(
+                        error_trends_df,
+                        x="date",
+                        y="error_rate",
+                        color="category",
+                        title=f"{time_period} Error Rate Trends by Category",
+                        labels={
+                            "date": "Date",
+                            "error_rate": "Error Rate (%)",
+                            "category": "Category",
+                        },
+                    )
+
+                    fig.update_layout(
+                        xaxis_title="Date",
+                        yaxis_title="Error Rate (%)",
+                        hovermode="x unified",
+                    )
+
+                    st.plotly_chart(fig, use_container_width=True)
+
+                st.write("")
+
+            # column statistics
+            if column_category_summary.empty:
+                st.write("Column Statistics")
+                st.warning("No backcheck columns set")
+                st.write("")
+            else:
+                st.subheader("Column Statistics")
+                st.dataframe(column_category_summary)
+                st.write("")
+
+                # enumerator statistics
+                st.subheader("Enumerator Statistics")
+                enumerator_statistics = generate_column_summary(
+                    column_config_data=st.session_state.column_config_data,
+                    survey_data=survey_data,
+                    backcheck_data=backcheck_data,
+                    survey_id=survey_id,
+                    summary_col=enumerator,
+                )
+
+                st.dataframe(enumerator_statistics)
+                st.write("")
+
+            # backchecker statistics
+            if column_category_summary.empty:
+                st.write("Backchecker Statistics")
+                st.warning("No backcheck columns set")
+                st.write("")
+            else:
+                st.subheader("Backchecker Statistics")
+                backchecker_statistics = generate_column_summary(
+                    column_config_data=st.session_state.column_config_data,
+                    survey_data=survey_data,
+                    backcheck_data=backcheck_data,
+                    survey_id=survey_id,
+                    summary_col="backchecker",
+                )
+                st.dataframe(backchecker_statistics)
+                st.write("")
+
+            if column_category_summary.empty:
+                st.write("Comparison Details")
+                st.warning("No backcheck columns set")
+                st.write("")
+            else:
+                st.subheader("Comparison Details")
 
             # Create tabs for each selected variable
 
