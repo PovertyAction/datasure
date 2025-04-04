@@ -258,28 +258,39 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                     "ok range",
                     options=[
                         "None",
-                        "equals to",
-                        "less than",
-                        "greater than",
+                        "absolute value",
                         "between",
+                        "percentage",
                     ],
                     help="Select the type of range condition",
                     key="ok range",
                 )
-
-                if ok_range_type == "between":
+                if ok_range_type == "absolute value":
+                    absolute_ok_range = st.number_input(
+                        label="Absolute Value",
+                        min_value=0,
+                        help="Enter the absolute value",
+                    )
+                    ok_range = f"{absolute_ok_range}"
+                elif ok_range_type == "percentage":
+                    ok_range_percentage = st.number_input(
+                        "Percentage", min_value=0, help="Enter a percentage value"
+                    )
+                    ok_range = f"{ok_range_percentage}%"
+                elif ok_range_type == "between":
                     range_min = st.number_input(
-                        "Minimum Value", help="Enter the minimum value"
+                        "Minimum Value",
+                        max_value=0,
+                        help="Enter the minimum value (less than zero)",
                     )
                     range_max = st.number_input(
-                        "Maximum Value", help="Enter the maximum value"
+                        "Maximum Value",
+                        min_value=0,
+                        help="Enter the maximum value (greater than zero)",
                     )
-                    ok_range = f"between {range_min} and {range_max}"
-                elif ok_range_type == "None":
-                    ok_range = ""
+                    ok_range = f"[{range_min} , {range_max}]"
                 else:
-                    single_value = st.number_input("Value", help="Enter the value")
-                    ok_range = f"{ok_range_type} {single_value}"
+                    ok_range = ""
 
                 compare_condition = st.selectbox(
                     label="comparison condition",
@@ -487,32 +498,29 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                         try:
                             svy_val = float(row[svy_col])
                             bc_val = float(row[bc_col])
+                            diff = abs(svy_val - bc_val)
 
-                            if "between" in ok_range:
-                                range_min, range_max = map(
-                                    float, ok_range.replace("between", "").split("and")
+                            if "%" in ok_range:  # Percentage range
+                                allowed_diff = (
+                                    float(ok_range.replace("%", "")) / 100 * svy_val
                                 )
-                                if svy_val.between(
-                                    range_min, range_max
-                                ) and bc_val.between(range_min, range_max):
+                                if diff <= allowed_diff:
                                     return "not different"
-                            elif "less than" in ok_range:
-                                value = float(ok_range.replace("less than", "").strip())
-                                if svy_val < value and bc_val < value:
-                                    return "not different"
-                            elif "greater than" in ok_range:
-                                value = float(
-                                    ok_range.replace("greater than", "").strip()
+                            elif "[" in ok_range:  # Between range
+                                min_val, max_val = map(
+                                    float, ok_range.strip("[]").split(",")
                                 )
-                                if svy_val > value and bc_val > value:
+                                if min_val <= diff <= max_val:
                                     return "not different"
-                            elif "equals to" in ok_range:
-                                value = float(ok_range.replace("equals to", "").strip())
-                                if svy_val == value and bc_val == value:
+                            else:  # Absolute value
+                                allowed_diff = float(ok_range)
+                                min_abs_val = -ok_range
+                                if min_abs_val <= diff <= allowed_diff:
                                     return "not different"
+
+                            return "different"  # noqa: TRY300
                         except (ValueError, TypeError):
-                            pass
-
+                            return "not compared"
                     # Default comparison
                     return (
                         "not different"
