@@ -240,7 +240,11 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 )
 
             # Display the table and allow user interaction
-            with st.popover("Add a backcheck column", icon=":material/add:"):
+            with st.popover(
+                "Add a backcheck column",
+                icon=":material/add:",
+                use_container_width=True,
+            ):
                 # st.markdown("### Add backcheck column type")
                 column_name = st.selectbox(
                     "column",
@@ -259,7 +263,7 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                     options=[
                         "None",
                         "absolute value",
-                        "between",
+                        "range",
                         "percentage",
                     ],
                     help="Select the type of range condition",
@@ -277,7 +281,7 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                         "Percentage", min_value=0, help="Enter a percentage value"
                     )
                     ok_range = f"{ok_range_percentage}%"
-                elif ok_range_type == "between":
+                elif ok_range_type == "range":
                     range_min = st.number_input(
                         "Minimum Value",
                         max_value=0,
