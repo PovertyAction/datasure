@@ -1,11 +1,411 @@
-from datetime import datetime
-
+import matplotlib.pyplot as plt
 import pandas as pd
+import plotly.express as px
+import seaborn as sns
 import streamlit as st
+from millify import millify, prettify
+
+from src.utils import donut_chart2, load_check_settings, save_check_settings
 
 
 # define function to create summary report
-def summary_report(data, page_num) -> None:
+def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
+    """
+    Generates a summary report for the survey data
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+            The survey data
+
+    Returns
+    -------
+    tuple
+            A tuple containing the settings for the summary report
+
+    """
+    with st.expander("settings", icon=":material/settings:"):
+        st.markdown("## Configure settings for summary report")
+
+        survey_cols = data.columns
+
+        st.write("---")
+        st.markdown("### Select columns to include in summary report")
+
+        # load default settings in the following order:
+        # - if settings file exists, load settings from file
+        # - if settings file does not exist, load default settings from config
+        default_settings = load_check_settings(setting_file, "summary")
+        if default_settings:
+            default_date = default_settings.get("date")
+            default_enumerator = default_settings.get("enumerator")
+            default_target = default_settings.get("target")
+            default_survey_id = default_settings.get("survey_id")
+        else:
+            default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
+            default_enumerator = st.session_state["config_pages"]["Enumerator"][
+                page_num - 1
+            ]
+            default_survey_id = st.session_state["config_pages"]["Survey ID"][
+                page_num - 1
+            ]
+            default_target = None
+
+        with st.container(border=True):
+            sc1, sc2, sc3 = st.columns(spec=3)
+
+            with sc1:
+                default_date_index = survey_cols.get_loc(default_date)
+                date = st.selectbox(
+                    label="Date",
+                    options=survey_cols,
+                    help="Column containing survey date",
+                    index=default_date_index,
+                    key="date_summary",
+                )
+
+            with sc2:
+                default_enumerator_index = survey_cols.get_loc(default_enumerator)
+                enumerator = st.selectbox(
+                    label="Enumerator",
+                    options=survey_cols,
+                    index=default_enumerator_index,
+                    key="enumerator_summary",
+                )
+
+            with sc3:
+                default_survey_id_index = survey_cols.get_loc(default_survey_id)
+                survey_id = st.selectbox(
+                    label="Survey ID",
+                    options=survey_cols,
+                    help="Column containing survey ID",
+                    index=default_survey_id_index,
+                    key="survey_id_summary",
+                )
+
+            st.write("---")
+            tc1, tc2 = st.columns([0.4, 0.6])
+            tc1.markdown("##### Target number of interviews")
+            with tc2:
+                target = st.number_input(
+                    label="Total goal",
+                    min_value=0,
+                    value=default_target,
+                    help="Total number of interviews expected",
+                    label_visibility="collapsed",
+                    key="total_goal_summary",
+                )
+
+        # define a save settings button
+        st.button(
+            label="Save settings",
+            on_click=save_check_settings,
+            key="save_summary_settings",
+            kwargs={
+                "settings_file": setting_file,
+                "check_name": "summary",
+                "check_settings": {
+                    "date": date,
+                    "enumerator": enumerator,
+                    "target": target,
+                    "survey_id": survey_id,
+                },
+            },
+        )
+    return date, enumerator, target, survey_id or None
+
+
+def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
+    """
+    Generates a summary report for the survey data
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+            The survey data
+
+    date : str
+            The date column in the survey data
+
+    Returns
+    -------
+    None
+    """
+    st.markdown("## Submission details")
+    if date:
+        first_submission_date = data[date].min()
+        last_submission_date = data[date].max()
+
+        dc1, _, _, dc2 = st.columns(spec=4)
+        dc1.metric(
+            label="First Submission",
+            value=str(first_submission_date.date()),
+            help="Date of the first submission",
+        )
+        dc2.metric(
+            label="Last Submission",
+            value=str(last_submission_date.date()),
+            help="Date of the last submission",
+        )
+
+        mc1, mc2, mc3, mc4 = st.columns(spec=4, border=True)
+        submissions_today = data[data[date] == pd.Timestamp.now().normalize()].shape[0]
+        submissions_yesterday = data[
+            data[date] == pd.Timestamp.now().normalize() - pd.DateOffset(days=1)
+        ].shape[0]
+        submissions_this_week = data[
+            data[date] >= pd.Timestamp.now().normalize() - pd.DateOffset(weeks=1)
+        ].shape[0]
+        submissions_last_week = data[
+            (data[date] >= pd.Timestamp.now().normalize() - pd.DateOffset(weeks=2))
+            & (data[date] < pd.Timestamp.now().normalize() - pd.DateOffset(weeks=1))
+        ].shape[0]
+        submissions_this_month = data[
+            data[date] >= pd.Timestamp.now().normalize() - pd.DateOffset(months=1)
+        ].shape[0]
+        submissions_last_month = data[
+            (data[date] >= pd.Timestamp.now().normalize() - pd.DateOffset(months=2))
+            & (data[date] < pd.Timestamp.now().normalize() - pd.DateOffset(months=1))
+        ].shape[0]
+        submissions_total = data.shape[0]
+
+        submissions_today_delta = (
+            ((submissions_today - submissions_yesterday) / submissions_yesterday) * 100
+            if submissions_yesterday > 0
+            else 0
+        )
+        submissions_this_week_delta = (
+            ((submissions_this_week - submissions_last_week) / submissions_last_week)
+            * 100
+            if submissions_last_week > 0
+            else 0
+        )
+        submissions_this_month_delta = (
+            ((submissions_this_month - submissions_last_month) / submissions_last_month)
+            * 100
+            if submissions_last_month > 0
+            else 0
+        )
+
+        mc1.metric(
+            label="Today",
+            value=submissions_today,
+            delta=f"{prettify(millify(submissions_today_delta, precision=2))}%",
+            help="Number of submissions today. Delta is the percentage change from yesterday.",
+        )
+        mc2.metric(
+            label="This week",
+            value=submissions_this_week,
+            delta=f"{prettify(millify(submissions_this_week_delta, precision=2))}%",
+            help="Number of submissions this week. Delta is the percentage change from last week.",
+        )
+        mc3.metric(
+            label="This month",
+            value=submissions_this_month,
+            delta=f"{prettify(millify(submissions_this_month_delta, precision=2))}%",
+            help="Number of submissions this month. Delta is the percentage change from last month",
+        )
+        mc4.metric(
+            label="Total",
+            value=f"{prettify(submissions_total)}",
+            help="Total number of submissions",
+        )
+
+        data[date] = data[date].dt.date
+        submissions_by_date = data.groupby(date).size().reset_index(name="submissions")
+
+        fig = px.area(
+            submissions_by_date,
+            x=date,
+            y="submissions",
+            title="Submissions by date",
+            color_discrete_sequence=["#e8848b"],
+        )
+        fig.update_layout(width=1000, height=500)
+        fig.update_yaxes(tick0=0)
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("Please select a date column to view submissions details")
+
+
+def summary_progress(
+    data: pd.DataFrame,
+    date: str,
+    enumerator: str | None = None,
+    target: int | None = None,
+) -> None:
+    """
+    Generates a summary progress report for the survey data
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+            The survey data
+
+    enumerator : str
+            The enumerator column in the survey data
+
+    Returns
+    -------
+    None
+    """
+    st.write("---")
+    st.markdown("## Progress")
+
+    progress = (data.shape[0] / target) * 100 if target else 0
+    average_submission_per_day = data[date].dt.date.value_counts().mean()
+    data["week"] = data[date].dt.to_period("W").dt.to_timestamp()
+    average_submission_per_week = data.groupby("week").size().mean()
+    data["month"] = data[date].dt.to_period("M").dt.to_timestamp()
+    average_submission_per_month = data.groupby("month").size().mean()
+
+    mc1, mc2, mc3, mc4 = st.columns(spec=4, border=True)
+    with mc1:
+        st.write("Submission progress")
+        sp1, sp2 = st.columns([0.80, 0.20])
+        sp1.progress(value=int(progress))
+        sp2.write(f"{progress:.2f}%")
+    mc2.metric(
+        label="Average submissions per day",
+        value=f"{prettify(millify(average_submission_per_day, precision=2))}",
+        help="Average number of submissions per day",
+    )
+    mc3.metric(
+        label="Average submissions per week",
+        value=f"{prettify(millify(average_submission_per_week, precision=2))}",
+        help="Average number of submissions per week",
+    )
+    mc4.metric(
+        label="Average submissions per month",
+        value=f"{prettify(millify(average_submission_per_month, precision=2))}",
+        help="Average number of submissions per month",
+    )
+
+    # progress by column
+    pc1, _ = st.columns([0.3, 0.7])
+    with pc1:
+        progress_options = data.columns.tolist()
+        progress_options.remove(date)
+        progress_by_col = st.selectbox(
+            "Progress by", options=progress_options, index=None, key="progress_by_col"
+        )
+
+    if progress_by_col:
+        _, pil1 = st.columns([0.80, 0.20])
+        with pil1:
+            progress_time_period = st.pills(
+                label="Progress time period",
+                options=["Auto", "Daily", "Weekly", "Monthly"],
+                default="Auto",
+                key="progress_time_period",
+            )
+
+        if progress_time_period == "Auto":
+            total_submissions = data.shape[0]
+            if total_submissions > 0:
+                if total_submissions < 20:
+                    progress_time_period_use = "Daily"
+                elif total_submissions < 140:
+                    progress_time_period_use = "Weekly"
+                else:
+                    progress_time_period_use = "Monthly"
+        else:
+            progress_time_period_use = progress_time_period
+
+        progress_data = data[[date, progress_by_col]].copy()
+        progress_data["time period"] = data[date].dt.to_period("D").dt.to_timestamp()
+        progress_data = (
+            progress_data.groupby(["time period", progress_by_col])
+            .size()
+            .reset_index(name="count")
+        )
+
+        if progress_time_period_use == "Weekly":
+            progress_data["time period"] = (
+                progress_data["time period"].dt.to_period("W").dt.to_timestamp()
+            )
+            progress_data = (
+                progress_data.groupby(["time period", progress_by_col])
+                .sum("count")
+                .reset_index()
+            )
+        elif progress_time_period_use == "Monthly":
+            progress_data["time period"] = (
+                progress_data["time period"].dt.to_period("M").dt.to_timestamp()
+            )
+            progress_data = (
+                progress_data.groupby(["time period", progress_by_col])
+                .sum("count")
+                .reset_index()
+            )
+
+        progress_data["time period"] = progress_data["time period"].dt.date
+        progress_data = progress_data.pivot(
+            index=progress_by_col, columns="time period", values="count"
+        ).fillna(0)
+
+        cmap = sns.light_palette("pink", as_cmap=True)
+        vmin_val = progress_data.min().min()
+        vmax_val = progress_data.max().max()
+
+        progress_data["trend"] = progress_data.apply(
+            lambda col_val: ", ".join(map(str, col_val)), axis=1
+        )
+        format_cols = [col for col in progress_data.columns if col != "trend"]
+        progress_data = progress_data[["trend"] + format_cols]
+
+        st.dataframe(
+            progress_data.style.format(
+                subset=format_cols, precision=0
+            ).background_gradient(
+                subset=format_cols, cmap=cmap, axis=1, vmin=vmin_val, vmax=vmax_val
+            ),
+            use_container_width=True,
+            column_config={
+                "trend": st.column_config.AreaChartColumn(
+                    "Trend of submissions",
+                    width="medium",
+                    help="Trend of submissions over time",
+                    y_min=vmin_val,
+                    y_max=vmax_val,
+                ),
+            },
+        )
+
+
+def summary_data_summary(data: pd.DataFrame) -> None:
+    """
+    Generates summary details of for the survey data
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+            The survey data
+
+    Returns
+    -------
+    None
+    """
+    st.write("---")
+    st.markdown("## Data Summary")
+
+    num_str_cols = data.select_dtypes(include=["object"]).shape[1]
+    num_num_cols = data.select_dtypes(include=["number"]).shape[1]
+    num_date_cols = data.select_dtypes(include=["datetime"]).shape[1]
+    col_count = data.shape[1]
+
+    ds1, ds2, ds3, ds4 = st.columns(spec=4, border=True)
+    ds1.metric(
+        label="String Columns", value=num_str_cols, help="Number of string columns"
+    )
+    ds2.metric(
+        label="Numeric Columns", value=num_num_cols, help="Number of numeric columns"
+    )
+    ds3.metric(label="Date Columns", value=num_date_cols, help="Number of date columns")
+    ds4.metric(label="Total Columns", value=col_count, help="Total number of columns")
+
+
+def summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> None:
     """
     Generates a summary report for the survey data
 
@@ -17,381 +417,77 @@ def summary_report(data, page_num) -> None:
     Returns
     -------
     None
-
     """
-    with st.expander("settings", icon=":material/settings:"):
-        st.markdown("## Configure settings for summary report")
+    st.write("---")
+    st.markdown("## Data Quality")
 
-        survey_cols = data.columns
+    if survey_id:
+        # calculate number of duplicates in survey id column
+        perc_duplicates = data.duplicated(subset=[survey_id]).mean() * 100
+        perc_outliers = 0
+        perc_missing = data.isnull().mean().mean() * 100
+        perc_back_check_error_rate = 0
 
-        st.write("---")
-        st.markdown("### Select columns to include in summary report")
-
-        meta_col, enum_col, agg_col = st.columns(spec=3, border=True)
-
-        with meta_col:
-            duration = st.selectbox(  # noqa: F841
-                label="Duration",
-                options=survey_cols,
-                help="Column containing survey duration",
-                index=None,
-                key="duration_summary",
-            )
-
-            # get date column name from dataset & get index
-            default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
-            default_date_index = survey_cols.get_loc(default_date)
-            date = st.selectbox(
-                label="Date",
-                options=survey_cols,
-                help="Column containing survey date",
-                index=default_date_index,
-                key="date_summary",
-            )
-
-            formversion = st.selectbox(  # noqa: F841
-                label="Form Version",
-                options=survey_cols,
-                help="Column containing survey form version",
-                index=None,
-                key="formversion_summary",
-            )
-
-        with enum_col:
-            by = st.selectbox(  # noqa: F841
-                label="Group by",
-                options=survey_cols,
-                help="Column to group summary report by by",
-                index=None,
-                key="by_summary",
-            )
-
-            # get enumerator column name from dataset & get index
-            default_enumerator = st.session_state["config_pages"]["Enumerator"][
-                page_num - 1
-            ]
-            default_enumerator_index = survey_cols.get_loc(default_enumerator)
-            enumerator = st.selectbox(
-                label="Enumerator",
-                options=survey_cols,
-                index=default_enumerator_index,
-                key="enumerator_summary",
-            )
-            team = st.selectbox("Team", options=survey_cols, index=None)  # noqa: F841
-
-        with agg_col:
-            # get survey id column name from dataset & get index
-            default_survey_id = st.session_state["config_pages"]["Survey ID"][
-                page_num - 1
-            ]
-            default_survey_id_index = survey_cols.get_loc(default_survey_id)
-            survey_id = st.selectbox(
-                label="Survey ID",
-                options=survey_cols,
-                help="Column containing survey ID",
-                index=default_survey_id_index,
-                key="survey_id_summary",
-            )
-
-            consent = st.selectbox(
-                label="Consent",
-                options=survey_cols,
-                help="Column containing survey consent",
-                index=None,
-                key="consent_summary",
-            )
-
-            if consent:
-                consent_options = data[consent].unique().tolist()
-                consent_val = st.multiselect(
-                    label="Consent value(s)",
-                    options=consent_options,
-                    help="Value(s) indicating valid consent",
-                    key="consent_val_summary",
-                )
-
-            outcome = st.selectbox(
-                label="Outcome",
-                options=survey_cols,
-                help="Column containing survey outcome",
-                index=None,
-            )
-            if outcome:
-                outcome_options = data[outcome].unique().tolist()
-                outcome_val = st.multiselect(  # noqa: F841
-                    label="Outcome value(s)",
-                    options=outcome_options,
-                    help="Value(s) indicating completed survey",
-                    key="outcome_val_summary",
-                )
-
-        st.write("---")
-        st.markdown("### Additional Options")
-
-        if date:
-            st.markdown("##### Filter data by date")
-            # get first and last date from date column in dataset
-            min_date = data[date].min().date()
-            max_date = data[date].max().date()
-            date_filter = st.slider(  # noqa: F841
-                label="Select date range",
-                min_value=min_date,
-                max_value=max_date,
-                format="YYYY-MM-DD",
-                value=(min_date, max_date),
-                label_visibility="collapsed",
-                help="Select date range to filter data",
-                key="date_filter_summary",
-            )
-
-        # number of interviews expected
-        st.markdown("##### Target number of interviews")
-        total_goal = st.number_input(
-            label="Total goal",
-            min_value=0,
-            help="Total number of interviews expected",
-            label_visibility="collapsed",
-            key="total_goal_summary",
+        perc_duplicates_chart = donut_chart2(
+            actual_value=perc_duplicates,
+        )
+        plt.close(perc_duplicates_chart)
+        perc_outliers_chart = donut_chart2(
+            actual_value=perc_outliers,
+        )
+        plt.close(perc_outliers_chart)
+        perc_missing_chart = donut_chart2(
+            actual_value=perc_missing,
+        )
+        plt.close(perc_missing_chart)
+        perc_back_check_error_rate_chart = donut_chart2(
+            actual_value=perc_back_check_error_rate,
         )
 
-        # define a save settings button
-        save_settings = st.button("Save settings")  # noqa: F841
+        dq1, dq2, dq3, dq4 = st.columns(spec=4, border=True)
+        with dq1:
+            st.markdown(f"**% of duplicates values on {survey_id}**")
+            st.pyplot(perc_duplicates_chart)
+        with dq2:
+            st.markdown("**% of values in XX columns**")
+            st.pyplot(perc_outliers_chart)
+        with dq3:
+            st.markdown("**% of missing values in survey dataset**")
+            st.pyplot(perc_missing_chart)
+        with dq4:
+            st.markdown("**Back check error rate**")
+            st.pyplot(perc_back_check_error_rate_chart)
 
-    # Check that required options have been selected. If not, display a info message
-    if not all([date, enumerator, survey_id, consent, outcome]):
-        st.info("Please select all required columns to generate the summary report")
-        return
+    else:
+        st.warning("Please select a survey ID column to view data quality details")
 
-    # Define flagged percentage of missing. For example, write 50 if there are
-    # more than 50% of missing and should be flagged as warning
-    percentage_warning = 50
 
-    ### Value box 1 ###
+def summary_report(data: pd.DataFrame, page_num: int) -> None:
+    """
+    Generates a summary report for the survey data
 
-    # count the number of valid consent
-    valid_interviews = data[consent].isin(consent_val).sum()
+    Parameters
+    ----------
+    data : pd.DataFrame
+            The survey data
 
-    # Calculate porcentage of finished interviews
-    percentage_finished = (valid_interviews / total_goal) * 100
+    settings : dict
+            The settings for the summary report
 
-    # Format of percentage
-    formatted_percentage_finished = f"{percentage_finished:.2f}%"
+    Returns
+    -------
+    None
+    """
+    page_name = st.session_state.config_pages["Page Name"][page_num - 1]
+    setting_file = f"cache/settings/pyDMS_hfc_settings_{page_name}.json"
 
-    ### Value box 2 ###
-    # Identify the date of the first interview
-    earliest_date = data[date].min()
-
-    # Todays date
-    today = pd.Timestamp.now()
-
-    # Calculate the number of days since the first interview/launch
-    days_since_start = (today - earliest_date).days
-
-    # Set the color
-    color = "black"  # noqa: F841
-
-    ### Value box 3 ###
-    # Percentage of missing ID's
-    total_values = data[survey_id].size
-
-    # Define ID variable
-    missing_values = data[survey_id].isnull().sum()
-    missing_percentage = (missing_values / total_values) * 100
-
-    # Format the percentage
-    formatted_missing_percentage = f"{missing_percentage:.2f}%"
-
-    ### Value box 4 ###
-    # Group by date and count number of IDs
-    count_by_date = data.groupby(date).size()
-
-    # Calculate the average number of interviews per day
-    average_interviews_per_day = count_by_date.mean()
-
-    # Round number of interviews per day
-    rounded_average_day = round(average_interviews_per_day, 2)
-
-    #### Create first row of value boxes ####
-    # Define color codes
-    color_completed = (
-        "#FFA500" if percentage_finished <= percentage_warning else "#4CAF50"
+    date, enumerator, target, survey_id = summary_settings(
+        data=data, setting_file=setting_file, page_num=page_num
     )
-    color_missing = "#FFA500" if missing_percentage > percentage_warning else "#4CAF50"
-
-    # Include Font Awesome
-    st.markdown(
-        '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">',
-        unsafe_allow_html=True,
+    summary_submissions(
+        data=data[[date]],
+        date=date,
     )
-
-    # Create columns for value boxes
-    col1, col2, col3, col4 = st.columns(spec=4, border=True)
-
-    # Value box: Completed interviews
-    with col1:
-        st.markdown(
-            f"""
-                <div style="display: flex; align-items: center; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9f9f9; text-align: center; width: 100%;">
-                    <i class="fas fa-bullseye" style="font-size: 70px; color: {color_completed}; margin-right: 10px;"></i>
-                    <div style="flex-grow: 1;">
-                        <h3 style="margin: 0; font-size: 25px; text-align: center;">Completed Interviews</h3>
-                        <p style="font-size: 53px; color: {color_completed}; margin: 0; text-align: center;">{formatted_percentage_finished}</p>
-                    </div>
-                </div>
-                """,
-            unsafe_allow_html=True,
-        )
-
-        # Value box: Number of days since launch
-    with col2:
-        st.markdown(
-            f"""
-		<div style="display: flex; align-items: center; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9f9f9; text-align: center; width: 100%;">
-			<i class="fas fa-calendar-week" style="font-size: 70px; color: black; margin-right: 10px;"></i>
-			<div style="flex-grow: 1;">
-				<h3 style="margin: 0; font-size: 25px; text-align: center;">Number of Days since Launch</h3>
-				<p style="font-size: 53px; color: black; margin: 0; text-align: center;">{days_since_start}</p>
-			</div>
-		</div>
-		""",
-            unsafe_allow_html=True,
-        )
-
-    # Value box: % of missing IDs
-    with col3:
-        st.markdown(
-            f"""
-		<div style="display: flex; align-items: center; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9f9f9; text-align: center; width: 100%;">
-			<i class="fas fa-percent" style="font-size: 70px; color: {color_missing}; margin-right: 10px;"></i>
-			<div style="flex-grow: 1;">
-				<h3 style="margin: 0; font-size: 25px; text-align: center;">Percentage of Missing IDs</h3>
-				<p style="font-size: 53px; color: {color_missing}; margin: 0; text-align: center;">{formatted_missing_percentage}</p>
-			</div>
-		</div>
-		""",
-            unsafe_allow_html=True,
-        )
-
-    # Value box 4: Average Interviews per Day
-    with col4:
-        st.markdown(
-            f"""
-		<div style="display: flex; align-items: center; padding: 5px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9f9f9; text-align: center; width: 100%;">
-			<i class="fas fa-calendar-alt" style="font-size: 73px; color: black; margin-right: 10px;"></i>
-			<div style="flex-grow: 1;">
-				<h3 style="font-size: 28px; margin: 0; text-align: center;"> Average Interviews per Day</h3>
-				<p style="font-size: 53px; color: black; margin: 0; text-align: center;">{rounded_average_day}</p>
-			</div>
-		</div>
-		""",
-            unsafe_allow_html=True,
-        )
-
-        ### Value box 5 ###
-    # Count number of enumerators
-    unique_enumerators = data[enumerator].nunique()
-
-    ### Value box 6 ###
-    # Count the number of interviews per interviewer
-    interviews_per_interviewer = (
-        data.groupby(enumerator, observed=False)
-        .size()
-        .reset_index(name="interviews_count")
-    )
-
-    # Calculate the average number of interviews per enumerator
-    average_interviews_per_interviewer = interviews_per_interviewer[
-        "interviews_count"
-    ].mean()
-
-    # Round the number of interviews per enumerator
-    rounded_average = round(average_interviews_per_interviewer, 2)
-
-    ### Value box 7 ###
-    average_interviews_per_day_per_enumerator = (
-        average_interviews_per_day / (unique_enumerators)
-        if unique_enumerators > 0
-        else 0
-    )
-    rounded_average_day_per_enumerator = round(
-        average_interviews_per_day_per_enumerator, 2
-    )
-
-    ### Value box 8 ###
-    # Calculate interviews left
-    interviews_left = total_goal - valid_interviews
-
-    #### Create second row of value boxes
-    # Create columns for the value boxes
-    col5, col6, col7, col8 = st.columns(spec=4, border=True)
-
-    # Value box 5: Number of Enumerators
-    with col5:
-        st.markdown(
-            f"""
-		<div style="display: flex; align-items: center; padding: 21px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9f9f9; text-align: center; width: 100%;">
-			<i class="fas fa-user" style="font-size: 73px; color: black; margin-right: 10px;"></i>
-			<div style="flex-grow: 1;">
-				<h3 style="margin: 0; font-size: 23px; text-align: center;">Number of Enumerators</h3>
-				<p style="font-size: 50px; color: black; margin: 0; text-align: center;">{unique_enumerators}</p>
-			</div>
-		</div>
-		""",
-            unsafe_allow_html=True,
-        )
-
-    # Value box 6: Average Interviews per Enumerator
-    with col6:
-        st.markdown(
-            f"""
-		<div style="display: flex; align-items: center; padding: 10px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9f9f9; text-align: center; width: 100%;">
-			<i class="fas fa-chart-line" style="font-size: 75px; color: black; margin-right: 10px;"></i>
-			<div style="flex-grow: 1;">
-				<h3 style="margin: 0; font-size: 25px; text-align: center;">Average Interviews per Enumerator</h3>
-				<p style="font-size: 47px; color: black; margin: 0; text-align: center;">{rounded_average}</p>
-			</div>
-		</div>
-		""",
-            unsafe_allow_html=True,
-        )
-
-    # Value box 7: Avg interviews per day per enumerator
-    with col7:
-        st.markdown(
-            f"""
-		<div style="display: flex; align-items: center; justify-content: center; padding: 5px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9f9f9; text-align: center; width: 100%;">
-			<i class="fas fa-calendar-check" style="font-size: 75px; color: black; margin-right: 10px;"></i>
-			<div style="flex-grow: 1; text-align: center;">
-				<h3 style="margin: 0; font-size: 24px;">Average Interviews per Day per Enumerator</h3>
-				<p style="font-size: 50px; color: black; margin: 0;">{rounded_average_day_per_enumerator}</p>
-			</div>
-		</div>
-		""",
-            unsafe_allow_html=True,
-        )
-
-    # Value box 8: Interviews Left
-    with col8:
-        st.markdown(
-            f"""
-		<div style="display: flex; align-items: center; justify-content: center; padding: 1px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9f9f9; text-align: center; width: 100%;">
-			<i class="fas fa-pen-to-square" style="font-size: 70px; color: black; margin-right: 10px;"></i>
-			<div style="flex-grow: 1; text-align: center;">
-				<h3 style="margin: 0; font-size: 25px;">Number of Interviews Left to Reach Goal</h3>
-				<p style="font-size: 50px; color: black; margin: 0;">{interviews_left}</p>
-			</div>
-		</div>
-		""",
-            unsafe_allow_html=True,
-        )
-
-    # Calculate todays date
-    today = datetime.now().strftime(
-        "%B %d, %Y"
-    )  # Format: Month day, year (e.g., August 22, 2024)
-
-    # Creat text
-    last_updated_text = f"Last update: {today}"
-
-    # Show text
-    st.write(last_updated_text)
+    summary_progress(data=data, date=date, enumerator=enumerator, target=target)
+    summary_data_summary(data=data)
+    summary_data_quality(data=data, survey_id=survey_id)

@@ -253,7 +253,7 @@ def missing_over_time(data: pd.DataFrame) -> None:
     )
     fig.update_layout(width=1000, height=500)
     fig.update_layout(yaxis_range=[0, 100])
-    st.plotly_chart(fig)
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def missing_correlation(data: pd.DataFrame, color_map: str) -> None:
@@ -268,8 +268,9 @@ def missing_correlation(data: pd.DataFrame, color_map: str) -> None:
 
     # user define columns for nullity correlation
     null_cols_sel = st.multiselect(
-        label="Sort Nullity Matrix by column",
+        label="Select columns for nullity correlation",
         options=null_cols,
+        help="Select columns to calculate nullity correlation, by default all columns with missing values are selected",
     )
     if null_cols_sel and len(null_cols_sel) > 1:
         nullity_cols = null_cols_sel
@@ -283,7 +284,7 @@ def missing_correlation(data: pd.DataFrame, color_map: str) -> None:
 
     fig = px.imshow(nullity_corr, color_continuous_scale=color_map)
     fig.update_layout(width=1000, height=1000)
-    st.plotly_chart(fig)
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def missing_matrix(data: pd.DataFrame, color_map: str) -> None:
@@ -310,7 +311,7 @@ def missing_matrix(data: pd.DataFrame, color_map: str) -> None:
     fig1 = px.imshow(nullity_matrix, color_continuous_scale=color_map)
     fig1.layout.coloraxis.showscale = False
     fig1.update_layout(width=1000, height=1000)
-    st.plotly_chart(fig1)
+    st.plotly_chart(fig1, use_container_width=True)
 
 
 def missing_compare(data: pd.DataFrame) -> None:

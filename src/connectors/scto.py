@@ -440,7 +440,7 @@ def scto_import_data(
             else:
                 cols = row["name"]
 
-            cols = [col for col in cols if col in scto_data_cols]
+            cols = [col for col in cols if col in scto_data.columns]
 
             if cols:
                 if row["type"] in ["date", "datetime", "time"]:

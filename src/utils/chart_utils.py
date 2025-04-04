@@ -74,3 +74,62 @@ def donut_chart(
     plt.axis("off")
 
     return fig
+
+
+def donut_chart2(
+    actual_value: int,
+    target_value: int = 100,
+    title: str | None = None,
+    prefix: str = "",
+    suffix: str = "%",
+    colours: list | None = None,
+):
+    """
+    actual_value: int
+    target_value: int
+    title: str
+    prefix: str - prefix to add to actual value eg "$"
+    suffix: str - suffix to add to actual value eg "%" or "K"
+    colours: list of colour codes
+    """
+    if colours is None:
+        colours = ["#FF8000", "#E5E5E5"]
+
+    fig = plt.figure(figsize=(10, 10), facecolor="#FFFFFF")
+    ax = fig.add_subplot(1, 1, 1)
+    ax.set_title(title, fontsize=50)
+
+    # calculate the remainder. If the actual value is greater
+    # than the target value, set the remainder to 0
+    remainder = target_value - actual_value if actual_value <= target_value else 0
+
+    pie = ax.pie(
+        [actual_value, remainder],
+        colors=colours,
+        startangle=90,
+        labeldistance=1.15,
+        counterclock=False,
+    )
+
+    pie[0][1].set_alpha(0.4)
+
+    centre_circle = plt.Circle((0, 0), 0.7, fc="#FFFFFF")
+    fig.gca().add_artist(centre_circle)
+
+    if suffix == "%":
+        actual_value = f"{actual_value:.2f}"
+
+    centre_text = f"{prefix}{actual_value}{suffix}"
+
+    ax.text(
+        0,
+        0.1,
+        centre_text,
+        horizontalalignment="center",
+        verticalalignment="center",
+        fontsize=60,
+        fontweight="bold",
+        color="#FF8000",
+    )
+
+    return fig
