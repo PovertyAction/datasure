@@ -834,6 +834,10 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 category_1_summary = column_category_summary[
                     column_category_summary["category"] == 1
                 ]
+                category_1_error_rate = (
+                    category_1_summary["# different"].sum()
+                    / category_1_summary["# compared"].sum()
+                ) * 100
                 type1_1.metric(
                     "Number of category 1 columns",
                     len(category_1_summary["column"].unique()),
@@ -844,7 +848,7 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 )
                 type1_3.metric(
                     "% of category 1 error rate",
-                    f"{((category_1_summary["# different"].sum()/category_1_summary["# compared"].sum())*100):.0f}%",
+                    f"{category_1_error_rate:.0f}%",
                 )
                 st.write("")
 
@@ -858,6 +862,10 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 category_2_summary = column_category_summary[
                     column_category_summary["category"] == 2
                 ]
+                category_2_error_rate = (
+                    category_2_summary["# different"].sum()
+                    / category_2_summary["# compared"].sum()
+                ) * 100
                 type2_1.metric(
                     "Number of category 2 columns",
                     len(category_2_summary["column"].unique()),
@@ -868,7 +876,7 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 )
                 type2_3.metric(
                     "% of category 2 error rate",
-                    f"{((category_2_summary["# different"].sum()/category_2_summary["# compared"].sum())*100):.0f}%",
+                    f"{category_2_error_rate:.0f}%",
                 )
                 st.write("")
 
@@ -882,6 +890,10 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 category_3_summary = column_category_summary[
                     column_category_summary["category"] == 3
                 ]
+                category_3_error_rate = (
+                    category_3_summary["# different"].sum()
+                    / category_3_summary["# compared"].sum()
+                ) * 100
                 type3_1.metric(
                     "Number of category 3 columns",
                     len(category_3_summary["column"].unique()),
@@ -892,7 +904,7 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 )
                 type3_3.metric(
                     "% of category 3 error rate",
-                    f"{((category_3_summary["# different"].sum()/category_3_summary["# compared"].sum())*100):.0f}%",
+                    f"{category_3_error_rate:.0f}%",
                 )
             st.write("")
 
