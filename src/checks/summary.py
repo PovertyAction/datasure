@@ -1,3 +1,5 @@
+import os
+
 import matplotlib.pyplot as plt
 import pandas as pd
 import plotly.express as px
@@ -35,12 +37,13 @@ def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
         # load default settings in the following order:
         # - if settings file exists, load settings from file
         # - if settings file does not exist, load default settings from config
-        default_settings = load_check_settings(setting_file, "summary")
-        if default_settings:
-            default_date = default_settings.get("date")
-            default_enumerator = default_settings.get("enumerator")
-            default_target = default_settings.get("target")
-            default_survey_id = default_settings.get("survey_id")
+        if setting_file and os.path.exists(setting_file):
+            default_settings = load_check_settings(setting_file, "summary")
+            if default_settings:
+                default_date = default_settings.get("date")
+                default_enumerator = default_settings.get("enumerator")
+                default_target = default_settings.get("target")
+                default_survey_id = default_settings.get("survey_id")
         else:
             default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
             default_enumerator = st.session_state["config_pages"]["Enumerator"][
