@@ -77,16 +77,7 @@ def outliers_report(data, page_num) -> None:  # noqa: D417, RUF100
             survey_key = st.selectbox(
                 "Survey Key", options=survey_cols, key="survey_key_outliers", index=default_survey_key_index
             )
-            # get date column name from dataset & get index
-            #default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
-            #default_date_index = survey_cols.get_loc(default_date)
-
-            #st.markdown("### Select date column")
-            #date = st.selectbox(
-            #    "Date", options=survey_cols, key="date_outliers", index=default_date_index
-            #)
-        
-
+            
 ######### Functions for joint outlier detection: 
         def find_variable_patterns(columns):
             """Identify patterns in variable names based on underscores.
