@@ -122,12 +122,17 @@ if show_prep_page_info:
             d_i = st.session_state["script_alias_list"].index(label)
             data_name = f"script_raw_data{d_i}"
 
-        # save a copy of the raw dataset as the initial prepped dataset
-        st.session_state[f"raw_data_prep{i}"] = st.session_state[f"{data_name}"].copy()
-        if f"prepped_data{i}" not in st.session_state:
-            st.session_state[f"prepped_data{i}"] = st.session_state[
+        # if prep cache exists, apply it to the dataset, else use raw data
+        if f"prep_log{i}" in st.session_state:
+            prep_apply_action(index=i)
+        else:
+            st.session_state[f"raw_data_prep{i}"] = st.session_state[
                 f"{data_name}"
             ].copy()
+            if f"prepped_data{i}" not in st.session_state:
+                st.session_state[f"prepped_data{i}"] = st.session_state[
+                    f"{data_name}"
+                ].copy()
 
         # count rows, columns, number missing & percent missing
         row_count: int = len(st.session_state[f"prepped_data{i}"].index)
