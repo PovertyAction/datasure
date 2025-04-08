@@ -434,7 +434,6 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 column_type = row["category"]
                 ok_range = row["ok range"]
                 comparison_condition = row["comparison condition"]
-
                 # Prepare survey and backcheck data
                 svy_col = f"_svy_{column_name}"
                 bc_col = f"_bc_{column_name}"
@@ -518,8 +517,7 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                                     return "not different"
                             else:  # Absolute value
                                 allowed_diff = float(ok_range)
-                                min_abs_val = -ok_range
-                                if min_abs_val <= diff <= allowed_diff:
+                                if diff <= allowed_diff:
                                     return "not different"
 
                             return "different"  # noqa: TRY300
@@ -1018,7 +1016,7 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
         st.write("")
 
         # enumerator statistics
-        enumerator_category_summary, _ = generate_column_summary(
+        enumerator_category_summary, _var_sum_df = generate_column_summary(
             column_config_data=bc_column_config_df,
             survey_data=survey_data,
             backcheck_data=backcheck_data,
