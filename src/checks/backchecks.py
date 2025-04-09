@@ -944,9 +944,25 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 )
 
             with trend_cols[1]:
+                # create weekly and monthly options based on submission date
+                time_period_options = ["Daily"]
+                if (
+                    error_trends_category_summary[date_col]
+                    .dt.to_period("W-SUN")
+                    .nunique()
+                    > 1
+                ):
+                    time_period_options.append("Weekly")
+                if (
+                    error_trends_category_summary[date_col].dt.to_period("M").nunique()
+                    > 1
+                ):
+                    time_period_options.append("Monthly")
+
+                # Select time period
                 time_period = st.selectbox(
                     "Select time period",
-                    options=["Daily", "Weekly", "Monthly"],
+                    options=time_period_options,
                     key="time_period",
                 )
 
