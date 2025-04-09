@@ -3,7 +3,7 @@ name = "dms-dashboard"
 version = "0.1.0"
 description = "IPA Data Management System Dashboard."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "jupyter>=1.1.1",
     "openpyxl>=3.1.5",
@@ -23,6 +23,9 @@ dependencies = [
     "bs4>=0.0.2",
     "millify>=0.1.1",
     "hydralit-components>=1.0.10",
+    "pyarrow==16.0.0",
+    "opencv-python>=4.11.0.86",
+    "numpy>=2.2.3",
 ]
 
 [tool.uv]
@@ -40,8 +43,8 @@ dev-dependencies = [
 [tool.ruff]
 line-length = 88
 fix = true
-# Assume Python 3.12
-target-version = "py312"
+# Assume Python 3.11
+target-version = "py311"
 
 [tool.ruff.lint]
 # docs: https://docs.astral.sh/ruff/rules/
@@ -79,7 +82,7 @@ ignore = [
     "D400",   # First line should end with a period
     "D401",   # First line of docstring should be in imperative mood
     "RUF005", # Code suggestions
-    "E722", #bare-exception
+    "E722",   #bare-exception
 ]
 
 [tool.ruff.lint.pycodestyle]
