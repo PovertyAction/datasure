@@ -41,8 +41,6 @@ st.title(st.session_state[f"config_page_{page_number}"])
 
 alias_list = list(filter(None, st.session_state.alias_list))
 
-# load data from
-
 with summary:
     summary_report(
         data=st.session_state[f"prepped_data{page_data_index}"], page_num=page_number
