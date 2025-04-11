@@ -1,7 +1,10 @@
 import json
 import os
 
+import streamlit as st
 
+
+@st.cache_data
 def save_check_settings(settings_file, check_name, check_settings) -> None:
     """Save the settings for a check to a dictionary.
 
@@ -31,6 +34,7 @@ def save_check_settings(settings_file, check_name, check_settings) -> None:
         json.dump(settings_dict, f)
 
 
+@st.cache_data
 def load_check_settings(settings_file, check_name) -> tuple:
     """Load the settings for a check from a dictionary.
 
