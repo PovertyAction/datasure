@@ -7,7 +7,12 @@ import seaborn as sns
 import streamlit as st
 from millify import millify, prettify
 
-from src.utils import donut_chart2, load_check_settings, save_check_settings
+from src.utils import (
+    donut_chart2,
+    load_check_settings,
+    save_check_settings,
+    trigger_save,
+)
 
 
 @st.cache_data
@@ -495,25 +500,27 @@ def summary_progress(
         progress_by_col = (
             default_settings.get("progress_by_col") if default_settings else None
         )
+        progress_col_index = (
+            data.columns.get_loc(progress_by_col) if progress_by_col else None
+        )
         progress_options = data.columns.tolist()
         progress_options.remove(date)
         progress_by_col = st.selectbox(
             "Progress by",
             options=progress_options,
-            index=progress_options.index(progress_by_col)
-            if progress_by_col in progress_options
-            else 0,
+            index=progress_col_index,
             key="progress_by_col",
-            on_change=save_check_settings,
-            kwargs={
-                "settings_file": setting_file,
-                "check_name": "summary",
-                "check_settings": {
-                    "progress_by_col": progress_by_col,
-                },
-            },
             help="Select a column to compute progress by",
+            on_change=trigger_save,
+            kwargs={"state_name": "progress_by_col"},
         )
+        if "progress_by_col" in st.session_state and st.session_state.progress_by_col:
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="summary",
+                check_settings={"progress_by_col": progress_by_col},
+            )
+            st.session_state.progress_by_col = False
 
     if progress_by_col:
         _, pil1 = st.columns([0.80, 0.20])
@@ -529,15 +536,16 @@ def summary_progress(
                 default=progress_time_period if progress_time_period else "Auto",
                 help="Select a time period to compute progress by",
                 key="progress_time_period",
-                on_change=save_check_settings,
-                kwargs={
-                    "settings_file": setting_file,
-                    "check_name": "summary",
-                    "check_settings": {
+            )
+
+            if progress_time_period:
+                save_check_settings(
+                    settings_file=setting_file,
+                    check_name="summary",
+                    check_settings={
                         "progress_time_period": progress_time_period,
                     },
-                },
-            )
+                )
 
         progress_data, vmin_val, vmax_val, format_cols = (
             compute_summary_progress_by_col(
