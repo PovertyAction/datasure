@@ -10,7 +10,7 @@ def save_check_settings(settings_file, check_name, check_settings) -> None:
 
     Parameters
     ----------
-    settings_dict (dict): The JSON fole to which the settings will be added.
+    settings_dict (dict): The JSON file to which the settings will be added.
     check_name (str): The name of the check.
         The name of the check for which the settings will be saved.
     check_settings (dict): The settings for the check.
@@ -28,8 +28,12 @@ def save_check_settings(settings_file, check_name, check_settings) -> None:
     with open(settings_file) as f:
         settings_dict = json.load(f)
 
-    settings_dict[check_name] = check_settings
+    if check_name in settings_dict:
+        settings_dict[check_name].update(check_settings)
+    else:
+        settings_dict[check_name] = check_settings
 
+    # save the dictionary to the file
     with open(settings_file, "w") as f:
         json.dump(settings_dict, f)
 
@@ -49,7 +53,15 @@ def load_check_settings(settings_file, check_name) -> tuple:
     tuple: The settings for the check.
 
     """
+    # check if the file exists
+    if not os.path.exists(settings_file):
+        return None
     with open(settings_file) as f:
         settings_dict = json.load(f)
 
     return settings_dict.get(check_name)
+
+
+def trigger_save(state_name: str):
+    """Return a session state of True when triggered by the user."""
+    st.session_state[state_name] = True
