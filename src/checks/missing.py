@@ -683,7 +683,7 @@ def missing_matrix(data: pd.DataFrame, color_map: str, setting_file: str) -> Non
 
 
 # define function to create summary report
-def missing_report(data: pd.DataFrame, page_num: int) -> None:  # noqa: D417, RUF100
+def missing_report(data: pd.DataFrame, setting_file: str, page_name: str) -> None:  # noqa: D417, RUF100
     """Generate a report on missing data in the dataset. The report includes a
     summary of missing data, a table showing the percentage of missing values
     in each column, and an option to inspect variables with missing data.
@@ -713,9 +713,7 @@ def missing_report(data: pd.DataFrame, page_num: int) -> None:  # noqa: D417, RU
         [1.0, "#da3b46"],
     ]
 
-    page_name = st.session_state.config_pages["Page Name"][page_num - 1]
     missing_setting_file = f"cache/settings/pyDMS_missing_settings_{page_name}.json"
-    setting_file = f"cache/settings/pyDMS_hfc_settings_{page_name}.json"
 
     missing_codes = missing_settings(missing_setting_file=missing_setting_file)
     missing_summary(data=data)

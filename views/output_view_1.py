@@ -15,6 +15,9 @@ from src.checks import (
 page_number = 1
 page_data_index = page_number - 1
 
+page_name = st.session_state.config_pages["Page Name"][page_data_index]
+setting_file = f"cache/settings/pyDMS_hfc_settings_{page_name}.json"
+
 st.title(st.session_state[f"config_page_{page_number}"])
 
 (
@@ -43,12 +46,16 @@ alias_list = list(filter(None, st.session_state.alias_list))
 
 with summary:
     summary_report(
-        data=st.session_state[f"prepped_data{page_data_index}"], page_num=page_number
+        data=st.session_state[f"prepped_data{page_data_index}"],
+        setting_file=setting_file,
+        page_num=page_number,
     )
 
 with missing:
     missing_report(
-        data=st.session_state[f"prepped_data{page_data_index}"], page_num=page_number
+        data=st.session_state[f"prepped_data{page_data_index}"],
+        setting_file=setting_file,
+        page_name=page_name,
     )
 
 with survey_progress:
@@ -58,7 +65,9 @@ with survey_progress:
 
 with duplicates:
     duplicates_report(
-        data=st.session_state[f"prepped_data{page_data_index}"], page_num=page_number
+        data=st.session_state[f"prepped_data{page_data_index}"],
+        setting_file=setting_file,
+        page_num=page_number,
     )
 
 with outliers:

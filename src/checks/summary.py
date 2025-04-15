@@ -58,7 +58,7 @@ def load_default_settings(setting_file: str, page_num: int) -> tuple:
 # define function to create summary report
 def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
     """
-    Generates a summary report for the survey data
+    Get the settings for the summary report.
 
     Parameters
     ----------
@@ -509,7 +509,7 @@ def summary_progress(
             "Progress by",
             options=progress_options,
             index=progress_col_index,
-            key="progress_by_col",
+            key="progress_by_col_key",
             help="Select a column to compute progress by",
             on_change=trigger_save,
             kwargs={"state_name": "progress_by_col"},
@@ -719,7 +719,7 @@ def summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> None:
         st.warning("Please select a survey ID column to view data quality details")
 
 
-def summary_report(data: pd.DataFrame, page_num: int) -> None:
+def summary_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:
     """
     Generates a summary report for the survey data
 
@@ -735,9 +735,6 @@ def summary_report(data: pd.DataFrame, page_num: int) -> None:
     -------
     None
     """
-    page_name = st.session_state.config_pages["Page Name"][page_num - 1]
-    setting_file = f"cache/settings/pyDMS_hfc_settings_{page_name}.json"
-
     date, enumerator, target, survey_id = summary_settings(
         data=data, setting_file=setting_file, page_num=page_num
     )

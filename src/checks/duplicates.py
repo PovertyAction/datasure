@@ -1,9 +1,168 @@
+import os
+
 import pandas as pd
 import streamlit as st
 
+from src.utils import load_check_settings, save_check_settings
+
+
+def load_default_duplicates_settings(setting_file: str, page_num: int) -> tuple:
+    """
+    Load default settings for duplicates report from a settings file.
+
+    Parameters
+    ----------
+        settings_file (str): The path to the settings file.
+
+    Returns
+    -------
+        dict: A dictionary containing the default settings for duplicates report.
+    """
+    # load default settings in the following order:
+    # - if settings file exists, load settings from file
+    # - if settings file does not exist, load default settings from config
+
+    if setting_file and os.path.exists(setting_file):
+        default_settings = load_check_settings(setting_file, "duplicates")
+        if default_settings:
+            default_survey_id = default_settings.get("survey_id")
+            default_survey_key = default_settings.get("survey_key")
+            default_date = default_settings.get("date")
+            default_dup_cols = default_settings.get("dup_cols")
+            default_display_cols = default_settings.get("display_cols")
+        else:
+            default_survey_id = st.session_state["config_pages"]["Survey ID"][
+                page_num - 1
+            ]
+            default_survey_key = st.session_state["config_pages"]["Survey KEY"][
+                page_num - 1
+            ]
+            default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
+            default_dup_cols = None
+            default_display_cols = None
+
+    else:
+        default_survey_id = st.session_state["config_pages"]["Survey ID"][page_num - 1]
+        default_survey_key = st.session_state["config_pages"]["Survey KEY"][
+            page_num - 1
+        ]
+        default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
+        default_dup_cols = None
+        default_display_cols = None
+
+    return (
+        default_survey_id,
+        default_survey_key,
+        default_date,
+        default_dup_cols,
+        default_display_cols,
+    )
+
+
+def duplicates_settings(data: pd.DataFrame, settings_file: str, page_num: int) -> tuple:
+    """
+    Get the settings for duplicates report
+
+    Parameters
+    ----------
+        data (pd.DataFrame): The dataset to generate the duplicate data report for.
+        settings_file (str): The path to the settings file.
+        page_num (int): The page number of the current report.
+
+    Returns
+    -------
+            tuple: A tuple containing the survey ID, survey key, date, and columns to
+            check for duplicates.
+    """
+    with st.expander("settings", icon=":material/settings:"):
+        st.markdown("## Configure settings for survey duplicates report")
+
+        survey_cols = data.columns.to_list()
+
+        st.write("---")
+
+        id_col, key_col, date_col = st.columns(3)
+
+        survey_id, survey_key, date, dup_cols, display_cols = (
+            load_default_duplicates_settings(
+                setting_file=settings_file, page_num=page_num
+            )
+        )
+
+        with id_col:
+            survey_id_index = survey_cols.index(survey_id) if survey_id else 0
+            st.markdown("### Select survey ID column")
+            survey_id = st.selectbox(
+                label="Survey ID",
+                options=survey_cols,
+                key="survey_id_duplicates_key",
+                index=survey_id_index,
+            )
+
+        with key_col:
+            survey_key_index = survey_cols.index(survey_key) if survey_key else None
+            st.markdown("### Select survey key column")
+            survey_key = st.selectbox(
+                label="Survey Key",
+                options=survey_cols,
+                key="survey_key_duplicates_key",
+                index=survey_key_index,
+            )
+
+        with date_col:
+            st.markdown("### Select date column")
+            date_index = survey_cols.index(date) if date else None
+            date = st.selectbox(
+                label="Date",
+                options=survey_cols,
+                key="date_duplicates_key",
+                index=date_index,
+            )
+
+        st.markdown("### Select columns to check for duplicates")
+        dup_cols = st.multiselect(
+            label="Columns",
+            options=survey_cols,
+            key="dup_cols_key",
+            default=dup_cols,
+        )
+
+        st.write("---")
+        st.markdown("### Report options")
+
+        st.markdown("### Select additional columns to display in the report")
+        display_cols = st.multiselect(
+            label="Columns",
+            options=survey_cols,
+            key="display_cols_key",
+            default=display_cols,
+        )
+
+        # add button for saving settings
+        st.write("---")
+        st.write("Save settings")
+        st.button(
+            label="Save settings",
+            key="save_settings_duplicates",
+            on_click=save_check_settings,
+            args=(
+                settings_file,
+                "duplicates",
+                {
+                    "survey_id": survey_id,
+                    "survey_key": survey_key,
+                    "date": date,
+                    "dup_cols": dup_cols,
+                    "display_cols": display_cols,
+                },
+            ),
+        )
+
+    return survey_id, survey_key, date, dup_cols, display_cols
+
 
 # define function to create duplicates report
-def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
+def duplicates_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:  # noqa: D417, RUF100
     """
     Generate a report on duplicate data in the dataset. The report includes a
     summary of duplicate data, a table showing the number of duplicate rows, and
@@ -22,79 +181,18 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
 
 
     """
-    with st.expander("settings", icon=":material/settings:"):
-        st.markdown("## Configure settings for survey duplicates report")
-
-        survey_cols = data.columns
-
-        st.write("---")
-        st.markdown("### Select columns to check for duplicates")
-        dup_cols = st.multiselect("Columns", options=survey_cols, key="dup_cols")
-
-        id_col, key_col, date_col = st.columns(3)
-
-        with id_col:
-            # get survey id column name from dataset & get index
-            default_survey_id = st.session_state["config_pages"]["Survey ID"][
-                page_num - 1
-            ]
-            default_survey_id_index = survey_cols.get_loc(default_survey_id)
-
-            st.markdown("### Select survey ID column")
-            survey_id = st.selectbox(
-                "Survey ID",
-                options=survey_cols,
-                key="survey_id_duplicates",
-                index=default_survey_id_index,
-            )
-
-        with key_col:
-            # get survey key column name from dataset & get index
-            default_survey_key = st.session_state["config_pages"]["Survey KEY"][
-                page_num - 1
-            ]
-            default_survey_key_index = survey_cols.get_loc(default_survey_key)
-
-            st.markdown("### Select survey key column")
-            survey_key = st.selectbox(
-                "Survey Key",
-                options=survey_cols,
-                key="survey_key_duplicates",
-                index=default_survey_key_index,
-            )
-
-        with date_col:
-            # get date column name from dataset & get index
-            default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
-            default_date_index = survey_cols.get_loc(default_date)
-
-            st.markdown("### Select date column")
-            date = st.selectbox(
-                "Date",
-                options=survey_cols,
-                key="date_duplicates",
-                index=default_date_index,
-            )
-
-        st.write("---")
-        st.markdown("### Report options")
-
-        st.markdown("### Select additional columns to display in the report")
-
-        display_cols = st.multiselect(
-            "Columns", options=survey_cols, key="display_cols"
-        )
-
-        # add button for saving settings
-        st.write("---")
-        st.write("Save settings")
-        save_settings = st.button("Save settings", key="save_settings_duplicates")  # noqa: F841
+    survey_id, survey_key, date, dup_cols, display_cols = duplicates_settings(
+        data, settings_file=setting_file, page_num=page_num
+    )
 
     # ---- Show report --- #
     # Check that required options have been selected. If not, display a info message
     # Modified to always allow survey_id, survey_key, and date to be processed
     if not all([survey_id, survey_key, date]):
-        st.info("Please select all required options to generate the progress report")
+        st.info(
+            body="Please select all required options to generate the progress report",
+            icon=":material/info:",
+        )
         return
 
     # Add CSS for consistent width
