@@ -5,6 +5,7 @@ from src.checks import (
     descriptive_report,
     duplicates_report,
     enumerator_report,
+    gpschecks_report,
     missing_report,
     outliers_report,
     progress_report,
@@ -26,6 +27,7 @@ st.title(st.session_state[f"config_page_{page_number}"])
     enum_stats,
     desc_stats,
     back_checks,
+    gps_checks,
 ) = st.tabs(
     (
         "Summary",
@@ -36,6 +38,7 @@ st.title(st.session_state[f"config_page_{page_number}"])
         "Enumerator Stats",
         "Descriptive Stats",
         "Back Checks",
+        "GPS Checks",
     )
 )
 
@@ -87,3 +90,8 @@ with back_checks:
             backcheck_data=backcheck_data,
             page_num=page_number,
         )
+
+with gps_checks:
+    gpschecks_report(
+        data=st.session_state[f"prepped_data{page_data_index}"], page_num=page_number
+    )
