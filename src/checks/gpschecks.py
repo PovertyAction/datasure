@@ -599,8 +599,6 @@ def gpschecks_report(data: pd.DataFrame, setting_file: str, page_num: int) -> No
 
     """
     # load settings
-    # page_name = st.session_state.config_pages["Page Name"][page_num - 1]
-    # settings_file = f"cache/settings/pyDMS_hfc_settings_{page_name}.json"
     (
         gps_column_exists,
         gps_lat_col,
