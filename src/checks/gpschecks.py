@@ -1,14 +1,12 @@
 import folium
-import numpy as np
 import streamlit as st
 from branca.colormap import linear
-from folium.plugins import HeatMap
-from sklearn.cluster import DBSCAN
+from geopy.distance import geodesic
+from sklearn.neighbors import LocalOutlierFactor
 from streamlit_folium import st_folium
 
 
 # plot gps coordinates on a map
-# @st.cache_data
 def plot_gps_coordinates(df, survey_key, gps_lat_col, gps_lon_col, color_col):
     """
     Plot GPS coordinates on a map, color-coded by a specified column.
@@ -84,7 +82,7 @@ def plot_gps_coordinates(df, survey_key, gps_lat_col, gps_lon_col, color_col):
     st_folium(gps_map, height=500, use_container_width=True)
 
 
-# outlier detection using clustering
+# detect outliers using a clustering column
 @st.cache_data
 def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
     """
@@ -109,42 +107,110 @@ def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
     # Drop rows with missing latitude values
     df = df[df[gps_lat_col].notna()]
 
-    # Perform clustering for each group in the clustering column
-    df["Outlier"] = False
-    for _group, group_data in df.groupby(clustering_col):
-        coords = group_data[[gps_lat_col, gps_lon_col]].values
-        if len(coords) < 5:
-            continue  # Skip groups with insufficient data for clustering
+    # Group data by clustering_col and process each group separately
+    grouped_df = df.groupby(clustering_col)
 
-        eps_meters = 10000  # desired distance in meters
-        eps_degrees = eps_meters / 111320  # 1 degree ≈ 111.32 km at equator
+    # Calculate centroids for each group
+    centroids = grouped_df[[gps_lat_col, gps_lon_col]].mean()
 
-        db = DBSCAN(eps=eps_degrees, min_samples=5).fit(coords)  # Adjust eps as needed
-        group_data["Cluster"] = db.labels_
+    # Calculate distances from centroids using geopy
+    def calculate_distance(row):
+        centroid = centroids.loc[row[clustering_col]]
+        return geodesic(
+            (row[gps_lat_col], row[gps_lon_col]),
+            (centroid[gps_lat_col], centroid[gps_lon_col]),
+        ).meters
 
-        # Calculate centroids for each cluster
-        centroids = (
-            group_data[group_data["Cluster"] != -1]
-            .groupby("Cluster")[[gps_lat_col, gps_lon_col]]
-            .mean()
+    df["distance_from_centroid"] = df.apply(calculate_distance, axis=1)
+
+    # Flag outliers using IQR for each group
+    def flag_outliers(group):
+        Q1 = group["distance_from_centroid"].quantile(0.25)
+        Q3 = group["distance_from_centroid"].quantile(0.75)
+        IQR = Q3 - Q1
+        lower_bound = Q1 - 1.5 * IQR
+        upper_bound = Q3 + 1.5 * IQR
+        group["Outlier"] = (group["distance_from_centroid"] < lower_bound) | (
+            group["distance_from_centroid"] > upper_bound
         )
+        return group
 
-        # Flag outliers based on distance from cluster centroids
-        for cluster, centroid in centroids.iterrows():
-            cluster_points = group_data[group_data["Cluster"] == cluster]
-            distances = np.linalg.norm(
-                cluster_points[[gps_lat_col, gps_lon_col]].values - centroid.values,
-                axis=1,
-            )
-            threshold = (
-                distances.mean() + 2 * distances.std()
-            )  # Adjust threshold as needed
-            outliers = cluster_points[distances > threshold].index
-            df.loc[outliers, "Outlier"] = True
+    df = grouped_df.apply(flag_outliers).reset_index(drop=True)
 
-        # Mark DBSCAN outliers (label -1) as outliers
-        df.loc[group_data[group_data["Cluster"] == -1].index, "Outlier"] = True
     return df
+
+
+# automatically detect outliers using Local Outlier Factor (LOF)
+@st.cache_data
+def detect_outliers_with_lof(df, gps_lat_col, gps_lon_col, n_neighbors, contamination):
+    """
+    Automatically detect GPS outliers using Local Outlier Factor (LOF).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The input dataframe containing GPS data.
+    gps_lat_col : str
+        The name of the latitude column.
+    gps_lon_col : str
+        The name of the longitude column.
+    n_neighbors : int
+        Number of neighbors to use for LOF.
+    contamination : float
+        The proportion of outliers in the data.
+
+    Returns
+    -------
+    pd.DataFrame
+        The input dataframe with an additional 'Outlier' column indicating GPS outliers.
+    """
+    # Drop rows with missing latitude or longitude values
+    df = df.dropna(subset=[gps_lat_col, gps_lon_col])
+
+    # Convert coordinates to a numpy array
+    coords = df[[gps_lat_col, gps_lon_col]].values
+
+    # Apply Local Outlier Factor
+    lof = LocalOutlierFactor(n_neighbors=n_neighbors, contamination=contamination)
+    df["Outlier"] = lof.fit_predict(coords) == -1  # LOF assigns -1 to outliers
+
+    return df
+
+
+# calculate gps accuracy statistics
+@st.cache_data
+def calculate_gps_accuracy_statistics(
+    df, gps_accuracy, accuracy_cluster_col, accuracy_stats_list
+):
+    """
+    Calculate GPS accuracy statistics grouped by a specified column.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        The input dataframe containing GPS data.
+    gps_accuracy : str
+        The name of the GPS accuracy column.
+    accuracy_cluster_col : str
+        The name of the column to group data for calculating statistics.
+    accuracy_stats_list : list
+        List of statistics to calculate (e.g., ['min', 'median', 'mean', 'max', 'std']).
+
+    Returns
+    -------
+    pd.DataFrame
+        A dataframe containing grouped GPS accuracy statistics.
+    """
+    # Group GPS accuracy statistics by the selected column
+    gps_accuracy_stats = df.groupby(accuracy_cluster_col)[gps_accuracy].agg(
+        accuracy_stats_list
+    )
+
+    # gps_accuracy_stats = df.groupby(accuracy_cluster_col)[gps_accuracy].agg(
+    #     ['min','median', 'mean', lambda x: np.percentile(x, 75), 'max', 'std']
+    # ).rename(columns={'<lambda_0>': '75th percentile'})
+
+    return gps_accuracy_stats
 
 
 # plot clusters on map
@@ -188,6 +254,8 @@ def plot_clusters_on_map(
 
     # Add points to the map
     for _, row in df.iterrows():
+        cluster_id = row[clustering_col] if clustering_col else "No Cluster"
+
         color = "red" if row[outlier_col] else "blue"
         folium.CircleMarker(
             location=(row[gps_lat_col], row[gps_lon_col]),
@@ -200,13 +268,22 @@ def plot_clusters_on_map(
                 <b>{"Submission Date"}:</b> {row[submission_date]}<br>
                 <b>{"Enumerator"}:</b> {row[enumerator]}<br>
                 <b>{"Survey ID"}:</b> {row[survey_id]}<br>
-                <b>{"Cluster"}:</b> {row[clustering_col]}<br>
+                <b>{"Cluster"}:</b> {cluster_id}<br>
                 <b>Outlier:</b> {row[outlier_col]}<br>
                 """,
                 min_width=200,
                 max_width=300,
             ),
         ).add_to(cluster_map)
+
+    # add tooltip
+    folium.LayerControl(
+        title=outlier_col,
+        title_style={"font-size": "16px", "font-weight": "bold"},
+        position="topright",
+        collapsed=True,
+        autoZIndex=True,
+    ).add_to(cluster_map)
 
     # Display the map in Streamlit
     st_folium(cluster_map, height=500, use_container_width=True)
@@ -232,7 +309,7 @@ def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
 
         survey_cols = data.columns
 
-        gps_col, enum_col = st.columns(spec=2, border=True)
+        enum_col, gps_col = st.columns(spec=2, border=True)
 
         with gps_col:
             gps_column_exists = st.toggle("Data contain GPS column(s)", value=True)
@@ -254,19 +331,6 @@ def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
                     gps_accuracy = "accuracy"
                     data[[gps_lat_col, gps_lon_col, gps_altitude, gps_accuracy]] = (
                         data[gps_column].str.split(",", expand=True).astype(float)
-                    )
-
-                # outlier detection method
-                outlier_method = st.selectbox(
-                    "Select Outlier Detection Method",
-                    ["Distance Threshold", "DBSCAN Clustering", "Z-Score", "IQR"],
-                )
-                if outlier_method == "Distance Threshold":
-                    threshold = st.number_input(
-                        "Set Distance Threshold (meters)",
-                        min_value=0,
-                        max_value=100000,
-                        value=1000,
                     )
 
         with enum_col:
@@ -331,8 +395,6 @@ def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
             lat_long_columns,
             gps_lat_col,
             gps_lon_col,
-            outlier_method,
-            threshold,
             enumerator,
             survey_key,
             survey_id,
@@ -364,10 +426,16 @@ def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
             label="% of non-missing GPS data",
             value=f"{pct_non_missing_gps:.2f}%",
         )
-        col4.metric(
-            label="% flagged as potential outliers",
-            value=f"{(0.2390):.2f}%",
-        )
+        try:
+            col4.metric(
+                "% flagged as potential outliers",
+                f"{st.session_state.gps_outlier_rate:.0f}%",
+            )
+        except:
+            col4.metric(
+                label="% flagged as potential outliers",
+                value="n/a",
+            )
         st.write("")
 
         st.write("##### GPS Data Distribution")
@@ -378,30 +446,96 @@ def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
                 survey_cols,
                 index=default_enumerator_index,
             )
-        # plot gps coordinates on a map
-        plot_gps_coordinates(data, survey_key, gps_lat_col, gps_lon_col, gps_color_col)
+        with gcol2:
+            dist_map_filter_col = st.multiselect(
+                label="Select values to display on the map",
+                options=data[gps_color_col].unique(),
+                default=None,
+            )
+
+        # Plot GPS coordinates on a map
+        if dist_map_filter_col:
+            dist_map_data_df = data[data[gps_color_col].isin(dist_map_filter_col)]
+        else:
+            dist_map_data_df = data
+        st.write("GPS points distribution, colored by the selected column.")
+        plot_gps_coordinates(
+            dist_map_data_df, survey_key, gps_lat_col, gps_lon_col, gps_color_col
+        )
 
         st.write("")
 
         # cluster detection
-        st.write("##### Cluster Outlier Detection")
+        st.write("##### GPS Outliers")
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
-            clustering_col = st.selectbox(
-                "Select a column to cluster GPS points",
-                survey_cols,
-                index=default_enumerator_index,
+            outlier_detection_method = st.selectbox(
+                "Select a gps outlier detection method",
+                ["Automatic", "Manual"],
+                index=0,
             )
+            if outlier_detection_method == "Manual":
+                clustering_col = st.selectbox(
+                    "Select a column to cluster GPS points",
+                    survey_cols,
+                    index=default_enumerator_index,
+                )
 
-        # Detect outliers using clustering
-        clusters_df = detect_outliers_with_clusters(
-            data, gps_lat_col, gps_lon_col, clustering_col
+                # Detect outliers using clustering
+                flag_outliers_df = detect_outliers_with_clusters(
+                    data, gps_lat_col, gps_lon_col, clustering_col
+                )
+                with col2:
+                    outliers_filter_col = st.multiselect(
+                        label="Select values to display on the map",
+                        options=data[clustering_col].unique(),
+                        default=None,
+                    )
+                if outliers_filter_col:
+                    flag_outliers_df = flag_outliers_df[
+                        flag_outliers_df[clustering_col].isin(outliers_filter_col)
+                    ]
+            else:
+                clustering_col = (
+                    None  # no clustering column needed for automatic detection
+                )
+                flag_outliers_df = detect_outliers_with_lof(
+                    data, gps_lat_col, gps_lon_col, n_neighbors=5, contamination="auto"
+                )
+
+                with col2:
+                    auto_outliers_filter_col = st.selectbox(
+                        label="Select a column to filter values on the map",
+                        options=survey_cols,
+                        index=None,
+                        help="Column to filter values on the map",
+                    )
+                    if auto_outliers_filter_col:
+                        with col3:
+                            # Filter values to display on the map
+                            auto_outliers_filter_vals = st.multiselect(
+                                label="Select values to display on the map",
+                                options=data[auto_outliers_filter_col].unique(),
+                                default=None,
+                                help="Values to display on the map",
+                            )
+
+                            if auto_outliers_filter_vals:
+                                flag_outliers_df = flag_outliers_df[
+                                    flag_outliers_df[auto_outliers_filter_col].isin(
+                                        auto_outliers_filter_vals
+                                    )
+                                ]
+
+        st.write("")
+
+        # Plot outliers a map
+        st.write(
+            "The map below shows the GPS points' distribution, colored by the outlier check outcome. Red points are flagged as outliers."
         )
-
-        # Plot clusters on a map
         plot_clusters_on_map(
-            clusters_df,
+            flag_outliers_df,
             enumerator,
             date,
             survey_id,
@@ -413,75 +547,60 @@ def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
 
         st.write("")
 
-        st.write("### Heatmap of GPS Points")
-        m = folium.Map(
-            location=[data[gps_lat_col].mean(), data[gps_lon_col].mean()], zoom_start=10
+        gps_outliers_df = flag_outliers_df[flag_outliers_df["Outlier"]].reset_index(
+            drop=True
         )
-        HeatMap(data[[gps_lat_col, gps_lon_col]].dropna().values.tolist()).add_to(m)
-        st_folium(m, width=700, height=500)
 
-        st.write("### Outlier Detection")
-        if outlier_method == "Distance Threshold":
-            # Distance threshold-based outlier detection
-            coords = data[[gps_lat_col, gps_lon_col]].dropna().values
-            center = np.mean(coords, axis=0)
-            distances = np.linalg.norm(coords - center, axis=1)
-            outliers = data.iloc[np.where(distances > threshold)]
-
-            st.write(f"Outliers detected using threshold: {threshold} meters")
-            st.write(outliers[[gps_lat_col, gps_lon_col]])
-
-        elif outlier_method == "DBSCAN Clustering":
-            # DBSCAN clustering-based outlier detection
-            coords = data[[gps_lat_col, gps_lon_col]].dropna().values
-            db = DBSCAN(eps=threshold / 111320, min_samples=5).fit(
-                coords
-            )  # Convert meters to degrees
-            labels = db.labels_
-
-            data["Cluster"] = labels
-            outliers = data[data["Cluster"] == -1]
+        if gps_outliers_df.shape[0] > 0:
+            outliers_df_cols = st.multiselect(
+                label="Select a list of columns to display",
+                options=gps_outliers_df.columns,
+                default=[survey_key, enumerator, gps_lat_col, gps_lon_col],
+                help="Columns to display in the table",
+            )
 
             st.write(
-                f"Number of clusters found: {len(set(labels)) - (1 if -1 in labels else 0)}"
+                "The table below shows the GPS points flagged as potential outliers."
             )
-            st.write(f"Number of outliers detected: {len(outliers)}")
-            st.write(outliers[[gps_lat_col, gps_lon_col]])
 
-            # Visualize clusters
-            cluster_map = folium.Map(
-                location=[data[gps_lat_col].mean(), data[gps_lon_col].mean()],
-                zoom_start=10,
+            st.dataframe(gps_outliers_df[outliers_df_cols], use_container_width=True)
+
+            st.session_state.gps_outlier_rate = (
+                gps_outliers_df.shape[0] / data.shape[0]
+            ) * 100
+        else:
+            st.info("No outliers detected")
+
+        st.write("")
+
+        st.write("##### GPS Accuracy Statistics")
+        cl1, cl2 = st.columns(2)
+        with cl1:
+            accuracy_cluster_col = st.selectbox(
+                "Select a column to summarize GPS points by:",
+                survey_cols,
+                index=default_enumerator_index,
             )
-            for _idx, row in data.iterrows():
-                color = "red" if row["Cluster"] == -1 else "blue"
-                folium.CircleMarker(
-                    location=(row[gps_lat_col], row[gps_lon_col]),
-                    radius=3,
-                    color=color,
-                    fill=True,
-                    fill_opacity=0.6,
-                ).add_to(cluster_map)
-            st_folium(cluster_map, width=700, height=500)
+        with cl2:
+            accuracy_stats_list = st.multiselect(
+                label="Select statistics to display",
+                options=[
+                    "min",
+                    "median",
+                    "mean",
+                    "max",
+                    "std",
+                ],
+                default=[
+                    "min",
+                    "median",
+                    "mean",
+                    "max",
+                ],
+            )
 
-        elif outlier_method == "Z-Score":
-            # Z-Score-based outlier detection
-            coords = data[[gps_lat_col, gps_lon_col]].dropna()
-            z_scores = np.abs((coords - coords.mean()) / coords.std())
-            outliers = data[(z_scores > 3).any(axis=1)]
-
-            st.write("Outliers detected using Z-Score method")
-            st.write(outliers[[gps_lat_col, gps_lon_col]])
-
-        elif outlier_method == "IQR":
-            # IQR-based outlier detection
-            coords = data[[gps_lat_col, gps_lon_col]].dropna()
-            Q1 = coords.quantile(0.25)
-            Q3 = coords.quantile(0.75)
-            IQR = Q3 - Q1
-            outliers = data[
-                ((coords < (Q1 - 1.5 * IQR)) | (coords > (Q3 + 1.5 * IQR))).any(axis=1)
-            ]
-
-            st.write("Outliers detected using IQR method")
-            st.write(outliers[[gps_lat_col, gps_lon_col]])
+        gps_accuracy_statistics = calculate_gps_accuracy_statistics(
+            data, gps_accuracy, accuracy_cluster_col, accuracy_stats_list
+        )
+        st.dataframe(gps_accuracy_statistics, use_container_width=True)
+        st.write("")
