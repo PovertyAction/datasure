@@ -424,12 +424,12 @@ def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
         )
         col3.metric(
             label="% of non-missing GPS data",
-            value=f"{pct_non_missing_gps:.2f}%",
+            value=f"{pct_non_missing_gps:.1f}%",
         )
         try:
             col4.metric(
                 "% flagged as potential outliers",
-                f"{st.session_state.gps_outlier_rate:.0f}%",
+                f"{st.session_state.gps_outlier_rate:.1f}%",
             )
         except:
             col4.metric(
@@ -566,7 +566,7 @@ def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
             st.dataframe(gps_outliers_df[outliers_df_cols], use_container_width=True)
 
             st.session_state.gps_outlier_rate = (
-                gps_outliers_df.shape[0] / data.shape[0]
+                gps_outliers_df.shape[0] / flag_outliers_df.shape[0]
             ) * 100
         else:
             st.info("No outliers detected")
