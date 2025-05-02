@@ -1,4 +1,5 @@
 import folium
+import numpy as np
 import streamlit as st
 from branca.colormap import linear
 from geopy.distance import geodesic
@@ -7,7 +8,9 @@ from streamlit_folium import st_folium
 
 
 # plot gps coordinates on a map
-def plot_gps_coordinates(df, survey_key, gps_lat_col, gps_lon_col, color_col):
+def plot_gps_coordinates(
+    df, enumerator, submissiondate, survey_id, gps_lat_col, gps_lon_col, color_col
+):
     """
     Plot GPS coordinates on a map, color-coded by a specified column.
 
@@ -15,8 +18,12 @@ def plot_gps_coordinates(df, survey_key, gps_lat_col, gps_lon_col, color_col):
     ----------
     data : pd.DataFrame
         The input dataframe containing GPS data.
-    survey_key : str
-        The name of the survey key column.
+    enumerator : str
+        The name of the enumerator column.
+    submissiondate : str
+        The name of the submission date column.
+    survey_id : str
+        The name of the survey id column.
     survey_id : str
         The name of the survey ID column.
     gps_lat_col : str
@@ -53,15 +60,15 @@ def plot_gps_coordinates(df, survey_key, gps_lat_col, gps_lon_col, color_col):
             color=row["color_value"],
             fill=True,
             fill_opacity=0.7,
-            popup=folium.Popup(
+            tooltip=folium.Tooltip(
                 f"""
+                <b>{"Submission Date"}:</b> {row[submissiondate]}<br>
+                <b>{"Enumerator"}:</b> {row[enumerator]}<br>
+                <b>Survey ID:</b> {row[survey_id]}<br>
                 <b>{color_col}:</b> {row[color_col]}<br>
-                <b>survey key:</b> {row[survey_key]}<br>
                 <b>latitude:</b> {row[gps_lat_col]:.6f}<br>
                 <b>longitude:</b> {row[gps_lon_col]:.6f}
-                """,
-                min_width=200,
-                max_width=300,
+                """
             ),
         )
 
@@ -70,16 +77,8 @@ def plot_gps_coordinates(df, survey_key, gps_lat_col, gps_lon_col, color_col):
     for group in feature_groups.values():
         gps_map.add_child(group)
 
-    folium.LayerControl(
-        title=color_col,
-        title_style={"font-size": "16px", "font-weight": "bold"},
-        position="topright",
-        collapsed=True,
-        autoZIndex=True,
-    ).add_to(gps_map)
-
     # Display the map in Streamlit
-    st_folium(gps_map, height=500, use_container_width=True)
+    st_folium(gps_map, height=450, use_container_width=True)
 
 
 # detect outliers using a clustering column
@@ -201,14 +200,32 @@ def calculate_gps_accuracy_statistics(
     pd.DataFrame
         A dataframe containing grouped GPS accuracy statistics.
     """
+    # update percentile statistics with numpy percentile function
+    percentile_map = {
+        "25th percentile": lambda x: np.percentile(x, 25),
+        "75th percentile": lambda x: np.percentile(x, 75),
+        "95th percentile": lambda x: np.percentile(x, 95),
+    }
+
+    accuracy_stats_list = [
+        percentile_map.get(stat, stat) for stat in accuracy_stats_list
+    ]
+
     # Group GPS accuracy statistics by the selected column
     gps_accuracy_stats = df.groupby(accuracy_cluster_col)[gps_accuracy].agg(
         accuracy_stats_list
     )
-
-    # gps_accuracy_stats = df.groupby(accuracy_cluster_col)[gps_accuracy].agg(
-    #     ['min','median', 'mean', lambda x: np.percentile(x, 75), 'max', 'std']
-    # ).rename(columns={'<lambda_0>': '75th percentile'})
+    # Rename lambda_* columns back to their correct percentile names if present
+    for col in gps_accuracy_stats.columns:
+        if "lambda" in col:
+            for percentile_name, func in percentile_map.items():
+                if gps_accuracy_stats[col].equals(
+                    df.groupby(accuracy_cluster_col)[gps_accuracy].agg(func)
+                ):
+                    gps_accuracy_stats = gps_accuracy_stats.rename(
+                        columns={col: percentile_name}
+                    )
+                    break
 
     return gps_accuracy_stats
 
@@ -263,30 +280,19 @@ def plot_clusters_on_map(
             color=color,
             fill=True,
             fill_opacity=0.7,
-            popup=folium.Popup(
+            tooltip=folium.Tooltip(
                 f"""
-                <b>{"Submission Date"}:</b> {row[submission_date]}<br>
                 <b>{"Enumerator"}:</b> {row[enumerator]}<br>
+                <b>{"Submission Date"}:</b> {row[submission_date]}<br>
                 <b>{"Survey ID"}:</b> {row[survey_id]}<br>
                 <b>{"Cluster"}:</b> {cluster_id}<br>
                 <b>Outlier:</b> {row[outlier_col]}<br>
                 """,
-                min_width=200,
-                max_width=300,
             ),
         ).add_to(cluster_map)
 
-    # add tooltip
-    folium.LayerControl(
-        title=outlier_col,
-        title_style={"font-size": "16px", "font-weight": "bold"},
-        position="topright",
-        collapsed=True,
-        autoZIndex=True,
-    ).add_to(cluster_map)
-
     # Display the map in Streamlit
-    st_folium(cluster_map, height=500, use_container_width=True)
+    st_folium(cluster_map, height=450, use_container_width=True)
 
 
 # define function for gps checks
@@ -439,36 +445,51 @@ def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
         st.write("")
 
         st.write("##### GPS Data Distribution")
-        gcol1, gcol2 = st.columns(2)
+        st.write("")
+
+        gcol1, gcol2 = st.columns(spec=[0.25, 0.75], gap="medium")
+
         with gcol1:
             gps_color_col = st.selectbox(
                 "Select column to color-code GPS points",
                 survey_cols,
                 index=default_enumerator_index,
+                key="gps_color_col",
+                help="Column to color-code GPS points",
             )
-        with gcol2:
             dist_map_filter_col = st.multiselect(
                 label="Select values to display on the map",
                 options=data[gps_color_col].unique(),
                 default=None,
+                key="dist_map_filter_col",
+                help="Column to filter values on the map",
             )
+            if dist_map_filter_col:
+                dist_map_data_df = data[data[gps_color_col].isin(dist_map_filter_col)]
+            else:
+                dist_map_data_df = data
 
-        # Plot GPS coordinates on a map
-        if dist_map_filter_col:
-            dist_map_data_df = data[data[gps_color_col].isin(dist_map_filter_col)]
-        else:
-            dist_map_data_df = data
-        st.write("GPS points distribution, colored by the selected column.")
-        plot_gps_coordinates(
-            dist_map_data_df, survey_key, gps_lat_col, gps_lon_col, gps_color_col
-        )
+        with gcol2:
+            st.write("GPS points distribution, colored by the selected column.")
+
+            # plot gps coordinates on map
+            plot_gps_coordinates(
+                dist_map_data_df,
+                enumerator,
+                date,
+                survey_id,
+                gps_lat_col,
+                gps_lon_col,
+                gps_color_col,
+            )
 
         st.write("")
 
         # cluster detection
         st.write("##### GPS Outliers")
+        st.write("")
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(spec=[0.25, 0.75], gap="medium")
         with col1:
             outlier_detection_method = st.selectbox(
                 "Select a gps outlier detection method",
@@ -480,18 +501,22 @@ def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
                     "Select a column to cluster GPS points",
                     survey_cols,
                     index=default_enumerator_index,
+                    key="clustering_col",
+                    help="Column to cluster GPS points",
                 )
 
                 # Detect outliers using clustering
                 flag_outliers_df = detect_outliers_with_clusters(
                     data, gps_lat_col, gps_lon_col, clustering_col
                 )
-                with col2:
-                    outliers_filter_col = st.multiselect(
-                        label="Select values to display on the map",
-                        options=data[clustering_col].unique(),
-                        default=None,
-                    )
+
+                outliers_filter_col = st.multiselect(
+                    label="Select values to display on the map",
+                    options=data[clustering_col].unique(),
+                    default=None,
+                    key="outliers_filter_col",
+                    help="Column to filter values on the map",
+                )
                 if outliers_filter_col:
                     flag_outliers_df = flag_outliers_df[
                         flag_outliers_df[clustering_col].isin(outliers_filter_col)
@@ -504,46 +529,45 @@ def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
                     data, gps_lat_col, gps_lon_col, n_neighbors=5, contamination="auto"
                 )
 
-                with col2:
-                    auto_outliers_filter_col = st.selectbox(
-                        label="Select a column to filter values on the map",
-                        options=survey_cols,
-                        index=None,
-                        help="Column to filter values on the map",
+                auto_outliers_filter_col = st.selectbox(
+                    label="Select a column to filter values on the map",
+                    options=survey_cols,
+                    index=None,
+                    key="auto_outliers_filter_col",
+                    help="Column to filter values on the map",
+                )
+                if auto_outliers_filter_col:
+                    # Filter values to display on the map
+                    auto_outliers_filter_vals = st.multiselect(
+                        label="Select values to display on the map",
+                        options=data[auto_outliers_filter_col].unique(),
+                        default=None,
+                        key="auto_outliers_filter_vals",
+                        help="Values to display on the map",
                     )
-                    if auto_outliers_filter_col:
-                        with col3:
-                            # Filter values to display on the map
-                            auto_outliers_filter_vals = st.multiselect(
-                                label="Select values to display on the map",
-                                options=data[auto_outliers_filter_col].unique(),
-                                default=None,
-                                help="Values to display on the map",
+
+                    if auto_outliers_filter_vals:
+                        flag_outliers_df = flag_outliers_df[
+                            flag_outliers_df[auto_outliers_filter_col].isin(
+                                auto_outliers_filter_vals
                             )
+                        ]
 
-                            if auto_outliers_filter_vals:
-                                flag_outliers_df = flag_outliers_df[
-                                    flag_outliers_df[auto_outliers_filter_col].isin(
-                                        auto_outliers_filter_vals
-                                    )
-                                ]
-
-        st.write("")
-
-        # Plot outliers a map
-        st.write(
-            "The map below shows the GPS points' distribution, colored by the outlier check outcome. Red points are flagged as outliers."
-        )
-        plot_clusters_on_map(
-            flag_outliers_df,
-            enumerator,
-            date,
-            survey_id,
-            gps_lat_col,
-            gps_lon_col,
-            clustering_col,
-            "Outlier",
-        )
+        with col2:
+            st.write(
+                "The map below shows GPS data distribution, colored by the outlier check outcome. Red points are flagged as outliers."
+            )
+            # plot outliers map
+            plot_clusters_on_map(
+                flag_outliers_df,
+                enumerator,
+                date,
+                survey_id,
+                gps_lat_col,
+                gps_lon_col,
+                clustering_col,
+                "Outlier",
+            )
 
         st.write("")
 
@@ -559,9 +583,7 @@ def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
                 help="Columns to display in the table",
             )
 
-            st.write(
-                "The table below shows the GPS points flagged as potential outliers."
-            )
+            st.write("Below is a list of potential GPS outliers:")
 
             st.dataframe(gps_outliers_df[outliers_df_cols], use_container_width=True)
 
@@ -590,6 +612,9 @@ def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
                     "mean",
                     "max",
                     "std",
+                    "25th percentile",
+                    "75th percentile",
+                    "95th percentile",
                 ],
                 default=[
                     "min",
