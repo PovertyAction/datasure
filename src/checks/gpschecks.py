@@ -1,5 +1,6 @@
 import folium
 import numpy as np
+import pandas as pd
 import streamlit as st
 from branca.colormap import linear
 from geopy.distance import geodesic
@@ -409,7 +410,9 @@ def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
         st.info("Please select all required options to generate the progress report")
         return
 
-    if gps_lat_col and gps_lon_col:
+    if pd.api.types.is_numeric_dtype(
+        data[gps_lat_col]
+    ) and pd.api.types.is_numeric_dtype(data[gps_lon_col]):
         st.markdown("## Overview")
 
         col1, col2, col3, col4 = st.columns(4)
@@ -629,3 +632,6 @@ def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
         )
         st.dataframe(gps_accuracy_statistics, use_container_width=True)
         st.write("")
+    else:
+        st.error("Please select valid GPS columns")
+        return
