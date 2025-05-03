@@ -341,10 +341,15 @@ def missing_over_time(data: pd.DataFrame, setting_file) -> None:
     )
     dc1, _ = st.columns([0.3, 0.7])
     with dc1:
+        select_date_col_index = (
+            date_cols.tolist().index(select_date_col)
+            if select_date_col in date_cols
+            else 0
+        )
         select_date_col = st.selectbox(
             "Select date column",
             options=date_cols,
-            index=date_cols.tolist().index(select_date_col),
+            index=select_date_col_index,
             key="select_date_col",
             help="Select the date column to compute missingness over time",
         )
