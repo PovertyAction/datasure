@@ -1,12 +1,15 @@
 import io
+import os
 
-import matplotlib.pyplot as plt
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-from plotly.subplots import make_subplots
 
-from src.utils import donut_chart
+from src.utils import (
+    donut_chart2,
+    load_check_settings,
+    save_check_settings,
+)
 
 
 def fig_to_streamlit(fig):
@@ -18,439 +21,463 @@ def fig_to_streamlit(fig):
 
 
 #### Survey Progress ###
-
-
-def progress_report(data, page_num) -> None:
-    """Display progress report
+@st.cache_data
+def load_default_progress_settings(setting_file: str, page_num: int) -> tuple:
+    """Load default settings for progress report
 
     PARAMS:
     -------
 
-    data: pd.DataFrame : data to display
+    setting_file: str : path to the settings file
     page_num: int : page number
+
+    Returns
+    -------
+    tuple : default settings for progress report
+    """
+    # load default settings in the following order:
+    # - if settings file exists, load settings from file
+    # - if settings file does not exist, load default settings from config
+    if setting_file and os.path.exists(setting_file):
+        default_settings = load_check_settings(setting_file, "progress_report")
+        if default_settings:
+            default_survey_id, default_survey_key, default_enumerator, default_date = (
+                default_settings.get("survey_id"),
+                default_settings.get("survey_key"),
+                default_settings.get("enumerator"),
+                default_settings.get("date"),
+            )
+            default_team, default_groupby, default_target = (
+                default_settings.get("team"),
+                default_settings.get("groupby"),
+                default_settings.get("target"),
+            )
+        else:
+            default_survey_id, default_survey_key, default_enumerator, default_date = (
+                st.session_state["config_pages"]["Survey ID"][page_num - 1],
+                st.session_state["config_pages"]["Survey KEY"][page_num - 1],
+                st.session_state["config_pages"]["Enumerator"][page_num - 1],
+                st.session_state["config_pages"]["Survey Date"][page_num - 1],
+            )
+            default_team, default_groupby, default_target = (
+                None,
+                None,
+                None,
+            )
+    else:
+        default_survey_id, default_survey_key, default_enumerator, default_date = (
+            st.session_state["config_pages"]["Survey ID"][page_num - 1],
+            st.session_state["config_pages"]["Survey KEY"][page_num - 1],
+            st.session_state["config_pages"]["Enumerator"][page_num - 1],
+            st.session_state["config_pages"]["Survey Date"][page_num - 1],
+        )
+        default_team, default_groupby, default_target = (
+            None,
+            None,
+            None,
+        )
+
+    return (
+        default_survey_id,
+        default_survey_key,
+        default_enumerator,
+        default_date,
+        default_team,
+        default_groupby,
+        default_target,
+    )
+
+
+def progress_report_settings(
+    data: pd.DataFrame,
+    setting_file: str,
+    page_num: int,
+) -> tuple:
+    """
+    Get settings for progress report
+
+    Parameters
+    ----------
+    data: pd.DataFrame : data to display
+    setting_file: str : path to the settings file
+    page_num: int : page number
+
+    Returns
+    -------
+    tuple : settings for progress report
+    """
+    with st.expander("settings", icon=":material/settings:"):
+        st.markdown("## Configure settings for progress report")
+
+        (
+            default_survey_id,
+            default_survey_key,
+            default_enumerator,
+            default_date,
+            default_team,
+            default_groupby,
+            default_target,
+        ) = load_default_progress_settings(setting_file=setting_file, page_num=page_num)
+
+        survey_cols = data.columns
+
+        uc1, uc2, uc3 = st.columns(3)
+        with uc1:
+            default_survey_id_index = survey_cols.get_loc(default_survey_id)
+            st.markdown("### Select survey ID column")
+            survey_id = st.selectbox(
+                "Survey ID",
+                options=survey_cols,
+                help="Column containing survey ID",
+                key="surveyid_progress_settings",
+                index=default_survey_id_index,
+            )
+        with uc2:
+            default_survey_key_index = survey_cols.get_loc(default_survey_key)
+            st.markdown("### Select survey key column")
+            survey_key = st.selectbox(
+                "Survey Key",
+                options=survey_cols,
+                help="Column containing survey key",
+                key="surveykey_progress_settings",
+                index=default_survey_key_index,
+            )
+        with uc3:
+            default_date_index = survey_cols.get_loc(default_date)
+            st.markdown("### Select survey date column")
+            date = st.selectbox(
+                label="Date",
+                options=survey_cols,
+                help="Column containing survey date",
+                key="date_progress_settings",
+                index=default_date_index,
+            )
+        bc1, bc2, bc3 = st.columns(3)
+        with bc1:
+            default_enumerator_index = survey_cols.get_loc(default_enumerator)
+            st.markdown("### Select enumerator column")
+            enumerator = st.selectbox(
+                "Enumerator",
+                options=survey_cols,
+                help="Column containing survey enumerator",
+                key="enumerator_progress_settings",
+                index=default_enumerator_index,
+            )
+        with bc2:
+            default_team_index = (
+                survey_cols.get_loc(default_team) if default_team else None
+            )
+            st.markdown("### Select team column")
+            team = st.selectbox(
+                "Team",
+                options=survey_cols,
+                help="Column containing survey team",
+                key="team_progress_settings",
+                index=default_team_index,
+            )
+        with bc3:
+            default_groupby_index = (
+                survey_cols.get_loc(default_groupby) if default_groupby else None
+            )
+            st.markdown("### Select group by column")
+            groupby = st.selectbox(
+                "Group by",
+                options=survey_cols,
+                help="Column to group summary report by",
+                key="groupby_progress_settings",
+                index=default_groupby_index,
+            )
+
+        st.write("---")
+        tc1, tc2 = st.columns([0.4, 0.6])
+        tc1.markdown("##### Target number of interviews")
+        with tc2:
+            target = st.number_input(
+                label="Total goal",
+                min_value=0,
+                value=default_target,
+                help="Total number of interviews expected",
+                label_visibility="collapsed",
+                key="total_goal_progress_settings",
+            )
+
+        # add button for saving settings
+        st.write("---")
+        st.write("Save settings")
+        st.button(
+            label="Save settings",
+            key="save_settings_progress",
+            on_click=save_check_settings,
+            args=(
+                setting_file,
+                "progress",
+                {
+                    "survey_id": survey_id,
+                    "survey_key": survey_key,
+                    "date": date,
+                    "enumerator": enumerator,
+                    "team": team,
+                    "groupby": groupby,
+                    "target": target,
+                },
+            ),
+        )
+
+    return survey_id, survey_key, date, enumerator, team, groupby, target
+
+
+@st.cache_data
+def compute_progress_summary(data: pd.DataFrame, target: int) -> tuple:
+    """Compute summary statistics for progress report
+
+    Parameters
+    ----------
+    data: pd.DataFrame : data to display
+    target: int : target number of interviews
+
+    Returns
+    -------
+    tuple : summary statistics for progress report
+    - total_submitted: int : total number of submitted interviews
+    - total_goal: int : total number of interviews expected
+    - percentage of completed interviews
+    """
+    total_submitted = len(data)
+    if target and target > 0:
+        percentage_completed = (total_submitted / target) * 100
+    else:
+        percentage_completed = 0
+
+    return total_submitted, target, percentage_completed
+
+
+def display_progress_summary(data: pd.DataFrame, target: int) -> None:
+    """Display summary statistics for progress report
+
+    Parameters
+    ----------
+    total_submitted: int : total number of submitted interviews
+    target: int : target number of interviews
+    percentage_completed: float : percentage of completed interviews
 
     Returns
     -------
     None
     """
-    with st.expander("settings", icon=":material/settings:"):
-        st.markdown("## Configure settings for progress report")
+    total_submitted, target, percentage_completed = compute_progress_summary(
+        data=data, target=target
+    )
+    mc1, mc2, mc3 = st.columns([0.5, 0.25, 0.25], border=True)
+    with mc1:
+        st.write("Submission progress")
+        sp1, sp2 = st.columns([0.9, 0.1])
+        # sp1.write(f"{percentage_completed:.2f}%")
+        sp1.progress(value=percentage_completed / 100)
+        sp2.write(f"{percentage_completed:.2f}%")
+    mc2.metric(
+        label="Target Interviews",
+        value=target if (target and target > 0) else "N/A",
+    )
+    mc3.metric(label="Total Submitted Interviews", value=total_submitted)
 
-        survey_cols = data.columns
 
-        st.write("---")
-        st.markdown("### Select columns to include in summary report")
+@st.cache_data
+def compute_progress_chart(
+    data: pd.DataFrame,
+    consent_col: str | None,
+    consent_vals: list | None,
+    outcome_col: str | None,
+    outcome_vals: list | None,
+) -> tuple:
+    """Compute progress chart statistics
 
-        meta_col, enum_col, agg_col = st.columns(spec=3, border=True)
+    Parameters
+    ----------
+    data: pd.DataFrame : dataset
+    consent_col: str | None : column name for consent
+    consent_vals: list | None : list of consent values
+    outcome_col: str | None : column name for outcome
+    outcome_vals: list | None : list of outcome values
 
-        with meta_col:
-            # get date column name from dataset & get index
-            default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
-            default_date_index = survey_cols.get_loc(default_date)
-            date = st.selectbox(
-                "Date",
-                options=survey_cols,
-                help="Column containing survey date",
-                key="date_progress",
-                index=default_date_index,
-            )
-
-        with enum_col:
-            by = st.selectbox(  # noqa: F841
-                "Group by",
-                options=survey_cols,
-                help="Column to group summary report by by",
-                key="groupby_progress",
-                index=None,
-            )
-
-            # get enumerator column name from dataset & get index
-            default_enumerator = st.session_state["config_pages"]["Enumerator"][
-                page_num - 1
-            ]
-            default_enumerator_index = survey_cols.get_loc(default_enumerator)
-            enumerator = st.selectbox(
-                "Enumerator",
-                options=survey_cols,
-                help="Column containing survey enumerator",
-                key="enumerator_progress",
-                index=default_enumerator_index,
-            )
-            team = st.selectbox(  # noqa: F841
-                "Team",
-                options=survey_cols,
-                help="Column containing survey team",
-                key="team_progress",
-                index=None,
-            )
-
-        with agg_col:
-            # get survey id column name from dataset & get index
-            default_survey_id = st.session_state["config_pages"]["Survey ID"][
-                page_num - 1
-            ]
-            default_survey_id_index = survey_cols.get_loc(default_survey_id)
-            survey_id = st.selectbox(
-                "Survey ID",
-                options=survey_cols,
-                help="Column containing survey ID",
-                key="surveyid_progress",
-                index=default_survey_id_index,
-            )
-            # get survey key column name from dataset & get index
-            default_survey_key = st.session_state["config_pages"]["Survey KEY"][
-                page_num - 1
-            ]
-            default_survey_key_index = survey_cols.get_loc(default_survey_key)
-            survey_key = st.selectbox(
-                "Survey Key",
-                options=survey_cols,
-                help="Column containing survey key",
-                key="surveykey_progress",
-                index=default_survey_key_index,
-            )
-
-            consent = st.selectbox(
-                "Consent",
-                options=survey_cols,
-                help="Column containing survey consent",
-                key="consent_progress",
-                index=None,
-            )
-
-            if consent:
-                consent_options = data[consent].unique().tolist()
-                consent_val = st.multiselect(
-                    "Consent value(s)",
-                    options=consent_options,
-                    help="Value(s) indicating valid consent",
-                    key="consent_val_progress",
-                )
-
-            outcome = st.selectbox(
-                "Outcome",
-                options=survey_cols,
-                help="Column containing survey outcome",
-                key="outcome_progress",
-                index=None,
-            )
-
-            if outcome:
-                outcome_options = data[outcome].unique().tolist()
-                outcome_val = st.multiselect(  # noqa: F841
-                    "Outcome value(s)",
-                    options=outcome_options,
-                    help="Value(s) indicating completed survey",
-                    key="outcome_val_progress",
-                )
-
-        st.write("---")
-        st.markdown("### Tracking Options")
-
-        # number of interviews expected
-        total_goal = st.number_input(
-            "Total goal",
-            min_value=0,
-            help="Total number of interviews expected",
-            key="total_goal_progress",
+    Returns
+    -------
+    tuple: progress chart statistics
+    - consent_percentage: float : percentage of valid consents
+    - completion_percentage: float : percentage of completed surveys
+    """
+    # count total valid consent. Count as valid consent if the value is in the
+    # consent_vals list
+    total_submitted = len(data)
+    if consent_col and consent_vals:
+        valid_consent_count = len(data[data[consent_col].isin(consent_vals)])
+        consent_percentage = (
+            (valid_consent_count / total_submitted) * 100 if total_submitted > 0 else 0
         )
+    else:
+        consent_percentage = 0
 
-        # define a save settings button
-        save_settings = st.button("Save settings", key="save_settings_progress")  # noqa: F841
-
-    # Add the summary section
-    st.markdown("## Survey Summary")
-
-    # Get required data for the summary
-    total_submitted = len(data[survey_id].unique())
-
-    # Create metrics row
-    met_col1, met_col2 = st.columns(2)
-
-    with met_col1:
-        st.metric(
-            label="Target Interviews",
-            value=total_goal
-            if "total_goal_progress" in st.session_state
-            and st.session_state["total_goal_progress"] > 0
-            else "N/A",
+    if outcome_col and outcome_vals:
+        # count total completed surveys. Count as completed if the value is in the
+        # outcome_vals list
+        completed_count = len(data[data[outcome_col].isin(outcome_vals)])
+        completion_percentage = (
+            (completed_count / total_submitted) * 100 if total_submitted > 0 else 0
         )
+    else:
+        completion_percentage = 0
 
-    with met_col2:
-        st.metric(label="Total Submitted Interviews", value=total_submitted)
+    return consent_percentage, completion_percentage
 
-    # Create charts row
-    chart_cols = st.columns([1, 1])
 
-    # Consent chart
-    with chart_cols[0]:
-        if (
-            consent
-            and "consent_val_progress" in st.session_state
-            and len(st.session_state["consent_val_progress"]) > 0
-        ):
-            # Count total valid consents
-            valid_consent_count = data[
-                data[consent].isin(st.session_state["consent_val_progress"])
-            ][survey_id].nunique()
-            consent_percentage = (
-                round((valid_consent_count / total_submitted * 100), 0)
-                if total_submitted > 0
-                else 0
+def display_progress_chart(data: pd.DataFrame):
+    """Display progress chart
+
+    Parameters
+    ----------
+    data: pd.DataFrame : dataset
+
+    Returns
+    -------
+    None
+    """
+    survey_cols = data.columns
+    st.write("---")
+    st.write("## Progress Chart")
+    _, cc1, _, cc2, _ = st.columns([0.1, 0.35, 0.1, 0.35, 0.1])
+    consent, consent_vals, outcome, outcome_vals = None, None, None, None
+    with cc1, st.container(border=True):
+        consent = st.selectbox(
+            label="Select consent column",
+            options=survey_cols,
+            help="Column containing consent information",
+            key="consent_progress_chart",
+            index=None,
+        )
+        if consent:
+            consent_vals = st.multiselect(
+                label="Select consent values",
+                options=data[consent].unique(),
+                help="Values to consider as valid consent",
+                key="consent_val_progress_chart",
             )
-
-            # Create matplotlib donut chart for consent
-            st.markdown(
-                "<p font-size: 16px;'>Valid Consent</p>", unsafe_allow_html=True
-            )
-            fig = donut_chart(
-                actual_value=int(consent_percentage),
-                suffix="%",
-                colors=["#2C5F2D", "#CCCCCC"],
-            )
-            # Use use_column_width parameter to make image responsive to column width
-            st.image(fig_to_streamlit(fig), use_container_width=False)
-            plt.close(fig)  # Close the figure to free memory
         else:
-            st.info("Consent data not configured")
-
-    # Outcome chart
-    with chart_cols[1]:
-        if (
-            outcome
-            and "outcome_val_progress" in st.session_state
-            and len(st.session_state["outcome_val_progress"]) > 0
-        ):
-            # Count total completed surveys
-            completed_count = data[
-                data[outcome].isin(st.session_state["outcome_val_progress"])
-            ][survey_id].nunique()
-            completion_percentage = (
-                round((completed_count / total_goal * 100), 0)
-                if total_submitted > 0
-                else 0
+            st.warning("Please select a consent column first")
+            consent_vals = None
+    with cc2, st.container(border=True):
+        outcome = st.selectbox(
+            label="Select outcome column",
+            options=survey_cols,
+            help="Column containing outcome information",
+            key="outcome_progress_chart",
+            index=None,
+        )
+        if outcome:
+            outcome_vals = st.multiselect(
+                label="Select outcome values",
+                options=data[outcome].unique(),
+                help="Values to consider as completed surveys",
+                key="outcome_val_progress_chart",
             )
-
-            # Create matplotlib donut chart for outcome
-            st.markdown(
-                "<p font-size: 16px;'>Survey Completion</p>", unsafe_allow_html=True
-            )
-            fig = donut_chart(
-                actual_value=int(completion_percentage),
-                suffix="%",
-                colors=["#2C5F2D", "#CCCCCC"],
-            )
-            # Use use_column_width parameter to make image responsive to column width
-            st.image(fig_to_streamlit(fig), use_container_width=False)
-            plt.close(fig)  # Close the figure to free memory
         else:
-            st.info("Outcome data not configured")
-
-    # Add the Report section
-    st.markdown("## Survey Progress Report")
-
-    col1, col2 = st.columns(2)
-
-    # Check that required options have been selected. If not, display a info message
-    if not all([survey_id, survey_key, consent, outcome]):
-        st.info("Please select all required options to generate the progress report")
-        return
-
-    with col1:
-        # Add CSS to ensure table width matches selectbox
-        st.markdown(
-            """
-			<style>
-				.stDataFrame {
-					width: 100%;
-				}
-				.dataframe {
-					width: 100%;
-				}
-			</style>
-		""",
-            unsafe_allow_html=True,
-        )
-
-        summary = (
-            data.groupby(consent, observed=True)[survey_id].nunique().reset_index()
-        )
-
-        # Define which values should be considered as given "consent" or "no consent"
-        consent_vals = [x for x in consent_val]
-        no_consent_vals = [x for x in data[consent].unique() if x not in consent_vals]
-
-        # Create mapping
-        mapping = {
-            **{x: "Consent" for x in consent_vals},
-            **{x: "No Consent" for x in no_consent_vals},
-        }
-
-        # Apply the mapping to the consent column
-        summary[consent] = summary[consent].map(mapping)
-
-        # Rename the columns AFTER applying the mapping
-        summary.columns = ["Consent Status", "Unique ID Count"]
-
-        st.table(summary)
-
-        # Group by 'id' and count unique values of "key"
-        unique_counts = (
-            data.groupby(survey_id)[survey_key]
-            .nunique()
-            .rename("unique_key_count")
-            .reset_index()
-        )
-        unique_counts.columns = [survey_id, "unique_key_count"]
-
-        # Count unique ids from the new df
-        count_unique_ids = unique_counts[survey_id].nunique()
-
-    with col2:
-        # Count unique ids by number of counts from the new df
-        count_unique_ids = (
-            unique_counts.groupby("unique_key_count").count().reset_index()
-        )
-
-        # Define the color scale
-        colors = [
-            "#2C5F2D",
-            "#74AA76",
-            "#9ECED7",
-            "#4D5E90",
-            "#DE9461",
-            "#B9ABE6",
-            "#E0C97D",
-            "#636892",
-        ]
-
-        # Create the Plotly figure
-        fig = go.Figure(
-            data=[
-                go.Pie(
-                    labels=count_unique_ids.unique_key_count,
-                    values=count_unique_ids[survey_id],
-                    hole=0.3,
-                    marker=dict(colors=colors),
-                )
-            ]
-        )
-
-        # Update the layout
-        fig.update_layout(
-            title="Unique IDs by number of attempts",
-            plot_bgcolor="white",
-            paper_bgcolor="white",
-            font_color="black",
-            font_family="Arial",
-            font_size=14,
-        )
-
-        st.plotly_chart(fig, theme="streamlit", use_container_width=True)
-
-        # Create the figure with secondary y-axis
-        fig = make_subplots(specs=[[{"secondary_y": True}]])
-
-    # Second row with full width for col3
-    st.write("")  # Add some space between rows
-    col3 = st.container()
-
-    with col3:
-        # Create a new DataFrame for the table
-        data["date_only"] = pd.to_datetime(data[date]).dt.date
-        table_data = data[[survey_id, "date_only", consent]].copy()
-        table_data["number_of_attempts"] = table_data[survey_id].map(
-            unique_counts.set_index(survey_id)["unique_key_count"]
-        )
-
-        # Filter box styling
-        st.markdown(
-            """
-            <style>
-            .stTextInput input {
-                background-color: #f0f2f6;
-            }
-            </style>
-        """,
-            unsafe_allow_html=True,
-        )
-
-        # Get unique number of attempts for the dropdown options
-        attempt_options = sorted(table_data["number_of_attempts"].unique().tolist())
-
-        # Create a multiselect dropdown instead of text input
-        selected_attempts = st.multiselect(
-            "Filter by number of attempts", options=attempt_options, default=[]
-        )
-
-        # Filter logic
-        if selected_attempts:
-            filtered_table = table_data[
-                table_data["number_of_attempts"].isin(selected_attempts)
-            ]
-        else:
-            filtered_table = table_data
-
-        # Display the table with custom formatting
-        st.write("Detailed Information Table:")
-        st.dataframe(
-            filtered_table,
-            use_container_width=True,
-            hide_index=True,
-        )
-
-        st.write(f"Number of entries shown: {len(filtered_table)}")
-
-    # Add time period selection with left-aligned title
-    st.markdown(
-        """
-        <style>
-        .left-aligned {
-            text-align: left;
-            padding-left: 0;
-            margin-left: 0;
-        }
-        </style>
-        <h2 class="left-aligned">Interview Progress Over Time</h2>
-        """,
-        unsafe_allow_html=True,
+            st.warning("Please select an outcome column first")
+            outcome_vals = None
+    consent_percentage, completion_percentage = compute_progress_chart(
+        data=data,
+        consent_col=consent,
+        consent_vals=consent_vals,
+        outcome_col=outcome,
+        outcome_vals=outcome_vals,
     )
 
-    time_period = st.radio(
-        "Select time period:",
-        options=["Day", "Week", "Month"],
-        horizontal=True,
-        key="time_period_selection",
+    perc_consent_chart = donut_chart2(
+        actual_value=int(consent_percentage),
     )
+    with cc1:
+        st.markdown("**% consent**")
+        st.pyplot(perc_consent_chart, use_container_width=True)
 
-    # Create a copy of the dataframe with datetime index for resampling
-    chart_data = data.copy()
-    chart_data[date] = pd.to_datetime(chart_data[date])
+    perc_completion_chart = donut_chart2(
+        actual_value=int(completion_percentage),
+    )
+    with cc2:
+        st.markdown("**% completion**")
+        st.pyplot(perc_completion_chart, use_container_width=True)
 
-    # Function to get the appropriate time period for grouping
-    def get_time_period(date_col, period):
-        if period == "Day":
-            return date_col.dt.date
-        elif period == "Week":
-            return date_col.dt.to_period("W").dt.start_time.dt.date
-        elif period == "Month":
-            return date_col.dt.to_period("M").dt.start_time.dt.date
 
-    # Add time period column
-    chart_data["time_period"] = get_time_period(chart_data[date], time_period)
+@st.cache_data
+def compute_progress_overtime(
+    data: pd.DataFrame, date: str, time_period: str, survey_id, enumerator: str
+) -> tuple:
+    """Compute progress over time
 
-    # Group by time period and count interviews and unique enumerators
+    Parameters
+    ----------
+    data: pd.DataFrame : dataset
+    date_col: str : column name for date
+
+    Returns
+    -------
+    pd.DataFrame : progress over time
+    """
+    # if time_period is day, week or month, create a new column with the time period
+    if time_period == "Day":
+        data["time_period"] = pd.to_datetime(data[date]).dt.date
+    elif time_period == "Week":
+        data["time_period"] = (
+            pd.to_datetime(data[date]).dt.to_period("W").dt.start_time.dt.date
+        )
+    elif time_period == "Month":
+        data["time_period"] = (
+            pd.to_datetime(data[date]).dt.to_period("M").dt.start_time.dt.date
+        )
+
+    # group data by time period and count interviews and unique enumerators
     period_stats = (
-        chart_data.groupby("time_period")
+        data.groupby("time_period")
         .agg(
             num_interviews=pd.NamedAgg(column=survey_id, aggfunc="count"),
             num_enumerators=pd.NamedAgg(column=enumerator, aggfunc="nunique"),
         )
         .reset_index()
     )
-
     # Calculate the average number of interviews
     average_interviews = period_stats["num_interviews"].mean()
+
+    return period_stats, average_interviews
+
+
+def display_progress_overtime(
+    data: pd.DataFrame, date: str, enumerator: str, survey_id
+) -> None:
+    """Display progress over time
+
+    Parameters
+    ----------
+    data: pd.DataFrame : dataset
+    date_col: str : column name for date
+    enumerator: str : column name for enumerator
+
+    Returns
+    -------
+    None
+    """
+    st.write("---")
+    st.write("## Progress Over Time")
+    time_period = st.radio(
+        label="Select time period:",
+        options=["Day", "Week", "Month"],
+        horizontal=True,
+        key="time_period_progress_overtime",
+        help="Select time period for progress report",
+    )
+
+    period_stats, average_interviews = compute_progress_overtime(
+        data=data,
+        date=date,
+        enumerator=enumerator,
+        time_period=time_period,
+        survey_id=survey_id,
+    )
 
     # Create the figure
     fig = go.Figure()
@@ -506,3 +533,57 @@ def progress_report(data, page_num) -> None:
     )
 
     st.plotly_chart(fig, theme=None, use_container_width=True)
+
+
+def compute_progress_by_group(data: pd.DataFrame, groupby: str) -> pd.DataFrame:
+    """Compute progress by group
+
+    Parameters
+    ----------
+    data: pd.DataFrame : dataset
+    groupby: str : column name to group by
+
+    Returns
+    -------
+    pd.DataFrame : progress by group
+    """
+    # group data by groupby column and count interviews and unique enumerators
+    group_stats = (
+        data.groupby(groupby)
+        .agg(
+            num_interviews=pd.NamedAgg(column="survey_id", aggfunc="count"),
+            num_enumerators=pd.NamedAgg(column="enumerator", aggfunc="nunique"),
+        )
+        .reset_index()
+    )
+    return group_stats
+
+
+def progress_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:
+    """Display progress report
+
+    Parameters
+    ----------
+    data: pd.DataFrame : data to display
+    page_num: int : page number
+
+    Returns
+    -------
+    None
+    """
+    survey_id, survey_key, date, enumerator, team, groupby, target = (
+        progress_report_settings(
+            data=data, setting_file=setting_file, page_num=page_num
+        )
+    )
+    display_progress_summary(
+        data=data,
+        target=target,
+    )
+    display_progress_chart(data=data)
+    display_progress_overtime(
+        data=data,
+        date=date,
+        enumerator=enumerator,
+        survey_id=survey_id,
+    )
