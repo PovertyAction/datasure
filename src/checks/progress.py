@@ -1,23 +1,16 @@
-import io
 import os
 
 import pandas as pd
 import plotly.graph_objects as go
+import seaborn as sns
 import streamlit as st
 
 from src.utils import (
     donut_chart2,
     load_check_settings,
     save_check_settings,
+    trigger_save,
 )
-
-
-def fig_to_streamlit(fig):
-    """Convert a matplotlib figure to a format Streamlit can display"""
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
-    buf.seek(0)
-    return buf
 
 
 #### Survey Progress ###
@@ -39,51 +32,33 @@ def load_default_progress_settings(setting_file: str, page_num: int) -> tuple:
     # - if settings file exists, load settings from file
     # - if settings file does not exist, load default settings from config
     if setting_file and os.path.exists(setting_file):
-        default_settings = load_check_settings(setting_file, "progress_report")
+        default_settings = load_check_settings(setting_file, "progress")
         if default_settings:
-            default_survey_id, default_survey_key, default_enumerator, default_date = (
+            default_survey_id, default_enumerator, default_date, default_target = (
                 default_settings.get("survey_id"),
-                default_settings.get("survey_key"),
                 default_settings.get("enumerator"),
                 default_settings.get("date"),
-            )
-            default_team, default_groupby, default_target = (
-                default_settings.get("team"),
-                default_settings.get("groupby"),
                 default_settings.get("target"),
             )
         else:
-            default_survey_id, default_survey_key, default_enumerator, default_date = (
+            default_survey_id, default_enumerator, default_date, default_target = (
                 st.session_state["config_pages"]["Survey ID"][page_num - 1],
-                st.session_state["config_pages"]["Survey KEY"][page_num - 1],
                 st.session_state["config_pages"]["Enumerator"][page_num - 1],
                 st.session_state["config_pages"]["Survey Date"][page_num - 1],
-            )
-            default_team, default_groupby, default_target = (
-                None,
-                None,
                 None,
             )
     else:
-        default_survey_id, default_survey_key, default_enumerator, default_date = (
+        default_survey_id, default_enumerator, default_date, default_target = (
             st.session_state["config_pages"]["Survey ID"][page_num - 1],
-            st.session_state["config_pages"]["Survey KEY"][page_num - 1],
             st.session_state["config_pages"]["Enumerator"][page_num - 1],
             st.session_state["config_pages"]["Survey Date"][page_num - 1],
-        )
-        default_team, default_groupby, default_target = (
-            None,
-            None,
             None,
         )
 
     return (
         default_survey_id,
-        default_survey_key,
         default_enumerator,
         default_date,
-        default_team,
-        default_groupby,
         default_target,
     )
 
@@ -111,11 +86,8 @@ def progress_report_settings(
 
         (
             default_survey_id,
-            default_survey_key,
             default_enumerator,
             default_date,
-            default_team,
-            default_groupby,
             default_target,
         ) = load_default_progress_settings(setting_file=setting_file, page_num=page_num)
 
@@ -133,16 +105,6 @@ def progress_report_settings(
                 index=default_survey_id_index,
             )
         with uc2:
-            default_survey_key_index = survey_cols.get_loc(default_survey_key)
-            st.markdown("### Select survey key column")
-            survey_key = st.selectbox(
-                "Survey Key",
-                options=survey_cols,
-                help="Column containing survey key",
-                key="surveykey_progress_settings",
-                index=default_survey_key_index,
-            )
-        with uc3:
             default_date_index = survey_cols.get_loc(default_date)
             st.markdown("### Select survey date column")
             date = st.selectbox(
@@ -152,8 +114,7 @@ def progress_report_settings(
                 key="date_progress_settings",
                 index=default_date_index,
             )
-        bc1, bc2, bc3 = st.columns(3)
-        with bc1:
+        with uc3:
             default_enumerator_index = survey_cols.get_loc(default_enumerator)
             st.markdown("### Select enumerator column")
             enumerator = st.selectbox(
@@ -162,30 +123,6 @@ def progress_report_settings(
                 help="Column containing survey enumerator",
                 key="enumerator_progress_settings",
                 index=default_enumerator_index,
-            )
-        with bc2:
-            default_team_index = (
-                survey_cols.get_loc(default_team) if default_team else None
-            )
-            st.markdown("### Select team column")
-            team = st.selectbox(
-                "Team",
-                options=survey_cols,
-                help="Column containing survey team",
-                key="team_progress_settings",
-                index=default_team_index,
-            )
-        with bc3:
-            default_groupby_index = (
-                survey_cols.get_loc(default_groupby) if default_groupby else None
-            )
-            st.markdown("### Select group by column")
-            groupby = st.selectbox(
-                "Group by",
-                options=survey_cols,
-                help="Column to group summary report by",
-                key="groupby_progress_settings",
-                index=default_groupby_index,
             )
 
         st.write("---")
@@ -213,17 +150,14 @@ def progress_report_settings(
                 "progress",
                 {
                     "survey_id": survey_id,
-                    "survey_key": survey_key,
                     "date": date,
                     "enumerator": enumerator,
-                    "team": team,
-                    "groupby": groupby,
                     "target": target,
                 },
             ),
         )
 
-    return survey_id, survey_key, date, enumerator, team, groupby, target
+    return survey_id, date, enumerator, target
 
 
 @st.cache_data
@@ -329,7 +263,7 @@ def compute_progress_chart(
     return consent_percentage, completion_percentage
 
 
-def display_progress_chart(data: pd.DataFrame):
+def display_progress_chart(data: pd.DataFrame, setting_file: str) -> None:
     """Display progress chart
 
     Parameters
@@ -342,24 +276,52 @@ def display_progress_chart(data: pd.DataFrame):
     """
     survey_cols = data.columns
     st.write("---")
-    st.write("## Progress Chart")
+    st.write("## Consent and Completion Progress Chart")
     _, cc1, _, cc2, _ = st.columns([0.1, 0.35, 0.1, 0.35, 0.1])
-    consent, consent_vals, outcome, outcome_vals = None, None, None, None
+    default_settings = load_check_settings(
+        settings_file=setting_file, check_name="progress"
+    )
+    consent, consent_vals, outcome, outcome_vals = (
+        default_settings.get("consent"),
+        default_settings.get("consent_vals"),
+        default_settings.get("outcome"),
+        default_settings.get("outcome_vals"),
+    )
     with cc1, st.container(border=True):
+        consent_index = survey_cols.get_loc(consent) if consent else None
         consent = st.selectbox(
             label="Select consent column",
             options=survey_cols,
             help="Column containing consent information",
             key="consent_progress_chart",
-            index=None,
+            index=consent_index,
+            on_change=trigger_save,
+            kwargs=({"state_name": "consent_progress_chart_save"}),
         )
+        if st.session_state.get("consent_progress_chart_save"):
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="progress",
+                check_settings={"consent": consent},
+            )
+            st.session_state["consent_progress_chart_save"] = False
         if consent:
             consent_vals = st.multiselect(
                 label="Select consent values",
                 options=data[consent].unique(),
                 help="Values to consider as valid consent",
-                key="consent_val_progress_chart",
+                key="consent_vals_progress_chart",
+                default=consent_vals,
+                on_change=trigger_save,
+                kwargs=({"state_name": "consent_vals_progress_chart_save"}),
             )
+            if st.session_state.get("consent_vals_progress_chart_save"):
+                save_check_settings(
+                    settings_file=setting_file,
+                    check_name="progress",
+                    check_settings={"consent_vals": consent_vals},
+                )
+                st.session_state["consent_vals_progress_chart_save"] = False
         else:
             st.warning("Please select a consent column first")
             consent_vals = None
@@ -370,14 +332,33 @@ def display_progress_chart(data: pd.DataFrame):
             help="Column containing outcome information",
             key="outcome_progress_chart",
             index=None,
+            on_change=trigger_save,
+            kwargs=({"state_name": "outcome_progress_chart_save"}),
         )
+        if st.session_state.get("outcome_progress_chart_save"):
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="progress",
+                check_settings={"outcome": outcome},
+            )
+            st.session_state["outcome_progress_chart_save"] = False
         if outcome:
             outcome_vals = st.multiselect(
                 label="Select outcome values",
                 options=data[outcome].unique(),
                 help="Values to consider as completed surveys",
-                key="outcome_val_progress_chart",
+                key="outcome_vals_progress_chart",
+                default=outcome_vals,
+                on_change=trigger_save,
+                kwargs=({"state_name": "outcome_vals_progress_chart_save"}),
             )
+            if st.session_state.get("outcome_vals_progress_chart_save"):
+                save_check_settings(
+                    settings_file=setting_file,
+                    check_name="progress",
+                    check_settings={"outcome_vals": outcome_vals},
+                )
+                st.session_state["outcome_vals_progress_chart_save"] = False
         else:
             st.warning("Please select an outcome column first")
             outcome_vals = None
@@ -447,7 +428,7 @@ def compute_progress_overtime(
 
 
 def display_progress_overtime(
-    data: pd.DataFrame, date: str, enumerator: str, survey_id
+    data: pd.DataFrame, date: str, enumerator: str, survey_id: str, setting_file: str
 ) -> None:
     """Display progress over time
 
@@ -469,7 +450,16 @@ def display_progress_overtime(
         horizontal=True,
         key="time_period_progress_overtime",
         help="Select time period for progress report",
+        on_change=trigger_save,
+        kwargs=({"state_name": "time_period_progress_overtime_save"}),
     )
+    if st.session_state.get("time_period_progress_overtime_save"):
+        save_check_settings(
+            settings_file=setting_file,
+            check_name="progress",
+            check_settings={"time_period": time_period},
+        )
+        st.session_state["time_period_progress_overtime_save"] = False
 
     period_stats, average_interviews = compute_progress_overtime(
         data=data,
@@ -535,6 +525,163 @@ def display_progress_overtime(
     st.plotly_chart(fig, theme=None, use_container_width=True)
 
 
+@st.cache_data
+def compute_attempted_interviews(
+    data: pd.DataFrame, survey_id: str, date: str, display_cols: list
+) -> tuple:
+    """Compute attempted interviews
+
+    Parameters
+    ----------
+    data: pd.DataFrame : dataset
+    survey_id: str : column name for survey ID
+    enumrator_id: str : column name for enumerator ID
+    date: str : column name for date
+    display_cols: list : list of columns to display
+
+    Returns
+    -------
+    pd.Dataframe : Dataset with the number of interviews attempted for each survey ID
+    and additional columns
+    """
+    # calculate the number of interviews attempted for each survey ID
+    total_submitted = len(data)
+    # create a dataframe with the following information:
+    # survey_id, count of interviews per survey_id, last attempt date, attempt dates for
+    # each survey_id
+    attempted_interviews = (
+        data.groupby(survey_id)
+        .agg(
+            num_interviews=pd.NamedAgg(column=survey_id, aggfunc="count"),
+            last_attempt_date=pd.NamedAgg(column=date, aggfunc="max"),
+            attempt_dates=pd.NamedAgg(column=date, aggfunc=lambda x: list(x)),
+        )
+        .reset_index()
+    )
+    attempt_dates_df = attempted_interviews["attempt_dates"].apply(pd.Series)
+    attempt_dates_df.columns = [
+        f"Attempt Date {i+1}" for i in range(attempt_dates_df.shape[1])
+    ]
+    attempted_interviews = pd.concat([attempted_interviews, attempt_dates_df], axis=1)
+    attempted_interviews.drop(columns=["attempt_dates"], inplace=True)
+    display_cols_use = display_cols + [survey_id]
+    # sort data by survey_id and date
+    data = data.sort_values(by=[survey_id, date])
+    display_data = data[display_cols_use].copy()
+    # for columns in display_cols, aggregate by survey_id keep the last value
+    for col in display_cols:
+        display_data[col] = display_data.groupby(survey_id)[col].transform(
+            lambda x: x.ffill().bfill()
+        )
+    display_data = display_data.drop_duplicates(subset=[survey_id])
+    # merge the display data with the attempted interviews data
+    attempted_interviews = pd.merge(
+        attempted_interviews,
+        display_data,
+        how="left",
+        on=survey_id,
+    )
+
+    # order columns
+    cols = [survey_id] + ["num_interviews", "last_attempt_date"] + display_cols
+    cols += list(attempt_dates_df.columns)
+    attempted_interviews = attempted_interviews[cols]
+
+    # count number of unique ID, min number of attempts and max number of attempts
+    number_of_unique_ids = attempted_interviews[survey_id].nunique()
+    min_attempts = attempted_interviews["num_interviews"].min()
+    max_attempts = attempted_interviews["num_interviews"].max()
+
+    return (
+        attempted_interviews,
+        total_submitted,
+        number_of_unique_ids,
+        min_attempts,
+        max_attempts,
+    )
+
+
+def display_attempted_interviews(
+    data: pd.DataFrame, survey_id: str, enumerator_id: str, date: str, setting_file: str
+) -> None:
+    """Display attempted interviews
+
+    Parameters
+    ----------
+    data: pd.DataFrame : dataset
+    survey_id: str : column name for survey ID
+    enumerator_id: str : column name for enumerator ID
+    date: str : column name for date
+
+    Returns
+    -------
+    None
+    """
+    st.write("---")
+    st.write("## Attempted Interviews")
+    st.markdown("### Select columns to display")
+    default_settings = load_check_settings(
+        settings_file=setting_file, check_name="progress"
+    )
+    display_cols = default_settings.get("display_cols")
+    display_cols = st.multiselect(
+        label="",
+        options=data.columns,
+        help="Columns to display in the attempted interviews report",
+        key="attempted_interviews_display_cols",
+        default=display_cols,
+        on_change=trigger_save,
+        kwargs=({"state_name": "attempted_interviews_display_cols_save"}),
+    )
+    if st.session_state.get("attempted_interviews_display_cols_save"):
+        save_check_settings(
+            settings_file=setting_file,
+            check_name="progress",
+            check_settings={"display_cols": display_cols},
+        )
+        st.session_state["attempted_interviews_display_cols_save"] = False
+    (
+        attempted_interviews,
+        total_submitted,
+        number_of_unique_ids,
+        min_attempts,
+        max_attempts,
+    ) = compute_attempted_interviews(
+        data=data,
+        survey_id=survey_id,
+        date=date,
+        display_cols=display_cols,
+    )
+    cmap = sns.light_palette("pink", as_cmap=True)
+    vmin = attempted_interviews["num_interviews"].min()
+    vmax = attempted_interviews["num_interviews"].max()
+    cm1, cm2, cm3, cm4 = st.columns(4, border=True)
+    cm1.metric(label="Total Submitted Interviews", value=total_submitted)
+    cm2.metric(label="Number of Unique IDs", value=number_of_unique_ids)
+    cm3.metric(label="Min Attempts", value=min_attempts)
+    cm4.metric(label="Max Attempts", value=max_attempts)
+    pd.set_option("display.max_columns", None)
+    st.dataframe(
+        data=attempted_interviews.style.background_gradient(
+            subset=["num_interviews"],
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+        ),
+        use_container_width=True,
+        column_config={
+            survey_id: st.column_config.Column(pinned=True),
+            "num_interviews": st.column_config.Column(
+                pinned=True, label="Number of Interviews"
+            ),
+            "last_attempt_date": st.column_config.DateColumn(
+                pinned=True, label="Last Attempt Date"
+            ),
+        },
+        hide_index=True,
+    )
+
+
 def progress_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:
     """Display progress report
 
@@ -547,19 +694,25 @@ def progress_report(data: pd.DataFrame, setting_file: str, page_num: int) -> Non
     -------
     None
     """
-    survey_id, survey_key, date, enumerator, team, groupby, target = (
-        progress_report_settings(
-            data=data, setting_file=setting_file, page_num=page_num
-        )
+    survey_id, date, enumerator, target = progress_report_settings(
+        data=data, setting_file=setting_file, page_num=page_num
     )
     display_progress_summary(
         data=data,
         target=target,
     )
-    display_progress_chart(data=data)
     display_progress_overtime(
         data=data,
         date=date,
         enumerator=enumerator,
         survey_id=survey_id,
+        setting_file=setting_file,
     )
+    display_attempted_interviews(
+        data=data,
+        survey_id=survey_id,
+        enumerator_id=enumerator,
+        date=date,
+        setting_file=setting_file,
+    )
+    display_progress_chart(data=data, setting_file=setting_file)
