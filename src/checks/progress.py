@@ -535,30 +535,6 @@ def display_progress_overtime(
     st.plotly_chart(fig, theme=None, use_container_width=True)
 
 
-def compute_progress_by_group(data: pd.DataFrame, groupby: str) -> pd.DataFrame:
-    """Compute progress by group
-
-    Parameters
-    ----------
-    data: pd.DataFrame : dataset
-    groupby: str : column name to group by
-
-    Returns
-    -------
-    pd.DataFrame : progress by group
-    """
-    # group data by groupby column and count interviews and unique enumerators
-    group_stats = (
-        data.groupby(groupby)
-        .agg(
-            num_interviews=pd.NamedAgg(column="survey_id", aggfunc="count"),
-            num_enumerators=pd.NamedAgg(column="enumerator", aggfunc="nunique"),
-        )
-        .reset_index()
-    )
-    return group_stats
-
-
 def progress_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:
     """Display progress report
 
