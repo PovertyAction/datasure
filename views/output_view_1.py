@@ -106,5 +106,7 @@ with back_checks:
 
 with gps_checks:
     gpschecks_report(
-        data=st.session_state[f"prepped_data{page_data_index}"], page_num=page_number
+        data=st.session_state[f"prepped_data{page_data_index}"],
+        setting_file=setting_file,
+        page_num=page_number,
     )
