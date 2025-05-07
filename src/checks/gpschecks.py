@@ -656,7 +656,11 @@ def plot_clusters_on_map(
 
 
 # gps checks report
+<<<<<<< HEAD
 def gpschecks_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:
+=======
+def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
+>>>>>>> 26465f8 (minor edit)
     """
     Visualize distribution of GPS data in the survey
 
@@ -1275,7 +1279,6 @@ def gpschecks_report(data: pd.DataFrame, setting_file: str, page_num: int) -> No
                     ],
                     default=[
                         "min",
-                        "median",
                         "mean",
                         "max",
                     ],
