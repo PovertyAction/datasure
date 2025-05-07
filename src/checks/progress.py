@@ -95,7 +95,9 @@ def progress_report_settings(
 
         uc1, uc2, uc3 = st.columns(3)
         with uc1:
-            default_survey_id_index = survey_cols.get_loc(default_survey_id)
+            default_survey_id_index = (
+                survey_cols.get_loc(default_survey_id) if default_survey_id else None
+            )
             st.markdown("### Select survey ID column")
             survey_id = st.selectbox(
                 "Survey ID",
