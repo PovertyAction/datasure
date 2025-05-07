@@ -519,7 +519,7 @@ def plot_clusters_on_map(
     st_folium(cluster_map, height=450, use_container_width=True)
 
 
-# define function for gps checks
+# gps checks report
 def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
     """
     Visualize distribution of GPS data in the survey
@@ -775,7 +775,6 @@ def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
                     ],
                     default=[
                         "min",
-                        "median",
                         "mean",
                         "max",
                     ],
