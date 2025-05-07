@@ -12,8 +12,90 @@ from streamlit_folium import st_folium
 from src.utils import load_check_settings, save_check_settings
 
 
-# load page settings
-def gps_check_settings(data: pd.DataFrame, settings_file: str, page_num) -> tuple:
+@st.cache_data
+def load_default_settings(setting_file: str, page_num: int) -> tuple:
+    """
+    Load the default settings for the summary report.
+
+    Parameters
+    ----------
+    setting_file : str
+            The settings file to load.
+
+    page_num : int
+            The page number of the report.
+
+    Returns
+    -------
+    tuple
+            A tuple containing the default settings for the summary report.
+
+    """
+    # load default settings in the following order:
+    # - if settings file exists, load settings from file
+    # - if settings file does not exist, load default settings from config
+    if setting_file and os.path.exists(setting_file):
+        default_settings = load_check_settings(setting_file, "gpscheck")
+        if default_settings:
+            default_date = default_settings.get("date")
+            default_enumerator = default_settings.get("enumerator")
+            default_survey_key = default_settings.get("survey_key")
+            default_survey_id = default_settings.get("survey_id")
+            default_gps_column_exists = default_settings.get("gps_column_exists")
+            default_lat_lon_exist = default_settings.get("lat_lon_columns_exist")
+            default_gps_column = default_settings.get("gps_column")
+            default_gps_lat_col = default_settings.get("gps_lat_col")
+            default_gps_lon_col = default_settings.get("gps_lon_col")
+            default_gps_accuracy = default_settings.get("gps_accuracy")
+        else:
+            default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
+            default_enumerator = st.session_state["config_pages"]["Enumerator"][
+                page_num - 1
+            ]
+            default_survey_id = st.session_state["config_pages"]["Survey ID"][
+                page_num - 1
+            ]
+            default_survey_key = st.session_state["config_pages"]["Survey KEY"][
+                page_num - 1
+            ]
+            default_gps_column_exists = False
+            default_lat_lon_exist = False
+            default_gps_lat_col = None
+            default_gps_lon_col = None
+            default_gps_accuracy = None
+            default_gps_column = None
+    else:
+        default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
+        default_enumerator = st.session_state["config_pages"]["Enumerator"][
+            page_num - 1
+        ]
+        default_survey_id = st.session_state["config_pages"]["Survey ID"][page_num - 1]
+        default_survey_key = st.session_state["config_pages"]["Survey KEY"][
+            page_num - 1
+        ]
+        default_gps_column_exists = False
+        default_lat_lon_exist = False
+        default_gps_lat_col = None
+        default_gps_lon_col = None
+        default_gps_accuracy = None
+        default_gps_column = None
+
+    return (
+        default_date,
+        default_enumerator,
+        default_survey_id,
+        default_survey_key,
+        default_gps_column_exists,
+        default_lat_lon_exist,
+        default_gps_lat_col,
+        default_gps_lon_col,
+        default_gps_accuracy,
+        default_gps_column,
+    )
+
+
+#  gps check settings
+def gps_check_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
     """
     Load and save settings for the GPS checks page.
 
@@ -37,39 +119,19 @@ def gps_check_settings(data: pd.DataFrame, settings_file: str, page_num) -> tupl
 
         survey_cols = data.columns
 
-        # load default settings in the following order:
-        # - if settings file exists, load settings from file
-        # - if settings file does not exist, load default settings from config
-        if settings_file and os.path.exists(settings_file):
-            default_settings = load_check_settings(settings_file, "gpscheck")
-            if default_settings:
-                default_date = default_settings.get("date")
-                default_enumerator = default_settings.get("enumerator")
-                default_survey_key = default_settings.get("survey_key")
-                default_survey_id = default_settings.get("survey_id")
-                default_gps_column_exists = default_settings.get("gps_column_exists")
-                default_lat_lon_exist = default_settings.get("lat_lon_columns_exist")
-                default_gps_column = default_settings.get("gps_column")
-                default_gps_lat_col = default_settings.get("gps_lat_col")
-                default_gps_lon_col = default_settings.get("gps_lon_col")
-                default_gps_accuracy = default_settings.get("gps_accuracy")
-        else:
-            default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
-            default_enumerator = st.session_state["config_pages"]["Enumerator"][
-                page_num - 1
-            ]
-            default_survey_id = st.session_state["config_pages"]["Survey ID"][
-                page_num - 1
-            ]
-            default_survey_key = st.session_state["config_pages"]["Survey KEY"][
-                page_num - 1
-            ]
-            default_gps_column_exists = False
-            default_lat_lon_exist = False
-            default_gps_lat_col = None
-            default_gps_lon_col = None
-            default_gps_accuracy = None
-            default_gps_column = None
+        # load default settings
+        (
+            default_date,
+            default_enumerator,
+            default_survey_id,
+            default_survey_key,
+            default_gps_column_exists,
+            default_lat_lon_exist,
+            default_gps_lat_col,
+            default_gps_lon_col,
+            default_gps_accuracy,
+            default_gps_column,
+        ) = load_default_settings(setting_file, page_num)
 
         enum_col, gps_col = st.columns(spec=2, border=True)
 
@@ -145,12 +207,11 @@ def gps_check_settings(data: pd.DataFrame, settings_file: str, page_num) -> tupl
                         gps_lon_col = None
                         gps_accuracy = None
             else:
-                lat_lon_columns_exist = False
-                gps_column = None
-                gps_lat_col = None
-                gps_lon_col = None
-                gps_accuracy = None
-                gps_column = None
+                lat_lon_columns_exist = default_lat_lon_exist
+                gps_column = default_gps_column
+                gps_lat_col = default_gps_lat_col
+                gps_lon_col = default_gps_lon_col
+                gps_accuracy = default_gps_accuracy
 
         with enum_col:
             default_date_index = survey_cols.get_loc(default_date)
@@ -169,7 +230,7 @@ def gps_check_settings(data: pd.DataFrame, settings_file: str, page_num) -> tupl
                 "Survey KEY",
                 options=survey_cols,
                 help="Column containing Survey KEY",
-                key="surveykey_gpscheck",
+                key="survey_key_gpscheck",
                 index=default_survey_key_index,
             )
 
@@ -213,8 +274,9 @@ def gps_check_settings(data: pd.DataFrame, settings_file: str, page_num) -> tupl
         save_gpscheck_settings = st.button(
             label="Save settings", key="save_gpscheck_settings"
         )
+
         if save_gpscheck_settings:
-            save_check_settings(settings_file, "gpscheck", gps_report_settings)
+            save_check_settings(setting_file, "gpscheck", gps_report_settings)
             st.success("Settings saved successfully!")
 
     return (
@@ -518,7 +580,7 @@ def plot_clusters_on_map(
 
 
 # gps checks report
-def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
+def gpschecks_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:
     """
     Visualize distribution of GPS data in the survey
 
@@ -526,6 +588,10 @@ def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
     ----------
     data : pd.DataFrame
         The input dataframe to visualize.
+    setting_file : str
+        The path to the settings file.
+    page_num : int
+        The page number for the current check.
 
     Returns
     -------
@@ -533,8 +599,8 @@ def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
 
     """
     # load settings
-    page_name = st.session_state.config_pages["Page Name"][page_num - 1]
-    settings_file = f"cache/settings/pyDMS_hfc_settings_{page_name}.json"
+    # page_name = st.session_state.config_pages["Page Name"][page_num - 1]
+    # settings_file = f"cache/settings/pyDMS_hfc_settings_{page_name}.json"
     (
         gps_column_exists,
         gps_lat_col,
@@ -544,7 +610,7 @@ def gpschecks_report(data, page_num) -> None:  # noqa: D417, RUF100
         survey_key,
         survey_id,
         enumerator,
-    ) = gps_check_settings(data, settings_file, page_num)
+    ) = gps_check_settings(data, setting_file, page_num)
     if gps_column_exists:
         if gps_lat_col is None or gps_lon_col is None or gps_accuracy is None:
             st.warning(
