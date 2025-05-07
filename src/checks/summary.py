@@ -44,6 +44,15 @@ def load_default_settings(setting_file: str, page_num: int) -> tuple:
             default_enumerator = default_settings.get("enumerator")
             default_target = default_settings.get("target")
             default_survey_id = default_settings.get("survey_id")
+        else:
+            default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
+            default_enumerator = st.session_state["config_pages"]["Enumerator"][
+                page_num - 1
+            ]
+            default_survey_id = st.session_state["config_pages"]["Survey ID"][
+                page_num - 1
+            ]
+            default_target = None
     else:
         default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
         default_enumerator = st.session_state["config_pages"]["Enumerator"][

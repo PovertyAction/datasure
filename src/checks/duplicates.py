@@ -482,29 +482,35 @@ def column_duplicates_display(
         )
         st.session_state["display_cols_duplicates_save"] = False
 
-    col_dups_data = compute_column_duplicates(
-        data=data,
-        survey_id=survey_id,
-        survey_key=survey_key,
-        dup_col=dup_col,
-        display_cols=display_cols,
-    )
+    if dup_col:
+        col_dups_data = compute_column_duplicates(
+            data=data,
+            survey_id=survey_id,
+            survey_key=survey_key,
+            dup_col=dup_col,
+            display_cols=display_cols,
+        )
 
-    if col_dups_data.empty:
-        st.write(f"No duplicates found for {dup_col}")
+        if col_dups_data.empty:
+            st.write(f"No duplicates found for {dup_col}")
+        else:
+            st.dataframe(
+                col_dups_data,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    f"{dup_col}_dup_count": st.column_config.Column(
+                        label=f"# of {dup_col} duplicates"
+                    ),
+                    f"{dup_col}_dup_percent": st.column_config.NumberColumn(
+                        label="% of total records", format="%.2f%%"
+                    ),
+                },
+            )
     else:
-        st.dataframe(
-            col_dups_data,
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                f"{dup_col}_dup_count": st.column_config.Column(
-                    label=f"# of {dup_col} duplicates"
-                ),
-                f"{dup_col}_dup_percent": st.column_config.NumberColumn(
-                    label="% of total records", format="%.2f%%"
-                ),
-            },
+        st.info(
+            body="Please select a column to check for duplicates",
+            icon=":material/info:",
         )
 
 

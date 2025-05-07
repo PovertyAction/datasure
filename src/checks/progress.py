@@ -283,12 +283,20 @@ def display_progress_chart(data: pd.DataFrame, setting_file: str) -> None:
     default_settings = load_check_settings(
         settings_file=setting_file, check_name="progress"
     )
-    consent, consent_vals, outcome, outcome_vals = (
-        default_settings.get("consent"),
-        default_settings.get("consent_vals"),
-        default_settings.get("outcome"),
-        default_settings.get("outcome_vals"),
-    )
+    if default_settings:
+        consent, consent_vals, outcome, outcome_vals = (
+            default_settings.get("consent"),
+            default_settings.get("consent_vals"),
+            default_settings.get("outcome"),
+            default_settings.get("outcome_vals"),
+        )
+    else:
+        consent, consent_vals, outcome, outcome_vals = (
+            None,
+            None,
+            None,
+            None,
+        )
     with cc1, st.container(border=True):
         consent_index = survey_cols.get_loc(consent) if consent else None
         consent = st.selectbox(
@@ -625,7 +633,7 @@ def display_attempted_interviews(
     default_settings = load_check_settings(
         settings_file=setting_file, check_name="progress"
     )
-    display_cols = default_settings.get("display_cols")
+    display_cols = default_settings.get("display_cols") if default_settings else None
     display_cols = st.multiselect(
         label="",
         options=data.columns,
