@@ -41,7 +41,7 @@ def gps_check_settings(data: pd.DataFrame, settings_file: str, page_num) -> tupl
         # - if settings file exists, load settings from file
         # - if settings file does not exist, load default settings from config
         if settings_file and os.path.exists(settings_file):
-            default_settings = load_check_settings(settings_file, "gpschecks")
+            default_settings = load_check_settings(settings_file, "gpscheck")
             if default_settings:
                 default_date = default_settings.get("date")
                 default_enumerator = default_settings.get("enumerator")
@@ -194,30 +194,28 @@ def gps_check_settings(data: pd.DataFrame, settings_file: str, page_num) -> tupl
             )
         st.write("")
 
-        # save settings
-        st.button(
-            label="Save settings",
-            on_click=save_check_settings,
-            key="save_gpscheck_settings",
-            kwargs={
-                "settings_file": settings_file,
-                "check_name": "gpscheck",
-                "check_settings": {
-                    "date": date,
-                    "enumerator": enumerator,
-                    "survey_key": survey_key,
-                    "survey_id": survey_id,
-                    "gps_column_exists": gps_column_exists,
-                    "lat_lon_columns_exist": lat_lon_columns_exist
-                    if gps_column_exists
-                    else False,
-                    "gps_lat_col": gps_lat_col if gps_column_exists else None,
-                    "gps_lon_col": gps_lon_col if gps_column_exists else None,
-                    "gps_accuracy": gps_accuracy if gps_column_exists else None,
-                    "gps_column": gps_column if not lat_lon_columns_exist else None,
-                },
-            },
+        # save settings to file
+        gps_report_settings = {
+            "date": date,
+            "enumerator": enumerator,
+            "survey_key": survey_key,
+            "survey_id": survey_id,
+            "gps_column_exists": gps_column_exists,
+            "lat_lon_columns_exist": lat_lon_columns_exist
+            if gps_column_exists
+            else False,
+            "gps_lat_col": gps_lat_col if gps_column_exists else None,
+            "gps_lon_col": gps_lon_col if gps_column_exists else None,
+            "gps_accuracy": gps_accuracy if gps_column_exists else None,
+            "gps_column": gps_column if not lat_lon_columns_exist else None,
+        }
+
+        save_gpscheck_settings = st.button(
+            label="Save settings", key="save_gpscheck_settings"
         )
+        if save_gpscheck_settings:
+            save_check_settings(settings_file, "gpscheck", gps_report_settings)
+            st.success("Settings saved successfully!")
 
     return (
         gps_column_exists,
