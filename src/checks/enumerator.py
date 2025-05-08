@@ -377,6 +377,49 @@ def display_enumerator_overview(
     bc4.metric("Total number of submissions", all_submissions)
 
 
+@st.cache_data
+def compute_enumerator_summary(
+    data: pd.DataFrame,
+    date: str,
+    enumerator: str,
+    formdef_version: str | None,
+    duration: str | None,
+    consent: str | None,
+    consent_vals: str | None,
+    outcome: str | None,
+    outcome_vals: str | None,
+) -> pd.DataFrame:
+    """Compute enumerator summary table.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing survey data.
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+    formdef_version : str | None
+        Form version column name.
+    duration : str | None
+        Duration column name.
+    consent : str | None
+        Consent column name.
+    consent_vals : str | None
+        Consent values.
+    outcome : str | None
+        Outcome column name.
+    outcome_vals : str | None
+        Outcome values.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing enumerator summary.
+    """
+    pass
+
+
 def enumerator_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:
     """Generate enumerator report.
 
