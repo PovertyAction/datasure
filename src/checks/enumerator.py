@@ -1,3 +1,4 @@
+import json
 import os
 
 import pandas as pd
@@ -351,6 +352,8 @@ def display_enumerator_overview(
     -------
         None
     """
+    st.write("---")
+    st.markdown("## Enumerator Overview")
     (
         all_submissions,
         num_active_enumerators,
@@ -378,8 +381,60 @@ def display_enumerator_overview(
 
 
 @st.cache_data
+def compute_enumerator_missing_table(
+    data: pd.DataFrame, missing_setting_file: str, enumerator: str
+) -> pd.DataFrame:
+    """Compute enumerator missing table.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing survey data.
+    settings_file : str
+        Path to the settings file.
+    enumerator : str
+        Enumerator column name.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing enumerator missing table.
+    """
+    try:
+        with open(missing_setting_file) as f:
+            settings_dict = json.load(f)
+            missing_codes = pd.DataFrame(settings_dict)
+
+    except FileNotFoundError:
+        # create new dataframe with default values
+        missing_codes = None
+
+    data["Null values"] = data.isnull().mean(axis=1)
+
+    miss_cols = ["Null values"]
+    if not missing_codes.empty:
+        for i in range(len(missing_codes)):
+            miss_label = missing_codes["Missing Labels"][i]
+            miss_codes = missing_codes["Missing Codes"][i].split(",")
+            data[miss_label] = data[enumerator].isin(miss_codes).astype(int)
+
+            miss_cols.append(miss_label)
+
+    mv_data = data[[enumerator] + miss_cols].copy(deep=True)
+    mv_data = (
+        mv_data.groupby(by=enumerator, dropna=False, as_index=False)
+        .agg({col: "mean" for col in miss_cols})
+        .reset_index(drop=True)
+        .reset_index(drop=True)
+    )
+
+    return mv_data
+
+
+@st.cache_data
 def compute_enumerator_summary(
     data: pd.DataFrame,
+    missing_setting_file: str,
     date: str,
     enumerator: str,
     formdef_version: str | None,
@@ -417,10 +472,230 @@ def compute_enumerator_summary(
     pd.DataFrame
         DataFrame containing enumerator summary.
     """
-    pass
+    df = data.copy()
+    df[date] = df[date].dt.strftime("%b %d, %Y")
+
+    summary_df = df.groupby(by=enumerator, dropna=False, as_index=False).date.agg(
+        {
+            "first date": "min",
+            "last date": "max",
+            "# of submissions": "count",
+            "# of days worked": "nunique",
+        }
+    )
+
+    today = pd.to_datetime("today").date()
+    start_of_week = today - pd.Timedelta(days=today.weekday())
+    start_of_month = today.replace(day=1)
+
+    df["submitted_today"] = df[date] == today.strftime("%b %d, %Y")
+    df["submitted_this_week"] = df[date] >= start_of_week.strftime("%b %d, %Y")
+    df["submitted_this_month"] = df[date] >= start_of_month.strftime("%b %d, %Y")
+
+    lagged_df = (
+        df.groupby(by=enumerator, dropna=False, as_index=False)
+        .agg(
+            {
+                "submitted_today": "sum",
+                "submitted_this_week": "sum",
+                "submitted_this_month": "sum",
+            }
+        )
+        .reset_index(drop=True)
+        .rename(
+            columns={
+                "submitted_today": "submissions today",
+                "submitted_this_week": "submissions this week",
+                "submitted_this_month": "submissions this month",
+            }
+        )
+    )
+
+    summary_df = pd.merge(
+        summary_df,
+        lagged_df,
+        how="left",
+        left_on=enumerator,
+        right_on=enumerator,
+    )
+
+    enumerator_missing_df = compute_enumerator_missing_table(
+        data=df, missing_setting_file=missing_setting_file, enumerator=enumerator
+    )
+
+    summary_df = pd.merge(
+        summary_df,
+        enumerator_missing_df,
+        how="left",
+        left_on=enumerator,
+        right_on=enumerator,
+    )
+
+    if duration:
+        duration_df = df.groupby(by=enumerator, dropna=False, as_index=False).agg(
+            {duration: ["min", "mean", "median", "max"]}
+        )
+        duration_df.columns = [
+            enumerator,
+            "min duration",
+            "mean duration",
+            "median duration",
+            "max duration",
+        ]
+        summary_df = pd.merge(
+            summary_df,
+            duration_df,
+            how="left",
+            left_on=enumerator,
+            right_on=enumerator,
+        )
+
+    if formdef_version:
+        formdef_outdated = df[[date, formdef_version]].copy(deep=True)
+        formdef_outdated = (
+            formdef_outdated.groupby(by=date, dropna=False, as_index=False)
+            .formdef_version.agg({"latest daily form version": "max"})
+            .reset_index()
+        )
+        df = pd.merge(
+            df,
+            formdef_outdated,
+            how="left",
+            left_on=[date],
+            right_on=[date],
+        )
+        df["outdated_form_version"] = (
+            df[formdef_version] != df["latest daily form version"]
+        )
+        formdef_outdated_df = (
+            df.groupby(by=enumerator, dropna=False, as_index=False)
+            .outdated_form_version.agg({"# of outdated form versions": "sum"})
+            .reset_index(drop=True)
+        )
+
+        formdef_df = (
+            df.groupby(by=enumerator, dropna=False, as_index=False)
+            .formdef_version.agg({formdef_version: ["nunique", "max"]})
+            .reset_index(drop=True)
+        )
+        formdef_df.columns = [
+            enumerator,
+            "number of form versions",
+            "latest form version",
+        ]
+        summary_df.merge(
+            formdef_df,
+            how="left",
+            left_on=enumerator,
+            right_on=enumerator,
+        )
+        summary_df = pd.merge(
+            summary_df,
+            formdef_outdated_df,
+            how="left",
+            left_on=enumerator,
+            right_on=enumerator,
+        )
+        latest_enum_formversion = (
+            df.groupby(by=enumerator, dropna=False, as_index=False)
+            .formdef_version.agg({"last form version": "max"})
+            .reset_index(drop=True)
+        )
+
+        summary_df = pd.merge(
+            summary_df,
+            latest_enum_formversion,
+            how="left",
+            left_on=enumerator,
+            right_on=enumerator,
+        )
+    if consent and consent_vals:
+        df["consent_granted_agg_col"] = df[consent].isin(consent_vals).astype(int)
+        consent_df = (
+            df.groupby(by=enumerator, dropna=False, as_index=False)
+            .consent_granted_agg_col.agg({"% consent": "mean"})
+            .reset_index(drop=True)
+        )
+        summary_df = pd.merge(
+            summary_df,
+            consent_df,
+            how="left",
+            left_on=enumerator,
+            right_on=enumerator,
+        )
+    if outcome and outcome_vals:
+        df["completed_survey_agg_col"] = df[outcome].isin(outcome_vals).astype(int)
+        outcome_df = (
+            df.groupby(by=enumerator, dropna=False, as_index=False)
+            .completed_survey_agg_col.agg({"% completed survey": "mean"})
+            .reset_index(drop=True)
+        )
+        summary_df = pd.merge(
+            summary_df,
+            outcome_df,
+            how="left",
+            left_on=enumerator,
+            right_on=enumerator,
+        )
+
+    return summary_df
 
 
-def enumerator_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:
+def display_enumerator_summary(
+    data: pd.DataFrame,
+    missing_setting_file: str,
+    date: str,
+    enumerator: str,
+    formdef_version: str | None,
+    duration: str | None,
+    consent: str | None,
+    consent_vals: str | None,
+    outcome: str | None,
+    outcome_vals: str | None,
+) -> pd.DataFrame:
+    """Display enumerator summary table.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing summary data frame.
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+    formdef_version : str | None
+        Form version column name.
+    duration : str | None
+        Duration column name.
+    consent : str | None
+        Consent column name.
+    consent_vals : str | None
+        Consent values.
+    outcome : str | None
+        Outcome column name.
+    outcome_vals : str | None
+        Outcome values.
+    """
+    st.write("---")
+    st.markdown("## Enumerator Summary")
+    summary_df = compute_enumerator_summary(
+        data=data,
+        missing_setting_file=missing_setting_file,
+        date=date,
+        enumerator=enumerator,
+        formdef_version=formdef_version,
+        duration=duration,
+        consent=consent,
+        consent_vals=consent_vals,
+        outcome=outcome,
+        outcome_vals=outcome_vals,
+    )
+    st.dataframe(summary_df, hide_index=True, use_container_width=True)
+
+
+def enumerator_report(
+    data: pd.DataFrame, setting_file: str, page_num: int, page_name: str
+) -> None:
     """Generate enumerator report.
 
     Parameters
@@ -436,6 +711,8 @@ def enumerator_report(data: pd.DataFrame, setting_file: str, page_num: int) -> N
     -------
         None
     """
+    missing_setting_file = f"cache/settings/pyDMS_missing_settings_{page_name}.json"
+
     (
         date,
         formdef_version,
@@ -455,4 +732,17 @@ def enumerator_report(data: pd.DataFrame, setting_file: str, page_num: int) -> N
         date=date,
         enumerator=enumerator,
         team=team,
+    )
+
+    display_enumerator_summary(
+        data=data,
+        date=date,
+        enumerator=enumerator,
+        formdef_version=formdef_version,
+        duration=duration,
+        consent=consent,
+        consent_vals=consent_vals,
+        outcome=outcome,
+        outcome_vals=outcome_vals,
+        missing_setting_file=missing_setting_file,
     )

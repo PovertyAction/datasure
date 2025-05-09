@@ -82,6 +82,7 @@ with enum_stats:
         data=st.session_state[f"prepped_data{page_data_index}"],
         setting_file=setting_file,
         page_num=page_number,
+        page_name=page_name,
     )
 
 with desc_stats:
