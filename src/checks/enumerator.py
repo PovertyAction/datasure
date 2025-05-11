@@ -724,6 +724,137 @@ def display_enumerator_summary(
     st.dataframe(summary_df, hide_index=True, use_container_width=True)
 
 
+@st.cache_data
+def compute_enumerator_productivity(
+    data: pd.DataFrame, date: str, enumerator: str, period: str, weekstartday: str
+) -> pd.DataFrame:
+    """Compute enumerator productivity.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing survey data.
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+    period : str
+        Period for productivity calculation.
+    weekstartday : str
+        Start day of the week.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing enumerator productivity.
+    """
+    prod_df = data.copy()
+    # convert datetime to date
+    prod_df[date] = pd.to_datetime(prod_df[date])
+
+    if period == "Daily":
+        prod_df["TIME PERIOD"] = prod_df[date].dt.to_period("D").dt.to_timestamp()
+    elif period == "Weekly":
+        prod_df["TIME PERIOD"] = prod_df[date].dt.to_period("W").dt.to_timestamp()
+    elif period == "Monthly":
+        prod_df["TIME PERIOD"] = prod_df[date].dt.to_period("M").dt.to_timestamp()
+
+    # generate productivity table
+    prod_df["TOKEN KEY"] = prod_df.index
+    prod_res = (
+        prod_df.groupby(["TIME PERIOD", enumerator], dropna=False, as_index=False).agg(
+            {"TOKEN KEY": "count"}
+        )
+    ).rename(columns={"TOKEN KEY": "submissions"})
+
+    prod_df["TIME PERIOD"] = prod_df["TIME PERIOD"].dt.strftime("%b %d, %Y")
+
+    # pivot table so enumerators dates values are columns
+    prod_res = (
+        prod_res.pivot(
+            index=[enumerator],
+            columns=["TIME PERIOD"],
+            values="submissions",
+        )
+        .reset_index(drop=False)
+        .fillna(0)
+    )
+
+    return prod_res
+
+
+def display_enumerator_productivity(
+    data: pd.DataFrame,
+    date: str,
+    enumerator: str,
+) -> None:
+    """Display enumerator productivity.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing survey data.
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+
+    Returns
+    -------
+        None
+    """
+    st.write("---")
+    st.markdown("## Enumerator Productivity")
+    # Toggle for days, weeks, or months view
+    st.markdown("##### Productivity")
+    view_option = st.radio(
+        label="Select View:",
+        options=("Daily", "Weekly", "Monthly"),
+        index=0,
+        key="view_option_enumerator",
+        horizontal=True,
+    )
+    weekstartday = "MON"
+    if view_option == "Weekly":
+        weekstartday_sel = st.selectbox(
+            label="Select the first day of the week",
+            options=[
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday",
+                "Saturday",
+                "Sunday",
+            ],
+            index=0,
+            key="project_week_start_day",
+        )
+        if weekstartday_sel:
+            weekstartday = weekstartday_sel[0:3].upper()
+    productivity_df = compute_enumerator_productivity(
+        data=data,
+        date=date,
+        enumerator=enumerator,
+        period=view_option,
+        weekstartday=weekstartday,
+    )
+    cmap = sns.light_palette("pink", as_cmap=True)
+    format_cols = [col for col in productivity_df.columns if col not in [enumerator]]
+    min_val = productivity_df[format_cols].min().min()
+    max_val = productivity_df[format_cols].max().max()
+    productivity_df = productivity_df.style.format(
+        subset=format_cols,
+        formatter="{:,.0f}",
+    ).background_gradient(
+        subset=format_cols,
+        low=min_val,
+        high=max_val,
+        cmap=cmap,
+    )
+    st.dataframe(productivity_df, hide_index=True, use_container_width=True)
+
+
 def enumerator_report(
     data: pd.DataFrame, setting_file: str, page_num: int, page_name: str
 ) -> None:
@@ -776,4 +907,9 @@ def enumerator_report(
         outcome=outcome,
         outcome_vals=outcome_vals,
         missing_setting_file=missing_setting_file,
+    )
+    display_enumerator_productivity(
+        data=data,
+        date=date,
+        enumerator=enumerator,
     )
