@@ -2,6 +2,7 @@ import json
 import os
 
 import pandas as pd
+import seaborn as sns
 import streamlit as st
 
 from src.utils import (
@@ -399,6 +400,8 @@ def compute_enumerator_missing_table(
     -------
     pd.DataFrame
         DataFrame containing enumerator missing table.
+    miss_cols : list
+        List of missing label columns.
     """
     try:
         with open(missing_setting_file) as f:
@@ -409,16 +412,16 @@ def compute_enumerator_missing_table(
         # create new dataframe with default values
         missing_codes = None
 
-    data["Null values"] = data.isnull().mean(axis=1)
+    data["% Null values"] = data.isnull().mean(axis=1)
 
-    miss_cols = ["Null values"]
+    miss_cols = ["% Null values"]
     if not missing_codes.empty:
         for i in range(len(missing_codes)):
             miss_label = missing_codes["Missing Labels"][i]
             miss_codes = missing_codes["Missing Codes"][i].split(",")
-            data[miss_label] = data[enumerator].isin(miss_codes).astype(int)
+            data[f"% {miss_label}"] = data[enumerator].isin(miss_codes).astype(int)
 
-            miss_cols.append(miss_label)
+            miss_cols.append(f"% {miss_label}")
 
     mv_data = data[[enumerator] + miss_cols].copy(deep=True)
     mv_data = (
@@ -469,6 +472,7 @@ def compute_enumerator_summary(
 
     Returns
     -------
+    Tuple:
     pd.DataFrame
         DataFrame containing enumerator summary.
     """
@@ -504,9 +508,9 @@ def compute_enumerator_summary(
         .reset_index(drop=True)
         .rename(
             columns={
-                "submitted_today": "submissions today",
-                "submitted_this_week": "submissions this week",
-                "submitted_this_month": "submissions this month",
+                "submitted_today": "# submissions today",
+                "submitted_this_week": "# submissions this week",
+                "submitted_this_month": "# submissions this month",
             }
         )
     )
@@ -554,8 +558,9 @@ def compute_enumerator_summary(
         formdef_outdated = df[[date, formdef_version]].copy(deep=True)
         formdef_outdated = (
             formdef_outdated.groupby(by=date, dropna=False, as_index=False)
-            .formdef_version.agg({"latest daily form version": "max"})
+            .agg({formdef_version: "max"})
             .reset_index()
+            .rename(columns={formdef_version: "latest daily form version"})
         )
         df = pd.merge(
             df,
@@ -580,7 +585,7 @@ def compute_enumerator_summary(
         )
         formdef_df.columns = [
             enumerator,
-            "number of form versions",
+            "# form versions",
             "latest form version",
         ]
         summary_df.merge(
@@ -689,6 +694,32 @@ def display_enumerator_summary(
         consent_vals=consent_vals,
         outcome=outcome,
         outcome_vals=outcome_vals,
+    )
+
+    cmap = sns.light_palette("pink", as_cmap=True)
+
+    perc_cols = [col for col in summary_df.columns if col.startswith("%")]
+    summary_df = summary_df.style.format(subset=perc_cols, formatter="{:.2%}")
+    num_cols = [col for col in summary_df.columns if col.startswith("#")]
+    summary_df = summary_df.format(
+        subset=num_cols,
+        formatter="{:,.0f}",
+    )
+    if duration:
+        summary_df = summary_df.format(
+            subset=["min duration", "mean duration", "median duration", "max duration"],
+            formatter="{:,.2f} sec",
+        ).background_gradient(
+            subset=["min duration", "mean duration", "median duration", "max duration"],
+            cmap=cmap,
+        )
+    # set background gradient for percentage and numeric columns
+    summary_df = summary_df.background_gradient(
+        subset=perc_cols,
+        cmap=cmap,
+    ).background_gradient(
+        subset=num_cols,
+        cmap=cmap,
     )
     st.dataframe(summary_df, hide_index=True, use_container_width=True)
 
