@@ -898,8 +898,6 @@ def display_enumerator_statistics(
     data: pd.DataFrame,
     date: str,
     enumerator: str,
-    statscols: list[str],
-    stats: list[str],
 ) -> None:
     """Display enumerator statistics.
 
@@ -976,6 +974,180 @@ def display_enumerator_statistics(
         )
 
 
+def compute_enumerator_statistics_overtime(
+    data: pd.DataFrame,
+    date: str,
+    enumerator: str,
+    statscol: list[str],
+    stat: list[str],
+    period: str,
+    weekstartday: str,
+) -> pd.DataFrame:
+    """Compute enumerator statistics over time.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing survey data.
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+    statscol : list[str]
+        List of columns to compute statistics on.
+    stat : list[str]
+        List of statistics to compute.
+    time_period : str
+        Time period for statistics calculation.
+    weekstartday : str
+        Start day of the week.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing enumerator statistics over time.
+    """
+    stats_overtime_df = data[[date, enumerator, statscol]].copy(deep=True)
+    stats_overtime_df[date] = pd.to_datetime(stats_overtime_df[date])
+    if period == "Daily":
+        stats_overtime_df["TIME PERIOD"] = stats_overtime_df[date].dt.to_period("D")
+    elif period == "Weekly":
+        stats_overtime_df["TIME PERIOD"] = stats_overtime_df[date].dt.to_period(
+            f"W-{weekstartday}"
+        )
+    elif period == "Monthly":
+        stats_overtime_df["TIME PERIOD"] = stats_overtime_df[date].dt.to_period("M")
+    if stat == "missing":
+        stats_overtime_df["_STAT"] = stats_overtime_df[statscol].isnull().mean()
+        stats_overtime_res = stats_overtime_df.groupby(
+            by=["TIME PERIOD", enumerator], dropna=False, as_index=False
+        ).agg({"_STAT": "mean"})
+    else:
+        stats_overtime_res = (
+            stats_overtime_df.groupby(
+                by=["TIME PERIOD", enumerator], dropna=False, as_index=False
+            )
+            .agg({statscol: stat})
+            .rename(columns={statscol: "_STAT"})
+        )
+    # pivot table so enumerators dates values are columns
+    stats_overtime_res = stats_overtime_res.pivot(
+        index=[enumerator],
+        columns=["TIME PERIOD"],
+        values="_STAT",
+    ).reset_index(drop=False)
+
+    return stats_overtime_res
+
+
+def display_enumerator_statistics_overtime(
+    data: pd.DataFrame,
+    date: str,
+    enumerator: str,
+) -> None:
+    """Display enumerator statistics over time.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing survey data.
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+
+    Returns
+    -------
+        None
+    """
+    st.write("---")
+    st.markdown("## Enumerator Statistics Over Time")
+    # create enumerator statistics
+
+    st.markdown("##### Statistics")
+    s1, s2, s3 = st.columns([0.2, 0.15, 0.75])
+    with s1:
+        period = st.radio(
+            label="Select Time Period:",
+            options=("Daily", "Weekly", "Monthly"),
+            index=0,
+            key="project_enumerator_statistics_overtime_period",
+            horizontal=True,
+        )
+    weekstartday = "SAT"
+    if period == "Weekly":
+        weekstartday = st.selectbox(
+            label="Select the first day of the week",
+            options=[
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday",
+                "Saturday",
+                "Sunday",
+            ],
+            index=0,
+            key="project_week_start_day_enumerator",
+        )
+        if weekstartday:
+            weekstart_adjust_dict = {
+                "Monday": "SUN",
+                "Tuesday": "MON",
+                "Wednesday": "TUE",
+                "Thursday": "WED",
+                "Friday": "THU",
+                "Saturday": "FRI",
+                "Sunday": "SAT",
+            }
+            weekstartday = weekstart_adjust_dict[weekstartday]
+    with s2:
+        stat = st.selectbox(
+            label="Select statistic:",
+            options=["count", "min", "mean", "median", "max", "std", "missing"],
+            index=0,
+            help="Select statistics to calculate",
+            key="enumerator_statistics_overtime_stat",
+        )
+    with s3:
+        statscol = st.selectbox(
+            label="Select column:",
+            options=data.select_dtypes("number").columns,
+            index=None,
+            help="Select columns to include in statistics",
+            key="enumerator_statistics_overtime_column",
+        )
+    if statscol:
+        stats_overtime_df = compute_enumerator_statistics_overtime(
+            data=data,
+            date=date,
+            enumerator=enumerator,
+            statscol=statscol,
+            stat=stat,
+            period=period,
+            weekstartday=weekstartday,
+        )
+        cmap = sns.light_palette("pink", as_cmap=True)
+        # apply formatting to the statistics DataFrame
+        format_cols = [
+            col for col in stats_overtime_df.columns if col not in [enumerator]
+        ]
+        format = "{:,.2%}" if stat == "missing" else "{:,.2f}"
+        stats_overtime_df = stats_overtime_df.style.format(
+            subset=format_cols,
+            formatter=format,
+        ).background_gradient(
+            subset=format_cols,
+            cmap=cmap,
+        )
+
+        st.dataframe(stats_overtime_df, hide_index=True, use_container_width=True)
+    else:
+        st.info(
+            "No columns selected for statistics calculation.", icon=":material/info:"
+        )
+
+
 def enumerator_report(
     data: pd.DataFrame, setting_file: str, page_num: int, page_name: str
 ) -> None:
@@ -1038,6 +1210,9 @@ def enumerator_report(
         data=data,
         date=date,
         enumerator=enumerator,
-        statscols=[duration],
-        stats=["count", "min", "mean", "max"],
+    )
+    display_enumerator_statistics_overtime(
+        data=data,
+        date=date,
+        enumerator=enumerator,
     )
