@@ -5,9 +5,7 @@ import pandas as pd
 import seaborn as sns
 import streamlit as st
 
-from src.utils import (
-    load_check_settings,
-)
+from src.utils import load_check_settings, save_check_settings, trigger_save
 
 ##### Enumerator Statistics #####
 
@@ -256,6 +254,31 @@ def enumerator_report_settings(data: str, setting_file: str, page_num: str) -> t
                     key="outcome_val_enumerator",
                     default=outcome_vals,
                 )
+
+        # define a save settings button
+        st.button(
+            label="Save settings",
+            on_click=save_check_settings,
+            key="save_enumerator_settings",
+            kwargs={
+                "settings_file": setting_file,
+                "check_name": "enumerator",
+                "check_settings": {
+                    "date": date,
+                    "formdef_version": formdef_version,
+                    "survey_id": survey_id,
+                    "duration": duration,
+                    "enumerator": enumerator,
+                    "team": team,
+                    "consent": consent,
+                    "consent_vals": consent_vals,
+                    "outcome": outcome,
+                    "outcome_vals": outcome_vals,
+                },
+            },
+            help="Save settings for enumerator report",
+        )
+
     return (
         date,
         formdef_version,
@@ -784,6 +807,7 @@ def display_enumerator_productivity(
     data: pd.DataFrame,
     date: str,
     enumerator: str,
+    setting_file: str,
 ) -> None:
     """Display enumerator productivity.
 
@@ -800,33 +824,67 @@ def display_enumerator_productivity(
     -------
         None
     """
+    default_setting = load_check_settings(
+        settings_file=setting_file, check_name="enumerator"
+    )
+    if not default_setting:
+        default_setting = {}
     st.write("---")
     st.markdown("## Enumerator Productivity")
     # Toggle for days, weeks, or months view
     st.markdown("##### Productivity")
+    view_option_list = ("Daily", "Weekly", "Monthly")
+    default_view = default_setting.get("view_option", "Daily")
+    default_view_index = view_option_list.index(default_view)
     view_option = st.radio(
         label="Select View:",
-        options=("Daily", "Weekly", "Monthly"),
-        index=0,
+        options=view_option_list,
+        index=default_view_index,
         key="view_option_enumerator",
         horizontal=True,
+        on_change=trigger_save,
+        kwargs={"state_name": "view_option_enumerator_save"},
     )
+    if (
+        "view_option_enumerator_save" in st.session_state
+    ) and st.session_state.view_option_enumerator_save:
+        save_check_settings(
+            settings_file=setting_file,
+            check_name="enumerator",
+            check_settings={"view_option": view_option},
+        )
+        st.session_state.view_option_enumerator_save = False
+
     weekstartday = "SAT"
     if view_option == "Weekly":
+        day_list = (
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday",
+        )
+        default_weekstartday_sel = default_setting.get("weekstartday", "Monday")
+        default_weekstartday_sel_index = day_list.index(default_weekstartday_sel)
         weekstartday_sel = st.selectbox(
             label="Select the first day of the week",
-            options=[
-                "Monday",
-                "Tuesday",
-                "Wednesday",
-                "Thursday",
-                "Friday",
-                "Saturday",
-                "Sunday",
-            ],
-            index=0,
+            options=day_list,
+            index=default_weekstartday_sel_index,
             key="project_week_start_day",
+            on_change=trigger_save,
+            kwargs={"state_name": "project_week_start_day_enumerator_save"},
         )
+        if (
+            "project_week_start_day_enumerator_save" in st.session_state
+        ) and st.session_state.project_week_start_day_enumerator_save:
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="enumerator",
+                check_settings={"weekstartday": weekstartday_sel},
+            )
+            st.session_state.project_week_start_day_enumerator_save = False
         if weekstartday_sel:
             weekstart_adjust_dict = {
                 "Monday": "SUN",
@@ -898,6 +956,7 @@ def display_enumerator_statistics(
     data: pd.DataFrame,
     date: str,
     enumerator: str,
+    setting_file: str,
 ) -> None:
     """Display enumerator statistics.
 
@@ -921,18 +980,35 @@ def display_enumerator_statistics(
     st.write("---")
     st.markdown("## Enumerator Statistics")
     # create enumerator statistics
-
+    default_setting = load_check_settings(
+        settings_file=setting_file, check_name="enumerator"
+    )
+    if not default_setting:
+        default_setting = {}
     st.markdown("##### Statistics")
     s1, s2 = st.columns(2)
     with s1:
+        default_statscols = default_setting.get("statscols", None)
         statscols = st.multiselect(
             label="Select columns:",
             options=data.select_dtypes("number").columns,
-            default=None,
+            default=default_statscols,
             help="Select columns to include in statistics",
             key="selected_columns_enumerator",
+            on_change=trigger_save,
+            kwargs={"state_name": "selected_columns_enumerator_save"},
         )
+        if (
+            "selected_columns_enumerator_save" in st.session_state
+        ) and st.session_state.selected_columns_enumerator_save:
+            save_check_settings(
+                settings_file=st.session_state["settings_file"],
+                check_name="enumerator",
+                check_settings={"statscols": statscols},
+            )
+            st.session_state.selected_columns_enumerator_save = False
     with s2:
+        default_stats = default_setting.get("stats", ["count", "mean"])
         stats = st.multiselect(
             "Select statistics:",
             options=[
@@ -945,10 +1021,21 @@ def display_enumerator_statistics(
                 "25th percentile",
                 "75th percentile",
             ],
-            default=["count", "mean"],
+            default=default_stats,
             help="Select statistics to calculate",
             key="statistics_options_enumerator",
+            on_change=trigger_save,
+            kwargs={"state_name": "statistics_options_enumerator_save"},
         )
+        if (
+            "statistics_options_enumerator_save" in st.session_state
+        ) and st.session_state.statistics_options_enumerator_save:
+            save_check_settings(
+                settings_file=st.session_state["settings_file"],
+                check_name="enumerator",
+                check_settings={"stats": stats},
+            )
+            st.session_state.statistics_options_enumerator_save = False
     if statscols:
         stats_df = compute_enumerator_statistics(
             data=data,
@@ -1044,6 +1131,7 @@ def display_enumerator_statistics_overtime(
     data: pd.DataFrame,
     date: str,
     enumerator: str,
+    setting_file: str,
 ) -> None:
     """Display enumerator statistics over time.
 
@@ -1065,31 +1153,63 @@ def display_enumerator_statistics_overtime(
     # create enumerator statistics
 
     st.markdown("##### Statistics")
+    default_setting = (
+        load_check_settings(settings_file=setting_file, check_name="enumerator") or {}
+    )
     s1, s2, s3 = st.columns([0.2, 0.15, 0.75])
     with s1:
+        period_list = ("Daily", "Weekly", "Monthly")
+        default_period = default_setting.get("period", "Daily")
+        default_period_index = period_list.index(default_period)
         period = st.radio(
             label="Select Time Period:",
-            options=("Daily", "Weekly", "Monthly"),
-            index=0,
+            options=period_list,
+            index=default_period_index,
             key="project_enumerator_statistics_overtime_period",
             horizontal=True,
+            on_change=trigger_save,
+            kwargs={"state_name": "project_enumerator_statistics_overtime_period_save"},
         )
+        if (
+            "project_enumerator_statistics_overtime_period_save" in st.session_state
+        ) and st.session_state.project_enumerator_statistics_overtime_period_save:
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="enumerator",
+                check_settings={"period": period},
+            )
+            st.session_state.project_enumerator_statistics_overtime_period_save = False
     weekstartday = "SAT"
     if period == "Weekly":
+        day_list = (
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday",
+        )
+        default_weekstartday_sel = default_setting.get("weekstartday", "Monday")
+        default_weekstartday_sel_index = day_list.index(default_weekstartday_sel)
         weekstartday = st.selectbox(
             label="Select the first day of the week",
-            options=[
-                "Monday",
-                "Tuesday",
-                "Wednesday",
-                "Thursday",
-                "Friday",
-                "Saturday",
-                "Sunday",
-            ],
-            index=0,
+            options=day_list,
+            index=default_weekstartday_sel_index,
+            help="Select the first day of the week",
             key="project_week_start_day_enumerator",
+            on_change=trigger_save,
+            kwargs={"state_name": "project_week_start_day_enumerator_save"},
         )
+        if (
+            "project_week_start_day_enumerator_save" in st.session_state
+        ) and st.session_state.project_week_start_day_enumerator_save:
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="enumerator",
+                check_settings={"weekstartday": weekstartday},
+            )
+            st.session_state.project_week_start_day_enumerator_save = False
         if weekstartday:
             weekstart_adjust_dict = {
                 "Monday": "SUN",
@@ -1102,18 +1222,49 @@ def display_enumerator_statistics_overtime(
             }
             weekstartday = weekstart_adjust_dict[weekstartday]
     with s2:
+        stat_list = (
+            "count",
+            "min",
+            "mean",
+            "median",
+            "max",
+            "std",
+            "25th percentile",
+            "75th percentile",
+            "missing",
+        )
+        default_stat = default_setting.get("stat", "count")
+        default_stat_index = stat_list.index(default_stat)
         stat = st.selectbox(
             label="Select statistic:",
-            options=["count", "min", "mean", "median", "max", "std", "missing"],
-            index=0,
+            options=stat_list,
+            index=default_stat_index,
             help="Select statistics to calculate",
             key="enumerator_statistics_overtime_stat",
+            on_change=trigger_save,
+            kwargs={"state_name": "enumerator_statistics_overtime_stat_save"},
         )
+        if (
+            "enumerator_statistics_overtime_stat_save" in st.session_state
+        ) and st.session_state.enumerator_statistics_overtime_stat_save:
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="enumerator",
+                check_settings={"stat": stat},
+            )
+            st.session_state.enumerator_statistics_overtime_stat_save = False
     with s3:
+        statscol_option_list = data.select_dtypes("number").columns
+        default_statscol = default_setting.get("statscol", None)
+        default_statscol_index = (
+            statscol_option_list.tolist().index(default_statscol)
+            if default_statscol in statscol_option_list
+            else None
+        )
         statscol = st.selectbox(
             label="Select column:",
-            options=data.select_dtypes("number").columns,
-            index=None,
+            options=statscol_option_list,
+            index=default_statscol_index,
             help="Select columns to include in statistics",
             key="enumerator_statistics_overtime_column",
         )
@@ -1205,14 +1356,17 @@ def enumerator_report(
         data=data,
         date=date,
         enumerator=enumerator,
+        setting_file=setting_file,
     )
     display_enumerator_statistics(
         data=data,
         date=date,
         enumerator=enumerator,
+        setting_file=setting_file,
     )
     display_enumerator_statistics_overtime(
         data=data,
         date=date,
         enumerator=enumerator,
+        setting_file=setting_file,
     )
