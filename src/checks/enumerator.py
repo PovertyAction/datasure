@@ -751,13 +751,12 @@ def compute_enumerator_productivity(
     prod_df = data.copy()
     # convert datetime to date
     prod_df[date] = pd.to_datetime(prod_df[date])
-
     if period == "Daily":
-        prod_df["TIME PERIOD"] = prod_df[date].dt.to_period("D").dt.to_timestamp()
+        prod_df["TIME PERIOD"] = prod_df[date].dt.to_period("D")
     elif period == "Weekly":
-        prod_df["TIME PERIOD"] = prod_df[date].dt.to_period("W").dt.to_timestamp()
+        prod_df["TIME PERIOD"] = prod_df[date].dt.to_period(f"W-{weekstartday}")
     elif period == "Monthly":
-        prod_df["TIME PERIOD"] = prod_df[date].dt.to_period("M").dt.to_timestamp()
+        prod_df["TIME PERIOD"] = prod_df[date].dt.to_period("M")
 
     # generate productivity table
     prod_df["TOKEN KEY"] = prod_df.index
@@ -766,8 +765,6 @@ def compute_enumerator_productivity(
             {"TOKEN KEY": "count"}
         )
     ).rename(columns={"TOKEN KEY": "submissions"})
-
-    prod_df["TIME PERIOD"] = prod_df["TIME PERIOD"].dt.strftime("%b %d, %Y")
 
     # pivot table so enumerators dates values are columns
     prod_res = (
@@ -814,7 +811,7 @@ def display_enumerator_productivity(
         key="view_option_enumerator",
         horizontal=True,
     )
-    weekstartday = "MON"
+    weekstartday = "SAT"
     if view_option == "Weekly":
         weekstartday_sel = st.selectbox(
             label="Select the first day of the week",
@@ -831,7 +828,16 @@ def display_enumerator_productivity(
             key="project_week_start_day",
         )
         if weekstartday_sel:
-            weekstartday = weekstartday_sel[0:3].upper()
+            weekstart_adjust_dict = {
+                "Monday": "SUN",
+                "Tuesday": "MON",
+                "Wednesday": "TUE",
+                "Thursday": "WED",
+                "Friday": "THU",
+                "Saturday": "FRI",
+                "Sunday": "SAT",
+            }
+            weekstartday = weekstart_adjust_dict[weekstartday_sel]
     productivity_df = compute_enumerator_productivity(
         data=data,
         date=date,
@@ -841,18 +847,133 @@ def display_enumerator_productivity(
     )
     cmap = sns.light_palette("pink", as_cmap=True)
     format_cols = [col for col in productivity_df.columns if col not in [enumerator]]
-    min_val = productivity_df[format_cols].min().min()
-    max_val = productivity_df[format_cols].max().max()
     productivity_df = productivity_df.style.format(
         subset=format_cols,
         formatter="{:,.0f}",
     ).background_gradient(
         subset=format_cols,
-        low=min_val,
-        high=max_val,
         cmap=cmap,
     )
     st.dataframe(productivity_df, hide_index=True, use_container_width=True)
+
+
+@st.cache_data
+def compute_enumerator_statistics(
+    data: pd.DataFrame,
+    date: str,
+    enumerator: str,
+    statscols: list[str],
+    stats: list[str],
+) -> pd.DataFrame:
+    """Compute enumerator statistics.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing survey data.
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+    statscols : list[str]
+        List of columns to compute statistics on.
+    stats : list[str]
+        List of statistics to compute.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing enumerator statistics.
+    """
+    stats_df = data[[enumerator] + statscols].copy(deep=True)
+    stats_dict = {col: stats for col in statscols}
+    stats_res = stats_df.groupby(by=enumerator, dropna=False, as_index=False).agg(
+        stats_dict
+    )
+
+    return stats_res
+
+
+def display_enumerator_statistics(
+    data: pd.DataFrame,
+    date: str,
+    enumerator: str,
+    statscols: list[str],
+    stats: list[str],
+) -> None:
+    """Display enumerator statistics.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing survey data.
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+    statscols : list[str]
+        List of columns to compute statistics on.
+    stats : list[str]
+        List of statistics to compute.
+
+    Returns
+    -------
+        None
+    """
+    st.write("---")
+    st.markdown("## Enumerator Statistics")
+    # create enumerator statistics
+
+    st.markdown("##### Statistics")
+    s1, s2 = st.columns(2)
+    with s1:
+        statscols = st.multiselect(
+            label="Select columns:",
+            options=data.select_dtypes("number").columns,
+            default=None,
+            help="Select columns to include in statistics",
+            key="selected_columns_enumerator",
+        )
+    with s2:
+        stats = st.multiselect(
+            "Select statistics:",
+            options=[
+                "count",
+                "min",
+                "mean",
+                "median",
+                "max",
+                "std",
+                "25th percentile",
+                "75th percentile",
+            ],
+            default=["count", "mean"],
+            help="Select statistics to calculate",
+            key="statistics_options_enumerator",
+        )
+    if statscols:
+        stats_df = compute_enumerator_statistics(
+            data=data,
+            date=date,
+            enumerator=enumerator,
+            statscols=statscols,
+            stats=stats,
+        )
+        cmap = sns.light_palette("pink", as_cmap=True)
+        # apply formatting to the statistics DataFrame
+        stats_df = stats_df.style.format(
+            subset=statscols,
+            formatter="{:,.2f}",
+        ).background_gradient(
+            subset=statscols,
+            cmap=cmap,
+        )
+
+        st.dataframe(stats_df, hide_index=True, use_container_width=True)
+    else:
+        st.info(
+            "No columns selected for statistics calculation.", icon=":material/info:"
+        )
 
 
 def enumerator_report(
@@ -912,4 +1033,11 @@ def enumerator_report(
         data=data,
         date=date,
         enumerator=enumerator,
+    )
+    display_enumerator_statistics(
+        data=data,
+        date=date,
+        enumerator=enumerator,
+        statscols=[duration],
+        stats=["count", "min", "mean", "max"],
     )
