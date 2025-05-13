@@ -219,17 +219,7 @@ def enumerator_report_settings(data: str, setting_file: str, page_num: str) -> t
                 help="Column containing survey consent",
                 key="consent_enumerator",
                 index=default_consent_index,
-                on_change=trigger_save,
-                kwargs={"state_name": "consent_enumerator_save"},
             )
-            if (
-                "consent_enumerator_save" in st.session_state
-            ) and st.session_state.consent_enumerator_save:
-                save_check_settings(
-                    settings_file=setting_file,
-                    check_name="enumerator",
-                    check_settings={"consent": consent},
-                )
             if consent:
                 consent_options = data[consent].unique().tolist()
                 consent_vals = st.multiselect(
@@ -238,18 +228,7 @@ def enumerator_report_settings(data: str, setting_file: str, page_num: str) -> t
                     help="Value(s) indicating valid consent",
                     key="consent_val_enumerator",
                     default=consent_vals,
-                    on_change=trigger_save,
-                    kwargs={"state_name": "consent_val_enumerator_save"},
                 )
-                if (
-                    "consent_val_enumerator_save" in st.session_state
-                ) and st.session_state.consent_val_enumerator_save:
-                    save_check_settings(
-                        settings_file=setting_file,
-                        check_name="enumerator",
-                        check_settings={"consent_vals": consent_vals},
-                    )
-                    st.session_state.consent_val_enumerator_save = False
         with bc2, st.container(border=True):
             default_outcome_index = (
                 survey_cols.get_loc(outcome) if outcome in survey_cols else None
@@ -260,17 +239,7 @@ def enumerator_report_settings(data: str, setting_file: str, page_num: str) -> t
                 help="Column containing survey outcome",
                 key="outcome_enumerator",
                 index=default_outcome_index,
-                on_change=trigger_save,
-                kwargs={"state_name": "outcome_enumerator_save"},
             )
-            if (
-                "outcome_enumerator_save" in st.session_state
-            ) and st.session_state.outcome_enumerator_save:
-                save_check_settings(
-                    settings_file=setting_file,
-                    check_name="enumerator",
-                    check_settings={"outcome": outcome},
-                )
             if outcome:
                 outcome_options = data[outcome].unique().tolist()
                 outcome_vals = outcome_vals if outcome_vals in outcome_options else None
@@ -280,18 +249,7 @@ def enumerator_report_settings(data: str, setting_file: str, page_num: str) -> t
                     help="Value(s) indicating completed survey",
                     key="outcome_val_enumerator",
                     default=outcome_vals,
-                    on_change=trigger_save,
-                    kwargs={"state_name": "outcome_val_enumerator_save"},
                 )
-                if (
-                    "outcome_val_enumerator_save" in st.session_state
-                ) and st.session_state.outcome_val_enumerator_save:
-                    save_check_settings(
-                        settings_file=setting_file,
-                        check_name="enumerator",
-                        check_settings={"outcome_vals": outcome_vals},
-                    )
-                    st.session_state.outcome_val_enumerator_save = False
 
         # define a save settings button
         st.button(

@@ -38,28 +38,20 @@ def load_default_settings(setting_file: str, page_num: int) -> tuple:
     # - if settings file exists, load settings from file
     # - if settings file does not exist, load default settings from config
     if setting_file and os.path.exists(setting_file):
-        default_settings = load_check_settings(setting_file, "summary")
-        if default_settings:
-            default_date = default_settings.get("date")
-            default_enumerator = default_settings.get("enumerator")
-            default_target = default_settings.get("target")
-            default_survey_id = default_settings.get("survey_id")
-        else:
-            default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
-            default_enumerator = st.session_state["config_pages"]["Enumerator"][
-                page_num - 1
-            ]
-            default_survey_id = st.session_state["config_pages"]["Survey ID"][
-                page_num - 1
-            ]
-            default_target = None
+        default_settings = load_check_settings(setting_file, "summary") or {}
     else:
-        default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
-        default_enumerator = st.session_state["config_pages"]["Enumerator"][
-            page_num - 1
-        ]
-        default_survey_id = st.session_state["config_pages"]["Survey ID"][page_num - 1]
-        default_target = None
+        default_settings = {}
+
+    default_date = default_settings.get(
+        "date", st.session_state["config_pages"]["Survey Date"][page_num - 1]
+    )
+    default_enumerator = default_settings.get(
+        "enumerator", st.session_state["config_pages"]["Enumerator"][page_num - 1]
+    )
+    default_target = default_settings.get("target", None)
+    default_survey_id = default_settings.get(
+        "survey_id", st.session_state["config_pages"]["Survey ID"][page_num - 1]
+    )
 
     return default_date, default_enumerator, default_target, default_survey_id
 
@@ -95,7 +87,9 @@ def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
             sc1, sc2, sc3 = st.columns(spec=3)
 
             with sc1:
-                default_date_index = survey_cols.get_loc(default_date)
+                default_date_index = (
+                    survey_cols.get_loc(default_date) if default_date else 0
+                )
                 date = st.selectbox(
                     label="Date",
                     options=survey_cols,
@@ -105,7 +99,9 @@ def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
                 )
 
             with sc2:
-                default_enumerator_index = survey_cols.get_loc(default_enumerator)
+                default_enumerator_index = (
+                    survey_cols.get_loc(default_enumerator) if default_enumerator else 0
+                )
                 enumerator = st.selectbox(
                     label="Enumerator",
                     options=survey_cols,
@@ -114,7 +110,9 @@ def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
                 )
 
             with sc3:
-                default_survey_id_index = survey_cols.get_loc(default_survey_id)
+                default_survey_id_index = (
+                    survey_cols.get_loc(default_survey_id) if default_survey_id else 0
+                )
                 survey_id = st.selectbox(
                     label="Survey ID",
                     options=survey_cols,
@@ -501,14 +499,12 @@ def summary_progress(
     )
 
     # load default settings if default values exist in setting_file
-    default_settings = load_check_settings(setting_file, "summary")
+    default_settings = load_check_settings(setting_file, "summary") or {}
 
     # progress by column
     pc1, _ = st.columns([0.3, 0.7])
     with pc1:
-        progress_by_col = (
-            default_settings.get("progress_by_col") if default_settings else None
-        )
+        progress_by_col = default_settings.get("progress_by_col", None)
         progress_col_index = (
             data.columns.get_loc(progress_by_col) if progress_by_col else None
         )
@@ -534,11 +530,7 @@ def summary_progress(
     if progress_by_col:
         _, pil1 = st.columns([0.80, 0.20])
         with pil1:
-            progress_time_period = (
-                default_settings.get("progress_time_period")
-                if default_settings
-                else None
-            )
+            progress_time_period = default_settings.get("progress_time_period", None)
             progress_time_period = st.pills(
                 label="Progress time period",
                 options=["Auto", "Daily", "Weekly", "Monthly"],
