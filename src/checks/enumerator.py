@@ -39,58 +39,53 @@ def load_default_enumerator_settings(setting_file: str, page_num: str) -> tuple:
        outcome_vals : list - outcome values
     """
     if setting_file and os.path.exists(setting_file):
-        default_settings = load_check_settings(
-            settings_file=setting_file, check_name="enumerator"
+        default_settings = (
+            load_check_settings(settings_file=setting_file, check_name="enumerator")
+            or {}
         )
-        if default_settings:
-            (
-                date,
-                formdef_version,
-                survey_id,
-                enumerator,
-                team,
-                consent,
-                consent_vals,
-                outcome,
-                outcome_vals,
-            ) = (
-                default_settings.get("date"),
-                default_settings.get("formdef_version"),
-                default_settings.get("survey_id"),
-                default_settings.get("enumerator"),
-                default_settings.get("team"),
-                default_settings.get("consent"),
-                default_settings.get("consent_vals"),
-                default_settings.get("outcome"),
-                default_settings.get("outcome_vals"),
-            )
-        else:
-            date, survey_id, enumerator = (
-                st.session_state["config_pages"]["Survey Date"][page_num - 1],
-                st.session_state["config_pages"]["Survey ID"][page_num - 1],
-                st.session_state["config_pages"]["Enumerator"][page_num - 1],
-            )
-            (
-                formdef_version,
-                duration,
-                team,
-                consent,
-                consent_vals,
-                outcome,
-                outcome_vals,
-            ) = (None, None, None, None, None, None, None)
-        return (
-            date,
-            formdef_version,
-            survey_id,
-            duration,
-            enumerator,
-            team,
-            consent,
-            consent_vals,
-            outcome,
-            outcome_vals,
-        )
+    else:
+        default_settings = {}
+    (
+        date,
+        formdef_version,
+        duration,
+        survey_id,
+        enumerator,
+        team,
+        consent,
+        consent_vals,
+        outcome,
+        outcome_vals,
+    ) = (
+        default_settings.get(
+            "date", st.session_state["config_pages"]["Survey Date"][page_num - 1]
+        ),
+        default_settings.get("formdef_version", None),
+        default_settings.get("duration", None),
+        default_settings.get(
+            "survey_id", st.session_state["config_pages"]["Survey ID"][page_num - 1]
+        ),
+        default_settings.get(
+            "enumerator", st.session_state["config_pages"]["Enumerator"][page_num - 1]
+        ),
+        default_settings.get("team", None),
+        default_settings.get("consent", None),
+        default_settings.get("consent_vals", None),
+        default_settings.get("outcome", None),
+        default_settings.get("outcome_vals", None),
+    )
+    return (
+        date,
+        formdef_version,
+        survey_id,
+        duration,
+        enumerator,
+        team,
+        consent,
+        consent_vals,
+        outcome,
+        outcome_vals,
+    )
 
 
 def enumerator_report_settings(data: str, setting_file: str, page_num: str) -> tuple:
@@ -224,7 +219,17 @@ def enumerator_report_settings(data: str, setting_file: str, page_num: str) -> t
                 help="Column containing survey consent",
                 key="consent_enumerator",
                 index=default_consent_index,
+                on_change=trigger_save,
+                kwargs={"state_name": "consent_enumerator_save"},
             )
+            if (
+                "consent_enumerator_save" in st.session_state
+            ) and st.session_state.consent_enumerator_save:
+                save_check_settings(
+                    settings_file=setting_file,
+                    check_name="enumerator",
+                    check_settings={"consent": consent},
+                )
             if consent:
                 consent_options = data[consent].unique().tolist()
                 consent_vals = st.multiselect(
@@ -233,7 +238,18 @@ def enumerator_report_settings(data: str, setting_file: str, page_num: str) -> t
                     help="Value(s) indicating valid consent",
                     key="consent_val_enumerator",
                     default=consent_vals,
+                    on_change=trigger_save,
+                    kwargs={"state_name": "consent_val_enumerator_save"},
                 )
+                if (
+                    "consent_val_enumerator_save" in st.session_state
+                ) and st.session_state.consent_val_enumerator_save:
+                    save_check_settings(
+                        settings_file=setting_file,
+                        check_name="enumerator",
+                        check_settings={"consent_vals": consent_vals},
+                    )
+                    st.session_state.consent_val_enumerator_save = False
         with bc2, st.container(border=True):
             default_outcome_index = (
                 survey_cols.get_loc(outcome) if outcome in survey_cols else None
@@ -244,16 +260,38 @@ def enumerator_report_settings(data: str, setting_file: str, page_num: str) -> t
                 help="Column containing survey outcome",
                 key="outcome_enumerator",
                 index=default_outcome_index,
+                on_change=trigger_save,
+                kwargs={"state_name": "outcome_enumerator_save"},
             )
+            if (
+                "outcome_enumerator_save" in st.session_state
+            ) and st.session_state.outcome_enumerator_save:
+                save_check_settings(
+                    settings_file=setting_file,
+                    check_name="enumerator",
+                    check_settings={"outcome": outcome},
+                )
             if outcome:
                 outcome_options = data[outcome].unique().tolist()
+                outcome_vals = outcome_vals if outcome_vals in outcome_options else None
                 outcome_vals = st.multiselect(
                     label="Outcome value(s)",
                     options=outcome_options,
                     help="Value(s) indicating completed survey",
                     key="outcome_val_enumerator",
                     default=outcome_vals,
+                    on_change=trigger_save,
+                    kwargs={"state_name": "outcome_val_enumerator_save"},
                 )
+                if (
+                    "outcome_val_enumerator_save" in st.session_state
+                ) and st.session_state.outcome_val_enumerator_save:
+                    save_check_settings(
+                        settings_file=setting_file,
+                        check_name="enumerator",
+                        check_settings={"outcome_vals": outcome_vals},
+                    )
+                    st.session_state.outcome_val_enumerator_save = False
 
         # define a save settings button
         st.button(
@@ -438,7 +476,7 @@ def compute_enumerator_missing_table(
     data["% Null values"] = data.isnull().mean(axis=1)
 
     miss_cols = ["% Null values"]
-    if not missing_codes.empty:
+    if missing_codes:
         for i in range(len(missing_codes)):
             miss_label = missing_codes["Missing Labels"][i]
             miss_codes = missing_codes["Missing Codes"][i].split(",")
@@ -502,14 +540,25 @@ def compute_enumerator_summary(
     df = data.copy()
     df[date] = df[date].dt.strftime("%b %d, %Y")
 
-    summary_df = df.groupby(by=enumerator, dropna=False, as_index=False).date.agg(
-        {
-            "first date": "min",
-            "last date": "max",
-            "# of submissions": "count",
-            "# of days worked": "nunique",
-        }
+    summary_df = (
+        df.groupby(by=enumerator, dropna=False, as_index=False)
+        .agg(
+            {
+                date: ["min", "max", "count", "nunique"],
+            }
+        )
+        .reset_index(drop=True)
+        .droplevel(0, axis=1)
+        .rename(
+            columns={
+                "min": "first submission",
+                "max": "last submission",
+                "count": "# submissions",
+                "nunique": "# unique dates",
+            }
+        )
     )
+    summary_df = summary_df.rename(columns={summary_df.columns[0]: enumerator})
 
     today = pd.to_datetime("today").date()
     start_of_week = today - pd.Timedelta(days=today.weekday())
@@ -824,11 +873,9 @@ def display_enumerator_productivity(
     -------
         None
     """
-    default_setting = load_check_settings(
-        settings_file=setting_file, check_name="enumerator"
+    default_setting = (
+        load_check_settings(settings_file=setting_file, check_name="enumerator") or {}
     )
-    if not default_setting:
-        default_setting = {}
     st.write("---")
     st.markdown("## Enumerator Productivity")
     # Toggle for days, weeks, or months view
@@ -980,11 +1027,9 @@ def display_enumerator_statistics(
     st.write("---")
     st.markdown("## Enumerator Statistics")
     # create enumerator statistics
-    default_setting = load_check_settings(
-        settings_file=setting_file, check_name="enumerator"
+    default_setting = (
+        load_check_settings(settings_file=setting_file, check_name="enumerator") or {}
     )
-    if not default_setting:
-        default_setting = {}
     st.markdown("##### Statistics")
     s1, s2 = st.columns(2)
     with s1:
@@ -1002,7 +1047,7 @@ def display_enumerator_statistics(
             "selected_columns_enumerator_save" in st.session_state
         ) and st.session_state.selected_columns_enumerator_save:
             save_check_settings(
-                settings_file=st.session_state["settings_file"],
+                settings_file=setting_file,
                 check_name="enumerator",
                 check_settings={"statscols": statscols},
             )
@@ -1154,8 +1199,8 @@ def display_enumerator_statistics_overtime(
 
     st.markdown("##### Statistics")
     default_setting = (
-        load_check_settings(settings_file=setting_file, check_name="enumerator") or {}
-    )
+        load_check_settings(settings_file=setting_file, check_name="enumerator")
+    ) or {}
     s1, s2, s3 = st.columns([0.2, 0.15, 0.75])
     with s1:
         period_list = ("Daily", "Weekly", "Monthly")
