@@ -1,13 +1,12 @@
 import os
 
-import folium
+import matplotlib.cm as cm
 import numpy as np
 import pandas as pd
+import pydeck as pdk
 import streamlit as st
-from branca.colormap import linear
 from geopy.distance import geodesic
 from sklearn.neighbors import LocalOutlierFactor
-from streamlit_folium import st_folium
 
 from src.utils import load_check_settings, save_check_settings
 
@@ -296,11 +295,11 @@ def plot_gps_coordinates(
     df, enumerator, submissiondate, survey_id, gps_lat_col, gps_lon_col, color_col
 ):
     """
-    Plot GPS coordinates on a map, color-coded by a specified column.
+    Plot GPS coordinates on a map, color-coded by a specified column using pydeck.
 
     Parameters
     ----------
-    data : pd.DataFrame
+    df : pd.DataFrame
         The input dataframe containing GPS data.
     enumerator : str
         The name of the enumerator column.
@@ -308,8 +307,6 @@ def plot_gps_coordinates(
         The name of the submission date column.
     survey_id : str
         The name of the survey id column.
-    survey_id : str
-        The name of the survey ID column.
     gps_lat_col : str
         The name of the latitude column.
     gps_lon_col : str
@@ -321,48 +318,99 @@ def plot_gps_coordinates(
     -------
     None
     """
-    # Create a folium map centered at the mean latitude and longitude
-    df = df[~df[gps_lat_col].isna()]
-    map_center = [df[gps_lat_col].mean(), df[gps_lon_col].mean()]
-    gps_map = folium.Map(location=map_center, zoom_start=10)
+    # Drop rows with missing coordinates
+    df = df.dropna(subset=[gps_lat_col, gps_lon_col])
 
-    # assign colors to the color column
+    # Assign a color to each unique value in color_col
     unique_values = df[color_col].unique()
-    value_to_index = {val: i for i, val in enumerate(unique_values)}
-    colormap = linear.viridis.scale(0, len(unique_values) - 1)
-    color_map = {val: colormap(value_to_index[val]) for val in unique_values}
+    # generate a color palette based on the number of unique values
+    num_colors = len(unique_values)
+    if num_colors <= 10:
+        color_palette = [
+            [31, 119, 180, 160],
+            [255, 127, 14, 160],
+            [44, 160, 44, 160],
+            [214, 39, 40, 160],
+            [148, 103, 189, 160],
+            [140, 86, 75, 160],
+            [227, 119, 194, 160],
+            [127, 127, 127, 160],
+            [188, 189, 34, 160],
+            [23, 190, 207, 160],
+        ][:num_colors]
+    else:
+        # Use matplot lib colormap for more colors
+        cmap = cm.get_cmap("tab20", num_colors)
+        color_palette = [
+            [int(r * 255), int(g * 255), int(b * 255), 160]
+            for r, g, b, _ in [cmap(i) for i in range(num_colors)]
+        ]
+    color_palette = [
+        [31, 119, 180, 160],
+        [255, 127, 14, 160],
+        [44, 160, 44, 160],
+        [214, 39, 40, 160],
+        [148, 103, 189, 160],
+        [140, 86, 75, 160],
+        [227, 119, 194, 160],
+        [127, 127, 127, 160],
+        [188, 189, 34, 160],
+        [23, 190, 207, 160],
+    ]
+    color_map = {
+        val: color_palette[i % len(color_palette)]
+        for i, val in enumerate(unique_values)
+    }
     df["color_value"] = df[color_col].map(color_map)
 
-    feature_groups = {}
-    for val in unique_values:
-        feature_groups[val] = folium.FeatureGroup(name=f"{val}")
-
+    # Prepare data for pydeck
+    map_data = []
     for _, row in df.iterrows():
-        marker = folium.CircleMarker(
-            location=(row[gps_lat_col], row[gps_lon_col]),
-            radius=5,
-            color=row["color_value"],
-            fill=True,
-            fill_opacity=0.7,
-            tooltip=folium.Tooltip(
-                f"""
-                <b>{"Submission Date"}:</b> {row[submissiondate]}<br>
-                <b>{"Enumerator"}:</b> {row[enumerator]}<br>
-                <b>Survey ID:</b> {row[survey_id]}<br>
-                <b>{color_col}:</b> {row[color_col]}<br>
-                <b>latitude:</b> {row[gps_lat_col]:.6f}<br>
-                <b>longitude:</b> {row[gps_lon_col]:.6f}
-                """
-            ),
+        map_data.append(
+            {
+                "longitude": float(row[gps_lon_col]),
+                "latitude": float(row[gps_lat_col]),
+                "color": row["color_value"],
+                "tooltip": (
+                    f"Submission Date: {row[submissiondate]}\n"
+                    f"Enumerator: {row[enumerator]}\n"
+                    f"Survey ID: {row[survey_id]}\n"
+                    f"{color_col}: {row[color_col]}\n"
+                    f"Latitude: {row[gps_lat_col]:.6f}\n"
+                    f"Longitude: {row[gps_lon_col]:.6f}"
+                ),
+            }
         )
 
-        feature_groups[row[color_col]].add_child(marker)
+    # Calculate map center
+    center_lat = df[gps_lat_col].mean()
+    center_lon = df[gps_lon_col].mean()
 
-    for group in feature_groups.values():
-        gps_map.add_child(group)
+    layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=map_data,
+        get_position=["longitude", "latitude"],
+        get_fill_color="color",
+        get_radius=50,
+        radius_scale=6,
+        radius_min_pixels=3,
+        radius_max_pixels=8,
+        pickable=True,
+        auto_highlight=True,
+    )
 
-    # Display the map in Streamlit
-    st_folium(gps_map, height=450, use_container_width=True)
+    view_state = pdk.ViewState(
+        longitude=float(center_lon), latitude=float(center_lat), zoom=10, pitch=0
+    )
+
+    deck = pdk.Deck(
+        layers=[layer],
+        initial_view_state=view_state,
+        tooltip={"text": "{tooltip}"},
+        map_style="mapbox://styles/mapbox/street-v11",
+    )
+
+    st.pydeck_chart(deck, height=450, use_container_width=True)
 
 
 # detect outliers using a clustering column
@@ -549,34 +597,58 @@ def plot_clusters_on_map(
     -------
     None
     """
-    # Create a folium map centered at the mean latitude and longitude
-    map_center = [df[gps_lat_col].mean(), df[gps_lon_col].mean()]
-    cluster_map = folium.Map(location=map_center, zoom_start=10)
+    # make a copy of the dataframe
+    df = df.copy()
 
-    # Add points to the map
+    # Create a clean data structure for pydeck
+    map_data = []
     for _, row in df.iterrows():
-        cluster_id = row[clustering_col] if clustering_col else "No Cluster"
-
-        color = "red" if row[outlier_col] else "blue"
-        folium.CircleMarker(
-            location=(row[gps_lat_col], row[gps_lon_col]),
-            radius=5,
-            color=color,
-            fill=True,
-            fill_opacity=0.7,
-            tooltip=folium.Tooltip(
-                f"""
-                <b>{"Enumerator"}:</b> {row[enumerator]}<br>
-                <b>{"Submission Date"}:</b> {row[submission_date]}<br>
-                <b>{"Survey ID"}:</b> {row[survey_id]}<br>
-                <b>{"Cluster"}:</b> {cluster_id}<br>
-                <b>Outlier:</b> {row[outlier_col]}<br>
-                """,
+        point = {
+            # Ensure coordinates are in [longitude, latitude] order for pydeck
+            "longitude": float(row[gps_lon_col]),
+            "latitude": float(row[gps_lat_col]),
+            "outlier_color": [242, 45, 17, 160]
+            if row[outlier_col]
+            else [17, 89, 242, 160],
+            "tooltip": (
+                f"Enumerator: {row[enumerator]}\n"
+                f"Date: {row[submission_date]}\n"
+                f"Survey ID: {row[survey_id]}\n"
+                f"Cluster: {row[clustering_col] if clustering_col else 'No Cluster'}\n"
+                f"Outlier: {row[outlier_col]}\n"
             ),
-        ).add_to(cluster_map)
+        }
+        map_data.append(point)
 
-    # Display the map in Streamlit
-    st_folium(cluster_map, height=450, use_container_width=True)
+    # Calculate map center
+    center_lat = df[gps_lat_col].mean()
+    center_lon = df[gps_lon_col].mean()
+
+    layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=map_data,
+        get_position=["longitude", "latitude"],
+        get_fill_color="outlier_color",
+        get_radius=50,
+        radius_scale=6,
+        radius_min_pixels=3,
+        radius_max_pixels=8,
+        pickable=True,
+        auto_highlight=True,
+    )
+
+    view_state = pdk.ViewState(
+        longitude=float(center_lon), latitude=float(center_lat), zoom=7, pitch=0
+    )
+
+    deck = pdk.Deck(
+        layers=[layer],
+        initial_view_state=view_state,
+        tooltip={"text": "{tooltip}"},
+        map_style="mapbox://styles/mapbox/street-v11",
+    )
+
+    st.pydeck_chart(deck, height=450, use_container_width=True)
 
 
 # gps checks report
