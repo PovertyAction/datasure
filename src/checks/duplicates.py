@@ -1,9 +1,515 @@
+import os
+
 import pandas as pd
 import streamlit as st
 
+from src.utils import load_check_settings, save_check_settings, trigger_save
+
+
+@st.cache_data
+def load_default_duplicates_settings(setting_file: str, page_num: int) -> tuple:
+    """
+    Load default settings for duplicates report from a settings file.
+
+    Parameters
+    ----------
+        settings_file (str): The path to the settings file.
+
+    Returns
+    -------
+        dict: A dictionary containing the default settings for duplicates report.
+    """
+    # load default settings in the following order:
+    # - if settings file exists, load settings from file
+    # - if settings file does not exist, load default settings from config
+
+    if setting_file and os.path.exists(setting_file):
+        default_settings = load_check_settings(setting_file, "duplicates") or {}
+    else:
+        default_settings = {}
+
+    default_survey_id = default_settings.get(
+        "survey_id", st.session_state["config_pages"]["Survey ID"][page_num - 1]
+    )
+    default_survey_key = default_settings.get(
+        "survey_key", st.session_state["config_pages"]["Survey KEY"][page_num - 1]
+    )
+    default_date = default_settings.get(
+        "date", st.session_state["config_pages"]["Survey Date"][page_num - 1]
+    )
+    default_dup_cols = default_settings.get("dup_cols", None)
+    default_display_cols = default_settings.get("display_cols", None)
+
+    return (
+        default_survey_id,
+        default_survey_key,
+        default_date,
+        default_dup_cols,
+        default_display_cols,
+    )
+
+
+def duplicates_settings(data: pd.DataFrame, settings_file: str, page_num: int) -> tuple:
+    """
+    Get the settings for duplicates report
+
+    Parameters
+    ----------
+        data (pd.DataFrame): The dataset to generate the duplicate data report for.
+        settings_file (str): The path to the settings file.
+        page_num (int): The page number of the current report.
+
+    Returns
+    -------
+            tuple: A tuple containing the survey ID, survey key, date, and columns to
+            check for duplicates.
+    """
+    with st.expander("settings", icon=":material/settings:"):
+        st.markdown("## Configure settings for survey duplicates report")
+
+        survey_cols = data.columns.to_list()
+
+        st.write("---")
+
+        id_col, key_col, date_col = st.columns(3)
+
+        survey_id, survey_key, date, dup_cols, display_cols = (
+            load_default_duplicates_settings(
+                setting_file=settings_file, page_num=page_num
+            )
+        )
+
+        with id_col:
+            survey_id_index = survey_cols.index(survey_id) if survey_id else 0
+            st.markdown("### Select survey ID column")
+            survey_id = st.selectbox(
+                label="Survey ID",
+                options=survey_cols,
+                key="survey_id_duplicates_key",
+                index=survey_id_index,
+            )
+
+        with key_col:
+            survey_key_index = survey_cols.index(survey_key) if survey_key else None
+            st.markdown("### Select survey key column")
+            survey_key = st.selectbox(
+                label="Survey Key",
+                options=survey_cols,
+                key="survey_key_duplicates_key",
+                index=survey_key_index,
+            )
+
+        with date_col:
+            st.markdown("### Select date column")
+            date_index = survey_cols.index(date) if date else None
+            date = st.selectbox(
+                label="Date",
+                options=survey_cols,
+                key="date_duplicates_key",
+                index=date_index,
+            )
+
+        st.markdown("### Select columns to check for duplicates")
+        dup_cols = st.multiselect(
+            label="Columns",
+            options=survey_cols,
+            key="dup_cols_key",
+            default=dup_cols,
+        )
+
+        # add button for saving settings
+        st.write("---")
+        st.write("Save settings")
+        st.button(
+            label="Save settings",
+            key="save_settings_duplicates",
+            on_click=save_check_settings,
+            args=(
+                settings_file,
+                "duplicates",
+                {
+                    "survey_id": survey_id,
+                    "survey_key": survey_key,
+                    "date": date,
+                    "dup_cols": dup_cols,
+                },
+            ),
+        )
+
+    return survey_id, survey_key, date, dup_cols, display_cols
+
+
+@st.cache_data
+def compute_duplicates_statistics(
+    data: pd.DataFrame, survey_id: str, survey_key: str, dup_cols: list
+) -> tuple:
+    """
+    Compute statistics for duplicates in the dataset.
+
+    Parameters
+    ----------
+        data (pd.DataFrame): The dataset to compute duplicates statistics for.
+        survey_id (str): The survey ID column name.
+        survey_key (str): The survey key column name.
+        dup_cols (list): The columns to check for duplicates.
+
+    Returns
+    -------
+        tuple: A tuple containing the total number of columns checked, the number of
+        columns with duplicates, the number of columns without duplicates, total number of duplicates
+        total number of ID duplicates and total number of duplicates resolved.
+        id_duplicates_data (pd.DataFrame): A DataFrame containing the duplicate entries for the survey ID.
+        all_duplicates_data (pd.DataFrame): A DataFrame containing the duplicate entries for the selected columns.
+    """  # noqa: W505
+    total_cols_checked = len(dup_cols)
+    cols_with_dups = [x for x in dup_cols if data[x].duplicated().any()]
+    total_cols_with_dups = len(cols_with_dups)
+    total_cols_no_dups = total_cols_checked - total_cols_with_dups
+    id_dups_data = data[data.duplicated(subset=[survey_id], keep=False)]
+    total_id_dups = len(id_dups_data)
+    total_resolved_dups = st.session_state.get("resolved_duplicates", 0)
+    total_dups = 0
+    for col in dup_cols:
+        if data[col].duplicated().any():
+            col_dups_data = data[data.duplicated(subset=[col], keep=False)]
+            total_dups += len(col_dups_data)
+
+    return (
+        total_cols_checked,
+        total_cols_with_dups,
+        total_cols_no_dups,
+        total_dups,
+        total_id_dups,
+        total_resolved_dups,
+    )
+
+
+def duplicates_statistics_overview(
+    data: pd.DataFrame, survey_id: str, survey_key: str, dup_cols: list
+) -> None:
+    """
+    Display an overview of duplicates statistics in the dataset.
+
+    Parameters
+    ----------
+        data (pd.DataFrame): The dataset to display duplicates statistics for.
+        survey_id (str): The survey ID column name.
+        survey_key (str): The survey key column name.
+        dup_cols (list): The columns to check for duplicates.
+
+    Returns
+    -------
+        None
+    """
+    (
+        total_cols_checked,
+        total_cols_with_dups,
+        total_cols_no_dups,
+        total_dups,
+        total_id_dups,
+        total_resolved_dups,
+    ) = compute_duplicates_statistics(
+        data=data, survey_id=survey_id, survey_key=survey_key, dup_cols=dup_cols
+    )
+
+    st.markdown("## Duplicates Statistics Overview")
+    _, gc2 = st.columns(2)
+    with gc2:
+        tc3, tc4 = st.columns(2, border=True)
+        tc3.metric(
+            label="Total Duplicates",
+            value=total_dups,
+            help="Total number of duplicates in the dataset",
+        )
+        tc4.metric(
+            label="Resolved Duplicates",
+            value=total_resolved_dups,
+            help="Total number of duplicates resolved",
+        )
+
+    bc1, bc2, bc3, bc4 = st.columns(4, border=True)
+    bc1.metric(
+        label="Columns Checked",
+        value=total_cols_checked,
+        help="Total number of columns checked for duplicates",
+    )
+    bc2.metric(
+        label="Columns With No Duplicates",
+        value=total_cols_no_dups,
+        help="Total number of columns with no duplicates",
+    )
+    bc3.metric(
+        label="Columns With Duplicates",
+        value=total_cols_with_dups,
+        help="Total number of columns with duplicates",
+    )
+    bc4.metric(
+        label="Survey ID Duplicates",
+        value=total_id_dups,
+        help="Total number of duplicates in the survey ID column",
+    )
+
+
+@st.cache_data
+def compute_id_duplicates(
+    data: pd.DataFrame, survey_id: str, survey_key: str, display_cols: list | None
+) -> pd.DataFrame:
+    """
+    Compute duplicates for the survey ID column.
+
+    Parameters
+    ----------
+        data (pd.DataFrame): The dataset to compute duplicates for.
+        survey_id (str): The
+
+    Returns
+    -------
+        pd.DataFrame: A DataFrame containing the duplicate entries for the survey ID.
+    """
+    id_dups_data = data[data.duplicated(subset=[survey_id], keep=False)]
+    id_dups_data["id_dup_count"] = id_dups_data.groupby(survey_id)[survey_id].transform(
+        "count"
+    )
+    id_dups_data["id_dup_percent"] = (id_dups_data["id_dup_count"] / len(data)) * 100
+
+    # Add user-selected display columns (if any). Join to duplicates data using
+    # survey_key
+    if display_cols:
+        id_dups_data.merge(
+            data[[survey_key] + display_cols],
+            on=survey_key,
+            how="left",
+        )
+        id_dups_data = id_dups_data[
+            [survey_id, survey_key, "id_dup_count", "id_dup_percent"] + display_cols
+        ]
+    else:
+        id_dups_data = id_dups_data[
+            [survey_id, survey_key, "id_dup_count", "id_dup_percent"]
+        ]
+    return id_dups_data.sort_values(
+        [survey_id, "id_dup_count"], ascending=[False, True]
+    )
+
+
+def id_duplicates_display(
+    data: pd.DataFrame, survey_id: str, survey_key: str, setting_file: str
+) -> None:
+    """
+    Display duplicates for the survey ID column.
+
+    Parameters
+    ----------
+        data (pd.DataFrame): The dataset to compute duplicates for.
+        survey_id (str): survey ID column name.
+        survey_key (str): survey key column name.
+
+    Returns
+    -------
+        None
+
+    """
+    st.markdown(f"## Duplicate Entries for {survey_id}")
+
+    # Load settings from file if it exists
+    if setting_file and os.path.exists(setting_file):
+        default_settings = load_check_settings(setting_file, "duplicates") or {}
+    else:
+        default_settings = {}
+    display_cols = default_settings.get("id_display_cols", None)
+
+    display_cols = st.multiselect(
+        label="Select columns to display in the report",
+        options=data.columns,
+        default=display_cols,
+        key="display_id_cols_duplicates",
+        on_change=trigger_save,
+        kwargs={"state_name": "display_id_cols_duplicates_save"},
+    )
+    if (
+        "display_id_cols_duplicates_save" in st.session_state
+    ) and st.session_state.display_id_cols_duplicates_save:
+        save_check_settings(
+            settings_file=setting_file,
+            check_name="duplicates",
+            check_settings={"id_display_cols": display_cols},
+        )
+        st.session_state["display_id_cols_duplicates_save"] = False
+
+    id_dups_data = compute_id_duplicates(
+        data=data, survey_id=survey_id, survey_key=survey_key, display_cols=display_cols
+    )
+
+    if id_dups_data.empty:
+        st.write(f"No duplicates found for {survey_id}")
+    else:
+        st.dataframe(
+            id_dups_data,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "id_dup_count": st.column_config.Column(
+                    label=f"# of {survey_id} duplicates"
+                ),
+                "id_dup_percent": st.column_config.NumberColumn(
+                    label="% of total records", format="%.2f%%"
+                ),
+            },
+        )
+
+
+@st.cache_data
+def compute_column_duplicates(
+    data: pd.DataFrame, survey_id: str, survey_key: str, dup_col: list, display_cols
+) -> pd.DataFrame:
+    """
+    Compute duplicates for the selected columns.
+
+    Parameters
+    ----------
+        data (pd.DataFrame): The dataset to compute duplicates for.
+        survey_id (str): The survey ID column name.
+        survey_key (str): The survey key column name.
+        dup_col (list): The columns to check for duplicates.
+        display_cols (list): The columns to display in the report.
+
+    Returns
+    -------
+        pd.DataFrame: A DataFrame containing the duplicate entries for the selected
+        columns.
+    """
+    var_dups_data = data[data.duplicated(subset=[dup_col], keep=False)]
+    var_dups_data[f"{dup_col}_dup_count"] = var_dups_data.groupby(dup_col)[
+        dup_col
+    ].transform("count")
+    var_dups_data[f"{dup_col}_dup_percent"] = (
+        var_dups_data[f"{dup_col}_dup_count"] / len(data)
+    ) * 100
+
+    # Add user-selected display columns (if any). Join to duplicates data
+    # using survey_key
+    if display_cols:
+        var_dups_data.merge(
+            data[[survey_key] + display_cols],
+            on=survey_key,
+            how="left",
+        )
+        var_dups_data = var_dups_data[
+            [survey_id, dup_col, f"{dup_col}_dup_count", f"{dup_col}_dup_percent"]
+            + display_cols
+        ]
+    else:
+        var_dups_data = var_dups_data[
+            [survey_id, dup_col, f"{dup_col}_dup_count", f"{dup_col}_dup_percent"]
+        ]
+    return var_dups_data.sort_values(
+        [f"{dup_col}_dup_count", dup_col], ascending=[False, True]
+    )
+
+
+def column_duplicates_display(
+    data: pd.DataFrame,
+    survey_id: str,
+    survey_key: str,
+    dup_cols: str,
+    setting_file: str,
+) -> None:
+    """
+    Display duplicates for the selected columns.
+
+    Parameters
+    ----------
+        data (pd.DataFrame): The dataset to compute duplicates for.
+        survey_id (str): survey ID column name.
+        survey_key (str): survey key column name.
+        dup_col (list): The columns to check for duplicates.
+
+    Returns
+    -------
+        None
+
+    """
+    st.markdown("## Duplicate Entries for columns")
+
+    # load settings from file if it exists
+    if setting_file and os.path.exists(setting_file):
+        default_settings = load_check_settings(setting_file, "duplicates") or {}
+    else:
+        default_settings = {}
+    dup_col = default_settings.get("dup_col", None)
+    dup_col_index = dup_cols.index(dup_col) if dup_col else 0
+    display_cols = default_settings.get(f"{dup_col}/display_cols") if dup_col else None
+
+    dup_col = st.selectbox(
+        label="Select column to check for duplicates",
+        options=dup_cols,
+        key="dup_col_duplicates",
+        index=dup_col_index,
+        on_change=trigger_save,
+        kwargs={"state_name": "dup_col_duplicates_save"},
+    )
+    if (
+        "dup_col_duplicates_save" in st.session_state
+    ) and st.session_state.dup_col_duplicates_save:
+        save_check_settings(
+            settings_file=setting_file,
+            check_name="duplicates",
+            check_settings={"dup_col": dup_col},
+        )
+        st.session_state["dup_col_duplicates_save"] = False
+
+    display_cols = st.multiselect(
+        label="Select columns to display in the report",
+        options=data.columns,
+        default=display_cols,
+        key="display_cols_duplicates",
+        on_change=trigger_save,
+        kwargs={"state_name": "display_cols_duplicates_save"},
+    )
+    if (
+        "display_cols_duplicates_save" in st.session_state
+    ) and st.session_state.display_cols_duplicates_save:
+        save_check_settings(
+            settings_file=setting_file,
+            check_name="duplicates",
+            check_settings={f"{dup_col}/display_cols": display_cols},
+        )
+        st.session_state["display_cols_duplicates_save"] = False
+
+    if dup_col:
+        col_dups_data = compute_column_duplicates(
+            data=data,
+            survey_id=survey_id,
+            survey_key=survey_key,
+            dup_col=dup_col,
+            display_cols=display_cols,
+        )
+
+        if col_dups_data.empty:
+            st.write(f"No duplicates found for {dup_col}")
+        else:
+            st.dataframe(
+                col_dups_data,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    f"{dup_col}_dup_count": st.column_config.Column(
+                        label=f"# of {dup_col} duplicates"
+                    ),
+                    f"{dup_col}_dup_percent": st.column_config.NumberColumn(
+                        label="% of total records", format="%.2f%%"
+                    ),
+                },
+            )
+    else:
+        st.info(
+            body="Please select a column to check for duplicates",
+            icon=":material/info:",
+        )
+
 
 # define function to create duplicates report
-def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
+def duplicates_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:  # noqa: D417, RUF100
     """
     Generate a report on duplicate data in the dataset. The report includes a
     summary of duplicate data, a table showing the number of duplicate rows, and
@@ -22,289 +528,33 @@ def duplicates_report(data, page_num) -> None:  # noqa: D417, RUF100
 
 
     """
-    with st.expander("settings", icon=":material/settings:"):
-        st.markdown("## Configure settings for survey duplicates report")
-
-        survey_cols = data.columns
-
-        st.write("---")
-        st.markdown("### Select columns to check for duplicates")
-        dup_cols = st.multiselect("Columns", options=survey_cols, key="dup_cols")
-
-        id_col, key_col, date_col = st.columns(3)
-
-        with id_col:
-            # get survey id column name from dataset & get index
-            default_survey_id = st.session_state["config_pages"]["Survey ID"][
-                page_num - 1
-            ]
-            default_survey_id_index = survey_cols.get_loc(default_survey_id)
-
-            st.markdown("### Select survey ID column")
-            survey_id = st.selectbox(
-                "Survey ID",
-                options=survey_cols,
-                key="survey_id_duplicates",
-                index=default_survey_id_index,
-            )
-
-        with key_col:
-            # get survey key column name from dataset & get index
-            default_survey_key = st.session_state["config_pages"]["Survey KEY"][
-                page_num - 1
-            ]
-            default_survey_key_index = survey_cols.get_loc(default_survey_key)
-
-            st.markdown("### Select survey key column")
-            survey_key = st.selectbox(
-                "Survey Key",
-                options=survey_cols,
-                key="survey_key_duplicates",
-                index=default_survey_key_index,
-            )
-
-        with date_col:
-            # get date column name from dataset & get index
-            default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
-            default_date_index = survey_cols.get_loc(default_date)
-
-            st.markdown("### Select date column")
-            date = st.selectbox(
-                "Date",
-                options=survey_cols,
-                key="date_duplicates",
-                index=default_date_index,
-            )
-
-        st.write("---")
-        st.markdown("### Report options")
-
-        st.markdown("### Select additional columns to display in the report")
-
-        display_cols = st.multiselect(
-            "Columns", options=survey_cols, key="display_cols"
-        )
-
-        # add button for saving settings
-        st.write("---")
-        st.write("Save settings")
-        save_settings = st.button("Save settings", key="save_settings_duplicates")  # noqa: F841
+    survey_id, survey_key, date, dup_cols, display_cols = duplicates_settings(
+        data, settings_file=setting_file, page_num=page_num
+    )
 
     # ---- Show report --- #
     # Check that required options have been selected. If not, display a info message
     # Modified to always allow survey_id, survey_key, and date to be processed
     if not all([survey_id, survey_key, date]):
-        st.info("Please select all required options to generate the progress report")
+        st.info(
+            body="Please select all required options to generate the progress report",
+            icon=":material/info:",
+        )
         return
 
-    # Add CSS for consistent width
-    st.markdown(
-        """
-        <style>
-            .stDataFrame {
-                width: 100%;
-            }
-            .dataframe {
-                width: 100%;
-            }
-        </style>
-    """,
-        unsafe_allow_html=True,
+    duplicates_statistics_overview(
+        data=data,
+        survey_id=survey_id,
+        survey_key=survey_key,
+        dup_cols=dup_cols,
     )
 
-    # ---- Duplicates Statistics Overview Section ---- #
-    st.markdown("## Duplicates Statistics Overview")
+    st.write("---")
+    id_duplicates_display(
+        data=data, survey_id=survey_id, survey_key=survey_key, setting_file=setting_file
+    )
 
-    # Calculate statistics for ID duplicates
-    id_dups_data = data[data.duplicated(subset=[survey_id], keep=False)]
-
-    # Calculate statistics for selected columns (only if dup_cols is not empty)
-    total_duplicates = 0
-    dups_data = pd.DataFrame()
-    if dup_cols:
-        data["num_dups"] = data.groupby(dup_cols)[survey_key].transform("count")
-        dups_data = data[data["num_dups"] > 1]
-        total_duplicates = len(dups_data)
-
-    # Determine duplicates for each selected column
-    columns_with_dups = []
-    columns_no_dups = []
-
-    for col in dup_cols:
-        # Check if column has duplicates
-        if data[col].duplicated().any():
-            columns_with_dups.append(col)
-        else:
-            columns_no_dups.append(col)
-
-    total_columns_checked = len(dup_cols)
-    total_columns_no_dups = len(columns_no_dups)
-    total_columns_with_dups = len(columns_with_dups)
-    id_duplicates = len(id_dups_data)
-
-    # Calculate total records for percentage calculations
-    total_records = len(data)
-
-    resolved_duplicates = 0
-    if "resolved_duplicates" in st.session_state:
-        resolved_duplicates = st.session_state["resolved_duplicates"]
-
-    # Display metric cards in a row
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
-
-    with col1:
-        st.metric(label="Columns Checked", value=total_columns_checked)
-
-    with col2:
-        st.metric(label="Columns With No Duplicates", value=total_columns_no_dups)
-
-    with col3:
-        st.metric(label="Columns With Duplicates", value=total_columns_with_dups)
-
-    with col4:
-        st.metric(label="Total Duplicates", value=total_duplicates)
-
-    with col5:
-        st.metric(label=f"{survey_id} Duplicates", value=id_duplicates)
-
-    with col6:
-        st.metric(label="Duplicates Resolved", value=resolved_duplicates)
-
-    # Add a separator
-    st.markdown("---")
-
-    # Create tabs for ID duplicates and selected variables duplicates
-    tab1, tab2 = st.tabs(["Survey ID Duplicates", "Selected Variables Duplicates"])
-
-    # Tab for ID duplicates
-    with tab1:
-        st.markdown(f"## Duplicate Entries for {survey_id}")
-
-        if id_dups_data.empty:
-            st.write(f"No duplicates found for {survey_id}")
-        else:
-            # Count duplicates by ID
-            id_dups_data["id_dup_count"] = id_dups_data.groupby(survey_id)[
-                survey_key
-            ].transform("count")
-
-            # Calculate percentage of total records
-            id_dups_data["id_dup_percent"] = (
-                id_dups_data["id_dup_count"] / total_records
-            ) * 100
-
-            # Sort by count in descending order
-            id_dups_data = id_dups_data.sort_values(
-                ["id_dup_count", survey_id], ascending=[False, True]
-            )
-
-            # Create a list of columns to display
-            # Start with mandatory columns
-            id_display_columns = [survey_id, date, survey_key]
-
-            # Add user-selected display columns (if any)
-            for col in display_cols:
-                if col not in id_display_columns and col in id_dups_data.columns:
-                    id_display_columns.append(col)
-
-            # Insert the duplicate count and percentage
-            if "id_dup_count" not in id_display_columns:
-                id_display_columns.insert(1, "id_dup_count")
-            if "id_dup_percent" not in id_display_columns:
-                id_display_columns.insert(2, "id_dup_percent")
-
-            # Filter to ensure all columns exist in the dataframe
-            existing_columns = [
-                col for col in id_display_columns if col in id_dups_data.columns
-            ]
-
-            st.dataframe(
-                id_dups_data[existing_columns],
-                hide_index=True,
-                use_container_width=True,
-                column_config={
-                    "id_dup_count": st.column_config.Column(
-                        label=f"# of {survey_id} duplicates"
-                    ),
-                    "id_dup_percent": st.column_config.NumberColumn(
-                        label="% of total records", format="%.2f%%"
-                    ),
-                },
-            )
-
-    # Tab for selected variables duplicates
-    with tab2:
-        st.markdown("## Duplicate Entries for Selected Variables")
-
-        # Only allow selection if dup_cols is not empty
-        if dup_cols:
-            # Create dropdown for variable selection
-            selected_var = st.selectbox(
-                "Select variable to display duplicates for:",
-                options=dup_cols,
-                key="selected_var_duplicates",
-            )
-
-            # Display duplicates for the selected variable
-            if selected_var:
-                # Check if the selected variable has duplicates
-                if selected_var in columns_with_dups:
-                    # Filter by this specific column
-                    var_dups_data = data[
-                        data.duplicated(subset=[selected_var], keep=False)
-                    ]
-
-                    # Count duplicates by this column
-                    var_dups_data[f"{selected_var}_dup_count"] = var_dups_data.groupby(
-                        selected_var
-                    )[survey_key].transform("count")
-
-                    # Calculate percentage of total records
-                    var_dups_data[f"{selected_var}_dup_percent"] = (
-                        var_dups_data[f"{selected_var}_dup_count"] / total_records
-                    ) * 100
-
-                    # Sort by count in descending order
-                    var_dups_data = var_dups_data.sort_values(
-                        [f"{selected_var}_dup_count", selected_var],
-                        ascending=[False, True],
-                    )
-
-                    # Create list of columns to display
-                    # Start with the current variable and mandatory columns
-                    var_display_columns = [survey_id, selected_var, date, survey_key]
-
-                    # Add user-selected display columns
-                    for display_col in display_cols:
-                        if (
-                            display_col not in var_display_columns
-                            and display_col in var_dups_data.columns
-                        ):
-                            var_display_columns.append(display_col)
-
-                    # Insert the duplicate count and percentage
-                    var_display_columns.insert(2, f"{selected_var}_dup_count")
-                    var_display_columns.insert(3, f"{selected_var}_dup_percent")
-
-                    # Filter to ensure all columns exist in the dataframe
-                    existing_columns = [
-                        c for c in var_display_columns if c in var_dups_data.columns
-                    ]
-
-                    st.dataframe(
-                        var_dups_data[existing_columns],
-                        hide_index=True,
-                        use_container_width=True,
-                        column_config={
-                            f"{selected_var}_dup_count": st.column_config.Column(
-                                label=f"# of {selected_var} duplicates"
-                            ),
-                            f"{selected_var}_dup_percent": st.column_config.NumberColumn(
-                                label="% of total records", format="%.2f%%"
-                            ),
-                        },
-                    )
-                else:
-                    st.warning(f"No duplicates found for {selected_var}")
-        else:
-            st.info("Please select columns to check for duplicates in the settings.")
+    st.write("---")
+    column_duplicates_display(
+        data, survey_id, survey_key, dup_cols=dup_cols, setting_file=setting_file
+    )

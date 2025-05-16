@@ -1,472 +1,1018 @@
+import json
+import os
+
 import pandas as pd
-import plotly.express as px
+import seaborn as sns
 import streamlit as st
+
+from src.utils import load_check_settings, save_check_settings, trigger_save
 
 ##### Enumerator Statistics #####
 
 
-def enumerator_report(data, page_num) -> None:
-    """Generate enumerator report.
+@st.cache_data
+def load_default_enumerator_settings(setting_file: str, page_num: str) -> tuple:
+    """Load default settings for enumerator report.
+
+    Parameters
+    ----------
+    setting_file : str
+        Path to the settings file.
+    page_num : str
+        Page number for the report.
+
+
+    Returns
+    -------
+    tuple
+        Default settings for enumerator report.
+
+       date : str - date column name
+       formdef_version : str - form version column name
+       survey_id : str - survey ID column name
+       duration : str - duration column name
+       enumerator : str - enumerator column name
+       team : str - team column name
+       consent : str - consent column name
+       consent_vals : list - consent values
+       outcome : str - outcome column name
+       outcome_vals : list - outcome values
+    """
+    if setting_file and os.path.exists(setting_file):
+        default_settings = (
+            load_check_settings(settings_file=setting_file, check_name="enumerator")
+            or {}
+        )
+    else:
+        default_settings = {}
+    (
+        date,
+        formdef_version,
+        duration,
+        survey_id,
+        enumerator,
+        team,
+        consent,
+        consent_vals,
+        outcome,
+        outcome_vals,
+    ) = (
+        default_settings.get(
+            "date", st.session_state["config_pages"]["Survey Date"][page_num - 1]
+        ),
+        default_settings.get("formdef_version", None),
+        default_settings.get("duration", None),
+        default_settings.get(
+            "survey_id", st.session_state["config_pages"]["Survey ID"][page_num - 1]
+        ),
+        default_settings.get(
+            "enumerator", st.session_state["config_pages"]["Enumerator"][page_num - 1]
+        ),
+        default_settings.get("team", None),
+        default_settings.get("consent", None),
+        default_settings.get("consent_vals", None),
+        default_settings.get("outcome", None),
+        default_settings.get("outcome_vals", None),
+    )
+    return (
+        date,
+        formdef_version,
+        survey_id,
+        duration,
+        enumerator,
+        team,
+        consent,
+        consent_vals,
+        outcome,
+        outcome_vals,
+    )
+
+
+def enumerator_report_settings(data: str, setting_file: str, page_num: str) -> tuple:
+    """Load default settings for enumerator report.
+
+    Parameters
+    ----------
+    data : str
+        Path to the settings file.
+    setting_file : str
+        Path to the settings file.
+    page_num : str
+        Page number for the report.
+
+    Returns
+    -------
+    tuple
+        Default settings for enumerator report.
+
+       date : str - date column name
+       formdef_version : str - form version column name
+       survey_id : str - survey ID column name
+       duration : str - duration column name
+       enumerator : str - enumerator column name
+       team : str - team column name
+       consent : str - consent column name
+       consent_vals : list - consent values
+       outcome : str - outcome column name
+       outcome_vals : list - outcome values
+    """
+    with st.expander("settings", icon=":material/settings:"):
+        st.markdown("## Configure settings for enumerator report")
+        st.write("---")
+        survey_cols = data.columns
+        (
+            date,
+            formdef_version,
+            survey_id,
+            duration,
+            enumerator,
+            team,
+            consent,
+            consent_vals,
+            outcome,
+            outcome_vals,
+        ) = load_default_enumerator_settings(
+            setting_file=setting_file, page_num=page_num
+        )
+        uc1, uc2, uc3 = st.columns(3)
+        with st.container(border=True):
+            with uc1:
+                default_date_index = (
+                    survey_cols.get_loc(date) if date in survey_cols else None
+                )
+                date = st.selectbox(
+                    label="Date",
+                    options=data.columns,
+                    help="Column containing survey date",
+                    key="date_enumerator",
+                    index=default_date_index,
+                )
+            with uc2:
+                default_formdef_index = (
+                    survey_cols.get_loc(formdef_version)
+                    if formdef_version in survey_cols
+                    else None
+                )
+                formdef_version = st.selectbox(
+                    label="Form Version",
+                    options=data.columns,
+                    help="Column containing survey form version",
+                    key="formdef_version_enumerator",
+                    index=default_formdef_index,
+                )
+            with uc3:
+                default_survey_id_index = (
+                    survey_cols.get_loc(survey_id) if survey_id in survey_cols else None
+                )
+                survey_id = st.selectbox(
+                    label="Survey ID",
+                    options=data.columns,
+                    help="Column containing survey ID",
+                    key="survey_id_enumerator",
+                    index=default_survey_id_index,
+                )
+        with st.container(border=True):
+            mc1, mc2, mc3 = st.columns(3)
+            with mc1:
+                default_duration_index = (
+                    survey_cols.get_loc(duration) if duration in survey_cols else None
+                )
+                duration = st.selectbox(
+                    label="Duration",
+                    options=data.columns,
+                    help="Column containing survey duration",
+                    key="duration_enumerator",
+                    index=default_duration_index,
+                )
+            with mc2:
+                default_enumerator_index = (
+                    survey_cols.get_loc(enumerator)
+                    if enumerator in survey_cols
+                    else None
+                )
+                enumerator = st.selectbox(
+                    label="Enumerator",
+                    options=data.columns,
+                    help="Column containing survey enumerator",
+                    key="enumerator_enumerator",
+                    index=default_enumerator_index,
+                )
+            with mc3:
+                default_team_index = (
+                    survey_cols.get_loc(team) if team in survey_cols else None
+                )
+                team = st.selectbox(
+                    label="Team",
+                    options=data.columns,
+                    help="Column containing survey team",
+                    key="team_enumerator",
+                    index=default_team_index,
+                )
+        bc1, _, bc2 = st.columns(3)
+        with bc1, st.container(border=True):
+            default_consent_index = (
+                survey_cols.get_loc(consent) if consent in survey_cols else None
+            )
+            consent = st.selectbox(
+                label="Consent",
+                options=survey_cols,
+                help="Column containing survey consent",
+                key="consent_enumerator",
+                index=default_consent_index,
+            )
+            if consent:
+                consent_options = data[consent].unique().tolist()
+                consent_vals = st.multiselect(
+                    label="Consent value(s)",
+                    options=consent_options,
+                    help="Value(s) indicating valid consent",
+                    key="consent_val_enumerator",
+                    default=consent_vals,
+                )
+        with bc2, st.container(border=True):
+            default_outcome_index = (
+                survey_cols.get_loc(outcome) if outcome in survey_cols else None
+            )
+            outcome = st.selectbox(
+                label="Outcome",
+                options=survey_cols,
+                help="Column containing survey outcome",
+                key="outcome_enumerator",
+                index=default_outcome_index,
+            )
+            if outcome:
+                outcome_options = data[outcome].unique().tolist()
+                outcome_vals = outcome_vals if outcome_vals in outcome_options else None
+                outcome_vals = st.multiselect(
+                    label="Outcome value(s)",
+                    options=outcome_options,
+                    help="Value(s) indicating completed survey",
+                    key="outcome_val_enumerator",
+                    default=outcome_vals,
+                )
+
+        # define a save settings button
+        st.button(
+            label="Save settings",
+            on_click=save_check_settings,
+            key="save_enumerator_settings",
+            kwargs={
+                "settings_file": setting_file,
+                "check_name": "enumerator",
+                "check_settings": {
+                    "date": date,
+                    "formdef_version": formdef_version,
+                    "survey_id": survey_id,
+                    "duration": duration,
+                    "enumerator": enumerator,
+                    "team": team,
+                    "consent": consent,
+                    "consent_vals": consent_vals,
+                    "outcome": outcome,
+                    "outcome_vals": outcome_vals,
+                },
+            },
+            help="Save settings for enumerator report",
+        )
+
+    return (
+        date,
+        formdef_version,
+        survey_id,
+        duration,
+        enumerator,
+        team,
+        consent,
+        consent_vals,
+        outcome,
+        outcome_vals,
+    )
+
+
+@st.cache_data
+def compute_enumerator_overview(
+    data: pd.DataFrame, date: str, enumerator: str, team: str
+) -> tuple:
+    """Compute enumerator overview metrics.
 
     Parameters
     ----------
     data : pd.DataFrame
         DataFrame containing survey data.
-    page_num : int
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+    team : str
+        Team column name.
 
     Returns
     -------
-    None
+    tuple:
+        Overview metrics for enumerators.
     """
-    #### Temp Remove Later
-    analyze_backcheck = False
-    backcheck_data = None
-    merged_df = None
-
-    with st.expander("settings", icon=":material/settings:"):
-        st.markdown("## Configure settings for enumerator report")
-
-        survey_cols = data.columns
-
-        st.write("---")
-        st.markdown("### Select columns to include in summary report")
-
-        meta_col, enum_col, agg_col = st.columns(spec=3, border=True)
-
-        with meta_col:
-            duration = st.selectbox(
-                "Duration",
-                options=survey_cols,
-                help="Column containing survey duration",
-                key="duration_enumerator",
-                index=None,
-            )
-            if duration:
-                duration_in_minutes = st.toggle("Calculate duration in minutes")
-
-            date = st.selectbox(
-                "Date",
-                options=survey_cols,
-                help="Column containing survey date",
-                key="date_enumerator",
-                index=None,
-            )
-            formversion = st.selectbox(
-                "Form Version",
-                options=survey_cols,
-                help="Column containing survey form version",
-                key="formversion_enumerator",
-                index=None,
-            )
-
-        with enum_col:
-            by = st.selectbox(
-                "Group by",
-                options=survey_cols,
-                help="Column to group summary report by",
-                key="groupby_enumerator",
-                index=None,
-            )
-            enumerator = st.selectbox(
-                "Enumerator",
-                options=survey_cols,
-                help="Column containing survey enumerator",
-                key="enumerator_enumerator",
-                index=None,
-            )
-            team = st.selectbox(
-                "Team",
-                options=survey_cols,
-                help="Column containing survey team",
-                key="team_enumerator",
-                index=None,
-            )
-
-        with agg_col:
-            survey_id = st.selectbox(
-                "Survey ID",
-                options=survey_cols,
-                help="Column containing survey ID",
-                key="surveyid_enumerator",
-                index=None,
-            )
-            survey_key = st.selectbox(
-                "Survey Key",
-                options=survey_cols,
-                help="Column containing survey key",
-                key="surveykey_enumerator",
-                index=None,
-            )
-
-            consent = st.selectbox(
-                "Consent",
-                options=survey_cols,
-                help="Column containing survey consent",
-                key="consent_enumerator",
-                index=None,
-            )
-
-            if consent:
-                consent_options = data[consent].unique().tolist()
-                consent_val = st.multiselect(
-                    "Consent value(s)",
-                    options=consent_options,
-                    help="Value(s) indicating valid consent",
-                    key="consent_val_enumerator",
-                )
-
-            outcome = st.selectbox(
-                "Outcome",
-                options=survey_cols,
-                help="Column containing survey outcome",
-                key="outcome_enumerator",
-                index=None,
-            )
-
-            if outcome:
-                outcome_options = data[outcome].unique().tolist()
-                outcome_val = st.multiselect(  # noqa: F841
-                    "Outcome value(s)",
-                    options=outcome_options,
-                    help="Value(s) indicating completed survey",
-                    key="outcome_val_enumerator",
-                )
-
-        st.write("---")
-        st.markdown("### Tracking Options")
-
-        # number of interviews expected
-        total_goal = st.number_input(  # noqa: F841
-            "Total goal",
-            min_value=0,
-            help="Total number of interviews expected",
-            key="total_goal_enumerator",
-        )
-
-        # define a save settings button
-        save_settings = st.button("Save settings", key="save_settings_enumerator")  # noqa: F841
-
-    # Check that required options have been selected. If not, display a info message
-    if not all(
-        [
-            duration,
-            date,
-            formversion,
-            by,
-            enumerator,
-            team,
-            survey_id,
-            survey_key,
-            consent,
-            outcome,
-        ]
-    ):
-        st.info("Please select all required options to generate the enumerator report")
-        return
-
-    # quick overview metrics
-    st.subheader("Overview")
-    data[date] = pd.to_datetime(data[date])
     data = data.sort_values(by=[enumerator, date])
-    data["submission_date_format"] = data[date].dt.strftime("%b %d, %Y")
+    data[date] = data[date].dt.strftime("%b %d, %Y")
+
+    all_submissions = len(data)
+
+    # Calculate daily submissions
+    data["TOKEN KEY"] = data.index
     daily_submissions_sum = (
-        data.groupby(["submission_date_format", enumerator])[survey_key]
+        data.groupby([date, enumerator])["TOKEN KEY"]
         .count()
         .rename("count")
         .reset_index()
     )
     active_date_cut_off = pd.to_datetime("today").date() - pd.Timedelta(weeks=1)
-    daily_submissions_sum["active"] = pd.to_datetime(
-        data["submission_date_format"]
-    ) > pd.to_datetime(active_date_cut_off)
+    daily_submissions_sum["active"] = pd.to_datetime(data[date]) > pd.to_datetime(
+        active_date_cut_off
+    )
     num_active_enumerators = daily_submissions_sum[daily_submissions_sum["active"]][
         enumerator
-    ].unique()
+    ].nunique()
 
-    m1, m2, m3 = st.columns(3)
     num_enumerators = data[enumerator].nunique()
     num_teams = data[team].nunique() if team else "n/a"
     min_submissions = daily_submissions_sum["count"].min()
     max_submissions = daily_submissions_sum["count"].max()
     avg_submissions = int(daily_submissions_sum["count"].mean())
 
-    pct_active_enumerators = (
-        f"{(len(num_active_enumerators) / num_enumerators) * 100:.0f}%"
+    pct_active_enumerators = f"{(num_active_enumerators / num_enumerators) * 100:.0f}%"
+
+    return (
+        all_submissions,
+        num_active_enumerators,
+        num_enumerators,
+        num_teams,
+        min_submissions,
+        max_submissions,
+        avg_submissions,
+        pct_active_enumerators,
     )
 
-    m1.metric("Total number of enumerators", num_enumerators)
-    m2.metric("Total number of teams", num_teams)
-    m3.metric("Active enumerators (past 1 week)", pct_active_enumerators)
 
-    n1, n2, n3 = st.columns(3)
-    n1.metric("Minimum number of submissions", min_submissions)
-    n2.metric("Highest number of submissions", max_submissions)
-    n3.metric("Average number of submissions", avg_submissions)
+def display_enumerator_overview(
+    data: pd.DataFrame, date: str, enumerator: str, team: str
+) -> None:
+    """Display enumerator overview metrics.
 
-    # Enumerator summary table
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing survey data.
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+    team : str
+        Team column name.
+
+    Returns
+    -------
+        None
+    """
+    st.write("---")
+    st.markdown("## Enumerator Overview")
+    (
+        all_submissions,
+        num_active_enumerators,
+        num_enumerators,
+        num_teams,
+        min_submissions,
+        max_submissions,
+        avg_submissions,
+        pct_active_enumerators,
+    ) = compute_enumerator_overview(
+        data=data, date=date, enumerator=enumerator, team=team
+    )
+
+    tc1, tc2, tc3, tc4 = st.columns(4, border=True)
+    tc1.metric("Total number of enumerators", num_enumerators)
+    tc2.metric("Total number of teams", num_teams)
+    tc3.metric("Active enumerators (past 7 days)", num_active_enumerators)
+    tc4.metric("Percentage of active enumerator (past 7 days)", pct_active_enumerators)
+
+    bc1, bc2, bc3, bc4 = st.columns(4, border=True)
+    bc1.metric("Minimum number of submissions", min_submissions)
+    bc2.metric("Highest number of submissions", max_submissions)
+    bc3.metric("Average number of submissions", avg_submissions)
+    bc4.metric("Total number of submissions", all_submissions)
+
+
+@st.cache_data
+def compute_enumerator_missing_table(
+    data: pd.DataFrame, missing_setting_file: str, enumerator: str
+) -> pd.DataFrame:
+    """Compute enumerator missing table.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing survey data.
+    settings_file : str
+        Path to the settings file.
+    enumerator : str
+        Enumerator column name.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing enumerator missing table.
+    miss_cols : list
+        List of missing label columns.
+    """
+    try:
+        with open(missing_setting_file) as f:
+            settings_dict = json.load(f)
+            missing_codes = pd.DataFrame(settings_dict)
+
+    except FileNotFoundError:
+        # create new dataframe with default values
+        missing_codes = None
+
+    data["% Null values"] = data.isnull().mean(axis=1)
+
+    miss_cols = ["% Null values"]
+    if missing_codes:
+        for i in range(len(missing_codes)):
+            miss_label = missing_codes["Missing Labels"][i]
+            miss_codes = missing_codes["Missing Codes"][i].split(",")
+            data[f"% {miss_label}"] = data[enumerator].isin(miss_codes).astype(int)
+
+            miss_cols.append(f"% {miss_label}")
+
+    mv_data = data[[enumerator] + miss_cols].copy(deep=True)
+    mv_data = (
+        mv_data.groupby(by=enumerator, dropna=False, as_index=False)
+        .agg({col: "mean" for col in miss_cols})
+        .reset_index(drop=True)
+        .reset_index(drop=True)
+    )
+
+    return mv_data
+
+
+@st.cache_data
+def compute_enumerator_summary(
+    data: pd.DataFrame,
+    missing_setting_file: str,
+    date: str,
+    enumerator: str,
+    formdef_version: str | None,
+    duration: str | None,
+    consent: str | None,
+    consent_vals: str | None,
+    outcome: str | None,
+    outcome_vals: str | None,
+) -> pd.DataFrame:
+    """Compute enumerator summary table.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing survey data.
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+    formdef_version : str | None
+        Form version column name.
+    duration : str | None
+        Duration column name.
+    consent : str | None
+        Consent column name.
+    consent_vals : str | None
+        Consent values.
+    outcome : str | None
+        Outcome column name.
+    outcome_vals : str | None
+        Outcome values.
+
+    Returns
+    -------
+    Tuple:
+    pd.DataFrame
+        DataFrame containing enumerator summary.
+    """
+    df = data.copy()
+    df[date] = df[date].dt.strftime("%b %d, %Y")
+
     summary_df = (
-        data.groupby(enumerator)
+        df.groupby(by=enumerator, dropna=False, as_index=False)
         .agg(
-            first_submission=("submission_date_format", "first"),
-            last_submission=("submission_date_format", "last"),
-            total_submissions=(survey_key, "count"),
-            total_days_worked=("submission_date_format", "nunique"),
+            {
+                date: ["min", "max", "count", "nunique"],
+            }
         )
-        .reset_index()
+        .reset_index(drop=True)
+        .droplevel(0, axis=1)
         .rename(
             columns={
-                "first_submission": "first date",
-                "last_submission": "last date",
-                "total_submissions": "# of submissions",
-                "total_days_worked": "# of days worked",
+                "min": "first submission",
+                "max": "last submission",
+                "count": "# submissions",
+                "nunique": "# unique dates",
+            }
+        )
+    )
+    summary_df = summary_df.rename(columns={summary_df.columns[0]: enumerator})
+
+    today = pd.to_datetime("today").date()
+    start_of_week = today - pd.Timedelta(days=today.weekday())
+    start_of_month = today.replace(day=1)
+
+    df["submitted_today"] = df[date] == today.strftime("%b %d, %Y")
+    df["submitted_this_week"] = df[date] >= start_of_week.strftime("%b %d, %Y")
+    df["submitted_this_month"] = df[date] >= start_of_month.strftime("%b %d, %Y")
+
+    lagged_df = (
+        df.groupby(by=enumerator, dropna=False, as_index=False)
+        .agg(
+            {
+                "submitted_today": "sum",
+                "submitted_this_week": "sum",
+                "submitted_this_month": "sum",
+            }
+        )
+        .reset_index(drop=True)
+        .rename(
+            columns={
+                "submitted_today": "# submissions today",
+                "submitted_this_week": "# submissions this week",
+                "submitted_this_month": "# submissions this month",
             }
         )
     )
 
-    # Calculate number of submissions this month, week, and day
-    today = pd.to_datetime("today").normalize()
-    start_of_month = today.replace(day=1)
-    start_of_week = today - pd.Timedelta(days=today.weekday())
-
-    data["submission_date_format"] = pd.to_datetime(data["submission_date_format"])
-    summary_df["# of submissions (today)"] = (
-        data[data["submission_date_format"] == today.strftime("%b %d, %Y")]
-        .groupby(enumerator)[survey_key]
-        .count()
-        .reindex(summary_df[enumerator])
-        .fillna(0)
-        .astype(int)
-        .values
-    )
-    summary_df["# of submissions (this week)"] = (
-        data[data["submission_date_format"] >= start_of_week]
-        .groupby(enumerator)[survey_key]
-        .count()
-        .reindex(summary_df[enumerator])
-        .fillna(0)
-        .astype(int)
-        .values
-    )
-    summary_df["# of submissions (this month)"] = (
-        data[data["submission_date_format"] >= start_of_month]
-        .groupby(enumerator)[survey_key]
-        .count()
-        .reindex(summary_df[enumerator])
-        .fillna(0)
-        .astype(int)
-        .values
-    )
-
-    # convert duration to minutes if necessary
-    if duration_in_minutes:
-        data[duration] = data[duration].apply(lambda x: round(x / 60, 1))
-
-    summary_df["minimum duration"] = (
-        data.groupby(enumerator)[duration].min().reindex(summary_df[enumerator]).values
-    )
-    summary_df["median duration"] = (
-        data.groupby(enumerator)[duration]
-        .median()
-        .reindex(summary_df[enumerator])
-        .values
-    )
-    summary_df["mean duration"] = (
-        data.groupby(enumerator)[duration].mean().reindex(summary_df[enumerator]).values
-    )
-    summary_df["maximum duration"] = (
-        data.groupby(enumerator)[duration].max().reindex(summary_df[enumerator]).values
-    )
-
-    # Calculate percentage of missing values for each enumerator
-    def calculate_missing_values(data, data_cols, index_cols):
-        max_vals_count = data.shape[0] * len(data_cols)
-        missing_values_df = data.pivot_table(
-            index=index_cols, values=data_cols, aggfunc=lambda x: x.isna().sum()
-        ).reset_index()
-        missing_values_df["missing"] = missing_values_df.iloc[:, len(index_cols) :].sum(
-            axis=1
-        )
-        missing_values_df["% missing"] = (
-            missing_values_df["missing"] / max_vals_count * 100
-        ).apply(lambda x: f"{x:.0f}%")
-        return missing_values_df[index_cols + ["% missing"]]
-
-    index_cols = [enumerator]
-    data_cols = [x for x in data.columns if x != enumerator]
-    missing_values_df = calculate_missing_values(data, data_cols, index_cols)
-
-    # Merge missing values percentage with summary_df
-    summary_df = summary_df.merge(missing_values_df, on=enumerator, how="left")
-
-    # Flag outdated form versions
-    data[formversion] = data[formversion].astype(float)
-    current_formversion = max([int(c) for c in data[formversion].unique()])
-    current_formversion_date = pd.to_datetime(
-        "20" + str(current_formversion), format="%Y%m%d%H%M"
-    )
-    data["current_formversion_date"] = current_formversion_date
-    data["outdated_form_version"] = (data[date] < current_formversion_date) & (
-        data[formversion] < current_formversion
-    )
-
-    outdated_form_versions_df = data[data["outdated_form_version"]]
-    outdated_formversion_summary = (
-        outdated_form_versions_df.groupby(enumerator)[survey_key]
-        .count()
-        .rename("outdated forms")
-        .reset_index()
-    )
     summary_df = pd.merge(
-        summary_df, outdated_formversion_summary, on=enumerator, how="left"
-    ).fillna(0)
-    summary_df["% outdated form versions"] = (
-        (summary_df["outdated forms"] / summary_df["# of submissions"]) * 100
-    ).apply(lambda x: f"{x:.0f}%")
-    summary_df = summary_df.drop(columns="outdated forms")
+        summary_df,
+        lagged_df,
+        how="left",
+        left_on=enumerator,
+        right_on=enumerator,
+    )
 
-    st.dataframe(summary_df, hide_index=True)
+    enumerator_missing_df = compute_enumerator_missing_table(
+        data=df, missing_setting_file=missing_setting_file, enumerator=enumerator
+    )
 
+    summary_df = pd.merge(
+        summary_df,
+        enumerator_missing_df,
+        how="left",
+        left_on=enumerator,
+        right_on=enumerator,
+    )
+
+    if duration:
+        duration_df = df.groupby(by=enumerator, dropna=False, as_index=False).agg(
+            {duration: ["min", "mean", "median", "max"]}
+        )
+        duration_df.columns = [
+            enumerator,
+            "min duration",
+            "mean duration",
+            "median duration",
+            "max duration",
+        ]
+        summary_df = pd.merge(
+            summary_df,
+            duration_df,
+            how="left",
+            left_on=enumerator,
+            right_on=enumerator,
+        )
+
+    if formdef_version:
+        formdef_outdated = df[[date, formdef_version]].copy(deep=True)
+        formdef_outdated = (
+            formdef_outdated.groupby(by=date, dropna=False, as_index=False)
+            .agg({formdef_version: "max"})
+            .reset_index()
+            .rename(columns={formdef_version: "latest daily form version"})
+        )
+        df = pd.merge(
+            df,
+            formdef_outdated,
+            how="left",
+            left_on=[date],
+            right_on=[date],
+        )
+        df["outdated_form_version"] = (
+            df[formdef_version] != df["latest daily form version"]
+        )
+        formdef_outdated_df = (
+            df.groupby(by=enumerator, dropna=False, as_index=False)
+            .outdated_form_version.agg({"# of outdated form versions": "sum"})
+            .reset_index(drop=True)
+        )
+
+        formdef_df = (
+            df.groupby(by=enumerator, dropna=False, as_index=False)
+            .formdef_version.agg({formdef_version: ["nunique", "max"]})
+            .reset_index(drop=True)
+        )
+        formdef_df.columns = [
+            enumerator,
+            "# form versions",
+            "latest form version",
+        ]
+        summary_df.merge(
+            formdef_df,
+            how="left",
+            left_on=enumerator,
+            right_on=enumerator,
+        )
+        summary_df = pd.merge(
+            summary_df,
+            formdef_outdated_df,
+            how="left",
+            left_on=enumerator,
+            right_on=enumerator,
+        )
+        latest_enum_formversion = (
+            df.groupby(by=enumerator, dropna=False, as_index=False)
+            .formdef_version.agg({"last form version": "max"})
+            .reset_index(drop=True)
+        )
+
+        summary_df = pd.merge(
+            summary_df,
+            latest_enum_formversion,
+            how="left",
+            left_on=enumerator,
+            right_on=enumerator,
+        )
+    if consent and consent_vals:
+        df["consent_granted_agg_col"] = df[consent].isin(consent_vals).astype(int)
+        consent_df = (
+            df.groupby(by=enumerator, dropna=False, as_index=False)
+            .consent_granted_agg_col.agg({"% consent": "mean"})
+            .reset_index(drop=True)
+        )
+        summary_df = pd.merge(
+            summary_df,
+            consent_df,
+            how="left",
+            left_on=enumerator,
+            right_on=enumerator,
+        )
+    if outcome and outcome_vals:
+        df["completed_survey_agg_col"] = df[outcome].isin(outcome_vals).astype(int)
+        outcome_df = (
+            df.groupby(by=enumerator, dropna=False, as_index=False)
+            .completed_survey_agg_col.agg({"% completed survey": "mean"})
+            .reset_index(drop=True)
+        )
+        summary_df = pd.merge(
+            summary_df,
+            outcome_df,
+            how="left",
+            left_on=enumerator,
+            right_on=enumerator,
+        )
+
+    return summary_df
+
+
+def display_enumerator_summary(
+    data: pd.DataFrame,
+    missing_setting_file: str,
+    date: str,
+    enumerator: str,
+    formdef_version: str | None,
+    duration: str | None,
+    consent: str | None,
+    consent_vals: str | None,
+    outcome: str | None,
+    outcome_vals: str | None,
+) -> pd.DataFrame:
+    """Display enumerator summary table.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing summary data frame.
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+    formdef_version : str | None
+        Form version column name.
+    duration : str | None
+        Duration column name.
+    consent : str | None
+        Consent column name.
+    consent_vals : str | None
+        Consent values.
+    outcome : str | None
+        Outcome column name.
+    outcome_vals : str | None
+        Outcome values.
+    """
+    st.write("---")
+    st.markdown("## Enumerator Summary")
+    summary_df = compute_enumerator_summary(
+        data=data,
+        missing_setting_file=missing_setting_file,
+        date=date,
+        enumerator=enumerator,
+        formdef_version=formdef_version,
+        duration=duration,
+        consent=consent,
+        consent_vals=consent_vals,
+        outcome=outcome,
+        outcome_vals=outcome_vals,
+    )
+
+    cmap = sns.light_palette("pink", as_cmap=True)
+
+    perc_cols = [col for col in summary_df.columns if col.startswith("%")]
+    summary_df = summary_df.style.format(subset=perc_cols, formatter="{:.2%}")
+    num_cols = [col for col in summary_df.columns if col.startswith("#")]
+    summary_df = summary_df.format(
+        subset=num_cols,
+        formatter="{:,.0f}",
+    )
+    if duration:
+        summary_df = summary_df.format(
+            subset=["min duration", "mean duration", "median duration", "max duration"],
+            formatter="{:,.2f} sec",
+        ).background_gradient(
+            subset=["min duration", "mean duration", "median duration", "max duration"],
+            cmap=cmap,
+        )
+    # set background gradient for percentage and numeric columns
+    summary_df = summary_df.background_gradient(
+        subset=perc_cols,
+        cmap=cmap,
+    ).background_gradient(
+        subset=num_cols,
+        cmap=cmap,
+    )
+    st.dataframe(summary_df, hide_index=True, use_container_width=True)
+
+
+@st.cache_data
+def compute_enumerator_productivity(
+    data: pd.DataFrame, date: str, enumerator: str, period: str, weekstartday: str
+) -> pd.DataFrame:
+    """Compute enumerator productivity.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing survey data.
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+    period : str
+        Period for productivity calculation.
+    weekstartday : str
+        Start day of the week.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing enumerator productivity.
+    """
+    prod_df = data.copy()
+    # convert datetime to date
+    prod_df[date] = pd.to_datetime(prod_df[date])
+    if period == "Daily":
+        prod_df["TIME PERIOD"] = prod_df[date].dt.to_period("D")
+    elif period == "Weekly":
+        prod_df["TIME PERIOD"] = prod_df[date].dt.to_period(f"W-{weekstartday}")
+    elif period == "Monthly":
+        prod_df["TIME PERIOD"] = prod_df[date].dt.to_period("M")
+
+    # generate productivity table
+    prod_df["TOKEN KEY"] = prod_df.index
+    prod_res = (
+        prod_df.groupby(["TIME PERIOD", enumerator], dropna=False, as_index=False).agg(
+            {"TOKEN KEY": "count"}
+        )
+    ).rename(columns={"TOKEN KEY": "submissions"})
+
+    # pivot table so enumerators dates values are columns
+    prod_res = (
+        prod_res.pivot(
+            index=[enumerator],
+            columns=["TIME PERIOD"],
+            values="submissions",
+        )
+        .reset_index(drop=False)
+        .fillna(0)
+    )
+
+    return prod_res
+
+
+def display_enumerator_productivity(
+    data: pd.DataFrame,
+    date: str,
+    enumerator: str,
+    setting_file: str,
+) -> None:
+    """Display enumerator productivity.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing survey data.
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+
+    Returns
+    -------
+        None
+    """
+    default_setting = (
+        load_check_settings(settings_file=setting_file, check_name="enumerator") or {}
+    )
+    st.write("---")
+    st.markdown("## Enumerator Productivity")
     # Toggle for days, weeks, or months view
     st.markdown("##### Productivity")
+    view_option_list = ("Daily", "Weekly", "Monthly")
+    default_view = default_setting.get("view_option", "Daily")
+    default_view_index = view_option_list.index(default_view)
     view_option = st.radio(
-        "Select View:",
-        ("Days", "Weeks", "Months"),
-        index=0,
+        label="Select View:",
+        options=view_option_list,
+        index=default_view_index,
         key="view_option_enumerator",
         horizontal=True,
+        on_change=trigger_save,
+        kwargs={"state_name": "view_option_enumerator_save"},
     )
-
-    # Create a new column for the selected view option
-    if view_option == "Days":
-        data["view_period"] = data[date].dt.strftime("%d-%m-%Y")
-        view_summary_df = (
-            data.groupby([enumerator, "view_period"])
-            .agg(total_submissions=(survey_key, "count"))
-            .reset_index()
+    if (
+        "view_option_enumerator_save" in st.session_state
+    ) and st.session_state.view_option_enumerator_save:
+        save_check_settings(
+            settings_file=setting_file,
+            check_name="enumerator",
+            check_settings={"view_option": view_option},
         )
-    elif view_option == "Weeks":
-        week_start_day_options = st.selectbox(
+        st.session_state.view_option_enumerator_save = False
+
+    weekstartday = "SAT"
+    if view_option == "Weekly":
+        day_list = (
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday",
+        )
+        default_weekstartday_sel = default_setting.get("weekstartday", "Monday")
+        default_weekstartday_sel_index = day_list.index(default_weekstartday_sel)
+        weekstartday_sel = st.selectbox(
             label="Select the first day of the week",
-            options=[
-                "Monday",
-                "Tuesday",
-                "Wednesday",
-                "Thursday",
-                "Friday",
-                "Saturday",
-                "Sunday",
-            ],
-            index=0,
+            options=day_list,
+            index=default_weekstartday_sel_index,
             key="project_week_start_day",
+            on_change=trigger_save,
+            kwargs={"state_name": "project_week_start_day_enumerator_save"},
         )
-        week_start_day = "W-" + str.upper(week_start_day_options[:3])
-        week_start_end_dict = {
-            "W-SUN": "W-SAT",
-            "W-MON": "W-SUN",
-            "W-TUE": "W-MON",
-            "W-WED": "W-TUE",
-            "W-THU": "W-WED",
-            "W-FRI": "W-THU",
-            "W-SAT": "W-FRI",
-        }
-        week_end_day = week_start_end_dict[week_start_day]
+        if (
+            "project_week_start_day_enumerator_save" in st.session_state
+        ) and st.session_state.project_week_start_day_enumerator_save:
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="enumerator",
+                check_settings={"weekstartday": weekstartday_sel},
+            )
+            st.session_state.project_week_start_day_enumerator_save = False
+        if weekstartday_sel:
+            weekstart_adjust_dict = {
+                "Monday": "SUN",
+                "Tuesday": "MON",
+                "Wednesday": "TUE",
+                "Thursday": "WED",
+                "Friday": "THU",
+                "Saturday": "FRI",
+                "Sunday": "SAT",
+            }
+            weekstartday = weekstart_adjust_dict[weekstartday_sel]
+    productivity_df = compute_enumerator_productivity(
+        data=data,
+        date=date,
+        enumerator=enumerator,
+        period=view_option,
+        weekstartday=weekstartday,
+    )
+    cmap = sns.light_palette("pink", as_cmap=True)
+    format_cols = [col for col in productivity_df.columns if col not in [enumerator]]
+    productivity_df = productivity_df.style.format(
+        subset=format_cols,
+        formatter="{:,.0f}",
+    ).background_gradient(
+        subset=format_cols,
+        cmap=cmap,
+    )
+    st.dataframe(productivity_df, hide_index=True, use_container_width=True)
 
-        data["view_period"] = pd.to_datetime(
-            data[date].dt.strftime("%d-%m-%Y"), dayfirst=True
-        )
-        data["view_period"] = (
-            data["view_period"].dt.to_period(week_end_day).dt.start_time
-        )
 
-        first_submission_date = min([d.date() for d in data["view_period"].unique()])
-        last_submission_date = max([d.date() for d in data["view_period"].unique()])
+@st.cache_data
+def compute_enumerator_statistics(
+    data: pd.DataFrame,
+    date: str,
+    enumerator: str,
+    statscols: list[str],
+    stats: list[str],
+) -> pd.DataFrame:
+    """Compute enumerator statistics.
 
-        first_submission_week_date = (
-            pd.to_datetime(first_submission_date)
-            .to_period(week_end_day)
-            .to_timestamp()
-            .date()
-        )
-        last_submission_week_date = (
-            pd.to_datetime(last_submission_date)
-            .to_period(week_end_day)
-            .to_timestamp()
-            .date()
-        )
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing survey data.
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+    statscols : list[str]
+        List of columns to compute statistics on.
+    stats : list[str]
+        List of statistics to compute.
 
-        starting_week_dates = pd.date_range(
-            start=first_submission_week_date,
-            end=last_submission_week_date,
-            freq=week_start_day,
-        )
-
-        starting_week_dates_dict = {}
-        enum_list = [c for c in data[enumerator].unique()]
-        for d in starting_week_dates:
-            starting_week_dates_dict[d] = enum_list
-
-        starting_week_dates_df = pd.DataFrame(
-            starting_week_dates_dict.items(), columns=["view_period", enumerator]
-        )
-        enum_list_df = pd.DataFrame(starting_week_dates_df[enumerator].explode())
-        starting_week_dates_df = pd.merge(
-            enum_list_df,
-            starting_week_dates_df["view_period"],
-            left_index=True,
-            right_index=True,
-        )
-
-        view_summary_df = (
-            data.groupby([enumerator, "view_period"])
-            .agg(total_submissions=(survey_key, "count"))
-            .reset_index()
-        )
-        view_summary_df = pd.merge(
-            starting_week_dates_df,
-            view_summary_df,
-            on=["enumerator", "view_period"],
-            how="left",
-        ).fillna(0)
-        view_summary_df["view_period"] = pd.to_datetime(
-            view_summary_df["view_period"]
-        ).dt.strftime("%d-%m-%Y")
-
-    else:
-        data["view_period"] = data[date].dt.strftime("%b-%Y")
-        view_summary_df = (
-            data.groupby([enumerator, "view_period"])
-            .agg(total_submissions=(survey_key, "count"))
-            .reset_index()
-        )
-
-    # create a pivot table for the view summary
-    view_summary_pivot = view_summary_df.pivot_table(
-        index=enumerator,
-        columns="view_period",
-        values="total_submissions",
-        fill_value=0,
-    ).reset_index()
-    view_summary_pivot.insert(
-        1, "Total submissions", view_summary_pivot.sum(axis=1, numeric_only=True)
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing enumerator statistics.
+    """
+    stats_df = data[[enumerator] + statscols].copy(deep=True)
+    stats_dict = {col: stats for col in statscols}
+    stats_res = stats_df.groupby(by=enumerator, dropna=False, as_index=False).agg(
+        stats_dict
     )
 
-    # Display view summary
-    st.dataframe(view_summary_pivot, hide_index=True, use_container_width=True)
+    return stats_res
 
+
+def display_enumerator_statistics(
+    data: pd.DataFrame,
+    date: str,
+    enumerator: str,
+    setting_file: str,
+) -> None:
+    """Display enumerator statistics.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing survey data.
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+    statscols : list[str]
+        List of columns to compute statistics on.
+    stats : list[str]
+        List of statistics to compute.
+
+    Returns
+    -------
+        None
+    """
+    st.write("---")
+    st.markdown("## Enumerator Statistics")
     # create enumerator statistics
-
+    default_setting = (
+        load_check_settings(settings_file=setting_file, check_name="enumerator") or {}
+    )
     st.markdown("##### Statistics")
     s1, s2 = st.columns(2)
     with s1:
-        selected_columns = st.multiselect(
-            "Select columns:",
+        default_statscols = default_setting.get("statscols", None)
+        statscols = st.multiselect(
+            label="Select columns:",
             options=data.select_dtypes("number").columns,
-            default=duration,
+            default=default_statscols,
             help="Select columns to include in statistics",
             key="selected_columns_enumerator",
+            on_change=trigger_save,
+            kwargs={"state_name": "selected_columns_enumerator_save"},
         )
+        if (
+            "selected_columns_enumerator_save" in st.session_state
+        ) and st.session_state.selected_columns_enumerator_save:
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="enumerator",
+                check_settings={"statscols": statscols},
+            )
+            st.session_state.selected_columns_enumerator_save = False
     with s2:
-        statistics_options = st.multiselect(
+        default_stats = default_setting.get("stats", ["count", "mean"])
+        stats = st.multiselect(
             "Select statistics:",
             options=[
                 "count",
@@ -478,469 +1024,352 @@ def enumerator_report(data, page_num) -> None:
                 "25th percentile",
                 "75th percentile",
             ],
-            default=["count", "min", "mean", "max"],
+            default=default_stats,
             help="Select statistics to calculate",
             key="statistics_options_enumerator",
+            on_change=trigger_save,
+            kwargs={"state_name": "statistics_options_enumerator_save"},
         )
-    if selected_columns and statistics_options:
-        try:
-            stats_options_list = {
-                "count": "count",
-                "min": "min",
-                "mean": "mean",
-                "median": "median",
-                "max": "max",
-                "std": "std",
-                "25th percentile": pd.NamedAgg(
-                    column="25th percentile", aggfunc=lambda x: x.quantile(0.25)
-                ),
-                "75th percentile": pd.NamedAgg(
-                    column="75th percentile", aggfunc=lambda x: x.quantile(0.75)
-                ),
+        if (
+            "statistics_options_enumerator_save" in st.session_state
+        ) and st.session_state.statistics_options_enumerator_save:
+            save_check_settings(
+                settings_file=st.session_state["settings_file"],
+                check_name="enumerator",
+                check_settings={"stats": stats},
+            )
+            st.session_state.statistics_options_enumerator_save = False
+    if statscols:
+        stats_df = compute_enumerator_statistics(
+            data=data,
+            date=date,
+            enumerator=enumerator,
+            statscols=statscols,
+            stats=stats,
+        )
+        cmap = sns.light_palette("pink", as_cmap=True)
+        # apply formatting to the statistics DataFrame
+        stats_df = stats_df.style.format(
+            subset=statscols,
+            formatter="{:,.2f}",
+        ).background_gradient(
+            subset=statscols,
+            cmap=cmap,
+        )
+
+        st.dataframe(stats_df, hide_index=True, use_container_width=True)
+    else:
+        st.info(
+            "No columns selected for statistics calculation.", icon=":material/info:"
+        )
+
+
+def compute_enumerator_statistics_overtime(
+    data: pd.DataFrame,
+    date: str,
+    enumerator: str,
+    statscol: list[str],
+    stat: list[str],
+    period: str,
+    weekstartday: str,
+) -> pd.DataFrame:
+    """Compute enumerator statistics over time.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing survey data.
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+    statscol : list[str]
+        List of columns to compute statistics on.
+    stat : list[str]
+        List of statistics to compute.
+    time_period : str
+        Time period for statistics calculation.
+    weekstartday : str
+        Start day of the week.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing enumerator statistics over time.
+    """
+    stats_overtime_df = data[[date, enumerator, statscol]].copy(deep=True)
+    stats_overtime_df[date] = pd.to_datetime(stats_overtime_df[date])
+    if period == "Daily":
+        stats_overtime_df["TIME PERIOD"] = stats_overtime_df[date].dt.to_period("D")
+    elif period == "Weekly":
+        stats_overtime_df["TIME PERIOD"] = stats_overtime_df[date].dt.to_period(
+            f"W-{weekstartday}"
+        )
+    elif period == "Monthly":
+        stats_overtime_df["TIME PERIOD"] = stats_overtime_df[date].dt.to_period("M")
+    if stat == "missing":
+        stats_overtime_df["_STAT"] = stats_overtime_df[statscol].isnull().mean()
+        stats_overtime_res = stats_overtime_df.groupby(
+            by=["TIME PERIOD", enumerator], dropna=False, as_index=False
+        ).agg({"_STAT": "mean"})
+    else:
+        stats_overtime_res = (
+            stats_overtime_df.groupby(
+                by=["TIME PERIOD", enumerator], dropna=False, as_index=False
+            )
+            .agg({statscol: stat})
+            .rename(columns={statscol: "_STAT"})
+        )
+    # pivot table so enumerators dates values are columns
+    stats_overtime_res = stats_overtime_res.pivot(
+        index=[enumerator],
+        columns=["TIME PERIOD"],
+        values="_STAT",
+    ).reset_index(drop=False)
+
+    return stats_overtime_res
+
+
+def display_enumerator_statistics_overtime(
+    data: pd.DataFrame,
+    date: str,
+    enumerator: str,
+    setting_file: str,
+) -> None:
+    """Display enumerator statistics over time.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing survey data.
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+
+    Returns
+    -------
+        None
+    """
+    st.write("---")
+    st.markdown("## Enumerator Statistics Over Time")
+    # create enumerator statistics
+
+    st.markdown("##### Statistics")
+    default_setting = (
+        load_check_settings(settings_file=setting_file, check_name="enumerator")
+    ) or {}
+    s1, s2, s3 = st.columns([0.2, 0.15, 0.75])
+    with s1:
+        period_list = ("Daily", "Weekly", "Monthly")
+        default_period = default_setting.get("period", "Daily")
+        default_period_index = period_list.index(default_period)
+        period = st.radio(
+            label="Select Time Period:",
+            options=period_list,
+            index=default_period_index,
+            key="project_enumerator_statistics_overtime_period",
+            horizontal=True,
+            on_change=trigger_save,
+            kwargs={"state_name": "project_enumerator_statistics_overtime_period_save"},
+        )
+        if (
+            "project_enumerator_statistics_overtime_period_save" in st.session_state
+        ) and st.session_state.project_enumerator_statistics_overtime_period_save:
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="enumerator",
+                check_settings={"period": period},
+            )
+            st.session_state.project_enumerator_statistics_overtime_period_save = False
+    weekstartday = "SAT"
+    if period == "Weekly":
+        day_list = (
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday",
+        )
+        default_weekstartday_sel = default_setting.get("weekstartday", "Monday")
+        default_weekstartday_sel_index = day_list.index(default_weekstartday_sel)
+        weekstartday = st.selectbox(
+            label="Select the first day of the week",
+            options=day_list,
+            index=default_weekstartday_sel_index,
+            help="Select the first day of the week",
+            key="project_week_start_day_enumerator",
+            on_change=trigger_save,
+            kwargs={"state_name": "project_week_start_day_enumerator_save"},
+        )
+        if (
+            "project_week_start_day_enumerator_save" in st.session_state
+        ) and st.session_state.project_week_start_day_enumerator_save:
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="enumerator",
+                check_settings={"weekstartday": weekstartday},
+            )
+            st.session_state.project_week_start_day_enumerator_save = False
+        if weekstartday:
+            weekstart_adjust_dict = {
+                "Monday": "SUN",
+                "Tuesday": "MON",
+                "Wednesday": "TUE",
+                "Thursday": "WED",
+                "Friday": "THU",
+                "Saturday": "FRI",
+                "Sunday": "SAT",
             }
-            stat_func_list = [stats_options_list[col] for col in statistics_options]
-            enum_statistics = (
-                data[[enumerator] + selected_columns]
-                .groupby(enumerator)
-                .agg(stat_func_list)
-                .reset_index()
+            weekstartday = weekstart_adjust_dict[weekstartday]
+    with s2:
+        stat_list = (
+            "count",
+            "min",
+            "mean",
+            "median",
+            "max",
+            "std",
+            "25th percentile",
+            "75th percentile",
+            "missing",
+        )
+        default_stat = default_setting.get("stat", "count")
+        default_stat_index = stat_list.index(default_stat)
+        stat = st.selectbox(
+            label="Select statistic:",
+            options=stat_list,
+            index=default_stat_index,
+            help="Select statistics to calculate",
+            key="enumerator_statistics_overtime_stat",
+            on_change=trigger_save,
+            kwargs={"state_name": "enumerator_statistics_overtime_stat_save"},
+        )
+        if (
+            "enumerator_statistics_overtime_stat_save" in st.session_state
+        ) and st.session_state.enumerator_statistics_overtime_stat_save:
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="enumerator",
+                check_settings={"stat": stat},
             )
-
-            # # clean multi-index columns
-            enum_statistics = enum_statistics.rename(
-                columns={enumerator: "", "": enumerator}
-            )
-
-            # display enumerator statistics
-            st.dataframe(enum_statistics, hide_index=True, use_container_width=True)
-        except Exception as e:
-            st.write(e)
-    else:
-        st.info("Please select columns and statistics to display.")
-
-    # Graph enumerator statistics
-
-    # Radio button for calculations
-    calculation_type = st.radio(
-        "Select calculation type:",
-        ("Graph with Overall Results", "Graph with Results per Date"),
-    )
-
-    # Date input for filtering if "Calculations per Date" is selected
-    if calculation_type == "Graph with Results per Date":
-        date_filter = st.date_input("Select date")
-        filtered_df = data[data[date] == pd.to_datetime(date_filter)]
-    else:
-        filtered_df = data
-
-    # Calculate average duration time per enumerator
-
-    if filtered_df.shape[0] > 0:
-        average_duration = (
-            filtered_df.groupby(enumerator, observed=False)
-            .agg(avg_duration=(duration, "mean"))
-            .reset_index()
+            st.session_state.enumerator_statistics_overtime_stat_save = False
+    with s3:
+        statscol_option_list = data.select_dtypes("number").columns
+        default_statscol = default_setting.get("statscol", None)
+        default_statscol_index = (
+            statscol_option_list.tolist().index(default_statscol)
+            if default_statscol in statscol_option_list
+            else None
         )
-
-        # Sort values by avg_duration
-        average_duration = average_duration.sort_values(
-            by="avg_duration", ascending=True
+        statscol = st.selectbox(
+            label="Select column:",
+            options=statscol_option_list,
+            index=default_statscol_index,
+            help="Select columns to include in statistics",
+            key="enumerator_statistics_overtime_column",
         )
-
-        # Calculate overall average duration
-        overall_avg_duration = average_duration["avg_duration"].mean()
-
-        # Calculate standard deviation
-        std_dev = average_duration["avg_duration"].std()
-
-        # Calculate how many standard deviations away each average
-        duration_units = "minutes" if duration_in_minutes else "seconds"
-
-        # is from the overall average
-        average_duration["std_dev_away"] = (
-            average_duration["avg_duration"] - overall_avg_duration
-        ) / std_dev
-
-        # Create the plot with different colors for each bar
-        fig = px.bar(
-            average_duration,
-            x=enumerator,
-            y="avg_duration",
-            title="Average Duration per Enumerator",
-            labels={
-                "avg_duration": "Average Duration (" + duration_units + ")",
-                enumerator: "Enumerator ID",
-            },
-            color="std_dev_away",  # Color by how many std dev away from the mean
-            color_continuous_scale=px.colors.sequential.Viridis[::-1],
+    if statscol:
+        stats_overtime_df = compute_enumerator_statistics_overtime(
+            data=data,
+            date=date,
+            enumerator=enumerator,
+            statscol=statscol,
+            stat=stat,
+            period=period,
+            weekstartday=weekstartday,
         )
-
-        fig.update_xaxes(tickangle=90, tickmode="auto")
-
-        # Customize hover template
-        fig.update_traces(
-            hovertemplate="<b>Enumerator ID:</b> %{x}<br>"
-            + "<b>Average Duration:</b> %{y} <br>"
-            + f"<b>Overall Average:</b> {overall_avg_duration:.2f} <br>"
-            + "<b>Standard Deviations Away:</b> %{customdata:.2f}",
-            customdata=average_duration["std_dev_away"].values,
-        )
-
-        # Add overall average line
-        fig.add_hline(y=overall_avg_duration, line_color="red", line_dash="dash")
-
-        fig.update_layout(xaxis=dict(type="category"))
-
-        # Show the figure
-        st.plotly_chart(fig, theme="streamlit", use_container_width=True)
-    else:
-        st.warning("No data available for the selected criteria.")
-
-    # with col2:
-    # Add CSS for consistent width
-    st.markdown(
-        """
-    <style>
-        .stDataFrame {
-            width: 100%;
-        }
-        .dataframe {
-            width: 25%;
-        }
-    </style>
-    """,
-        unsafe_allow_html=True,
-    )
-
-    # Checkbox for calculations
-    calculation_type = st.radio(
-        "Select calculation type:",
-        ("Calculations per Period", "Calculations per Date"),
-    )
-
-    # Date input for filtering
-    if calculation_type == "Calculations per Date":
-        date_filter = st.date_input("Select a date")
-        data[date] = pd.to_datetime(data["date_only"])
-        filtered_df = data[data[date] == pd.to_datetime(date_filter)]
-    else:
-        filtered_df = data
-
-    if filtered_df.shape[0] > 0:
-        # Summary calculation for consent data
-        summary = (
-            filtered_df.groupby(enumerator, observed=False)
-            .agg(
-                total_persons=(survey_id, "size"),
-                consented_persons=(consent, lambda x: (x.isin(consent_val)).sum()),
-            )
-            .reset_index()
-        )
-
-        # Convert to numeric and calculate consent percentage
-        summary["consented_persons"] = pd.to_numeric(
-            summary["consented_persons"], errors="coerce"
-        )
-        summary["total_persons"] = pd.to_numeric(
-            summary["total_persons"], errors="coerce"
-        )
-        summary["consent_percentage"] = (
-            summary["consented_persons"] / summary["total_persons"]
-        ) * 100
-
-        # Rename columns for consent data
-        summary.rename(
-            columns={
-                enumerate: "Enumerator ID",
-                "total_persons": "Total Interviews",
-                "consented_persons": "Consented Interviews",
-                "consent_percentage": "Consent Percentage",
-            },
-            inplace=True,
-        )
-
-        # Backcheck analysis
-
-        if analyze_backcheck:
-            # Calculate statistics for original enumerators
-            survey_counts = (
-                data.groupby("enumid").size().reset_index(name="Total Surveys")
-            )
-
-            # Count how many times each enumerator's work was backchecked
-            backcheck_counts = (
-                merged_df.groupby("enumid")
-                .size()
-                .reset_index(name="Backchecked Interviews")
-            )
-
-            # Get comparable variables
-            comparable_vars = []
-            prefix_pairs = []
-            svy_cols = [col for col in merged_df.columns if col.startswith("svy_")]
-
-            for svy_col in svy_cols:
-                base_var = svy_col[4:]
-                back_col = f"back_{base_var}"
-                if back_col in merged_df.columns:
-                    comparable_vars.append(base_var)
-                    prefix_pairs.append((svy_col, back_col))
-
-            # Count mismatches for each enumerator
-            def count_mismatches(group):
-                """Count mismatches between survey and backcheck
-                values for a given group.
-
-                Args:
-                        group (pd.DataFrame): DataFrame containing
-                        survey and backcheck values.
-
-                Returns
-                -------
-                        int: Number of mismatches.
-
-                """
-                mismatch_count = 0
-                for svy_col, back_col in prefix_pairs:
-                    svy_values = group[svy_col].astype(str)
-                    back_values = group[back_col].astype(str)
-                    svy_values = svy_values.replace("nan", "")
-                    back_values = back_values.replace("nan", "")
-                    mismatch_count += (svy_values != back_values).sum()
-                return mismatch_count
-
-            if len(comparable_vars) > 0:
-                try:
-                    # Calculate mismatches by enumerator
-                    mismatch_counts = (
-                        merged_df.groupby("enumid")
-                        .apply(count_mismatches)
-                        .reset_index(name="Total Mismatches")
-                    )
-
-                    # Calculate backcheck metrics
-                    backcheck_data = survey_counts.merge(
-                        backcheck_counts, on="enumid", how="left"
-                    )
-
-                    # Fill NaN values with 0 for enumerators with
-                    # no backchecks
-                    backcheck_data["Backchecked Interviews"] = (
-                        backcheck_data["Backchecked Interviews"].fillna(0).astype(int)
-                    )
-
-                    # Calculate total surveys that can be compared
-                    backcheck_data["Values Compared"] = (
-                        backcheck_data["Backchecked Interviews"] * len(comparable_vars)
-                    ).astype(int)
-
-                    # Merge with mismatch counts
-                    backcheck_data = backcheck_data.merge(
-                        mismatch_counts, on="enumid", how="left"
-                    )
-
-                    # Fill NaN values for mismatches
-                    backcheck_data["Total Mismatches"] = (
-                        backcheck_data["Total Mismatches"].fillna(0).astype(int)
-                    )
-
-                    # Calculate percentages
-                    backcheck_data["Backchecked Percentage"] = (
-                        backcheck_data["Backchecked Interviews"]
-                        / backcheck_data["Total Surveys"]
-                        * 100
-                    ).round(2)
-
-                    backcheck_data["Mismatch Percentage"] = (
-                        backcheck_data["Total Mismatches"]
-                        / backcheck_data["Values Compared"]
-                        * 100
-                    ).round(2)
-
-                    # Merge consent summary with backcheck data
-                    combined_summary = summary.merge(
-                        backcheck_data,
-                        left_on="Enumerator ID",
-                        right_on="enumid",
-                        how="outer",
-                    )
-
-                    # Clean up the merged dataframe
-                    combined_summary = combined_summary.drop(
-                        ["enumid", "Total Surveys"], axis=1
-                    )
-
-                    # Format percentage columns
-                    combined_summary["Consent Percentage"] = combined_summary[
-                        "Consent Percentage"
-                    ].round(2)
-                    combined_summary["Backchecked Percentage"] = combined_summary[
-                        "Backchecked Percentage"
-                    ].round(2)
-                    combined_summary["Mismatch Percentage"] = combined_summary[
-                        "Mismatch Percentage"
-                    ].round(2)
-
-                    # Define the desired column order
-                    column_order = [
-                        "Enumerator ID",
-                        "Total Interviews",
-                        "Consented Interviews",
-                        "Consent Percentage",
-                        "Backchecked Interviews",
-                        "Backchecked Percentage",
-                        "Values Compared",
-                        "Total Mismatches",
-                        "Mismatch Percentage",
-                    ]
-
-                    # Reorder the columns in the combined_summary DataFrame
-                    combined_summary = combined_summary[column_order]
-
-                    # Display combined summary with the new column order
-                    st.dataframe(
-                        combined_summary,
-                        hide_index=True,
-                        use_container_width=True,
-                        column_config={
-                            "Enumerator ID": st.column_config.Column(width="small"),
-                            "Total Interviews": st.column_config.NumberColumn(
-                                format="%d", width="small"
-                            ),
-                            "Consented Interviews": st.column_config.NumberColumn(
-                                format="%d", width="small"
-                            ),
-                            "Consent Percentage": st.column_config.NumberColumn(
-                                format="%.2f%%", width="small"
-                            ),
-                            "Backchecked Interviews": st.column_config.NumberColumn(
-                                format="%d", width="small"
-                            ),
-                            "Backchecked Percentage": st.column_config.NumberColumn(
-                                format="%.2f%%", width="small"
-                            ),
-                            "Values Compared": st.column_config.NumberColumn(
-                                format="%d", width="small"
-                            ),
-                            "Total Mismatches": st.column_config.NumberColumn(
-                                format="%d", width="small"
-                            ),
-                            "Mismatch Percentage": st.column_config.NumberColumn(
-                                format="%.2f%%", width="small"
-                            ),
-                        },
-                    )
-
-                    # Display number of comparable variables
-                    st.write(
-                        f"Note: For backchecks calculations there were found {len(comparable_vars)} comparable variables."
-                    )
-
-                except Exception as e:
-                    st.error(f"Error calculating combined metrics: {e!s}")
-            else:
-                st.warning("No comparable variables found for backcheck analysis.")
-        else:
-            st.warning("No backcheck data available. Displaying only consent data.")
-            st.dataframe(
-                summary,
-                hide_index=True,
-                use_container_width=True,
-                column_config={
-                    "Enumerator ID": st.column_config.Column(width="small"),
-                    "Total Interviews": st.column_config.NumberColumn(
-                        format="%d", width="small"
-                    ),
-                    "Consent Percentage": st.column_config.NumberColumn(
-                        format="%.2f%%", width="small"
-                    ),
-                },
-            )
-    else:
-        st.warning("No data available for the selected criteria.")
-
-    # enumerator statistics over time
-
-    st.markdown("##### Enumerator Statistics Over Time")
-
-    # Select enumerators to display
-    selected_enumerators = st.multiselect(
-        "Select enumerators:",
-        options=data[enumerator].unique(),
-        default=data[enumerator].unique(),
-        help="Select enumerators to include in the graph",
-        key="selected_enumerators",
-    )
-
-    # Filter data based on selected enumerators
-    filtered_data = data[data[enumerator].isin(selected_enumerators)]
-    filtered_data["submission_date_format"] = pd.to_datetime(
-        filtered_data["submission_date_format"]
-    ).dt.date
-
-    # Select columns to display
-    selected_column = st.selectbox(
-        "Select columns:",
-        options=filtered_data.columns,
-        index=0,
-        help="Select columns to include in the graph",
-        key="selected_columns_graph",
-    )
-
-    # Select statistics to display
-    statistics_option = st.selectbox(
-        "Select a statistic:",
-        options=["count", "mean", "median", "min", "max", "std", "missing"],
-        help="Select statistics to calculate",
-        key="statistics_options_graph",
-    )
-
-    # Calculate statistics
-    if selected_column and statistics_option:
-        # select specific columns
-        filtered_data = filtered_data[
-            [enumerator, "submission_date_format"] + [selected_column]
+        cmap = sns.light_palette("pink", as_cmap=True)
+        # apply formatting to the statistics DataFrame
+        format_cols = [
+            col for col in stats_overtime_df.columns if col not in [enumerator]
         ]
-
-        if statistics_option == "missing":
-            index_cols = [enumerator, "submission_date_format"]
-            data_cols = [x for x in filtered_data.columns if x != enumerator]
-            filtered_enum_statistics = calculate_missing_values(
-                filtered_data, data_cols, index_cols
-            )
-            filtered_enum_statistics["% missing"] = filtered_enum_statistics[
-                "% missing"
-            ].apply(lambda x: int(x.replace("%", "")))
-            selected_column = "% missing"
-        else:
-            filtered_enum_statistics = (
-                filtered_data.groupby([enumerator, "submission_date_format"])
-                .agg(statistics_option)
-                .reset_index()
-                .fillna(0)
-            )
-            filtered_enum_statistics.columns = [
-                enumerator,
-                "submission_date_format",
-            ] + [selected_column]
-        # Create line graph
-        fig = px.line(
-            filtered_enum_statistics,
-            x="submission_date_format",
-            y=selected_column,
-            color=enumerator,
-            labels={"value": "Value", "variable": "Statistic"},
-            title="Enumerator Statistics Over Time",
+        format = "{:,.2%}" if stat == "missing" else "{:,.2f}"
+        stats_overtime_df = stats_overtime_df.style.format(
+            subset=format_cols,
+            formatter=format,
+        ).background_gradient(
+            subset=format_cols,
+            cmap=cmap,
         )
 
-        # Update layout
-        fig.update_layout(
-            xaxis_title="",
-            yaxis_title=selected_column,
-            legend_title="Enumerator",
-        )
-
-        # Show the figure
-        st.plotly_chart(fig, theme="streamlit", use_container_width=True)
+        st.dataframe(stats_overtime_df, hide_index=True, use_container_width=True)
     else:
-        st.info("Please select columns and statistics to display.")
+        st.info(
+            "No columns selected for statistics calculation.", icon=":material/info:"
+        )
+
+
+def enumerator_report(
+    data: pd.DataFrame, setting_file: str, page_num: int, page_name: str
+) -> None:
+    """Generate enumerator report.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing survey data.
+    setting_file : str
+        Path to the settings file.
+    page_num : int
+        Page number for the report.
+
+    Returns
+    -------
+        None
+    """
+    missing_setting_file = f"cache/settings/pyDMS_missing_settings_{page_name}.json"
+
+    (
+        date,
+        formdef_version,
+        survey_id,
+        duration,
+        enumerator,
+        team,
+        consent,
+        consent_vals,
+        outcome,
+        outcome_vals,
+    ) = enumerator_report_settings(
+        data=data, setting_file=setting_file, page_num=page_num
+    )
+    display_enumerator_overview(
+        data=data,
+        date=date,
+        enumerator=enumerator,
+        team=team,
+    )
+
+    display_enumerator_summary(
+        data=data,
+        date=date,
+        enumerator=enumerator,
+        formdef_version=formdef_version,
+        duration=duration,
+        consent=consent,
+        consent_vals=consent_vals,
+        outcome=outcome,
+        outcome_vals=outcome_vals,
+        missing_setting_file=missing_setting_file,
+    )
+    display_enumerator_productivity(
+        data=data,
+        date=date,
+        enumerator=enumerator,
+        setting_file=setting_file,
+    )
+    display_enumerator_statistics(
+        data=data,
+        date=date,
+        enumerator=enumerator,
+        setting_file=setting_file,
+    )
+    display_enumerator_statistics_overtime(
+        data=data,
+        date=date,
+        enumerator=enumerator,
+        setting_file=setting_file,
+    )
