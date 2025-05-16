@@ -448,7 +448,7 @@ def plot_gps_coordinates(
         layers=[layer],
         initial_view_state=view_state,
         tooltip={"text": "{tooltip}"},
-        map_style="mapbox://styles/mapbox/street-v11",
+        map_style="mapbox://styles/mapbox/streets-v11",
     )
 
     st.pydeck_chart(deck, height=450, use_container_width=True)
@@ -686,7 +686,7 @@ def plot_clusters_on_map(
         layers=[layer],
         initial_view_state=view_state,
         tooltip={"text": "{tooltip}"},
-        map_style="mapbox://styles/mapbox/street-v11",
+        map_style="mapbox://styles/mapbox/streets-v11",
     )
 
     st.pydeck_chart(deck, height=450, use_container_width=True)
