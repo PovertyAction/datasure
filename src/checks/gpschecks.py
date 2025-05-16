@@ -1,6 +1,6 @@
 import os
 
-import matplotlib.cm as cm
+import matplotlib as mpl
 import numpy as np
 import pandas as pd
 import pydeck as pdk
@@ -381,7 +381,7 @@ def plot_gps_coordinates(
         ][:num_colors]
     else:
         # Use matplot lib colormap for more colors
-        cmap = cm.get_cmap("tab20", num_colors)
+        cmap = mpl.cm.get_cmap("tab20", num_colors)
         color_palette = [
             [int(r * 255), int(g * 255), int(b * 255), 160]
             for r, g, b, _ in [cmap(i) for i in range(num_colors)]
