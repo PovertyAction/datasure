@@ -194,13 +194,54 @@ def gps_check_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple
                     )
 
                     if gps_column:
-                        gps_lat_col = "latitude"
-                        gps_lon_col = "longitude"
-                        gps_altitude = "altitude"
-                        gps_accuracy = "accuracy"
-                        data[[gps_lat_col, gps_lon_col, gps_altitude, gps_accuracy]] = (
-                            data[gps_column].str.split(",", expand=True).astype(float)
+                        # Try to detect delimiter: comma, tab, or space
+                        sample_val = data[gps_column].dropna().astype(str).iloc[0]
+                        if "\t" in sample_val:
+                            delimiter = "\t"
+                        elif "," in sample_val:
+                            delimiter = ","
+                        elif " " in sample_val:
+                            delimiter = " "
+                        else:
+                            delimiter = ","  # fallback
+
+                        # Split the GPS column into parts
+                        gps_split = (
+                            data[gps_column]
+                            .astype(str)
+                            .str.split(delimiter, expand=True)
                         )
+
+                        # Assign columns based on the number of split parts
+                        if gps_split.shape[1] == 2:
+                            gps_lat_col = "latitude"
+                            gps_lon_col = "longitude"
+                            data[[gps_lat_col, gps_lon_col]] = gps_split.iloc[
+                                :, :2
+                            ].astype(float)
+                            gps_altitude = None
+                            gps_accuracy = None
+                        elif gps_split.shape[1] == 3:
+                            gps_lat_col = "latitude"
+                            gps_lon_col = "longitude"
+                            gps_accuracy = "accuracy"
+                            data[[gps_lat_col, gps_lon_col, gps_accuracy]] = (
+                                gps_split.iloc[:, :3].astype(float)
+                            )
+                            gps_altitude = None
+                        elif gps_split.shape[1] >= 4:
+                            gps_lat_col = "latitude"
+                            gps_lon_col = "longitude"
+                            gps_altitude = "altitude"
+                            gps_accuracy = "accuracy"
+                            data[
+                                [gps_lat_col, gps_lon_col, gps_altitude, gps_accuracy]
+                            ] = gps_split.iloc[:, :4].astype(float)
+                        else:
+                            gps_lat_col = None
+                            gps_lon_col = None
+                            gps_altitude = None
+                            gps_accuracy = None
                     else:
                         gps_lat_col = None
                         gps_lon_col = None
@@ -682,10 +723,8 @@ def gpschecks_report(data: pd.DataFrame, setting_file: str, page_num: int) -> No
         enumerator,
     ) = gps_check_settings(data, setting_file, page_num)
     if gps_column_exists:
-        if gps_lat_col is None or gps_lon_col is None or gps_accuracy is None:
-            st.warning(
-                "Select a GPS column or latitude, longitude and accuracy columns"
-            )
+        if gps_lat_col is None or gps_lon_col is None:
+            st.warning("Select a GPS column or latitude and longitude columns")
             return
         if pd.api.types.is_numeric_dtype(
             data[gps_lat_col]
@@ -887,38 +926,42 @@ def gpschecks_report(data: pd.DataFrame, setting_file: str, page_num: int) -> No
             st.write("")
 
             st.write("##### GPS Accuracy Statistics")
-            cl1, cl2 = st.columns(2)
-            with cl1:
-                accuracy_cluster_col = st.selectbox(
-                    "Select a column to summarize GPS points by:",
-                    survey_cols,
-                    index=default_enumerator_index,
+            if gps_accuracy:
+                cl1, cl2 = st.columns(2)
+                with cl1:
+                    accuracy_cluster_col = st.selectbox(
+                        "Select a column to summarize GPS points by:",
+                        survey_cols,
+                        index=default_enumerator_index,
+                    )
+                with cl2:
+                    accuracy_stats_list = st.multiselect(
+                        label="Select statistics to display",
+                        options=[
+                            "min",
+                            "median",
+                            "mean",
+                            "max",
+                            "std",
+                            "25th percentile",
+                            "75th percentile",
+                            "95th percentile",
+                        ],
+                        default=[
+                            "min",
+                            "mean",
+                            "max",
+                        ],
+                    )
+                gps_accuracy_statistics = calculate_gps_accuracy_statistics(
+                    data, gps_accuracy, accuracy_cluster_col, accuracy_stats_list
                 )
-            with cl2:
-                accuracy_stats_list = st.multiselect(
-                    label="Select statistics to display",
-                    options=[
-                        "min",
-                        "median",
-                        "mean",
-                        "max",
-                        "std",
-                        "25th percentile",
-                        "75th percentile",
-                        "95th percentile",
-                    ],
-                    default=[
-                        "min",
-                        "mean",
-                        "max",
-                    ],
+                st.dataframe(gps_accuracy_statistics, use_container_width=True)
+                st.write("")
+            else:
+                st.warning(
+                    "No GPS accuracy column selected. Please select a GPS accuracy column to display statistics."
                 )
-
-            gps_accuracy_statistics = calculate_gps_accuracy_statistics(
-                data, gps_accuracy, accuracy_cluster_col, accuracy_stats_list
-            )
-            st.dataframe(gps_accuracy_statistics, use_container_width=True)
-            st.write("")
         else:
             st.error("Please select valid GPS columns")
             return
