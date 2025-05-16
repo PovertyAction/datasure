@@ -174,6 +174,8 @@ def compute_summary_submissions(data: pd.DataFrame, date: str) -> tuple:
     """
     first_submission_date = data[date].min()
     last_submission_date = data[date].max()
+    data["DATE (ONLY)"] = data[date].dt.date
+    num_of_unique_dates = data["DATE (ONLY)"].nunique()
 
     submissions_today = data[data[date] == pd.Timestamp.now().normalize()].shape[0]
     submissions_yesterday = data[
@@ -218,6 +220,7 @@ def compute_summary_submissions(data: pd.DataFrame, date: str) -> tuple:
     return (
         first_submission_date,
         last_submission_date,
+        num_of_unique_dates,
         submissions_today,
         submissions_this_week,
         submissions_this_month,
@@ -250,6 +253,7 @@ def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
         (
             first_submission_date,
             last_submission_date,
+            num_of_unique_dates,
             submissions_today,
             submissions_this_week,
             submissions_this_month,
@@ -260,17 +264,25 @@ def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
             submissions_by_date,
         ) = compute_summary_submissions(data, date)
 
-        dc1, _, _, dc2 = st.columns(spec=4)
-        dc1.metric(
-            label="First Submission",
-            value=str(first_submission_date.date()),
-            help="Date of the first submission",
-        )
-        dc2.metric(
-            label="Last Submission",
-            value=str(last_submission_date.date()),
-            help="Date of the last submission",
-        )
+        _, dc1, dc2, dc3 = st.columns(spec=4)
+        with dc1, st.container(border=True):
+            st.metric(
+                label="Number days of submissions",
+                value=num_of_unique_dates,
+                help="Number of unique dates of submissions",
+            )
+        with dc2, st.container(border=True):
+            st.metric(
+                label="First Submission",
+                value=str(first_submission_date.date()),
+                help="Date of the first submission",
+            )
+        with dc3, st.container(border=True):
+            st.metric(
+                label="Last Submission",
+                value=str(last_submission_date.date()),
+                help="Date of the last submission",
+            )
 
         mc1, mc2, mc3, mc4 = st.columns(spec=4, border=True)
 
@@ -480,7 +492,7 @@ def summary_progress(
     with mc1:
         st.write("Submission progress")
         sp1, sp2 = st.columns([0.80, 0.20])
-        sp1.progress(value=int(progress))
+        sp1.progress(value=min(int(progress), 100))
         sp2.write(f"{progress:.2f}%")
     mc2.metric(
         label="Average submissions per day",
