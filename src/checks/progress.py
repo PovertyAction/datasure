@@ -32,28 +32,21 @@ def load_default_progress_settings(setting_file: str, page_num: int) -> tuple:
     # - if settings file exists, load settings from file
     # - if settings file does not exist, load default settings from config
     if setting_file and os.path.exists(setting_file):
-        default_settings = load_check_settings(setting_file, "progress")
-        if default_settings:
-            default_survey_id, default_enumerator, default_date, default_target = (
-                default_settings.get("survey_id"),
-                default_settings.get("enumerator"),
-                default_settings.get("date"),
-                default_settings.get("target"),
-            )
-        else:
-            default_survey_id, default_enumerator, default_date, default_target = (
-                st.session_state["config_pages"]["Survey ID"][page_num - 1],
-                st.session_state["config_pages"]["Enumerator"][page_num - 1],
-                st.session_state["config_pages"]["Survey Date"][page_num - 1],
-                None,
-            )
+        default_settings = load_check_settings(setting_file, "progress") or {}
     else:
-        default_survey_id, default_enumerator, default_date, default_target = (
-            st.session_state["config_pages"]["Survey ID"][page_num - 1],
-            st.session_state["config_pages"]["Enumerator"][page_num - 1],
-            st.session_state["config_pages"]["Survey Date"][page_num - 1],
-            None,
-        )
+        default_settings = {}
+    default_survey_id, default_enumerator, default_date, default_target = (
+        default_settings.get(
+            "survey_id", st.session_state["config_pages"]["Survey ID"][page_num - 1]
+        ),
+        default_settings.get(
+            "enumerator", st.session_state["config_pages"]["Enumerator"][page_num - 1]
+        ),
+        default_settings.get(
+            "date", st.session_state["config_pages"]["Survey Date"][page_num - 1]
+        ),
+        default_settings.get("target", None),
+    )
 
     return (
         default_survey_id,
@@ -95,7 +88,9 @@ def progress_report_settings(
 
         uc1, uc2, uc3 = st.columns(3)
         with uc1:
-            default_survey_id_index = survey_cols.get_loc(default_survey_id)
+            default_survey_id_index = (
+                survey_cols.get_loc(default_survey_id) if default_survey_id else None
+            )
             st.markdown("### Select survey ID column")
             survey_id = st.selectbox(
                 "Survey ID",
@@ -105,7 +100,9 @@ def progress_report_settings(
                 index=default_survey_id_index,
             )
         with uc2:
-            default_date_index = survey_cols.get_loc(default_date)
+            default_date_index = (
+                survey_cols.get_loc(default_date) if default_date else None
+            )
             st.markdown("### Select survey date column")
             date = st.selectbox(
                 label="Date",
@@ -115,7 +112,9 @@ def progress_report_settings(
                 index=default_date_index,
             )
         with uc3:
-            default_enumerator_index = survey_cols.get_loc(default_enumerator)
+            default_enumerator_index = (
+                survey_cols.get_loc(default_enumerator) if default_enumerator else None
+            )
             st.markdown("### Select enumerator column")
             enumerator = st.selectbox(
                 "Enumerator",
@@ -278,14 +277,14 @@ def display_progress_chart(data: pd.DataFrame, setting_file: str) -> None:
     st.write("---")
     st.write("## Consent and Completion Progress Chart")
     _, cc1, _, cc2, _ = st.columns([0.1, 0.35, 0.1, 0.35, 0.1])
-    default_settings = load_check_settings(
-        settings_file=setting_file, check_name="progress"
+    default_settings = (
+        load_check_settings(settings_file=setting_file, check_name="progress") or {}
     )
     consent, consent_vals, outcome, outcome_vals = (
-        default_settings.get("consent"),
-        default_settings.get("consent_vals"),
-        default_settings.get("outcome"),
-        default_settings.get("outcome_vals"),
+        default_settings.get("consent", None),
+        default_settings.get("consent_vals", None),
+        default_settings.get("outcome", None),
+        default_settings.get("outcome_vals", None),
     )
     with cc1, st.container(border=True):
         consent_index = survey_cols.get_loc(consent) if consent else None
@@ -293,18 +292,20 @@ def display_progress_chart(data: pd.DataFrame, setting_file: str) -> None:
             label="Select consent column",
             options=survey_cols,
             help="Column containing consent information",
-            key="consent_progress_chart",
+            key="progress_consent_pie_chart",
             index=consent_index,
             on_change=trigger_save,
-            kwargs=({"state_name": "consent_progress_chart_save"}),
+            kwargs=({"state_name": "progress_consent_pie_chart_save"}),
         )
-        if st.session_state.get("consent_progress_chart_save"):
+        if (
+            "progress_consent_pie_chart_save" in st.session_state
+        ) and st.session_state.progress_consent_pie_chart_save:
             save_check_settings(
                 settings_file=setting_file,
                 check_name="progress",
                 check_settings={"consent": consent},
             )
-            st.session_state["consent_progress_chart_save"] = False
+            st.session_state["progress_consent_pie_chart_save"] = False
         if consent:
             consent_vals = st.multiselect(
                 label="Select consent values",
@@ -315,7 +316,9 @@ def display_progress_chart(data: pd.DataFrame, setting_file: str) -> None:
                 on_change=trigger_save,
                 kwargs=({"state_name": "consent_vals_progress_chart_save"}),
             )
-            if st.session_state.get("consent_vals_progress_chart_save"):
+            if (
+                "consent_vals_progress_chart_save" in st.session_state
+            ) and st.session_state.consent_vals_progress_chart_save:
                 save_check_settings(
                     settings_file=setting_file,
                     check_name="progress",
@@ -326,16 +329,19 @@ def display_progress_chart(data: pd.DataFrame, setting_file: str) -> None:
             st.warning("Please select a consent column first")
             consent_vals = None
     with cc2, st.container(border=True):
+        outcome_index = survey_cols.get_loc(outcome) if outcome else None
         outcome = st.selectbox(
             label="Select outcome column",
             options=survey_cols,
             help="Column containing outcome information",
             key="outcome_progress_chart",
-            index=None,
+            index=outcome_index,
             on_change=trigger_save,
             kwargs=({"state_name": "outcome_progress_chart_save"}),
         )
-        if st.session_state.get("outcome_progress_chart_save"):
+        if (
+            "outcome_progress_chart_save" in st.session_state
+        ) and st.session_state.outcome_progress_chart_save:
             save_check_settings(
                 settings_file=setting_file,
                 check_name="progress",
@@ -352,7 +358,9 @@ def display_progress_chart(data: pd.DataFrame, setting_file: str) -> None:
                 on_change=trigger_save,
                 kwargs=({"state_name": "outcome_vals_progress_chart_save"}),
             )
-            if st.session_state.get("outcome_vals_progress_chart_save"):
+            if (
+                "outcome_vals_progress_chart_save" in st.session_state
+            ) and st.session_state.outcome_vals_progress_chart_save:
                 save_check_settings(
                     settings_file=setting_file,
                     check_name="progress",
@@ -478,7 +486,7 @@ def display_progress_overtime(
             x=period_stats["time_period"],
             y=period_stats["num_interviews"],
             name="Interviews",
-            marker_color="#2C5F2D",  # Dark green color
+            marker_color="#2C5F2D",  # Dark green color [Alt. Orange #F28C28]
             hovertemplate="<b>%{x}</b><br>"
             + "Interviews: %{y}<br>"
             + "Enumerators: %{customdata}<extra></extra>",
@@ -493,7 +501,7 @@ def display_progress_overtime(
             y=[average_interviews, average_interviews],
             mode="lines",
             name=f"Avg Interviews: {average_interviews:.2f}",
-            line=dict(color="#4D5E90", width=1, dash="dash"),
+            line=dict(color="#4D5E90", width=2, dash="dash"),
         )
     )
 
@@ -623,7 +631,7 @@ def display_attempted_interviews(
     default_settings = load_check_settings(
         settings_file=setting_file, check_name="progress"
     )
-    display_cols = default_settings.get("display_cols")
+    display_cols = default_settings.get("display_cols") if default_settings else None
     display_cols = st.multiselect(
         label="",
         options=data.columns,

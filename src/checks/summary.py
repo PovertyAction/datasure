@@ -38,19 +38,20 @@ def load_default_settings(setting_file: str, page_num: int) -> tuple:
     # - if settings file exists, load settings from file
     # - if settings file does not exist, load default settings from config
     if setting_file and os.path.exists(setting_file):
-        default_settings = load_check_settings(setting_file, "summary")
-        if default_settings:
-            default_date = default_settings.get("date")
-            default_enumerator = default_settings.get("enumerator")
-            default_target = default_settings.get("target")
-            default_survey_id = default_settings.get("survey_id")
+        default_settings = load_check_settings(setting_file, "summary") or {}
     else:
-        default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
-        default_enumerator = st.session_state["config_pages"]["Enumerator"][
-            page_num - 1
-        ]
-        default_survey_id = st.session_state["config_pages"]["Survey ID"][page_num - 1]
-        default_target = None
+        default_settings = {}
+
+    default_date = default_settings.get(
+        "date", st.session_state["config_pages"]["Survey Date"][page_num - 1]
+    )
+    default_enumerator = default_settings.get(
+        "enumerator", st.session_state["config_pages"]["Enumerator"][page_num - 1]
+    )
+    default_target = default_settings.get("target", None)
+    default_survey_id = default_settings.get(
+        "survey_id", st.session_state["config_pages"]["Survey ID"][page_num - 1]
+    )
 
     return default_date, default_enumerator, default_target, default_survey_id
 
@@ -86,7 +87,9 @@ def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
             sc1, sc2, sc3 = st.columns(spec=3)
 
             with sc1:
-                default_date_index = survey_cols.get_loc(default_date)
+                default_date_index = (
+                    survey_cols.get_loc(default_date) if default_date else 0
+                )
                 date = st.selectbox(
                     label="Date",
                     options=survey_cols,
@@ -96,7 +99,9 @@ def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
                 )
 
             with sc2:
-                default_enumerator_index = survey_cols.get_loc(default_enumerator)
+                default_enumerator_index = (
+                    survey_cols.get_loc(default_enumerator) if default_enumerator else 0
+                )
                 enumerator = st.selectbox(
                     label="Enumerator",
                     options=survey_cols,
@@ -105,7 +110,9 @@ def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
                 )
 
             with sc3:
-                default_survey_id_index = survey_cols.get_loc(default_survey_id)
+                default_survey_id_index = (
+                    survey_cols.get_loc(default_survey_id) if default_survey_id else 0
+                )
                 survey_id = st.selectbox(
                     label="Survey ID",
                     options=survey_cols,
@@ -167,6 +174,8 @@ def compute_summary_submissions(data: pd.DataFrame, date: str) -> tuple:
     """
     first_submission_date = data[date].min()
     last_submission_date = data[date].max()
+    data["DATE (ONLY)"] = data[date].dt.date
+    num_of_unique_dates = data["DATE (ONLY)"].nunique()
 
     submissions_today = data[data[date] == pd.Timestamp.now().normalize()].shape[0]
     submissions_yesterday = data[
@@ -211,6 +220,7 @@ def compute_summary_submissions(data: pd.DataFrame, date: str) -> tuple:
     return (
         first_submission_date,
         last_submission_date,
+        num_of_unique_dates,
         submissions_today,
         submissions_this_week,
         submissions_this_month,
@@ -243,6 +253,7 @@ def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
         (
             first_submission_date,
             last_submission_date,
+            num_of_unique_dates,
             submissions_today,
             submissions_this_week,
             submissions_this_month,
@@ -253,17 +264,25 @@ def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
             submissions_by_date,
         ) = compute_summary_submissions(data, date)
 
-        dc1, _, _, dc2 = st.columns(spec=4)
-        dc1.metric(
-            label="First Submission",
-            value=str(first_submission_date.date()),
-            help="Date of the first submission",
-        )
-        dc2.metric(
-            label="Last Submission",
-            value=str(last_submission_date.date()),
-            help="Date of the last submission",
-        )
+        _, dc1, dc2, dc3 = st.columns(spec=4)
+        with dc1, st.container(border=True):
+            st.metric(
+                label="Number days of submissions",
+                value=num_of_unique_dates,
+                help="Number of unique dates of submissions",
+            )
+        with dc2, st.container(border=True):
+            st.metric(
+                label="First Submission",
+                value=str(first_submission_date.date()),
+                help="Date of the first submission",
+            )
+        with dc3, st.container(border=True):
+            st.metric(
+                label="Last Submission",
+                value=str(last_submission_date.date()),
+                help="Date of the last submission",
+            )
 
         mc1, mc2, mc3, mc4 = st.columns(spec=4, border=True)
 
@@ -473,7 +492,7 @@ def summary_progress(
     with mc1:
         st.write("Submission progress")
         sp1, sp2 = st.columns([0.80, 0.20])
-        sp1.progress(value=int(progress))
+        sp1.progress(value=min(int(progress), 100))
         sp2.write(f"{progress:.2f}%")
     mc2.metric(
         label="Average submissions per day",
@@ -492,14 +511,12 @@ def summary_progress(
     )
 
     # load default settings if default values exist in setting_file
-    default_settings = load_check_settings(setting_file, "summary")
+    default_settings = load_check_settings(setting_file, "summary") or {}
 
     # progress by column
     pc1, _ = st.columns([0.3, 0.7])
     with pc1:
-        progress_by_col = (
-            default_settings.get("progress_by_col") if default_settings else None
-        )
+        progress_by_col = default_settings.get("progress_by_col", None)
         progress_col_index = (
             data.columns.get_loc(progress_by_col) if progress_by_col else None
         )
@@ -525,11 +542,7 @@ def summary_progress(
     if progress_by_col:
         _, pil1 = st.columns([0.80, 0.20])
         with pil1:
-            progress_time_period = (
-                default_settings.get("progress_time_period")
-                if default_settings
-                else None
-            )
+            progress_time_period = default_settings.get("progress_time_period", None)
             progress_time_period = st.pills(
                 label="Progress time period",
                 options=["Auto", "Daily", "Weekly", "Monthly"],

@@ -24,32 +24,21 @@ def load_default_duplicates_settings(setting_file: str, page_num: int) -> tuple:
     # - if settings file does not exist, load default settings from config
 
     if setting_file and os.path.exists(setting_file):
-        default_settings = load_check_settings(setting_file, "duplicates")
-        if default_settings:
-            default_survey_id = default_settings.get("survey_id")
-            default_survey_key = default_settings.get("survey_key")
-            default_date = default_settings.get("date")
-            default_dup_cols = default_settings.get("dup_cols")
-            default_display_cols = default_settings.get("display_cols")
-        else:
-            default_survey_id = st.session_state["config_pages"]["Survey ID"][
-                page_num - 1
-            ]
-            default_survey_key = st.session_state["config_pages"]["Survey KEY"][
-                page_num - 1
-            ]
-            default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
-            default_dup_cols = None
-            default_display_cols = None
-
+        default_settings = load_check_settings(setting_file, "duplicates") or {}
     else:
-        default_survey_id = st.session_state["config_pages"]["Survey ID"][page_num - 1]
-        default_survey_key = st.session_state["config_pages"]["Survey KEY"][
-            page_num - 1
-        ]
-        default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
-        default_dup_cols = None
-        default_display_cols = None
+        default_settings = {}
+
+    default_survey_id = default_settings.get(
+        "survey_id", st.session_state["config_pages"]["Survey ID"][page_num - 1]
+    )
+    default_survey_key = default_settings.get(
+        "survey_key", st.session_state["config_pages"]["Survey KEY"][page_num - 1]
+    )
+    default_date = default_settings.get(
+        "date", st.session_state["config_pages"]["Survey Date"][page_num - 1]
+    )
+    default_dup_cols = default_settings.get("dup_cols", None)
+    default_display_cols = default_settings.get("display_cols", None)
 
     return (
         default_survey_id,
@@ -324,25 +313,28 @@ def id_duplicates_display(
 
     # Load settings from file if it exists
     if setting_file and os.path.exists(setting_file):
-        default_settings = load_check_settings(setting_file, "duplicates")
-        if default_settings:
-            display_cols = default_settings.get("id_display_cols")
-        else:
-            display_cols = None
+        default_settings = load_check_settings(setting_file, "duplicates") or {}
+    else:
+        default_settings = {}
+    display_cols = default_settings.get("id_display_cols", None)
 
     display_cols = st.multiselect(
         label="Select columns to display in the report",
         options=data.columns,
         default=display_cols,
         key="display_id_cols_duplicates",
+        on_change=trigger_save,
+        kwargs={"state_name": "display_id_cols_duplicates_save"},
     )
-
-    if display_cols:
+    if (
+        "display_id_cols_duplicates_save" in st.session_state
+    ) and st.session_state.display_id_cols_duplicates_save:
         save_check_settings(
             settings_file=setting_file,
             check_name="duplicates",
             check_settings={"id_display_cols": display_cols},
         )
+        st.session_state["display_id_cols_duplicates_save"] = False
 
     id_dups_data = compute_id_duplicates(
         data=data, survey_id=survey_id, survey_key=survey_key, display_cols=display_cols
@@ -441,30 +433,30 @@ def column_duplicates_display(
 
     # load settings from file if it exists
     if setting_file and os.path.exists(setting_file):
-        default_settings = load_check_settings(setting_file, "duplicates")
-        if default_settings:
-            dup_col = default_settings.get("dup_col")
-            dup_col_index = dup_cols.index(dup_col) if dup_col else 0
-            if dup_col:
-                display_cols = default_settings.get(f"{dup_col}/display_cols")
-            else:
-                display_cols = None
-        else:
-            dup_col_index = 0
-            display_cols = None
+        default_settings = load_check_settings(setting_file, "duplicates") or {}
+    else:
+        default_settings = {}
+    dup_col = default_settings.get("dup_col", None)
+    dup_col_index = dup_cols.index(dup_col) if dup_col else 0
+    display_cols = default_settings.get(f"{dup_col}/display_cols") if dup_col else None
 
     dup_col = st.selectbox(
         label="Select column to check for duplicates",
         options=dup_cols,
         key="dup_col_duplicates",
         index=dup_col_index,
+        on_change=trigger_save,
+        kwargs={"state_name": "dup_col_duplicates_save"},
     )
-    if dup_col:
+    if (
+        "dup_col_duplicates_save" in st.session_state
+    ) and st.session_state.dup_col_duplicates_save:
         save_check_settings(
             settings_file=setting_file,
             check_name="duplicates",
             check_settings={"dup_col": dup_col},
         )
+        st.session_state["dup_col_duplicates_save"] = False
 
     display_cols = st.multiselect(
         label="Select columns to display in the report",
@@ -474,7 +466,9 @@ def column_duplicates_display(
         on_change=trigger_save,
         kwargs={"state_name": "display_cols_duplicates_save"},
     )
-    if st.session_state.get("display_cols_duplicates_save"):
+    if (
+        "display_cols_duplicates_save" in st.session_state
+    ) and st.session_state.display_cols_duplicates_save:
         save_check_settings(
             settings_file=setting_file,
             check_name="duplicates",
@@ -482,29 +476,35 @@ def column_duplicates_display(
         )
         st.session_state["display_cols_duplicates_save"] = False
 
-    col_dups_data = compute_column_duplicates(
-        data=data,
-        survey_id=survey_id,
-        survey_key=survey_key,
-        dup_col=dup_col,
-        display_cols=display_cols,
-    )
+    if dup_col:
+        col_dups_data = compute_column_duplicates(
+            data=data,
+            survey_id=survey_id,
+            survey_key=survey_key,
+            dup_col=dup_col,
+            display_cols=display_cols,
+        )
 
-    if col_dups_data.empty:
-        st.write(f"No duplicates found for {dup_col}")
+        if col_dups_data.empty:
+            st.write(f"No duplicates found for {dup_col}")
+        else:
+            st.dataframe(
+                col_dups_data,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    f"{dup_col}_dup_count": st.column_config.Column(
+                        label=f"# of {dup_col} duplicates"
+                    ),
+                    f"{dup_col}_dup_percent": st.column_config.NumberColumn(
+                        label="% of total records", format="%.2f%%"
+                    ),
+                },
+            )
     else:
-        st.dataframe(
-            col_dups_data,
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                f"{dup_col}_dup_count": st.column_config.Column(
-                    label=f"# of {dup_col} duplicates"
-                ),
-                f"{dup_col}_dup_percent": st.column_config.NumberColumn(
-                    label="% of total records", format="%.2f%%"
-                ),
-            },
+        st.info(
+            body="Please select a column to check for duplicates",
+            icon=":material/info:",
         )
 
 

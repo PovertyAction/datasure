@@ -231,7 +231,7 @@ with local:
             st.write("---")
 
             local_select_col, local_prev_mc1, local_prev_mc2, local_prev_mc3, _ = (
-                st.columns((0.2, 0.1, 0.1, 0.1, 0.5))
+                st.columns((0.2, 0.2, 0.2, 0.2, 0.2))
             )
 
             st.session_state.local_alias_list = st.session_state.local_files[

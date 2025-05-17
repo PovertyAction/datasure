@@ -240,10 +240,10 @@ def missing_columns(data: pd.DataFrame, missing_codes, setting_file) -> None:
 
     _, _, _, slider_col = st.columns(4)
 
-    default_settings = load_check_settings(
-        settings_file=setting_file, check_name="missing"
+    default_settings = (
+        load_check_settings(settings_file=setting_file, check_name="missing") or {}
     )
-    mv_threshold = default_settings.get("mv_threshold") if default_settings else 0
+    mv_threshold = default_settings.get("mv_threshold", 0)
     with slider_col:
         mv_threshold = st.slider(
             label="Filter Report by % missing:",
@@ -252,13 +252,18 @@ def missing_columns(data: pd.DataFrame, missing_codes, setting_file) -> None:
             max_value=100,
             value=mv_threshold,
             key="mv_threshold",
+            on_change=trigger_save,
+            kwargs={"state_name": "mv_threshold_save"},
         )
-        if mv_threshold:
+        if (
+            "mv_threshold_save" in st.session_state
+        ) and st.session_state.mv_threshold_save:
             save_check_settings(
                 settings_file=setting_file,
                 check_name="missing",
                 check_settings={"mv_threshold": mv_threshold},
             )
+        st.session_state["mv_threshold_save"] = False
 
     mv_data = compute_missing_columns(data=data, missing_codes=missing_codes)
     # Filter based on total missing percentage
@@ -333,12 +338,10 @@ def missing_over_time(data: pd.DataFrame, setting_file) -> None:
     # get the date columns from dataset
     date_cols = data.select_dtypes(include=["datetime64"]).columns
 
-    default_settings = load_check_settings(
-        settings_file=setting_file, check_name="missing"
+    default_settings = (
+        load_check_settings(settings_file=setting_file, check_name="missing") or {}
     )
-    select_date_col = (
-        default_settings.get("select_date_col") if default_settings else date_cols[0]
-    )
+    select_date_col = default_settings.get("select_date_col", date_cols[0])
     dc1, _ = st.columns([0.3, 0.7])
     with dc1:
         select_date_col_index = (
@@ -352,13 +355,18 @@ def missing_over_time(data: pd.DataFrame, setting_file) -> None:
             index=select_date_col_index,
             key="select_date_col",
             help="Select the date column to compute missingness over time",
+            on_change=trigger_save,
+            kwargs={"state_name": "select_date_col_save"},
         )
-        if select_date_col:
+        if (
+            "select_date_col_save" in st.session_state
+        ) and st.session_state.select_date_col_save:
             save_check_settings(
                 settings_file=setting_file,
                 check_name="missing",
                 check_settings={"select_date_col": select_date_col},
             )
+            st.session_state["select_date_col_save"] = False
 
     missingness_over_time = compute_missing_over_time(
         data=data, select_date_col=select_date_col
@@ -436,12 +444,10 @@ def missing_compare(data: pd.DataFrame, setting_file: str) -> None:
     mc_1, mc_2 = st.columns([0.3, 0.7])
 
     with mc_1:
-        default_settings = load_check_settings(
-            settings_file=setting_file, check_name="missing"
+        default_settings = (
+            load_check_settings(settings_file=setting_file, check_name="missing") or {}
         )
-        group_by_col = (
-            default_settings.get("group_by_col") if default_settings else None
-        )
+        group_by_col = default_settings.get("group_by_col", None)
         group_by_col_index = (
             data.columns.tolist().index(group_by_col) if group_by_col else None
         )
@@ -449,31 +455,43 @@ def missing_compare(data: pd.DataFrame, setting_file: str) -> None:
             label="Select column to group missing data by",
             options=data.columns,
             index=group_by_col_index,
+            help="Select the column to group missing data by",
+            key="group_by_col",
+            on_change=trigger_save,
+            kwargs={"state_name": "group_by_col_save"},
         )
-        allowed_cols = [col for col in data.columns if col != group_by_col]
-
-        if group_by_col:
+        if (
+            "group_by_col_save" in st.session_state
+        ) and st.session_state.group_by_col_save:
             save_check_settings(
                 settings_file=setting_file,
                 check_name="missing",
                 check_settings={"group_by_col": group_by_col},
             )
+            st.session_state["group_by_col_save"] = False
+        allowed_cols = [col for col in data.columns if col != group_by_col]
 
     with mc_2:
-        compare_col = default_settings.get("compare_col") if default_settings else None
+        compare_col = default_settings.get("compare_col", None)
         compare_col = st.multiselect(
             label="Select column to compare missing data",
             options=allowed_cols,
             disabled=not group_by_col,
             default=compare_col,
+            help="Select the column to compare missing data",
+            key="compare_col",
+            on_change=trigger_save,
+            kwargs={"state_name": "compare_col_save"},
         )
-
-        if compare_col:
+        if (
+            "compare_col_save" in st.session_state
+        ) and st.session_state.compare_col_save:
             save_check_settings(
                 settings_file=setting_file,
                 check_name="missing",
                 check_settings={"compare_col": compare_col},
             )
+            st.session_state["compare_col_save"] = False
 
     if group_by_col:
         group_by_data, vmin_val, vmax_val = compute_missing_compare(
@@ -547,10 +565,10 @@ def missing_correlation(data: pd.DataFrame, color_map: str, setting_file: str) -
 
     mc1, mc2 = st.columns([0.1, 0.9])
     with mc1:
-        default_settings = load_check_settings(
-            settings_file=setting_file, check_name="missing"
+        default_settings = (
+            load_check_settings(settings_file=setting_file, check_name="missing") or {}
         )
-        all_cols = default_settings.get("all_cols") if default_settings else False
+        all_cols = default_settings.get("all_cols", False)
         all_cols = st.toggle(
             label="allow any columns",
             help="Select to allow the selection of any columns in the dataset. By default, only columns \
@@ -559,7 +577,7 @@ def missing_correlation(data: pd.DataFrame, color_map: str, setting_file: str) -
             kwargs={"state_name": "all_cols_save"},
         )
 
-        if "all_cols_save" in st.session_state and st.session_state["all_cols_save"]:  # noqa RUF019
+        if ("all_cols_save" in st.session_state) and st.session_state.all_cols_save:
             save_check_settings(
                 settings_file=setting_file,
                 check_name="missing",
@@ -570,9 +588,7 @@ def missing_correlation(data: pd.DataFrame, color_map: str, setting_file: str) -
         col_options = get_null_list(data=data, all_cols=all_cols)
 
     with mc2:
-        null_cols_sel = (
-            default_settings.get("null_cols_sel") if default_settings else None
-        )
+        null_cols_sel = default_settings.get("null_cols_sel", None)
         null_cols_sel = st.multiselect(
             label="Select columns for nullity correlation",
             options=col_options,
@@ -582,7 +598,9 @@ def missing_correlation(data: pd.DataFrame, color_map: str, setting_file: str) -
             on_change=trigger_save,
             kwargs={"state_name": "null_cols_sel_save"},
         )
-        if st.session_state.get("null_cols_sel_save"):
+        if (
+            "null_cols_sel_save" in st.session_state
+        ) and st.session_state.null_cols_sel_save:
             save_check_settings(
                 settings_file=setting_file,
                 check_name="missing",
@@ -650,10 +668,10 @@ def missing_matrix(data: pd.DataFrame, color_map: str, setting_file: str) -> Non
     st.write("---")
     st.markdown("## Nullity matrix")
 
-    default_settings = load_check_settings(
-        settings_file=setting_file, check_name="missing"
+    default_settings = (
+        load_check_settings(settings_file=setting_file, check_name="missing") or {}
     )
-    sort_by_col = default_settings.get("sort_by_col") if default_settings else None
+    sort_by_col = default_settings.get("sort_by_col", None)
     sort_by_col_index = (
         data.columns.tolist().index(sort_by_col) if sort_by_col else None
     )
@@ -667,7 +685,7 @@ def missing_matrix(data: pd.DataFrame, color_map: str, setting_file: str) -> Non
         kwargs={"state_name": "sort_by_col_save"},
     )
 
-    if "sort_by_col_save" in st.session_state and st.session_state["sort_by_col_save"]:  # noqa RUF019
+    if ("sort_by_col_save" in st.session_state) and st.session_state.sort_by_col_save:
         save_check_settings(
             settings_file=setting_file,
             check_name="missing",
