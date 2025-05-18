@@ -172,27 +172,51 @@ def compute_summary_submissions(data: pd.DataFrame, date: str) -> tuple:
             A tuple containing the summary values
 
     """
-    first_submission_date = data[date].min()
-    last_submission_date = data[date].max()
+    summary_df = data[[date]].copy(deep=True)
+    summary_df[date] = summary_df[date].dt.date
+    first_submission_date = summary_df[date].min()
+    last_submission_date = summary_df[date].max()
 
-    submissions_today = data[data[date] == pd.Timestamp.now().normalize()].shape[0]
-    submissions_yesterday = data[
-        data[date] == pd.Timestamp.now().normalize() - pd.DateOffset(days=1)
+    todays_date = pd.Timestamp.now().normalize().date()
+    submissions_today = summary_df[summary_df[date] == todays_date].shape[0]
+
+    yestedays_date = (pd.Timestamp.now().normalize() - pd.DateOffset(days=1)).date()
+    submissions_yesterday = summary_df[summary_df[date] == yestedays_date].shape[0]
+
+    this_week_start_date = (
+        pd.Timestamp.now().normalize() - pd.DateOffset(weeks=1)
+    ).date()
+    submissions_this_week = summary_df[summary_df[date] >= this_week_start_date].shape[
+        0
+    ]
+
+    lastweek_start_date = (
+        pd.Timestamp.now().normalize() - pd.DateOffset(weeks=2)
+    ).date()
+    lastweek_end_date = (pd.Timestamp.now().normalize() - pd.DateOffset(weeks=1)).date()
+    submissions_last_week = summary_df[
+        (summary_df[date] >= lastweek_start_date)
+        & (summary_df[date] < lastweek_end_date)
     ].shape[0]
-    submissions_this_week = data[
-        data[date] >= pd.Timestamp.now().normalize() - pd.DateOffset(weeks=1)
+
+    this_months_start_date = (
+        pd.Timestamp.now().normalize() - pd.DateOffset(months=1)
+    ).date()
+    submissions_this_month = summary_df[
+        summary_df[date] >= this_months_start_date
     ].shape[0]
-    submissions_last_week = data[
-        (data[date] >= pd.Timestamp.now().normalize() - pd.DateOffset(weeks=2))
-        & (data[date] < pd.Timestamp.now().normalize() - pd.DateOffset(weeks=1))
+
+    last_month_start_date = (
+        pd.Timestamp.now().normalize() - pd.DateOffset(months=2)
+    ).date()
+    last_month_end_date = (
+        pd.Timestamp.now().normalize() - pd.DateOffset(months=1)
+    ).date()
+    submissions_last_month = summary_df[
+        (summary_df[date] >= last_month_start_date)
+        & (summary_df[date] < last_month_end_date)
     ].shape[0]
-    submissions_this_month = data[
-        data[date] >= pd.Timestamp.now().normalize() - pd.DateOffset(months=1)
-    ].shape[0]
-    submissions_last_month = data[
-        (data[date] >= pd.Timestamp.now().normalize() - pd.DateOffset(months=2))
-        & (data[date] < pd.Timestamp.now().normalize() - pd.DateOffset(months=1))
-    ].shape[0]
+
     submissions_total = data.shape[0]
 
     submissions_today_delta = (
@@ -212,8 +236,9 @@ def compute_summary_submissions(data: pd.DataFrame, date: str) -> tuple:
         else 0
     )
 
-    data[date] = data[date].dt.date
-    submissions_by_date = data.groupby(date).size().reset_index(name="submissions")
+    submissions_by_date = (
+        summary_df.groupby(date).size().reset_index(name="submissions")
+    )
 
     return (
         first_submission_date,
@@ -258,17 +283,17 @@ def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
             submissions_this_week_delta,
             submissions_this_month_delta,
             submissions_by_date,
-        ) = compute_summary_submissions(data, date)
+        ) = compute_summary_submissions(data=data, date=date)
 
         dc1, _, _, dc2 = st.columns(spec=4)
         dc1.metric(
             label="First Submission",
-            value=str(first_submission_date.date()),
+            value=str(first_submission_date),
             help="Date of the first submission",
         )
         dc2.metric(
             label="Last Submission",
-            value=str(last_submission_date.date()),
+            value=str(last_submission_date),
             help="Date of the last submission",
         )
 
