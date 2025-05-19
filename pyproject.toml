@@ -38,8 +38,9 @@ dev-dependencies = [
     "mdformat-pyproject>=0.0.1",
     "ruff>=0.6.4",
     "sqlfluff>=3.1.1",
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
 ]
-
 
 [tool.ruff]
 line-length = 88
@@ -101,3 +102,35 @@ docstring-code-line-length = 88
 wrap = 88          # possible values: {"keep", "no", INTEGER}
 number = false     # possible values: {false, true}
 end_of_line = "lf" # possible values: {"lf", "crlf", "keep"}
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "tests/*",
+    "**/__init__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "pass",
+    "raise ImportError",
+]
