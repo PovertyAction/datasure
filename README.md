@@ -135,3 +135,19 @@ Follow these steps to test the app:
 - To set up the checks:
   1. Open a tab and expand the **Settings Expander** at the top.
   2. Configure the settings as needed for the check to display the required output.
+
+## Running Tests
+
+The project uses Python's built-in `unittest` framework for testing. The test files are located in the `tests/` directory.
+
+To run all tests, execute the following command from the project root directory:
+
+```bash
+python -m unittest discover tests
+```
+
+To run a specific test file:
+
+```bash
+python -m unittest tests/test_summary.py
+```
