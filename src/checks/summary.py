@@ -406,7 +406,33 @@ def compute_summary_progress(
             A tuple containing the summary values
 
     """
-    # compute progress values here if needed
+    prog_summary_df = data[[date]].copy(deep=True)
+    # return None and 0 if no data
+    if prog_summary_df.empty:
+        return (
+            0,
+            0,
+            0,
+            0,
+        )
+    # check if date column is datetime
+    # try convertting to datetime
+    # and raise error if conversion fails
+    if not pd.api.types.is_datetime64_any_dtype(prog_summary_df[date]):
+        prog_summary_df[date] = pd.to_datetime(prog_summary_df[date], errors="coerce")
+        if not pd.api.types.is_datetime64_any_dtype(prog_summary_df[date]):
+            raise ValueError(f"Column {date} is not a datetime column")
+
+    # drop missing date
+    prog_summary_df = prog_summary_df.dropna(subset=[date])
+    # dataset is empty after dropping missing date return None
+    if prog_summary_df.empty:
+        return (
+            0,
+            0,
+            0,
+            0,
+        )
     progress = (data.shape[0] / target) * 100 if target else 0
     average_submission_per_day = data[date].dt.date.value_counts().mean()
     data["week"] = data[date].dt.to_period("W").dt.to_timestamp()
