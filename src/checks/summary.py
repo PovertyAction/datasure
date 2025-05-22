@@ -189,11 +189,33 @@ def compute_summary_submissions(data: pd.DataFrame, date: str) -> tuple:
             pd.DataFrame(),
         )
 
-    # return error if date column is not a datetime
+    # check if date column is in the data
+    # try convertting to datetime
+    # and raise error if conversion fails
     if not pd.api.types.is_datetime64_any_dtype(summary_df[date]):
-        raise ValueError(f"Column {date} is not a datetime column")
+        summary_df[date] = pd.to_datetime(summary_df[date], errors="coerce")
+        if not pd.api.types.is_datetime64_any_dtype(summary_df[date]):
+            raise ValueError(f"Column {date} is not a datetime column")
 
     summary_df[date] = summary_df[date].dt.date
+    # count number of submissions with missing date
+    missing_date_count = max(summary_df[date].isnull().sum(), 0)
+    summary_df = summary_df.dropna(subset=[date])
+    # dataset is empty after dropping missing date return None
+    if summary_df.empty:
+        return (
+            None,
+            None,
+            0,
+            0,
+            0,
+            missing_date_count,
+            0,
+            0,
+            0,
+            pd.DataFrame(),
+        )
+
     first_submission_date = summary_df[date].min()
     last_submission_date = summary_df[date].max()
 
@@ -266,7 +288,7 @@ def compute_summary_submissions(data: pd.DataFrame, date: str) -> tuple:
         submissions_today,
         submissions_this_week,
         submissions_this_month,
-        submissions_total,
+        submissions_total + missing_date_count,
         submissions_today_delta,
         submissions_this_week_delta,
         submissions_this_month_delta,
@@ -550,13 +572,13 @@ def summary_progress(
     pc1, _ = st.columns([0.3, 0.7])
     with pc1:
         progress_by_col = default_settings.get("progress_by_col", None)
-        progress_col_index = (
-            data.columns.get_loc(progress_by_col) if progress_by_col else None
-        )
         progress_options = data.columns.tolist()
         progress_options.remove(date)
+        progress_col_index = (
+            progress_options.index(progress_by_col) if progress_by_col else None
+        )
         progress_by_col = st.selectbox(
-            "Progress by",
+            label="Progress by",
             options=progress_options,
             index=progress_col_index,
             key="progress_by_col_key",
