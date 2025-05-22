@@ -7,14 +7,20 @@ from .missing import missing_report
 from .outliers import outliers_report
 from .progress import progress_report
 from .summary import (
+    compute_summary_data_quality,
+    compute_summary_data_summary,
     compute_summary_progress,
+    compute_summary_progress_by_col,
     compute_summary_submissions,
     summary_report,
 )
 
 __all__ = [
     "backchecks_report",
+    "compute_summary_data_quality",
+    "compute_summary_data_summary",
     "compute_summary_progress",
+    "compute_summary_progress_by_col",
     "compute_summary_submissions",
     "descriptive_report",
     "duplicates_report",
