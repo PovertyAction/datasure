@@ -1,10 +1,174 @@
+import os
+
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
+from src.utils import load_check_settings
+
+
+@st.cache_data
+def load_default_summary_settings(setting_file: str, page_num: int) -> tuple:
+    """
+    Load default summary settings from a JSON file.
+
+    Parameters
+    ----------
+    setting_file : str
+        Path to the JSON file containing default settings.
+    page_num : int
+        Page number for the Streamlit app.
+
+    Returns
+    -------
+    tuple
+        A tuple containing the loaded settings and the page number.
+    """
+    # load default settings in the following order:
+    # - if settings file exists, load settings from file
+    # - if settings file does not exist, load default settings from config
+
+    if setting_file and os.path.exists(setting_file):
+        default_settings = load_check_settings(setting_file, "descriptive") or {}
+    else:
+        default_settings = {}
+
+    default_col_list = default_settings.get("column_list") or []
+
+    default_numeric_col_type = default_settings.get("numeric_col_type") or "Continuous"
+
+    default_table_type = default_settings.get("table_type") or "One-way Table"
+    default_display_type = default_settings.get("display_type") or "Table"
+
+    return (
+        default_col_list,
+        default_numeric_col_type,
+        default_table_type,
+        default_display_type,
+    )
+
+
+def datetime_check(col: pd.Series) -> bool:
+    """
+    Check if column can be converted to date/datetime.
+
+    Parameters
+    ----------
+    col : pd.Series
+        The column to check.
+
+    Returns
+    -------
+    bool
+        True if the column is date-like, False otherwise.
+    """
+    if isinstance(col, str):
+        try:
+            pd.to_datetime(col, errors="raise")
+            if pd.api.types.is_datetime64_any_dtype(col):
+                return True
+        except (ValueError, TypeError):
+            return False
+
+    return False
+
+
+def descriptive_report_settings(
+    data: pd.DataFrame, setting_file: str, page_num: int
+) -> tuple:
+    """
+    Get the settings for the descriptive report.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        The input dataframe to visualize.
+    setting_file : str
+        Path to the JSON file containing default settings.
+    page_num : int
+        Page number for the Streamlit app.
+
+    Returns
+    -------
+    tuple
+        A tuple containing the selected columns, treatment type, table type, and
+        display type.
+    """
+    with st.expander("Descriptive Statistics Settings", expanded=True):
+        st.markdown("## Configure settings for descriptive statistics")
+
+        survey_cols = data.columns
+
+        (
+            default_selected_cols,
+            default_treat_as_global,
+            default_table_type_global,
+            default_display_type_global,
+        ) = load_default_summary_settings(setting_file=setting_file, page_num=page_num)
+
+        # Let users select columns for analysis (max 10)
+        selected_cols = st.multiselect(
+            label="Select columns to include in descriptive statistics (maximum 10)",
+            options=list(survey_cols),
+            default=default_selected_cols,
+            key="selected_cols_key",
+            max_selections=10,
+        )
+
+        # return a list of date/datetime columns
+        date_cols = [
+            data[selected_cols]
+            .select_dtypes(include=["datetime64", "datetime64[ns]"])
+            .columns.tolist()
+        ]
+        # Check for columns that might be dates but not recognized as datetime
+        potential_date_cols = (
+            data[selected_cols]
+            .apply(
+                lambda col: datetime_check(col) if col.name not in date_cols else False
+            )
+            .any()
+        )
+        # Confirm which date columns should be treated as dates
+        if potential_date_cols:
+            st.markdown("### Date Column Detection")
+            st.write(
+                "The following columns might contain date values. Please select which ones to treat as dates:"
+            )
+
+            date_confirm = st.multiselect(
+                label="Select columns to treat as dates",
+                options=potential_date_cols,
+                default=potential_date_cols,
+            )
+            if date_confirm:
+                # Convert confirmed date columns to datetime
+                for col in date_confirm:
+                    try:
+                        data[col] = pd.to_datetime(data[col])
+                        if col not in date_cols:
+                            date_cols.append(col)
+                    except Exception as e:
+                        st.warning(f"Could not convert '{col}' to datetime: {e}")
+
+        # return a list of numeric columns
+        numeric_cols = [
+            data[selected_cols]
+            .select_dtypes(include=["int64", "float64"])
+            .columns.tolist()
+        ]
+        # return a list of categorical columns
+        categorical_cols = [
+            data[selected_cols]
+            .select_dtypes(include=["object", "category"])
+            .columns.tolist()
+        ]
+
+    return selected_cols, date_cols, numeric_cols, categorical_cols
+
 
 # define function to create summary report
-def descriptive_report(data, page_num) -> None:  # noqa: D417, RUF100
+def descriptive_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:  # noqa: D417, RUF100
     """
     Visualize the distribution of categorical and numeric variables in the dataframe.
 
@@ -18,238 +182,242 @@ def descriptive_report(data, page_num) -> None:  # noqa: D417, RUF100
     None
 
     """
-    with st.expander("Descriptive Statistics Settings", expanded=True):
-        st.markdown("## Configure settings for descriptive statistics")
+    survey_cols = data.columns
 
-        survey_cols = data.columns
+    (
+        default_selected_cols,
+        default_treat_as_global,
+        default_table_type_global,
+        default_display_type_global,
+    ) = load_default_summary_settings(setting_file=setting_file, page_num=page_num)
 
-        # Let users select columns for analysis (max 10)
-        selected_cols = st.multiselect(
-            "Select columns to include in descriptive statistics (maximum 10)",
-            options=list(survey_cols),
-            default=[],
-            max_selections=10,
+    selected_cols, date_cols, numeric_cols, categorical_cols = (
+        descriptive_report_settings(
+            data=data,
+            setting_file=setting_file,
+            page_num=page_num,
         )
+    )
 
-        # Only show settings if columns are selected
-        if selected_cols:
-            # Filter data to only include selected columns
-            data_filtered = data[selected_cols]
+    # Only show settings if columns are selected
+    if selected_cols:
+        # Filter data to only include selected columns
+        data_filtered = data[selected_cols]
 
-            # Identify column types
-            cat_vars = data_filtered.select_dtypes(
-                include=["object", "category"]
-            ).columns.tolist()
-            num_vars = data_filtered.select_dtypes(
-                include=["int64", "float64"]
-            ).columns.tolist()
-            date_vars = data_filtered.select_dtypes(
-                include=["datetime64", "datetime64[ns]"]
-            ).columns.tolist()
+        # Identify column types
+        cat_vars = data_filtered.select_dtypes(
+            include=["object", "category"]
+        ).columns.tolist()
+        num_vars = data_filtered.select_dtypes(
+            include=["int64", "float64"]
+        ).columns.tolist()
+        date_vars = data_filtered.select_dtypes(
+            include=["datetime64", "datetime64[ns]"]
+        ).columns.tolist()
 
-            # Check for columns that might be dates but not recognized as datetime
-            potential_date_cols = []
-            for col in selected_cols:
-                if col not in cat_vars and col not in num_vars and col not in date_vars:
-                    # Check if column might be a date
-                    try:
-                        # Attempt to parse the first non-null value
-                        sample_val = data_filtered[col].dropna().iloc[0]
-                        if isinstance(sample_val, str):
-                            pd.to_datetime(sample_val)
-                            potential_date_cols.append(col)
-                    except (ValueError, TypeError, IndexError):
-                        pass
+        # Check for columns that might be dates but not recognized as datetime
+        potential_date_cols = []
+        for col in selected_cols:
+            if col not in cat_vars and col not in num_vars and col not in date_vars:
+                # Check if column might be a date
+                try:
+                    # Attempt to parse the first non-null value
+                    sample_val = data_filtered[col].dropna().iloc[0]
+                    if isinstance(sample_val, str):
+                        pd.to_datetime(sample_val)
+                        potential_date_cols.append(col)
+                except (ValueError, TypeError, IndexError):
+                    pass
 
-            # Confirm which date columns should be treated as dates
-            if potential_date_cols:
-                st.markdown("### Date Column Detection")
-                st.write(
-                    "The following columns might contain date values. Please select which ones to treat as dates:"
-                )
+        # Confirm which date columns should be treated as dates
+        if potential_date_cols:
+            st.markdown("### Date Column Detection")
+            st.write(
+                "The following columns might contain date values. Please select which ones to treat as dates:"
+            )
 
-                date_confirm = st.multiselect(
-                    "Select columns to treat as dates",
-                    options=potential_date_cols,
-                    default=potential_date_cols,
-                )
+            date_confirm = st.multiselect(
+                "Select columns to treat as dates",
+                options=potential_date_cols,
+                default=potential_date_cols,
+            )
 
-                # Convert confirmed date columns to datetime
-                for col in date_confirm:
-                    try:
-                        data_filtered[col] = pd.to_datetime(data_filtered[col])
-                        if col in cat_vars:
-                            cat_vars.remove(col)
-                        date_vars.append(col)
-                    except Exception as e:
-                        st.warning(f"Could not convert '{col}' to datetime: {e}")
+            # Convert confirmed date columns to datetime
+            for col in date_confirm:
+                try:
+                    data_filtered[col] = pd.to_datetime(data_filtered[col])
+                    if col in cat_vars:
+                        cat_vars.remove(col)
+                    date_vars.append(col)
+                except Exception as e:
+                    st.warning(f"Could not convert '{col}' to datetime: {e}")
 
-            # For remaining columns that are in selected_cols but not categorized
-            extra_cols = [
-                col
-                for col in selected_cols
-                if col not in cat_vars and col not in num_vars and col not in date_vars
-            ]
+        # For remaining columns that are in selected_cols but not categorized
+        extra_cols = [
+            col
+            for col in selected_cols
+            if col not in cat_vars and col not in num_vars and col not in date_vars
+        ]
 
-            if extra_cols:
-                # Try to identify if these should be numeric or categorical
-                for col in extra_cols:
-                    try:
-                        # Convert to numeric if possible
-                        data_filtered[col] = pd.to_numeric(data_filtered[col])
-                        num_vars.append(col)
-                    except:
-                        # Otherwise treat as categorical
-                        cat_vars.append(col)
+        if extra_cols:
+            # Try to identify if these should be numeric or categorical
+            for col in extra_cols:
+                try:
+                    # Convert to numeric if possible
+                    data_filtered[col] = pd.to_numeric(data_filtered[col])
+                    num_vars.append(col)
+                except:
+                    # Otherwise treat as categorical
+                    cat_vars.append(col)
 
-            # Date Variables Settings
-            if len(date_vars) > 0:
-                st.markdown("### Date Variables Settings")
-                st.write(f"Found {len(date_vars)} date variables.")
+        # Date Variables Settings
+        if len(date_vars) > 0:
+            st.markdown("### Date Variables Settings")
+            st.write(f"Found {len(date_vars)} date variables.")
 
-                # Select date format for display
-                date_format = st.selectbox(
-                    "Select date format for display:",
-                    options=[
-                        "%Y-%m-%d",  # 2023-01-15
-                        "%d/%m/%Y",  # 15/01/2023
-                        "%m/%d/%Y",  # 01/15/2023
-                        "%B %d, %Y",  # January 15, 2023
-                        "%d %B %Y",  # 15 January 2023
-                        "%Y-%m-%d %H:%M:%S",  # 2023-01-15 14:30:00
-                    ],
-                    index=0,
-                    key="date_format",
-                )
+            # Select date format for display
+            date_format = st.selectbox(
+                "Select date format for display:",
+                options=[
+                    "%Y-%m-%d",  # 2023-01-15
+                    "%d/%m/%Y",  # 15/01/2023
+                    "%m/%d/%Y",  # 01/15/2023
+                    "%B %d, %Y",  # January 15, 2023
+                    "%d %B %Y",  # 15 January 2023
+                    "%Y-%m-%d %H:%M:%S",  # 2023-01-15 14:30:00
+                ],
+                index=0,
+                key="date_format",
+            )
 
-                # Analysis type for date variables
-                date_analysis_type = st.radio(
-                    "Analysis type for date variables:",
-                    options=["Frequency Table", "Distribution by Period"],
-                    key="date_analysis_type",
-                    horizontal=True,
-                )
+            # Analysis type for date variables
+            date_analysis_type = st.radio(
+                "Analysis type for date variables:",
+                options=["Frequency Table", "Distribution by Period"],
+                key="date_analysis_type",
+                horizontal=True,
+            )
 
-                # Period selection for distribution analysis
-                date_period = None
-                display_mode = None
-                if date_analysis_type == "Distribution by Period":
-                    col1, col2 = st.columns(2)
-
-                    with col1:
-                        # MODIFIED: Removed "Day of Week" from options
-                        date_period = st.selectbox(
-                            "Group dates by:",
-                            options=["Year", "Month", "Quarter"],
-                            key="date_period",
-                        )
-
-                    with col2:
-                        display_mode = st.radio(
-                            "Display as:",
-                            options=["Table", "Graph", "Both"],
-                            key="date_display_mode",
-                            horizontal=True,
-                            index=2,
-                        )
-
-            # Categorical Variables Settings
-            if len(cat_vars) > 0:
-                st.markdown("### Categorical Variables Settings")
-                st.write(f"Found {len(cat_vars)} categorical variables.")
-
-                # Selection between one-way and two-way table
-                analysis_type = st.radio(
-                    "Analysis type for all categorical variables:",
-                    options=["One-way Table", "Two-way Table (Cross-tabulation)"],
-                    key="cat_analysis_type",
-                    horizontal=True,
-                )
-
-                # For two-way tables, select a variable for cross-tabulation
-                cross_tab_col = None
-                if analysis_type == "Two-way Table (Cross-tabulation)":
-                    # Get all columns from the original dataset for cross-tabulation
-                    all_cols = data.columns.tolist()
-
-                    cross_tab_col = st.selectbox(
-                        "Cross-tabulate all categorical variables with:",
-                        options=all_cols,
-                        key="cat_crosstab_global",
-                    )
-
-            # Numeric Variables Settings
-            if len(num_vars) > 0:
-                st.markdown("### Numeric Variables Settings")
-                st.write(f"Found {len(num_vars)} numeric variables.")
-
-                # Global settings for numeric variables
+            # Period selection for distribution analysis
+            date_period = None
+            display_mode = None
+            if date_analysis_type == "Distribution by Period":
                 col1, col2 = st.columns(2)
 
                 with col1:
-                    treat_as_global = st.radio(
-                        "Treat all numeric variables as:",
-                        options=["Continuous", "Categorical"],
-                        key="num_treat_global",
-                        horizontal=True,
+                    # MODIFIED: Removed "Day of Week" from options
+                    date_period = st.selectbox(
+                        "Group dates by:",
+                        options=["Year", "Month", "Quarter"],
+                        key="date_period",
                     )
 
                 with col2:
-                    if treat_as_global == "Continuous":
-                        display_type_global = st.radio(
-                            "Display type for all numeric variables:",
-                            options=["Table", "Graph"],
-                            key="num_display_global",
-                            horizontal=True,
-                        )
-                    else:
-                        # For categorical, only show Table options
-                        display_type_global = "Table"
+                    display_mode = st.radio(
+                        "Display as:",
+                        options=["Table", "Graph", "Both"],
+                        key="date_display_mode",
+                        horizontal=True,
+                        index=2,
+                    )
 
-                # For Table options, choose table type (oneway or twoway)
-                table_type_global = None
-                cross_tab_col_num = None
+        # Categorical Variables Settings
+        if len(cat_vars) > 0:
+            st.markdown("### Categorical Variables Settings")
+            st.write(f"Found {len(cat_vars)} categorical variables.")
 
-                if display_type_global == "Table":
-                    table_type_global = st.radio(
-                        "Table type for all numeric variables:",
-                        options=["One-way Table", "Two-way Table (Cross-tabulation)"],
-                        key="num_table_global",
+            # Selection between one-way and two-way table
+            analysis_type = st.radio(
+                "Analysis type for all categorical variables:",
+                options=["One-way Table", "Two-way Table (Cross-tabulation)"],
+                key="cat_analysis_type",
+                horizontal=True,
+            )
+
+            # For two-way tables, select a variable for cross-tabulation
+            cross_tab_col = None
+            if analysis_type == "Two-way Table (Cross-tabulation)":
+                # Get all columns from the original dataset for cross-tabulation
+                all_cols = data.columns.tolist()
+
+                cross_tab_col = st.selectbox(
+                    "Cross-tabulate all categorical variables with:",
+                    options=all_cols,
+                    key="cat_crosstab_global",
+                )
+
+        # Numeric Variables Settings
+        if len(num_vars) > 0:
+            st.markdown("### Numeric Variables Settings")
+            st.write(f"Found {len(num_vars)} numeric variables.")
+
+            # Global settings for numeric variables
+            col1, col2 = st.columns(2)
+
+            with col1:
+                treat_as_global = st.radio(
+                    "Treat all numeric variables as:",
+                    options=["Continuous", "Categorical"],
+                    key="num_treat_global",
+                    horizontal=True,
+                )
+
+            with col2:
+                if treat_as_global == "Continuous":
+                    display_type_global = st.radio(
+                        "Display type for all numeric variables:",
+                        options=["Table", "Graph"],
+                        key="num_display_global",
                         horizontal=True,
                     )
+                else:
+                    # For categorical, only show Table options
+                    display_type_global = "Table"
 
-                    # For two-way tables, set up cross-tabulation
-                    if table_type_global == "Two-way Table (Cross-tabulation)":
-                        # Get all columns from the original df for cross-tabulation
-                        all_cols = data.columns.tolist()
+            # For Table options, choose table type (oneway or twoway)
+            table_type_global = None
+            cross_tab_col_num = None
 
-                        cross_tab_col_num = st.selectbox(
-                            "Cross-tabulate all numeric variables with:",
-                            options=all_cols,
-                            key="num_crosstab_global",
-                        )
+            if display_type_global == "Table":
+                table_type_global = st.radio(
+                    "Table type for all numeric variables:",
+                    options=["One-way Table", "Two-way Table (Cross-tabulation)"],
+                    key="num_table_global",
+                    horizontal=True,
+                )
 
-                # For continuous variables with statistics
-                stats_to_show_global = None
-                if (
-                    treat_as_global == "Continuous"
-                    and display_type_global == "Table"
-                    and table_type_global == "One-way Table"
-                ):
-                    # Select statistics to display
-                    stats_to_show_global = st.multiselect(
-                        "Statistics to display for all numeric variables:",
-                        options=[
-                            "Mean",
-                            "Median",
-                            "Standard Deviation",
-                            "Min",
-                            "Max",
-                            "Quartiles",
-                        ],
-                        default=["Mean", "Median", "Standard Deviation", "Min", "Max"],
-                        key="stats_global",
+                # For two-way tables, set up cross-tabulation
+                if table_type_global == "Two-way Table (Cross-tabulation)":
+                    # Get all columns from the original df for cross-tabulation
+                    all_cols = data.columns.tolist()
+
+                    cross_tab_col_num = st.selectbox(
+                        "Cross-tabulate all numeric variables with:",
+                        options=all_cols,
+                        key="num_crosstab_global",
                     )
+
+            # For continuous variables with statistics
+            stats_to_show_global = None
+            if (
+                treat_as_global == "Continuous"
+                and display_type_global == "Table"
+                and table_type_global == "One-way Table"
+            ):
+                # Select statistics to display
+                stats_to_show_global = st.multiselect(
+                    "Statistics to display for all numeric variables:",
+                    options=[
+                        "Mean",
+                        "Median",
+                        "Standard Deviation",
+                        "Min",
+                        "Max",
+                        "Quartiles",
+                    ],
+                    default=["Mean", "Median", "Standard Deviation", "Min", "Max"],
+                    key="stats_global",
+                )
 
     # Check if any columns were selected
     if not selected_cols:
