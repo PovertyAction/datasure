@@ -6,10 +6,15 @@ from .gpschecks import gpschecks_report
 from .missing import missing_report
 from .outliers import outliers_report
 from .progress import progress_report
-from .summary import compute_summary_submissions, summary_report
+from .summary import (
+    compute_summary_progress,
+    compute_summary_submissions,
+    summary_report,
+)
 
 __all__ = [
     "backchecks_report",
+    "compute_summary_progress",
     "compute_summary_submissions",
     "descriptive_report",
     "duplicates_report",
