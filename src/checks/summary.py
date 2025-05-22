@@ -173,6 +173,26 @@ def compute_summary_submissions(data: pd.DataFrame, date: str) -> tuple:
 
     """
     summary_df = data[[date]].copy(deep=True)
+
+    # return None and 0 if no data
+    if summary_df.empty:
+        return (
+            None,
+            None,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            pd.DataFrame(),
+        )
+
+    # return error if date column is not a datetime
+    if not pd.api.types.is_datetime64_any_dtype(summary_df[date]):
+        raise ValueError(f"Column {date} is not a datetime column")
+
     summary_df[date] = summary_df[date].dt.date
     first_submission_date = summary_df[date].min()
     last_submission_date = summary_df[date].max()
