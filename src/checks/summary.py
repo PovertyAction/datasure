@@ -406,6 +406,9 @@ def compute_summary_progress(
             A tuple containing the summary values
 
     """
+    # if target is negative, or not an integer, raise error
+    if target is not None and (not isinstance(target, int) or target < 0):
+        raise ValueError("Target must be a positive integer")
     prog_summary_df = data[[date]].copy(deep=True)
     # return None and 0 if no data
     if prog_summary_df.empty:
@@ -433,12 +436,12 @@ def compute_summary_progress(
             0,
             0,
         )
-    progress = (data.shape[0] / target) * 100 if target else 0
-    average_submission_per_day = data[date].dt.date.value_counts().mean()
-    data["week"] = data[date].dt.to_period("W").dt.to_timestamp()
-    average_submission_per_week = data.groupby("week").size().mean()
-    data["month"] = data[date].dt.to_period("M").dt.to_timestamp()
-    average_submission_per_month = data.groupby("month").size().mean()
+    progress = (prog_summary_df.shape[0] / target) * 100 if target else 0
+    average_submission_per_day = prog_summary_df[date].dt.date.value_counts().mean()
+    prog_summary_df["week"] = prog_summary_df[date].dt.to_period("W").dt.to_timestamp()
+    average_submission_per_week = prog_summary_df.groupby("week").size().mean()
+    prog_summary_df["month"] = prog_summary_df[date].dt.to_period("M").dt.to_timestamp()
+    average_submission_per_month = prog_summary_df.groupby("month").size().mean()
 
     return (
         progress,
@@ -490,7 +493,23 @@ def compute_summary_progress_by_col(
     else:
         progress_time_period_use = progress_time_period
 
-    progress_data = data[[date, progress_by_col]].copy()
+    progress_data = data[[date, progress_by_col]].copy(deep=True)
+    # return None and 0 if no data
+    if progress_data.empty:
+        return (
+            pd.DataFrame(),
+            0,
+            0,
+            [],
+        )
+    # check if date column is datetime
+    # try convertting to datetime
+    # and raise error if conversion fails
+    if not pd.api.types.is_datetime64_any_dtype(progress_data[date]):
+        progress_data[date] = pd.to_datetime(progress_data[date], errors="coerce")
+        if not pd.api.types.is_datetime64_any_dtype(progress_data[date]):
+            raise ValueError(f"Column {date} is not a datetime column")
+
     progress_data["time period"] = data[date].dt.to_period("D").dt.to_timestamp()
     progress_data = (
         progress_data.groupby(["time period", progress_by_col])

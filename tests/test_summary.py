@@ -6,7 +6,11 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from src.checks import compute_summary_progress, compute_summary_submissions
+from src.checks import (
+    compute_summary_progress,
+    compute_summary_progress_by_col,
+    compute_summary_submissions,
+)
 
 
 def create_summary_test_data():
@@ -431,6 +435,91 @@ class TestSummary(unittest.TestCase):  # noqa: D101
         self.assertIsInstance(average_submission_per_day, (float, int))
         self.assertIsInstance(average_submission_per_week, (float, int))
         self.assertIsInstance(average_submission_per_month, (float, int))
+
+    def test_compute_summary_progress_with_invalid_target(self):
+        """Test the compute_summary_progress function with invalid target"""
+        # Load test data
+        self.test_data = create_summary_test_data()
+
+        # Compute summary with invalid target
+        with self.assertRaises(ValueError):
+            compute_summary_progress(
+                data=self.test_data,
+                date="SubmissionDate",
+                target=-1000,
+            )
+        # test with non-integer target
+        with self.assertRaises(ValueError):
+            compute_summary_progress(
+                data=self.test_data,
+                date="SubmissionDate",
+                target=1000.5,
+            )
+
+        # test target of 0 and 2000
+        progress_0, _, _, _ = compute_summary_progress(
+            data=self.test_data,
+            date="SubmissionDate",
+            target=0,
+        )
+        self.assertEqual(
+            progress_0,
+            0,
+        )
+        progress_2000, _, _, _ = compute_summary_progress(
+            data=self.test_data,
+            date="SubmissionDate",
+            target=2000,
+        )
+        self.assertEqual(
+            progress_2000,
+            len(self.test_data) / 2000 * 100,
+        )
+
+    def test_compute_summary_progress_by_col(self):
+        """Test the compute_summary_progress_by_col function"""
+        # Load test data
+        self.test_data = create_summary_test_data()
+        # add district column with 5 random districts
+        districts = [
+            "District A",
+            "District B",
+            "District C",
+            "District D",
+            "District E",
+        ]
+        self.test_data["district"] = [
+            pd.Series(districts).sample(1, random_state=42).values[0]
+            for _ in range(len(self.test_data))
+        ]
+
+        # Compute summary
+        progress_data, vmin_val, vmax_val, format_cols = (
+            compute_summary_progress_by_col(
+                data=self.test_data,
+                date="SubmissionDate",
+                progress_by_col="district",
+                progress_time_period="Auto",
+            )
+        )
+
+        # test 1: Returns tuple of 4 elements
+        self.assertEqual(
+            len(
+                (
+                    progress_data,
+                    vmin_val,
+                    vmax_val,
+                    format_cols,
+                )
+            ),
+            4,
+        )
+        # test 2: Check the type of each element in the tuple
+        self.assertIsInstance(progress_data, pd.DataFrame)
+        self.assertIsInstance(vmin_val, (int, np.int64, float))
+        self.assertIsInstance(vmax_val, (int, np.int64, float))
+        self.assertIsInstance(format_cols, list)
 
 
 if __name__ == "__main__":
