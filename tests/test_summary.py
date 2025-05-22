@@ -6,7 +6,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from src.checks import compute_summary_submissions
+from src.checks import compute_summary_progress, compute_summary_submissions
 
 
 def create_summary_test_data():
@@ -198,7 +198,9 @@ class TestSummary(unittest.TestCase):  # noqa: D101
             else 0,
         )
 
-        # test 4: test with empty data
+    # test 4: test with empty data
+    def test_compute_summary_submissions_with_empty_data(self):
+        """Test the compute_summary_submissions function with empty data"""
         empty_data = pd.DataFrame(
             {
                 "SubmissionDate": [],
@@ -275,26 +277,160 @@ class TestSummary(unittest.TestCase):  # noqa: D101
         (
             first_submission_date,
             last_submission_date,
-            submissions_today,
-            submissions_this_week,
-            submissions_this_month,
-            submissions_total,
-            submissions_today_delta,
-            submissions_this_week_delta,
-            submissions_this_month_delta,
-            submissions_by_date,
+            _,
+            _,
+            _,
+            _,
+            _,
+            _,
+            _,
+            _,
         ) = compute_summary_submissions(
             data=self.test_data,
             date="SubmissionDate",
         )
 
         # Check that the function handles missing dates correctly
-        # self.assertIsInstance(first_submission_date, datetime.date)
-        # self.assertIsInstance(last_submission_date, datetime.date)
+        self.assertIsInstance(first_submission_date, datetime.date)
+        self.assertIsInstance(last_submission_date, datetime.date)
 
     def test_compute_summary_progress(self):
         """Test the compute_summary_progress function"""
-        pass
+        # load test data
+        self.test_data = create_summary_test_data()
+
+        (
+            progress,
+            average_submission_per_day,
+            average_submission_per_week,
+            average_submission_per_month,
+        ) = compute_summary_progress(
+            data=self.test_data,
+            date="SubmissionDate",
+            target=1000,
+        )
+
+        # test 1: Returns a tuple of 4 elements
+        self.assertEqual(
+            len(
+                (
+                    progress,
+                    average_submission_per_day,
+                    average_submission_per_week,
+                    average_submission_per_month,
+                )
+            ),
+            4,
+        )
+
+        # test 2: Check the type of each element in the tuple
+        self.assertIsInstance(progress, (float, int))
+        self.assertIsInstance(average_submission_per_day, (float, int))
+        self.assertIsInstance(average_submission_per_week, (float, int))
+        self.assertIsInstance(average_submission_per_month, (float, int))
+
+        # test 3: check the values of the tuple
+        self.assertEqual(
+            progress,
+            len(self.test_data) / 1000 * 100,
+        )
+        # create day column, calculate average submission per day and check the value
+        self.test_data["day"] = (
+            self.test_data["SubmissionDate"].dt.to_period("D").dt.to_timestamp()
+        )
+        average_submission_per_day_test = self.test_data.groupby("day").size().mean()
+        self.assertEqual(
+            average_submission_per_day,
+            average_submission_per_day_test,
+        )
+        # create week column, calculate average submission per week and check the value
+        self.test_data["week"] = (
+            self.test_data["SubmissionDate"].dt.to_period("W").dt.to_timestamp()
+        )
+        average_submission_per_week_test = self.test_data.groupby("week").size().mean()
+        self.assertEqual(
+            average_submission_per_week,
+            average_submission_per_week_test,
+        )
+        # create month column, calculate average submission per month and check the
+        # value
+        self.test_data["month"] = (
+            self.test_data["SubmissionDate"].dt.to_period("M").dt.to_timestamp()
+        )
+        average_submission_per_month_test = (
+            self.test_data.groupby("month").size().mean()
+        )
+        self.assertEqual(
+            average_submission_per_month,
+            average_submission_per_month_test,
+        )
+
+    # test 4: test with empty data
+    def test_compute_summary_progress_with_empty_data(self):
+        """Test the compute_summary_progress function with empty data"""
+        empty_data = pd.DataFrame(
+            {
+                "SubmissionDate": [],
+                "enum_id": [],
+                "enum_name": [],
+            }
+        )
+        (
+            progress,
+            average_submission_per_day,
+            average_submission_per_week,
+            average_submission_per_month,
+        ) = compute_summary_progress(
+            data=empty_data,
+            date="SubmissionDate",
+            target=1000,
+        )
+
+        self.assertEqual(
+            progress,
+            0,
+        )
+        self.assertEqual(
+            average_submission_per_day,
+            0,
+        )
+        self.assertEqual(
+            average_submission_per_week,
+            0,
+        )
+        self.assertEqual(
+            average_submission_per_month,
+            0,
+        )
+
+    # test 5: test with non-empty data with missing date values
+    def test_compute_summary_progress_with_missing_dates(self):
+        """Test the compute_summary_progress function with missing date values"""
+        # Load test data
+        self.test_data = create_summary_test_data()
+
+        # Introduce missing dates
+        self.test_data.loc[
+            self.test_data.sample(frac=0.1, random_state=42).index, "SubmissionDate"
+        ] = pd.NaT
+
+        # Compute summary
+        (
+            progress,
+            average_submission_per_day,
+            average_submission_per_week,
+            average_submission_per_month,
+        ) = compute_summary_progress(
+            data=self.test_data,
+            date="SubmissionDate",
+            target=1000,
+        )
+
+        # Check that the function handles missing dates correctly
+        self.assertIsInstance(progress, (float, int))
+        self.assertIsInstance(average_submission_per_day, (float, int))
+        self.assertIsInstance(average_submission_per_week, (float, int))
+        self.assertIsInstance(average_submission_per_month, (float, int))
 
 
 if __name__ == "__main__":
