@@ -197,6 +197,72 @@ class TestSummary(unittest.TestCase):  # noqa: D101
             else 0,
         )
 
+        # test 4: test with empty data
+        empty_data = pd.DataFrame(
+            {
+                "SubmissionDate": [],
+                "enum_id": [],
+                "enum_name": [],
+            }
+        )
+        (
+            first_submission_date,
+            last_submission_date,
+            submissions_today,
+            submissions_this_week,
+            submissions_this_month,
+            submissions_total,
+            submissions_today_delta,
+            submissions_this_week_delta,
+            submissions_this_month_delta,
+            submissions_by_date,
+        ) = compute_summary_submissions(
+            data=empty_data,
+            date="SubmissionDate",
+        )
+
+        self.assertEqual(
+            first_submission_date,
+            None,
+        )
+        self.assertEqual(
+            last_submission_date,
+            None,
+        )
+        self.assertEqual(
+            submissions_today,
+            0,
+        )
+        self.assertEqual(
+            submissions_this_week,
+            0,
+        )
+        self.assertEqual(
+            submissions_this_month,
+            0,
+        )
+        self.assertEqual(
+            submissions_total,
+            0,
+        )
+        self.assertEqual(
+            submissions_today_delta,
+            0,
+        )
+        self.assertEqual(
+            submissions_this_week_delta,
+            0,
+        )
+        self.assertEqual(
+            submissions_this_month_delta,
+            0,
+        )
+        assert submissions_by_date.empty
+
+    def test_compute_summary_progress(self):
+        """Test the compute_summary_progress function"""
+        pass
+
 
 if __name__ == "__main__":
     unittest.main()
