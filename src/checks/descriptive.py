@@ -4,7 +4,7 @@ import pandas as pd
 import seaborn as sns
 import streamlit as st
 
-from src.utils import load_check_settings
+from src.utils import load_check_settings, save_check_settings, trigger_save
 
 
 @st.cache_data
@@ -33,19 +33,9 @@ def load_default_summary_settings(setting_file: str, page_num: int) -> tuple:
     else:
         default_settings = {}
 
-    default_col_list = default_settings.get("column_list") or []
+    default_col_list = default_settings.get("selected_cols") or []
 
-    default_numeric_col_type = default_settings.get("numeric_col_type") or "Continuous"
-
-    default_table_type = default_settings.get("table_type") or "One-way Table"
-    default_display_type = default_settings.get("display_type") or "Table"
-
-    return (
-        default_col_list,
-        default_numeric_col_type,
-        default_table_type,
-        default_display_type,
-    )
+    return (default_col_list,)
 
 
 def datetime_check(col: pd.Series) -> bool:
@@ -94,22 +84,23 @@ def descriptive_report_settings(
         A tuple containing the selected columns, treatment type, table type, and
         display type.
     """
-    with st.expander("Descriptive Statistics Settings", expanded=True):
+    with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for descriptive statistics")
 
-        survey_cols = data.columns
-
-        (
-            default_selected_cols,
-            default_treat_as_global,
-            default_table_type_global,
-            default_display_type_global,
-        ) = load_default_summary_settings(setting_file=setting_file, page_num=page_num)
+        survey_cols = data.columns.to_list()
+        default_selected_cols = (
+            load_default_summary_settings(setting_file=setting_file, page_num=page_num)
+            or []
+        )
+        default_selected_cols = [
+            col for col in default_selected_cols[0] if col in survey_cols
+        ]
+        # survey_cols]
 
         # Let users select columns for analysis (max 10)
         selected_cols = st.multiselect(
             label="Select columns to include in descriptive statistics (maximum 10)",
-            options=list(survey_cols),
+            options=survey_cols,
             default=default_selected_cols,
             key="selected_cols_key",
             max_selections=10,
@@ -163,6 +154,28 @@ def descriptive_report_settings(
             .select_dtypes(include=["object", "category"])
             .columns.tolist()
         ]
+
+        # save settings to file
+        # define a save settings button
+        st.button(
+            label="Save settings",
+            on_click=trigger_save,
+            key="save_descriptive_settings",
+            kwargs={"state_name": "save_descriptive_settings_save"},
+        )
+        if (
+            "save_descriptive_settings_save" in st.session_state
+            and st.session_state.save_descriptive_settings_save
+        ):
+            # save settings to file
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="descriptive",
+                check_settings={
+                    "column_list": selected_cols,
+                },
+            )
+            st.session_state["save_descriptive_settings_save"] = False
 
     return selected_cols, date_cols, numeric_cols, categorical_cols
 
@@ -583,13 +596,6 @@ def descriptive_report(data: pd.DataFrame, setting_file: str, page_num: int) -> 
     None
 
     """
-    (
-        default_selected_cols,
-        default_treat_as_global,
-        default_table_type_global,
-        default_display_type_global,
-    ) = load_default_summary_settings(setting_file=setting_file, page_num=page_num)
-
     selected_cols, date_cols, numeric_cols, categorical_cols = (
         descriptive_report_settings(
             data=data,
