@@ -12,7 +12,7 @@ from src.utils import (
 )
 
 
-@st.cache_data
+# @st.cache_data
 def load_default_settings(settings_file: str, page_num: int) -> tuple:
     """
     Load the default settings for the summary report.
@@ -65,7 +65,7 @@ def load_default_settings(settings_file: str, page_num: int) -> tuple:
 
 
 # Function for joint outlier detection: find variable patterns
-@st.cache_data
+# @st.cache_data
 def find_variable_patterns(columns):
     """Identify patterns in variable names based on underscores.
     Args:
@@ -92,45 +92,49 @@ def find_variable_patterns(columns):
 
 
 # Function for joint outlier detection: show pattern selection
-@st.cache_data
-def show_pattern_selection(df, survey_id, pattern_groups, selected_pattern):
+# @st.cache_data
+def show_pattern_selection(df, survey_id, pattern_groups, selected_patterns):
     """Generate a pattern from selected variable names and
     return the selected columns and melted DataFrame.
-    Args:
-        df (pd.DataFrame): The input DataFrame.
-        numeric_columns (list): List of numeric column names.
-
-    Returns
-    -------
-    -------_
-        tuple: A tuple containing the base pattern, selected columns and the
-        melted DataFrame.
     """
     if pattern_groups:
+        # Create pattern options for display
         pattern_options = [
             f"{pattern} ({len(cols)} variables)"
             for pattern, cols in pattern_groups.items()
         ]
-        pattern_to_base = {
+
+        # Create mapping from display name to base pattern
+        pattern_to_base = {  # noqa: F841
             display: pattern
-            for pattern, display in zip(pattern_groups, pattern_options, strict=False)
+            for pattern, display in zip(
+                pattern_groups.keys(), pattern_options, strict=False
+            )
         }
 
-        if selected_pattern:
-            base_pattern = pattern_to_base[selected_pattern]
-            selected_cols = pattern_groups[base_pattern]
+        # Handle selected patterns
+        if selected_patterns:
+            # Get all columns from selected patterns
+            selected_cols = []
+            base_patterns = []
+            for pattern in selected_patterns:
+                if pattern in pattern_groups:
+                    selected_cols.extend(pattern_groups[pattern])
+                    base_patterns.append(pattern)
 
-            df_subset = df[[survey_id, *selected_cols]]
-            df_melted = pd.melt(
-                df_subset,
-                id_vars=[survey_id],
-                value_vars=selected_cols,
-                var_name="name_variable",
-                value_name="new_var",
-            )
-            return base_pattern, selected_cols, df_melted
-    else:
-        return None, None, None
+            if selected_cols:
+                base_pattern = " & ".join(base_patterns)  # Combine pattern names
+                df_subset = df[[survey_id] + selected_cols]
+                df_melted = pd.melt(
+                    df_subset,
+                    id_vars=[survey_id],
+                    value_vars=selected_cols,
+                    var_name="name_variable",
+                    value_name="new_var",
+                )
+                return base_pattern, selected_cols, df_melted
+
+    return None, None, None
 
 
 # outliers check settings
@@ -168,10 +172,10 @@ def outliers_settings(data: pd.DataFrame, settings_file: str, page_num: int) -> 
 
         with var_col:
             outlier_cols = st.multiselect(
-                "Select columns to check for outliers",
+                "Columns to check for outliers",
                 options=numeric_cols,
                 default=default_outlier_cols,
-                help="Select the columns to check for outliers",
+                help="Columns to check for outliers",
                 key="outlier_cols",
             )
         with method_col:
@@ -180,7 +184,7 @@ def outliers_settings(data: pd.DataFrame, settings_file: str, page_num: int) -> 
                 "Standard Deviation (SD)",
             ]
             outlier_method = st.radio(
-                label="Select your preferred method for outlier detection:",
+                label="Outlier Detection Method",
                 options=outlier_method_options,
                 index=default_outlier_method,
             )
@@ -304,7 +308,93 @@ def outliers_settings(data: pd.DataFrame, settings_file: str, page_num: int) -> 
         )
 
 
-# define function to create duplicates report
+# Function to flag outliers
+@st.cache_data
+def flag_outliers(col, outlier_method, sd_value, iqr_value):
+    """Flag outliers in a column based on specified method and thresholds."""
+    if pd.isna(col):  # Handle NaN values
+        return 0
+
+    # Calculate bounds based on the entire column
+    if outlier_method == "Interquartile Range (IQR)":
+        Q1 = col.quantile(0.25)
+        Q3 = col.quantile(0.75)
+        IQR = Q3 - Q1
+        lower_bound = Q1 - iqr_value * IQR
+        upper_bound = Q3 + iqr_value * IQR
+    else:  # Standard Deviation method
+        mean = col.mean()
+        std = col.std()
+        lower_bound = mean - sd_value * std
+        upper_bound = mean + sd_value * std
+
+    # Return 1 for outliers, 0 for non-outliers
+    return 1 if (col < lower_bound) or (col > upper_bound) else 0
+
+
+# Function to check for outliers
+@st.cache_data
+def check_outliers(
+    data,
+    outlier_cols,
+    survey_id,
+    survey_key,
+    enumerator,
+    outlier_method,
+    sd_value,
+    iqr_value,
+):
+    """Check for outliers in selected columns."""
+    # Create base dataframe with ID columns
+    ids = data[[survey_id, survey_key, enumerator]].copy()
+    # Initialize results storage
+    outliers_list = []
+
+    # Process each column
+    for col in outlier_cols:
+        series = data[col].copy()
+
+        # Calculate outlier flags
+        outlier_flags = pd.Series(False, index=series.index)
+        non_null_mask = ~series.isna()
+
+        if outlier_method == "Interquartile Range (IQR)":
+            Q1 = series[non_null_mask].quantile(0.25)
+            Q3 = series[non_null_mask].quantile(0.75)
+            IQR = Q3 - Q1
+            lower_bound = Q1 - iqr_value * IQR
+            upper_bound = Q3 + iqr_value * IQR
+        else:  # Standard Deviation method
+            mean = series[non_null_mask].mean()
+            std = series[non_null_mask].std()
+            lower_bound = mean - sd_value * std
+            upper_bound = mean + sd_value * std
+
+        # Flag outliers
+        outlier_flags[non_null_mask] = (series[non_null_mask] < lower_bound) | (
+            series[non_null_mask] > upper_bound
+        )
+
+        # Create outlier records
+        outlier_records = ids[outlier_flags].copy()
+        outlier_records["variable"] = col
+        outlier_records["value"] = series[outlier_flags]
+        outlier_records["mean"] = series[non_null_mask].mean()
+        outlier_records["std"] = series[non_null_mask].std()
+        outlier_records["lower_bound"] = lower_bound
+        outlier_records["upper_bound"] = upper_bound
+
+        outliers_list.append(outlier_records)
+
+    # Combine all outliers
+    if outliers_list:
+        table_data = pd.concat(outliers_list, ignore_index=True)
+        return table_data
+    else:
+        return pd.DataFrame()
+
+
+# define function to create outliers report
 def outliers_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:  # noqa: D417, RUF100"
     """
     Function to create a report on survey duplicates
@@ -330,68 +420,19 @@ def outliers_report(data: pd.DataFrame, setting_file: str, page_num: int) -> Non
         st.info("Please select all required options to generate the outliers report")
         return
 
-    ids = pd.DataFrame(data[[survey_id, survey_key, enumerator]])
-    series = data[outlier_cols]
-    summary = series.describe().transpose()
-    summary["IQR"] = summary["75%"] - summary["25%"]
-
-    if outlier_method == "Interquartile Range (IQR)":
-        summary["lower_bound"] = summary["25%"] - 1.5 * summary["IQR"]
-        summary["upper_bound"] = summary["75%"] + 1.5 * summary["IQR"]
-    elif outlier_method == "Standard Deviation (SD)":
-        summary["lower_bound"] = summary["mean"] - sd_value * summary["std"]
-        summary["upper_bound"] = summary["mean"] + sd_value * summary["std"]
-
-    summary = summary.rename_axis("variable").reset_index()
-
-    def flag_outliers(col):
-        # Drop NA
-        no_na = pd.Series(col).dropna()
-        # Define bounds
-        if outlier_method == "Interquartile Range (IQR)":
-            Q1 = no_na.quantile(0.25)
-            Q3 = no_na.quantile(0.75)
-            IQR = Q3 - Q1
-            lower_bound = Q1 - 1.5 * IQR
-            upper_bound = Q3 + 1.5 * IQR
-        elif outlier_method == "Standard Deviation (SD)":
-            mean = no_na.mean()
-            std_dev = no_na.std()
-            lower_bound = mean - sd_value * std_dev
-            upper_bound = mean + sd_value * std_dev
-        # Find outliers
-        if (col < lower_bound) | (col > upper_bound):
-            return 1
-        else:
-            return 0
-
-    for col in series:
-        series["value_" + col] = series[col]
-        series["outlier_" + col] = series[col].apply(lambda x: flag_outliers(x))
-
-    outlier_df = series[series.columns[series.columns.str.contains("outlier")]]
-    values_df = series[series.columns[series.columns.str.contains("value")]]
-
-    outlier_df["has_outliers"] = outlier_df.sum(axis=1)
-    outlier_df = ids.join(values_df).join(outlier_df)
-    outlier_df = outlier_df[outlier_df["has_outliers"] == 1]
-    outlier_df["id"] = range(0, len(outlier_df))
-    outlier_df = outlier_df.drop(columns=["has_outliers"])
-    outliers = pd.wide_to_long(
-        outlier_df,
-        stubnames=["outlier", "value"],
-        i="id",
-        j="var",
-        sep="_",
-        suffix=r"\w+",
-    )
-
-    # Prepare data for the table
-    table_data = pd.merge(outliers, summary, left_on="var", right_on="variable").drop(
-        columns=["outlier", "count"]
-    )
-
     st.markdown("## Outliers")
+
+    # Check for outliers
+    table_data = check_outliers(
+        data,
+        outlier_cols,
+        survey_id,
+        survey_key,
+        enumerator,
+        outlier_method,
+        sd_value,
+        iqr_value,
+    )
 
     with stylable_container(
         key="outlier_metrics",
