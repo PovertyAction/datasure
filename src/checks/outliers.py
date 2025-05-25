@@ -624,6 +624,36 @@ def compute_joint_outlier_distribution(
     return table_data, outliers_df
 
 
+# display joint outlier distribution summary
+@st.cache_data
+def display_joint_outlier_summary(joint_outlier_summary):
+    """Display the joint outlier distribution summary.
+    Args:
+        joint_outlier_summary (pd.DataFrame): DataFrame containing
+        joint outlier summary.
+    """
+    st.subheader("Joint Outlier Distribution")
+    st.dataframe(
+        joint_outlier_summary,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "id": st.column_config.Column("ID", width="small"),
+            "name_variable": st.column_config.Column("Variable Name"),
+            "new_var": st.column_config.NumberColumn(
+                "Value", format="%.2f", width="small"
+            ),
+            "mean": st.column_config.NumberColumn("Mean", format="%.2f", width="small"),
+            "lower_bound": st.column_config.NumberColumn(
+                "Lower Bound", format="%.2f", width="small"
+            ),
+            "upper_bound": st.column_config.NumberColumn(
+                "Upper Bound", format="%.2f", width="small"
+            ),
+        },
+    )
+
+
 # calculate joint outliers metrics
 @st.cache_data
 def calculate_joint_outliers_percentage(
@@ -737,34 +767,13 @@ def outliers_report(data: pd.DataFrame, setting_file: str, page_num: int) -> Non
         )
         if not joint_outlier_summary.empty:
             # Display the joint outlier distribution summary
-            st.subheader("Joint Outlier Distribution")
-            st.dataframe(
-                joint_outlier_summary,
-                hide_index=True,
-                use_container_width=True,
-                column_config={
-                    "id": st.column_config.Column("ID", width="small"),
-                    "name_variable": st.column_config.Column("Variable Name"),
-                    "new_var": st.column_config.NumberColumn(
-                        "Value", format="%.2f", width="small"
-                    ),
-                    "mean": st.column_config.NumberColumn(
-                        "Mean", format="%.2f", width="small"
-                    ),
-                    "lower_bound": st.column_config.NumberColumn(
-                        "Lower Bound", format="%.2f", width="small"
-                    ),
-                    "upper_bound": st.column_config.NumberColumn(
-                        "Upper Bound", format="%.2f", width="small"
-                    ),
-                },
+            display_joint_outlier_summary(joint_outlier_summary)
+
+            # Calculate joint outliers percentage
+            joint_outlier_percentage = calculate_joint_outliers_percentage(
+                joint_outlier_summary, selected_cols
             )
+            st.metric(value=joint_outlier_percentage, label="Share of outliers")
 
-        # Calculate joint outliers percentage
-        joint_outlier_percentage = calculate_joint_outliers_percentage(
-            joint_outlier_summary, selected_cols
-        )
-        st.metric(value=joint_outlier_percentage, label="Share of outliers")
-
-        # Plot joint outliers distribution
-        plot_joint_outliers_distribution(reshaped_joint_outliers_df, selected_cols)
+            # Plot joint outliers distribution
+            plot_joint_outliers_distribution(reshaped_joint_outliers_df, selected_cols)
