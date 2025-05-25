@@ -127,14 +127,14 @@ def show_pattern_selection(df, survey_id, pattern_groups, selected_patterns):
             if selected_cols:
                 base_pattern = " & ".join(base_patterns)  # Combine pattern names
                 df_subset = df[[survey_id] + selected_cols]
-                df_melted = pd.melt(
+                reshaped_joint_outliers_df = pd.melt(
                     df_subset,
                     id_vars=[survey_id],
                     value_vars=selected_cols,
                     var_name="name_variable",
                     value_name="new_var",
                 )
-                return base_pattern, selected_cols, df_melted
+                return base_pattern, selected_cols, reshaped_joint_outliers_df
 
     return None, None, None
 
@@ -266,8 +266,10 @@ def outliers_report_settings(
             pattern_groups = find_variable_patterns(numeric_cols)
 
             # show pattern selection
-            base_pattern, selected_cols, df_melted = show_pattern_selection(
-                data, survey_id, pattern_groups, selected_pattern
+            base_pattern, selected_cols, reshaped_joint_outliers_df = (
+                show_pattern_selection(
+                    data, survey_id, pattern_groups, selected_pattern
+                )
             )
             if selected_cols:
                 with st.container():
@@ -314,7 +316,7 @@ def outliers_report_settings(
             sd_value if outlier_method == "Standard Deviation (SD)" else None,
             iqr_value if outlier_method == "Interquartile Range (IQR)" else None,
             selected_cols if selected_pattern else [],
-            df_melted if selected_pattern else None,
+            reshaped_joint_outliers_df if selected_pattern else None,
         )
 
 
@@ -651,10 +653,11 @@ def calculate_joint_outliers_percentage(
 
 
 # plot joint outliers distribution
-def plot_joint_outliers_distribution(df_melted, selected_cols):
+def plot_joint_outliers_distribution(reshaped_joint_outliers_df, selected_cols):
     """Plot the joint outliers distribution for selected columns.
     Args:
-        df_melted (pd.DataFrame): Melted DataFrame containing the variables to analyze.
+        reshaped_joint_outliers_df (pd.DataFrame): Melted DataFrame
+        containing the variables to analyze.
         selected_cols (list): List of selected variable columns.
     """
     # Get common prefix
@@ -662,7 +665,7 @@ def plot_joint_outliers_distribution(df_melted, selected_cols):
 
     fig = go.Figure(
         data=go.Violin(
-            y=df_melted["new_var"],
+            y=reshaped_joint_outliers_df["new_var"],
             box_visible=True,
             line_color="black",
             meanline_visible=True,
@@ -694,7 +697,7 @@ def outliers_report(data: pd.DataFrame, setting_file: str, page_num: int) -> Non
         sd_value,
         iqr_value,
         selected_cols,
-        df_melted,
+        reshaped_joint_outliers_df,
     ) = outliers_report_settings(data, setting_file, page_num)
 
     # Check that required options have been selected. If not, display a info message
@@ -724,9 +727,13 @@ def outliers_report(data: pd.DataFrame, setting_file: str, page_num: int) -> Non
     plot_outliers_distribution(data, table_data, outlier_cols)
 
     # joint outlier distribution
-    if selected_cols and df_melted is not None:
+    if selected_cols and reshaped_joint_outliers_df is not None:
         joint_outlier_summary = compute_joint_outlier_distribution(
-            df_melted, selected_cols, outlier_method, iqr_value, sd_value
+            reshaped_joint_outliers_df,
+            selected_cols,
+            outlier_method,
+            iqr_value,
+            sd_value,
         )
         if not joint_outlier_summary.empty:
             # Display the joint outlier distribution summary
@@ -760,4 +767,4 @@ def outliers_report(data: pd.DataFrame, setting_file: str, page_num: int) -> Non
         st.metric(value=joint_outlier_percentage, label="Share of outliers")
 
         # Plot joint outliers distribution
-        plot_joint_outliers_distribution(df_melted, selected_cols)
+        plot_joint_outliers_distribution(reshaped_joint_outliers_df, selected_cols)
