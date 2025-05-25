@@ -12,7 +12,7 @@ from src.utils import (
 )
 
 
-# @st.cache_data
+@st.cache_data
 def load_default_settings(settings_file: str, page_num: int) -> tuple:
     """
     Load the default settings for the summary report.
@@ -67,7 +67,7 @@ def load_default_settings(settings_file: str, page_num: int) -> tuple:
 
 
 # Function for joint outlier detection: find variable patterns
-# @st.cache_data
+@st.cache_data
 def find_variable_patterns(columns):
     """Identify patterns in variable names based on underscores.
     Args:
@@ -94,7 +94,7 @@ def find_variable_patterns(columns):
 
 
 # Function for joint outlier detection: show pattern selection
-# @st.cache_data
+@st.cache_data
 def show_pattern_selection(df, survey_id, pattern_groups, selected_patterns):
     """Generate a pattern from selected variable names and
     return the selected columns and melted DataFrame.
@@ -140,7 +140,9 @@ def show_pattern_selection(df, survey_id, pattern_groups, selected_patterns):
 
 
 # outliers check settings
-def outliers_settings(data: pd.DataFrame, settings_file: str, page_num: int) -> tuple:
+def outliers_report_settings(
+    data: pd.DataFrame, settings_file: str, page_num: int
+) -> tuple:
     """
     Function to create a report on survey duplicates
     Args:
@@ -342,7 +344,7 @@ def flag_outliers(col, outlier_method, sd_value, iqr_value):
 
 # Function to check for outliers
 @st.cache_data
-def check_outliers(
+def compute_outliers_summary(
     data,
     outlier_cols,
     survey_id,
@@ -352,7 +354,17 @@ def check_outliers(
     sd_value,
     iqr_value,
 ):
-    """Check for outliers in selected columns."""
+    """Check for outliers in selected columns and return a summary DataFrame.
+    Args:
+        data (pd.DataFrame): DataFrame containing survey data.
+        outlier_cols (list): List of columns to check for outliers.
+        survey_id (str): Column name for survey ID.
+        survey_key (str): Column name for survey key.
+        enumerator (str): Column name for enumerator ID.
+        outlier_method (str): Method for outlier detection ("IQR" or "SD").
+        sd_value (float): Number of standard deviations for SD method.
+        iqr_value (float): IQR multiplier for IQR method.
+    """
     # Create base dataframe with ID columns
     ids = data[[survey_id, survey_key, enumerator]].copy()
     # Initialize results storage
@@ -402,135 +414,16 @@ def check_outliers(
         return pd.DataFrame()
 
 
-# Function to find the common prefix
-def common_prefix(strs):
-    """Find the longest common prefix string amongst an array
-    of strings.
-
+@st.cache_data
+def plot_outliers_distribution(
+    data: pd.DataFrame, outliers_summary: pd.DataFrame, outlier_cols: list
+) -> None:
+    """Plot outliers in selected columns.
     Args:
-        strs (list): List of strings.
-
-    Returns
-    -------
-        str: The longest common prefix.
-
+        data (pd.DataFrame): DataFrame containing survey data.
+        outliers_summary (pd.DataFrame): DataFrame containing outlier summary.
+        outlier_cols (list): List of columns to check for outliers.
     """
-    if not strs:
-        return ""
-    prefix = strs[0]
-    for s in strs[1:]:
-        while not s.startswith(prefix):
-            prefix = prefix[:-1]
-            if not prefix:
-                return ""
-    return prefix
-
-
-# define function to create outliers report
-def outliers_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:  # noqa: D417, RUF100"
-    """
-    Function to create a report on survey duplicates
-    Args:
-        data: DataFrame
-    Returns:
-
-    """
-    # outliers settings
-    (
-        outlier_cols,
-        survey_id,
-        enumerator,
-        survey_key,
-        outlier_method,
-        sd_value,
-        iqr_value,
-        selected_cols,
-        df_melted,
-    ) = outliers_settings(data, setting_file, page_num)
-
-    # Check that required options have been selected. If not, display a info message
-
-    if not all([outlier_cols, outlier_method, survey_id, enumerator, survey_key]):
-        st.info("Please select all required options to generate the outliers report")
-        return
-
-    st.markdown("## Outliers")
-
-    # Check for outliers
-    table_data = check_outliers(
-        data,
-        outlier_cols,
-        survey_id,
-        survey_key,
-        enumerator,
-        outlier_method,
-        sd_value,
-        iqr_value,
-    )
-
-    with stylable_container(
-        key="outlier_metrics",
-        css_styles="""
-            {
-                background-color: #F9F9F9;
-                border: 1px solid rgba(49, 51, 63, 0.2);
-                border-radius: 0.5rem;
-                padding: calc(1em - 1px)
-            }
-            """,
-    ):
-        col1, col2, col3, col4 = st.columns(4)
-
-        cols_checked_outliers = len(outlier_cols)
-        at_least_one_outlier = table_data["variable"].nunique()
-        total_outliers = len(table_data)
-        total_enumerators = table_data[enumerator].nunique()
-
-        col1.metric(
-            label="VARIABLES CHECKED",
-            value=f"{cols_checked_outliers}",
-            help="Columns checked for outlier values",
-        )
-
-        col2.metric(
-            label="OUTLIER VARIABLES",
-            value=f"{at_least_one_outlier}",
-            help="Variables with at least one outlier",
-        )
-
-        col3.metric(
-            label="TOTAL NUMBER OF OUTLIERS",
-            value=f"{total_outliers}",
-            help="Total number of identified outliers",
-        )
-
-        col4.metric(
-            label="NUMBER OF ENUMERATORS",
-            value=f"{total_enumerators}",
-            help="Number of enumerators with outliers flagged",
-        )
-
-    # display outliers table
-    st.dataframe(
-        table_data,
-        hide_index=True,
-        use_container_width=True,
-        column_config={
-            "variable_value": st.column_config.NumberColumn(
-                "Value", format="%.2f", width="small"
-            ),
-            "mean": st.column_config.NumberColumn("Mean", format="%.2f", width="small"),
-            "std": st.column_config.NumberColumn("std", format="%.2f", width="small"),
-            "lower_bound": st.column_config.NumberColumn(
-                "Lower Bound", format="%.2f", width="small"
-            ),
-            "upper_bound": st.column_config.NumberColumn(
-                "Upper Bound", format="%.2f", width="small"
-            ),
-        },
-    )
-
-    # Check if there are any outliers
     no_outliers_vars = []
     with stylable_container(
         key="plots",
@@ -544,7 +437,7 @@ def outliers_report(data: pd.DataFrame, setting_file: str, page_num: int) -> Non
         """,
     ):
         for var in outlier_cols:
-            if var in table_data["variable"].values:
+            if var in outliers_summary["variable"].values:
                 st.subheader(var)
                 col1, col2 = st.columns([4, 1], vertical_alignment="center")
                 with col1:
@@ -563,7 +456,9 @@ def outliers_report(data: pd.DataFrame, setting_file: str, page_num: int) -> Non
                     st.plotly_chart(fig, theme="streamlit", use_container_width=True)
                 with col2:
                     # Calculate percentage of outliers within variable non-missing vals
-                    outlier_count = len(table_data[table_data["variable"] == var])
+                    outlier_count = len(
+                        outliers_summary[outliers_summary["variable"] == var]
+                    )
                     total_nonmissing = data[var].count()
                     outlier_percentage = (outlier_count / total_nonmissing) * 100
                     formatted_outlier_percentage = f"{outlier_percentage:.2f}%"
@@ -591,34 +486,253 @@ def outliers_report(data: pd.DataFrame, setting_file: str, page_num: int) -> Non
             column_config={"B": None},
         )
 
-        # NEXT PR:
-        if selected_cols and df_melted is not None:
-            series = df_melted["new_var"].dropna()
-            total_count = len(series)
 
-            if outlier_method == "Interquartile Range (IQR)":
-                Q1 = series.quantile(0.25)
-                Q3 = series.quantile(0.75)
-                IQR = Q3 - Q1
-                lower_bound = Q1 - 1.5 * IQR
-                upper_bound = Q3 + 1.5 * IQR
-            elif outlier_method == "Standard Deviation (+/-)":
-                mean = series.mean()
-                std_dev = series.std()
-                lower_bound = mean - sd_value * std_dev
-                upper_bound = mean + sd_value * std_dev
+# Function to display outlier metrics
+@st.cache_data
+def display_outlier_metrics(
+    outliers_summary: pd.DataFrame, outlier_cols: list, enumerator: str
+) -> None:
+    """Display metrics related to outliers in a summary format.
+    Args:
+    outliers_summary (pd.DataFrame): DataFrame containing outlier summary.
+    outlier_cols (list): List of columns checked for outliers.
+    enumerator (str): Column name for enumerator ID.
+    """
+    col1, col2, col3, col4 = st.columns(spec=4, border=True)
 
-            outliers = series[(series < lower_bound) | (series > upper_bound)]
-            outliers_df = df_melted[df_melted["new_var"].isin(outliers)]
+    cols_checked_outliers = len(outlier_cols)
+    at_least_one_outlier = outliers_summary["variable"].nunique()
+    total_outliers = len(outliers_summary)
+    total_enumerators = outliers_summary[enumerator].nunique()
 
-            table_data = outliers_df[[survey_id, "name_variable"]].copy()
-            table_data["new_var"] = outliers_df["new_var"].round(2)
-            table_data["mean"] = round(series.mean(), 2)
-            table_data["lower_bound"] = round(lower_bound, 2)
-            table_data["upper_bound"] = round(upper_bound, 2)
+    col1.metric(
+        label="Variables checked",
+        value=f"{cols_checked_outliers}",
+        help="Columns checked for outlier values",
+    )
 
+    col2.metric(
+        label="Outlier variables",
+        value=f"{at_least_one_outlier}",
+        help="Variables with at least one outlier",
+    )
+
+    col3.metric(
+        label="Number of outliers",
+        value=f"{total_outliers}",
+        help="Total number of identified outliers",
+    )
+
+    col4.metric(
+        label="Number of enumerators",
+        value=f"{total_enumerators}",
+        help="Number of enumerators with outliers flagged",
+    )
+
+    # Display the outliers summary table
+    st.dataframe(
+        outliers_summary,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "variable_value": st.column_config.NumberColumn(
+                "Value", format="%.2f", width="small"
+            ),
+            "mean": st.column_config.NumberColumn("Mean", format="%.2f", width="small"),
+            "std": st.column_config.NumberColumn("std", format="%.2f", width="small"),
+            "lower_bound": st.column_config.NumberColumn(
+                "Lower Bound", format="%.2f", min_value=0, max_value=300, width="small"
+            ),
+            "upper_bound": st.column_config.NumberColumn(
+                "Upper Bound", format="%.2f", width="small"
+            ),
+        },
+    )
+
+
+# Function to find the common prefix
+def common_prefix(strs):
+    """Find the longest common prefix string amongst an array
+    of strings.
+
+    Args:
+        strs (list): List of strings.
+
+    Returns
+    -------
+        str: The longest common prefix.
+
+    """
+    if not strs:
+        return ""
+    prefix = strs[0]
+    for s in strs[1:]:
+        while not s.startswith(prefix):
+            prefix = prefix[:-1]
+            if not prefix:
+                return ""
+    return prefix
+
+
+# Function to calculate joint outlier distribution
+@st.cache_data
+def compute_joint_outlier_distribution(
+    data, selected_cols, survey_id, outlier_method, iqr_value, sd_value
+) -> pd.DataFrame:
+    """
+    Calculate the joint outlier distribution for a set of selected columns using the
+    specified outlier detection method.
+
+    Args:
+        data (pd.DataFrame): Melted DataFrame containing the variables to analyze.
+        selected_cols (list): List of selected variable columns.
+        survey_id (str): Column name for survey ID.
+        outlier_method (str): Outlier detection method ("Interquartile Range (IQR)" or
+        "Standard Deviation (SD)").
+        iqr_value (float): IQR multiplier for IQR method.
+        sd_value (float): Number of standard deviations for SD method.
+
+    Returns
+    -------
+        pd.DataFrame: DataFrame containing outlier joint outlier distribution.
+    """
+    series = data["new_var"].dropna()
+
+    if outlier_method == "Interquartile Range (IQR)":
+        Q1 = series.quantile(0.25)
+        Q3 = series.quantile(0.75)
+        IQR = Q3 - Q1
+        lower_bound = Q1 - iqr_value * IQR
+        upper_bound = Q3 + iqr_value * IQR
+    else:
+        mean = series.mean()
+        std_dev = series.std()
+        lower_bound = mean - sd_value * std_dev
+        upper_bound = mean + sd_value * std_dev
+
+    outliers = series[(series < lower_bound) | (series > upper_bound)]
+    outliers_df = data[data["new_var"].isin(outliers)]
+
+    table_data = outliers_df[[survey_id, "name_variable"]].copy()
+    table_data["new_var"] = outliers_df["new_var"].round(2)
+    table_data["mean"] = round(series.mean(), 2)
+    table_data["lower_bound"] = round(lower_bound, 2)
+    table_data["upper_bound"] = round(upper_bound, 2)
+
+    return table_data, outliers_df
+
+
+# calculate joint outliers metrics
+@st.cache_data
+def calculate_joint_outliers_percentage(
+    outliers_df: pd.DataFrame, selected_cols: list
+) -> tuple:
+    """
+    Calculate metrics for joint outliers.
+
+    Args:
+        outliers_df (pd.DataFrame): DataFrame containing outlier data.
+        selected_cols (list): List of selected variable columns.
+
+    Returns
+    -------
+        tuple: A tuple containing the number of outliers, total count,
+        and percentage of outliers.
+    """
+    if outliers_df.empty:
+        return "0.00%"
+
+    outlier_count = len(outliers_df)
+    total_count = len(outliers_df[selected_cols].dropna())
+    outlier_percentage = (outlier_count / total_count) * 100 if total_count > 0 else 0.0
+    formatted_outlier_percentage = f"{outlier_percentage:.2f}%"
+
+    return formatted_outlier_percentage
+
+
+# plot joint outliers distribution
+def plot_joint_outliers_distribution(df_melted, selected_cols):
+    """Plot the joint outliers distribution for selected columns.
+    Args:
+        df_melted (pd.DataFrame): Melted DataFrame containing the variables to analyze.
+        selected_cols (list): List of selected variable columns.
+    """
+    # Get common prefix
+    x_axis_label = common_prefix(selected_cols)
+
+    fig = go.Figure(
+        data=go.Violin(
+            y=df_melted["new_var"],
+            box_visible=True,
+            line_color="black",
+            meanline_visible=True,
+            fillcolor="forestgreen",
+            opacity=0.6,
+            x0=x_axis_label,
+        )
+    )
+
+    st.plotly_chart(fig, theme="streamlit", use_container_width=True)
+
+
+# define function to create outliers report
+def outliers_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:  # noqa: D417, RUF100"
+    """
+    Function to create a report on survey duplicates
+    Args:
+        data: DataFrame
+    Returns:
+
+    """
+    # outliers settings
+    (
+        outlier_cols,
+        survey_id,
+        enumerator,
+        survey_key,
+        outlier_method,
+        sd_value,
+        iqr_value,
+        selected_cols,
+        df_melted,
+    ) = outliers_report_settings(data, setting_file, page_num)
+
+    # Check that required options have been selected. If not, display a info message
+
+    if not all([outlier_cols, outlier_method, survey_id, enumerator, survey_key]):
+        st.info("Please select all required options to generate the outliers report")
+        return
+
+    st.markdown("## Outliers")
+
+    # Check for outliers
+    table_data = compute_outliers_summary(
+        data,
+        outlier_cols,
+        survey_id,
+        survey_key,
+        enumerator,
+        outlier_method,
+        sd_value,
+        iqr_value,
+    )
+
+    # display outlier metrics
+    display_outlier_metrics(table_data, outlier_cols, enumerator)
+
+    # plot outliers
+    plot_outliers_distribution(data, table_data, outlier_cols)
+
+    # joint outlier distribution
+    if selected_cols and df_melted is not None:
+        joint_outlier_summary = compute_joint_outlier_distribution(
+            df_melted, selected_cols, outlier_method, iqr_value, sd_value
+        )
+        if not joint_outlier_summary.empty:
+            # Display the joint outlier distribution summary
+            st.subheader("Joint Outlier Distribution")
             st.dataframe(
-                table_data,
+                joint_outlier_summary,
                 hide_index=True,
                 use_container_width=True,
                 column_config={
@@ -639,32 +753,11 @@ def outliers_report(data: pd.DataFrame, setting_file: str, page_num: int) -> Non
                 },
             )
 
-            # Check if outliers_df is not empty
-            if outliers_df.empty:
-                st.write(
-                    "No outliers found according to the selected method and threshold"
-                )
-            else:
-                # Calculate percentage of outliers
-                outlier_count = len(outliers)
-                outlier_percentage = (outlier_count / total_count) * 100
-                formatted_outlier_percentage = f"{outlier_percentage:.2f}%"
+        # Calculate joint outliers percentage
+        joint_outlier_percentage = calculate_joint_outliers_percentage(
+            joint_outlier_summary, selected_cols
+        )
+        st.metric(value=joint_outlier_percentage, label="Share of outliers")
 
-                st.metric(value=formatted_outlier_percentage, label="Share of outliers")
-
-            # Get common prefix
-            x_axis_label = common_prefix(selected_cols)
-
-            fig = go.Figure(
-                data=go.Violin(
-                    y=df_melted["new_var"],
-                    box_visible=True,
-                    line_color="black",
-                    meanline_visible=True,
-                    fillcolor="forestgreen",
-                    opacity=0.6,
-                    x0=x_axis_label,
-                )
-            )
-
-            st.plotly_chart(fig, theme="streamlit", use_container_width=True)
+        # Plot joint outliers distribution
+        plot_joint_outliers_distribution(df_melted, selected_cols)
