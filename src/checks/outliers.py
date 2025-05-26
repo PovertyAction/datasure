@@ -4,7 +4,6 @@ from collections import defaultdict
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-from streamlit_extras.stylable_container import stylable_container
 
 from src.utils import (
     load_check_settings,
@@ -50,7 +49,7 @@ def load_default_settings(settings_file: str, page_num: int) -> tuple:
     )
     default_outlier_cols = default_settings.get("outlier_cols", [])
     default_outlier_method = default_settings.get("outlier_method", 0)
-    default_sd_value = default_settings.get("sd_value", 3)
+    default_sd_value = default_settings.get("sd_value", 3.0)
     default_iqr_value = default_settings.get("iqr_value", 1.5)
     default_selected_pattern = default_settings.get("selected_pattern", [])
 
@@ -197,14 +196,14 @@ def outliers_report_settings(
             if outlier_method == "Standard Deviation (SD)":
                 sd_value = st.number_input(
                     "Number of Standard Deviations:",
-                    value=default_sd_value,
+                    value=3.0 if default_sd_value is None else default_sd_value,
                     key="sd_value_outliers",
                     help="The number of standard deviations from the mean to use for outlier detection.",
                 )
             else:
                 iqr_value = st.number_input(
                     "IQR Value:",
-                    value=default_iqr_value,
+                    value=1.5 if default_iqr_value is None else default_iqr_value,
                     help="The IQR value is used to determine the range of values that are considered outliers.",
                     key="iqr_value_outliers",
                 )
@@ -320,173 +319,125 @@ def outliers_report_settings(
         )
 
 
-# Function to flag outliers
+# Function to detect outliers
 @st.cache_data
-def flag_outliers(col, outlier_method, sd_value, iqr_value):
-    """Flag outliers in a column based on specified method and thresholds."""
-    if pd.isna(col):  # Handle NaN values
-        return 0
+def detect_outliers(
+    df: pd.DataFrame,
+    survey_key: str,
+    survey_id: str,
+    enumerator: str,
+    cols: list,
+    method: str,
+    iqr_value: float,
+    sd_value: float,
+) -> pd.DataFrame:
+    """Detect outliers in specified columns using either IQR or Standard Deviation
+    method.
 
-    # Calculate bounds based on the entire column
-    if outlier_method == "Interquartile Range (IQR)":
-        Q1 = col.quantile(0.25)
-        Q3 = col.quantile(0.75)
-        IQR = Q3 - Q1
-        lower_bound = Q1 - iqr_value * IQR
-        upper_bound = Q3 + iqr_value * IQR
-    else:  # Standard Deviation method
-        mean = col.mean()
-        std = col.std()
-        lower_bound = mean - sd_value * std
-        upper_bound = mean + sd_value * std
-
-    # Return 1 for outliers, 0 for non-outliers
-    return 1 if (col < lower_bound) or (col > upper_bound) else 0
-
-
-# Function to check for outliers
-@st.cache_data
-def compute_outliers_summary(
-    data,
-    outlier_cols,
-    survey_id,
-    survey_key,
-    enumerator,
-    outlier_method,
-    sd_value,
-    iqr_value,
-):
-    """Check for outliers in selected columns and return a summary DataFrame.
     Args:
-        data (pd.DataFrame): DataFrame containing survey data.
-        outlier_cols (list): List of columns to check for outliers.
-        survey_id (str): Column name for survey ID.
-        survey_key (str): Column name for survey key.
-        enumerator (str): Column name for enumerator ID.
-        outlier_method (str): Method for outlier detection ("IQR" or "SD").
-        sd_value (float): Number of standard deviations for SD method.
-        iqr_value (float): IQR multiplier for IQR method.
+        df (pd.DataFrame): Input dataframe containing survey data
+        survey_key (str): Column name for survey key
+        survey_id (str): Column name for survey ID
+        enumerator (str): Column name for enumerator ID
+        cols (list): List of columns to check for outliers
+        method (str): Outlier detection method ("Interquartile Range (IQR)" or
+        "Standard Deviation (SD)")
+        iqr_value (float): Multiplier for IQR calculation
+        sd_value (float): Number of standard deviations from mean
+
+    Returns
+    -------
+        pd.DataFrame: DataFrame containing detected outliers with their details
     """
-    # Create base dataframe with ID columns
-    ids = data[[survey_id, survey_key, enumerator]].copy()
-    # Initialize results storage
-    outliers_list = []
+    results = []
 
-    # Process each column
-    for col in outlier_cols:
-        series = data[col].copy()
+    for col in cols:
+        series_df = df[[survey_key, survey_id, enumerator, col]].dropna(subset=col)
+        series = series_df[col]
+        mean, std = series.mean(), series.std()
 
-        # Calculate outlier flags
-        outlier_flags = pd.Series(False, index=series.index)
-        non_null_mask = ~series.isna()
-
-        if outlier_method == "Interquartile Range (IQR)":
-            Q1 = series[non_null_mask].quantile(0.25)
-            Q3 = series[non_null_mask].quantile(0.75)
+        if method == "Interquartile Range (IQR)":
+            Q1, Q3 = series.quantile([0.25, 0.75])
             IQR = Q3 - Q1
-            lower_bound = Q1 - iqr_value * IQR
-            upper_bound = Q3 + iqr_value * IQR
+            lower, upper = Q1 - iqr_value * IQR, Q3 + iqr_value * IQR
         else:  # Standard Deviation method
-            mean = series[non_null_mask].mean()
-            std = series[non_null_mask].std()
-            lower_bound = mean - sd_value * std
-            upper_bound = mean + sd_value * std
+            lower, upper = mean - sd_value * std, mean + sd_value * std
 
-        # Flag outliers
-        outlier_flags[non_null_mask] = (series[non_null_mask] < lower_bound) | (
-            series[non_null_mask] > upper_bound
-        )
+        mask = (series < lower) | (series > upper)
+        if mask.any():
+            outliers = pd.DataFrame(
+                {
+                    survey_key: series_df.loc[mask.index[mask], survey_key],
+                    survey_id: series_df.loc[mask.index[mask], survey_id],
+                    enumerator: series_df.loc[mask.index[mask], enumerator],
+                    "variable": col,
+                    "value": series[mask],
+                    "mean": mean,
+                    "std": std,
+                    "lower_bound": lower,
+                    "upper_bound": upper,
+                }
+            )
+            results.append(outliers)
 
-        # Create outlier records
-        outlier_records = ids[outlier_flags].copy()
-        outlier_records["variable"] = col
-        outlier_records["value"] = series[outlier_flags]
-        outlier_records["mean"] = series[non_null_mask].mean()
-        outlier_records["std"] = series[non_null_mask].std()
-        outlier_records["lower_bound"] = lower_bound
-        outlier_records["upper_bound"] = upper_bound
-
-        outliers_list.append(outlier_records)
-
-    # Combine all outliers
-    if outliers_list:
-        table_data = pd.concat(outliers_list, ignore_index=True)
-        return table_data
-    else:
-        return pd.DataFrame()
+    return pd.concat(results) if results else pd.DataFrame()
 
 
+# function to create outlier distribution
 @st.cache_data
-def plot_outliers_distribution(
-    data: pd.DataFrame, outliers_summary: pd.DataFrame, outlier_cols: list
-) -> None:
-    """Plot outliers in selected columns.
-    Args:
-        data (pd.DataFrame): DataFrame containing survey data.
-        outliers_summary (pd.DataFrame): DataFrame containing outlier summary.
-        outlier_cols (list): List of columns to check for outliers.
-    """
-    no_outliers_vars = []
-    with stylable_container(
-        key="plots",
-        css_styles="""
-        {
-            background-color: #F9F9F9;
-            border: 1px solid rgba(49, 51, 63, 0.2);
-            border-radius: 0.5rem;
-            padding: calc(1em - 1px)
-        }
-        """,
-    ):
-        for var in outlier_cols:
-            if var in outliers_summary["variable"].values:
-                st.subheader(var)
-                col1, col2 = st.columns([4, 1], vertical_alignment="center")
-                with col1:
-                    # Plot outliers
-                    fig = go.Figure(
-                        data=go.Violin(
-                            y=data[var],
-                            box_visible=True,
-                            line_color="black",
-                            meanline_visible=True,
-                            fillcolor="darkgreen",
-                            opacity=0.6,
-                            x0=var,
-                        )
-                    )
-                    st.plotly_chart(fig, theme="streamlit", use_container_width=True)
-                with col2:
-                    # Calculate percentage of outliers within variable non-missing vals
-                    outlier_count = len(
-                        outliers_summary[outliers_summary["variable"] == var]
-                    )
-                    total_nonmissing = data[var].count()
-                    outlier_percentage = (outlier_count / total_nonmissing) * 100
-                    formatted_outlier_percentage = f"{outlier_percentage:.2f}%"
-                    st.metric(
-                        value=formatted_outlier_percentage, label="Share of outliers"
-                    )
-            else:
-                no_outliers_vars.append(var)
+def create_violin_plot(data: pd.Series, title: str) -> go.Figure:
+    """Create a violin plot using plotly.
 
-    # no outliers vars
-    if no_outliers_vars:
-        st.write(
-            "No outliers found on the following variables according to the selected method and threshold:"
+    Args:
+        data (pd.Series): Data series to plot
+        title (str): Title for the plot
+
+    Returns
+    -------
+        go.Figure: Plotly figure object containing the violin plot
+    """
+    return go.Figure(
+        data=go.Violin(
+            y=data,
+            box_visible=True,
+            line_color="black",
+            meanline_visible=True,
+            fillcolor="darkgreen",
+            opacity=0.6,
+            x0=title,
         )
-        # Split the list into chunks of 3
-        n = 4
-        no_outliers_vars_list = [
-            no_outliers_vars[i : i + n] for i in range(0, len(no_outliers_vars), n)
-        ]
-        no_outliers_df = pd.DataFrame(no_outliers_vars_list).fillna("")
-        st.dataframe(
-            no_outliers_df,
-            hide_index=True,
-            use_container_width=True,
-            column_config={"B": None},
-        )
+    )
+
+
+# plot outlier distribution
+@st.cache_data
+def plot_outlier_distributions(
+    data, outliers_summary: pd.DataFrame, cols: list
+) -> None:
+    """Plot distribution of outliers for selected columns.
+
+    Args:
+        data: DataFrame containing the survey data
+        outliers_summary: DataFrame containing the outlier summary
+        cols: List of columns to plot distributions for
+
+    Returns
+    -------
+        None
+    """
+    for var in cols:
+        if var in outliers_summary["variable"].values:
+            col1, col2 = st.columns([4, 1], vertical_alignment="center")
+            with col1:
+                fig = create_violin_plot(data[var], var)
+                st.plotly_chart(fig, use_container_width=True)
+            with col2:
+                outlier_pct = (
+                    len(outliers_summary[outliers_summary["variable"] == var])
+                    / data[var].count()
+                    * 100
+                )
+                st.metric(value=f"{outlier_pct:.2f}%", label="Share of outliers")
 
 
 # Function to display outlier metrics
@@ -505,7 +456,7 @@ def display_outlier_metrics(
     cols_checked_outliers = len(outlier_cols)
     at_least_one_outlier = outliers_summary["variable"].nunique()
     total_outliers = len(outliers_summary)
-    total_enumerators = outliers_summary[enumerator].nunique()
+    # total_enumerators = outliers_summary[enumerator].nunique()
 
     col1.metric(
         label="Variables checked",
@@ -527,7 +478,7 @@ def display_outlier_metrics(
 
     col4.metric(
         label="Number of enumerators",
-        value=f"{total_enumerators}",
+        value=1,  # f"{total_enumerators}",
         help="Number of enumerators with outliers flagged",
     )
 
@@ -739,22 +690,23 @@ def outliers_report(data: pd.DataFrame, setting_file: str, page_num: int) -> Non
     st.markdown("## Outliers")
 
     # Check for outliers
-    table_data = compute_outliers_summary(
+    table_data = detect_outliers(
         data,
-        outlier_cols,
-        survey_id,
         survey_key,
+        survey_id,
         enumerator,
+        outlier_cols,
         outlier_method,
-        sd_value,
         iqr_value,
+        sd_value,
     )
 
     # display outlier metrics
     display_outlier_metrics(table_data, outlier_cols, enumerator)
 
     # plot outliers
-    plot_outliers_distribution(data, table_data, outlier_cols)
+    # plot_outliers_distribution(data, table_data, outlier_cols)
+    plot_outlier_distributions(data, table_data, outlier_cols)
 
     # joint outlier distribution
     if selected_cols and reshaped_joint_outliers_df is not None:
