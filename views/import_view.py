@@ -67,17 +67,27 @@ with scto:
 
     # --- DOWNLOAD DATA FROM SURVEYCTO --- #
 
-    scto_download_btn_col, scto_download_prog_col, _ = st.columns((0.1, 0.3, 0.6))
+    scto_download_btn_col, scto_download_new_col, scto_download_prog_col, _ = (
+        st.columns((0.1, 0.1, 0.3, 0.5))
+    )
 
     with st.container(border=True):
         # Get data
         with scto_download_btn_col:
             scto_download_btn = st.button(
-                "Download",
+                label="Download/Load Data",
                 type="primary",
                 key="scto_download_btn_key",
                 use_container_width=True,
                 disabled=st.session_state.scto_disable_download_btn,
+            )
+
+        with scto_download_new_col:
+            scto_get_new_data = st.toggle(
+                label="Get New Data",
+                key="scto_get_new_data_key",
+                help="Get new data from the server. If unchecked, only previously downloaded data will be loaded.",
+                value=True,
             )
 
         # import data
@@ -86,7 +96,7 @@ with scto:
                 st.session_state.scto_forms = st.session_state.scto_forms[
                     st.session_state.scto_forms["select"] == 1
                 ].reset_index()
-                scto_download_action(st.session_state.scto_forms)
+                scto_download_action(st.session_state.scto_forms, scto_get_new_data)
 
     # --- PREVIEW SURVEYCTO DATA --- #
     if st.session_state.scto_show_preview:
