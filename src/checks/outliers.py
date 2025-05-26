@@ -3,6 +3,7 @@ from collections import defaultdict
 
 import pandas as pd
 import plotly.graph_objects as go
+import seaborn as sns
 import streamlit as st
 
 from src.utils import (
@@ -379,8 +380,11 @@ def detect_outliers(
                 }
             )
             results.append(outliers)
+    results_df = (
+        pd.concat(results).reset_index(drop=True) if results else pd.DataFrame()
+    )
 
-    return pd.concat(results) if results else pd.DataFrame()
+    return results_df
 
 
 # function to create outlier distribution
@@ -507,32 +511,14 @@ def display_outlier_metrics(
 
     # Display the outliers summary table
     if not outliers_summary.empty:
-        st.dataframe(
-            outliers_summary,
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "variable_value": st.column_config.NumberColumn(
-                    "Value", format="%.2f", width="small"
-                ),
-                "mean": st.column_config.NumberColumn(
-                    "Mean", format="%.2f", width="small"
-                ),
-                "std": st.column_config.NumberColumn(
-                    "std", format="%.2f", width="small"
-                ),
-                "lower_bound": st.column_config.NumberColumn(
-                    "Lower Bound",
-                    format="%.2f",
-                    min_value=0,
-                    max_value=300,
-                    width="small",
-                ),
-                "upper_bound": st.column_config.NumberColumn(
-                    "Upper Bound", format="%.2f", width="small"
-                ),
-            },
-        )
+        cmap = sns.light_palette("pink", as_cmap=True)
+
+        num_cols = ["value", "mean", "std", "lower_bound", "upper_bound"]
+        outliers_summary = outliers_summary.style.format(
+            subset=num_cols, formatter="{:,.2f}"
+        ).background_gradient(subset=num_cols, cmap=cmap)
+        st.dataframe(outliers_summary, use_container_width=True, hide_index=True)
+
     else:
         st.success("No outliers detected in the selected variables.")
 
