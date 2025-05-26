@@ -331,6 +331,7 @@ def scto_import_data(
     server_dataset: bool = False,
     saveas: str | None = None,
     media: bool = False,
+    get_new_data: bool = True,
 ) -> tuple:
     """Import SurveyCTO data.
 
@@ -369,6 +370,10 @@ def scto_import_data(
 
         # if saves is not missing, check if file exist and load
         scto_data, oldest_completion_date = scto_load_existing_data(saveas)
+
+        # if new data is not requested, return existing data
+        if not get_new_data:
+            return (scto_data, 0)
 
         # Download new data (from the oldest completion date)
         try:
@@ -688,12 +693,13 @@ def scto_login_form() -> tuple:
 
 
 # --- SCTO Download button action --- #
-def scto_download_action(form_inputs: pd.DataFrame) -> None:
+def scto_download_action(form_inputs: pd.DataFrame, get_new_data: bool) -> None:
     """Trigger Action to download SurveyCTO data based on form inputs.
 
     PARAMS:
     -------
     form_inputs: pandas dataframe of form inputs
+    get_new_data: boolean, True if downloading new data
 
     Return:
     ------
@@ -728,6 +734,7 @@ def scto_download_action(form_inputs: pd.DataFrame) -> None:
                 server_dataset=server_dataset,
                 saveas=saveas,
                 media=media,
+                get_new_data=get_new_data,
             )
             time.sleep(3)
             progress_bar.progress(
