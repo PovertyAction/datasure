@@ -454,9 +454,13 @@ def display_outlier_metrics(
     col1, col2, col3, col4 = st.columns(spec=4, border=True)
 
     cols_checked_outliers = len(outlier_cols)
-    at_least_one_outlier = outliers_summary["variable"].nunique()
     total_outliers = len(outliers_summary)
-    # total_enumerators = outliers_summary[enumerator].nunique()
+    at_least_one_outlier = (
+        outliers_summary["variable"].nunique() if not outliers_summary.empty else 0
+    )
+    total_enumerators = (
+        outliers_summary[enumerator].unique() if not outliers_summary.empty else 0
+    )
 
     col1.metric(
         label="Variables checked",
@@ -478,29 +482,40 @@ def display_outlier_metrics(
 
     col4.metric(
         label="Number of enumerators",
-        value=1,  # f"{total_enumerators}",
+        value=f"{total_enumerators}",
         help="Number of enumerators with outliers flagged",
     )
 
     # Display the outliers summary table
-    st.dataframe(
-        outliers_summary,
-        hide_index=True,
-        use_container_width=True,
-        column_config={
-            "variable_value": st.column_config.NumberColumn(
-                "Value", format="%.2f", width="small"
-            ),
-            "mean": st.column_config.NumberColumn("Mean", format="%.2f", width="small"),
-            "std": st.column_config.NumberColumn("std", format="%.2f", width="small"),
-            "lower_bound": st.column_config.NumberColumn(
-                "Lower Bound", format="%.2f", min_value=0, max_value=300, width="small"
-            ),
-            "upper_bound": st.column_config.NumberColumn(
-                "Upper Bound", format="%.2f", width="small"
-            ),
-        },
-    )
+    if not outliers_summary.empty:
+        st.dataframe(
+            outliers_summary,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "variable_value": st.column_config.NumberColumn(
+                    "Value", format="%.2f", width="small"
+                ),
+                "mean": st.column_config.NumberColumn(
+                    "Mean", format="%.2f", width="small"
+                ),
+                "std": st.column_config.NumberColumn(
+                    "std", format="%.2f", width="small"
+                ),
+                "lower_bound": st.column_config.NumberColumn(
+                    "Lower Bound",
+                    format="%.2f",
+                    min_value=0,
+                    max_value=300,
+                    width="small",
+                ),
+                "upper_bound": st.column_config.NumberColumn(
+                    "Upper Bound", format="%.2f", width="small"
+                ),
+            },
+        )
+    else:
+        st.success("No outliers detected in the selected columns.")
 
 
 # Function to find the common prefix
@@ -705,8 +720,8 @@ def outliers_report(data: pd.DataFrame, setting_file: str, page_num: int) -> Non
     display_outlier_metrics(table_data, outlier_cols, enumerator)
 
     # plot outliers
-    # plot_outliers_distribution(data, table_data, outlier_cols)
-    plot_outlier_distributions(data, table_data, outlier_cols)
+    if not table_data.empty:
+        plot_outlier_distributions(data, table_data, outlier_cols)
 
     # joint outlier distribution
     if selected_cols and reshaped_joint_outliers_df is not None:
