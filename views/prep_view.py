@@ -380,10 +380,12 @@ if show_prep_page_info:
                                     "value is less than",
                                     "value is greater than or equal to",
                                     "value is less than or equal to",
+                                    "value is between",
+                                    "value is not between",
                                 ]:
                                     col_options = (
                                         st.session_state[f"prepped_data{i}"]
-                                        .select_dtypes(include=["number"])
+                                        .select_dtypes(include=["number", "datetime"])
                                         .columns
                                     )
                                 else:
@@ -429,15 +431,43 @@ if show_prep_page_info:
                                     "value is between",
                                     "value is not between",
                                 ]:
-                                    dp_prep_del_rows_cond_val_min = st.text_input(
-                                        label="Enter minimum value",
-                                        help="Enter minimum value to compare",
-                                        key=f"st_sb_del_rows_cond_val_min{i}",
+                                    # check that all columns are of the same type
+                                    disable_inputs = True
+                                    col_types = (
+                                        st.session_state[f"prepped_data{i}"][
+                                            dp_prep_del_rows_cond_cols
+                                        ]
+                                        .dtypes.unique()
+                                        .tolist()
                                     )
-                                    dp_prep_del_rows_cond_val_max = st.text_input(
-                                        label="Enter maximum value",
-                                        help="Enter maximum value to compare",
+                                    if len(col_types) > 1:
+                                        st.error(
+                                            "All selected columns must be of the same type for this condition"
+                                        )
+                                    else:
+                                        disable_inputs = False
+
+                                    # get a list of unique values in select columns
+                                    value_options = []
+                                    for col in dp_prep_del_rows_cond_cols:
+                                        value_options = (
+                                            st.session_state[f"prepped_data{i}"][col]
+                                            .unique()
+                                            .tolist()
+                                        )
+                                    dp_prep_del_rows_cond_val_min = st.selectbox(
+                                        label="Select minimum value",
+                                        options=sorted(value_options),
+                                        help="Select minimum value to compare",
+                                        key=f"st_sb_del_rows_cond_val_min{i}",
+                                        disabled=disable_inputs,
+                                    )
+                                    dp_prep_del_rows_cond_val_max = st.selectbox(
+                                        label="Select maximum value",
+                                        options=sorted(value_options),
+                                        help="Select maximum value to compare",
                                         key=f"st_sb_del_rows_cond_val_max{i}",
+                                        disabled=disable_inputs,
                                     )
 
                                     description = f"remove row(s) by condition '{dp_prep_del_rows_cond}' on columns {dp_prep_del_rows_cond_cols} with values {dp_prep_del_rows_cond_val_min} and {dp_prep_del_rows_cond_val_max}"
