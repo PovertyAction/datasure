@@ -176,7 +176,17 @@ def prep_remove_rows(index: int, description: str):
                 .replace("'", "")
             )
 
-            value = eval(value)[0]
+            # check if value is a Timestamp
+            if "Timestamp" in value:
+                value = (
+                    value.replace("[", "@pd.")
+                    .replace("]", "")
+                    .replace("(", "('")
+                    .replace(")", "')")
+                )
+                # value = pd.to_datetime(value)
+            else:
+                value = eval(value)[0]
             cols = eval(cols)[0]
             if condition == "value is greater than":
                 st.session_state[f"prepped_data{index}"] = st.session_state[
@@ -201,15 +211,21 @@ def prep_remove_rows(index: int, description: str):
                 .replace("with values ", "")
                 .replace("'", "")
             )
+            cols = eval(cols)[0]
             values = values.split(" and ")
             values_use = []
             for value in values:
+                # check if column type is datetime
+                if (
+                    st.session_state[f"prepped_data{index}"][cols].dtype
+                    == "datetime64[ns]"
+                ):
+                    value = "@pd.Timestamp('" + value + "')"
                 if value.isdigit():
                     values_use.append(int(value))
                 else:
                     values_use.append(value)
 
-            cols = eval(cols)[0]
             if condition == "value is between":
                 st.session_state[f"prepped_data{index}"] = st.session_state[
                     f"prepped_data{index}"
