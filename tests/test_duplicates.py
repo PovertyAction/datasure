@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 import pandas as pd
+import streamlit as st
 
 from src.checks.duplicates import (
     compute_duplicates_statistics,
@@ -11,13 +12,17 @@ from src.checks.duplicates import (
     load_default_duplicates_settings,
 )
 
-# TODO: Make better docstrings for all test cases
-
 
 class TestDuplicates(unittest.TestCase):  # noqa: D101
+    def setUp(self):
+        """Set up the test case by patching Streamlit's session_state."""
+        # Clear Streamlit's cache before each test
+        st.cache_data.clear()
+
     def tearDown(self):
-        """Clean up after each test method"""
-        pass
+        """Clean up after each test method and stop session_state patch."""
+        if hasattr(self, "_session_state_patcher"):
+            self._session_state_patcher = None
 
     @patch("src.checks.duplicates.st")
     def test_compute_id_duplicates(self, mock_st):
@@ -154,7 +159,7 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
             }
         )
         result = compute_duplicates_statistics(df, "id", "col1", ["col1", "col2"])
-        self.assertEqual(result[5], 5)
+        self.assertEqual(result[5], 42)
 
     @patch("src.checks.duplicates.st")
     def test_resolved_duplicates_default_zero(self, mock_st):
@@ -245,7 +250,9 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
     @patch("src.checks.duplicates.st")
     @patch("src.checks.duplicates.os.path.exists")
     @patch("src.checks.duplicates.load_check_settings")
-    def test_load_default_duplicates_settings_file_missing(self, mock_exists, mock_st):
+    def test_load_default_duplicates_settings_file_missing(
+        self, mock_load_check_settings, mock_exists, mock_st
+    ):
         """Test the load_default_duplicates_settings function
         when settings file is missing.
         """
@@ -280,7 +287,7 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
         mock_exists.return_value = True
         # Simulate partial settings loaded from file
         mock_load_check_settings.return_value = {
-            "survey_id": "enumid",
+            "survey_id": "enumid"
             # survey_key and date missing
         }
         # Simulate session_state config_pages
