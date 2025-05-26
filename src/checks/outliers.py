@@ -425,6 +425,7 @@ def plot_outlier_distributions(
     -------
         None
     """
+    no_outlier_vars = []
     for var in cols:
         if var in outliers_summary["variable"].values:
             col1, col2 = st.columns([4, 1], vertical_alignment="center")
@@ -438,6 +439,24 @@ def plot_outlier_distributions(
                     * 100
                 )
                 st.metric(value=f"{outlier_pct:.2f}%", label="Share of outliers")
+        else:
+            no_outlier_vars.append(var)
+
+    if no_outlier_vars:
+        st.write(
+            "No outliers detected for the following variables according to the selected method and threshold"
+        )
+        # Split the list into chunks of 3
+        n = 3
+        no_outliers_vars_list = [
+            no_outlier_vars[i : i + n] for i in range(0, len(no_outlier_vars), n)
+        ]
+        no_outliers_df = pd.DataFrame(no_outliers_vars_list).fillna("")
+        st.dataframe(
+            no_outliers_df,
+            hide_index=True,
+            use_container_width=True,
+        )
 
 
 # Function to display outlier metrics
@@ -459,7 +478,7 @@ def display_outlier_metrics(
         outliers_summary["variable"].nunique() if not outliers_summary.empty else 0
     )
     total_enumerators = (
-        outliers_summary[enumerator].unique() if not outliers_summary.empty else 0
+        outliers_summary[enumerator].nunique() if not outliers_summary.empty else 0
     )
 
     col1.metric(
@@ -515,7 +534,7 @@ def display_outlier_metrics(
             },
         )
     else:
-        st.success("No outliers detected in the selected columns.")
+        st.success("No outliers detected in the selected variables.")
 
 
 # Function to find the common prefix
