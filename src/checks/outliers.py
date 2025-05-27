@@ -139,6 +139,33 @@ def show_pattern_selection(df, survey_id, pattern_groups, selected_patterns):
     return None, None, None
 
 
+# get a list of numeric columns
+@st.cache_data
+def get_numeric_columns(data: pd.DataFrame) -> list:
+    """Check if columns in the DataFrame are numeric.
+
+    Args:
+        data (pd.DataFrame): Input DataFrame.
+
+    Returns
+    -------
+        list: List of numeric columns.
+    """
+    numeric_cols = []
+    for col in data.columns:
+        # Check if column is not all NaN or empty strings
+        if data[col].replace("", pd.NA).isna().sum() < len(data[col]):
+            # Skip datetime columns
+            if pd.api.types.is_datetime64_any_dtype(data[col]):
+                continue
+            try:
+                pd.to_numeric(data[col], errors="raise")
+                numeric_cols.append(col)
+            except (ValueError, TypeError):
+                continue
+    return numeric_cols
+
+
 # outliers check settings
 def outliers_report_settings(
     data: pd.DataFrame, settings_file: str, page_num: int
@@ -158,8 +185,9 @@ def outliers_report_settings(
             "###### Select columns and the outlier detection method to include in the report"
         )
 
-        numeric_cols = data.select_dtypes(include="number").columns.tolist()
+        # get numeric columns and survey columns
         survey_cols = data.columns
+        numeric_cols = get_numeric_columns(data)
 
         # load default settings
         (
@@ -351,10 +379,14 @@ def detect_outliers(
         pd.DataFrame: DataFrame containing detected outliers with their details
     """
     results = []
-
     for col in cols:
         series_df = df[[survey_key, survey_id, enumerator, col]].dropna(subset=col)
-        series = series_df[col]
+        series = series_df[col].astype("float64", errors="raise")
+        # Drop NaN and missing values
+        series = series.dropna()
+        dk_refused_to_answer_vals = [-999, 0.999, -888, 0.888, -777, 0.777]
+        series = series[~series.isin(dk_refused_to_answer_vals)]
+
         mean, std = series.mean(), series.std()
 
         if method == "Interquartile Range (IQR)":
