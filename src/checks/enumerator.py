@@ -434,7 +434,7 @@ def compute_enumerator_missing_table(
     data["% Null values"] = data.isnull().mean(axis=1)
 
     miss_cols = ["% Null values"]
-    if missing_codes:
+    if not missing_codes.empty:
         for i in range(len(missing_codes)):
             miss_label = missing_codes["Missing Labels"][i]
             miss_codes = missing_codes["Missing Codes"][i].split(",")

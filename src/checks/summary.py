@@ -173,7 +173,49 @@ def compute_summary_submissions(data: pd.DataFrame, date: str) -> tuple:
 
     """
     summary_df = data[[date]].copy(deep=True)
+
+    # return None and 0 if no data
+    if summary_df.empty:
+        return (
+            None,
+            None,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            pd.DataFrame(),
+        )
+
+    # check if date column is in the data
+    # try convertting to datetime
+    # and raise error if conversion fails
+    if not pd.api.types.is_datetime64_any_dtype(summary_df[date]):
+        summary_df[date] = pd.to_datetime(summary_df[date], errors="coerce")
+        if not pd.api.types.is_datetime64_any_dtype(summary_df[date]):
+            raise ValueError(f"Column {date} is not a datetime column")
+
     summary_df[date] = summary_df[date].dt.date
+    # count number of submissions with missing date
+    missing_date_count = max(summary_df[date].isnull().sum(), 0)
+    summary_df = summary_df.dropna(subset=[date])
+    # dataset is empty after dropping missing date return None
+    if summary_df.empty:
+        return (
+            None,
+            None,
+            0,
+            0,
+            0,
+            missing_date_count,
+            0,
+            0,
+            0,
+            pd.DataFrame(),
+        )
+
     first_submission_date = summary_df[date].min()
     last_submission_date = summary_df[date].max()
 
@@ -246,7 +288,7 @@ def compute_summary_submissions(data: pd.DataFrame, date: str) -> tuple:
         submissions_today,
         submissions_this_week,
         submissions_this_month,
-        submissions_total,
+        submissions_total + missing_date_count,
         submissions_today_delta,
         submissions_this_week_delta,
         submissions_this_month_delta,
@@ -364,13 +406,42 @@ def compute_summary_progress(
             A tuple containing the summary values
 
     """
-    # compute progress values here if needed
-    progress = (data.shape[0] / target) * 100 if target else 0
-    average_submission_per_day = data[date].dt.date.value_counts().mean()
-    data["week"] = data[date].dt.to_period("W").dt.to_timestamp()
-    average_submission_per_week = data.groupby("week").size().mean()
-    data["month"] = data[date].dt.to_period("M").dt.to_timestamp()
-    average_submission_per_month = data.groupby("month").size().mean()
+    # if target is negative, or not an integer, raise error
+    if target is not None and (not isinstance(target, int) or target < 0):
+        raise ValueError("Target must be a positive integer")
+    prog_summary_df = data[[date]].copy(deep=True)
+    # return None and 0 if no data
+    if prog_summary_df.empty:
+        return (
+            0,
+            0,
+            0,
+            0,
+        )
+    # check if date column is datetime
+    # try convertting to datetime
+    # and raise error if conversion fails
+    if not pd.api.types.is_datetime64_any_dtype(prog_summary_df[date]):
+        prog_summary_df[date] = pd.to_datetime(prog_summary_df[date], errors="coerce")
+        if not pd.api.types.is_datetime64_any_dtype(prog_summary_df[date]):
+            raise ValueError(f"Column {date} is not a datetime column")
+
+    # drop missing date
+    prog_summary_df = prog_summary_df.dropna(subset=[date])
+    # dataset is empty after dropping missing date return None
+    if prog_summary_df.empty:
+        return (
+            0,
+            0,
+            0,
+            0,
+        )
+    progress = (prog_summary_df.shape[0] / target) * 100 if target else 0
+    average_submission_per_day = prog_summary_df[date].dt.date.value_counts().mean()
+    prog_summary_df["week"] = prog_summary_df[date].dt.to_period("W").dt.to_timestamp()
+    average_submission_per_week = prog_summary_df.groupby("week").size().mean()
+    prog_summary_df["month"] = prog_summary_df[date].dt.to_period("M").dt.to_timestamp()
+    average_submission_per_month = prog_summary_df.groupby("month").size().mean()
 
     return (
         progress,
@@ -422,7 +493,23 @@ def compute_summary_progress_by_col(
     else:
         progress_time_period_use = progress_time_period
 
-    progress_data = data[[date, progress_by_col]].copy()
+    progress_data = data[[date, progress_by_col]].copy(deep=True)
+    # return None and 0 if no data
+    if progress_data.empty:
+        return (
+            pd.DataFrame(),
+            0,
+            0,
+            [],
+        )
+    # check if date column is datetime
+    # try convertting to datetime
+    # and raise error if conversion fails
+    if not pd.api.types.is_datetime64_any_dtype(progress_data[date]):
+        progress_data[date] = pd.to_datetime(progress_data[date], errors="coerce")
+        if not pd.api.types.is_datetime64_any_dtype(progress_data[date]):
+            raise ValueError(f"Column {date} is not a datetime column")
+
     progress_data["time period"] = data[date].dt.to_period("D").dt.to_timestamp()
     progress_data = (
         progress_data.groupby(["time period", progress_by_col])
@@ -530,13 +617,13 @@ def summary_progress(
     pc1, _ = st.columns([0.3, 0.7])
     with pc1:
         progress_by_col = default_settings.get("progress_by_col", None)
-        progress_col_index = (
-            data.columns.get_loc(progress_by_col) if progress_by_col else None
-        )
         progress_options = data.columns.tolist()
         progress_options.remove(date)
+        progress_col_index = (
+            progress_options.index(progress_by_col) if progress_by_col else None
+        )
         progress_by_col = st.selectbox(
-            "Progress by",
+            label="Progress by",
             options=progress_options,
             index=progress_col_index,
             key="progress_by_col_key",
