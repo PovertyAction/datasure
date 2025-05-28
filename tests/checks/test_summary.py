@@ -90,6 +90,43 @@ def test_compute_summary_submissions_type(sample_date_data_10000, name, index, t
     ), f"Value at index {name} should be of type {type.__name__}"
 
 
+@pytest.mark.parametrize(
+    "name, index, type",
+    [
+        ("first_date", 0, datetime.date),
+        ("last_date", 1, datetime.date),
+        ("submissions_today", 2, int),
+        ("submissions_this_week", 3, int),
+        ("submissions_this_month", 4, int),
+        ("submissions_total", 5, (int, np.int64)),
+        ("submissions_today_delta", 6, (int, float)),
+        ("submissions_this_week_delta", 7, (int, float)),
+        ("submissions_this_month_delta", 8, (int, float)),
+        ("submissions_by_date", 9, pd.DataFrame),
+    ],
+)
+def test_compute_submissions_with_missing_dates(
+    sample_date_data_10000, name, index, type
+):
+    """Test the compute_summary_submissions function for specific values when dataset
+    has some missing dates.
+    """
+    # Randomly sample 10000 observations
+    test_data = sample_date_data_10000.sample(n=10000, random_state=42)
+    # Introduce some missing dates
+    test_data.loc[
+        test_data.sample(frac=0.1, random_state=42).index, "SubmissionDate"
+    ] = pd.NaT
+
+    # Compute summary
+    summary = compute_summary_submissions(test_data, "SubmissionDate")
+
+    # Check if the value is of the expected type
+    assert isinstance(
+        summary[index], type
+    ), f"Value at index {name} should be of type {type.__name__}"
+
+
 # test 3: values of return values with empty input dataset
 @pytest.mark.parametrize(
     "name, index, result",
@@ -124,13 +161,14 @@ def test_compute_submissions_values_0(name, index, result):
         assert summary[index] == result, f"Value at index {name} should be {result}"
 
 
-# test 4: values of return values with 10
-def test_compute_submissions_values_10(sample_date_data_10000):
+@pytest.mark.parametrize("size", [10, 1000, 10000])
+# test 5: values of return values with 10
+def test_compute_submissions_values_10(sample_date_data_10000, size):
     """Test the compute_summary_submissions function for specific values with 10
     observations.
     """
-    # Load test data
-    test_data = sample_date_data_10000.sample(n=10, random_state=42)
+    # randomly sample based on size
+    test_data = sample_date_data_10000.sample(n=size, random_state=42)
 
     # Compute summary
     summary = compute_summary_submissions(test_data, "SubmissionDate")
@@ -161,11 +199,8 @@ def test_compute_submissions_values_10(sample_date_data_10000):
     assert summary[4] == test_submissions_this_month
     assert summary[5] == len(test_data)
     test_submissions_yesterday = test_data[
-        (
-            test_data["SubmissionDate"]
-            >= datetime.date.today() - datetime.timedelta(days=1)
-        )
-        & (test_data["SubmissionDate"] <= datetime.date.today())
+        test_data["SubmissionDate"]
+        == (datetime.date.today() - datetime.timedelta(days=1))
     ]["SubmissionDate"].count()
     test_submissions_today_delta = (
         (test_submissions_today - test_submissions_yesterday)
@@ -206,3 +241,7 @@ def test_compute_submissions_values_10(sample_date_data_10000):
         else 0
     )
     assert summary[8] == test_submissions_this_month_delta * 100
+    assert isinstance(
+        summary[9], pd.DataFrame
+    ), "submissions_by_date should be a DataFrame"
+    assert not summary[9].empty, "submissions_by_date should not be empty"
