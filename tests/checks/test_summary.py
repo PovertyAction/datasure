@@ -7,6 +7,8 @@ import pandas as pd
 import pytest
 
 from src.checks import (
+    compute_summary_progress,
+    compute_summary_progress_by_col,
     compute_summary_submissions,
 )
 
@@ -245,3 +247,169 @@ def test_compute_submissions_values_10(sample_date_data_10000, size):
         summary[9], pd.DataFrame
     ), "submissions_by_date should be a DataFrame"
     assert not summary[9].empty, "submissions_by_date should not be empty"
+
+
+### TEST: compute_summary_progress
+
+
+# test 1: Test structure of returned value from compute_summary_progress
+@pytest.mark.parametrize("target", [None, 0, 10, 9999, 10000, 10001])
+def test_compute_summary_progress_structure(sample_date_data_10000, target):
+    """Test the compute_summary_progress function"""
+    # Randomly sample based on size
+    test_data = sample_date_data_10000
+
+    summary_progress = compute_summary_progress(
+        data=test_data,
+        date="SubmissionDate",
+        target=target,
+    )
+
+    # Check if the returned value is a tuple
+    assert isinstance(summary_progress, tuple)
+
+    # Check if return value us a tuple of 4 elements
+    assert len(summary_progress) == 4
+
+    # check if elements of the tuple are of expected types (ie int, float)
+    assert isinstance(summary_progress[0], int | float)
+    assert isinstance(summary_progress[1], int | float)
+    assert isinstance(summary_progress[2], int | float)
+    assert isinstance(summary_progress[3], int | float)
+
+
+# test 2: Test values of returned value from compute_summary_progress
+@pytest.mark.parametrize("target", [0, 10, 9999, 10000, 10001])
+def test_compute_summary_progress_values(sample_date_data_10000, target):
+    """Test the compute_summary_progress function for specific values."""
+    # Randomly sample based on size
+    test_data = sample_date_data_10000
+
+    summary_progress = compute_summary_progress(
+        data=test_data,
+        date="SubmissionDate",
+        target=target,
+    )
+
+    # check progress
+    test_progress = len(test_data) / target * 100 if target > 0 else 0
+    assert summary_progress[0] == test_progress
+
+    # check average submissions per day
+    test_data["day"] = test_data["SubmissionDate"].dt.date
+    test_avg_submissions_per_day = (
+        test_data["day"].value_counts().mean() if not test_data["day"].empty else 0
+    )
+    assert summary_progress[1] == test_avg_submissions_per_day
+
+    # check average submissions per week
+    test_data["week"] = test_data["SubmissionDate"].dt.to_period("W").dt.to_timestamp()
+    test_avg_submissions_per_week = (
+        test_data["week"].value_counts().mean() if not test_data["week"].empty else 0
+    )
+    assert summary_progress[2] == test_avg_submissions_per_week
+
+    # check average submissions per month
+    test_data["month"] = test_data["SubmissionDate"].dt.to_period("M").dt.to_timestamp()
+    test_avg_submissions_per_month = (
+        test_data["month"].value_counts().mean() if not test_data["month"].empty else 0
+    )
+    assert summary_progress[3] == test_avg_submissions_per_month
+
+
+# test 3: Test values of returned value from compute_summary_progress with empty input
+@pytest.mark.parametrize("target", [0, 10001])
+def test_compute_summary_progress_values_empty(target):
+    """Test the compute_summary_progress function for specific values with
+    empty input.
+    """
+    # Create an empty DataFrame
+    test_data_empty = pd.DataFrame(columns=["SubmissionDate", "enum_id"])
+
+    summary_progress = compute_summary_progress(
+        data=test_data_empty,
+        date="SubmissionDate",
+        target=target,
+    )
+
+    # Check if the values are as expected
+    assert summary_progress[0] == 0
+    assert summary_progress[1] == 0
+    assert summary_progress[2] == 0
+    assert summary_progress[3] == 0
+
+
+# test 4: Test values of returned value from compute_summary_progress with
+# invalid target
+@pytest.mark.parametrize("target", [-1, -100, "A"])
+def test_compute_summary_progress_invalid_target(sample_date_data_10000, target):
+    """Test the compute_summary_progress function for specific values with
+    invalid target.
+    """
+    # Randomly sample based on size
+    test_data = sample_date_data_10000
+
+    with pytest.raises(ValueError):
+        compute_summary_progress(
+            data=test_data,
+            date="SubmissionDate",
+            target=target,
+        )
+
+
+### TEST: compute_summary_progress_by_col
+# test 1: Test structure of returned value from compute_summary_progress_by_col
+def test_compute_summary_progress_by_col(sample_date_data_10000):
+    """Test the compute_summary_progress_by_col function"""
+    # Randomly sample based on size
+    test_data = sample_date_data_10000
+
+    # add district column to the test data
+    test_data["district"] = (
+        pd.Series(["District A", "District B", "District C", "District D"])
+        .sample(n=len(test_data), replace=True, random_state=42)
+        .values
+    )
+
+    summary_progress_by_col = compute_summary_progress_by_col(
+        data=test_data,
+        date="SubmissionDate",
+        progress_by_col="district",
+        progress_time_period="Auto",
+    )
+
+    # check that the returned value is a tuple of 4 elements
+    assert isinstance(summary_progress_by_col, tuple)
+    assert len(summary_progress_by_col) == 4
+
+    # Check if the returned value is a DataFrame
+    assert isinstance(summary_progress_by_col[0], pd.DataFrame)
+    assert isinstance(summary_progress_by_col[1], int | np.int64 | float | np.float64)
+    assert isinstance(summary_progress_by_col[2], int | np.int64 | float | np.float64)
+    assert isinstance(summary_progress_by_col[3], list)
+
+
+# test 2: Test values of returned value from compute_summary_progress_by_col
+@pytest.mark.parametrize("time_period", ["daily", "weekly", "monthly"])
+def test_compute_summary_progress_by_col_values(sample_date_data_10000, time_period):
+    """Test the compute_summary_progress_by_col function for specific values."""
+    # Randomly sample based on size
+    test_data = sample_date_data_10000
+
+    # add district column to the test data
+    test_data["district"] = (
+        pd.Series(["District A", "District B", "District C", "District D"])
+        .sample(n=len(test_data), replace=True, random_state=42)
+        .values
+    )
+
+    summary_progress_by_col = compute_summary_progress_by_col(
+        data=test_data,
+        date="SubmissionDate",
+        progress_by_col="district",
+        progress_time_period=time_period,
+    )
+
+    # check that the number of rows in progress_by_col DataFrame is equal to
+    # the number of unique values in the progress_by_col column
+    assert len(summary_progress_by_col[0]) == test_data["district"].nunique()
