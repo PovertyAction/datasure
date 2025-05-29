@@ -203,6 +203,10 @@ def compute_missing_columns(data: pd.DataFrame, missing_codes) -> pd.DataFrame:
     mv_data = pd.DataFrame({"Column": mv_data.index, "Null Values": mv_data.values})
     mv_data["% Null Values"] = (mv_data["Null Values"] / len(data)) * 100
 
+    # Add total missing values and percentage of total missing values
+    mv_data["Total Missing"] = mv_data["Null Values"]
+    mv_data["% Total Missing"] = 0
+
     for i in range(len(missing_codes)):
         miss_label = missing_codes["Missing Labels"][i]
         miss_codes = missing_codes["Missing Codes"][i].split(",")
@@ -213,8 +217,27 @@ def compute_missing_columns(data: pd.DataFrame, missing_codes) -> pd.DataFrame:
         )
         new_col[f"% {miss_label}"] = (new_col[f"{miss_label}"] / len(data)) * 100
 
+        # update the total missing values
+        mv_data["Total Missing"] += new_col[f"{miss_label}"]
+
         # join new column to mv_data using column name
         mv_data = mv_data.merge(new_col, on="Column", how="left")
+
+    # calculate percentage of total missing values
+    mv_data["% Total Missing"] = (mv_data["Total Missing"] / len(data)) * 100
+    # update the column order
+    mv_data = mv_data[
+        [
+            "Column",
+            "Total Missing",
+            "% Total Missing",
+        ]
+        + [
+            col
+            for col in mv_data.columns
+            if col not in ["Column", "Total Missing", "% Total Missing"]
+        ]
+    ]
 
     return mv_data
 
@@ -223,7 +246,7 @@ def compute_missing_columns(data: pd.DataFrame, missing_codes) -> pd.DataFrame:
 def compute_filtered_missing_columns(data: pd.DataFrame, mv_threshold: int) -> tuple:
     """Compute filtered datasets and statistics based on filtered result columns."""
     # Filter based on total missing percentage
-    mv_data_filtered = data[data["% Null Values"] >= mv_threshold]
+    mv_data_filtered = data[data["% Total Missing"] >= mv_threshold]
 
     perc_cols = [col for col in data.columns if "%" in col]
     vmin_val = mv_data_filtered[perc_cols].min().min()
@@ -451,9 +474,13 @@ def missing_compare(data: pd.DataFrame, setting_file: str) -> None:
         group_by_col_index = (
             data.columns.tolist().index(group_by_col) if group_by_col else None
         )
+        # allow only categorical columns for grouping
+        allowed_cols = data.select_dtypes(
+            include=["object", "category"]
+        ).columns.tolist()
         group_by_col = st.selectbox(
             label="Select column to group missing data by",
-            options=data.columns,
+            options=allowed_cols,
             index=group_by_col_index,
             help="Select the column to group missing data by",
             key="group_by_col",
@@ -741,7 +768,7 @@ def missing_report(data: pd.DataFrame, setting_file: str, page_name: str) -> Non
     missing_codes = missing_settings(missing_setting_file=missing_setting_file)
     missing_summary(data=data)
     missing_columns(data=data, missing_codes=missing_codes, setting_file=setting_file)
-    missing_over_time(data=data, setting_file=setting_file)
     missing_compare(data=data, setting_file=setting_file)
+    missing_over_time(data=data, setting_file=setting_file)
     missing_correlation(data=data, color_map=sns_colormap, setting_file=setting_file)
     missing_matrix(data=data, color_map=sns_colormap, setting_file=setting_file)
