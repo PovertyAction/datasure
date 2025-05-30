@@ -61,6 +61,7 @@ prep_data_page = st.Page(
     page="views/prep_view.py", title="Prepare Data", icon=":material/rule_settings:"
 )
 
+
 # config data checks config page
 config_checks_page = st.Page(
     page="views/config_view.py",
@@ -75,6 +76,12 @@ check_output_page_1 = st.Page(
     icon=":material/frame_inspect:",
 )
 
+corr_data_page = st.Page(
+    page="views/correction_view.py",
+    title="Correct Data",
+    icon=":material/edit:",
+)
+
 # --- NAVIGATION MENU --- #
 
 # Dynamically load pages
@@ -85,6 +92,7 @@ if st.session_state.show_checks_page_1:
             "Prepare Data": [prep_data_page],
             "Configure Checks": [config_checks_page],
             f"{st.session_state.config_page_1}": [check_output_page_1],
+            "Correct Data": [corr_data_page],
         }
     )
 elif st.session_state.show_prep_section:
