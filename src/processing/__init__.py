@@ -1,7 +1,6 @@
 from .corrections import (
-    apply_id_correction,
-    apply_other_correction,
-    load_corrections_log,
+    correction_apply_action,
+    correction_load_log,
 )
 from .prep import (
     prep_apply_action,
@@ -9,9 +8,8 @@ from .prep import (
 )
 
 __all__ = [
-    "apply_id_correction",
-    "apply_other_correction",
-    "load_corrections_log",
+    "correction_apply_action",
+    "correction_load_log",
     "prep_apply_action",
     "prep_load_log",
 ]

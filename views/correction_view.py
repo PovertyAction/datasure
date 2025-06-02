@@ -2,14 +2,13 @@ import polars as pl
 import streamlit as st
 
 from src.processing import (
-    apply_id_correction,
-    load_corrections_log,
+    correction_apply_action,
+    correction_load_log,
 )
 
 # DEFINE CONSTANTS FOR CORRECTION'
 
-ID_CORRECTION_ACTIONS = ("modify id", "remove row")
-OTHER_CORRECTION_ACTIONS = ("modify value", "remove value", "remove row")
+CORRECTION_ACTIONS = ("modify value", "remove value", "remove row")
 
 # -- DATA CORERCTIONS PAGE --#
 # Creates page for data preprocessing
@@ -33,7 +32,7 @@ except:
     )
 
 
-def id_correction_input_form(
+def correction_input_form(
     id_col: str,
     key_col: str,
     data_index: int,
@@ -80,29 +79,83 @@ def id_correction_input_form(
             )
             corr_action = st.selectbox(
                 label="Select Action",
-                options=ID_CORRECTION_ACTIONS,
+                options=CORRECTION_ACTIONS,
                 key=f"ID_correction_action_{i}",
             )
 
-            if corr_action == "modify id":
-                new_id = st.text_input(
-                    label="Enter New ID",
-                    key=f"ID_correction_new_id_{i}",
-                    placeholder="Enter new ID value",
+            if corr_action == "modify value" or corr_action == "remove value":
+                col_to_modify = st.selectbox(
+                    label="Select Column to Modify",
+                    options=st.session_state[f"corrected_data{i}"].columns,
+                    key=f"ID_correction_col_to_modify_{i}",
                 )
+
+                # display current value
+                current_value = (
+                    st.session_state[f"corrected_data{i}"]
+                    .filter(pl.col(survey_key) == corr_key_val)
+                    .select(col_to_modify)[0, 0]
+                )
+
+                st.text_input(
+                    label="Current Value",
+                    value=current_value,
+                    key=f"ID_correction_current_value_{i}",
+                    disabled=True,
+                )
+                if corr_action == "modify value":
+                    # if column is a date column, we use date or datetime input
+                    if st.session_state[f"corrected_data{i}"].dtypes == pl.datetime:
+                        new_value = st.date_input(
+                            label="New Value",
+                            key=f"ID_correction_new_value_{i}",
+                            value=current_value,
+                            help="Select a date for the new value.",
+                        )
+                        # convert date to datetime
+                        new_value = pl.datetime(
+                            new_value.year, new_value.month, new_value.day
+                        )
+                    # else we use text input
+                    else:
+                        new_value = st.text_input(
+                            label="New Value",
+                            key=f"ID_correction_new_value_{i}",
+                            placeholder="Enter new value",
+                        )
+                        # validate new value
+                        # if col_to_modify is a numeric column, we check if the
+                        # new value is
+                        # a number
+                        if st.session_state[f"corrected_data{i}"].schema[
+                            col_to_modify
+                        ] in [
+                            "int",
+                            "float",
+                        ]:
+                            try:
+                                new_value = float(new_value)
+                            except ValueError:
+                                st.error("New value must be a number.")
+                                new_value = None
+                else:
+                    new_value = None
+                    current_value = None
             elif corr_action == "remove row":
                 st.warning(
                     "This will remove the row with the current ID value from the dataset."
                 )
-                new_id = None
+                new_value, current_value, col_to_modify = None, None, None
             reason = st.text_input(
                 label="Reason for Correction",
                 key=f"ID_correction_reason_{i}",
                 placeholder="Enter reason for correction",
             )
             apply_button_enabled = bool(
-                corr_action == "modify id" and new_id and reason
-            ) or bool(corr_action == "remove row" and reason)
+                (corr_action == "modify value" and new_value and reason)
+                or bool(corr_action == "remove row" and reason)
+                or bool(corr_action == "remove value" and reason)
+            )
             apply_id_correction_btn = st.button(
                 label="Apply",
                 key=f"ID_correction_apply_{i}",
@@ -111,13 +164,14 @@ def id_correction_input_form(
             )
 
             if apply_id_correction_btn:
-                apply_id_correction(
+                correction_apply_action(
                     action=corr_action,
                     key_col=key_col,
-                    id_col=id_col,
-                    key_value=corr_key_val,
                     current_id=current_id_val,
-                    new_id=new_id,
+                    key_value=corr_key_val,
+                    current_value=current_value,
+                    col_to_modify=col_to_modify,
+                    new_value=new_value,
                     reason=reason,
                     data_index=data_index,
                 )
@@ -145,8 +199,8 @@ if show_corr_page_info:
 
             # load corrections log
             if f"id_correction_log_{i}" not in st.session_state:
-                st.session_state[f"id_correction_log_{i}"] = load_corrections_log(
-                    setting_file, "id"
+                st.session_state[f"id_correction_log_{i}"] = correction_load_log(
+                    setting_file,
                 )
 
             st.subheader("ID Duplicates Corrections")
@@ -155,7 +209,7 @@ if show_corr_page_info:
                 "Select the action from the dropdown and provide the necessary input."
             )
 
-            id_correction_input_form(
+            correction_input_form(
                 key_col=survey_key,
                 id_col=survey_id,
                 data_index=i,
@@ -167,13 +221,6 @@ if show_corr_page_info:
                 use_container_width=True,
                 key=f"id_correction_log_displ_{i}",
                 num_rows="dynamic",
-            )
-
-            st.write("---")
-            st.subheader("Other Corrections")
-            st.write(
-                "Correct other issues by modifying the value, removing the value, or removing the row. "
-                "Select the action from the dropdown and provide the necessary input."
             )
 
             row_count, col_count = st.session_state[f"corrected_data{i}"].shape
