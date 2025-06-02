@@ -500,6 +500,8 @@ def missing_compare(data: pd.DataFrame, setting_file: str) -> None:
 
     with mc_2:
         compare_col = default_settings.get("compare_col", None)
+        if compare_col not in allowed_cols:
+            compare_col = allowed_cols[0] if allowed_cols else None
         compare_col = st.multiselect(
             label="Select column to compare missing data",
             options=allowed_cols,
