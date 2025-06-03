@@ -1,0 +1,46 @@
+name: Code Coverage
+
+on:
+  push:
+    branches: [ main, feature/add-code-coverage-report]
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+      - uses: pre-commit/action@v3.0.1
+
+  sonarqube:
+    name: SonarQube
+    runs-on: ubuntu-latest
+    needs: pre-commit
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+      
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      
+      - name: Set up Python
+        run: uv python install
+      
+      - name: Install dependencies
+        run: uv sync
+      
+      - name: Install Just
+        uses: extractions/setup-just@v3
+      
+      - name: Run tests with coverage
+        run: just test-cov-xml
+      
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
