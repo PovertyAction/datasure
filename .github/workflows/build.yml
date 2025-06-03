@@ -40,6 +40,9 @@ jobs:
       - name: Run tests with coverage
         run: just test-cov-xml
       
+      - name: Run ruff linting with JSON output
+        run: uv run ruff check --output-format=json --output-file=ruff-report.json || true
+      
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v5
         env:
