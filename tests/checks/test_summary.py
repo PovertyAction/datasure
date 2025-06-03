@@ -194,7 +194,7 @@ def test_compute_submissions_values_10(sample_date_data_10000, size):
     test_submissions_this_month = test_data[
         (
             test_data["SubmissionDate"]
-            >= datetime.date.today() - datetime.timedelta(days=30)
+            >= (pd.Timestamp.now().normalize() - pd.DateOffset(months=1)).date()
         )
         & (test_data["SubmissionDate"] <= datetime.date.today())
     ]["SubmissionDate"].count()
