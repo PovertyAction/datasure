@@ -105,7 +105,7 @@ end_of_line = "lf" # possible values: {"lf", "crlf", "keep"}
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-ra -q"
+addopts = "-ra -q --strict-markers --strict-config"
 testpaths = [
     "tests",
 ]
@@ -116,13 +116,22 @@ filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::UserWarning",
 ]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
 
 [tool.coverage.run]
 source = ["src"]
 omit = [
     "tests/*",
     "**/__init__.py",
+    "*/migrations/*",
+    "*/venv/*",
+    "*/.venv/*",
 ]
+branch = true
 
 [tool.coverage.report]
 exclude_lines = [
@@ -133,4 +142,18 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "pass",
     "raise ImportError",
+    "if TYPE_CHECKING:",
+    "if typing.TYPE_CHECKING:",
+    "@abstractmethod",
 ]
+show_missing = true
+skip_covered = false
+precision = 2
+fail_under = 10
+
+[tool.coverage.html]
+directory = "htmlcov"
+title = "pyDMS Coverage Report"
+
+[tool.coverage.xml]
+output = "coverage.xml"
