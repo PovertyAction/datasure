@@ -143,13 +143,13 @@ The project uses Python `pytest` framework for testing. The test files are locat
 To run all tests, execute the following command from the project root directory:
 
 ```bash
-python -m pytest
+uv run python -m pytest
 ```
 
 To run a specific test file, use:
 
 ```bash
-python -m pytest tests/test_file.py
+uv run python -m pytest tests/test_file.py
 ```
 
 ## Code Quality Reports
