@@ -285,6 +285,7 @@ def test_compute_filtered_missing_columns():
             "Column": ["A", "B"],
             "Null Values": [1, 2],
             "% Null Values": [50, 100],
+            "% Total Missing": [50, 100],
             "% CustomMissing": [0, 100],
         }
     )
@@ -308,6 +309,7 @@ def test_compute_filtered_missing_columns_all_match():
             "Column": ["A", "B"],
             "Null Values": [2, 2],
             "% Null Values": [100, 100],
+            "% Total Missing": [100, 100],
             "% CustomMissing": [100, 100],
         }
     )
@@ -329,6 +331,7 @@ def test_compute_filtered_missing_columns_no_match():
             "Column": ["A", "B"],
             "Null Values": [0, 0],
             "% Null Values": [0, 0],
+            "% Total Missing": [0, 0],
             "% CustomMissing": [0, 0],
         }
     )
@@ -347,6 +350,7 @@ def test_compute_filtered_missing_columns_mixed_percentages():
             "Column": ["A", "B", "C"],
             "Null Values": [5, 10, 15],
             "% Null Values": [25, 50, 75],
+            "% Total Missing": [35, 80, 135],
             "% CustomMissing": [10, 30, 60],
         }
     )
@@ -357,7 +361,7 @@ def test_compute_filtered_missing_columns_mixed_percentages():
     assert "B" in mv_data_filtered["Column"].values
     assert "C" in mv_data_filtered["Column"].values
     assert vmin == 30  # Minimum percentage value in the filtered data
-    assert vmax == 75  # Maximum percentage value in the filtered data
+    assert vmax == 135  # Maximum percentage value in the filtered data
 
 
 @patch("src.checks.missing.st.cache_data", lambda f: f)
