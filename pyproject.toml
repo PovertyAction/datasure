@@ -150,7 +150,7 @@ show_missing = true
 skip_covered = false
 precision = 2
 # TODO: need to increase the failing threshold considerably, ge above 80%
-fail_under = 9
+fail_under = 12
 
 [tool.coverage.html]
 directory = "htmlcov"
