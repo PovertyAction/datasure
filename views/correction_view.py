@@ -49,28 +49,28 @@ def correction_input_form(
     -------
         None
     """
+    # get dataset
+    if not isinstance(st.session_state[f"corrected_data{data_index}"], pl.DataFrame):
+        corrected_data = pl.from_pandas(st.session_state[f"corrected_data{data_index}"])
+    else:
+        corrected_data = st.session_state[f"corrected_data{data_index}"]
+
     fc1, _ = st.columns([0.4, 0.6])
     with (
         fc1,
         st.popover(":material/add: Add ID correction step", use_container_width=True),
     ):
         st.markdown("*Add new ID correction step*")
-        key_options = (
-            st.session_state[f"corrected_data{data_index}"]
-            .select(survey_key)
-            .unique(maintain_order=True)
-        )
+        key_options = corrected_data.select(survey_key).unique(maintain_order=True)
         corr_key_val = st.selectbox(
             label="Select KEY",
             options=key_options,
             key=f"ID_correction_key_value__{i}",
         )
         if corr_key_val:
-            current_id_val = (
-                st.session_state[f"corrected_data{i}"]
-                .filter(pl.col(survey_key) == corr_key_val)
-                .select(id_col)[0, 0]
-            )
+            current_id_val = corrected_data.filter(
+                pl.col(survey_key) == corr_key_val
+            ).select(id_col)[0, 0]
             st.text_input(
                 label="Current ID Value",
                 value=current_id_val,
@@ -86,16 +86,14 @@ def correction_input_form(
             if corr_action == "modify value" or corr_action == "remove value":
                 col_to_modify = st.selectbox(
                     label="Select Column to Modify",
-                    options=st.session_state[f"corrected_data{i}"].columns,
+                    options=corrected_data.columns,
                     key=f"ID_correction_col_to_modify_{i}",
                 )
 
                 # display current value
-                current_value = (
-                    st.session_state[f"corrected_data{i}"]
-                    .filter(pl.col(survey_key) == corr_key_val)
-                    .select(col_to_modify)[0, 0]
-                )
+                current_value = corrected_data.filter(
+                    pl.col(survey_key) == corr_key_val
+                ).select(col_to_modify)[0, 0]
 
                 st.text_input(
                     label="Current Value",
@@ -105,7 +103,7 @@ def correction_input_form(
                 )
                 if corr_action == "modify value":
                     # if column is a date column, we use date or datetime input
-                    if st.session_state[f"corrected_data{i}"].dtypes == pl.datetime:
+                    if corrected_data.dtypes == pl.datetime:
                         new_value = st.date_input(
                             label="New Value",
                             key=f"ID_correction_new_value_{i}",
@@ -127,9 +125,7 @@ def correction_input_form(
                         # if col_to_modify is a numeric column, we check if the
                         # new value is
                         # a number
-                        if st.session_state[f"corrected_data{i}"].schema[
-                            col_to_modify
-                        ] in [
+                        if corrected_data.schema[col_to_modify] in [
                             "int",
                             "float",
                         ]:
@@ -195,6 +191,14 @@ if show_corr_page_info:
             if f"corrected_data{i}" not in st.session_state:
                 st.session_state[f"corrected_data{i}"] = pl.from_pandas(
                     st.session_state[f"prepped_data{i}"]
+                )
+            else:
+                if isinstance(st.session_state[f"corrected_data{i}"], pl.DataFrame):
+                    st.session_state[f"corrected_data{i}"] = st.session_state[
+                        f"corrected_data{i}"
+                    ].to_pandas()
+                st.session_state[f"corrected_data{i}"] = pl.from_pandas(
+                    st.session_state[f"corrected_data{i}"]
                 )
 
             # load corrections log

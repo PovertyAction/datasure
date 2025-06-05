@@ -38,14 +38,15 @@ def correction_load_log(file_path: str) -> pl.DataFrame:
 
 def correction_apply_action(
     data_index: int,
-    action: str | None,
-    key_col: str | None,
-    key_value: any,
-    current_id: any,
-    current_value: any,
-    col_to_modify: any,
-    new_value: any,
-    reason: str | None,
+    key_col: str,
+    page_name=None,
+    action=None,
+    key_value=None,
+    current_id=None,
+    current_value=None,
+    col_to_modify=None,
+    new_value=None,
+    reason: str | None = None,
 ) -> None:
     """
     Apply ID corrections to a DataFrame based on a corrections log.
@@ -65,8 +66,18 @@ def correction_apply_action(
     # if action_col is provided, we add new column to corrections log
     # and apply new ID correction
     # else, we apply corrections to existing correction log
-
+    if page_name:
+        file_path = f"cache/pyDMS_hfc_correction_log_{page_name}.json"
+        # import corrections log from file
+        if f"id_correction_log_{data_index}" not in st.session_state:
+            st.session_state[f"id_correction_log_{data_index}"] = correction_load_log(
+                file_path
+            )
     corrections_log = st.session_state[f"id_correction_log_{data_index}"]
+    if "corrected_data" not in st.session_state:
+        st.session_state[f"corrected_data{data_index}"] = pl.from_pandas(
+            st.session_state[f"prepped_data{data_index}"]
+        )
     corrected_data = st.session_state[f"corrected_data{data_index}"]
 
     if action is not None:
