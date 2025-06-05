@@ -138,16 +138,24 @@ Follow these steps to test the app:
 
 ## Running Tests
 
-The project uses Python's built-in `unittest` framework for testing. The test files are located in the `tests/` directory.
+The project uses Python `pytest` framework for testing. The test files are located in the `tests/` directory.
 
 To run all tests, execute the following command from the project root directory:
 
 ```bash
-python -m unittest discover tests
+uv run python -m pytest
 ```
 
-To run a specific test file:
+To run a specific test file, use:
 
 ```bash
-python -m unittest tests/test_summary.py
+uv run python -m pytest tests/test_file.py
 ```
+
+## Code Quality Reports
+
+Code quality metrics and reports are available on SonarQube Cloud:
+
+- **Dashboard**: [https://sonarcloud.io/project/overview?id=PovertyAction_dms-dashboard](https://sonarcloud.io/project/overview?id=PovertyAction_dms-dashboard)
+
+The SonarQube dashboard provides insights into code coverage, code smells, bugs, vulnerabilities, and maintainability ratings.

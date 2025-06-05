@@ -36,7 +36,7 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
                 "survey_key": ["a", "b", "c", "d"],
             }
         )
-        result = compute_id_duplicates(df, "caseID", "survey_key", None)
+        result = compute_id_duplicates(df, "caseID", "survey_key", "survey_key", None)
         # Should be empty since there are no duplicates
         self.assertTrue(result.empty)
 
@@ -47,7 +47,7 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
                 "survey_key": ["a", "b", "b", "c", "d", "d", "d"],
             }
         )
-        result2 = compute_id_duplicates(df2, "caseID", "survey_key", None)
+        result2 = compute_id_duplicates(df2, "caseID", "survey_key", "survey_key", None)
         # Only rows with duplicated caseID should be present
         self.assertTrue((result2["caseID"].isin([2, 4])).all())
         # Check that id_dup_count is correct
@@ -63,13 +63,13 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
 
         # Test Case 3: All IDs are duplicates (all the same)
         df3 = pd.DataFrame({"caseID": [1, 1, 1, 1], "survey_key": ["a", "b", "c", "d"]})
-        result3 = compute_id_duplicates(df3, "caseID", "survey_key", None)
+        result3 = compute_id_duplicates(df3, "caseID", "survey_key", "survey_key", None)
         self.assertEqual(result3["id_dup_count"].iloc[0], 4)
         self.assertTrue((result3["id_dup_count"] == 4).all())
         self.assertTrue((result3["id_dup_percent"] == 100.0).all())
 
         # Test Case 4: display_cols is None
-        result4 = compute_id_duplicates(df2, "caseID", "survey_key", None)
+        result4 = compute_id_duplicates(df2, "caseID", "survey_key", "survey_key", None)
         self.assertIn("caseID", result4.columns)
         self.assertIn("survey_key", result4.columns)
         self.assertIn("id_dup_count", result4.columns)

@@ -38,7 +38,7 @@ def save_check_settings(settings_file, check_name, check_settings) -> None:
         json.dump(settings_dict, f)
 
 
-@st.cache_data
+# @st.cache_data
 def load_check_settings(settings_file, check_name) -> tuple:
     """Load the settings for a check from a dictionary.
 

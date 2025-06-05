@@ -219,7 +219,7 @@ def compute_summary_submissions(data: pd.DataFrame, date: str) -> tuple:
     first_submission_date = summary_df[date].min()
     last_submission_date = summary_df[date].max()
 
-    todays_date = pd.Timestamp.now().normalize().date()
+    todays_date = pd.Timestamp.now().date()
     submissions_today = summary_df[summary_df[date] == todays_date].shape[0]
 
     yestedays_date = (pd.Timestamp.now().normalize() - pd.DateOffset(days=1)).date()
