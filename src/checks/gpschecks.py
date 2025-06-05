@@ -230,6 +230,10 @@ def gps_check_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple
                             )
                             gps_altitude = None
                         elif gps_split.shape[1] >= 4:
+                            # remove any non-numeric values from split columns
+                            gps_split = gps_split.apply(
+                                lambda x: pd.to_numeric(x, errors="coerce")
+                            )
                             gps_lat_col = "latitude"
                             gps_lon_col = "longitude"
                             gps_altitude = "altitude"
