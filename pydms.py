@@ -57,7 +57,7 @@ if "alias_list_index" not in st.session_state:
 # start page
 start_page = st.Page(
     page="views/start_view.py",
-    title="Data Management System",
+    title="start here",
     icon=":material/home:",
     default=True,
 )
@@ -67,14 +67,12 @@ import_data_page = st.Page(
     page="views/import_view.py",
     title="Import Data",
     icon=":material/sync:",
-    default=True,
 )
 
 # config data prep page
 prep_data_page = st.Page(
     page="views/prep_view.py", title="Prepare Data", icon=":material/rule_settings:"
 )
-
 
 # config data checks config page
 config_checks_page = st.Page(
@@ -98,7 +96,14 @@ corr_data_page = st.Page(
 
 # --- NAVIGATION MENU --- #
 
-nav_menu = st.navigation({"start page": [start_page]})
+nav_menu = st.navigation({"": [start_page]})
+if st.session_state.st_load_project:
+    nav_menu = st.navigation(
+        {
+            "": [start_page],
+            "-": [import_data_page],
+        }
+    )
 
 # --- GLOBAL ASSETS --- #
 
