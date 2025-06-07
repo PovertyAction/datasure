@@ -5,7 +5,10 @@ import time
 import zipfile
 
 import pandas as pd
+import polars as pl
 import streamlit as st
+
+from src.connectors import get_import_cache
 
 # --- Get List of sheet from excel ---#
 
@@ -106,7 +109,7 @@ def get_file_path(file_uploader: object) -> str:
 # --- FORM for Adding file from local storage ---#
 
 
-def local_add_form() -> None:
+def local_add_form(project_id: str) -> None:
     """Form for adding a file from local storage.
 
     PARAMS:
@@ -118,29 +121,49 @@ def local_add_form() -> None:
     None
 
     """
-    st.image("assets/storage.png", width=100)
 
-    st.markdown("Add a new file")
-    # input file alias
+    def valid_alias(alias: str) -> bool:
+        """Validate alias for uniqueness and length."""
+        if not alias:
+            st.error("Alias cannot be empty")
+            return False
+        if len(alias) > 20:
+            st.error("Alias must be a maximum of 20 characters")
+            return False
+        return True
+
+    def valid_file_path(file_path: str) -> bool:
+        """Validate file path for existence and type."""
+        if not file_path:
+            st.error("File path cannot be empty")
+            return False
+        if not os.path.isfile(file_path):
+            st.error("File not found. Please check the file path")
+            return False
+        valid_extensions = ["csv", "xlsx", "xls", "json", "dta"]
+        if file_path.split(".")[-1] not in valid_extensions:
+            st.error("Invalid file type. Please upload a valid file type")
+            return False
+        return True
+
+    st.image("assets/hard-disk.png", width=100)
+    st.subheader("Add File from Local Storage")
+
     local_file_alias = st.text_input(
-        label="alias*", help="Enter a unique name for the file"
+        label="alias*", help="Enter a unique, short, descriptive name for the file"
     )
+    if local_file_alias:
+        valid_alias(local_file_alias)
 
     # file uploader. Limit to 1 file and allow only file types selected
     local_added_file = st.text_input(
         label="file path*", help="Add full file name and path. eg. C:/data/survey.dta"
     )
 
-    if local_added_file:
-        # get file extension from filename
+    if local_added_file and valid_file_path(local_added_file):
         local_added_file_ext = local_added_file.split(".")[-1]
 
-        # check file validity
-        if not os.path.isfile(local_added_file):
-            st.warning("File not found. Please check the file path")
-        elif local_added_file_ext not in ["csv", "xlsx", "xls", "json", "dta"]:
-            st.warning("Invalid file type. Please upload a valid file type")
-        elif local_added_file_ext in ["xlsx", "xls"]:
+        if local_added_file_ext in ["xlsx", "xls"]:
             sheets = get_excel_sheet_names(local_added_file)
             local_added_file_sheet_name = st.selectbox(
                 label="Sheet Name", options=sheets
@@ -149,7 +172,7 @@ def local_add_form() -> None:
             local_added_file_sheet_name = None
 
     # add a submit button
-    local_add_file = st.button(
+    local_add_btn = st.button(
         "Add File",
         type="primary",
         use_container_width=True,
@@ -160,26 +183,28 @@ def local_add_form() -> None:
     st.markdown("**required*")
 
     # if submit (local_add_file) button is clicked
+    if local_add_btn:
+        cache_file = get_import_cache(project_id)
+        # create a new row with the file details
+        new_row = {
+            "refresh": True,
+            "load": True,
+            "type": "local",
+            "alias": local_file_alias,
+            "filename": local_added_file,
+            "sheet name": local_added_file_sheet_name,
+            "server": "",
+            "form_id": "",
+            "private_key": "",
+            "save_to": "",
+            "attachments": None,
+        }
 
-    if local_add_file:
-        new_file = pd.DataFrame(
-            data=[
-                [
-                    local_file_alias,
-                    True,
-                    local_added_file_ext,
-                    local_added_file,
-                    local_added_file_sheet_name,
-                ]
-            ],
-            columns=["alias", "load", "type", "filename", "sheet name"],
-        )
+        # append the new row to the cache file
+        cache_file = pl.concat([cache_file, pl.DataFrame([new_row])], how="vertical")
 
-        # cst.write(new_file)
-
-        st.session_state.local_files = pd.concat(
-            [st.session_state.local_files, new_file], ignore_index=True
-        )
+        # save the updated cache file
+        cache_file.write_json(f"cache/{project_id}/settings/import_cache.json")
 
 
 # --- Load data from local storage ---#
