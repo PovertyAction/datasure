@@ -15,6 +15,7 @@ def get_project_id(project_name: str) -> str:
 def get_project_names() -> list[str]:
     """Get a list of project names from the local directory."""
     projects_file = "cache/projects.json"
+    project_names = []
     if os.path.exists(projects_file):
         with open(projects_file) as f:
             projects = json.load(f)
@@ -51,14 +52,21 @@ def load_projects():
         return projects
 
 
-def save_project(
-    project_name: str, project_id: str, created_at: str | None, last_used: str | None
-):
+def save_project(project_name: str, project_id: str):
     """Save a new project to the local directory."""
     if not os.path.exists(f"cache/{project_id}"):
         os.makedirs(f"cache/{project_id}")
+        os.makedirs(f"cache/{project_id}/data")
+        os.makedirs(f"cache/{project_id}/settings")
+        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        last_used = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        # get created at date from existing project
+        with open(f"cache/{project_id}/settings/project_info.json") as f:
+            project_info = json.load(f)
+        created_at = project_info.get("created_at")
+        last_used = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     projects = load_projects() or {}
-
     new_project = {
         "name": project_name,
         "created_at": created_at,
@@ -68,6 +76,26 @@ def save_project(
 
     with open("cache/projects.json", "w") as f:
         json.dump(projects, f, indent=4)
+
+
+def delete_project(project_id: str):
+    """Delete a project from the local directory."""
+    projects = load_projects()
+    if project_id in projects:
+        projects.pop(project_id)
+        with open("cache/projects.json", "w") as f:
+            json.dump(projects, f, indent=4)
+        project_dir = f"cache/{project_id}"
+        if os.path.exists(project_dir):
+            for root, dirs, files in os.walk(project_dir, topdown=False):
+                for name in files:
+                    os.remove(os.path.join(root, name))
+                for name in dirs:
+                    os.rmdir(os.path.join(root, name))
+            os.rmdir(project_dir)
+        st.success(f"Project '{project_id}' deleted successfully!")
+    else:
+        st.error(f"Project '{project_id}' does not exist.")
 
 
 st.set_page_config(
@@ -159,9 +187,7 @@ with page_canvas:
                         f"Project '{project_name}' already exists. Please choose a different name."
                     )
                     st.stop()
-                created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                last_used = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                save_project(project_name, project_id, created_at, last_used)
+                save_project(project_name, project_id)
                 st.success(f"Project '{project_name}' created successfully!")
                 st.rerun()
         elif project:
@@ -176,11 +202,6 @@ with page_canvas:
                     st.button("Confirm delete", use_container_width=True)
                     and project_id in projects
                 ):
-                    projects.pop(project_id)
-                    with open("cache/projects.json", "w") as f:
-                        json.dump(projects, f, indent=4)
-                    project_dir = f"cache/{project_id}"
-                    if os.path.exists(project_dir):
-                        os.rmdir(project_dir)
+                    delete_project(project_id)
                     st.success(f"Project '{project}' deleted successfully!")
                     st.rerun()
