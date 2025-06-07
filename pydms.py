@@ -4,6 +4,12 @@ import streamlit as st
 # --- PAGE SETUP --- #
 
 # initialize session states
+if "st_load_project" not in st.session_state:
+    st.session_state.st_load_project = False
+
+if "st_project_id" not in st.session_state:
+    st.session_state.st_project_id = ""
+
 if "show_prep_section" not in st.session_state:
     st.session_state.show_prep_section = True
 
@@ -48,6 +54,14 @@ else:
 if "alias_list_index" not in st.session_state:
     st.session_state.alias_list_index = [0, 0, 0, 0]
 
+# start page
+start_page = st.Page(
+    page="views/start_view.py",
+    title="Data Management System",
+    icon=":material/home:",
+    default=True,
+)
+
 # config data import page
 import_data_page = st.Page(
     page="views/import_view.py",
@@ -84,31 +98,7 @@ corr_data_page = st.Page(
 
 # --- NAVIGATION MENU --- #
 
-# Dynamically load pages
-if st.session_state.show_checks_page_1:
-    nav_menu = st.navigation(
-        {
-            "Import Data": [import_data_page],
-            "Prepare Data": [prep_data_page],
-            "Configure Checks": [config_checks_page],
-            f"{st.session_state.config_page_1}": [check_output_page_1],
-            "Correct Data": [corr_data_page],
-        }
-    )
-elif st.session_state.show_prep_section:
-    nav_menu = st.navigation(
-        {
-            "Import Data": [import_data_page],
-            "Prepare Data": [prep_data_page],
-            "Configure Checks": [config_checks_page],
-        }
-    )
-else:
-    nav_menu = st.navigation(
-        {
-            "Import Data": [import_data_page],
-        }
-    )
+nav_menu = st.navigation({"start page": [start_page]})
 
 # --- GLOBAL ASSETS --- #
 
