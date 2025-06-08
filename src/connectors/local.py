@@ -109,7 +109,9 @@ def get_file_path(file_uploader: object) -> str:
 # --- FORM for Adding file from local storage ---#
 
 
-def local_add_form(project_id: str) -> None:
+def local_add_form(
+    project_id: str, edit_mode: bool = False, defaults: dict | None = None
+) -> None:
     """Form for adding a file from local storage.
 
     PARAMS:
@@ -121,6 +123,7 @@ def local_add_form(project_id: str) -> None:
     None
 
     """
+    mode = "edit" if edit_mode else "add"
 
     def valid_alias(alias: str) -> bool:
         """Validate alias for uniqueness and length."""
@@ -149,15 +152,27 @@ def local_add_form(project_id: str) -> None:
     st.image("assets/hard-disk.png", width=100)
     st.subheader("Add File from Local Storage")
 
+    if edit_mode:
+        st.info("You are in edit mode. Please modify the file details below.")
+        # load the current file details from the defaults
+        default_local_file_alias = defaults.get("alias", "")
+        default_local_added_file = defaults.get("filename", "")
+        default_local_added_file_sheet_name = defaults.get("sheet_name", "")
+
     local_file_alias = st.text_input(
-        label="alias*", help="Enter a unique, short, descriptive name for the file"
+        label="alias*",
+        help="Enter a unique, short, descriptive name for the file",
+        placeholder=default_local_file_alias if edit_mode else "",
+        disabled=edit_mode,
     )
     if local_file_alias:
         valid_alias(local_file_alias)
 
     # file uploader. Limit to 1 file and allow only file types selected
     local_added_file = st.text_input(
-        label="file path*", help="Add full file name and path. eg. C:/data/survey.dta"
+        label="file path*",
+        help="Add full file name and path. eg. C:/data/survey.dta",
+        placeholder=default_local_added_file if edit_mode else "",
     )
 
     if local_added_file and valid_file_path(local_added_file):
@@ -165,8 +180,21 @@ def local_add_form(project_id: str) -> None:
 
         if local_added_file_ext in ["xlsx", "xls"]:
             sheets = get_excel_sheet_names(local_added_file)
+
+            # check if default sheetname exists in the list of sheets
+            if (
+                default_local_added_file_sheet_name
+                and default_local_added_file_sheet_name in sheets
+            ):
+                # get index of the default sheet name or set to first sheet
+                default_sheet_index = sheets.index(default_local_added_file_sheet_name)
+            else:
+                default_sheet_index = 0
+
             local_added_file_sheet_name = st.selectbox(
-                label="Sheet Name", options=sheets
+                label="Sheet Name",
+                options=sheets,
+                index=default_sheet_index,
             )
         else:
             local_added_file_sheet_name = ""
@@ -178,7 +206,7 @@ def local_add_form(project_id: str) -> None:
         "Add File",
         type="primary",
         use_container_width=True,
-        key="add_file_key",
+        key=f"add_file_key{mode}",
         disabled=not local_added_file and not local_file_alias,
     )
 
@@ -187,23 +215,35 @@ def local_add_form(project_id: str) -> None:
     # if submit (local_add_file) button is clicked
     if local_add_btn:
         cache_file = get_import_cache(project_id)
-        # create a new row with the file details
-        new_row = {
-            "refresh": True,
-            "load": True,
-            "source": "local storage",
-            "alias": local_file_alias,
-            "filename": local_added_file,
-            "sheet_name": local_added_file_sheet_name,
-            "server": "",
-            "form_id": "",
-            "private_key": "",
-            "save_to": "",
-            "attachments": None,
-        }
+        if edit_mode:
+            # update the row in the cache file
+            cache_file = cache_file.with_columns(
+                pl.when(pl.col("alias") == default_local_file_alias)
+                .then(pl.lit(local_added_file))
+                .otherwise(pl.col("filename"))
+                .alias("filename"),
+            )
 
-        # append the new row to the cache file
-        cache_file = pl.concat([cache_file, pl.DataFrame([new_row])], how="vertical")
+        else:
+            # create a new row with the file details
+            new_row = {
+                "refresh": True,
+                "load": True,
+                "source": "local storage",
+                "alias": local_file_alias,
+                "filename": local_added_file,
+                "sheet_name": local_added_file_sheet_name,
+                "server": "",
+                "form_id": "",
+                "private_key": "",
+                "save_to": "",
+                "attachments": None,
+            }
+
+            # append the new row to the cache file
+            cache_file = pl.concat(
+                [cache_file, pl.DataFrame([new_row])], how="vertical"
+            )
 
         # save the updated cache file
         cache_file.write_json(f"cache/{project_id}/settings/import_cache.json")

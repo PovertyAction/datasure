@@ -26,6 +26,43 @@ def remove_import_configuration(project_id: str, alias: str) -> None:
     updated_cache.write_json(f"cache/{project_id}/settings/import_cache.json")
 
 
+def edit_import_configuration(project_id: str, alias: str) -> None:
+    """Edit import configuration in the cache file.
+
+    PARAMS:
+    -------
+    project_id: str : project ID
+
+    Returns
+    -------
+    None
+    """
+    import_log = get_import_cache(project_id)
+
+    source = import_log.filter(pl.col("alias") == alias).select("source").to_series()[0]
+    if source == "local storage":
+        current_filename = (
+            import_log.filter(pl.col("alias") == alias)
+            .select("filename")
+            .to_series()[0]
+        )
+        current_sheet_name = (
+            import_log.filter(pl.col("alias") == alias)
+            .select("sheet_name")
+            .to_series()[0]
+        )
+        defaults = {
+            "alias": alias,
+            "filename": current_filename,
+            "sheet_name": current_sheet_name,
+        }
+        local_add_form(
+            project_id=project_id,
+            defaults=defaults,
+            edit_mode=True,
+        )
+
+
 # --- modify import cache file --- #
 def modify_import_cache_file(project_id: str, edited_import_log: pl.DataFrame) -> None:
     """Modify the import cache file to add or update import configurations.
@@ -132,7 +169,16 @@ with (
         "Edit Import Configuration", use_container_width=True, icon=":material/edit:"
     ),
 ):
-    st.warning("Edit configurations cleared.")
+    if st.session_state.st_raw_dataset_list:
+        edit_config = st.selectbox(
+            "Select Data to Edit",
+            options=st.session_state.st_raw_dataset_list,
+            index=None,
+        )
+        if edit_config:
+            edit_import_configuration(project_id, edit_config)
+    else:
+        st.info("No import configurations found. Please add import configurations.")
 with (
     ac3,
     st.popover(
@@ -186,8 +232,6 @@ if not import_log.is_empty():
         if load_btn:
             # update import_log with the edited import cache
             modify_import_cache_file(project_id, edited_import_cache)
-            # import datasets that are marked for loading
-            import_log = import_log.filter(pl.col("load"))
             load_raw_datasets(project_id)
 
     # --- Preview imported data --- #
