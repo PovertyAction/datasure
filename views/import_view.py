@@ -8,11 +8,17 @@ from src.connectors import (
     local_add_form,
     local_load_action,
     scto_add_form,
+    scto_import_data,
     scto_login_form,
 )
 
 # --- define project ID --- #
 project_id = st.session_state.st_project_id
+
+
+# add session state for raw dataset list
+if "st_raw_dataset_list" not in st.session_state:
+    st.session_state.st_raw_dataset_list = []
 
 
 # --- removing import configuration --- #
@@ -105,13 +111,12 @@ def refresh_raw_data_list(project_id: str) -> None:
     import_log = import_log.filter(pl.col("load"))
     if import_log.is_empty():
         st.error("No import configurations found. Please add import configurations.")
-        return
+        st.stop()
     for row in import_log.iter_rows(named=True):
         st.session_state.st_raw_dataset_list.append(row["alias"])
 
 
 # --- Load raw dataset list from import configurations --- #
-@st.cache_data()
 def load_raw_datasets(project_id: str) -> None:
     """Load raw dataset list from the cache file.
 
@@ -127,7 +132,7 @@ def load_raw_datasets(project_id: str) -> None:
     import_log = import_log.filter(pl.col("load"))
     if import_log.is_empty():
         st.error("No import configurations found. Please add import configurations.")
-        return
+        st.stop()
     with st.status("Loading datasets ...", expanded=True) as status:
         for row_index, row in enumerate(import_log.iter_rows(named=True)):
             if row["source"] == "local storage":
@@ -138,11 +143,20 @@ def load_raw_datasets(project_id: str) -> None:
                     filename=row["filename"],
                     sheet_name=row["sheet_name"] if row["sheet_name"] else None,
                 )
-                st.session_state.st_raw_dataset_list.append(row["alias"]) if row[
-                    "alias"
-                ] not in st.session_state.st_raw_dataset_list else None
-            else:
-                st.error(f"Unknown source: {row['source']}")
+            elif row["source"] == "SurveyCTO":
+                scto_import_data(
+                    project_id=project_id,
+                    data_index=row_index,
+                    form_id=row["form_id"],
+                    refresh=row["refresh"],
+                    key=row["private_key"],
+                    saveas=row["save_to"],
+                    attachments=row["attachments"],
+                )
+
+            st.session_state.st_raw_dataset_list.append(row["alias"]) if row[
+                "alias"
+            ] not in st.session_state.st_raw_dataset_list else None
         status.update(
             label="Data loaded successfully!", state="complete", expanded=False
         )
@@ -165,14 +179,9 @@ with st.container(border=True):
             "Add SurveyCTO Server", use_container_width=True, icon=":material/login:"
         ),
     ):
-        scto_login_form(project_id)
-
+        st.session_state.st_scto = scto_login_form(project_id)
 
 st.subheader("Import data from multiple sources")
-
-# add session state for raw dataset list
-if "st_raw_dataset_list" not in st.session_state:
-    st.session_state.st_raw_dataset_list = []
 
 # -- Add configurations for import data -- #
 ac1, ac2, ac3 = st.columns([0.4, 0.4, 0.2])
@@ -222,7 +231,6 @@ with (
         )
 
 import_log = get_import_cache(project_id)
-
 if not import_log.is_empty():
     edited_import_cache = st.data_editor(
         data=import_log,
@@ -244,7 +252,6 @@ if not import_log.is_empty():
             ),
         },
     )
-
     # -- Load data from import configurations -- #
     ld1, ld2 = st.columns([0.3, 0.7])
     with ld1:

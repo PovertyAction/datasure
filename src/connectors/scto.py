@@ -30,7 +30,8 @@ def scto_get_server_cache(project_id: str) -> dict:
 
     """
     try:
-        file = pd.read_json(f"cache/{project_id}/settings/scto.json").to_dict()
+        with open(f"cache/{project_id}/settings/scto.json") as file:
+            file = json.load(file)
 
     except FileNotFoundError:
         file = {}
@@ -351,13 +352,13 @@ def scto_download_media(
 
 # Using pysurveycto library, import survey data from SurveyCTO
 def scto_import_data(
-    scto: object,
+    project_id: str,
+    data_index: int,
     form_id: str,
+    refresh: bool = False,
     key: str | None = None,
-    server_dataset: bool = False,
     saveas: str | None = None,
-    media: bool = False,
-    get_new_data: bool = True,
+    attachments: bool = False,
 ) -> tuple:
     """Import SurveyCTO data.
 
@@ -381,15 +382,18 @@ def scto_import_data(
     Returns tuple of (scto_data, new_data_count)
 
     """
-    # download server databases
-    if server_dataset:
+    scto_login = scto_get_server_cache(project_id)
+    scto = scto_server_connect(
+        servername=scto_login["server"],
+        username=scto_login["user"],
+        password=scto_login["password"],
+    )
+    # check if form id is for a server dataset
+    try:
         scto_data = scto.get_server_dataset(form_id)
-        scto_data = pd.read_csv(StringIO(scto_data))
+        scto_data = pl.read_csv(StringIO(scto_data), encoding="utf-8")
 
-        # count the number of new data
-        new_data_count = len(scto_data.index)
-
-    else:
+    except requests.HTTPError:
         # key is not missing, import encryption key from key file
         if key:
             key = scto_import_key(key)
@@ -398,12 +402,12 @@ def scto_import_data(
         scto_data, oldest_completion_date = scto_load_existing_data(saveas)
 
         # if new data is not requested, return existing data
-        if not get_new_data:
+        if not refresh:
             return (scto_data, 0)
 
         # Download new data (from the oldest completion date)
         try:
-            new_data: pd.DataFrame = scto.get_form_data(
+            new_data: json = scto.get_form_data(
                 form_id=form_id,
                 format="json",
                 oldest_completion_date=oldest_completion_date,
@@ -426,18 +430,15 @@ def scto_import_data(
             st.stop()
 
         new_data: pd.DataFrame = pd.DataFrame(new_data)
-        new_data_count = len(new_data.index)
+        new_data_count = new_data.shape[0]
 
         # if scto_data is not empty, append new_data to scto_data, else set
         # scto_data to new_data
         if not scto_data.empty:
             scto_data = pd.concat([scto_data, new_data], ignore_index=True)
-
-            # drop duplicates from the dataset on key column (key) and keep the first
-            scto_data.drop_duplicates(subset="KEY", keep="first", inplace=True)
-
         else:
             scto_data = new_data
+        new_data_count = len(new_data.index)
 
         # download form definition
         questions, _ = scto_get_xls(scto, form_id)
@@ -488,7 +489,7 @@ def scto_import_data(
         # -- download media files --#
 
         # get a list of media fields form fields
-        if media:
+        if attachments:
             media_fields = fields[
                 fields["type"].isin(
                     [
@@ -554,7 +555,7 @@ def scto_add_form(
     try:
         with open(f"cache/{project_id}/settings/scto.json") as file:
             server_cache = json.load(file)
-            server_list = list(server_cache.keys())
+            server_list = server_cache.get("server", [])
     except FileNotFoundError:
         # if file not found, create empty list
         server_list = []
@@ -670,7 +671,7 @@ def valid_email(email: str) -> bool:
 
 
 # Configure SurveyCTO form
-def scto_login_form(project_id: str) -> tuple:
+def scto_login_form(project_id: str) -> None:
     """Create input form for SurveyCTO login.
 
     PARAMS:
@@ -719,22 +720,16 @@ def scto_login_form(project_id: str) -> tuple:
                 st.warning("Invalid email address. Please enter a valid email address.")
                 st.stop()
 
-            # connect to server
-            scto = scto_server_connect(  # noqa: F841
-                scto_server_name,
-                scto_server_user,
-                scto_server_password,
-            )
-
             # update cache file dict with usernamr using scto_server_name as key
-            server_cache = scto_get_server_cache(project_id)
-            server_cache[scto_server_name] = {
+            server_details = {
+                "server": scto_server_name,
                 "user": scto_server_user,
+                "password": scto_server_password,
             }
 
             # save server cache to file
             with open(f"cache/{project_id}/settings/scto.json", "w") as file:
-                json.dump(server_cache, file)
+                json.dump(server_details, file)
 
 
 # --- SCTO Download button action --- #
