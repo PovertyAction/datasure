@@ -1,15 +1,41 @@
 import datetime
+import json
 import os
 import re
 import time
 from io import StringIO
 
 import pandas as pd
+import polars as pl
 import pysurveycto
 import requests
 import streamlit as st
 
+from src.connectors import get_import_cache
+
 # --- SurveyCTO Server Connect Button Click Action --- #
+
+
+# --- Get cache data for SurveyCTO serves --- #
+def scto_get_server_cache(project_id: str) -> dict:
+    """Get cache data for SurveyCTO server.
+
+    PARAMS:
+    -------
+    servername: SurveyCTO server name
+
+    Return:
+    ------
+    pandas dataframe of cached data or empty dataframe if file not found
+
+    """
+    try:
+        file = pd.read_json(f"cache/{project_id}/settings/scto.json").to_dict()
+
+    except FileNotFoundError:
+        file = {}
+
+    return file
 
 
 def scto_server_connect(servername: str, username: str, password: str) -> str:
@@ -498,9 +524,121 @@ def scto_import_data(
     return (scto_data, new_data_count)
 
 
-# configure additional buttons for surveycto forms
-def scto_forms_edit(servername) -> None:
-    """Edit SurveyCTO forms.
+def scto_add_form(
+    project_id: str,
+    alias: str | None = None,
+    edit_mode: bool = False,
+    defaults: dict | None = None,
+) -> None:
+    """Form for adding a SurveyCTO form to the project.
+
+    PARAMS:
+    -------
+    project_id: str : project ID
+    edit_mode: bool : True if editing an existing form
+    defaults: dict : default values for the form fields
+
+    Returns
+    -------
+    None
+
+    """
+    if edit_mode:
+        # get default values from defaults dict
+        default_server = defaults.get("server", "")
+        default_form_id = defaults.get("form_id", "")
+        default_key = defaults.get("key", "")
+        default_saveas = defaults.get("saveas", "")
+
+    # import server list from cache file
+    try:
+        with open(f"cache/{project_id}/settings/scto.json") as file:
+            server_cache = json.load(file)
+            server_list = list(server_cache.keys())
+    except FileNotFoundError:
+        # if file not found, create empty list
+        server_list = []
+
+    if not server_list:
+        st.warning(
+            "No SurveyCTO servers found. Please connect to a server first or add a server."
+        )
+        return
+
+    # create form for adding SurveyCTO form
+    with st.form(key="scto_form"):
+        st.image("assets/SurveyCTO-Logo-CMYK.png", width=200)
+
+        alias = st.text_input(
+            label="Alias*",
+            help="Enter alias for the form. eg. 'my_survey_form'",
+        )
+
+        scto_server = st.selectbox(
+            label="Server*",
+            options=server_list,
+            index=0 if not edit_mode else default_server,
+            help="Select SurveyCTO server",
+        )
+
+        scto_form_id = st.text_input(
+            label="Form ID*",
+            value=default_form_id if edit_mode else "",
+            help="Enter SurveyCTO Form ID",
+        )
+        scto_key = st.text_input(
+            label="Encryption Key",
+            value=default_key if edit_mode else "",
+            help="Enter SurveyCTO encryption key. Optional if using server dataset",
+        )
+        scto_saveas = st.text_input(
+            label="Save as",
+            value=default_saveas if edit_mode else "",
+            help="Enter path to save dataset. eg. data/surveycto_data.csv",
+        )
+
+        # mark required fields
+        st.markdown("**required*")
+
+        # create submit button
+        submit_button = st.form_submit_button(label="Add Form")
+
+        if submit_button:
+            # check that alias provided is not an exiting alias
+            cache_file = get_import_cache(project_id)
+            if alias in cache_file:
+                st.warning(
+                    f"Alias '{alias}' already exists. Please choose a different alias."
+                )
+                st.stop()
+
+            new_form = {
+                "refresh": True,
+                "load": True,
+                "source": "SurveyCTO",
+                "alias": alias,
+                "filename": "",
+                "sheet_name": "",
+                "server": scto_server,
+                "form_id": scto_form_id,
+                "private_key": scto_key,
+                "save_to": scto_saveas,
+                "attachments": False,
+            }
+
+            # import import log and append new form
+            cache_file = get_import_cache(project_id)
+            cache_file = pl.concat(
+                [cache_file, pl.DataFrame([new_form])],
+                how="vertical",
+            )
+
+            # write the updated cache file to disk
+            cache_file.write_json(f"cache/{project_id}/settings/import_cache.json")
+
+
+def valid_server_name(servername: str) -> bool:
+    """Check if server name is valid.
 
     PARAMS:
     -------
@@ -508,129 +646,31 @@ def scto_forms_edit(servername) -> None:
 
     Return:
     ------
-    None
+    bool: True if server name is valid, False otherwise
 
     """
-    # add add, delete, move up and move down buttons
-    add_col, _, _, del_col = st.columns(4)
+    return bool(re.fullmatch(r"\b[a-z]+[a-z0-9]+\b", servername))
 
-    with (
-        add_col,
-        st.popover(label="Add", use_container_width=True, icon=":material/add:"),
-    ):
-        st.markdown("Add new SurveyCTO form details")
 
-        form_alias = st.text_input(
-            label="Alias",
-            help="Enter form alias eg. Household Survey, Community Survey",
-        )
+def valid_email(email: str) -> bool:
+    """Check if email is valid.
 
-        form_id = st.text_input(label="Form ID", help="Enter SurveyCTO form ID")
-        if form_id and not re.fullmatch(r"\b[a-z]+[a-z0-9_]+\b", form_id):
-            st.warning("Invalid form ID")
+    PARAMS:
+    -------
+    email: SurveyCTO account email address
 
-        encryption_key = st.text_input(
-            label="Encryption Key",
-            help="Enter file path for SurveyCTO encryption key",
-        )
-        if encryption_key and not os.path.isfile(encryption_key):
-            # check that key file exist
-            st.warning("Key file not found")
+    Return:
+    ------
+    bool: True if email is valid, False otherwise
 
-        server_dataset = st.checkbox(
-            label="Server dataset?", help="Check if this is a server dataset"
-        )
-
-        save_as = st.text_input(label="Save as", help="Enter path to save dataset")
-        if save_as:
-            path = save_as.split("/")[-1]
-            path = save_as.replace(path, "")
-            if not os.path.isdir(path):
-                st.warning("file path not found")
-
-        get_media = st.checkbox(
-            label="Download media files",
-            help="Check to download media files",
-            disabled=server_dataset,
-        )
-
-        # add form details to form list
-        add_form_btn = st.button(
-            label="Add",
-            key="add_form_key",
-            disabled=save_as is None or form_id is None or encryption_key is None,
-        )
-        if add_form_btn:
-            new_form = pd.DataFrame(
-                data=[
-                    [
-                        False,
-                        form_alias,
-                        form_id,
-                        encryption_key,
-                        server_dataset,
-                        save_as,
-                        get_media,
-                    ]
-                ],
-                columns=[
-                    "select",
-                    "alias",
-                    "form ID",
-                    "encryption key",
-                    "server dataset",
-                    "save as",
-                    "get media",
-                ],
-            )
-
-            scto_forms = pd.concat(
-                [st.session_state.scto_forms, new_form], ignore_index=True
-            )
-
-            # save form details to cache
-            scto_forms.to_json(f"cache/{servername}_pyDMS_forms_cache.json")
-
-    # load existing form detailss
-    st.session_state.scto_forms = scto_load_forms(servername)
-
-    # st.session_state.scto_forms
-    if st.session_state.scto_forms is None or st.session_state.scto_forms.empty:
-        st.warning("No form details found, click to add new form details")
-    else:
-        st.session_state.scto_forms = st.data_editor(
-            st.session_state.scto_forms,
-            hide_index=True,
-            key="scto_forms_key",
-            num_rows="dynamic",
-            column_config={
-                "select": st.column_config.CheckboxColumn(
-                    "download data?",
-                    default=False,
-                ),
-                "server dataset": st.column_config.CheckboxColumn(
-                    "download sever dataset?",
-                    default=False,
-                ),
-                "get media": st.column_config.CheckboxColumn(
-                    "download attachments?",
-                    default=False,
-                ),
-            },
-            disabled=["_index"],
-        )
-
-    # add save button
-    save_forms = st.button(label="Save", key="save_forms_key", use_container_width=True)
-    if save_forms:
-        st.session_state.scto_forms.to_json(
-            f"cache/{servername}_pyDMS_forms_cache.json"
-        )
-        st.success("Form details saved successfully")
+    """
+    return bool(
+        re.fullmatch(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b", email)
+    )
 
 
 # Configure SurveyCTO form
-def scto_login_form() -> tuple:
+def scto_login_form(project_id: str) -> tuple:
     """Create input form for SurveyCTO login.
 
     PARAMS:
@@ -647,49 +687,54 @@ def scto_login_form() -> tuple:
     with st.form(key="server_form"):
         st.image("assets/SurveyCTO-Logo-CMYK.png", width=200)
 
-        with st.popover(
-            label="Connect", use_container_width=True, icon=":material/login:"
-        ):
-            st.markdown("*Server Details:*")
+        st.markdown("*Server Details:*")
 
-            name_default, user_default = scto_load_login()
+        scto_server_name = st.text_input(
+            label="Server name*",
+            help="Enter SurveyCTO server name. eg. girlpower",
+        )
 
-            scto_server_name = st.text_input(
-                label="Server name*",
-                value=name_default,
-                help="Enter SurveyCTO server name. eg. girlpower",
-            )
-            scto_server_user = st.text_input(
-                label="Email address*",
-                value=user_default,
-                help="Enter valid email username",
-            )
-            scto_server_password = st.text_input(label="Password*", type="password")
+        scto_server_user = st.text_input(
+            label="Email address*",
+            help="Enter valid email username",
+        )
 
-            # mark required fields
-            st.markdown("**required*")
+        scto_server_password = st.text_input(label="Password*", type="password")
 
-            # create submit button
-            submit_button = st.form_submit_button(label="Connect to server")
+        # mark required fields
+        st.markdown("**required*")
+
+        # create submit button
+        submit_button = st.form_submit_button(
+            label="Connect to server",
+            help="Click to connect to SurveyCTO server",
+        )
 
         if submit_button:
-            # modify session state
-            st.session_state.scto = scto_server_connect(
-                scto_server_name, scto_server_user, scto_server_password
+            # validae server name and email
+            if not valid_server_name(scto_server_name):
+                st.warning("Invalid server name. Please enter a valid server name.")
+                st.stop()
+            if not valid_email(scto_server_user):
+                st.warning("Invalid email address. Please enter a valid email address.")
+                st.stop()
+
+            # connect to server
+            scto = scto_server_connect(  # noqa: F841
+                scto_server_name,
+                scto_server_user,
+                scto_server_password,
             )
 
-            # save server details to cache
-            server_details = pd.DataFrame(
-                data=[[scto_server_name, scto_server_user]],
-                columns=["name", "user"],
-            )
-            server_details.to_json("cache/pyDMS_server_cache.json")
-            st.session_state.scto_show_forms = True
-            st.session_state.scto_disable_download_btn = False
+            # update cache file dict with usernamr using scto_server_name as key
+            server_cache = scto_get_server_cache(project_id)
+            server_cache[scto_server_name] = {
+                "user": scto_server_user,
+            }
 
-        scto_forms = scto_load_forms(scto_server_name)
-
-        return scto_forms, scto_server_name, scto_server_user
+            # save server cache to file
+            with open(f"cache/{project_id}/settings/scto.json", "w") as file:
+                json.dump(server_cache, file)
 
 
 # --- SCTO Download button action --- #

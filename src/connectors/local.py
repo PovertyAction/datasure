@@ -237,7 +237,7 @@ def local_add_form(
                 "form_id": "",
                 "private_key": "",
                 "save_to": "",
-                "attachments": None,
+                "attachments": False,
             }
 
             # append the new row to the cache file

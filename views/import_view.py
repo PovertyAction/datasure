@@ -3,7 +3,16 @@ import polars as pl
 import streamlit as st
 from millify import prettify
 
-from src.connectors import get_import_cache, local_add_form, local_load_action
+from src.connectors import (
+    get_import_cache,
+    local_add_form,
+    local_load_action,
+    scto_add_form,
+    scto_login_form,
+)
+
+# --- define project ID --- #
+project_id = st.session_state.st_project_id
 
 
 # --- removing import configuration --- #
@@ -102,6 +111,7 @@ def refresh_raw_data_list(project_id: str) -> None:
 
 
 # --- Load raw dataset list from import configurations --- #
+@st.cache_data()
 def load_raw_datasets(project_id: str) -> None:
     """Load raw dataset list from the cache file.
 
@@ -142,9 +152,23 @@ def load_raw_datasets(project_id: str) -> None:
 
 st.set_page_config("Import Data", page_icon=":sync:", layout="wide")
 st.title("Import Data")
-st.subheader("Import data from multiple sources")
+st.write("---")
 
-project_id = st.session_state.st_project_id
+# --- add login configuration ---#
+lc1, _, _ = st.columns(3)
+with st.container(border=True):
+    st.subheader("Import Configuration")
+    st.write("Configure the import connections for your project.")
+    with (
+        lc1,
+        st.popover(
+            "Add SurveyCTO Server", use_container_width=True, icon=":material/login:"
+        ),
+    ):
+        scto_login_form(project_id)
+
+
+st.subheader("Import data from multiple sources")
 
 # add session state for raw dataset list
 if "st_raw_dataset_list" not in st.session_state:
@@ -163,6 +187,8 @@ with (
     )
     if import_type == "local storage":
         local_add_form(project_id)
+    elif import_type == "SurveyCTO":
+        scto_add_form(project_id)
 with (
     ac2,
     st.popover(
