@@ -170,6 +170,8 @@ def local_add_form(project_id: str) -> None:
             )
         else:
             local_added_file_sheet_name = ""
+    else:
+        local_added_file_sheet_name = ""
 
     # add a submit button
     local_add_btn = st.button(
