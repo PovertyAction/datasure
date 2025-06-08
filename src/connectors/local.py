@@ -1,9 +1,9 @@
 import os
 import re
 import tempfile
-import time
 import zipfile
 
+import duckdb
 import pandas as pd
 import polars as pl
 import streamlit as st
@@ -56,7 +56,7 @@ def local_load_files() -> pd.DataFrame:
 # --- Read data from file ---#
 
 
-def local_read_data(filename: str, sheet_name: str | None = None) -> pd.DataFrame:
+def local_read_data(filename: str, sheet_name: str | None = None) -> pl.DataFrame:
     """Import data from a file.
 
     PARAMS:
@@ -74,11 +74,11 @@ def local_read_data(filename: str, sheet_name: str | None = None) -> pd.DataFram
 
     # import file depending on the file extension
     if fileext == "csv":
-        data = pd.read_csv(filename)
+        data = pd.read_csv(filename, encoding="utf-8")
     elif fileext in ["xlsx", "xls"]:
-        data = pd.read_excel(filename, sheet_name=sheet_name)
+        data = pd.read_excel(filename, sheet_name=sheet_name, engine="openpyxl")
     elif fileext == "json":
-        data = pd.read_json(filename)
+        data = pd.read_json(filename, encoding="utf-8")
     elif fileext == "dta":
         data = pd.read_stata(filename)
 
@@ -169,7 +169,7 @@ def local_add_form(project_id: str) -> None:
                 label="Sheet Name", options=sheets
             )
         else:
-            local_added_file_sheet_name = None
+            local_added_file_sheet_name = ""
 
     # add a submit button
     local_add_btn = st.button(
@@ -189,10 +189,10 @@ def local_add_form(project_id: str) -> None:
         new_row = {
             "refresh": True,
             "load": True,
-            "type": "local",
+            "source": "local storage",
             "alias": local_file_alias,
             "filename": local_added_file,
-            "sheet name": local_added_file_sheet_name,
+            "sheet_name": local_added_file_sheet_name,
             "server": "",
             "form_id": "",
             "private_key": "",
@@ -210,41 +210,28 @@ def local_add_form(project_id: str) -> None:
 # --- Load data from local storage ---#
 
 
-def local_load_action(local_inputs: pd.DataFrame) -> None:
+def local_load_action(
+    project_id: str, data_index: int, alias: str, filename: str, sheet_name: str | None
+) -> None:
     """Load data from local storage.
 
     PARAMS:
     -------
-    local_inputs: pd.DataFrame : file list dataframe
+    project_id: str : project ID
+    data_index: int : index of the data to load
+    alias: str : alias for the data
+    filename: str : path to the file
+    sheet_name: str : name of the sheet to import (if applicable)
 
     Returns
     -------
     None
-
     """
-    # remove empty rows
-    local_inputs = local_inputs[local_inputs["load"] == True]  # noqa: E712
+    # read data from file
+    data: pl.DataFrame = local_read_data(filename, sheet_name)  # noqa: F841
 
-    # Check data and flag errors
-    if local_inputs.empty:
-        st.warning("No data selected for download. Please select data to download")
-        st.stop()
-
-    else:
-        local_files_count = len(local_inputs.index)
-
-        # download data
-        for i in range(0, local_files_count):
-            if f"local_raw_data{i}" in st.session_state:
-                local_filename = local_inputs["filename"][i]
-                local_sheet_name = local_inputs["sheet name"][i]
-
-                st.session_state[f"local_raw_data{i}"] = local_read_data(
-                    local_filename, local_sheet_name
-                )
-                time.sleep(1)
-
-        # modify session state for preview
-        st.session_state.local_show_preview = True
-
-        st.success(f"{local_files_count} Datasets loaded from local storage")
+    # create a new duckdb database in the cache folder and write the data to it
+    db_path: str = f"cache/{project_id}/data"
+    with duckdb.connect(f"{db_path}/raw.duckdb") as conn:
+        conn.execute(f"CREATE OR REPLACE TABLE raw{data_index} AS SELECT * FROM data")
+    st.success(f"Data loaded successfully from {filename} into {alias} table.")

@@ -14,7 +14,7 @@ def get_import_cache(project_id: str) -> pl.DataFrame:
         import_cache = {
             "refresh": False,
             "load": False,
-            "type": "",
+            "source": "",
             "alias": "",
             "filename": "",
             "sheet_name": "",
