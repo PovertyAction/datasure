@@ -19,7 +19,7 @@ def save_to_duckdb(
     # Create a DuckDB connection
     db_path = f"cache/{project_id}/data/{db_name}.duckdb"
     # convert alias to table name format
-    table_id = alias.title().replace(" ", "").replace("-", "")
+    table_id = alias.lower().replace(" ", "_").replace(" ", "_")
 
     with duckdb.connect(db_path) as conn:
         # Create a new table and insert data
@@ -43,7 +43,7 @@ def get_duckdb_table(project_id: str, alias: str, db_name: str) -> pl.DataFrame:
     pl.DataFrame : data from the DuckDB table
     """
     db_path = f"cache/{project_id}/data/{db_name}.duckdb"
-    table_id = alias.title().replace(" ", "").replace("-", "")
+    table_id = alias.lower().replace(" ", "_").replace("-", "_")
 
     with duckdb.connect(db_path) as conn:
         return conn.execute(f"SELECT * FROM {table_id}").pl()
