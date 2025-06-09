@@ -2,24 +2,22 @@ import polars as pl
 import streamlit as st
 
 
-def correction_load_log(file_path: str) -> pl.DataFrame:
+def correction_load_log(project_id: str, alias: str) -> pl.DataFrame:
     """
     Load the corrections log from a json file into a polars DataFrame.
 
-    Args:
-        file_path (str): The path to the corrections log CSV file.
-        type (str): The type of corrections log, default is "id".
-            - If the type is "id" and file is missing, it will load an empty ID
-                correction log.
-            - if type is "other" and file is missing, it will load an empty other
-                correction log.
+    Parameters
+    ----------
+        project_id (str): The ID of the project.
+        alias (str): The alias for the corrections log file.
 
     Returns
     -------
         pl.DataFrame: A DataFrame containing the corrections log.
     """
+    log_name = alias.lower().replace(" ", "_").replace("-", "_")
     try:
-        log = pl.read_json(file_path)
+        log = pl.read_json(f"cache/{project_id}/settings/{log_name}.json")
 
     except FileNotFoundError:
         log = pl.DataFrame(
@@ -39,6 +37,7 @@ def correction_load_log(file_path: str) -> pl.DataFrame:
 def correction_apply_action(
     data_index: int,
     key_col: str,
+    project_id: str,
     page_name=None,
     action=None,
     key_value=None,
@@ -66,17 +65,17 @@ def correction_apply_action(
     # if action_col is provided, we add new column to corrections log
     # and apply new ID correction
     # else, we apply corrections to existing correction log
-    if page_name:
-        file_path = f"cache/pyDMS_hfc_correction_log_{page_name}.json"
-        # import corrections log from file
-        if f"id_correction_log_{data_index}" not in st.session_state:
-            st.session_state[f"id_correction_log_{data_index}"] = correction_load_log(
-                file_path
-            )
+    if page_name and (f"id_correction_log_{data_index}" not in st.session_state):
+        st.session_state[f"id_correction_log_{data_index}"] = correction_load_log(
+            project_id, page_name
+        )
     corrections_log = st.session_state[f"id_correction_log_{data_index}"]
-    if "corrected_data" not in st.session_state:
+    if f"corrected_data{data_index}" not in st.session_state:
+        alias_list = st.session_state.st_raw_dataset_list
+        survey_data = st.session_state.config_pages["Survey Data"][data_index]
+        prep_data_index = alias_list.index(survey_data)
         st.session_state[f"corrected_data{data_index}"] = pl.from_pandas(
-            st.session_state[f"prepped_data{data_index}"]
+            st.session_state[f"prepped_data{prep_data_index}"]
         )
     corrected_data = st.session_state[f"corrected_data{data_index}"]
 

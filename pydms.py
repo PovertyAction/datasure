@@ -1,4 +1,3 @@
-import pandas as pd
 import streamlit as st
 
 # --- PAGE SETUP --- #
@@ -11,7 +10,7 @@ if "st_project_id" not in st.session_state:
     st.session_state.st_project_id = ""
 
 if "show_prep_section" not in st.session_state:
-    st.session_state.show_prep_section = True
+    st.session_state.show_prep_section = False
 
 if "show_config_section" not in st.session_state:
     st.session_state.show_config_section = False
@@ -24,21 +23,6 @@ for i in range(0, 10):
         st.session_state[f"check_page_name_{i}"] = ""
     if f"show_checks_page_{i}" not in st.session_state:
         st.session_state[f"show_checks_page_{i}"] = False
-
-# initiate session states for 10 datasets from SCTO
-for i in range(0, 10):
-    if f"scto_raw_data{i}" not in st.session_state:
-        st.session_state[f"scto_raw_data{i}"] = pd.DataFrame()
-
-# initiate session states for 10 datasets from local storage
-for i in range(0, 10):
-    if f"local_raw_data{i}" not in st.session_state:
-        st.session_state[f"local_raw_data{i}"] = pd.DataFrame()
-
-# initiate session states for 10 datasets from script
-for i in range(0, 10):
-    if f"script_raw_data{i}" not in st.session_state:
-        st.session_state[f"script_raw_data{i}"] = pd.DataFrame()
 
 # initiate session states for 10 output pages
 for i in range(0, 10):
@@ -101,7 +85,28 @@ if st.session_state.st_load_project:
     nav_menu = st.navigation(
         {
             "": [start_page],
-            "-": [import_data_page],
+            "Import Data": [import_data_page],
+        }
+    )
+if st.session_state.show_prep_section:
+    nav_menu = st.navigation(
+        {
+            "": [start_page],
+            "Import Data": [import_data_page],
+            "Prepare Data": [prep_data_page],
+            "Configure Checks": [config_checks_page],
+        }
+    )
+
+if st.session_state.show_checks_page_1:
+    nav_menu = st.navigation(
+        {
+            "": [start_page],
+            "Import Data": [import_data_page],
+            "Prepare Data": [prep_data_page],
+            "Configure Checks": [config_checks_page],
+            "Review Data Quality Checks": [check_output_page_1],
+            "Correct Data": [corr_data_page],
         }
     )
 

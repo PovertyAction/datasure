@@ -16,27 +16,27 @@ CORRECTION_ACTIONS = ("modify value", "remove value", "remove row")
 st.title("Correct Data")
 st.markdown("Make necessary corrections to data based on issues identified in checks.")
 
-# Get list of dataset alias
-alias_list: list[str] = list(filter(None, st.session_state.alias_list))
-alias_index: list[int] = st.session_state.alias_list_index
+# get dataset alias and project ID from session state
+alias_list: list[str] = st.session_state.st_raw_dataset_list
+project_id: str = st.session_state.st_project_id
 
 # show/hide data prep page
 
 show_corr_page_info = False
-try:
-    tabs = st.tabs(alias_list)
-    show_corr_page_info = True
-except:
+if not alias_list:
     st.info(
         "No data available to prepare. Load a dataset from the import page to continue."
     )
+else:
+    show_corr_page_info = True
 
 
 def correction_input_form(
     id_col: str,
     key_col: str,
     data_index: int,
-    setting_file: str,
+    project_id: str,
+    alias: str,
 ) -> None:
     """Define input form for corrections
 
@@ -174,18 +174,27 @@ def correction_input_form(
                 st.success("ID correction applied successfully!")
 
             # save corrections log to setting file
-            st.session_state[f"id_correction_log_{data_index}"].write_json(setting_file)
+            log_name = alias.lower().replace(" ", "_").replace("-", "_")
+            st.session_state[f"id_correction_log_{data_index}"].write_json(
+                f"cache/{project_id}/settings/{log_name}.json"
+            )
 
 
 if show_corr_page_info:
-    for i, name in enumerate(alias_list):
-        with tabs[i]:
-            st.subheader(f"{name}")
-            page_name = st.session_state.config_pages["Page Name"][i]
-            setting_file = f"cache/pyDMS_hfc_correction_log_{page_name}.json"
+    # get list of HFC pages from session state
+    hfc_pages = st.session_state.config_pages["Page Name"].tolist()
+    corr_tabs = st.tabs(hfc_pages)
 
-            survey_key = st.session_state["config_pages"]["Survey KEY"][i]
-            survey_id = st.session_state["config_pages"]["Survey ID"][i]
+    for idx, tab in enumerate(corr_tabs):
+        with tab:
+            page_name = hfc_pages[idx]
+            st.subheader(f"{page_name}")
+            # get value of survey key if Page Name is tab
+            survey_key = st.session_state.config_pages["Survey KEY"][idx]
+            survey_id = st.session_state.config_pages["Survey ID"][idx]
+            survey_data = st.session_state.config_pages["Survey Data"][idx]
+
+            i = alias_list.index(survey_data)
 
             # define session state for correction
             if f"corrected_data{i}" not in st.session_state:
@@ -204,10 +213,9 @@ if show_corr_page_info:
             # load corrections log
             if f"id_correction_log_{i}" not in st.session_state:
                 st.session_state[f"id_correction_log_{i}"] = correction_load_log(
-                    setting_file,
+                    project_id, page_name
                 )
 
-            st.subheader("ID Duplicates Corrections")
             st.write(
                 "Correct ID duplicates by either modifying the ID or removing the row. "
                 "Select the action from the dropdown and provide the necessary input."
@@ -217,7 +225,8 @@ if show_corr_page_info:
                 key_col=survey_key,
                 id_col=survey_id,
                 data_index=i,
-                setting_file=setting_file,
+                project_id=project_id,
+                alias=page_name,
             )
 
             st.session_state[f"id_correction_log_{i}"] = st.data_editor(

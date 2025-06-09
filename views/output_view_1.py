@@ -14,16 +14,24 @@ from src.checks import (
 )
 from src.processing import correction_apply_action
 
+# define project ID
+project_id = st.session_state.st_project_id
+
+
 # define page number
 page_number = 1
 page_data_index = page_number - 1
+
+# define setting file
+setting_file = f"cache/{project_id}/settings/checks_{page_data_index}.json"
+
 page_name = st.session_state.config_pages["Page Name"][page_data_index]
-setting_file = f"cache/settings/pyDMS_hfc_settings_{page_name}.json"
 key_col = st.session_state.config_pages["Survey KEY"][page_data_index]
 correction_apply_action(
     data_index=page_data_index,
     key_col=key_col,
     page_name=page_name,
+    project_id=project_id,
 )
 
 if isinstance(st.session_state[f"corrected_data{page_data_index}"], pl.DataFrame):
@@ -68,6 +76,7 @@ with summary:
 
 with missing:
     missing_report(
+        project_id=project_id,
         data=page_data,
         setting_file=setting_file,
         page_name=page_name,
@@ -96,6 +105,7 @@ with outliers:
 
 with enum_stats:
     enumerator_report(
+        project_id=project_id,
         data=page_data,
         setting_file=setting_file,
         page_num=page_number,

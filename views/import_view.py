@@ -268,6 +268,9 @@ if not import_log.is_empty():
 
     # --- Preview imported data --- #
     if st.session_state.st_raw_dataset_list:
+        # activate prep section
+        st.session_state.show_prep_section = True
+
         st.subheader("Preview Imported Data")
         sb, _, mb1, mb2, mb3 = st.columns([0.3, 0.25, 0.15, 0.15, 0.15])
         with sb:

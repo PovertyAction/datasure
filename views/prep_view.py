@@ -1,6 +1,7 @@
 import streamlit as st
 
 from src.processing import prep_apply_action, prep_load_log
+from src.utils import get_duckdb_table
 
 # -- DEFINE CONSTANTS FOR DATA PREP --#
 
@@ -92,47 +93,35 @@ st.title("Prepare Data")
 st.markdown("Make necessary adjustments to data before check")
 
 # Get list of dataset alias
-alias_list: list[str] = list(filter(None, st.session_state.alias_list))
-alias_index: list[int] = st.session_state.alias_list_index
+alias_list: list[str] = st.session_state.st_raw_dataset_list
+project_id: str = st.session_state.st_project_id
 
 # show/hide data prep page
 
 show_prep_page_info = False
+
 try:
     tabs = st.tabs(alias_list)
     show_prep_page_info = True
-except:
+except Exception as e:  # noqa: F841
     st.info(
         "No data available to prepare. Load a dataset from the import page to continue."
     )
 
 if show_prep_page_info:
     for i, (label, tab) in enumerate(zip(alias_list, tabs, strict=False)):
-        # get index for the dataset
-        if i < sum(alias_index[0:1]):
-            d_i = st.session_state["scto_alias_list"].index(label)
-            data_name = f"scto_raw_data{d_i}"
-        elif i < sum(alias_index[0:2]):
-            d_i = st.session_state["azure_alias_list"].index(label)
-            data_name = f"azure_raw_data{d_i}"
-        elif i < sum(alias_index[0:3]):
-            d_i = st.session_state["local_alias_list"].index(label)
-            data_name = f"local_raw_data{d_i}"
-        else:
-            d_i = st.session_state["script_alias_list"].index(label)
-            data_name = f"script_raw_data{d_i}"
+        st.session_state[f"prep_log{i}"] = prep_load_log(project_id, label)
 
-        # if prep cache exists, apply it to the dataset, else use raw data
-        if f"prep_log{i}" in st.session_state:
+        # if prep is not empty, apply it to the dataset, else use raw data
+        if not st.session_state[f"prep_log{i}"].empty:
             prep_apply_action(index=i)
         else:
-            st.session_state[f"raw_data_prep{i}"] = st.session_state[
-                f"{data_name}"
+            st.session_state[f"raw_data_prep{i}"] = get_duckdb_table(
+                project_id, label, "raw"
+            ).to_pandas()
+            st.session_state[f"prepped_data{i}"] = st.session_state[
+                f"raw_data_prep{i}"
             ].copy()
-            if f"prepped_data{i}" not in st.session_state:
-                st.session_state[f"prepped_data{i}"] = st.session_state[
-                    f"{data_name}"
-                ].copy()
 
         # count rows, columns, number missing & percent missing
         row_count: int = len(st.session_state[f"prepped_data{i}"].index)
@@ -497,7 +486,7 @@ if show_prep_page_info:
             with st.container(border=True):
                 st.subheader("Change Log:")
 
-                st.session_state[f"prep_log{i}"] = prep_load_log(i)
+                st.session_state[f"prep_log{i}"] = prep_load_log(project_id, label)
 
                 prep_logs_mod = st.data_editor(
                     data=st.session_state[f"prep_log{i}"],

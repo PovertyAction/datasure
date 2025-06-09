@@ -429,7 +429,7 @@ def compute_enumerator_missing_table(
 
     except FileNotFoundError:
         # create new dataframe with default values
-        missing_codes = None
+        missing_codes = pd.DataFrame([])
 
     data["% Null values"] = data.isnull().mean(axis=1)
 
@@ -1303,7 +1303,11 @@ def display_enumerator_statistics_overtime(
 
 
 def enumerator_report(
-    data: pd.DataFrame, setting_file: str, page_num: int, page_name: str
+    project_id: str,
+    data: pd.DataFrame,
+    setting_file: str,
+    page_num: int,
+    page_name: str,
 ) -> None:
     """Generate enumerator report.
 
@@ -1320,8 +1324,9 @@ def enumerator_report(
     -------
         None
     """
-    missing_setting_file = f"cache/settings/pyDMS_missing_settings_{page_name}.json"
-
+    missing_setting_file = (
+        f"cache/{project_id}/settings/missing_settings_{page_name}.json"
+    )
     (
         date,
         formdef_version,
