@@ -12,6 +12,7 @@ import requests
 import streamlit as st
 
 from src.connectors import get_import_cache
+from src.utils import save_to_duckdb
 
 # --- SurveyCTO Server Connect Button Click Action --- #
 
@@ -353,13 +354,13 @@ def scto_download_media(
 # Using pysurveycto library, import survey data from SurveyCTO
 def scto_import_data(
     project_id: str,
-    data_index: int,
+    alias: str,
     form_id: str,
     refresh: bool = False,
     key: str | None = None,
     saveas: str | None = None,
     attachments: bool = False,
-) -> tuple:
+) -> int:
     """Import SurveyCTO data.
 
     Import SurveyCTO Data and save to file, adjust data types based on XLS
@@ -403,7 +404,7 @@ def scto_import_data(
 
         # if new data is not requested, return existing data
         if not refresh:
-            return (scto_data, 0)
+            return 0
 
         # Download new data (from the oldest completion date)
         try:
@@ -438,7 +439,7 @@ def scto_import_data(
             scto_data = pd.concat([scto_data, new_data], ignore_index=True)
         else:
             scto_data = new_data
-        new_data_count = len(new_data.index)
+        new_data_count: int = len(new_data.index)
 
         # download form definition
         questions, _ = scto_get_xls(scto, form_id)
@@ -522,7 +523,16 @@ def scto_import_data(
     if saveas:
         scto_data.to_csv(saveas, index=False)
 
-    return (scto_data, new_data_count)
+    # save dataset to DuckDB
+    # save data to DuckDB
+    save_to_duckdb(
+        project_id=project_id,
+        data=scto_data,
+        alias=alias,
+        db_name="raw",
+    )
+
+    return new_data_count
 
 
 def scto_add_form(

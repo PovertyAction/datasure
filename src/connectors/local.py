@@ -3,12 +3,12 @@ import re
 import tempfile
 import zipfile
 
-import duckdb
 import pandas as pd
 import polars as pl
 import streamlit as st
 
 from src.connectors import get_import_cache
+from src.utils import save_to_duckdb
 
 # --- Get List of sheet from excel ---#
 
@@ -253,7 +253,7 @@ def local_add_form(
 
 
 def local_load_action(
-    project_id: str, data_index: int, alias: str, filename: str, sheet_name: str | None
+    project_id: str, alias: str, filename: str, sheet_name: str | None
 ) -> None:
     """Load data from local storage.
 
@@ -270,10 +270,12 @@ def local_load_action(
     None
     """
     # read data from file
-    data: pl.DataFrame = local_read_data(filename, sheet_name)  # noqa: F841
+    data: pl.DataFrame = local_read_data(filename, sheet_name)
 
-    # create a new duckdb database in the cache folder and write the data to it
-    db_path: str = f"cache/{project_id}/data"
-    with duckdb.connect(f"{db_path}/raw.duckdb") as conn:
-        conn.execute(f"CREATE OR REPLACE TABLE raw{data_index} AS SELECT * FROM data")
-    st.success(f"Data loaded successfully from {filename} into {alias} table.")
+    # save data to DuckDB
+    save_to_duckdb(
+        project_id=project_id,
+        data=data,
+        alias=alias,
+        db_name="raw",
+    )

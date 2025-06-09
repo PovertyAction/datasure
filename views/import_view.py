@@ -1,4 +1,3 @@
-import duckdb
 import polars as pl
 import streamlit as st
 from millify import prettify
@@ -11,6 +10,7 @@ from src.connectors import (
     scto_import_data,
     scto_login_form,
 )
+from src.utils import get_duckdb_table
 
 # --- define project ID --- #
 project_id = st.session_state.st_project_id
@@ -134,11 +134,10 @@ def load_raw_datasets(project_id: str) -> None:
         st.error("No import configurations found. Please add import configurations.")
         st.stop()
     with st.status("Loading datasets ...", expanded=True) as status:
-        for row_index, row in enumerate(import_log.iter_rows(named=True)):
+        for row in import_log.iter_rows(named=True):
             if row["source"] == "local storage":
                 local_load_action(
                     project_id=project_id,
-                    data_index=row_index,
                     alias=row["alias"],
                     filename=row["filename"],
                     sheet_name=row["sheet_name"] if row["sheet_name"] else None,
@@ -146,7 +145,7 @@ def load_raw_datasets(project_id: str) -> None:
             elif row["source"] == "SurveyCTO":
                 scto_import_data(
                     project_id=project_id,
-                    data_index=row_index,
+                    alias=row["alias"],
                     form_id=row["form_id"],
                     refresh=row["refresh"],
                     key=row["private_key"],
@@ -278,15 +277,13 @@ if not import_log.is_empty():
                 key="imported_data_select",
             )
 
-            # get index of the selected dataset from import_log
-            selected_index = st.session_state.st_raw_dataset_list.index(
-                selected_dataset
-            )
-            conn = duckdb.connect(f"cache/{project_id}/data/raw.duckdb")
-            query = f"SELECT * FROM raw{selected_index}"
-            imported_data = conn.execute(query).pl()
+        preview_data = get_duckdb_table(
+            project_id,
+            alias=selected_dataset,
+            db_name="raw",
+        )
 
-        num_rows = imported_data.height
+        num_rows = preview_data.height
         mb1.metric(
             label="Rows",
             value=prettify(num_rows),
@@ -294,7 +291,7 @@ if not import_log.is_empty():
             border=True,
         )
 
-        num_columns = imported_data.width
+        num_columns = preview_data.width
         mb2.metric(
             label="Columns",
             value=prettify(num_columns),
@@ -302,7 +299,7 @@ if not import_log.is_empty():
             border=True,
         )
 
-        num_missing = imported_data.null_count().sum()
+        num_missing = preview_data.null_count().sum()
         num_missing = num_missing.with_columns(
             pl.sum_horizontal(pl.all()).alias("row_total")
         )
@@ -317,7 +314,7 @@ if not import_log.is_empty():
             border=True,
         )
 
-        st.dataframe(imported_data, use_container_width=True)
+        st.dataframe(preview_data, use_container_width=True)
 
 else:
     st.info("No import data found. Please add import configurations.")
