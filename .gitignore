@@ -177,3 +177,4 @@ cache/data/*
 cache/settings/*
 !cache/settings/.gitkeep
 **.DS_Store
+CLAUDE.md

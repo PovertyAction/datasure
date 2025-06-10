@@ -1,0 +1,28 @@
+{
+    "id": "muddy-mountain-6219",
+    "type": "streamlit",
+    "ignore": [
+        "tests/",
+        ".github/",
+        "pytest_cache/",
+        "ruff_cache/",
+        ".sonarlint/",
+        ".streamlit/",
+        ".venv/",
+        ".vscode/",
+        "archived/",
+        "build/",
+        "htmlcov/",
+        ".coverage",
+        ".coverage.html",
+        ".coverage.htmlcov",
+        ".coverage.xml",
+        ".gitignore",
+        ".markdownlint.yaml",
+        ".pre-commit-config.yaml",
+        "Justfile",
+        "README.md",
+        "CLAUDE.md",
+        "pydms.py"
+    ]
+}
