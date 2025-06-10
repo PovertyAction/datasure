@@ -1,286 +1,323 @@
-import pandas as pd
+import polars as pl
 import streamlit as st
+from millify import prettify
 
 from src.connectors import (
+    get_import_cache,
     local_add_form,
     local_load_action,
-    local_load_files,
-    scto_download_action,
-    scto_forms_edit,
+    scto_add_form,
+    scto_import_data,
     scto_login_form,
 )
+from src.utils import get_duckdb_table
+
+# --- define project ID --- #
+project_id = st.session_state.st_project_id
+
+
+# add session state for raw dataset list
+if "st_raw_dataset_list" not in st.session_state:
+    st.session_state.st_raw_dataset_list = []
+
+
+# --- removing import configuration --- #
+def remove_import_configuration(project_id: str, alias: str) -> None:
+    """Remove import configuration from the cache file.
+
+    PARAMS:
+    -------
+    project_id: str : project ID
+    alias: str : alias of the import configuration to remove
+
+    Returns
+    -------
+    None
+    """
+    cache_file = get_import_cache(project_id)
+    # filter out the row with the given alias
+    updated_cache = cache_file.filter(pl.col("alias") != alias)
+    # save the updated cache file
+    updated_cache.write_json(f"cache/{project_id}/settings/import_cache.json")
+
+
+def edit_import_configuration(project_id: str, alias: str) -> None:
+    """Edit import configuration in the cache file.
+
+    PARAMS:
+    -------
+    project_id: str : project ID
+
+    Returns
+    -------
+    None
+    """
+    import_log = get_import_cache(project_id)
+
+    source = import_log.filter(pl.col("alias") == alias).select("source").to_series()[0]
+    if source == "local storage":
+        current_filename = (
+            import_log.filter(pl.col("alias") == alias)
+            .select("filename")
+            .to_series()[0]
+        )
+        current_sheet_name = (
+            import_log.filter(pl.col("alias") == alias)
+            .select("sheet_name")
+            .to_series()[0]
+        )
+        defaults = {
+            "alias": alias,
+            "filename": current_filename,
+            "sheet_name": current_sheet_name,
+        }
+        local_add_form(
+            project_id=project_id,
+            defaults=defaults,
+            edit_mode=True,
+        )
+
+
+# --- modify import cache file --- #
+def modify_import_cache_file(project_id: str, edited_import_log: pl.DataFrame) -> None:
+    """Modify the import cache file to add or update import configurations.
+
+    PARAMS:
+    -------
+    project_id: str : project ID
+
+    Returns
+    -------
+    None
+    """
+    # write edited import log to the cache file
+    edited_import_log.write_json(f"cache/{project_id}/settings/import_cache.json")
+
+
+# --- load raw data list from import configurations --- #
+def refresh_raw_data_list(project_id: str) -> None:
+    """Refresh the raw dataset list from the import configurations.
+
+    PARAMS:
+    -------
+    project_id: str : project ID
+
+    Returns
+    -------
+    None
+    """
+    st.session_state.st_raw_dataset_list = []
+    import_log = get_import_cache(project_id)
+    import_log = import_log.filter(pl.col("load"))
+    if import_log.is_empty():
+        st.error("No import configurations found. Please add import configurations.")
+        st.stop()
+    for row in import_log.iter_rows(named=True):
+        st.session_state.st_raw_dataset_list.append(row["alias"])
+
+
+# --- Load raw dataset list from import configurations --- #
+def load_raw_datasets(project_id: str) -> None:
+    """Load raw dataset list from the cache file.
+
+    PARAMS:
+    -------
+    project_id: str : project ID
+
+    Returns
+    -------
+    None
+    """
+    import_log = get_import_cache(project_id)
+    import_log = import_log.filter(pl.col("load"))
+    if import_log.is_empty():
+        st.error("No import configurations found. Please add import configurations.")
+        st.stop()
+    with st.status("Loading datasets ...", expanded=True) as status:
+        for row in import_log.iter_rows(named=True):
+            if row["source"] == "local storage":
+                local_load_action(
+                    project_id=project_id,
+                    alias=row["alias"],
+                    filename=row["filename"],
+                    sheet_name=row["sheet_name"] if row["sheet_name"] else None,
+                )
+            elif row["source"] == "SurveyCTO":
+                scto_import_data(
+                    project_id=project_id,
+                    alias=row["alias"],
+                    form_id=row["form_id"],
+                    refresh=row["refresh"],
+                    key=row["private_key"],
+                    saveas=row["save_to"],
+                    attachments=row["attachments"],
+                )
+
+            st.session_state.st_raw_dataset_list.append(row["alias"]) if row[
+                "alias"
+            ] not in st.session_state.st_raw_dataset_list else None
+        status.update(
+            label="Data loaded successfully!", state="complete", expanded=False
+        )
+
 
 # --- CONFIGURE PAGE --- #
 
 st.set_page_config("Import Data", page_icon=":sync:", layout="wide")
 st.title("Import Data")
-st.markdown("Import data from multiple sources")
+st.write("---")
 
-# --- CONFIGURE CONNECTOR TABS ---#
+# --- add login configuration ---#
+lc1, _, _ = st.columns(3)
+with st.container(border=True):
+    st.subheader("Import Configuration")
+    st.write("Configure the import connections for your project.")
+    with (
+        lc1,
+        st.popover(
+            "Add SurveyCTO Server", use_container_width=True, icon=":material/login:"
+        ),
+    ):
+        st.session_state.st_scto = scto_login_form(project_id)
 
-# create tabs for different data sources
-tabs = ["SurveyCTO", "Microsoft Azure", "Local Storage", "Python Script"]
-scto, azure, local, script = st.tabs(tabs)
+st.subheader("Import data from multiple sources")
 
-# --- INITIALIZING GLOBAL SESSION STATES --- #
-
-
-# --- SURVEYCTO CONNECTOR ---#
-
-# initiate alias list for SurveyCTO forms
-if "scto_alias_list" not in st.session_state:
-    st.session_state.scto_alias_list = []
-
-# show/hide SurveyCTO forms
-if "scto_show_forms" not in st.session_state:
-    st.session_state.scto_show_forms = False
-# enable/disable SurveyCTO download button
-if "scto_disable_download_btn" not in st.session_state:
-    st.session_state.scto_disable_download_btn = True
-# Show/hide preview page
-if "scto_show_preview" not in st.session_state:
-    st.session_state.scto_show_preview = False
-if "scto_forms" not in st.session_state:
-    st.session_state.scto_forms = pd.DataFrame()
-
-
-with scto:
-    # tab description
-    st.title("Sync your SurveyCTO")
-    st.markdown(
-        "Enter the details required for fetching your data from the SurveyCTO server"
+# -- Add configurations for import data -- #
+ac1, ac2, ac3 = st.columns([0.4, 0.4, 0.2])
+with (
+    ac1,
+    st.popover(
+        "Add Import Configuration", use_container_width=True, icon=":material/add:"
+    ),
+):
+    import_type = st.selectbox(
+        "Import Type", options=["local storage", "SurveyCTO"], index=None
     )
-
-    # server & form details
-    with st.container(border=True):
-        # define cols fr server and form id
-        scto_server_col, scto_forms_col = st.columns((0.4, 0.6))
-
-        with scto_server_col:
-            scto_form_inputs, scto_servername, scto_username = scto_login_form()
-            st.session_state.scto_forms = scto_form_inputs
-
-        with scto_forms_col:
-            if st.session_state.scto_show_forms:
-                # display forms and additional functions
-                scto_forms_edit(scto_servername)
-
-    # --- DOWNLOAD DATA FROM SURVEYCTO --- #
-
-    scto_download_btn_col, scto_download_new_col, scto_download_prog_col, _ = (
-        st.columns((0.1, 0.1, 0.3, 0.5))
+    if import_type == "local storage":
+        local_add_form(project_id)
+    elif import_type == "SurveyCTO":
+        scto_add_form(project_id)
+with (
+    ac2,
+    st.popover(
+        "Edit Import Configuration", use_container_width=True, icon=":material/edit:"
+    ),
+):
+    if st.session_state.st_raw_dataset_list:
+        edit_config = st.selectbox(
+            "Select Data to Edit",
+            options=st.session_state.st_raw_dataset_list,
+            index=None,
+        )
+        if edit_config:
+            edit_import_configuration(project_id, edit_config)
+    else:
+        st.info("No import configurations found. Please add import configurations.")
+with (
+    ac3,
+    st.popover(
+        "Remove Import Configuration", use_container_width=True, icon=":material/clear:"
+    ),
+):
+    st.warning("This will remove the import configuration.")
+    remove_data = st.selectbox(
+        "Select Data to Remove", options=st.session_state.st_raw_dataset_list
     )
-
-    with st.container(border=True):
-        # Get data
-        with scto_download_btn_col:
-            scto_download_btn = st.button(
-                label="Download/Load Data",
-                type="primary",
-                key="scto_download_btn_key",
-                use_container_width=True,
-                disabled=st.session_state.scto_disable_download_btn,
-            )
-
-        with scto_download_new_col:
-            scto_get_new_data = st.toggle(
-                label="Get New Data",
-                key="scto_get_new_data_key",
-                help="Get new data from the server. If unchecked, only previously downloaded data will be loaded.",
-                value=True,
-            )
-
-        # import data
-        with scto_download_prog_col:
-            if scto_download_btn:
-                st.session_state.scto_forms = st.session_state.scto_forms[
-                    st.session_state.scto_forms["select"] == 1
-                ].reset_index()
-                scto_download_action(st.session_state.scto_forms, scto_get_new_data)
-
-    # --- PREVIEW SURVEYCTO DATA --- #
-    if st.session_state.scto_show_preview:
-        with st.container(border=True):
-            st.subheader("Preview Downloaded Data")
-            st.write("---")
-
-            scto_prev_select_col, scto_prev_mc1, scto_prev_mc2, scto_prev_mc3, _ = (
-                st.columns((0.2, 0.2, 0.2, 0.2, 0.2))
-            )
-
-            st.session_state.scto_alias_list = st.session_state.scto_forms[
-                "alias"
-            ].tolist()
-
-            st.session_state.alias_list_index[0] = len(st.session_state.scto_alias_list)
-
-            with scto_prev_select_col:
-                scto_preview_data = st.selectbox(
-                    "Select Dataset to preview:",
-                    options=st.session_state.scto_alias_list,
-                )
-
-                if scto_preview_data is not None:
-                    scto_row_num = st.session_state.scto_alias_list.index(
-                        scto_preview_data
-                    )
-
-                    scto_row_count: int = len(
-                        st.session_state[f"scto_raw_data{scto_row_num}"].index
-                    )
-                    scto_col_count: int = len(
-                        st.session_state[f"scto_raw_data{scto_row_num}"].columns
-                    )
-                    scto_miss_count: int = (
-                        st.session_state[f"scto_raw_data{scto_row_num}"]
-                        .isnull()
-                        .sum()
-                        .sum()
-                    )
-                    scto_miss_perc: float = round(
-                        (scto_miss_count / (scto_row_count * scto_col_count)) * 100, 2
-                    )
-
-                    scto_prev_mc1.metric(label="Rows", value=scto_row_count)
-                    scto_prev_mc2.metric(label="Columns", value=scto_col_count)
-                    scto_prev_mc3.metric(
-                        label="Missing Values", value=f"{scto_miss_perc}%"
-                    )
-
-            if scto_preview_data is not None:
-                if len(st.session_state[f"scto_raw_data{scto_row_num}"]) > 1000:
-                    st.warning("Data preview is limited to 1000 rows.")
-                    st.dataframe(
-                        st.session_state[f"scto_raw_data{scto_row_num}"][:1000]
-                    )
-                else:
-                    st.dataframe(st.session_state[f"scto_raw_data{scto_row_num}"])
-
-
-# --- LOCAL STORAGE CONNECTOR ---#
-
-# initiate data alias list for local data
-if "local_alias_list" not in st.session_state:
-    st.session_state.local_alias_list = []
-
-# show/hide local files
-if "local_show_files" not in st.session_state:
-    st.session_state.local_show_files = False
-
-# show/hide files page
-if "local_show_files" not in st.session_state:
-    st.session_state.local_show_files = False
-# show/hide preview page
-if "local_show_preview" not in st.session_state:
-    st.session_state.local_show_preview = False
-# enable/disable load data button
-if "local_disable_load" not in st.session_state:
-    st.session_state.local_disable_load = False
-if "local_files" not in st.session_state:
-    st.session_state.local_files = local_load_files()
-
-with local:
-    # tab description
-    st.title("Sync data from Local Storage")
-    st.markdown("Add multiple data files from your local storage")
-
-    # define cols adding files and added files
-    local_add_col, local_show_col = st.columns((0.4, 0.6))
-
-    with local_add_col:
-        local_files = local_add_form()
-
-    with local_show_col, st.container(border=True):
-        if len(st.session_state.local_files.index) > 0:
-            st.session_state.local_disable_load = False
-
-            local_inputs_mod = st.data_editor(
-                data=st.session_state.local_files,
-                use_container_width=True,
-                num_rows="dynamic",
-            )
-
-            # Save configuration File
-            local_save_config = st.button(
-                "Save setting", type="secondary", key="local_save_config_key"
-            )
-
-            if local_save_config:
-                # save form information
-                local_config_filename = "cache/pyDMS_local_files_cache.json"
-                local_inputs_mod.to_json(local_config_filename)
-
-                st.session_state.local_files = local_inputs_mod
-
-                st.success("Configuration saved successfully!")
-
-    # --- LOAD DATA FROM LOCAL STORAGE --- #
-
-    local_load_btn_col, local_load_prog_col, _ = st.columns((0.1, 0.3, 0.6))
-
-    with local_load_btn_col:
-        # Get data
-        load_local_data = st.button(
-            label="Load Data",
-            type="primary",
-            key="local_get_data_key",
-            use_container_width=True,
-            disabled=st.session_state.local_disable_load,
+    if st.button("Remove Data", type="primary", use_container_width=True):
+        remove_import_configuration(project_id=project_id, alias=remove_data)
+        refresh_raw_data_list(
+            project_id=project_id,
         )
 
-    # import data
-    if load_local_data:
-        with local_load_prog_col:
-            local_load_action(st.session_state.local_files)
+import_log = get_import_cache(project_id)
+if not import_log.is_empty():
+    edited_import_cache = st.data_editor(
+        data=import_log,
+        key="import_data_editor",
+        use_container_width=True,
+        column_config={
+            "refresh": st.column_config.CheckboxColumn("Refresh"),
+            "load": st.column_config.CheckboxColumn("Load"),
+            "alias": st.column_config.TextColumn("Alias", disabled=True),
+            "filename": st.column_config.TextColumn("Filename", disabled=True),
+            "sheet_name": st.column_config.TextColumn("Sheet Name", disabled=True),
+            "source": st.column_config.TextColumn("Source", disabled=True),
+            "server": st.column_config.TextColumn("Server", disabled=True),
+            "form_id": st.column_config.TextColumn("Form ID", disabled=True),
+            "private_key": st.column_config.TextColumn("Private Key", disabled=True),
+            "save_to": st.column_config.TextColumn("Save To", disabled=True),
+            "attachments": st.column_config.CheckboxColumn(
+                "Download Attachments?", disabled=True
+            ),
+        },
+    )
+    # -- Load data from import configurations -- #
+    ld1, ld2 = st.columns([0.3, 0.7])
+    with ld1:
+        load_btn = st.button(
+            "Load Data",
+            type="primary",
+            use_container_width=True,
+            key="load_data_key",
+        )
+    with ld2:
+        if load_btn:
+            # update import_log with the edited import cache
+            modify_import_cache_file(project_id, edited_import_cache)
+            load_raw_datasets(project_id)
 
-    # --- PREVIEW LOCAL DATA --- #
+    # --- Preview imported data --- #
+    if st.session_state.st_raw_dataset_list:
+        # activate prep section
+        st.session_state.show_prep_section = True
 
-    if st.session_state.local_show_preview:
-        with st.container(border=True):
-            st.subheader("Preview Loaded Data")
-            st.write("---")
-
-            local_select_col, local_prev_mc1, local_prev_mc2, local_prev_mc3, _ = (
-                st.columns((0.2, 0.1, 0.1, 0.1, 0.5))
+        st.subheader("Preview Imported Data")
+        sb, _, mb1, mb2, mb3 = st.columns([0.3, 0.25, 0.15, 0.15, 0.15])
+        with sb:
+            selected_dataset = st.selectbox(
+                "Select Dataset",
+                options=st.session_state.st_raw_dataset_list,
+                key="imported_data_select",
             )
 
-            st.session_state.local_alias_list = st.session_state.local_files[
-                "alias"
-            ].tolist()
-            st.session_state.alias_list_index[2] = len(
-                st.session_state.local_alias_list
-            )
+        preview_data = get_duckdb_table(
+            project_id,
+            alias=selected_dataset,
+            db_name="raw",
+        )
 
-            with local_select_col:
-                local_preview_data = st.selectbox(
-                    "Select Dataset to preview:",
-                    options=st.session_state.local_alias_list,
-                )
-                local_row_num = st.session_state["local_alias_list"].index(
-                    local_preview_data
-                )
+        num_rows = preview_data.height
+        mb1.metric(
+            label="Rows",
+            value=prettify(num_rows),
+            help="Number of rows in the imported dataset.",
+            border=True,
+        )
 
-            local_row_count: int = len(
-                st.session_state[f"local_raw_data{local_row_num}"].index
-            )
-            local_col_count: int = len(
-                st.session_state[f"local_raw_data{local_row_num}"].columns
-            )
-            local_miss_count: int = (
-                st.session_state[f"local_raw_data{local_row_num}"].isnull().sum().sum()
-            )
-            local_miss_perc: float = round(
-                (local_miss_count / (local_row_count * local_col_count)) * 100, 2
-            )
+        num_columns = preview_data.width
+        mb2.metric(
+            label="Columns",
+            value=prettify(num_columns),
+            help="Number of columns in the imported dataset.",
+            border=True,
+        )
 
-            local_prev_mc1.metric(label="Rows", value=local_row_count)
-            local_prev_mc2.metric(label="Columns", value=local_col_count)
-            local_prev_mc3.metric(label="Missing Values", value=f"{local_miss_perc}%")
+        num_missing = preview_data.null_count().sum()
+        num_missing = num_missing.with_columns(
+            pl.sum_horizontal(pl.all()).alias("row_total")
+        )
+        perc_missing = (
+            f"{(num_missing['row_total'][0] / (num_rows * num_columns)) * 100:.2f}%"
+        )
 
-            st.dataframe(st.session_state[f"local_raw_data{local_row_num}"])
+        mb3.metric(
+            label="Missing Data",
+            value=perc_missing,
+            help="Percentage of missing data in the imported dataset.",
+            border=True,
+        )
 
-# --- Collate List of Data Aliases --- #
+        st.dataframe(preview_data, use_container_width=True)
 
-st.session_state.alias_list = (
-    st.session_state.scto_alias_list + st.session_state.local_alias_list
-)
+else:
+    st.info("No import data found. Please add import configurations.")

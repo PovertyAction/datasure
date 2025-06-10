@@ -500,6 +500,8 @@ def missing_compare(data: pd.DataFrame, setting_file: str) -> None:
 
     with mc_2:
         compare_col = default_settings.get("compare_col", None)
+        if compare_col not in allowed_cols:
+            compare_col = allowed_cols[0] if allowed_cols else None
         compare_col = st.multiselect(
             label="Select column to compare missing data",
             options=allowed_cols,
@@ -733,7 +735,9 @@ def missing_matrix(data: pd.DataFrame, color_map: str, setting_file: str) -> Non
 
 
 # define function to create summary report
-def missing_report(data: pd.DataFrame, setting_file: str, page_name: str) -> None:  # noqa: D417, RUF100
+def missing_report(
+    project_id: str, data: pd.DataFrame, setting_file: str, page_name: str
+) -> None:  # noqa: D417, RUF100
     """Generate a report on missing data in the dataset. The report includes a
     summary of missing data, a table showing the percentage of missing values
     in each column, and an option to inspect variables with missing data.
@@ -763,7 +767,9 @@ def missing_report(data: pd.DataFrame, setting_file: str, page_name: str) -> Non
         [1.0, "#da3b46"],
     ]
 
-    missing_setting_file = f"cache/settings/pyDMS_missing_settings_{page_name}.json"
+    missing_setting_file = (
+        f"cache/{project_id}/settings/missing_settings_{page_name}.json"
+    )
 
     missing_codes = missing_settings(missing_setting_file=missing_setting_file)
     missing_summary(data=data)

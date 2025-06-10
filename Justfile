@@ -79,6 +79,23 @@ fmt-check-markdown:
 
 fmt-all: lint-py fmt-python fmt-markdown
 
+# Run tests
+test:
+    uv run python -m pytest
+
+# Run tests with coverage report (terminal)
+test-cov:
+    uv run python -m pytest --cov=src --cov-report=term-missing
+
+# Run tests with HTML coverage report
+test-cov-html:
+    uv run python -m pytest --cov=src --cov-report=html
+    @echo "Coverage report available at htmlcov/index.html"
+
+# Run tests with XML coverage report (for CI)
+test-cov-xml:
+    uv run python -m pytest --cov=src --cov-report=xml
+
 # Run pre-commit hooks
 pre-commit-run:
     pre-commit run

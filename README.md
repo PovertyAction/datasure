@@ -151,3 +151,11 @@ To run a specific test file, use:
 ```bash
 uv run python -m pytest tests/test_file.py
 ```
+
+## Code Quality Reports
+
+Code quality metrics and reports are available on SonarQube Cloud:
+
+- **Dashboard**: [https://sonarcloud.io/project/overview?id=PovertyAction_dms-dashboard](https://sonarcloud.io/project/overview?id=PovertyAction_dms-dashboard)
+
+The SonarQube dashboard provides insights into code coverage, code smells, bugs, vulnerabilities, and maintainability ratings.

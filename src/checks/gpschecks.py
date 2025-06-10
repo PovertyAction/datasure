@@ -230,6 +230,10 @@ def gps_check_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple
                             )
                             gps_altitude = None
                         elif gps_split.shape[1] >= 4:
+                            # remove any non-numeric values from split columns
+                            gps_split = gps_split.apply(
+                                lambda x: pd.to_numeric(x, errors="coerce")
+                            )
                             gps_lat_col = "latitude"
                             gps_lon_col = "longitude"
                             gps_altitude = "altitude"
@@ -476,8 +480,9 @@ def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
     pd.DataFrame
         The input dataframe with an additional column indicating outliers.
     """
-    # Drop rows with missing latitude values
-    df = df[df[gps_lat_col].notna()]
+    # Drop rows with missing latitude values or longitude values
+    df = df.dropna(subset=[gps_lat_col, gps_lon_col])
+    # df = df[df[gps_lat_col].notna()]
 
     # Group data by clustering_col and process each group separately
     grouped_df = df.groupby(clustering_col)
@@ -573,6 +578,20 @@ def calculate_gps_accuracy_statistics(
     pd.DataFrame
         A dataframe containing grouped GPS accuracy statistics.
     """
+    allowed_stats = [
+        "min",
+        "median",
+        "mean",
+        "max",
+        "std",
+        "25th percentile",
+        "75th percentile",
+        "95th percentile",
+    ]
+    # Validate the accuracy_stats_list
+    accuracy_stats_list = [
+        stat for stat in accuracy_stats_list if stat in allowed_stats
+    ]
     # update percentile statistics with numpy percentile function
     percentile_map = {
         "25th percentile": lambda x: np.percentile(x, 25),

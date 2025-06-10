@@ -40,6 +40,7 @@ pip-delete-this-directory.txt
 htmlcov/
 .tox/
 .nox/
+htmlcov/
 .coverage
 .coverage.*
 .cache
@@ -51,6 +52,7 @@ coverage.xml
 .pytest_cache/
 cover/
 .ruff_cache/
+.sonarlint/
 
 # Translations
 *.mo
@@ -171,10 +173,7 @@ cython_debug/
 # Data Folders
 archived/code/*test*.ipynb
 archived/notebooks/*test*.ipynb
-cache/*.json
-cache/data/*
-!cache/data/.gitkeep
-cache/settings/*
-!cache/settings/.gitkeep
+cache/*
+!cache/.gitkeep
 **.DS_Store
 CLAUDE.md

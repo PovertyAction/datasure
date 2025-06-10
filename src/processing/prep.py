@@ -5,16 +5,17 @@ import pandas as pd
 import streamlit as st
 
 
-def prep_load_log(index) -> pd.DataFrame:
+def prep_load_log(project_id: str, alias: str) -> pd.DataFrame:
     """Load existing log or return empty dataframe.
 
     PARAMS:
     -------
     return: pandas dataframe of logs
     """
+    log_name = alias.lower().replace(" ", "_").replace("-", "_")
     # load form details from last session
     try:
-        file = pd.read_json(f"cache/pyDMS_prep_cache_{index}.json")
+        file = pd.read_json(f"cache/{project_id}/settings/{log_name}.json")
         logs = file.to_dict()
         return pd.DataFrame(logs)
 
