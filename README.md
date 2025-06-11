@@ -162,10 +162,13 @@ uv sync
 
 # set your Ploomber Cloud key locally
 uv run ploomber-cloud key YOUR-KEY
-```
 
-```bash
-uv run ploomber-cloud deploy --watch
+# make sure that the requirements.txt file is up to date
+uv pip compile pyproject.toml -o requirements.txt --no-annotate --no-header
+
+# make sure that app.py is the same as pydms.py and deploy the app
+# Ploomber needs to use app.py as the entry point for the Streamlit app
+cp pydms.py app.py && uv run ploomber-cloud deploy --watch
 ```
 
 See Ploomber docs for more details on deployment options and configurations of [Streamlit apps](https://docs.cloud.ploomber.io/en/latest/apps/streamlit.html).
