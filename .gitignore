@@ -177,3 +177,4 @@ cache/*
 !cache/.gitkeep
 **.DS_Store
 CLAUDE.md
+ploomber-cloud.json

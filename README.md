@@ -152,6 +152,24 @@ To run a specific test file, use:
 uv run python -m pytest tests/test_file.py
 ```
 
+## Deployment
+
+pyDMS can be deployed using [Ploomber Cloud](https://docs.cloud.ploomber.io/en/latest/intro.html). You will need a deployment key from [Ploomber's platform console](https://www.platform.ploomber.io/).
+
+```bash
+# make sure your venv is synced
+uv sync
+
+# set your Ploomber Cloud key locally
+uv run ploomber-cloud key YOUR-KEY
+```
+
+```bash
+uv run ploomber-cloud deploy --watch
+```
+
+See Ploomber docs for more details on deployment options and configurations of [Streamlit apps](https://docs.cloud.ploomber.io/en/latest/apps/streamlit.html).
+
 ## Code Quality Reports
 
 Code quality metrics and reports are available on SonarQube Cloud:
