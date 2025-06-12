@@ -71,8 +71,9 @@ def correction_apply_action(
         )
     corrections_log = st.session_state[f"id_correction_log_{data_index}"]
     if f"corrected_data{data_index}" not in st.session_state:
-        alias_list = st.session_state.st_raw_dataset_list
-        survey_data = st.session_state.config_pages["Survey Data"][data_index]
+        alias_list = st.session_state["st_raw_dataset_list"]
+        config_pages = st.session_state["config_pages"]
+        survey_data = config_pages["Survey Data"][data_index]
         prep_data_index = alias_list.index(survey_data)
         st.session_state[f"corrected_data{data_index}"] = pl.from_pandas(
             st.session_state[f"prepped_data{prep_data_index}"]
