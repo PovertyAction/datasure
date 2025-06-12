@@ -270,7 +270,8 @@ def compute_id_duplicates(
     -------
         pd.DataFrame: A DataFrame containing the duplicate entries for the survey ID.
     """
-    id_dups_data = data[data.duplicated(subset=[survey_id], keep=False)]
+    id_dups_data = data.copy(deep=True)
+    id_dups_data = id_dups_data[id_dups_data.duplicated(subset=[survey_id], keep=False)]
     id_dups_data["id_dup_count"] = id_dups_data.groupby(survey_id)[survey_id].transform(
         "count"
     )
