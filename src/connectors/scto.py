@@ -479,7 +479,6 @@ def scto_import_data(
                 if row["type"] in ["date", "datetime", "time"]:
                     scto_data[cols] = scto_data[cols].astype("datetime64[ns]")
                 elif row["type"] in ["integer", "decimal"]:
-                    # scto_data[cols] = pd.to_numeric(scto_data[cols])
                     pass
                 elif row["type"] == "note":
                     scto_data.drop(columns=cols, axis=1, inplace=True)
@@ -537,7 +536,6 @@ def scto_import_data(
 
 def scto_add_form(
     project_id: str,
-    alias: str | None = None,
     edit_mode: bool = False,
     defaults: dict | None = None,
 ) -> None:
@@ -660,7 +658,7 @@ def valid_server_name(servername: str) -> bool:
     bool: True if server name is valid, False otherwise
 
     """
-    return bool(re.fullmatch(r"\b[a-z]+[a-z0-9]+\b", servername))
+    return bool(re.fullmatch(r"\b[a-z][a-z0-9]+\b", servername))
 
 
 def valid_email(email: str) -> bool:
@@ -743,7 +741,7 @@ def scto_login_form(project_id: str) -> None:
 
 
 # --- SCTO Download button action --- #
-def scto_download_action(form_inputs: pd.DataFrame, get_new_data: bool) -> None:
+def scto_download_action(project_id: str, form_inputs: pd.DataFrame) -> None:
     """Trigger Action to download SurveyCTO data based on form inputs.
 
     PARAMS:
@@ -769,29 +767,23 @@ def scto_download_action(form_inputs: pd.DataFrame, get_new_data: bool) -> None:
     st.write(f"Downloading {form_count} datasets from SurveyCTO")
 
     # download data
-    for i in range(0, form_count):
+    for i, row in enumerate(form_inputs.itertuples()):
         if f"scto_raw_data{i}" in st.session_state:
-            form_id = form_inputs["form ID"][i]
-            key = form_inputs["encryption key"][i]
-            server_dataset = form_inputs["server dataset"][i]
-            saveas = form_inputs["save as"][i]
-            media = form_inputs["get media"][i]
-
             st.session_state[f"scto_raw_data{i}"], new_data_count = scto_import_data(
-                scto=st.session_state.scto,
-                form_id=form_id,
-                key=key,
-                server_dataset=server_dataset,
-                saveas=saveas,
-                media=media,
-                get_new_data=get_new_data,
+                project_id=project_id,
+                alias=row.alias,
+                form_id=row.form_id,
+                refresh=row.refresh,
+                key=row.private_key,
+                saveas=row.save_to,
+                attachments=row.attachments,
             )
             time.sleep(3)
             progress_bar.progress(
                 (i + 1) / form_count,
                 text=f"Download in progress...{i + 1}/{form_count}",
             )
-
+            saveas = row.save_to
             if saveas is not None:
                 st.write(
                     f"{i + 1}/{form_count}: downloaded {new_data_count} new data successfully and saved as {saveas}"
