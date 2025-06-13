@@ -1,3 +1,4 @@
+import ast
 import re
 
 import numpy as np
@@ -88,7 +89,11 @@ def prep_remove_columns(index: int, description: str):
     """
     # get column names from description
     columns = description.replace("remove column(s) ", "")
-    columns = eval(columns)
+    try:
+        columns = ast.literal_eval(columns)
+    except (ValueError, SyntaxError):
+        st.error(f"Invalid column specification: {columns}")
+        return
 
     # drop columns from dataset
     st.session_state[f"prepped_data{index}"].drop(columns=columns, axis=1, inplace=True)
@@ -111,7 +116,12 @@ def prep_remove_rows(index: int, description: str):
         rows = description.replace("remove row(s) by index", "")
 
         rows_drop = []
-        for row in eval(rows):
+        try:
+            rows_list = ast.literal_eval(rows)
+        except (ValueError, SyntaxError):
+            st.error(f"Invalid row specification: {rows}")
+            return
+        for row in rows_list:
             if ":" in row:
                 start, end = row.split(":")
                 rows_drop.extend(list(range(int(start), int(end) + 1)))
@@ -127,12 +137,22 @@ def prep_remove_rows(index: int, description: str):
 
         if condition == "value is missing":
             # drop rows from dataset if any value in cols is missing
+            try:
+                cols_list = ast.literal_eval(cols)
+            except (ValueError, SyntaxError):
+                st.error(f"Invalid column specification: {cols}")
+                return
             st.session_state[f"prepped_data{index}"].dropna(
-                subset=eval(cols), inplace=True
+                subset=cols_list, inplace=True
             )
         elif condition == "value is not missing":
+            try:
+                cols_list = ast.literal_eval(cols)
+            except (ValueError, SyntaxError):
+                st.error(f"Invalid column specification: {cols}")
+                return
             drop_index = st.session_state[f"prepped_data{index}"].dropna(
-                subset=eval(cols)
+                subset=cols_list
             )
             if drop_index is not None:
                 drop_index = list(drop_index.index)
@@ -147,15 +167,32 @@ def prep_remove_rows(index: int, description: str):
             )
 
             # check if column type is datetime
+            try:
+                cols_list = ast.literal_eval(cols)
+                first_col = cols_list[0]
+            except (ValueError, SyntaxError, IndexError):
+                st.error(f"Invalid column specification: {cols}")
+                return
+
             if (
-                st.session_state[f"prepped_data{index}"][eval(cols)[0]].dtype
+                st.session_state[f"prepped_data{index}"][first_col].dtype
                 == "datetime64[ns]"
             ):
-                values_use = [val for val in eval(values.replace("Timestamp", ""))]
+                try:
+                    values_use = [
+                        val for val in ast.literal_eval(values.replace("Timestamp", ""))
+                    ]
+                except (ValueError, SyntaxError):
+                    st.error(f"Invalid values specification: {values}")
+                    return
             else:
-                values_use = eval(values)
+                try:
+                    values_use = ast.literal_eval(values)
+                except (ValueError, SyntaxError):
+                    st.error(f"Invalid values specification: {values}")
+                    return
 
-            cols = eval(cols)[0]
+            cols = first_col
             if condition == "value is equal to":
                 st.session_state[f"prepped_data{index}"].query(
                     f"{cols} not in {values_use}", inplace=True
@@ -185,10 +222,19 @@ def prep_remove_rows(index: int, description: str):
                     .replace("(", "('")
                     .replace(")", "')")
                 )
-                # value = pd.to_datetime(value)
             else:
-                value = eval(value)[0]
-            cols = eval(cols)[0]
+                try:
+                    value_list = ast.literal_eval(value)
+                    value = value_list[0]
+                except (ValueError, SyntaxError, IndexError):
+                    st.error(f"Invalid value specification: {value}")
+                    return
+            try:
+                cols_list = ast.literal_eval(cols)
+                cols = cols_list[0]
+            except (ValueError, SyntaxError, IndexError):
+                st.error(f"Invalid column specification: {cols}")
+                return
             if condition == "value is greater than":
                 st.session_state[f"prepped_data{index}"] = st.session_state[
                     f"prepped_data{index}"
@@ -212,7 +258,12 @@ def prep_remove_rows(index: int, description: str):
                 .replace("with values ", "")
                 .replace("'", "")
             )
-            cols = eval(cols)[0]
+            try:
+                cols_list = ast.literal_eval(cols)
+                cols = cols_list[0]
+            except (ValueError, SyntaxError, IndexError):
+                st.error(f"Invalid column specification: {cols}")
+                return
             values = values.split(" and ")
             values_use = []
             for value in values:
@@ -242,7 +293,12 @@ def prep_remove_rows(index: int, description: str):
                 .replace("with pattern ", "")
                 .replace("'", "")
             )
-            cols = eval(cols)[0]
+            try:
+                cols_list = ast.literal_eval(cols)
+                cols = cols_list[0]
+            except (ValueError, SyntaxError, IndexError):
+                st.error(f"Invalid column specification: {cols}")
+                return
             if condition == "value is like":
                 st.session_state[f"prepped_data{index}"] = st.session_state[
                     f"prepped_data{index}"
@@ -333,9 +389,7 @@ def prep_transform_columns(index: int, description: str):
         ][columns].apply(np.abs)
     elif func in ["add", "subtract", "multiply", "divide"]:
         # get number of values for operation
-        value_operation = float(
-            re.search(r"[0-9]+\.{0,1}[0-9]*$", description).group(0)
-        )
+        value_operation = float(re.search(r"\d+\.?\d*$", description).group(0))
         if func == "add":
             # add value to column
             st.session_state[f"prepped_data{index}"][columns] = (
@@ -395,7 +449,7 @@ def prep_transform_columns(index: int, description: str):
     elif func == "substring":
         # get start and end index for substring
         start, end = (
-            re.search(r"from [0-9]+ to [0-9]+", description)
+            re.search(r"from \d+ to \d+", description)
             .group(0)
             .replace("from ", "")
             .split(" to ")
@@ -439,54 +493,59 @@ def prep_add_new_column(index: int, description: str):
         func = re.search(r"with [a-z]+", description).group(0).replace("with ", "")
         # get list of columns from description
         columns = re.search(r"\[.+\]", description).group(0)
+        try:
+            columns_list = ast.literal_eval(columns)
+        except (ValueError, SyntaxError):
+            st.error(f"Invalid column specification: {columns}")
+            return
         # create new column using funct eg sum, multiply, divide
         if func == "sum":
             st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
                 f"prepped_data{index}"
-            ][eval(columns)].sum(axis=1)
+            ][columns_list].sum(axis=1)
         elif func == "product":
             st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
                 f"prepped_data{index}"
-            ][eval(columns)].product(axis=1)
+            ][columns_list].product(axis=1)
         elif func == "mean":
             st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
                 f"prepped_data{index}"
-            ][eval(columns)].mean(axis=1)
+            ][columns_list].mean(axis=1)
         elif func == "median":
             st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
                 f"prepped_data{index}"
-            ][eval(columns)].median(axis=1)
+            ][columns_list].median(axis=1)
         elif func == "mode":
             st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
                 f"prepped_data{index}"
-            ][eval(columns)].mode(axis=1)
+            ][columns_list].mode(axis=1)
         elif func == "max":
             st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
                 f"prepped_data{index}"
-            ][eval(columns)].max(axis=1)
+            ][columns_list].max(axis=1)
         elif func == "min":
             st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
                 f"prepped_data{index}"
-            ][eval(columns)].min(axis=1)
+            ][columns_list].min(axis=1)
         elif func == "count":
             st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
                 f"prepped_data{index}"
-            ][eval(columns)].count(axis=1)
+            ][columns_list].count(axis=1)
         elif func == "std":
             st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
                 f"prepped_data{index}"
-            ][eval(columns)].std(axis=1)
+            ][columns_list].std(axis=1)
         elif func == "nunique":
             st.session_state[f"prepped_data{index}"][new_col] = st.session_state[
                 f"prepped_data{index}"
-            ][eval(columns)].nunique(axis=1)
+            ][columns_list].nunique(axis=1)
         elif func == "quotient":
             st.session_state[f"prepped_data{index}"][new_col] = (
-                st.session_state[f"prepped_data{index}"][eval(columns)[0]]
-                / st.session_state[f"prepped_data{index}"][eval(columns)[1]]
+                st.session_state[f"prepped_data{index}"][columns_list[0]]
+                / st.session_state[f"prepped_data{index}"][columns_list[1]]
             )
         elif func == "diff":
             st.session_state[f"prepped_data{index}"][new_col] = (
-                st.session_state[f"prepped_data{index}"][eval(columns)[0]]
-                - st.session_state[f"prepped_data{index}"][eval(columns)[1]]
+                st.session_state[f"prepped_data{index}"][columns_list[0]]
+                - st.session_state[f"prepped_data{index}"][columns_list[1]]
             )

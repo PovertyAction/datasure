@@ -2,13 +2,20 @@ import hashlib
 import json
 import os
 from datetime import datetime
+from pathlib import Path
 
 import streamlit as st
 
 
+def _validate_project_id(project_id: str) -> bool:
+    """Validate project ID to prevent path traversal attacks."""
+    # Project ID should only contain alphanumeric characters
+    return project_id.isalnum() and len(project_id) == 8
+
+
 def get_project_id(project_name: str) -> str:
     """Generate a unique project ID."""
-    hash_val = hashlib.md5(project_name.encode()).hexdigest()
+    hash_val = hashlib.sha256(project_name.encode()).hexdigest()
     return hash_val[:8]  # Return the first 8 characters of the hash as the project ID
 
 
@@ -54,15 +61,22 @@ def load_projects():
 
 def save_project(project_name: str, project_id: str):
     """Save a new project to the local directory."""
-    if not os.path.exists(f"cache/{project_id}"):
-        os.makedirs(f"cache/{project_id}")
-        os.makedirs(f"cache/{project_id}/data")
-        os.makedirs(f"cache/{project_id}/settings")
+    if not _validate_project_id(project_id):
+        raise ValueError(f"Invalid project ID: {project_id}")
+
+    cache_base = Path("cache")
+    project_path = cache_base / project_id
+
+    if not project_path.exists():
+        project_path.mkdir(parents=True, exist_ok=True)
+        (project_path / "data").mkdir(exist_ok=True)
+        (project_path / "settings").mkdir(exist_ok=True)
         created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         last_used = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     else:
         # get created at date from existing project
-        with open(f"cache/{project_id}/settings/project_info.json") as f:
+        project_info_path = project_path / "settings" / "project_info.json"
+        with open(project_info_path) as f:
             project_info = json.load(f)
         created_at = project_info.get("created_at")
         last_used = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -80,19 +94,33 @@ def save_project(project_name: str, project_id: str):
 
 def delete_project(project_id: str):
     """Delete a project from the local directory."""
+    if not _validate_project_id(project_id):
+        st.error(f"Invalid project ID: {project_id}")
+        return
+
     projects = load_projects()
     if project_id in projects:
         projects.pop(project_id)
         with open("cache/projects.json", "w") as f:
             json.dump(projects, f, indent=4)
-        project_dir = f"cache/{project_id}"
-        if os.path.exists(project_dir):
-            for root, dirs, files in os.walk(project_dir, topdown=False):
+
+        cache_base = Path("cache")
+        project_path = cache_base / project_id
+
+        # Ensure the path is within the cache directory (additional safety)
+        try:
+            project_path.resolve().relative_to(cache_base.resolve())
+        except ValueError:
+            st.error("Invalid project path detected")
+            return
+
+        if project_path.exists():
+            for root, dirs, files in os.walk(project_path, topdown=False):
                 for name in files:
                     os.remove(os.path.join(root, name))
                 for name in dirs:
                     os.rmdir(os.path.join(root, name))
-            os.rmdir(project_dir)
+            project_path.rmdir()
         st.success(f"Project '{project_id}' deleted successfully!")
     else:
         st.error(f"Project '{project_id}' does not exist.")

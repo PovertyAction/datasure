@@ -779,7 +779,7 @@ def gpschecks_report(data: pd.DataFrame, setting_file: str, page_num: int) -> No
                     "% flagged as potential outliers",
                     f"{st.session_state.gps_outlier_rate:.1f}%",
                 )
-            except:
+            except (AttributeError, TypeError, ValueError):
                 col4.metric(
                     label="% flagged as potential outliers",
                     value="n/a",
