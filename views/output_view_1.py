@@ -1,3 +1,4 @@
+import polars as pl
 import streamlit as st
 
 from src.checks import (
@@ -11,13 +12,32 @@ from src.checks import (
     progress_report,
     summary_report,
 )
+from src.processing import correction_apply_action
+
+# define project ID
+project_id = st.session_state.st_project_id
+
 
 # define page number
 page_number = 1
 page_data_index = page_number - 1
 
+# define setting file
+setting_file = f"cache/{project_id}/settings/checks_{page_data_index}.json"
+
 page_name = st.session_state.config_pages["Page Name"][page_data_index]
-setting_file = f"cache/settings/pyDMS_hfc_settings_{page_name}.json"
+key_col = st.session_state.config_pages["Survey KEY"][page_data_index]
+correction_apply_action(
+    data_index=page_data_index,
+    key_col=key_col,
+    page_name=page_name,
+    project_id=project_id,
+)
+
+if isinstance(st.session_state[f"corrected_data{page_data_index}"], pl.DataFrame):
+    page_data = st.session_state[f"corrected_data{page_data_index}"].to_pandas()
+else:
+    page_data = st.session_state[f"corrected_data{page_data_index}"]
 
 st.title(st.session_state[f"config_page_{page_number}"])
 
@@ -49,40 +69,44 @@ alias_list = list(filter(None, st.session_state.alias_list))
 
 with summary:
     summary_report(
-        data=st.session_state[f"prepped_data{page_data_index}"],
+        data=page_data,
         setting_file=setting_file,
         page_num=page_number,
     )
 
 with missing:
     missing_report(
-        data=st.session_state[f"prepped_data{page_data_index}"],
+        project_id=project_id,
+        data=page_data,
         setting_file=setting_file,
         page_name=page_name,
     )
 
 with survey_progress:
     progress_report(
-        data=st.session_state[f"prepped_data{page_data_index}"],
+        data=page_data,
         setting_file=setting_file,
         page_num=page_number,
     )
 
 with duplicates:
     duplicates_report(
-        data=st.session_state[f"prepped_data{page_data_index}"],
+        data=page_data,
         setting_file=setting_file,
         page_num=page_number,
     )
 
 with outliers:
     outliers_report(
-        data=st.session_state[f"prepped_data{page_data_index}"], page_num=page_number
+        data=page_data,
+        setting_file=setting_file,
+        page_num=page_number,
     )
 
 with enum_stats:
     enumerator_report(
-        data=st.session_state[f"prepped_data{page_data_index}"],
+        project_id=project_id,
+        data=page_data,
         setting_file=setting_file,
         page_num=page_number,
         page_name=page_name,
@@ -90,7 +114,7 @@ with enum_stats:
 
 with desc_stats:
     descriptive_report(
-        data=st.session_state[f"prepped_data{page_data_index}"],
+        data=page_data,
         setting_file=setting_file,
         page_num=page_number,
     )
@@ -102,14 +126,14 @@ with back_checks:
         backcheck_data = st.session_state[f"prepped_data{page_bc_data_index}"]
 
         backchecks_report(
-            survey_data=st.session_state[f"prepped_data{page_data_index}"],
+            survey_data=page_data,
             backcheck_data=backcheck_data,
             page_num=page_number,
         )
 
 with gps_checks:
     gpschecks_report(
-        data=st.session_state[f"prepped_data{page_data_index}"],
+        data=page_data,
         setting_file=setting_file,
         page_num=page_number,
     )

@@ -1,5 +1,7 @@
+import hashlib
 import json
 import os
+from functools import lru_cache
 
 import streamlit as st
 
@@ -38,7 +40,7 @@ def save_check_settings(settings_file, check_name, check_settings) -> None:
         json.dump(settings_dict, f)
 
 
-@st.cache_data
+# @st.cache_data
 def load_check_settings(settings_file, check_name) -> tuple:
     """Load the settings for a check from a dictionary.
 
@@ -65,3 +67,13 @@ def load_check_settings(settings_file, check_name) -> tuple:
 def trigger_save(state_name: str):
     """Return a session state of True when triggered by the user."""
     st.session_state[state_name] = True
+
+
+# --- Get shortened ID for text --- #
+@lru_cache
+def get_hash_id(name: str, length=6) -> str:
+    """Generate a unique ID (maybe) for project.
+    This ID will be used as project IDs (6 digits) and dataset IDs 8 digits
+    """
+    hash_val = hashlib.md5(name.encode()).hexdigest()
+    return hash_val[:length]
