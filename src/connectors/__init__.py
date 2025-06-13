@@ -1,4 +1,3 @@
-from .getdata import get_import_cache
 from .local import (
     local_add_form,
     local_excel_sheet_names,
@@ -18,7 +17,6 @@ from .scto import (
 )
 
 __all__ = [
-    "get_import_cache",
     "local_add_form",
     "local_excel_sheet_names",
     "local_load_action",
