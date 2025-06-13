@@ -1,11 +1,9 @@
 import os
-import re
-import tempfile
-import zipfile
 
 import pandas as pd
 import polars as pl
 import streamlit as st
+from openpyxl import load_workbook
 
 from src.connectors import get_import_cache
 from src.utils import save_to_duckdb
@@ -13,23 +11,17 @@ from src.utils import save_to_duckdb
 # --- Get List of sheet from excel ---#
 
 
-def get_excel_sheet_names(file_path: str) -> list:
+def local_excel_sheet_names(file_path: str) -> list:
     """Import an excel file and return the list of sheet names.
-
-    SOURCES:
-    Code is from the following source:
-    https://stackoverflow.com/questions/20105118/extracting-list-of-sheet-names-from-openpyxl
 
     PARAMS:
     -------
     file_path: str : path to the excel file
     """
-    sheets = []
-    with zipfile.ZipFile(file_path, "r") as zip_ref:
-        xml = zip_ref.read("xl/workbook.xml").decode("utf-8")
-    for s_tag in re.findall("<sheet [^>]*", xml):
-        sheets.append(re.search('name="[^"]*', s_tag).group(0)[6:])
-    return sheets
+    excel_file = load_workbook(file_path, read_only=True)
+    sheet_names = excel_file.sheetnames
+
+    return sheet_names
 
 
 # --- Create empty Dataframe ---#
@@ -85,27 +77,6 @@ def local_read_data(filename: str, sheet_name: str | None = None) -> pl.DataFram
     return data
 
 
-# --- get file name and path from st.file_uploader ---#
-
-
-def get_file_path(file_uploader: object) -> str:
-    """Get file path from st.file_uploader.
-
-    PARAMS:
-    -------
-    file_uploader: object : st.file_uploader object
-
-    Returns
-    -------
-    file_path: str : path to the file
-
-    """
-    temp_dir = tempfile.mkdtemp()
-    path = os.path.join(temp_dir, file_uploader.name)
-
-    return path
-
-
 # --- FORM for Adding file from local storage ---#
 
 
@@ -158,6 +129,11 @@ def local_add_form(
         default_local_file_alias = defaults.get("alias", "")
         default_local_added_file = defaults.get("filename", "")
         default_local_added_file_sheet_name = defaults.get("sheet_name", "")
+    else:
+        # set default values for the form inputs
+        default_local_file_alias = ""
+        default_local_added_file = ""
+        default_local_added_file_sheet_name = ""
 
     local_file_alias = st.text_input(
         label="alias*",
@@ -179,7 +155,7 @@ def local_add_form(
         local_added_file_ext = local_added_file.split(".")[-1]
 
         if local_added_file_ext in ["xlsx", "xls"]:
-            sheets = get_excel_sheet_names(local_added_file)
+            sheets = local_excel_sheet_names(local_added_file)
 
             # check if default sheetname exists in the list of sheets
             if (
