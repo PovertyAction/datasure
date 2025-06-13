@@ -6,8 +6,7 @@ import polars as pl
 import streamlit as st
 from openpyxl import load_workbook
 
-from src.connectors import get_import_cache
-from src.utils import save_to_duckdb
+from src.utils import duckdb_get_table, duckdb_save_table
 
 # --- Get List of sheet from excel ---#
 
@@ -220,39 +219,53 @@ def local_add_form(
 
     # if submit (local_add_file) button is clicked
     if local_add_btn:
-        cache_file = get_import_cache(project_id)
-        if edit_mode:
-            # update the row in the cache file
-            cache_file = cache_file.with_columns(
-                pl.when(pl.col("alias") == default_local_file_alias)
-                .then(pl.lit(local_added_file))
-                .otherwise(pl.col("filename"))
-                .alias("filename"),
-            )
+        import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
 
+        # check that alias is unique
+        if not import_log.is_empty() and (
+            local_file_alias in import_log["alias"].to_list()
+        ):
+            st.error(
+                "Alias already exists. Please choose a different alias or edit the existing one."
+            )
         else:
-            # create a new row with the file details
-            new_row = {
-                "refresh": True,
-                "load": True,
-                "source": "local storage",
-                "alias": local_file_alias,
-                "filename": local_added_file,
-                "sheet_name": local_added_file_sheet_name,
-                "server": "",
-                "form_id": "",
-                "private_key": "",
-                "save_to": "",
-                "attachments": False,
-            }
+            if edit_mode:
+                # update the row in the cache file
+                import_log = import_log.with_columns(
+                    pl.when(pl.col("alias") == default_local_file_alias)
+                    .then(pl.lit(local_added_file))
+                    .otherwise(pl.col("filename"))
+                    .alias("filename"),
+                )
 
-            # append the new row to the cache file
-            cache_file = pl.concat(
-                [cache_file, pl.DataFrame([new_row])], how="vertical"
+            else:
+                # create a new row with the file details
+                new_row = {
+                    "refresh": True,
+                    "load": True,
+                    "source": "local storage",
+                    "alias": local_file_alias,
+                    "filename": local_added_file,
+                    "sheet_name": local_added_file_sheet_name,
+                    "server": "",
+                    "form_id": "",
+                    "private_key": "",
+                    "save_to": "",
+                    "attachments": False,
+                }
+
+                # append the new row to the cache file
+                import_log = pl.concat(
+                    [import_log, pl.DataFrame([new_row])], how="vertical"
+                )
+
+            # save the updated cache file
+            duckdb_save_table(
+                project_id,
+                import_log,
+                alias="import_log",
+                db_name="logs",
             )
-
-        # save the updated cache file
-        cache_file.write_json(f"cache/{project_id}/settings/import_cache.json")
 
 
 # --- Load data from local storage ---#
@@ -279,9 +292,9 @@ def local_load_action(
     data: pl.DataFrame = local_read_data(filename, sheet_name)
 
     # save data to DuckDB
-    save_to_duckdb(
-        project_id=project_id,
-        data=data,
+    duckdb_save_table(
+        project_id,
+        data,
         alias=alias,
         db_name="raw",
     )

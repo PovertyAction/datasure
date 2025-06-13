@@ -11,8 +11,7 @@ import pysurveycto
 import requests
 import streamlit as st
 
-from src.connectors import get_import_cache
-from src.utils import save_to_duckdb
+from src.utils import duckdb_get_table, duckdb_save_table
 
 # --- SurveyCTO Server Connect Button Click Action --- #
 
@@ -524,9 +523,9 @@ def scto_import_data(
 
     # save dataset to DuckDB
     # save data to DuckDB
-    save_to_duckdb(
-        project_id=project_id,
-        data=scto_data,
+    duckdb_save_table(
+        project_id,
+        scto_data,
         alias=alias,
         db_name="raw",
     )
@@ -614,36 +613,39 @@ def scto_add_form(
 
         if submit_button:
             # check that alias provided is not an exiting alias
-            cache_file = get_import_cache(project_id)
-            if alias in cache_file:
-                st.warning(
+            import_log = duckdb_get_table(
+                project_id, alias="import_log", db_name="logs"
+            )
+            if alias in import_log["alias"].to_list():
+                st.error(
                     f"Alias '{alias}' already exists. Please choose a different alias."
                 )
-                st.stop()
+            else:
+                new_form = {
+                    "refresh": True,
+                    "load": True,
+                    "source": "SurveyCTO",
+                    "alias": alias,
+                    "filename": "",
+                    "sheet_name": "",
+                    "server": scto_server,
+                    "form_id": scto_form_id,
+                    "private_key": scto_key,
+                    "save_to": scto_saveas,
+                    "attachments": False,
+                }
 
-            new_form = {
-                "refresh": True,
-                "load": True,
-                "source": "SurveyCTO",
-                "alias": alias,
-                "filename": "",
-                "sheet_name": "",
-                "server": scto_server,
-                "form_id": scto_form_id,
-                "private_key": scto_key,
-                "save_to": scto_saveas,
-                "attachments": False,
-            }
+                import_log = pl.concat(
+                    [import_log, pl.DataFrame([new_form])],
+                    how="vertical",
+                )
 
-            # import import log and append new form
-            cache_file = get_import_cache(project_id)
-            cache_file = pl.concat(
-                [cache_file, pl.DataFrame([new_form])],
-                how="vertical",
-            )
-
-            # write the updated cache file to disk
-            cache_file.write_json(f"cache/{project_id}/settings/import_cache.json")
+                duckdb_save_table(
+                    project_id=project_id,
+                    table_data=import_log,
+                    alias="import_log",
+                    db_name="logs",
+                )
 
 
 def valid_server_name(servername: str) -> bool:

@@ -27,11 +27,7 @@ def get_project_names() -> list[str]:
         with open(projects_file) as f:
             projects = json.load(f)
         project_names = [project["name"] for project in projects.values()]
-    return (
-        project_names + ["Create New Project"]
-        if project_names
-        else ["Create New Project"]
-    )
+    return project_names + ["Create New Project"]
 
 
 def valid_project_name(project_name: str) -> bool:
@@ -50,13 +46,14 @@ def valid_project_name(project_name: str) -> bool:
     return True
 
 
-def load_projects():
+def load_projects() -> dict:
     """Load available projects from the local directory."""
     projects_file = "cache/projects.json"
     if os.path.exists(projects_file):
         with open(projects_file) as f:
             projects = json.load(f)
         return projects
+    return {}
 
 
 def save_project(project_name: str, project_id: str):
