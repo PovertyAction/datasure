@@ -19,10 +19,6 @@ from src.checks.enumerator import (
     load_default_enumerator_settings,
 )
 
-# ============================================
-# FIXTURES
-# ============================================
-
 
 # ============================================
 # SETTINGS TESTS
@@ -185,11 +181,12 @@ def test_compute_enumerator_productivity(productivity_data):
     )
 
     assert not productivity.empty
-    # Check that we have both enumerators in the data
+    # Check that we have all enumerators in the data
     if "enumerator" in productivity.columns:
         enumerators = productivity["enumerator"].unique()
         assert "E1" in enumerators
         assert "E2" in enumerators
+        assert "E3" in enumerators
 
 
 def test_compute_enumerator_statistics_overtime(productivity_data):
