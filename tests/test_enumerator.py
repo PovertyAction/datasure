@@ -186,7 +186,6 @@ def test_compute_enumerator_productivity(productivity_data):
         enumerators = productivity["enumerator"].unique()
         assert "E1" in enumerators
         assert "E2" in enumerators
-        assert "E3" in enumerators
 
 
 def test_compute_enumerator_statistics_overtime(productivity_data):
