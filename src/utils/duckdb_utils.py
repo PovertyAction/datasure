@@ -1,54 +1,6 @@
-import re
-
 import duckdb
 import pandas as pd
 import polars as pl
-
-
-def _validate_table_name(table_name: str) -> str:
-    """Validate and sanitize table name to prevent SQL injection.
-
-    Args:
-        table_name: The table name to validate
-
-    Returns
-    -------
-        str: Sanitized table name
-
-    Raises
-    ------
-        ValueError: If table name contains invalid characters
-    """
-    # Remove dangerous characters and ensure only alphanumeric and underscores
-    sanitized = re.sub(r"[^a-zA-Z0-9_]", "_", table_name)
-
-    # Ensure it starts with a letter or underscore
-    if not re.match(r"^[a-zA-Z_]", sanitized):
-        sanitized = f"table_{sanitized}"
-
-    # Check for SQL keywords (basic list)
-    sql_keywords = {
-        "select",
-        "insert",
-        "update",
-        "delete",
-        "drop",
-        "create",
-        "alter",
-        "table",
-        "database",
-        "index",
-        "view",
-        "union",
-        "where",
-        "from",
-    }
-
-    if sanitized.lower() in sql_keywords:
-        sanitized = f"{sanitized}_table"
-
-    return sanitized
-
 
 #     ------- Save data to database ---#
 
@@ -71,10 +23,7 @@ def duckdb_save_table(
         else f"cache/{project_id}/data/{db_name}.duckdb"
     )
 
-    table_id = _validate_table_name(alias.lower().replace(" ", "_").replace(" ", "_"))
-
-    # convert alias to table name format and validate
-    table_id = _validate_table_name(alias.lower().replace(" ", "_").replace("-", "_"))
+    table_id = alias.lower().replace(" ", "_").replace(" ", "_")
 
     with duckdb.connect(db_path) as conn:
         table_exists = (
@@ -110,7 +59,7 @@ def duckdb_get_table(project_id: str, alias: str, db_name: str) -> pl.DataFrame:
         else f"cache/{project_id}/data/{db_name}.duckdb"
     )
 
-    table_id = _validate_table_name(alias.lower().replace(" ", "_").replace("-", "_"))
+    table_id = alias.lower().replace(" ", "_").replace("-", "_")
 
     with duckdb.connect(db_path) as conn:
         # Check if the table exists
@@ -157,9 +106,6 @@ def duckdb_row_filter(
         return conn.execute(f"SELECT * FROM {table_id}").pl()
 
 
-# --- Get aliases from import log ---#
-
-
 def duckdb_get_aliases(project_id: str, to_load: bool = True) -> list[str]:
     """Get all aliases (table names) from import log.
 
@@ -200,32 +146,3 @@ def duckdb_get_aliases(project_id: str, to_load: bool = True) -> list[str]:
         else:
             result = conn.execute("SELECT DISTINCT alias FROM import_log").fetchall()
         return [row[0] for row in result] if result else []
-
-
-# --- Get list of imported and loaded datasets ---#
-def duckdb_get_imported_datasets(project_id: str) -> list[str]:
-    """Get a list of imported and loaded datasets from the import log.
-
-    Compare databases in import log with the database in db and return
-    the list of imported datasets.
-
-    PARAMS:
-    -------
-    project_id: str : project ID
-
-    Returns
-    -------
-    list
-    """
-    # get aliases from import log
-    aliases = duckdb_get_aliases(project_id, to_load=True)
-
-    # get list of tables in the database
-    db_path = f"cache/{project_id}/data/raw.duckdb"
-    with duckdb.connect(db_path) as conn:
-        table_names = conn.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
-        ).fetchall()
-        table_names = {name[0] for name in table_names}
-    table_list = [x for x in aliases if x.lower().replace(" ", "_") in table_names]
-    return table_list
