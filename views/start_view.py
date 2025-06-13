@@ -20,11 +20,7 @@ def get_project_names() -> list[str]:
         with open(projects_file) as f:
             projects = json.load(f)
         project_names = [project["name"] for project in projects.values()]
-    return (
-        project_names + ["Create New Project"]
-        if project_names
-        else ["Create New Project"]
-    )
+    return project_names + ["Create New Project"]
 
 
 def valid_project_name(project_name: str) -> bool:
@@ -43,13 +39,14 @@ def valid_project_name(project_name: str) -> bool:
     return True
 
 
-def load_projects():
+def load_projects() -> dict:
     """Load available projects from the local directory."""
     projects_file = "cache/projects.json"
     if os.path.exists(projects_file):
         with open(projects_file) as f:
             projects = json.load(f)
         return projects
+    return {}
 
 
 def save_project(project_name: str, project_id: str):
@@ -58,15 +55,17 @@ def save_project(project_name: str, project_id: str):
         os.makedirs(f"cache/{project_id}")
         os.makedirs(f"cache/{project_id}/data")
         os.makedirs(f"cache/{project_id}/settings")
-        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        last_used = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    else:
-        # get created at date from existing project
-        with open(f"cache/{project_id}/settings/project_info.json") as f:
+    if os.path.exists("cache/projects.json"):
+        with open("cache/projects.json") as f:
             project_info = json.load(f)
-        created_at = project_info.get("created_at")
-        last_used = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    projects = load_projects() or {}
+            created_at = project_info.get(project_id, {}).get("created_at")
+    else:
+        project_info = {}
+        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    last_used = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    projects = load_projects()
     new_project = {
         "name": project_name,
         "created_at": created_at,
