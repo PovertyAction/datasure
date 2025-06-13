@@ -2,6 +2,7 @@ import os
 import re
 import tempfile
 import zipfile
+from pathlib import Path
 
 import pandas as pd
 import polars as pl
@@ -101,9 +102,17 @@ def get_file_path(file_uploader: object) -> str:
 
     """
     temp_dir = tempfile.mkdtemp()
-    path = os.path.join(temp_dir, file_uploader.name)
 
-    return path
+    # Sanitize filename to prevent path traversal
+    filename = file_uploader.name
+    # Remove path separators and other dangerous characters
+    filename = os.path.basename(filename)
+    filename = re.sub(r"[^\w._-]", "_", filename)
+
+    temp_path = Path(temp_dir)
+    path = temp_path / filename
+
+    return str(path)
 
 
 # --- FORM for Adding file from local storage ---#

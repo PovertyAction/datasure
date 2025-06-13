@@ -698,7 +698,7 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                     "Total backcheck error rate",
                     f"{st.session_state.total_backcheck_error_rate:.0f}%",
                 )
-            except:
+            except (AttributeError, TypeError, ValueError):
                 st.metric("Total backcheck error rate", "n/a")
 
         cl1, cl2, cl3 = st.columns(3)
