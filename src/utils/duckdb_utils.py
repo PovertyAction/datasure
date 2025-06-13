@@ -51,10 +51,12 @@ def _validate_table_name(table_name: str) -> str:
 
 
 #     ------- Save data to database ---#
-def save_to_duckdb(
-    project_id: str, data: pl.DataFrame | pd.DataFrame, alias: str, db_name: str
+
+
+def duckdb_save_table(
+    project_id: str, table_data: pl.DataFrame | pd.DataFrame, alias: str, db_name: str
 ) -> None:
-    """Save data to a DuckDB database.
+    """Save a DataFrame to a DuckDB database.
 
     PARAMS:
     -------
@@ -63,6 +65,13 @@ def save_to_duckdb(
     alias: str : alias for the data
     db_name: str : name of the DuckDB database
     """
+    db_path = (
+        f"cache/{project_id}/settings/logs.duckdb"
+        if db_name == "logs"
+        else f"cache/{project_id}/data/{db_name}.duckdb"
+    )
+
+    table_id = alias.lower().replace(" ", "_").replace(" ", "_")
     # Create a DuckDB connection
     db_path = f"cache/{project_id}/data/{db_name}.duckdb"
     # convert alias to table name format and validate
@@ -76,7 +85,7 @@ def save_to_duckdb(
         conn.execute(f'CREATE OR REPLACE TABLE "{table_id}" AS SELECT * FROM data')
 
 
-def get_duckdb_table(project_id: str, alias: str, db_name: str) -> pl.DataFrame:
+def duckdb_get_table(project_id: str, alias: str, db_name: str) -> pl.DataFrame:
     """Get a table from a DuckDB database.
 
     PARAMS:
