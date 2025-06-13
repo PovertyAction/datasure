@@ -7,7 +7,11 @@ st.markdown("Add a page for each dataset you want to check")
 if "config_pages" not in st.session_state:
     st.session_state.config_pages = ""
 
-alias_list = list(filter(None, st.session_state.alias_list))
+alias_list = st.session_state.st_raw_dataset_list
+project_id: str = st.session_state.st_project_id
+
+# set config settings file
+config_settings_file = f"cache/{project_id}/settings/config.json"
 
 # define column names
 column_names = {
@@ -114,12 +118,9 @@ with add_page, st.container(border=True):
         disabled=not new_page_name or not new_page_survey_data,
     )
 
-
 with check_pages, st.container(border=True):
     try:
-        st.session_state.config_pages = pd.read_json(
-            "cache/settings/pyDMS_config_pages_cache.json"
-        )
+        st.session_state.config_pages = pd.read_json(config_settings_file)
 
     except Exception:
         st.session_state.config_pages = pd.DataFrame(
@@ -138,7 +139,7 @@ with check_pages, st.container(border=True):
     )
 
     if save_check_config:
-        check_page_mod.to_json("cache/settings/pyDMS_config_pages_cache.json")
+        check_page_mod.to_json(config_settings_file)
 
         for i in range(len(st.session_state.config_pages)):
             page_num = i + 1
@@ -178,4 +179,4 @@ if submit_button:
         [st.session_state.config_pages, new_page], ignore_index=True
     )
 
-    config_pages.to_json("cache/settings/pyDMS_config_pages_cache.json")
+    config_pages.to_json(config_settings_file)

@@ -230,6 +230,10 @@ def gps_check_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple
                             )
                             gps_altitude = None
                         elif gps_split.shape[1] >= 4:
+                            # remove any non-numeric values from split columns
+                            gps_split = gps_split.apply(
+                                lambda x: pd.to_numeric(x, errors="coerce")
+                            )
                             gps_lat_col = "latitude"
                             gps_lon_col = "longitude"
                             gps_altitude = "altitude"
@@ -359,11 +363,12 @@ def plot_gps_coordinates(
     -------
     None
     """
+    plot_df = df.copy(deep=True)
     # Drop rows with missing coordinates
-    df = df.dropna(subset=[gps_lat_col, gps_lon_col])
+    plot_df = plot_df.dropna(subset=[gps_lat_col, gps_lon_col])
 
     # Assign a color to each unique value in color_col
-    unique_values = df[color_col].unique()
+    unique_values = plot_df[color_col].unique()
     # generate a color palette based on the number of unique values
     num_colors = len(unique_values)
     if num_colors <= 10:
@@ -402,11 +407,11 @@ def plot_gps_coordinates(
         val: color_palette[i % len(color_palette)]
         for i, val in enumerate(unique_values)
     }
-    df["color_value"] = df[color_col].map(color_map)
+    plot_df["color_value"] = plot_df[color_col].map(color_map)
 
     # Prepare data for pydeck
     map_data = []
-    for _, row in df.iterrows():
+    for _, row in plot_df.iterrows():
         map_data.append(
             {
                 "longitude": float(row[gps_lon_col]),
@@ -424,8 +429,8 @@ def plot_gps_coordinates(
         )
 
     # Calculate map center
-    center_lat = df[gps_lat_col].mean()
-    center_lon = df[gps_lon_col].mean()
+    center_lat = plot_df[gps_lat_col].mean()
+    center_lon = plot_df[gps_lon_col].mean()
 
     layer = pdk.Layer(
         "ScatterplotLayer",
@@ -476,11 +481,12 @@ def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
     pd.DataFrame
         The input dataframe with an additional column indicating outliers.
     """
-    # Drop rows with missing latitude values
-    df = df[df[gps_lat_col].notna()]
+    outlier_df = df.copy(deep=True)
+    # Drop rows with missing latitude values or longitude values
+    outlier_df = outlier_df.dropna(subset=[gps_lat_col, gps_lon_col])
 
     # Group data by clustering_col and process each group separately
-    grouped_df = df.groupby(clustering_col)
+    grouped_df = outlier_df.groupby(clustering_col)
 
     # Calculate centroids for each group
     centroids = grouped_df[[gps_lat_col, gps_lon_col]].mean()
@@ -493,7 +499,7 @@ def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
             (centroid[gps_lat_col], centroid[gps_lon_col]),
         ).meters
 
-    df["distance_from_centroid"] = df.apply(calculate_distance, axis=1)
+    outlier_df["distance_from_centroid"] = outlier_df.apply(calculate_distance, axis=1)
 
     # Flag outliers using IQR for each group
     def flag_outliers(group):
@@ -507,9 +513,9 @@ def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
         )
         return group
 
-    df = grouped_df.apply(flag_outliers).reset_index(drop=True)
+    outlier_df = grouped_df.apply(flag_outliers).reset_index(drop=True)
 
-    return df
+    return outlier_df
 
 
 # automatically detect outliers using Local Outlier Factor (LOF)
@@ -573,6 +579,20 @@ def calculate_gps_accuracy_statistics(
     pd.DataFrame
         A dataframe containing grouped GPS accuracy statistics.
     """
+    allowed_stats = [
+        "min",
+        "median",
+        "mean",
+        "max",
+        "std",
+        "25th percentile",
+        "75th percentile",
+        "95th percentile",
+    ]
+    # Validate the accuracy_stats_list
+    accuracy_stats_list = [
+        stat for stat in accuracy_stats_list if stat in allowed_stats
+    ]
     # update percentile statistics with numpy percentile function
     percentile_map = {
         "25th percentile": lambda x: np.percentile(x, 25),
