@@ -1,7 +1,7 @@
 import streamlit as st
 
 from src.processing import prep_apply_action, prep_load_log
-from src.utils import get_duckdb_table
+from src.utils import duckdb_get_aliases, duckdb_get_table, get_df_info
 
 # -- DEFINE CONSTANTS FOR DATA PREP --#
 
@@ -93,15 +93,15 @@ st.title("Prepare Data")
 st.markdown("Make necessary adjustments to data before check")
 
 # Get list of dataset alias
-alias_list: list[str] = st.session_state.st_raw_dataset_list
 project_id: str = st.session_state.st_project_id
+alias_list: list[str] = duckdb_get_aliases(project_id)
 
 # show/hide data prep page
 
 show_prep_page_info = False
 
 try:
-    tabs = st.tabs(alias_list)
+    tabs = st.tabs(sorted(alias_list))
     show_prep_page_info = True
 except Exception as e:  # noqa: F841
     st.info(
@@ -110,32 +110,36 @@ except Exception as e:  # noqa: F841
 
 if show_prep_page_info:
     for i, (label, tab) in enumerate(zip(alias_list, tabs, strict=False)):
-        st.session_state[f"prep_log{i}"] = prep_load_log(project_id, label)
+        prep_log = duckdb_get_table(
+            project_id=project_id,
+            alias=f"prep_log_{label}",
+            db_name="logs",
+        ).to_pandas()
 
-        # if prep is not empty, apply it to the dataset, else use raw data
-        if not st.session_state[f"prep_log{i}"].empty:
-            prep_apply_action(index=i)
-        else:
-            st.session_state[f"raw_data_prep{i}"] = get_duckdb_table(
-                project_id, label, "raw"
+        prep_data = duckdb_get_table(
+            project_id=project_id,
+            alias=label,
+            db_name="prep",
+        ).to_pandas()
+
+        if prep_data.empty:
+            prep_data = duckdb_get_table(
+                project_id=project_id,
+                alias=label,
+                db_name="raw",
             ).to_pandas()
-            st.session_state[f"prepped_data{i}"] = st.session_state[
-                f"raw_data_prep{i}"
-            ].copy()
 
         # count rows, columns, number missing & percent missing
-        row_count: int = len(st.session_state[f"prepped_data{i}"].index)
-        col_count: int = len(st.session_state[f"prepped_data{i}"].columns)
-        miss_count: int = st.session_state[f"prepped_data{i}"].isnull().sum().sum()
-        miss_perc: float = round((miss_count / (row_count * col_count)) * 100, 2)
-
-        # collate all string columns in dataset
-        string_cols = (
-            st.session_state[f"prepped_data{i}"]
-            .select_dtypes(include=["object"])
-            .columns
-        )
-        all_cols = st.session_state[f"prepped_data{i}"].columns
+        (
+            row_count,
+            col_count,
+            miss_count,
+            miss_perc,
+            all_cols,
+            string_cols,
+            num_cols,
+            date_cols,
+        ) = get_df_info(prep_data)
 
         # display tab features
         with tab:
@@ -202,12 +206,6 @@ if show_prep_page_info:
                                 "quotient",
                                 "diff",
                             ]:
-                                # get list of numeric columns
-                                num_cols = (
-                                    st.session_state[f"prepped_data{i}"]
-                                    .select_dtypes(include=["number"])
-                                    .columns
-                                )
                                 if dp_prep_add_method in ["quotient", "diff"]:
                                     max_selections = 2
                                 else:
@@ -226,15 +224,13 @@ if show_prep_page_info:
                         # select column to transform
                         dp_prep_trf_col = st.selectbox(
                             label="Select column to transform",
-                            options=st.session_state[f"prepped_data{i}"].columns,
+                            options=all_cols,
                             key=f"st_sb_trf_col{i}",
                         )
 
                         if dp_prep_trf_col:
                             # show functions based on column type
-                            col_type = st.session_state[f"prepped_data{i}"][
-                                dp_prep_trf_col
-                            ].dtype
+                            col_type = prep_data[dp_prep_trf_col].dtype
                             st.info(f"Column type: {col_type}")
                             if col_type in ["object", "string"]:
                                 dp_prep_trf_func = st.selectbox(
@@ -372,11 +368,7 @@ if show_prep_page_info:
                                     "value is between",
                                     "value is not between",
                                 ]:
-                                    col_options = (
-                                        st.session_state[f"prepped_data{i}"]
-                                        .select_dtypes(include=["number", "datetime"])
-                                        .columns
-                                    )
+                                    col_options = num_cols + date_cols
                                 else:
                                     col_options = all_cols
 
@@ -401,9 +393,7 @@ if show_prep_page_info:
                                     if dp_prep_del_rows_cond_cols:
                                         # get a list of unique values in select column
                                         unique_vals = (
-                                            st.session_state[f"prepped_data{i}"][
-                                                dp_prep_del_rows_cond_cols[0]
-                                            ]
+                                            prep_data[dp_prep_del_rows_cond_cols[0]]
                                             .unique()
                                             .tolist()
                                         )
@@ -423,9 +413,7 @@ if show_prep_page_info:
                                     # check that all columns are of the same type
                                     disable_inputs = True
                                     col_types = (
-                                        st.session_state[f"prepped_data{i}"][
-                                            dp_prep_del_rows_cond_cols
-                                        ]
+                                        prep_data[dp_prep_del_rows_cond_cols]
                                         .dtypes.unique()
                                         .tolist()
                                     )
@@ -439,11 +427,7 @@ if show_prep_page_info:
                                     # get a list of unique values in select columns
                                     value_options = []
                                     for col in dp_prep_del_rows_cond_cols:
-                                        value_options = (
-                                            st.session_state[f"prepped_data{i}"][col]
-                                            .unique()
-                                            .tolist()
-                                        )
+                                        value_options = prep_data[col].unique().tolist()
                                     dp_prep_del_rows_cond_val_min = st.selectbox(
                                         label="Select minimum value",
                                         options=sorted(value_options),
@@ -532,12 +516,14 @@ if show_prep_page_info:
 
                 mc1, mc2, mc3 = st.columns((0.3, 0.3, 0.4))
 
-                mc1.metric(label="Rows", value=row_count)
-                mc2.metric(label="Columns", value=col_count)
-                mc3.metric(label="Missing Values", value=f"{miss_perc}%")
+                mc1.metric(label="Rows", value=row_count, border=True)
+                mc2.metric(label="Columns", value=col_count, border=True)
+                mc3.metric(
+                    label="Missing Values", value=f"{miss_perc:.2f}%", border=True
+                )
 
-                if len(st.session_state[f"prepped_data{i}"]) > 1000:
+                if len(prep_data) > 1000:
                     st.warning("Data preview limited to 1000 rows")
-                    st.dataframe(st.session_state[f"prepped_data{i}"][:1000])
+                    st.dataframe(prep_data[:1000])
                 else:
-                    st.dataframe(st.session_state[f"prepped_data{i}"])
+                    st.dataframe(prep_data)
