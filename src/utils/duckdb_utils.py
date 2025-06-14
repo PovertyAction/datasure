@@ -40,6 +40,9 @@ def duckdb_save_table(
             conn.execute(f"CREATE TABLE {table_id} AS SELECT * FROM table_data")
 
 
+# --- Load data from database ---#
+
+
 def duckdb_get_table(project_id: str, alias: str, db_name: str) -> pl.DataFrame:
     """Get a table from a DuckDB database.
 
@@ -75,6 +78,9 @@ def duckdb_get_table(project_id: str, alias: str, db_name: str) -> pl.DataFrame:
             return pl.DataFrame()
 
 
+# --- Filter rows from database ---#
+
+
 def duckdb_row_filter(
     project_id: str, alias: str, db_name: str, filter_condition: str
 ) -> pl.DataFrame:
@@ -104,6 +110,9 @@ def duckdb_row_filter(
         )
         # Optionally, return the filtered data
         return conn.execute(f"SELECT * FROM {table_id}").pl()
+
+
+# --- Get aliases from import log ---#
 
 
 def duckdb_get_aliases(project_id: str, to_load: bool = True) -> list[str]:
@@ -146,3 +155,32 @@ def duckdb_get_aliases(project_id: str, to_load: bool = True) -> list[str]:
         else:
             result = conn.execute("SELECT DISTINCT alias FROM import_log").fetchall()
         return [row[0] for row in result] if result else []
+
+
+# --- Get list of imported and loaded datasets ---#
+def duckdb_get_imported_datasets(project_id: str) -> list[str]:
+    """Get a list of imported and loaded datasets from the import log.
+
+    Compare databases in import log with the database in db and return
+    the list of imported datasets.
+
+    PARAMS:
+    -------
+    project_id: str : project ID
+
+    Returns
+    -------
+    list
+    """
+    # get aliases from import log
+    aliases = duckdb_get_aliases(project_id, to_load=True)
+
+    # get list of tables in the database
+    db_path = f"cache/{project_id}/data/raw.duckdb"
+    with duckdb.connect(db_path) as conn:
+        table_names = conn.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+        ).fetchall()
+        table_names = {name[0] for name in table_names}
+    table_list = [x for x in aliases if x.lower().replace(" ", "_") in table_names]
+    return table_list
