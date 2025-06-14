@@ -78,11 +78,18 @@ def duckdb_save_table(
     table_id = _validate_table_name(alias.lower().replace(" ", "_").replace("-", "_"))
 
     with duckdb.connect(db_path) as conn:
-        # Use DuckDB's identifier quoting to safely handle table names
-        conn.execute(
-            f'CREATE TABLE IF NOT EXISTS "{table_id}" AS SELECT * FROM data LIMIT 0'
+        table_exists = (
+            conn.execute(
+                f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table_id}'"
+            ).fetchone()[0]
+            > 0
         )
-        conn.execute(f'CREATE OR REPLACE TABLE "{table_id}" AS SELECT * FROM data')
+        if table_exists:
+            conn.execute(
+                f"CREATE OR REPLACE TABLE {table_id} AS SELECT * FROM table_data"
+            )
+        else:
+            conn.execute(f"CREATE TABLE {table_id} AS SELECT * FROM table_data")
 
 
 def duckdb_get_table(project_id: str, alias: str, db_name: str) -> pl.DataFrame:
