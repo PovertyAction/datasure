@@ -1,12 +1,7 @@
 import streamlit as st
 
 from src.processing import prep_apply_action, prep_load_log
-from src.utils import (
-    duckdb_get_aliases,
-    duckdb_get_table,
-    duckdb_save_table,
-    get_df_info,
-)
+from src.utils import duckdb_get_aliases, duckdb_get_table, get_df_info
 
 # -- DEFINE CONSTANTS FOR DATA PREP --#
 
@@ -134,13 +129,6 @@ if show_prep_page_info:
                 db_name="raw",
             ).to_pandas()
 
-            duckdb_save_table(
-                project_id,
-                prep_data,
-                alias=label,
-                db_name="prep",
-            )
-
         # count rows, columns, number missing & percent missing
         (
             row_count,
@@ -155,79 +143,81 @@ if show_prep_page_info:
 
         # display tab features
         with tab:
-            st.subheader("Apply Changes:")
-
             # create for text and form
-            pt1, _ = st.columns((0.4, 0.6))
+            prep_task_title_col, prep_task_add_col = st.columns((0.5, 0.5))
 
-            # create a popver box to accept inputs for new prep actions
-            with (
-                pt1,
-                st.popover(
-                    ":material/add: Add data prep step", use_container_width=True
-                ),
-            ):
-                st.markdown("*Add new data preparation steps*")
+            # populate actions and change log
+            with prep_task_title_col, st.container(border=True):
+                st.subheader("Apply Changes:")
 
-                # selectbox for action type
-                dp_action = st.selectbox(
-                    label="Select Action:",
-                    options=DP_ACTIONS,
-                    key=f"st_sb_dp_action{i}",
-                )
+                # create a popver box to accept inputs for new prep actions
+                with (
+                    prep_task_add_col,
+                    st.popover(
+                        ":material/add: Add data prep step", use_container_width=True
+                    ),
+                ):
+                    st.markdown("*Add new data preparation steps*")
 
-                # selectbox for adding new columns functions
-                if dp_action in ["add column"]:
-                    dp_prep_add_col = st.text_input(
-                        label="Enter column name",
-                        help="Enter name of new column to add",
-                        key=f"st_sb_add_col{i}",
+                    # selectbox for action type
+                    dp_action = st.selectbox(
+                        label="Select Action:",
+                        options=DP_ACTIONS,
+                        key=f"st_sb_dp_action{i}",
                     )
 
-                    if dp_prep_add_col:
-                        # select method for adding new column
-                        dp_prep_add_method = st.selectbox(
-                            label="Select Method",
-                            options=DP_ADD_METHODS,
-                            key=f"st_sb_add_method{i}",
+                    # selectbox for adding new columns functions
+                    if dp_action in ["add column"]:
+                        dp_prep_add_col = st.text_input(
+                            label="Enter column name",
+                            help="Enter name of new column to add",
+                            key=f"st_sb_add_col{i}",
                         )
 
-                        if dp_prep_add_method == "constant":
-                            dp_prep_add_val = st.text_input(
-                                label="Enter value",
-                                help="Enter value to add to new column",
-                                key=f"st_sb_add_val{i}",
+                        if dp_prep_add_col:
+                            # select method for adding new column
+                            dp_prep_add_method = st.selectbox(
+                                label="Select Method",
+                                options=DP_ADD_METHODS,
+                                key=f"st_sb_add_method{i}",
                             )
-                            description = f"Add column '{dp_prep_add_col}' with constant value '{dp_prep_add_val}'"
-                        elif dp_prep_add_method in [
-                            "sum",
-                            "mean",
-                            "median",
-                            "mode",
-                            "min",
-                            "max",
-                            "std",
-                            "var",
-                            "first",
-                            "last",
-                            "count",
-                            "nunique",
-                            "product",
-                            "quotient",
-                            "diff",
-                        ]:
-                            if dp_prep_add_method in ["quotient", "diff"]:
-                                max_selections = 2
-                            else:
-                                max_selections = len(num_cols)
 
-                            dp_prep_add_col_select = st.multiselect(
-                                label="Select column",
-                                options=num_cols,
-                                key=f"st_sb_add_col_select{i}",
-                                max_selections=max_selections,
-                            )
-                            description = f"Add column '{dp_prep_add_col}' with {dp_prep_add_method} of column {dp_prep_add_col_select}"
+                            if dp_prep_add_method == "constant":
+                                dp_prep_add_val = st.text_input(
+                                    label="Enter value",
+                                    help="Enter value to add to new column",
+                                    key=f"st_sb_add_val{i}",
+                                )
+                                description = f"Add column '{dp_prep_add_col}' with constant value '{dp_prep_add_val}'"
+                            elif dp_prep_add_method in [
+                                "sum",
+                                "mean",
+                                "median",
+                                "mode",
+                                "min",
+                                "max",
+                                "std",
+                                "var",
+                                "first",
+                                "last",
+                                "count",
+                                "nunique",
+                                "product",
+                                "quotient",
+                                "diff",
+                            ]:
+                                if dp_prep_add_method in ["quotient", "diff"]:
+                                    max_selections = 2
+                                else:
+                                    max_selections = len(num_cols)
+
+                                dp_prep_add_col_select = st.multiselect(
+                                    label="Select column",
+                                    options=num_cols,
+                                    key=f"st_sb_add_col_select{i}",
+                                    max_selections=max_selections,
+                                )
+                                description = f"Add column '{dp_prep_add_col}' with {dp_prep_add_method} of column {dp_prep_add_col_select}"
 
                     # selectbox for transforming columns functions
                     if dp_action in ["transform column(s)"]:
