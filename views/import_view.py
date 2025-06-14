@@ -14,6 +14,7 @@ from src.utils import (
     duckdb_get_imported_datasets,
     duckdb_get_table,
     duckdb_row_filter,
+    duckdb_save_table,
 )
 
 # --- define project ID --- #
@@ -22,7 +23,7 @@ project_id = st.session_state.st_project_id
 
 # add session state for raw dataset list
 if "st_raw_dataset_list" not in st.session_state:
-    st.session_state.st_raw_dataset_list = duckdb_get_aliases(project_id)
+    st.session_state.st_raw_dataset_list = duckdb_get_aliases(project_id, to_load=True)
 
 
 def edit_import_configuration(project_id: str, alias: str) -> None:
@@ -185,7 +186,17 @@ with (
 
 import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
 if not import_log.is_empty():
-    edited_import_cache = st.data_editor(
+    # -- Update import log in the DB on change -- #
+    def update_import_log():
+        """Update the import log in the cache file."""
+        duckdb_save_table(
+            project_id,
+            edited_import_log,
+            alias="import_log",
+            db_name="logs",
+        )
+
+    edited_import_log = st.data_editor(
         data=import_log,
         key="import_data_editor",
         use_container_width=True,
@@ -204,7 +215,9 @@ if not import_log.is_empty():
                 "Download Attachments?", disabled=True
             ),
         },
+        on_change=update_import_log,
     )
+
     # -- Load data from import configurations -- #
     ld1, ld2 = st.columns([0.3, 0.7])
     with ld1:
