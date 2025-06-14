@@ -11,6 +11,7 @@ from src.connectors import (
 )
 from src.utils import (
     duckdb_get_aliases,
+    duckdb_get_imported_datasets,
     duckdb_get_table,
     duckdb_row_filter,
 )
@@ -219,6 +220,8 @@ if not import_log.is_empty():
             # Load raw datasets from import configurations
             load_raw_datasets(project_id)
 
+    preview_options = duckdb_get_imported_datasets(project_id)
+    if preview_options:
         # --- Preview imported data --- #
         # activate prep section
         st.session_state.show_prep_section = True
@@ -228,7 +231,7 @@ if not import_log.is_empty():
         with sb:
             selected_dataset = st.selectbox(
                 "Select Dataset",
-                options=st.session_state.st_raw_dataset_list,
+                options=sorted(preview_options),
                 key="imported_data_select",
             )
 
