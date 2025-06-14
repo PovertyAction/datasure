@@ -2,7 +2,9 @@ import pandas as pd
 import polars as pl
 
 
-def get_df_info(stats_df: pl.DataFrame | pd.DataFrame, cols_only=False) -> tuple:
+def get_df_info(
+    stats_df: pl.DataFrame | pd.DataFrame,
+) -> tuple[int, int, int, float, list[str], list[str], list[str]]:
     """Get a description of the DataFrame.
 
     PARAMS:
@@ -24,6 +26,15 @@ def get_df_info(stats_df: pl.DataFrame | pd.DataFrame, cols_only=False) -> tuple
     if isinstance(stats_df, pd.DataFrame):
         stats_df = pl.from_pandas(stats_df)
 
+    num_rows = stats_df.height
+    num_columns = stats_df.width
+    num_missing = stats_df.null_count().sum()
+    num_missing = num_missing.with_columns(
+        pl.sum_horizontal(pl.all()).alias("row_total")
+    )
+    num_missing = num_missing["row_total"][0]
+    perc_missing = (num_missing / (num_rows * num_columns)) * 100
+
     all_columns = stats_df.columns
     string_columns = [col for col in all_columns if stats_df[col].dtype == pl.Utf8]
 
@@ -34,23 +45,6 @@ def get_df_info(stats_df: pl.DataFrame | pd.DataFrame, cols_only=False) -> tuple
     datetime_columns = [
         col for col in all_columns if stats_df[col].dtype == pl.Datetime
     ]
-
-    if cols_only:
-        return (
-            all_columns,
-            string_columns,
-            numeric_columns,
-            datetime_columns,
-        )
-
-    num_rows = stats_df.height
-    num_columns = stats_df.width
-    num_missing = stats_df.null_count().sum()
-    num_missing = num_missing.with_columns(
-        pl.sum_horizontal(pl.all()).alias("row_total")
-    )
-    num_missing = num_missing["row_total"][0]
-    perc_missing = (num_missing / (num_rows * num_columns)) * 100
 
     return (
         num_rows,
