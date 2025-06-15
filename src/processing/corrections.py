@@ -2,38 +2,6 @@ import polars as pl
 import streamlit as st
 
 
-def correction_load_log(project_id: str, alias: str) -> pl.DataFrame:
-    """
-    Load the corrections log from a json file into a polars DataFrame.
-
-    Parameters
-    ----------
-        project_id (str): The ID of the project.
-        alias (str): The alias for the corrections log file.
-
-    Returns
-    -------
-        pl.DataFrame: A DataFrame containing the corrections log.
-    """
-    log_name = alias.lower().replace(" ", "_").replace("-", "_")
-    try:
-        log = pl.read_json(f"cache/{project_id}/settings/{log_name}.json")
-
-    except FileNotFoundError:
-        log = pl.DataFrame(
-            {
-                "KEY": pl.Series([], dtype=pl.String),
-                "ID": pl.Series([], dtype=pl.String),
-                "action": pl.Series([], dtype=pl.String),
-                "column": pl.Series([], dtype=pl.String),
-                "current value": pl.Series([], dtype=pl.String),
-                "new value": pl.Series([], dtype=pl.String),
-                "reason": pl.Series([], dtype=pl.String),
-            }
-        )
-    return log
-
-
 def correction_apply_action(
     data_index: int,
     key_col: str,
@@ -66,9 +34,7 @@ def correction_apply_action(
     # and apply new ID correction
     # else, we apply corrections to existing correction log
     if page_name and (f"id_correction_log_{data_index}" not in st.session_state):
-        st.session_state[f"id_correction_log_{data_index}"] = correction_load_log(
-            project_id, page_name
-        )
+        st.session_state[f"id_correction_log_{data_index}"] = "None"
     corrections_log = st.session_state[f"id_correction_log_{data_index}"]
     if f"corrected_data{data_index}" not in st.session_state:
         alias_list = st.session_state["st_raw_dataset_list"]
