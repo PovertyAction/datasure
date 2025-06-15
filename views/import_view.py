@@ -20,10 +20,12 @@ from src.utils import (
 # --- define project ID --- #
 project_id = st.session_state.st_project_id
 
-
 # add session state for raw dataset list
 if "st_raw_dataset_list" not in st.session_state:
     st.session_state.st_raw_dataset_list = duckdb_get_aliases(project_id, to_load=True)
+
+if "st_prep_dataset_list" not in st.session_state:
+    st.session_state.st_prep_dataset_list = None
 
 
 def edit_import_configuration(project_id: str, alias: str) -> None:
@@ -229,6 +231,8 @@ if not import_log.is_empty():
         )
 
     if load_btn:
+        preview_options = duckdb_get_imported_datasets(project_id)
+        st.session_state.st_prep_dataset_list = preview_options
         with ld2:
             # Load raw datasets from import configurations
             load_raw_datasets(project_id)
