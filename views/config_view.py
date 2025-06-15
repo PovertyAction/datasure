@@ -31,13 +31,9 @@ def add_check_configuration(project_id: str) -> None:
             return False
 
         # get the current page names and check if the page name already exists
-        current_pages_df: pl.DataFrame = duckdb_get_table(
+        current_pages = duckdb_get_table(
             project_id=project_id, alias="check_config", db_name="logs"
-        )
-        if current_pages_df.is_empty():
-            return True
-
-        current_pages: list = current_pages_df["page_name"].to_list()
+        )["page_name"].to_list()
 
         # check if the page name already exists
         if page_name in current_pages:
