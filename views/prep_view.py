@@ -1,7 +1,12 @@
 import streamlit as st
 
 from src.processing import prep_apply_action, prep_load_log
-from src.utils import duckdb_get_aliases, duckdb_get_table, get_df_info
+from src.utils import (
+    duckdb_get_aliases,
+    duckdb_get_table,
+    duckdb_save_table,
+    get_df_info,
+)
 
 # -- DEFINE CONSTANTS FOR DATA PREP --#
 
@@ -128,6 +133,13 @@ if show_prep_page_info:
                 alias=label,
                 db_name="raw",
             ).to_pandas()
+
+            duckdb_save_table(
+                project_id,
+                prep_data,
+                alias=label,
+                db_name="prep",
+            )
 
         # count rows, columns, number missing & percent missing
         (
