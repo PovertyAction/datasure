@@ -71,12 +71,22 @@ def duckdb_save_table(
         else f"cache/{project_id}/data/{db_name}.duckdb"
     )
 
-    table_id = _validate_table_name(alias.lower().replace(" ", "_").replace(" ", "_"))
-
     # convert alias to table name format and validate
     table_id = _validate_table_name(alias.lower().replace(" ", "_").replace("-", "_"))
 
     with duckdb.connect(db_path) as conn:
+        table_exists = (
+            conn.execute(
+                f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table_id}'"
+            ).fetchone()[0]
+            > 0
+        )
+        if table_exists:
+            conn.execute(
+                f"CREATE OR REPLACE TABLE {table_id} AS SELECT * FROM table_data"
+            )
+        else:
+            conn.execute(f"CREATE TABLE {table_id} AS SELECT * FROM table_data")
         table_exists = (
             conn.execute(
                 f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table_id}'"

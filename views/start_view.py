@@ -28,6 +28,7 @@ def get_project_names() -> list[str]:
             projects = json.load(f)
         project_names = [project["name"] for project in projects.values()]
     return project_names + ["Create New Project"]
+    return project_names + ["Create New Project"]
 
 
 def valid_project_name(project_name: str) -> bool:

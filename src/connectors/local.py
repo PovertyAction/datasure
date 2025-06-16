@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 
 import pandas as pd
 import polars as pl
@@ -75,35 +74,6 @@ def local_read_data(filename: str, sheet_name: str | None = None) -> pl.DataFram
         data = pd.read_stata(filename)
 
     return data
-
-
-# --- get file name and path from st.file_uploader ---#
-
-
-def get_file_path(file_uploader: object) -> str:
-    """Get file path from st.file_uploader.
-
-    PARAMS:
-    -------
-    file_uploader: object : st.file_uploader object
-
-    Returns
-    -------
-    file_path: str : path to the file
-
-    """
-    temp_dir = tempfile.mkdtemp()
-
-    # Sanitize filename to prevent path traversal
-    filename = file_uploader.name
-    # Remove path separators and other dangerous characters
-    filename = os.path.basename(filename)
-    filename = re.sub(r"[^\w._-]", "_", filename)
-
-    temp_path = Path(temp_dir)
-    path = temp_path / filename
-
-    return str(path)
 
 
 # --- FORM for Adding file from local storage ---#
@@ -185,6 +155,7 @@ def local_add_form(
 
         if local_added_file_ext in ["xlsx", "xls"]:
             sheets = local_excel_sheet_names(local_added_file)
+            sheets = local_excel_sheet_names(local_added_file)
 
             # check if default sheetname exists in the list of sheets
             if (
@@ -219,6 +190,24 @@ def local_add_form(
 
     # if submit (local_add_file) button is clicked
     if local_add_btn:
+        import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
+
+        # check that alias is unique
+        if not import_log.is_empty() and (
+            local_file_alias in import_log["alias"].to_list()
+        ):
+            st.error(
+                "Alias already exists. Please choose a different alias or edit the existing one."
+            )
+        else:
+            if edit_mode:
+                # update the row in the cache file
+                import_log = import_log.with_columns(
+                    pl.when(pl.col("alias") == default_local_file_alias)
+                    .then(pl.lit(local_added_file))
+                    .otherwise(pl.col("filename"))
+                    .alias("filename"),
+                )
         import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
 
         # check that alias is unique
