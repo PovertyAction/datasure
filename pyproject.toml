@@ -151,8 +151,8 @@ exclude_lines = [
 show_missing = true
 skip_covered = false
 precision = 2
-# TODO: need to increase the failing threshold considerably, ge above 80%
-fail_under = 12
+# TODO: need to increase the failing threshold considerably, get above 80%
+fail_under = 16
 
 [tool.coverage.html]
 directory = "htmlcov"
