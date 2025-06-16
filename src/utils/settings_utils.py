@@ -5,6 +5,8 @@ from functools import lru_cache
 
 import streamlit as st
 
+from src.utils import duckdb_get_table
+
 
 @st.cache_data
 def save_check_settings(settings_file, check_name, check_settings) -> None:
@@ -77,3 +79,41 @@ def get_hash_id(name: str, length=6) -> str:
     """
     hash_val = hashlib.md5(name.encode()).hexdigest()
     return hash_val[:length]
+
+
+# --- Get Check Config Settings from DuckDB --- #
+def get_check_config_settings(project_id: str, page_row_index: int) -> tuple:
+    """Get the check configuration settings from DuckDB.
+
+    Parameters
+    ----------
+    project_id (str): The ID of the project.
+    page_row_index (int): The index of the row in the page.
+
+    Returns
+    -------
+    tuple: The check configuration settings.
+    """
+    hfc_config_logs = duckdb_get_table(
+        project_id=project_id, alias="check_config", db_name="logs"
+    )
+
+    page_name = hfc_config_logs.row(page_row_index)[0]
+    survey_data_name = hfc_config_logs.row(page_row_index)[1]
+    survey_key = hfc_config_logs.row(page_row_index)[2]
+    survey_id = hfc_config_logs.row(page_row_index)[3]
+    survey_date = hfc_config_logs.row(page_row_index)[4]
+    enumerator = hfc_config_logs.row(page_row_index)[5]
+    backcheck_data_name = hfc_config_logs.row(page_row_index)[6]
+    tracking_data_name = hfc_config_logs.row(page_row_index)[7]
+
+    return (
+        page_name,
+        survey_data_name,
+        survey_key,
+        survey_id,
+        survey_date,
+        enumerator,
+        backcheck_data_name,
+        tracking_data_name,
+    )
