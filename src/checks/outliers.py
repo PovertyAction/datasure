@@ -7,13 +7,14 @@ import seaborn as sns
 import streamlit as st
 
 from src.utils import (
+    get_check_config_settings,
     load_check_settings,
     save_check_settings,
 )
 
 
 @st.cache_data
-def load_default_settings(settings_file: str, page_num: int) -> tuple:
+def load_default_settings(project_id: str, settings_file: str, page_num: int) -> tuple:
     """
     Load the default settings for the summary report.
 
@@ -31,6 +32,13 @@ def load_default_settings(settings_file: str, page_num: int) -> tuple:
             A tuple containing the default settings for the summary report.
 
     """
+    # Get config page defaults
+    _, _, config_survey_key, config_survey_id, _, config_enumerator, _, _ = (
+        get_check_config_settings(
+            project_id=project_id,
+            page_row_index=page_num - 1,
+        )
+    )
     # load default settings in the following order:
     # - if settings file exists, load settings from file
     # - if settings file does not exist, load default settings from config
@@ -39,15 +47,9 @@ def load_default_settings(settings_file: str, page_num: int) -> tuple:
     else:
         default_settings = {}
 
-    default_survey_id = default_settings.get(
-        "survey_id", st.session_state["config_pages"]["Survey ID"][page_num - 1]
-    )
-    default_enumerator = default_settings.get(
-        "enumerator", st.session_state["config_pages"]["Enumerator"][page_num - 1]
-    )
-    default_survey_key = default_settings.get(
-        "survey_key", st.session_state["config_pages"]["Survey KEY"][page_num - 1]
-    )
+    default_survey_id = default_settings.get("survey_id", config_survey_id)
+    default_enumerator = default_settings.get("enumerator", config_enumerator)
+    default_survey_key = default_settings.get("survey_key", config_survey_key)
     default_outlier_cols = default_settings.get("outlier_cols", [])
     default_outlier_method = default_settings.get("outlier_method", 0)
     default_sd_value = default_settings.get("sd_value", 3.0)
@@ -168,7 +170,7 @@ def get_numeric_columns(data: pd.DataFrame) -> list:
 
 # outliers check settings
 def outliers_report_settings(
-    data: pd.DataFrame, settings_file: str, page_num: int
+    project_id: str, data: pd.DataFrame, settings_file: str, page_num: int
 ) -> tuple:
     """
     Function to create a report on survey duplicates
@@ -199,7 +201,7 @@ def outliers_report_settings(
             default_sd_value,
             default_iqr_value,
             default_selected_pattern,
-        ) = load_default_settings(settings_file, page_num)
+        ) = load_default_settings(project_id, settings_file, page_num)
 
         var_col, method_col, survey_col = st.columns(spec=3, border=True)
 
@@ -712,7 +714,9 @@ def plot_joint_outliers_distribution(reshaped_joint_outliers_df, selected_cols):
 
 
 # define function to create outliers report
-def outliers_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:  # noqa: D417, RUF100"
+def outliers_report(
+    project_id: str, data: pd.DataFrame, setting_file: str, page_num: int
+) -> None:  # noqa: D417, RUF100"
     """
     Function to create a report on survey duplicates
     Args:
@@ -731,7 +735,7 @@ def outliers_report(data: pd.DataFrame, setting_file: str, page_num: int) -> Non
         iqr_value,
         selected_cols,
         reshaped_joint_outliers_df,
-    ) = outliers_report_settings(data, setting_file, page_num)
+    ) = outliers_report_settings(project_id, data, setting_file, page_num)
 
     # Check that required options have been selected. If not, display a info message
 
