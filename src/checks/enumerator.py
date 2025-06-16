@@ -322,7 +322,6 @@ def compute_enumerator_overview(
         Overview metrics for enumerators.
     """
     data = data.sort_values(by=[enumerator, date])
-    data[date] = data[date].dt.strftime("%b %d, %Y")
 
     all_submissions = len(data)
 
