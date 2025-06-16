@@ -4,10 +4,7 @@ import streamlit as st
 from src.processing import (
     correction_apply_action,
 )
-from src.utils import (
-    duckdb_get_table,
-    duckdb_save_table,
-)
+from src.utils import duckdb_get_table, duckdb_save_table, get_check_config_settings
 
 # DEFINE CONSTANTS FOR CORRECTION'
 
@@ -33,45 +30,6 @@ if not hfc_pages:
         "No data available to prepare. Load a dataset from the import page to continue."
     )
     st.stop()
-
-
-def correction_load_log(
-    project_id: str,
-    alias: str,
-) -> pl.DataFrame:
-    """Load the corrections log for a given project and alias.
-
-    Parameters
-    ----------
-        project_id (str): The ID of the project.
-        alias (str): The alias of the dataset.
-
-    Returns
-    -------
-        pl.DataFrame: The corrections log as a Polars DataFrame.
-    """
-    correction_log = duckdb_get_table(
-        project_id=project_id,
-        alias=f"corr_log_{alias}",
-        db_name="logs",
-    )
-
-    if correction_log.is_empty():
-        # create empty log with columns
-        correction_log = pl.DataFrame(
-            {
-                "date": "",
-                "KEY": "",
-                "ID": "",
-                "action": "",
-                "column": "",
-                "current value": "",
-                "new value": "",
-                "reason": "",
-            }
-        )
-
-    return correction_log
 
 
 def correction_input_form(
@@ -239,14 +197,19 @@ corr_tabs = st.tabs(hfc_pages)
 for i, tab in enumerate(corr_tabs):
     with tab:
         # get page name for current index from polars dataframe hfc_config_logs
-        page_name = hfc_config_logs.row(i)[0]
-        survey_data_name = hfc_config_logs.row(i)[1]
-        survey_key = hfc_config_logs.row(i)[2]
-        survey_id = hfc_config_logs.row(i)[3]
-        survey_date = hfc_config_logs.row(i)[4]
-        enumerator = hfc_config_logs.row(i)[5]
-        backcheck_data_name = hfc_config_logs.row(i)[6]
-        tracking_data_name = hfc_config_logs.row(i)[7]
+        (
+            page_name,
+            survey_data_name,
+            survey_key,
+            survey_id,
+            survey_date,
+            enumerator,
+            backcheck_data_name,
+            tracking_data_name,
+        ) = get_check_config_settings(
+            project_id=project_id,
+            page_row_index=i,
+        )
 
         st.subheader(f"{page_name}")
 
@@ -281,15 +244,23 @@ for i, tab in enumerate(corr_tabs):
         )
 
         # load correction log
-        correction_log = correction_load_log(
+        correction_log = duckdb_get_table(
             project_id=project_id,
-            alias=survey_data_name,
+            alias=f"corr_log_{survey_data_name}",
+            db_name="logs",
         )
 
-        st.dataframe(
-            data=correction_log,
-            use_container_width=True,
-        )
+        with st.container(border=True):
+            if correction_log.is_empty():
+                st.info(
+                    "No corrections have been made yet. You can add corrections using the form above."
+                )
+            else:
+                st.subheader("Correction Log")
+                st.dataframe(
+                    data=correction_log,
+                    use_container_width=True,
+                )
 
         row_count, col_count = corrected_data.shape
 
