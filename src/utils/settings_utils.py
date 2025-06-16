@@ -77,7 +77,7 @@ def get_hash_id(name: str, length=6) -> str:
     """Generate a unique ID (maybe) for project.
     This ID will be used as project IDs (6 digits) and dataset IDs 8 digits
     """
-    hash_val = hashlib.md5(name.encode()).hexdigest()
+    hash_val = hashlib.sha256(name.encode()).hexdigest()
     return hash_val[:length]
 
 
