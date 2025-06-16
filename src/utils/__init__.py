@@ -8,6 +8,7 @@ from .duckdb_utils import (
     duckdb_save_table,
 )
 from .settings_utils import (
+    get_check_config_settings,
     get_hash_id,
     load_check_settings,
     save_check_settings,
@@ -22,6 +23,7 @@ __all__ = [
     "duckdb_get_table",
     "duckdb_row_filter",
     "duckdb_save_table",
+    "get_check_config_settings",
     "get_df_info",
     "get_hash_id",
     "load_check_settings",
