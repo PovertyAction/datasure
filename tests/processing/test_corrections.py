@@ -1,25 +1,11 @@
 """Test the corrections module."""
 
-import json
-import os
-import tempfile
 from unittest.mock import patch
 
 import polars as pl
 import pytest
 
-from src.processing.corrections import correction_apply_action, correction_load_log
-
-
-@pytest.fixture
-def temp_dir():
-    """Create a temporary directory for test files."""
-    temp_dir = tempfile.mkdtemp()
-    yield temp_dir
-    # Clean up temporary files
-    import shutil
-
-    shutil.rmtree(temp_dir, ignore_errors=True)
+from src.processing.corrections import correction_apply_action
 
 
 @pytest.fixture
@@ -36,109 +22,6 @@ def sample_corrections_log():
             "reason": ["reason1", "reason2", "reason3"],
         }
     )
-
-
-def test_correction_load_log_file_exists(temp_dir):
-    """Test loading corrections log when file exists."""
-    # Create a temporary JSON file with sample data
-    log_data = [
-        {
-            "KEY": "key1",
-            "ID": "id1",
-            "action": "modify value",
-            "column": "col1",
-            "current value": "old_value",
-            "new value": "new_value",
-            "reason": "test reason",
-        },
-        {
-            "KEY": "key2",
-            "ID": "id2",
-            "action": "remove value",
-            "column": "col2",
-            "current value": "remove_this",
-            "new value": "",
-            "reason": "removal reason",
-        },
-    ]
-
-    # Create the expected directory structure
-    project_id = "test_project"
-    alias = "Test Log"
-    settings_dir = os.path.join(temp_dir, project_id, "settings")
-    os.makedirs(settings_dir, exist_ok=True)
-
-    temp_file = os.path.join(settings_dir, "test_log.json")
-    with open(temp_file, "w") as f:
-        json.dump(log_data, f)
-
-    # Mock the cache directory to point to our temp directory
-    with patch("src.processing.corrections.pl.read_json") as mock_read_json:
-        mock_read_json.return_value = pl.DataFrame(log_data)
-
-        # Test loading the file
-        result = correction_load_log(project_id, alias)
-
-        # Verify the result
-        assert isinstance(result, pl.DataFrame)
-        assert len(result) == 2
-        assert result.item(0, "KEY") == "key1"
-        assert result.item(0, "action") == "modify value"
-        assert result.item(1, "KEY") == "key2"
-        assert result.item(1, "action") == "remove value"
-
-        # Verify the correct file path was used
-        mock_read_json.assert_called_once_with(
-            f"cache/{project_id}/settings/test_log.json"
-        )
-
-
-def test_correction_load_log_file_not_found():
-    """Test loading corrections log when file doesn't exist."""
-    project_id = "non_existent_project"
-    alias = "Non Existent Log"
-
-    result = correction_load_log(project_id, alias)
-
-    # Verify empty DataFrame with correct schema
-    assert isinstance(result, pl.DataFrame)
-    assert len(result) == 0
-    expected_columns = [
-        "KEY",
-        "ID",
-        "action",
-        "column",
-        "current value",
-        "new value",
-        "reason",
-    ]
-    assert list(result.columns) == expected_columns
-
-    # Verify column types
-    assert result["KEY"].dtype == pl.String
-    assert result["ID"].dtype == pl.String
-    assert result["action"].dtype == pl.String
-
-
-def test_correction_load_log_alias_transformation():
-    """Test that alias parameter is properly transformed to filename."""
-    project_id = "test_project"
-    alias = "My Test Log-Name"
-
-    # Mock pl.read_json to verify the correct file path is used
-    with patch("src.processing.corrections.pl.read_json") as mock_read_json:
-        mock_read_json.side_effect = FileNotFoundError()
-
-        result = correction_load_log(project_id, alias)
-
-        # Verify the file path transformation: spaces and hyphens should
-        # become underscores
-        expected_path = f"cache/{project_id}/settings/my_test_log_name.json"
-        mock_read_json.assert_called_once_with(expected_path)
-
-        # Should return empty DataFrame when file not found
-        assert isinstance(result, pl.DataFrame)
-        assert len(result) == 0
 
 
 @patch("src.processing.corrections.st")
@@ -336,53 +219,6 @@ def test_correction_apply_action_remove_row(mock_st):
     corrected_data = mock_st.session_state["corrected_data0"]
     assert len(corrected_data) == 2
     assert not (corrected_data["survey_key"] == "key2").any()
-
-
-@patch("src.processing.corrections.st")
-def test_correction_apply_action_with_page_name(mock_st):
-    """Test applying correction with page_name parameter."""
-    # Setup mock session state
-    mock_session_state = {
-        "st_raw_dataset_list": ["Dataset 1"],
-        "config_pages": {"Survey Data": ["Dataset 1"]},
-    }
-    mock_st.session_state = mock_session_state
-
-    # Mock the correction_load_log function call
-    with patch("src.processing.corrections.correction_load_log") as mock_load_log:
-        mock_load_log.return_value = pl.DataFrame(
-            {
-                "KEY": pl.Series([], dtype=pl.String),
-                "ID": pl.Series([], dtype=pl.String),
-                "action": pl.Series([], dtype=pl.String),
-                "column": pl.Series([], dtype=pl.String),
-                "current value": pl.Series([], dtype=pl.String),
-                "new value": pl.Series([], dtype=pl.String),
-                "reason": pl.Series([], dtype=pl.String),
-            }
-        )
-
-        mock_session_state["prepped_data0"] = pl.DataFrame(
-            {"survey_key": ["key1", "key2"], "name": ["John", "Jane"]}
-        ).to_pandas()
-
-        # Apply correction with page_name
-        correction_apply_action(
-            data_index=0,
-            key_col="survey_key",
-            project_id="test_project",
-            page_name="test_page",
-            action="modify value",
-            key_value="key1",
-            current_id="id1",
-            current_value="John",
-            col_to_modify="name",
-            new_value="Johnny",
-            reason="Name update",
-        )
-
-        # Verify the log was loaded with correct parameters
-        mock_load_log.assert_called_once_with("test_project", "test_page")
 
 
 @patch("src.processing.corrections.st")

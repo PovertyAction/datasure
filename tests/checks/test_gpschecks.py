@@ -127,39 +127,22 @@ def mock_session_state_gps():
 
 
 @patch("src.checks.gpschecks.st.cache_data", lambda f: f)
-def test_load_default_settings_with_existing_file(mock_settings_file):
-    """Test loading default settings from an existing settings file."""
-    result = load_default_settings(mock_settings_file, 1)
-
-    assert len(result) == 10
-    assert result[0] == "submissiondate"  # default_date
-    assert result[1] == "enumerator"  # default_enumerator
-    assert result[2] == "survey_id"  # default_survey_id
-    assert result[3] == "survey_key"  # default_survey_key
-    assert result[4] is True  # default_gps_column_exists
-    assert result[5] is True  # default_lat_lon_exist
-    assert result[6] == "latitude"  # default_gps_lat_col
-    assert result[7] == "longitude"  # default_gps_lon_col
-    assert result[8] == "gps_accuracy"  # default_gps_accuracy
-    assert result[9] is None  # default_gps_column
-
-
-@patch("src.checks.gpschecks.st.cache_data", lambda f: f)
-@patch("src.checks.gpschecks.st.session_state", new_callable=dict)
-def test_load_default_settings_no_file(mock_session_state):
+@patch("src.checks.gpschecks.get_check_config_settings")
+def test_load_default_settings_no_file(mock_config_settings):
     """Test loading default settings when no settings file exists."""
-    mock_session_state.update(
-        {
-            "config_pages": {
-                "Survey Date": ["submissiondate"],
-                "Enumerator": ["enumerator"],
-                "Survey ID": ["survey_id"],
-                "Survey KEY": ["survey_key"],
-            }
-        }
+    # Mock the config settings function to return expected values
+    mock_config_settings.return_value = (
+        None,
+        None,
+        "survey_key",
+        "survey_id",
+        "submissiondate",
+        "enumerator",
+        None,
+        None,
     )
 
-    result = load_default_settings(None, 1)
+    result = load_default_settings("test_project", None, 1)
 
     assert len(result) == 10
     assert result[0] == "submissiondate"
