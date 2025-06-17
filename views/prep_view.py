@@ -5,18 +5,21 @@ from millify import prettify
 
 from src.processing import prep_apply_action
 from src.utils import (
-    duckdb_get_aliases,
     duckdb_get_table,
     duckdb_save_table,
     get_df_info,
 )
+
+# Get list of dataset alias
+project_id: str = st.session_state.st_project_id
+alias_list: list[str] = st.session_state.st_prep_dataset_list
 
 # -- DEFINE CONSTANTS FOR DATA PREP --#
 
 # Data prep actions
 DP_ACTIONS: tuple = (
     "transform column(s)",
-    "add column",
+    "add new column",
     "remove column(s)",
     "remove row(s)",
 )
@@ -70,13 +73,14 @@ DP_NUM_FUNCS: tuple = (
 )
 
 DP_DATETIME_FUNCS: tuple = (
-    "day",
-    "week",
-    "month",
-    "quarter" "year",
     "second",
     "minute",
     "hour",
+    "day",
+    "week",
+    "month",
+    "quarter",
+    "year",
 )
 
 DP_ROW_CONDITIONS: tuple = (
@@ -99,10 +103,6 @@ DP_ROW_CONDITIONS: tuple = (
 
 st.title("Prepare Data")
 st.markdown("Make necessary adjustments to data before check")
-
-# Get list of dataset alias
-project_id: str = st.session_state.st_project_id
-alias_list: list[str] = duckdb_get_aliases(project_id)
 
 
 # --- Add prep step ---#
@@ -234,6 +234,13 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, i: int):
                     return (
                         f"Transform column '{dp_prep_trf_col}' to '{dp_prep_trf_func}'"
                     )
+            elif col_type == "datetime64[ns]":
+                dp_prep_trf_func = st.selectbox(
+                    label="Select Function",
+                    options=DP_DATETIME_FUNCS,
+                    key=f"st_sb_trf_func{i}",
+                )
+                return f"Transform column '{dp_prep_trf_col}' to '{dp_prep_trf_func}'"
 
     def prep_remove_column() -> str:
         dp_prep_del_cols = st.multiselect(
@@ -370,7 +377,6 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, i: int):
                     )
                     return f"remove row(s) by condition '{dp_prep_del_rows_cond}' on columns {dp_prep_del_rows_cond_cols} with pattern '{dp_prep_del_rows_cond_val}'"
 
-    # count rows, columns, number missing & percent missing
     (
         all_cols,
         string_cols,
@@ -390,26 +396,35 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, i: int):
             key=f"st_sb_dp_action{i}",
         )
 
-        if dp_action:
-            if dp_action == "add column":
-                description = prep_add_column()
-            elif dp_action == "transform column(s)":
-                description = prep_transform_column()
-            elif dp_action == "remove column(s)":
-                description = prep_remove_column()
-            elif dp_action == "remove row(s)":
-                description = prep_remove_row()
+        dp_action_handlers = {
+            "add column": prep_add_column,
+            "transform column(s)": prep_transform_column,
+            "remove column(s)": prep_remove_column,
+            "remove row(s)": prep_remove_row,
+        }
+
+        if dp_action in dp_action_handlers:
+            description = dp_action_handlers[dp_action]()
+        else:
+            raise ValueError(f"Unsupported action: {dp_action}")
 
         # apply button
         dp_prep_apply_btn = st.button(
             label="Apply",
             key=f"st_sb_del_button{i}",
             use_container_width=True,
+            type="primary",
+            help="Apply the selected data preparation step",
             disabled=(not dp_action or not description),
         )
 
         if dp_prep_apply_btn:
-            prep_apply_action(dp_action, description, i)
+            prep_apply_action(
+                project_id,
+                label,
+                dp_action,
+                description,
+            )
             st.success(
                 f"Action '{dp_action}' with description '{description}' applied successfully!"
             )
@@ -433,43 +448,53 @@ def prep_remove_step():
             st.warning("This will remove a data preparation step from the log.")
             # get unique index + actions
             prep_log["action_index"] = (
-                prep_log.index.astype(str) + " - " + prep_log["action"]
+                prep_log.index.astype(str)
+                + " - "
+                + prep_log["action"]
+                + " - "
+                + prep_log["description"]
             )
             unique_actions = prep_log["action_index"].unique().tolist()
             dp_prep_remove_action = st.selectbox(
                 label="Select Action to Remove",
                 options=unique_actions,
                 key=f"st_sb_remove_action{i}",
+                index=None,
+                help="Select the action you want to remove from the log",
             )
 
-            # if action is selected, show description and ask for delete confirmation
-            if dp_prep_remove_action:
+            # confirm removal
+            dp_prep_remove_confirm = st.button(
+                label="Remove",
+                key=f"st_sb_remove_confirm{i}",
+                use_container_width=True,
+                type="primary",
+                help="Remove the selected data preparation step from the log",
+                disabled=(not dp_prep_remove_action),
+            )
+
+            if dp_prep_remove_confirm:
+                # remove action from log, save log to database, and re-run
+                # the entire prep log to reflect the changes
                 dp_prep_remove_action_desc = prep_log.loc[
                     prep_log["action_index"] == dp_prep_remove_action, "description"
                 ].values[0]
 
-                # confirm removal
-                dp_prep_remove_confirm = st.button(
-                    label="Remove",
-                    key=f"st_sb_remove_confirm{i}",
-                    use_container_width=True,
+                duckdb_save_table(
+                    project_id,
+                    prep_log.drop(
+                        index=prep_log[
+                            prep_log["action_index"] == dp_prep_remove_action
+                        ].index
+                    ),
+                    alias=f"prep_log_{label}",
+                    db_name="logs",
                 )
 
-                if dp_prep_remove_confirm:
-                    # remove action from log
-                    duckdb_save_table(
-                        project_id,
-                        prep_log.drop(
-                            index=prep_log[
-                                prep_log["action_index"] == dp_prep_remove_action
-                            ].index
-                        ),
-                        alias=f"prep_log_{label}",
-                        db_name="logs",
-                    )
-                    st.success(
-                        f"Action '{dp_prep_remove_action_desc}' removed successfully!"
-                    )
+                prep_apply_action(project_id, label)
+                st.success(
+                    f"Action '{dp_prep_remove_action_desc}' removed successfully!"
+                )
 
 
 # show/hide data prep page
@@ -552,9 +577,10 @@ if show_prep_page_info:
                     )
                 else:
                     prep_logs_mod = st.dataframe(
-                        prep_log,
+                        prep_log["action", "description"],
                         use_container_width=True,
                         key=label,
+                        hide_index=False,
                     )
 
             # display preview of peppered data
@@ -572,4 +598,4 @@ if show_prep_page_info:
                     border=True,
                 )
 
-                st.dataframe(prep_data)
+                st.dataframe(prep_data, use_container_width=True, hide_index=False)
