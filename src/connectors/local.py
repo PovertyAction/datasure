@@ -23,30 +23,6 @@ def local_excel_sheet_names(file_path: str) -> list:
     return sheet_names
 
 
-# --- Create empty Dataframe ---#
-
-
-def local_load_files() -> pd.DataFrame:
-    """Load files from last session or return empty dataframe.
-
-    PARAMS:
-    -------
-    return: pandas dataframe of file list
-    """
-    # load form details from last session
-    try:
-        file = pd.read_json("cache/settings/pyDMS_local_files_cache.json")
-        form_inputs = file.to_dict()
-        return pd.DataFrame(form_inputs)
-
-    # if file not found, return empty dataframe
-    except FileNotFoundError:
-        return pd.DataFrame(columns=["alias", "load", "type", "filename", "sheet name"])
-
-
-# --- Read data from file ---#
-
-
 def local_read_data(filename: str, sheet_name: str | None = None) -> pl.DataFrame:
     """Import data from a file.
 
