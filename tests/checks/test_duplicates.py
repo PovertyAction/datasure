@@ -212,11 +212,11 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
         with self.assertRaises(KeyError):
             compute_duplicates_statistics(df, "id", "col1", ["col1", "colX"])
 
-    @patch("src.checks.duplicates.st")
+    @patch("src.checks.duplicates.get_check_config_settings")
     @patch("src.checks.duplicates.os.path.exists")
     @patch("src.checks.duplicates.load_check_settings")
     def test_load_default_duplicates_settings_file_exists(
-        self, mock_load_check_settings, mock_exists, mock_st
+        self, mock_load_check_settings, mock_exists, mock_config_settings
     ):
         """
         Test the load_default_duplicates_settings function
@@ -232,52 +232,58 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
             "dup_cols": ["enumid", "latitude", "longitude"],
             "display_cols": ["enumid", "latitude"],
         }
-        # Simulate session_state config_pages (should not be used if file exists)
-        mock_st.session_state = {
-            "config_pages": {
-                "Survey ID": ["sid1", "sid2"],
-                "Survey KEY": ["skey1", "skey2"],
-                "Survey Date": ["sdate1", "sdate2"],
-            }
-        }
-        result = load_default_duplicates_settings("settings.json", 1)
+        # Mock the config settings function
+        mock_config_settings.return_value = (
+            None,
+            None,
+            "skey1",
+            "sid1",
+            "sdate1",
+            None,
+            None,
+            None,
+        )
+        result = load_default_duplicates_settings("test_project", "settings.json", 1)
         self.assertEqual(result[0], "enumid")
         self.assertEqual(result[1], "key")
         self.assertEqual(result[2], "SubmissionDate")
         self.assertEqual(result[3], ["enumid", "latitude", "longitude"])
         self.assertEqual(result[4], ["enumid", "latitude"])
 
-    @patch("src.checks.duplicates.st")
+    @patch("src.checks.duplicates.get_check_config_settings")
     @patch("src.checks.duplicates.os.path.exists")
     @patch("src.checks.duplicates.load_check_settings")
     def test_load_default_duplicates_settings_file_missing(
-        self, mock_load_check_settings, mock_exists, mock_st
+        self, mock_load_check_settings, mock_exists, mock_config_settings
     ):
         """Test the load_default_duplicates_settings function
         when settings file is missing.
         """
         # Simulate settings file does not exist
         mock_exists.return_value = False
-        # Simulate session_state config_pages
-        mock_st.session_state = {
-            "config_pages": {
-                "Survey ID": ["sid1", "sid2"],
-                "Survey KEY": ["skey1", "skey2"],
-                "Survey Date": ["sdate1", "sdate2"],
-            }
-        }
-        result = load_default_duplicates_settings("missing.json", 2)
+        # Mock the config settings function to return expected values
+        mock_config_settings.return_value = (
+            None,
+            None,
+            "skey2",
+            "sid2",
+            "sdate2",
+            None,
+            None,
+            None,
+        )
+        result = load_default_duplicates_settings("test_project", "missing.json", 2)
         self.assertEqual(result[0], "sid2")
         self.assertEqual(result[1], "skey2")
         self.assertEqual(result[2], "sdate2")
         self.assertIsNone(result[3])
         self.assertIsNone(result[4])
 
-    @patch("src.checks.duplicates.st")
+    @patch("src.checks.duplicates.get_check_config_settings")
     @patch("src.checks.duplicates.os.path.exists")
     @patch("src.checks.duplicates.load_check_settings")
     def test_load_default_duplicates_settings_file_exists_partial_settings(
-        self, mock_load_check_settings, mock_exists, mock_st
+        self, mock_load_check_settings, mock_exists, mock_config_settings
     ):
         """
         Test the load_default_duplicates_settings function
@@ -290,37 +296,40 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
             "survey_id": "enumid"
             # survey_key and date missing
         }
-        # Simulate session_state config_pages
-        mock_st.session_state = {
-            "config_pages": {
-                "Survey ID": ["sid1"],
-                "Survey KEY": ["skey1"],
-                "Survey Date": ["sdate1"],
-            }
-        }
-        result = load_default_duplicates_settings("settings.json", 1)
+        # Mock the config settings function
+        mock_config_settings.return_value = (
+            None,
+            None,
+            "skey1",
+            "sid1",
+            "sdate1",
+            None,
+            None,
+            None,
+        )
+        result = load_default_duplicates_settings("test_project", "settings.json", 1)
         self.assertEqual(result[0], "enumid")
         self.assertEqual(result[1], "skey1")
         self.assertEqual(result[2], "sdate1")
         self.assertIsNone(result[3])
         self.assertIsNone(result[4])
 
-    @patch("src.checks.duplicates.st")
+    @patch("src.checks.duplicates.get_check_config_settings")
     @patch("src.checks.duplicates.os.path.exists")
     @patch("src.checks.duplicates.load_check_settings")
     def test_load_default_duplicates_settings_missing_config_pages(
-        self, mock_load_check_settings, mock_exists, mock_st
+        self, mock_load_check_settings, mock_exists, mock_config_settings
     ):
         """Test the load_default_duplicates_settings function
         when config_pages is missing.
         """
         # Simulate settings file does not exist
         mock_exists.return_value = False
-        # Simulate session_state missing config_pages
-        mock_st.session_state = {}
-        # Should raise KeyError because config_pages is missing
-        with self.assertRaises(KeyError):
-            load_default_duplicates_settings("missing.json", 1)
+        # Mock the config settings function to raise an exception
+        mock_config_settings.side_effect = Exception("Config not found")
+        # Should raise an exception because config is missing
+        with self.assertRaises(Exception):  # noqa: B017
+            load_default_duplicates_settings("test_project", "missing.json", 1)
 
 
 if __name__ == "__main__":
