@@ -88,14 +88,14 @@ def load_raw_datasets(project_id: str) -> None:
     else:
         with st.status("Loading datasets ...", expanded=True) as status:
             for row in import_log.iter_rows(named=True):
-                if row["source"] == "local storage":
+                if row["source"] == "local storage" and row["refresh"] is True:
                     local_load_action(
                         project_id=project_id,
                         alias=row["alias"],
                         filename=row["filename"],
                         sheet_name=row["sheet_name"] if row["sheet_name"] else None,
                     )
-                elif row["source"] == "SurveyCTO":
+                elif row["source"] == "SurveyCTO" and row["refresh"] is True:
                     scto_import_data(
                         project_id=project_id,
                         alias=row["alias"],
