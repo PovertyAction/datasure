@@ -46,14 +46,14 @@ config_checks_page = st.Page(
 
 # --- NAVIGATION MENU --- #
 
-nav_menu = st.navigation({"": [start_page]})
-if st.session_state.st_load_project:
-    nav_menu = st.navigation(
-        {
-            "": [start_page],
-            "Import Data": [import_data_page],
-        }
-    )
+
+nav_menu = st.navigation(
+    {
+        "": [start_page],
+        "Import Data": [import_data_page],
+    },
+    position="hidden",
+)
 if st.session_state.show_prep_section:
     nav_menu = st.navigation(
         {
