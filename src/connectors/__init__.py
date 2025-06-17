@@ -2,7 +2,6 @@ from .local import (
     local_add_form,
     local_excel_sheet_names,
     local_load_action,
-    local_load_files,
     local_read_data,
 )
 from .scto import (
@@ -20,7 +19,6 @@ __all__ = [
     "local_add_form",
     "local_excel_sheet_names",
     "local_load_action",
-    "local_load_files",
     "local_read_data",
     "scto_add_form",
     "scto_download_action",
