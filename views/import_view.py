@@ -106,9 +106,8 @@ def load_raw_datasets(project_id: str) -> None:
                         attachments=row["attachments"],
                     )
 
-                st.session_state.st_raw_dataset_list.append(row["alias"]) if row[
-                    "alias"
-                ] not in st.session_state.st_raw_dataset_list else None
+                if row["alias"] not in st.session_state.st_raw_dataset_list:
+                    st.session_state.st_raw_dataset_list.append(row["alias"])
             status.update(
                 label="Data loaded successfully!", state="complete", expanded=False
             )
@@ -236,6 +235,17 @@ if not import_log.is_empty():
         with ld2:
             # Load raw datasets from import configurations
             load_raw_datasets(project_id)
+
+        # display success message and link to the prep section
+        with st.container(border=True):
+            st.success(
+                "Data loaded successfully! You can now preview the imported data in the Prep section."
+            )
+            st.page_link(
+                "views/prep_view.py",
+                label="Click to go to Prep Section",
+                icon=":material/arrow_forward:",
+            )
 
     preview_options = duckdb_get_imported_datasets(project_id)
     if preview_options:
