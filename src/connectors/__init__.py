@@ -10,7 +10,6 @@ from .scto import (
     scto_get_server_cache,
     scto_import_data,
     scto_load_forms,
-    scto_load_login,
     scto_login_form,
     scto_server_connect,
 )
@@ -25,7 +24,6 @@ __all__ = [
     "scto_get_server_cache",
     "scto_import_data",
     "scto_load_forms",
-    "scto_load_login",
     "scto_login_form",
     "scto_server_connect",
 ]
