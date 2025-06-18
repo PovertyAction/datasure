@@ -146,9 +146,7 @@ def enumerator_report_settings(
         with st.container(border=True):
             with uc1:
                 date_col_options = data.select_dtypes("datetime").columns.tolist()
-                default_date_index = (
-                    survey_cols.get_loc(date) if date in date_col_options else None
-                )
+                default_date_index = date_col_options.index(date)
 
                 date = st.selectbox(
                     label="Date",
