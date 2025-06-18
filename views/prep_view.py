@@ -49,6 +49,7 @@ DP_DEL_METHODS: tuple = ("by row index", "by condition")
 DP_FUNCS: tuple = ("string", "numeric", "date")
 
 DP_STR_FUNCS: tuple = (
+    "trim",
     "substring",
     "replace",
     "strip",
@@ -63,7 +64,7 @@ DP_STR_FUNCS: tuple = (
 
 DP_NUM_FUNCS: tuple = (
     "add",
-    "multiple",
+    "multiply",
     "subtract",
     "divide",
     "round",
@@ -116,43 +117,52 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, i: int):
             key=f"st_sb_add_col{i}",
         )
 
-        if dp_prep_add_col == "constant":
-            dp_prep_add_val = st.text_input(
-                label="Enter value",
-                help="Enter value to add to new column",
-                key=f"st_sb_add_val{i}",
+        if dp_prep_add_col:
+            # select method to add column
+            dp_prep_add_col_med = st.selectbox(
+                label="Select Method",
+                options=DP_ADD_METHODS,
+                key=f"st_sb_add_col_method{i}",
+                help="Select method to add new column",
             )
-            return f"Add column '{dp_prep_add_col}' with constant value '{dp_prep_add_val}'"
 
-        elif dp_prep_add_col in [
-            "sum",
-            "mean",
-            "median",
-            "mode",
-            "min",
-            "max",
-            "std",
-            "var",
-            "first",
-            "last",
-            "count",
-            "nunique",
-            "product",
-            "quotient",
-            "diff",
-        ]:
-            if dp_prep_add_col in ["quotient", "diff"]:
-                max_selections = 2
-            else:
-                max_selections = len(num_cols)
+            if dp_prep_add_col_med == "constant":
+                dp_prep_add_val = st.text_input(
+                    label="Enter value",
+                    help="Enter value to add to new column",
+                    key=f"st_sb_add_val{i}",
+                )
+                return f"Add column '{dp_prep_add_col}' with constant value '{dp_prep_add_val}'"
 
-            dp_prep_add_col_select = st.multiselect(
-                label="Select column",
-                options=num_cols,
-                key=f"st_sb_add_col_select{i}",
-                max_selections=max_selections,
-            )
-            return f"Add column '{dp_prep_add_col}' with {dp_prep_add_col_select}"
+            elif dp_prep_add_col_med in [
+                "sum",
+                "mean",
+                "median",
+                "mode",
+                "min",
+                "max",
+                "std",
+                "var",
+                "first",
+                "last",
+                "count",
+                "nunique",
+                "product",
+                "quotient",
+                "diff",
+            ]:
+                if dp_prep_add_col in ["quotient", "diff"]:
+                    max_selections = 2
+                else:
+                    max_selections = len(num_cols)
+
+                dp_prep_add_col_select = st.multiselect(
+                    label="Select column",
+                    options=num_cols,
+                    key=f"st_sb_add_col_select{i}",
+                    max_selections=max_selections,
+                )
+                return f"Add column '{dp_prep_add_col}' with {dp_prep_add_col_med} of columns {dp_prep_add_col_select}"
 
     def prep_transform_column() -> str:
         dp_prep_trf_col = st.selectbox(
@@ -181,7 +191,7 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, i: int):
                         help="Enter new value to replace with",
                         key=f"st_sb_trf_new_val{i}",
                     )
-                    return f"Transform column '{dp_prep_trf_col}' to '{dp_prep_trf_func}' by replacing '{dp_prep_trf_old_val}' with '{dp_prep_trf_new_val}'"
+                    return f"transform column(s) '{dp_prep_trf_col}' to '{dp_prep_trf_func}' by replacing '{dp_prep_trf_old_val}' with '{dp_prep_trf_new_val}'"
                 elif dp_prep_trf_func == "substring":
                     start_col, end_col = st.columns(2)
                     with start_col:
@@ -198,20 +208,20 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, i: int):
                             key=f"st_sb_trf_end{i}",
                             step=1,
                         )
-                    if dp_prep_trf_start and dp_prep_trf_end:  # noqa: SIM102
+                    if dp_prep_trf_start and dp_prep_trf_end:
                         if dp_prep_trf_start > dp_prep_trf_end:
                             st.error("Start index cannot be greater than end index")
+                        else:
+                            return f"transform column(s) '{dp_prep_trf_col}' to '{dp_prep_trf_func}' by taking substring from index {dp_prep_trf_start} to {dp_prep_trf_end}"
                 elif dp_prep_trf_func == "extract pattern":
                     dp_prep_trf_pattern = st.text_input(
                         label="Enter pattern",
                         help="Enter pattern to extract from column",
                         key=f"st_sb_trf_pattern{i}",
                     )
-                    return f"Transform column '{dp_prep_trf_col}' to '{dp_prep_trf_func}' by extracting pattern '{dp_prep_trf_pattern}'"
+                    return f"transform column(s) '{dp_prep_trf_col}' to '{dp_prep_trf_func}' by extracting pattern '{dp_prep_trf_pattern}'"
                 else:
-                    return (
-                        f"Transform column '{dp_prep_trf_col}' to '{dp_prep_trf_func}'"
-                    )
+                    return f"transform column(s) '{dp_prep_trf_col}' to '{dp_prep_trf_func}'"
             elif col_type == "int64" or col_type == "float64":
                 dp_prep_trf_func = st.selectbox(
                     label="Select Function",
@@ -220,7 +230,7 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, i: int):
                 )
                 if dp_prep_trf_func in [
                     "add",
-                    "multiple",
+                    "multiply",
                     "subtract",
                     "divide",
                 ]:
@@ -229,18 +239,18 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, i: int):
                         help="Enter value to perform operation on column",
                         key=f"st_sb_trf_val{i}",
                     )
-                    return f"Transform column '{dp_prep_trf_col}' to '{dp_prep_trf_func}' by {dp_prep_trf_val}"
+                    return f"transform column(s) '{dp_prep_trf_col}' to '{dp_prep_trf_func}' by {dp_prep_trf_val}"
                 else:
-                    return (
-                        f"Transform column '{dp_prep_trf_col}' to '{dp_prep_trf_func}'"
-                    )
+                    return f"transform column(s) '{dp_prep_trf_col}' to '{dp_prep_trf_func}'"
             elif col_type == "datetime64[ns]":
                 dp_prep_trf_func = st.selectbox(
                     label="Select Function",
                     options=DP_DATETIME_FUNCS,
                     key=f"st_sb_trf_func{i}",
                 )
-                return f"Transform column '{dp_prep_trf_col}' to '{dp_prep_trf_func}'"
+                return (
+                    f"transform column(s) '{dp_prep_trf_col}' to '{dp_prep_trf_func}'"
+                )
 
     def prep_remove_column() -> str:
         dp_prep_del_cols = st.multiselect(
@@ -397,7 +407,7 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, i: int):
         )
 
         dp_action_handlers = {
-            "add column": prep_add_column,
+            "add new column": prep_add_column,
             "transform column(s)": prep_transform_column,
             "remove column(s)": prep_remove_column,
             "remove row(s)": prep_remove_row,
@@ -510,7 +520,7 @@ except Exception as e:  # noqa: F841
     )
 
 if show_prep_page_info:
-    for i, (label, tab) in enumerate(zip(alias_list, tabs, strict=False)):
+    for i, (label, tab) in enumerate(zip(sorted(alias_list), tabs, strict=False)):
         prep_log = duckdb_get_table(
             project_id=project_id,
             alias=f"prep_log_{label}",
