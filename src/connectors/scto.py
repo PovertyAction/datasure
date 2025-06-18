@@ -79,33 +79,6 @@ def scto_server_connect(servername: str, username: str, password: str) -> str:
         return scto
 
 
-# --- Load Login Information --- #
-def scto_load_login() -> tuple:
-    """Load Login details from previous session.
-
-    PARAMS:
-    -------
-    servername: SurveyCTO server name
-
-    Return:
-    ------
-    servername: SurveyCTO server name
-    username: SurveyCTO account username (email address)
-
-    Returned as tuple of servername and username.
-    Returns empty tuple if no previous session
-
-    """
-    # load server login details from last session
-    try:
-        file = pd.read_json("cache/pyDMS_server_cache.json")
-        server_details = file.to_dict()
-        return (server_details["name"][0], server_details["user"][0])
-
-    except FileNotFoundError:
-        return ("", "")
-
-
 # --- SurveyCTO load form details --- #
 
 
@@ -740,6 +713,10 @@ def scto_login_form(project_id: str) -> None:
             # save server cache to file
             with open(f"cache/{project_id}/settings/scto.json", "w") as file:
                 json.dump(server_details, file)
+
+            st.success(
+                f"SurveyCTO Connection for {scto_server_name} added successfully"
+            )
 
 
 # --- SCTO Download button action --- #
