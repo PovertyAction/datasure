@@ -187,8 +187,7 @@ def prep_remove_rows(prep_data: pd.DataFrame, description: str) -> pd.DataFrame:
             except (ValueError, SyntaxError, IndexError):
                 st.error(f"Invalid column specification: {cols}")
                 return
-
-            if prep_data.dtype == "datetime64[ns]":
+            if prep_data[first_col].dtypes == "datetime64[ns]":
                 try:
                     values_use = [
                         val for val in ast.literal_eval(values.replace("Timestamp", ""))
@@ -202,12 +201,10 @@ def prep_remove_rows(prep_data: pd.DataFrame, description: str) -> pd.DataFrame:
                 except (ValueError, SyntaxError):
                     st.error(f"Invalid values specification: {values}")
                     return
-
-            cols = first_col
             if condition == "value is equal to":
-                return prep_data.query(f"{cols} not in {values_use}", inplace=True)
+                return prep_data.query(f"{first_col} not in {values_use}")
             else:
-                return prep_data.query(f"{cols} in {values_use}", inplace=True)
+                return prep_data.query(f"{first_col} in {values_use}")
         elif condition in [
             "value is greater than",
             "value is greater than or equal to",
@@ -270,7 +267,7 @@ def prep_remove_rows(prep_data: pd.DataFrame, description: str) -> pd.DataFrame:
             values_use = []
             for value in values:
                 # check if column type is datetime
-                if prep_data.dtype == "datetime64[ns]":
+                if prep_data[cols].dtypes == "datetime64[ns]":
                     value = "@pd.Timestamp('" + value + "')"
                 if value.isdigit():
                     values_use.append(int(value))
@@ -430,8 +427,8 @@ def prep_add_new_column(prep_data: pd.DataFrame, description: str):
 
     if "constant value" in value:
         value = value.replace("constant value ", "")
-        # add new column to dataset
-        prep_data = prep_data[new_col] = value
+        prep_data[new_col] = value
+        return prep_data
     else:
         # get function from value
         func = re.search(r"with [a-z]+", description).group(0).replace("with ", "")
