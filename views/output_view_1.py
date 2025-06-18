@@ -55,6 +55,20 @@ page_data = duckdb_get_table(
     survey_data_name,
     db_name="corrected",
 ).to_pandas()
+# if corrected data is empty, load prep data
+if page_data.empty:
+    page_data = duckdb_get_table(
+        project_id,
+        survey_data_name,
+        db_name="prep",
+    ).to_pandas()
+    # if prep data is empty, load raw data
+    if page_data.empty:
+        page_data = duckdb_get_table(
+            project_id,
+            survey_data_name,
+            db_name="raw",
+        ).to_pandas()
 
 (
     summary,
