@@ -29,5 +29,9 @@
         "cpu": 1.0,
         "ram": 2,
         "gpu": 0
-    }
+    },
+    "secret-keys": [
+        "password_main_app",
+        "username_main_app"
+    ]
 }
