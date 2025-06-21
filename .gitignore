@@ -176,3 +176,4 @@ archived/notebooks/*test*.ipynb
 cache/*
 !cache/.gitkeep
 **.DS_Store
+CLAUDE.md
