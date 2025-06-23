@@ -3,12 +3,18 @@ import streamlit as st
 
 from src.processing import (
     correction_apply_action,
-    correction_load_log,
 )
+from src.utils import duckdb_get_table, duckdb_save_table, get_check_config_settings
 
 # DEFINE CONSTANTS FOR CORRECTION'
 
 CORRECTION_ACTIONS = ("modify value", "remove value", "remove row")
+
+project_id: str = st.session_state.st_project_id
+hfc_config_logs = duckdb_get_table(
+    project_id=project_id, alias="check_config", db_name="logs"
+)
+hfc_pages = hfc_config_logs["page_name"].to_list()
 
 # -- DATA CORERCTIONS PAGE --#
 # Creates page for data preprocessing
@@ -16,26 +22,19 @@ CORRECTION_ACTIONS = ("modify value", "remove value", "remove row")
 st.title("Correct Data")
 st.markdown("Make necessary corrections to data based on issues identified in checks.")
 
-# get dataset alias and project ID from session state
-alias_list: list[str] = st.session_state.st_raw_dataset_list
-project_id: str = st.session_state.st_project_id
-
 # show/hide data prep page
 
 show_corr_page_info = False
-if not alias_list:
+if not hfc_pages:
     st.info(
         "No data available to prepare. Load a dataset from the import page to continue."
     )
-else:
-    show_corr_page_info = True
+    st.stop()
 
 
 def correction_input_form(
-    id_col: str,
-    key_col: str,
-    data_index: int,
     project_id: str,
+    key_col: str,
     alias: str,
 ) -> None:
     """Define input form for corrections
@@ -49,12 +48,12 @@ def correction_input_form(
     -------
         None
     """
-    # get dataset
-    if not isinstance(st.session_state[f"corrected_data{data_index}"], pl.DataFrame):
-        corrected_data = pl.from_pandas(st.session_state[f"corrected_data{data_index}"])
-    else:
-        corrected_data = st.session_state[f"corrected_data{data_index}"]
-
+    # get corrected data keys
+    corrected_data = duckdb_get_table(
+        project_id=project_id,
+        alias=alias,
+        db_name="corrected",
+    )
     fc1, _ = st.columns([0.4, 0.6])
     with (
         fc1,
@@ -65,18 +64,9 @@ def correction_input_form(
         corr_key_val = st.selectbox(
             label="Select KEY",
             options=key_options,
-            key=f"ID_correction_key_value__{i}",
+            key=f"ID_correction_key_value_{i}",
         )
         if corr_key_val:
-            current_id_val = corrected_data.filter(
-                pl.col(survey_key) == corr_key_val
-            ).select(id_col)[0, 0]
-            st.text_input(
-                label="Current ID Value",
-                value=current_id_val,
-                key=f"ID_correction_current_id_{i}",
-                disabled=True,
-            )
             corr_action = st.selectbox(
                 label="Select Action",
                 options=CORRECTION_ACTIONS,
@@ -163,107 +153,140 @@ def correction_input_form(
                 correction_apply_action(
                     action=corr_action,
                     key_col=key_col,
-                    current_id=current_id_val,
                     key_value=corr_key_val,
                     current_value=current_value,
                     col_to_modify=col_to_modify,
                     new_value=new_value,
                     reason=reason,
-                    data_index=data_index,
                 )
                 st.success("ID correction applied successfully!")
 
-            # save corrections log to setting file
-            log_name = alias.lower().replace(" ", "_").replace("-", "_")
-            st.session_state[f"id_correction_log_{data_index}"].write_json(
-                f"cache/{project_id}/settings/{log_name}.json"
+                # update the corrections log
+                new_log_entry = {
+                    "date": pl.datetime.now(),
+                    "KEY": corr_key_val,
+                    "ID": current_value,
+                    "action": corr_action,
+                    "column": col_to_modify,
+                    "current value": current_value,
+                    "new value": new_value,
+                    "reason": reason,
+                }
+
+                # get current corrections log
+                current_log = duckdb_get_table(
+                    project_id=project_id,
+                    alias=f"corr_log_{alias}",
+                    db_name="logs",
+                )
+
+                # add new entry to the log
+                log = pl.concat([current_log, pl.DataFrame(new_log_entry)])
+
+                duckdb_save_table(
+                    project_id,
+                    log,
+                    alias=f"corr_log_{alias}",
+                    db_name="logs",
+                )
+
+
+# get list of HFC pages from session state
+corr_tabs = st.tabs(hfc_pages)
+
+for i, tab in enumerate(corr_tabs):
+    with tab:
+        # get page name for current index from polars dataframe hfc_config_logs
+        (
+            page_name,
+            survey_data_name,
+            survey_key,
+            survey_id,
+            survey_date,
+            enumerator,
+            backcheck_data_name,
+            tracking_data_name,
+        ) = get_check_config_settings(
+            project_id=project_id,
+            page_row_index=i,
+        )
+
+        st.subheader(f"{page_name}")
+
+        # get current corrected data, if empty, get prepped data and save
+        # as corrected data
+        corrected_data = duckdb_get_table(
+            project_id,
+            alias=survey_data_name,
+            db_name="corrected",
+        )
+
+        if corrected_data.is_empty():
+            corrected_data = duckdb_get_table(
+                project_id,
+                alias=survey_data_name,
+                db_name="prep",
             )
 
+        duckdb_save_table(
+            project_id,
+            corrected_data,
+            alias=survey_data_name,
+            db_name="corrected",
+        )
 
-if show_corr_page_info:
-    # get list of HFC pages from session state
-    hfc_pages = st.session_state.config_pages["Page Name"].tolist()
-    corr_tabs = st.tabs(hfc_pages)
+        st.write("Add corrections to the data based on issues identified in checks.")
 
-    for idx, tab in enumerate(corr_tabs):
-        with tab:
-            page_name = hfc_pages[idx]
-            st.subheader(f"{page_name}")
-            # get value of survey key if Page Name is tab
-            survey_key = st.session_state.config_pages["Survey KEY"][idx]
-            survey_id = st.session_state.config_pages["Survey ID"][idx]
-            survey_data = st.session_state.config_pages["Survey Data"][idx]
+        correction_input_form(
+            project_id=project_id,
+            key_col=survey_key,
+            alias=survey_data_name,
+        )
 
-            i = alias_list.index(survey_data)
+        # load correction log
+        correction_log = duckdb_get_table(
+            project_id=project_id,
+            alias=f"corr_log_{survey_data_name}",
+            db_name="logs",
+        )
 
-            # define session state for correction
-            if f"corrected_data{i}" not in st.session_state:
-                st.session_state[f"corrected_data{i}"] = pl.from_pandas(
-                    st.session_state[f"prepped_data{i}"]
+        with st.container(border=True):
+            if correction_log.is_empty():
+                st.info(
+                    "No corrections have been made yet. You can add corrections using the form above."
                 )
             else:
-                if isinstance(st.session_state[f"corrected_data{i}"], pl.DataFrame):
-                    st.session_state[f"corrected_data{i}"] = st.session_state[
-                        f"corrected_data{i}"
-                    ].to_pandas()
-                st.session_state[f"corrected_data{i}"] = pl.from_pandas(
-                    st.session_state[f"corrected_data{i}"]
-                )
-
-            # load corrections log
-            if f"id_correction_log_{i}" not in st.session_state:
-                st.session_state[f"id_correction_log_{i}"] = correction_load_log(
-                    project_id, page_name
-                )
-
-            st.write(
-                "Correct ID duplicates by either modifying the ID or removing the row. "
-                "Select the action from the dropdown and provide the necessary input."
-            )
-
-            correction_input_form(
-                key_col=survey_key,
-                id_col=survey_id,
-                data_index=i,
-                project_id=project_id,
-                alias=page_name,
-            )
-
-            st.session_state[f"id_correction_log_{i}"] = st.data_editor(
-                data=st.session_state[f"id_correction_log_{i}"],
-                use_container_width=True,
-                key=f"id_correction_log_displ_{i}",
-                num_rows="dynamic",
-            )
-
-            row_count, col_count = st.session_state[f"corrected_data{i}"].shape
-
-            # calculate missing values percentage
-            miss_count = st.session_state[f"corrected_data{i}"].select(
-                pl.all().is_null().sum()
-            )
-            miss_count = miss_count.with_columns(
-                sum_of_missing_values=pl.sum_horizontal(pl.all())
-            )
-            miss_perc = round(
-                (miss_count["sum_of_missing_values"][0] / (row_count * col_count))
-                * 100,
-                2,
-            )
-
-            # display preview of peppered data
-            with st.container(border=True):
-                st.subheader("Preview Corrected Data")
-                st.write("---")
-
-                mc1, mc2, mc3 = st.columns((0.3, 0.3, 0.4))
-
-                mc1.metric(label="Rows", value=row_count)
-                mc2.metric(label="Columns", value=col_count)
-                mc3.metric(label="Missing Values", value=f"{miss_perc}%")
-
-                # display data
+                st.subheader("Correction Log")
                 st.dataframe(
-                    data=st.session_state[f"corrected_data{i}"],
+                    data=correction_log,
                     use_container_width=True,
                 )
+
+        row_count, col_count = corrected_data.shape
+
+        # calculate missing values percentage
+        miss_count = corrected_data.select(pl.all().is_null().sum())
+        miss_count = miss_count.with_columns(
+            sum_of_missing_values=pl.sum_horizontal(pl.all())
+        )
+        miss_perc = round(
+            (miss_count["sum_of_missing_values"][0] / (row_count * col_count)) * 100,
+            2,
+        )
+
+        # display preview of peppered data
+        with st.container(border=True):
+            st.subheader("Preview Corrected Data")
+            st.write("---")
+
+            mc1, mc2, mc3 = st.columns((0.3, 0.3, 0.4))
+
+            mc1.metric(label="Rows", value=row_count)
+            mc2.metric(label="Columns", value=col_count)
+            mc3.metric(label="Missing Values", value=f"{miss_perc}%")
+
+            # display data
+            st.dataframe(
+                data=corrected_data,
+                use_container_width=True,
+            )

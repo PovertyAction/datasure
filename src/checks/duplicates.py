@@ -3,11 +3,18 @@ import os
 import pandas as pd
 import streamlit as st
 
-from src.utils import load_check_settings, save_check_settings, trigger_save
+from src.utils import (
+    get_check_config_settings,
+    load_check_settings,
+    save_check_settings,
+    trigger_save,
+)
 
 
 # @st.cache_data
-def load_default_duplicates_settings(setting_file: str, page_num: int) -> tuple:
+def load_default_duplicates_settings(
+    project_id: str, setting_file: str, page_num: int
+) -> tuple:
     """
     Load default settings for duplicates report from a settings file.
 
@@ -19,6 +26,13 @@ def load_default_duplicates_settings(setting_file: str, page_num: int) -> tuple:
     -------
         dict: A dictionary containing the default settings for duplicates report.
     """
+    # Get config page defaults
+    _, _, config_survey_key, config_survey_id, config_survey_date, _, _, _ = (
+        get_check_config_settings(
+            project_id=project_id,
+            page_row_index=page_num - 1,
+        )
+    )
     # load default settings in the following order:
     # - if settings file exists, load settings from file
     # - if settings file does not exist, load default settings from config
@@ -28,15 +42,9 @@ def load_default_duplicates_settings(setting_file: str, page_num: int) -> tuple:
     else:
         default_settings = {}
 
-    default_survey_id = default_settings.get(
-        "survey_id", st.session_state["config_pages"]["Survey ID"][page_num - 1]
-    )
-    default_survey_key = default_settings.get(
-        "survey_key", st.session_state["config_pages"]["Survey KEY"][page_num - 1]
-    )
-    default_date = default_settings.get(
-        "date", st.session_state["config_pages"]["Survey Date"][page_num - 1]
-    )
+    default_survey_id = default_settings.get("survey_id", config_survey_id)
+    default_survey_key = default_settings.get("survey_key", config_survey_key)
+    default_date = default_settings.get("date", config_survey_date)
     default_dup_cols = default_settings.get("dup_cols", None)
     default_display_cols = default_settings.get("display_cols", None)
 
@@ -49,7 +57,9 @@ def load_default_duplicates_settings(setting_file: str, page_num: int) -> tuple:
     )
 
 
-def duplicates_settings(data: pd.DataFrame, settings_file: str, page_num: int) -> tuple:
+def duplicates_settings(
+    project_id: str, data: pd.DataFrame, settings_file: str, page_num: int
+) -> tuple:
     """
     Get the settings for duplicates report
 
@@ -74,9 +84,7 @@ def duplicates_settings(data: pd.DataFrame, settings_file: str, page_num: int) -
         id_col, key_col, date_col = st.columns(3)
 
         survey_id, survey_key, date, dup_cols, display_cols = (
-            load_default_duplicates_settings(
-                setting_file=settings_file, page_num=page_num
-            )
+            load_default_duplicates_settings(project_id, settings_file, page_num)
         )
 
         with id_col:
@@ -562,7 +570,9 @@ def column_duplicates_display(
 
 
 # define function to create duplicates report
-def duplicates_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:  # noqa: D417, RUF100
+def duplicates_report(
+    project_id: str, data: pd.DataFrame, setting_file: str, page_num: int
+) -> None:  # noqa: D417, RUF100
     """
     Generate a report on duplicate data in the dataset. The report includes a
     summary of duplicate data, a table showing the number of duplicate rows, and
@@ -582,7 +592,7 @@ def duplicates_report(data: pd.DataFrame, setting_file: str, page_num: int) -> N
 
     """
     survey_id, survey_key, date, dup_cols, display_cols = duplicates_settings(
-        data, settings_file=setting_file, page_num=page_num
+        project_id, data, setting_file, page_num
     )
 
     # ---- Show report --- #

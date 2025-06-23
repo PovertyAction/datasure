@@ -11,8 +11,7 @@ import pysurveycto
 import requests
 import streamlit as st
 
-from src.connectors import get_import_cache
-from src.utils import save_to_duckdb
+from src.utils import duckdb_get_table, duckdb_save_table
 
 # --- SurveyCTO Server Connect Button Click Action --- #
 
@@ -78,33 +77,6 @@ def scto_server_connect(servername: str, username: str, password: str) -> str:
         scto = pysurveycto.SurveyCTOObject(servername, username, password)
         st.success("Connection successful")
         return scto
-
-
-# --- Load Login Information --- #
-def scto_load_login() -> tuple:
-    """Load Login details from previous session.
-
-    PARAMS:
-    -------
-    servername: SurveyCTO server name
-
-    Return:
-    ------
-    servername: SurveyCTO server name
-    username: SurveyCTO account username (email address)
-
-    Returned as tuple of servername and username.
-    Returns empty tuple if no previous session
-
-    """
-    # load server login details from last session
-    try:
-        file = pd.read_json("cache/pyDMS_server_cache.json")
-        server_details = file.to_dict()
-        return (server_details["name"][0], server_details["user"][0])
-
-    except FileNotFoundError:
-        return ("", "")
 
 
 # --- SurveyCTO load form details --- #
@@ -524,9 +496,9 @@ def scto_import_data(
 
     # save dataset to DuckDB
     # save data to DuckDB
-    save_to_duckdb(
-        project_id=project_id,
-        data=scto_data,
+    duckdb_save_table(
+        project_id,
+        scto_data,
         alias=alias,
         db_name="raw",
     )
@@ -614,36 +586,39 @@ def scto_add_form(
 
         if submit_button:
             # check that alias provided is not an exiting alias
-            cache_file = get_import_cache(project_id)
-            if alias in cache_file:
-                st.warning(
+            import_log = duckdb_get_table(
+                project_id, alias="import_log", db_name="logs"
+            )
+            if alias in import_log["alias"].to_list():
+                st.error(
                     f"Alias '{alias}' already exists. Please choose a different alias."
                 )
-                st.stop()
+            else:
+                new_form = {
+                    "refresh": True,
+                    "load": True,
+                    "source": "SurveyCTO",
+                    "alias": alias,
+                    "filename": "",
+                    "sheet_name": "",
+                    "server": scto_server,
+                    "form_id": scto_form_id,
+                    "private_key": scto_key,
+                    "save_to": scto_saveas,
+                    "attachments": False,
+                }
 
-            new_form = {
-                "refresh": True,
-                "load": True,
-                "source": "SurveyCTO",
-                "alias": alias,
-                "filename": "",
-                "sheet_name": "",
-                "server": scto_server,
-                "form_id": scto_form_id,
-                "private_key": scto_key,
-                "save_to": scto_saveas,
-                "attachments": False,
-            }
+                import_log = pl.concat(
+                    [import_log, pl.DataFrame([new_form])],
+                    how="vertical",
+                )
 
-            # import import log and append new form
-            cache_file = get_import_cache(project_id)
-            cache_file = pl.concat(
-                [cache_file, pl.DataFrame([new_form])],
-                how="vertical",
-            )
-
-            # write the updated cache file to disk
-            cache_file.write_json(f"cache/{project_id}/settings/import_cache.json")
+                duckdb_save_table(
+                    project_id=project_id,
+                    table_data=import_log,
+                    alias="import_log",
+                    db_name="logs",
+                )
 
 
 def valid_server_name(servername: str) -> bool:
@@ -738,6 +713,10 @@ def scto_login_form(project_id: str) -> None:
             # save server cache to file
             with open(f"cache/{project_id}/settings/scto.json", "w") as file:
                 json.dump(server_details, file)
+
+            st.success(
+                f"SurveyCTO Connection for {scto_server_name} added successfully"
+            )
 
 
 # --- SCTO Download button action --- #

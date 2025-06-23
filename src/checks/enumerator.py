@@ -5,13 +5,20 @@ import pandas as pd
 import seaborn as sns
 import streamlit as st
 
-from src.utils import load_check_settings, save_check_settings, trigger_save
+from src.utils import (
+    get_check_config_settings,
+    load_check_settings,
+    save_check_settings,
+    trigger_save,
+)
 
 ##### Enumerator Statistics #####
 
 
 @st.cache_data
-def load_default_enumerator_settings(setting_file: str, page_num: str) -> tuple:
+def load_default_enumerator_settings(
+    project_id: str, setting_file: str, page_num: str
+) -> tuple:
     """Load default settings for enumerator report.
 
     Parameters
@@ -38,6 +45,13 @@ def load_default_enumerator_settings(setting_file: str, page_num: str) -> tuple:
        outcome : str - outcome column name
        outcome_vals : list - outcome values
     """
+    # Get config page defaults
+    _, _, _, config_survey_id, config_survey_date, config_enumerator, _, _ = (
+        get_check_config_settings(
+            project_id=project_id,
+            page_row_index=page_num - 1,
+        )
+    )
     if setting_file and os.path.exists(setting_file):
         default_settings = (
             load_check_settings(settings_file=setting_file, check_name="enumerator")
@@ -47,27 +61,21 @@ def load_default_enumerator_settings(setting_file: str, page_num: str) -> tuple:
         default_settings = {}
     (
         date,
-        formdef_version,
-        duration,
         survey_id,
         enumerator,
+        formdef_version,
+        duration,
         team,
         consent,
         consent_vals,
         outcome,
         outcome_vals,
     ) = (
-        default_settings.get(
-            "date", st.session_state["config_pages"]["Survey Date"][page_num - 1]
-        ),
+        default_settings.get("date", config_survey_date),
+        default_settings.get("survey_id", config_survey_id),
+        default_settings.get("enumerator", config_enumerator),
         default_settings.get("formdef_version", None),
         default_settings.get("duration", None),
-        default_settings.get(
-            "survey_id", st.session_state["config_pages"]["Survey ID"][page_num - 1]
-        ),
-        default_settings.get(
-            "enumerator", st.session_state["config_pages"]["Enumerator"][page_num - 1]
-        ),
         default_settings.get("team", None),
         default_settings.get("consent", None),
         default_settings.get("consent_vals", None),
@@ -88,7 +96,9 @@ def load_default_enumerator_settings(setting_file: str, page_num: str) -> tuple:
     )
 
 
-def enumerator_report_settings(data: str, setting_file: str, page_num: str) -> tuple:
+def enumerator_report_settings(
+    project_id: str, data: str, setting_file: str, page_num: str
+) -> tuple:
     """Load default settings for enumerator report.
 
     Parameters
@@ -131,18 +141,16 @@ def enumerator_report_settings(data: str, setting_file: str, page_num: str) -> t
             consent_vals,
             outcome,
             outcome_vals,
-        ) = load_default_enumerator_settings(
-            setting_file=setting_file, page_num=page_num
-        )
+        ) = load_default_enumerator_settings(project_id, setting_file, page_num)
         uc1, uc2, uc3 = st.columns(3)
         with st.container(border=True):
             with uc1:
-                default_date_index = (
-                    survey_cols.get_loc(date) if date in survey_cols else None
-                )
+                date_col_options = data.select_dtypes("datetime").columns.tolist()
+                default_date_index = date_col_options.index(date)
+
                 date = st.selectbox(
                     label="Date",
-                    options=data.columns,
+                    options=date_col_options,
                     help="Column containing survey date",
                     key="date_enumerator",
                     index=default_date_index,
@@ -312,7 +320,6 @@ def compute_enumerator_overview(
         Overview metrics for enumerators.
     """
     data = data.sort_values(by=[enumerator, date])
-    data[date] = data[date].dt.strftime("%b %d, %Y")
 
     all_submissions = len(data)
 
@@ -1306,8 +1313,8 @@ def enumerator_report(
     project_id: str,
     data: pd.DataFrame,
     setting_file: str,
+    missing_setting_file: str,
     page_num: int,
-    page_name: str,
 ) -> None:
     """Generate enumerator report.
 
@@ -1324,9 +1331,6 @@ def enumerator_report(
     -------
         None
     """
-    missing_setting_file = (
-        f"cache/{project_id}/settings/missing_settings_{page_name}.json"
-    )
     (
         date,
         formdef_version,
@@ -1338,43 +1342,41 @@ def enumerator_report(
         consent_vals,
         outcome,
         outcome_vals,
-    ) = enumerator_report_settings(
-        data=data, setting_file=setting_file, page_num=page_num
-    )
+    ) = enumerator_report_settings(project_id, data, setting_file, page_num)
     display_enumerator_overview(
-        data=data,
-        date=date,
-        enumerator=enumerator,
-        team=team,
+        data,
+        date,
+        enumerator,
+        team,
     )
 
     display_enumerator_summary(
-        data=data,
-        date=date,
-        enumerator=enumerator,
-        formdef_version=formdef_version,
-        duration=duration,
-        consent=consent,
-        consent_vals=consent_vals,
-        outcome=outcome,
-        outcome_vals=outcome_vals,
-        missing_setting_file=missing_setting_file,
+        data,
+        missing_setting_file,
+        date,
+        enumerator,
+        formdef_version,
+        duration,
+        consent,
+        consent_vals,
+        outcome,
+        outcome_vals,
     )
     display_enumerator_productivity(
-        data=data,
-        date=date,
-        enumerator=enumerator,
-        setting_file=setting_file,
+        data,
+        date,
+        enumerator,
+        setting_file,
     )
     display_enumerator_statistics(
-        data=data,
-        date=date,
-        enumerator=enumerator,
-        setting_file=setting_file,
+        data,
+        date,
+        enumerator,
+        setting_file,
     )
     display_enumerator_statistics_overtime(
-        data=data,
-        date=date,
-        enumerator=enumerator,
-        setting_file=setting_file,
+        data,
+        date,
+        enumerator,
+        setting_file,
     )

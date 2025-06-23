@@ -7,6 +7,7 @@ import streamlit as st
 
 from src.utils import (
     donut_chart2,
+    get_check_config_settings,
     load_check_settings,
     save_check_settings,
     trigger_save,
@@ -15,7 +16,9 @@ from src.utils import (
 
 #### Survey Progress ###
 @st.cache_data
-def load_default_progress_settings(setting_file: str, page_num: int) -> tuple:
+def load_default_progress_settings(
+    project_id: str, setting_file: str, page_num: int
+) -> tuple:
     """Load default settings for progress report
 
     PARAMS:
@@ -28,25 +31,34 @@ def load_default_progress_settings(setting_file: str, page_num: int) -> tuple:
     -------
     tuple : default settings for progress report
     """
+    # Get config page defaults
+    _, _, _, config_survey_id, config_survey_date, config_enumerator, _, _ = (
+        get_check_config_settings(
+            project_id=project_id,
+            page_row_index=page_num - 1,
+        )
+    )
     # load default settings in the following order:
     # - if settings file exists, load settings from file
     # - if settings file does not exist, load default settings from config
     if setting_file and os.path.exists(setting_file):
         default_settings = load_check_settings(setting_file, "progress") or {}
+        summary_settings = load_check_settings(setting_file, "progress") or {}
     else:
         default_settings = {}
+        summary_settings = {}
+
     default_survey_id, default_enumerator, default_date, default_target = (
-        default_settings.get(
-            "survey_id", st.session_state["config_pages"]["Survey ID"][page_num - 1]
-        ),
-        default_settings.get(
-            "enumerator", st.session_state["config_pages"]["Enumerator"][page_num - 1]
-        ),
-        default_settings.get(
-            "date", st.session_state["config_pages"]["Survey Date"][page_num - 1]
-        ),
+        default_settings.get("survey_id", config_survey_id),
+        default_settings.get("enumerator", config_enumerator),
+        default_settings.get("date", config_survey_date),
         default_settings.get("target", None),
     )
+
+    # for default target, get the value in summary page if there is
+    # no default for the progress page
+    if not default_target:
+        default_target = summary_settings.get("target", None)
 
     return (
         default_survey_id,
@@ -57,6 +69,7 @@ def load_default_progress_settings(setting_file: str, page_num: int) -> tuple:
 
 
 def progress_report_settings(
+    project_id: str,
     data: pd.DataFrame,
     setting_file: str,
     page_num: int,
@@ -82,7 +95,7 @@ def progress_report_settings(
             default_enumerator,
             default_date,
             default_target,
-        ) = load_default_progress_settings(setting_file=setting_file, page_num=page_num)
+        ) = load_default_progress_settings(project_id, setting_file, page_num)
 
         survey_cols = data.columns
 
@@ -690,7 +703,9 @@ def display_attempted_interviews(
     )
 
 
-def progress_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:
+def progress_report(
+    project_id: str, data: pd.DataFrame, setting_file: str, page_num: int
+) -> None:
     """Display progress report
 
     Parameters
@@ -703,7 +718,7 @@ def progress_report(data: pd.DataFrame, setting_file: str, page_num: int) -> Non
     None
     """
     survey_id, date, enumerator, target = progress_report_settings(
-        data=data, setting_file=setting_file, page_num=page_num
+        project_id, data, setting_file, page_num
     )
     display_progress_summary(
         data=data,

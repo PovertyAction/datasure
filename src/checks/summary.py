@@ -9,6 +9,7 @@ from millify import millify, prettify
 
 from src.utils import (
     donut_chart2,
+    get_check_config_settings,
     load_check_settings,
     save_check_settings,
     trigger_save,
@@ -16,7 +17,7 @@ from src.utils import (
 
 
 @st.cache_data
-def load_default_settings(setting_file: str, page_num: int) -> tuple:
+def load_default_settings(project_id: str, setting_file: str, page_num: int) -> tuple:
     """
     Load the default settings for the summary report.
 
@@ -34,6 +35,12 @@ def load_default_settings(setting_file: str, page_num: int) -> tuple:
             A tuple containing the default settings for the summary report.
 
     """
+    # Get config page defaults
+    _, _, _, config_survey_id, config_survey_date, _, _, _ = get_check_config_settings(
+        project_id=project_id,
+        page_row_index=page_num - 1,
+    )
+
     # load default settings in the following order:
     # - if settings file exists, load settings from file
     # - if settings file does not exist, load default settings from config
@@ -42,22 +49,19 @@ def load_default_settings(setting_file: str, page_num: int) -> tuple:
     else:
         default_settings = {}
 
-    default_date = default_settings.get(
-        "date", st.session_state["config_pages"]["Survey Date"][page_num - 1]
-    )
-    default_enumerator = default_settings.get(
-        "enumerator", st.session_state["config_pages"]["Enumerator"][page_num - 1]
-    )
-    default_target = default_settings.get("target", None)
-    default_survey_id = default_settings.get(
-        "survey_id", st.session_state["config_pages"]["Survey ID"][page_num - 1]
-    )
+    default_date = default_settings.get("date", config_survey_date)
+    default_survey_id = default_settings.get("survey_id", config_survey_id)
 
-    return default_date, default_enumerator, default_target, default_survey_id
+    # if target is not set, return None
+    default_target = default_settings.get("target", None)
+
+    return default_date, default_target, default_survey_id
 
 
 # define function to create summary report
-def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
+def summary_settings(
+    project_id: str, data: pd.DataFrame, setting_file: str, page_num
+) -> tuple:
     """
     Get the settings for the summary report.
 
@@ -80,8 +84,8 @@ def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
         st.write("---")
         st.markdown("### Select columns to include in summary report")
 
-        default_date, default_enumerator, default_target, default_survey_id = (
-            load_default_settings(setting_file=setting_file, page_num=page_num)
+        default_date, default_target, default_survey_id = load_default_settings(
+            project_id=project_id, setting_file=setting_file, page_num=page_num
         )
         with st.container(border=True):
             sc1, sc2, sc3 = st.columns(spec=3)
@@ -99,17 +103,6 @@ def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
                 )
 
             with sc2:
-                default_enumerator_index = (
-                    survey_cols.get_loc(default_enumerator) if default_enumerator else 0
-                )
-                enumerator = st.selectbox(
-                    label="Enumerator",
-                    options=survey_cols,
-                    index=default_enumerator_index,
-                    key="enumerator_summary",
-                )
-
-            with sc3:
                 default_survey_id_index = (
                     survey_cols.get_loc(default_survey_id) if default_survey_id else 0
                 )
@@ -121,16 +114,12 @@ def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
                     key="survey_id_summary",
                 )
 
-            st.write("---")
-            tc1, tc2 = st.columns([0.4, 0.6])
-            tc1.markdown("##### Target number of interviews")
-            with tc2:
+            with sc3:
                 target = st.number_input(
                     label="Total goal",
                     min_value=0,
                     value=default_target,
                     help="Total number of interviews expected",
-                    label_visibility="collapsed",
                     key="total_goal_summary",
                 )
 
@@ -144,13 +133,12 @@ def summary_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
                 "check_name": "summary",
                 "check_settings": {
                     "date": date,
-                    "enumerator": enumerator,
                     "target": target,
                     "survey_id": survey_id,
                 },
             },
         )
-    return date, enumerator, target, survey_id or None
+    return date, target, survey_id or None
 
 
 @st.cache_data
@@ -832,7 +820,9 @@ def summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> None:
         st.warning("Please select a survey ID column to view data quality details")
 
 
-def summary_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:
+def summary_report(
+    project_id: str, data: pd.DataFrame, setting_file: str, page_num: int
+) -> None:
     """
     Generates a summary report for the survey data
 
@@ -848,9 +838,7 @@ def summary_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None
     -------
     None
     """
-    date, enumerator, target, survey_id = summary_settings(
-        data=data, setting_file=setting_file, page_num=page_num
-    )
+    date, target, survey_id = summary_settings(project_id, data, setting_file, page_num)
     summary_submissions(
         data=data[[date]],
         date=date,
