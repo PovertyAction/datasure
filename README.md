@@ -138,16 +138,45 @@ Follow these steps to test the app:
 
 ## Running Tests
 
-The project uses Python's built-in `unittest` framework for testing. The test files are located in the `tests/` directory.
+The project uses Python `pytest` framework for testing. The test files are located in the `tests/` directory.
 
 To run all tests, execute the following command from the project root directory:
 
 ```bash
-python -m unittest discover tests
+uv run python -m pytest
 ```
 
-To run a specific test file:
+To run a specific test file, use:
 
 ```bash
-python -m unittest tests/test_summary.py
+uv run python -m pytest tests/test_file.py
 ```
+
+## Deployment
+
+pyDMS can be deployed using [Ploomber Cloud](https://docs.cloud.ploomber.io/en/latest/intro.html). You will need a deployment key from [Ploomber's platform console](https://www.platform.ploomber.io/).
+
+```bash
+# make sure your venv is synced
+uv sync
+
+# set your Ploomber Cloud key locally
+uv run ploomber-cloud key YOUR-KEY
+
+# make sure that the requirements.txt file is up to date
+uv pip compile pyproject.toml -o requirements.txt --no-annotate --no-header
+
+# make sure that app.py is the same as pydms.py and deploy the app
+# Ploomber needs to use app.py as the entry point for the Streamlit app
+cp pydms.py app.py && uv run ploomber-cloud deploy --watch
+```
+
+See Ploomber docs for more details on deployment options and configurations of [Streamlit apps](https://docs.cloud.ploomber.io/en/latest/apps/streamlit.html). Password protection docs are found [here](https://docs.cloud.ploomber.io/en/latest/user-guide/cli.html#password-protection).
+
+## Code Quality Reports
+
+Code quality metrics and reports are available on SonarQube Cloud:
+
+- **Dashboard**: [https://sonarcloud.io/project/overview?id=PovertyAction_dms-dashboard](https://sonarcloud.io/project/overview?id=PovertyAction_dms-dashboard)
+
+The SonarQube dashboard provides insights into code coverage, code smells, bugs, vulnerabilities, and maintainability ratings.

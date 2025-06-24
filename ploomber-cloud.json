@@ -1,0 +1,37 @@
+{
+    "id": "muddy-mountain-6219",
+    "type": "streamlit",
+    "ignore": [
+        "tests/",
+        ".github/",
+        "pytest_cache/",
+        "ruff_cache/",
+        ".sonarlint/",
+        ".streamlit/",
+        ".venv/",
+        ".vscode/",
+        "archived/",
+        "build/",
+        "htmlcov/",
+        ".coverage",
+        ".coverage.html",
+        ".coverage.htmlcov",
+        ".coverage.xml",
+        ".gitignore",
+        ".markdownlint.yaml",
+        ".pre-commit-config.yaml",
+        "Justfile",
+        "README.md",
+        "CLAUDE.md",
+        "pydms.py"
+    ],
+    "resources": {
+        "cpu": 1.0,
+        "ram": 2,
+        "gpu": 0
+    },
+    "secret-keys": [
+        "password_main_app",
+        "username_main_app"
+    ]
+}

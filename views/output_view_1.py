@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import streamlit as st
 
 from src.checks import (
@@ -11,15 +13,62 @@ from src.checks import (
     progress_report,
     summary_report,
 )
+from src.utils import duckdb_get_table, get_check_config_settings
 
 # define page number
 page_number = 1
 page_data_index = page_number - 1
 
-page_name = st.session_state.config_pages["Page Name"][page_data_index]
-setting_file = f"cache/settings/pyDMS_hfc_settings_{page_name}.json"
+# define project ID
+project_id = st.session_state.st_project_id
 
-st.title(st.session_state[f"config_page_{page_number}"])
+# get page config information
+(
+    page_name,
+    survey_data_name,
+    survey_key,
+    survey_id,
+    survey_date,
+    enumerator,
+    backcheck_data_name,
+    tracking_data_name,
+) = get_check_config_settings(
+    project_id=project_id,
+    page_row_index=page_data_index,
+)
+
+# get_page_name_id from page name
+page_name_id = page_name.lower().replace(" ", "_").replace("-", "_")
+
+# set setting file path
+cache_settings_base = Path("cache") / project_id / "settings"
+
+# define setting file
+setting_file = cache_settings_base / f"page_{page_name_id}_settings.json"
+missing_setting_file = (
+    cache_settings_base / f"page_{page_name_id}_missing_settings.json"
+)
+
+# load corrected data for page
+page_data = duckdb_get_table(
+    project_id,
+    survey_data_name,
+    db_name="corrected",
+).to_pandas()
+# if corrected data is empty, load prep data
+if page_data.empty:
+    page_data = duckdb_get_table(
+        project_id,
+        survey_data_name,
+        db_name="prep",
+    ).to_pandas()
+    # if prep data is empty, load raw data
+    if page_data.empty:
+        page_data = duckdb_get_table(
+            project_id,
+            survey_data_name,
+            db_name="raw",
+        ).to_pandas()
 
 (
     summary,
@@ -45,71 +94,83 @@ st.title(st.session_state[f"config_page_{page_number}"])
     )
 )
 
-alias_list = list(filter(None, st.session_state.alias_list))
 
 with summary:
     summary_report(
-        data=st.session_state[f"prepped_data{page_data_index}"],
-        setting_file=setting_file,
-        page_num=page_number,
+        project_id,
+        page_data,
+        setting_file,
+        page_number,
     )
 
 with missing:
     missing_report(
-        data=st.session_state[f"prepped_data{page_data_index}"],
-        setting_file=setting_file,
-        page_name=page_name,
+        project_id,
+        page_data,
+        setting_file,
+        page_name,
     )
 
 with survey_progress:
     progress_report(
-        data=st.session_state[f"prepped_data{page_data_index}"],
-        setting_file=setting_file,
-        page_num=page_number,
+        project_id,
+        page_data,
+        setting_file,
+        page_number,
     )
 
 with duplicates:
     duplicates_report(
-        data=st.session_state[f"prepped_data{page_data_index}"],
-        setting_file=setting_file,
-        page_num=page_number,
+        project_id,
+        page_data,
+        setting_file,
+        page_number,
     )
 
 with outliers:
     outliers_report(
-        data=st.session_state[f"prepped_data{page_data_index}"], page_num=page_number
+        project_id,
+        page_data,
+        setting_file,
+        page_number,
     )
 
 with enum_stats:
     enumerator_report(
-        data=st.session_state[f"prepped_data{page_data_index}"],
-        setting_file=setting_file,
-        page_num=page_number,
-        page_name=page_name,
+        project_id,
+        page_data,
+        setting_file,
+        missing_setting_file,
+        page_number,
     )
 
 with desc_stats:
     descriptive_report(
-        data=st.session_state[f"prepped_data{page_data_index}"],
-        setting_file=setting_file,
-        page_num=page_number,
+        page_data,
+        setting_file,
+        page_number,
     )
 
 with back_checks:
-    bc_data_name = st.session_state.config_pages["Back check data"][page_number - 1]
-    if bc_data_name and bc_data_name in alias_list:
-        page_bc_data_index = st.session_state.alias_list.index(bc_data_name)
-        backcheck_data = st.session_state[f"prepped_data{page_bc_data_index}"]
+    if backcheck_data_name:
+        # load backcheck data
+        backcheck_data = duckdb_get_table(
+            project_id,
+            backcheck_data_name,
+            db_name="corrected",
+        ).to_pandas()
 
         backchecks_report(
-            survey_data=st.session_state[f"prepped_data{page_data_index}"],
-            backcheck_data=backcheck_data,
-            page_num=page_number,
+            project_id,
+            page_data,
+            backcheck_data,
+            page_number,
         )
 
 with gps_checks:
     gpschecks_report(
-        data=st.session_state[f"prepped_data{page_data_index}"],
-        setting_file=setting_file,
-        page_num=page_number,
+        project_id,
+        page_data,
+        setting_file,
+        page_number,
     )

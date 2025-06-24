@@ -261,3 +261,54 @@ def sample_form_data():
             {"name": "education", "type": "select_one"},
         ],
     }
+
+
+@pytest.fixture
+def sample_date_data_10000():
+    """Create a test dataset of 1000 observations for summary computation."""
+    # Set random seeds for reproducibility
+    seed = 42
+    size = 10000
+
+    # Generate datetime range
+    start_date = pd.Timestamp.now() - pd.Timedelta(days=40)
+    end_date = pd.Timestamp.now()
+
+    # Generate random datetimes
+    dates = pd.date_range(start=start_date, end=end_date, freq="h").to_list()
+    dates = (
+        pd.Series(dates)
+        .sample(size, random_state=seed, replace=True)
+        .dt.tz_localize(None)
+    )
+
+    # Create enumerator data
+    enum_ids = list(range(1, 11))  # 10 enumerators
+    enum_names = [
+        "John Smith",
+        "Mary Johnson",
+        "David Williams",
+        "Patricia Brown",
+        "Robert Jones",
+        "Linda Davis",
+        "Michael Miller",
+        "Sarah Wilson",
+        "James Taylor",
+        "Jennifer Anderson",
+    ]
+
+    # Create the dataset
+    data = {
+        "SubmissionDate": dates,
+        "enum_id": [
+            pd.Series(enum_ids).sample(1, random_state=seed).values[0]
+            for _ in range(size)
+        ],
+    }
+
+    df = pd.DataFrame(data)
+
+    # Add enum_name based on enum_id
+    df["enum_name"] = df["enum_id"].map(dict(zip(enum_ids, enum_names, strict=False)))
+
+    return df

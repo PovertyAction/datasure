@@ -8,11 +8,15 @@ import streamlit as st
 from geopy.distance import geodesic
 from sklearn.neighbors import LocalOutlierFactor
 
-from src.utils import load_check_settings, save_check_settings
+from src.utils import (
+    get_check_config_settings,
+    load_check_settings,
+    save_check_settings,
+)
 
 
 @st.cache_data
-def load_default_settings(setting_file: str, page_num: int) -> tuple:
+def load_default_settings(project_id: str, setting_file: str, page_num: int) -> tuple:
     """
     Load the default settings for the summary report.
 
@@ -30,54 +34,51 @@ def load_default_settings(setting_file: str, page_num: int) -> tuple:
             A tuple containing the default settings for the summary report.
 
     """
+    # Get config page defaults
+    (
+        _,
+        _,
+        config_survey_key,
+        config_survey_id,
+        config_survey_date,
+        config_enumerator,
+        _,
+        _,
+    ) = get_check_config_settings(
+        project_id=project_id,
+        page_row_index=page_num - 1,
+    )
     # load default settings in the following order:
     # - if settings file exists, load settings from file
     # - if settings file does not exist, load default settings from config
     if setting_file and os.path.exists(setting_file):
-        default_settings = load_check_settings(setting_file, "gpscheck")
-        if default_settings:
-            default_date = default_settings.get("date")
-            default_enumerator = default_settings.get("enumerator")
-            default_survey_key = default_settings.get("survey_key")
-            default_survey_id = default_settings.get("survey_id")
-            default_gps_column_exists = default_settings.get("gps_column_exists")
-            default_lat_lon_exist = default_settings.get("lat_lon_columns_exist")
-            default_gps_column = default_settings.get("gps_column")
-            default_gps_lat_col = default_settings.get("gps_lat_col")
-            default_gps_lon_col = default_settings.get("gps_lon_col")
-            default_gps_accuracy = default_settings.get("gps_accuracy")
-        else:
-            default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
-            default_enumerator = st.session_state["config_pages"]["Enumerator"][
-                page_num - 1
-            ]
-            default_survey_id = st.session_state["config_pages"]["Survey ID"][
-                page_num - 1
-            ]
-            default_survey_key = st.session_state["config_pages"]["Survey KEY"][
-                page_num - 1
-            ]
-            default_gps_column_exists = False
-            default_lat_lon_exist = False
-            default_gps_lat_col = None
-            default_gps_lon_col = None
-            default_gps_accuracy = None
-            default_gps_column = None
+        default_settings = load_check_settings(setting_file, "gpscheck") or {}
     else:
-        default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
-        default_enumerator = st.session_state["config_pages"]["Enumerator"][
-            page_num - 1
-        ]
-        default_survey_id = st.session_state["config_pages"]["Survey ID"][page_num - 1]
-        default_survey_key = st.session_state["config_pages"]["Survey KEY"][
-            page_num - 1
-        ]
-        default_gps_column_exists = False
-        default_lat_lon_exist = False
-        default_gps_lat_col = None
-        default_gps_lon_col = None
-        default_gps_accuracy = None
-        default_gps_column = None
+        default_settings = {}
+
+    (
+        default_date,
+        default_enumerator,
+        default_survey_id,
+        default_survey_key,
+        default_gps_column_exists,
+        default_lat_lon_exist,
+        default_gps_lat_col,
+        default_gps_lon_col,
+        default_gps_accuracy,
+        default_gps_column,
+    ) = (
+        default_settings.get("date", config_survey_date),
+        default_settings.get("enumerator", config_enumerator),
+        default_settings.get("survey_id", config_survey_id),
+        default_settings.get("survey_key", config_survey_key),
+        default_settings.get("gps_column_exists", False),
+        default_settings.get("lat_lon_columns_exist", False),
+        default_settings.get("gps_lat_col", None),
+        default_settings.get("gps_lon_col", None),
+        default_settings.get("gps_accuracy", None),
+        default_settings.get("gps_column", None),
+    )
 
     return (
         default_date,
@@ -94,7 +95,9 @@ def load_default_settings(setting_file: str, page_num: int) -> tuple:
 
 
 #  gps check settings
-def gps_check_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple:
+def gps_check_settings(
+    project_id: str, data: pd.DataFrame, setting_file: str, page_num
+) -> tuple:
     """
     Load and save settings for the GPS checks page.
 
@@ -130,7 +133,7 @@ def gps_check_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple
             default_gps_lon_col,
             default_gps_accuracy,
             default_gps_column,
-        ) = load_default_settings(setting_file, page_num)
+        ) = load_default_settings(project_id, setting_file, page_num)
 
         enum_col, gps_col = st.columns(spec=2, border=True)
 
@@ -230,6 +233,10 @@ def gps_check_settings(data: pd.DataFrame, setting_file: str, page_num) -> tuple
                             )
                             gps_altitude = None
                         elif gps_split.shape[1] >= 4:
+                            # remove any non-numeric values from split columns
+                            gps_split = gps_split.apply(
+                                lambda x: pd.to_numeric(x, errors="coerce")
+                            )
                             gps_lat_col = "latitude"
                             gps_lon_col = "longitude"
                             gps_altitude = "altitude"
@@ -359,11 +366,12 @@ def plot_gps_coordinates(
     -------
     None
     """
+    plot_df = df.copy(deep=True)
     # Drop rows with missing coordinates
-    df = df.dropna(subset=[gps_lat_col, gps_lon_col])
+    plot_df = plot_df.dropna(subset=[gps_lat_col, gps_lon_col])
 
     # Assign a color to each unique value in color_col
-    unique_values = df[color_col].unique()
+    unique_values = plot_df[color_col].unique()
     # generate a color palette based on the number of unique values
     num_colors = len(unique_values)
     if num_colors <= 10:
@@ -402,11 +410,11 @@ def plot_gps_coordinates(
         val: color_palette[i % len(color_palette)]
         for i, val in enumerate(unique_values)
     }
-    df["color_value"] = df[color_col].map(color_map)
+    plot_df["color_value"] = plot_df[color_col].map(color_map)
 
     # Prepare data for pydeck
     map_data = []
-    for _, row in df.iterrows():
+    for _, row in plot_df.iterrows():
         map_data.append(
             {
                 "longitude": float(row[gps_lon_col]),
@@ -424,8 +432,8 @@ def plot_gps_coordinates(
         )
 
     # Calculate map center
-    center_lat = df[gps_lat_col].mean()
-    center_lon = df[gps_lon_col].mean()
+    center_lat = plot_df[gps_lat_col].mean()
+    center_lon = plot_df[gps_lon_col].mean()
 
     layer = pdk.Layer(
         "ScatterplotLayer",
@@ -476,11 +484,12 @@ def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
     pd.DataFrame
         The input dataframe with an additional column indicating outliers.
     """
-    # Drop rows with missing latitude values
-    df = df[df[gps_lat_col].notna()]
+    outlier_df = df.copy(deep=True)
+    # Drop rows with missing latitude values or longitude values
+    outlier_df = outlier_df.dropna(subset=[gps_lat_col, gps_lon_col])
 
     # Group data by clustering_col and process each group separately
-    grouped_df = df.groupby(clustering_col)
+    grouped_df = outlier_df.groupby(clustering_col)
 
     # Calculate centroids for each group
     centroids = grouped_df[[gps_lat_col, gps_lon_col]].mean()
@@ -493,7 +502,7 @@ def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
             (centroid[gps_lat_col], centroid[gps_lon_col]),
         ).meters
 
-    df["distance_from_centroid"] = df.apply(calculate_distance, axis=1)
+    outlier_df["distance_from_centroid"] = outlier_df.apply(calculate_distance, axis=1)
 
     # Flag outliers using IQR for each group
     def flag_outliers(group):
@@ -507,9 +516,9 @@ def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
         )
         return group
 
-    df = grouped_df.apply(flag_outliers).reset_index(drop=True)
+    outlier_df = grouped_df.apply(flag_outliers).reset_index(drop=True)
 
-    return df
+    return outlier_df
 
 
 # automatically detect outliers using Local Outlier Factor (LOF)
@@ -573,6 +582,20 @@ def calculate_gps_accuracy_statistics(
     pd.DataFrame
         A dataframe containing grouped GPS accuracy statistics.
     """
+    allowed_stats = [
+        "min",
+        "median",
+        "mean",
+        "max",
+        "std",
+        "25th percentile",
+        "75th percentile",
+        "95th percentile",
+    ]
+    # Validate the accuracy_stats_list
+    accuracy_stats_list = [
+        stat for stat in accuracy_stats_list if stat in allowed_stats
+    ]
     # update percentile statistics with numpy percentile function
     percentile_map = {
         "25th percentile": lambda x: np.percentile(x, 25),
@@ -693,7 +716,9 @@ def plot_clusters_on_map(
 
 
 # gps checks report
-def gpschecks_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:
+def gpschecks_report(
+    project_id: str, data: pd.DataFrame, setting_file: str, page_num: int
+) -> None:
     """
     Visualize distribution of GPS data in the survey
 
@@ -721,7 +746,7 @@ def gpschecks_report(data: pd.DataFrame, setting_file: str, page_num: int) -> No
         survey_key,
         survey_id,
         enumerator,
-    ) = gps_check_settings(data, setting_file, page_num)
+    ) = gps_check_settings(project_id, data, setting_file, page_num)
     if gps_column_exists:
         if gps_lat_col is None or gps_lon_col is None:
             st.warning("Select a GPS column or latitude and longitude columns")
@@ -759,7 +784,7 @@ def gpschecks_report(data: pd.DataFrame, setting_file: str, page_num: int) -> No
                     "% flagged as potential outliers",
                     f"{st.session_state.gps_outlier_rate:.1f}%",
                 )
-            except:
+            except (AttributeError, TypeError, ValueError):
                 col4.metric(
                     label="% flagged as potential outliers",
                     value="n/a",

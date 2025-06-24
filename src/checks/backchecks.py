@@ -2,10 +2,12 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from src.utils import get_check_config_settings
+
 ##### Backchecks #####
 
 
-def backchecks_report(survey_data, backcheck_data, page_num) -> None:
+def backchecks_report(project_id: str, survey_data, backcheck_data, page_num) -> None:
     """
     Create a backcheck report for a given survey and backcheck data.
 
@@ -36,6 +38,21 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
 
         meta_col, enum_col, agg_col = st.columns(spec=3, border=True)
 
+        # Get config page defaults
+        (
+            _,
+            _,
+            config_survey_key,
+            config_survey_id,
+            config_survey_date,
+            config_enumerator,
+            _,
+            _,
+        ) = get_check_config_settings(
+            project_id=project_id,
+            page_row_index=page_num - 1,
+        )
+
         with meta_col:
             duration = st.selectbox(
                 "Duration",
@@ -44,7 +61,7 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 key="duration_backcheck",
                 index=None,
             )
-            default_date = st.session_state["config_pages"]["Survey Date"][page_num - 1]
+            default_date = config_survey_date
             default_date_index = survey_cols.get_loc(default_date)
             date = st.selectbox(
                 "Date",
@@ -62,9 +79,7 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
             )
 
         with enum_col:
-            default_enumerator = st.session_state["config_pages"]["Enumerator"][
-                page_num - 1
-            ]
+            default_enumerator = config_enumerator
             default_enumerator_index = survey_cols.get_loc(default_enumerator)
 
             enumerator = st.selectbox(
@@ -81,16 +96,12 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 key="team_backcheck",
                 index=None,
             )
-            default_backchecker = st.session_state["config_pages"]["Back Checker"][
-                page_num - 1
-            ]
-            default_backchecker_index = backcheck_cols_list.get_loc(default_backchecker)
             backchecker = st.selectbox(
                 "Back Checker",
                 options=backcheck_cols_list,
                 help="Column containing back check enumerator",
                 key="backchecker_backcheck",
-                index=default_backchecker_index,
+                index=None,
             )
             bc_team = st.selectbox(  # noqa: F841
                 "Back Check Team",
@@ -101,9 +112,7 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
             )
 
         with agg_col:
-            default_survey_id = st.session_state["config_pages"]["Survey ID"][
-                page_num - 1
-            ]
+            default_survey_id = config_survey_id
             default_survey_id_index = survey_cols.get_loc(default_survey_id)
             survey_id = st.selectbox(
                 "Survey ID",
@@ -112,9 +121,7 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                 key="surveyid_backcheck",
                 index=default_survey_id_index,
             )
-            default_survey_key = st.session_state["config_pages"]["Survey KEY"][
-                page_num - 1
-            ]
+            default_survey_key = config_survey_key
             default_survey_key_index = survey_cols.get_loc(default_survey_key)
             survey_key = st.selectbox(
                 "Survey Key",
@@ -698,7 +705,7 @@ def backchecks_report(survey_data, backcheck_data, page_num) -> None:
                     "Total backcheck error rate",
                     f"{st.session_state.total_backcheck_error_rate:.0f}%",
                 )
-            except:
+            except (AttributeError, TypeError, ValueError):
                 st.metric("Total backcheck error rate", "n/a")
 
         cl1, cl2, cl3 = st.columns(3)
