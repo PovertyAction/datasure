@@ -25,7 +25,8 @@ from src.checks.enumerator import (
 # ============================================
 def test_load_default_enumerator_settings_valid(settings_file, mock_streamlit_session):
     """Test loading settings from valid file."""
-    result = load_default_enumerator_settings(settings_file, 1)
+    project_id = mock_streamlit_session["config_pages"]["st_project_id"][0]
+    result = load_default_enumerator_settings(project_id, settings_file, 1)
     (
         date,
         formdef_version,
@@ -49,7 +50,8 @@ def test_load_default_enumerator_settings_valid(settings_file, mock_streamlit_se
 
 def test_load_default_settings_missing_file(mock_streamlit_session):
     """Test handling of missing settings file."""
-    result = load_default_enumerator_settings("nonexistent.json", 1)
+    project_id = mock_streamlit_session["config_pages"]["st_project_id"][0]
+    result = load_default_enumerator_settings(project_id, "nonexistent.json", 1)
     (
         date,
         formdef_version,
@@ -365,7 +367,8 @@ def test_invalid_settings_format(tmp_path, mock_streamlit_session):
     settings_file = tmp_path / "invalid_settings.json"
     settings_file.write_text(json.dumps(invalid_settings))
 
-    result = load_default_enumerator_settings(str(settings_file), 1)
+    project_id = mock_streamlit_session["config_pages"]["st_project_id"][0]
+    result = load_default_enumerator_settings(project_id, str(settings_file), 1)
     # Should fall back to session state values when settings file is invalid
     (
         date,
@@ -385,7 +388,8 @@ def test_invalid_settings_format(tmp_path, mock_streamlit_session):
 
 def test_settings_type_validation(settings_file, mock_streamlit_session):
     """Test validation of settings value types."""
-    settings = load_default_enumerator_settings(settings_file, 1)
+    project_id = mock_streamlit_session["config_pages"]["st_project_id"][0]
+    settings = load_default_enumerator_settings(project_id, settings_file, 1)
 
     assert isinstance(settings[0], str)  # date
     assert isinstance(settings[7], list)  # consent_vals
@@ -397,7 +401,8 @@ def test_empty_settings_file(tmp_path, mock_streamlit_session):
     empty_file = tmp_path / "empty.json"
     empty_file.write_text("{}")
 
-    result = load_default_enumerator_settings(str(empty_file), 1)
+    project_id = mock_streamlit_session["config_pages"]["st_project_id"][0]
+    result = load_default_enumerator_settings(project_id, str(empty_file), 1)
     # Should fall back to session state values when settings file is empty
     (
         date,
@@ -415,15 +420,17 @@ def test_empty_settings_file(tmp_path, mock_streamlit_session):
     assert enumerator == "enumerator"  # From mock session state
 
 
-def test_corrupted_json_file(tmp_path):
+def test_corrupted_json_file(tmp_path, mock_streamlit_session):
     """Test handling of corrupted JSON file."""
     corrupted_file = tmp_path / "corrupted.json"
     corrupted_file.write_text("invalid json content")
 
+    project_id = mock_streamlit_session["config_pages"]["st_project_id"][0]
+
     # The function should handle JSON decode errors gracefully
     # and return None values when the file cannot be parsed
     try:
-        result = load_default_enumerator_settings(str(corrupted_file), 1)
+        result = load_default_enumerator_settings(project_id, str(corrupted_file), 1)
         assert all(x is None for x in result)
     except Exception:
         # If the function throws an exception for corrupted JSON,

@@ -29,7 +29,17 @@ def settings_file(tmp_path):
             "outcome_vals": ["Complete", "Refused"],
         }
     }
-    file_path = tmp_path / "settings.json"
+
+    # Create cache directory structure
+    cache_dir = project_root / "cache"
+    test_project_dir = cache_dir / "test_survey_project_1001"
+    settings_dir = test_project_dir / "settings"
+
+    # Create directories if they don't exist
+    settings_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write settings file
+    file_path = settings_dir / "settings.json"
     file_path.write_text(json.dumps(settings))
     return str(file_path)
 
@@ -72,6 +82,11 @@ def mock_streamlit_session():
         "Survey Date": ["submission_date"],
         "Survey ID": ["survey_id"],
         "Enumerator": ["enumerator"],
+        "st_project_id": ["test_survey_project_1001"],
+        "data_loading": True,
+        "data_processing": True,
+        "gps_checks": True,
+        "backchecks": True,
     }
 
     with patch("streamlit.session_state") as mock_session_state:
@@ -312,3 +327,75 @@ def sample_date_data_10000():
     df["enum_name"] = df["enum_id"].map(dict(zip(enum_ids, enum_names, strict=False)))
 
     return df
+
+
+@pytest.fixture(autouse=True)
+def cleanup_test_cache():
+    """Clean up test cache directory after tests."""
+    yield
+    # Clean up after the test is done
+    cache_dir = project_root / "cache"
+    test_project_dir = cache_dir / "test_survey_project_1001"
+    if test_project_dir.exists():
+        import shutil
+
+        shutil.rmtree(test_project_dir)
+
+
+@pytest.fixture(autouse=True)
+def mock_database_functions(monkeypatch):
+    """Mock database functions to avoid needing actual database files during tests."""
+    import polars as pl
+    import streamlit as st
+
+    def mock_duckdb_get_table(project_id, alias, db_name):
+        """Mock duckdb_get_table to return a proper DataFrame with test data."""
+        if alias == "check_config":
+            # Return a DataFrame with the expected structure for check_config table
+            return pl.DataFrame(
+                {
+                    "page_name": ["enumerator"],
+                    "survey_data_name": ["test_survey"],
+                    "form_title": ["Test Form"],
+                    "survey_id": ["survey_id"],
+                    "survey_date": ["submission_date"],
+                    "enumerator_id": ["enumerator"],
+                    "consent_col": ["consent"],
+                    "outcome_col": ["outcome"],
+                }
+            )
+        else:
+            # Return empty DataFrame for other aliases
+            return pl.DataFrame()
+
+    def mock_config(*args, **kwargs):
+        # Return mock values in the expected order:
+        # formdef_version, project_name, form_title, survey_id,
+        # survey_date, enumerator_id, consent_col, outcome_col
+        return (
+            "v1",  # formdef_version
+            "Test Project",  # project_name
+            "Test Form",  # form_title
+            "survey_id",  # survey_id
+            "submission_date",  # survey_date
+            "enumerator",  # enumerator_id
+            "consent",  # consent_col
+            "outcome",  # outcome_col
+        )
+
+    # Clear streamlit cache to ensure our mocks are applied
+    st.cache_data.clear()
+
+    # Mock the duckdb_get_table function in all the places it might be imported
+    monkeypatch.setattr(
+        "src.utils.duckdb_utils.duckdb_get_table", mock_duckdb_get_table
+    )
+    monkeypatch.setattr("src.utils.duckdb_get_table", mock_duckdb_get_table)
+    monkeypatch.setattr(
+        "src.utils.settings_utils.duckdb_get_table", mock_duckdb_get_table
+    )
+
+    # Also directly patch the function used in settings_utils
+    monkeypatch.setattr(
+        "src.utils.settings_utils.get_check_config_settings", mock_config
+    )
