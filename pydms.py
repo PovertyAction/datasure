@@ -51,6 +51,7 @@ nav_menu = st.navigation(
     {
         "": [start_page],
         "Import Data": [import_data_page],
+        "Prepare Data": [prep_data_page],
     },
     position="hidden",
 )
