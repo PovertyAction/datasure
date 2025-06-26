@@ -108,13 +108,12 @@ def add_check_configuration(project_id: str) -> None:
                 backcheck_aliases = sorted(
                     [alias for alias in alias_list if alias != survey_data_name]
                 )
-                if backcheck_aliases:
-                    backcheck_data_name = st.selectbox(
-                        "Select Backcheck Dataset (Optional)",
-                        options=sorted(backcheck_aliases),
-                        index=None,
-                        help="Select the backcheck dataset to compare with the survey dataset.",
-                    )
+                backcheck_data_name = st.selectbox(
+                    "Select Backcheck Dataset (Optional)",
+                    options=sorted(backcheck_aliases),
+                    index=None,
+                    help="Select the backcheck dataset to compare with the survey dataset.",
+                )
 
                 if backcheck_aliases:
                     tracking_aliases = [
