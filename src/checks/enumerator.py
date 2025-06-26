@@ -445,7 +445,12 @@ def compute_enumerator_missing_table(
         for i in range(len(missing_codes)):
             miss_label = missing_codes["Missing Labels"][i]
             miss_codes = missing_codes["Missing Codes"][i].split(",")
-            data[f"% {miss_label}"] = data[enumerator].isin(miss_codes).astype(int)
+            data[f"% {miss_label}"] = data.apply(
+                lambda row, codes=miss_codes: any(
+                    str(row[col]).strip() in codes for col in data.columns
+                ),
+                axis=1,
+            ).astype(int)
 
             miss_cols.append(f"% {miss_label}")
 
