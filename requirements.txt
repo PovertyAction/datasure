@@ -33,7 +33,7 @@ joblib==1.5.1
 jsonschema==4.24.0
 jsonschema-specifications==2025.4.1
 kiwisolver==1.4.8
-lxml==5.4.0
+lxml==6.0.0
 markdown==3.8.2
 markdownlit==0.0.7
 markupsafe==3.0.2
