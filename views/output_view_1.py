@@ -157,13 +157,14 @@ with back_checks:
         backcheck_data = duckdb_get_table(
             project_id,
             backcheck_data_name,
-            db_name="corrected",
+            db_name="prep",
         ).to_pandas()
 
         backchecks_report(
             project_id,
             page_data,
             backcheck_data,
+            setting_file,
             page_number,
         )
 
