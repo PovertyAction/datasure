@@ -163,7 +163,8 @@ def add_check_configuration(project_id: str) -> None:
                         db_name="logs",
                     )
                     config_log = pl.concat(
-                        [current_log, pl.DataFrame([new_config])], how="vertical"
+                        [current_log, pl.DataFrame([new_config])],
+                        how="vertical_relaxed",
                     )
                     duckdb_save_table(
                         project_id,
