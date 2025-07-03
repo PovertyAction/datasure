@@ -53,7 +53,7 @@ def load_default_settings(project_id: str, setting_file: str, page_num: int) -> 
     default_survey_id = default_settings.get("survey_id", config_survey_id)
 
     # if target is not set, return None
-    default_target = default_settings.get("target", None)
+    default_target = default_settings.get("target")
 
     return default_date, default_target, default_survey_id
 

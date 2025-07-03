@@ -716,7 +716,7 @@ def plot_joint_outliers_distribution(reshaped_joint_outliers_df, selected_cols):
 # define function to create outliers report
 def outliers_report(
     project_id: str, data: pd.DataFrame, setting_file: str, page_num: int
-) -> None:  # noqa: D417, RUF100"
+) -> None:
     """
     Function to create a report on survey duplicates
     Args:

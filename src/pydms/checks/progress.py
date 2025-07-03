@@ -52,13 +52,13 @@ def load_default_progress_settings(
         default_settings.get("survey_id", config_survey_id),
         default_settings.get("enumerator", config_enumerator),
         default_settings.get("date", config_survey_date),
-        default_settings.get("target", None),
+        default_settings.get("target"),
     )
 
     # for default target, get the value in summary page if there is
     # no default for the progress page
     if not default_target:
-        default_target = summary_settings.get("target", None)
+        default_target = summary_settings.get("target")
 
     return (
         default_survey_id,

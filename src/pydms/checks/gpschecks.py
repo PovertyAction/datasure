@@ -74,10 +74,10 @@ def load_default_settings(project_id: str, setting_file: str, page_num: int) -> 
         default_settings.get("survey_key", config_survey_key),
         default_settings.get("gps_column_exists", False),
         default_settings.get("lat_lon_columns_exist", False),
-        default_settings.get("gps_lat_col", None),
-        default_settings.get("gps_lon_col", None),
-        default_settings.get("gps_accuracy", None),
-        default_settings.get("gps_column", None),
+        default_settings.get("gps_lat_col"),
+        default_settings.get("gps_lon_col"),
+        default_settings.get("gps_accuracy"),
+        default_settings.get("gps_column"),
     )
 
     return (
