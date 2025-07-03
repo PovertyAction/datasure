@@ -479,7 +479,7 @@ def plot_categorical_distribution(data: pd.DataFrame, categorical_col: str) -> N
 
         return basic_statistics
 
-    def display_one_way_table(one_way_table: pd.DataFrame) -> None:
+    def display_one_way_table() -> None:
         """Display one-way table for categorical column."""
         one_way_table = compute_one_way_table(
             data=data, categorical_col=categorical_col
@@ -502,7 +502,7 @@ def plot_categorical_distribution(data: pd.DataFrame, categorical_col: str) -> N
             hide_index=True,
         )
 
-    def display_two_way_table(two_way_table: pd.DataFrame) -> None:
+    def display_two_way_table() -> None:
         """Display two-way table for categorical columns."""
         two_way_table = compute_two_way_table(
             data=data, categorical_col=categorical_col, cat_col_2=cat_col_2
@@ -537,17 +537,9 @@ def plot_categorical_distribution(data: pd.DataFrame, categorical_col: str) -> N
         )
 
     if cat_tab_type == "One-way Table":
-        display_one_way_table(
-            one_way_table=compute_one_way_table(
-                data=data, categorical_col=categorical_col
-            )
-        )
+        display_one_way_table()
     elif cat_tab_type == "Two-way Table (Cross Tabulation)":
-        display_two_way_table(
-            two_way_table=compute_two_way_table(
-                data=data, categorical_col=categorical_col, cat_col_2=cat_col_2
-            )
-        )
+        display_two_way_table()
     elif cat_tab_type == "Summary Statistics":
         if num_col and summary_stat_type:
             summary_statistics = compute_summary_statistics_table(
