@@ -6,8 +6,10 @@ as a command-line application.
 """
 
 import argparse
+import contextlib
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 import streamlit.web.cli as stcli
@@ -55,28 +57,75 @@ def main():
 
             # Import Streamlit components for direct execution
             from streamlit import config
-            from streamlit.web import cli as web_cli
 
-            # Configure Streamlit for the executable
+            # Configure Streamlit for the executable with proper security settings
             config.set_option("server.headless", True)
             config.set_option("server.address", args.host)
             config.set_option("server.port", args.port)
             config.set_option("browser.gatherUsageStats", False)
             config.set_option("global.developmentMode", False)
 
-            # Import the app module directly to execute it
+            # Security configuration - properly handle CORS and XSRF protection
+            config.set_option("server.enableCORS", True)
+            config.set_option("server.enableXsrfProtection", True)
 
-            # Start the Streamlit server directly
-            web_cli._main_run_clExplicit = (
-                lambda target, command_line, args_list: web_cli._main_run(
-                    target, command_line, args_list
-                )
-            )
+            # Set allowed origins for security
+            config.set_option("server.allowRunOnSave", False)
+            config.set_option("server.runOnSave", False)
 
-            # This approach runs the imported app
-            from streamlit.web.bootstrap import run
+            # Create a properly accessible temporary app file
+            bundle_app_path = Path(sys._MEIPASS) / "pydms" / "app.py"
 
-            run("", "streamlit run", [])
+            # Create temp file in a user-writable location
+            temp_fd, temp_app_path = tempfile.mkstemp(suffix=".py", prefix="pydms_app_")
+            temp_path = Path(temp_app_path)
+
+            try:
+                # Read the app content from the bundle
+                with open(bundle_app_path, encoding="utf-8") as src:
+                    app_content = src.read()
+
+                # Write to the temporary file
+                with os.fdopen(temp_fd, "w", encoding="utf-8") as dst:
+                    dst.write(app_content)
+
+                # Ensure proper permissions
+                os.chmod(temp_path, 0o644)
+
+                # Set up Streamlit arguments with security settings
+                sys.argv = [
+                    "streamlit",
+                    "run",
+                    str(temp_path),
+                    "--server.address",
+                    args.host,
+                    "--server.port",
+                    str(args.port),
+                    "--server.headless",
+                    "true",
+                    "--browser.gatherUsageStats",
+                    "false",
+                    "--global.developmentMode",
+                    "false",
+                    "--server.enableCORS",
+                    "true",
+                    "--server.enableXsrfProtection",
+                    "true",
+                ]
+
+                # Register cleanup
+                import atexit
+
+                atexit.register(lambda: temp_path.unlink(missing_ok=True))
+
+                # Use the standard Streamlit CLI
+                stcli.main()
+
+            except Exception:
+                # Ensure cleanup even if there's an error
+                with contextlib.suppress(Exception):
+                    temp_path.unlink(missing_ok=True)
+                raise
 
         except Exception as e:
             print(f"Error running Streamlit in bundle mode: {e}", file=sys.stderr)
