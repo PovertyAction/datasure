@@ -7,7 +7,9 @@ as a command-line application.
 
 import argparse
 import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 import streamlit.web.cli as stcli
@@ -44,8 +46,34 @@ def main():
     # Find the app.py file in the package
     # Check if running in PyInstaller bundle
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        # Running in PyInstaller bundle
-        app_path = Path(sys._MEIPASS) / "pydms" / "app.py"
+        # Running in PyInstaller bundle - need to copy files to temp location
+        bundle_app_path = Path(sys._MEIPASS) / "pydms" / "app.py"
+
+        if not bundle_app_path.exists():
+            print(
+                f"Error: Could not find app.py in bundle at {bundle_app_path}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        # Create a temporary directory and copy the entire pydms package there
+        temp_dir = Path(tempfile.mkdtemp(prefix="pydms_"))
+        temp_pydms_dir = temp_dir / "pydms"
+        bundle_pydms_dir = Path(sys._MEIPASS) / "pydms"
+
+        try:
+            # Copy the entire pydms directory to temp location
+            shutil.copytree(bundle_pydms_dir, temp_pydms_dir)
+            app_path = temp_pydms_dir / "app.py"
+
+            # Register cleanup function
+            import atexit
+
+            atexit.register(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+
+        except Exception as e:
+            print(f"Error copying app files to temp directory: {e}", file=sys.stderr)
+            sys.exit(1)
     else:
         # Running normally
         app_path = Path(__file__).parent / "app.py"
@@ -53,30 +81,6 @@ def main():
     if not app_path.exists():
         print(f"Error: Could not find app.py at {app_path}", file=sys.stderr)
         print("Make sure the package is installed properly.", file=sys.stderr)
-
-        # Debug information for PyInstaller
-        if getattr(sys, "frozen", False):
-            print(
-                f"Running in PyInstaller bundle. sys._MEIPASS = {getattr(sys, '_MEIPASS', 'N/A')}",
-                file=sys.stderr,
-            )
-            print(f"__file__ = {__file__}", file=sys.stderr)
-            print(f"sys.executable = {sys.executable}", file=sys.stderr)
-
-            # List available files for debugging
-            if hasattr(sys, "_MEIPASS"):
-                meipass_path = Path(sys._MEIPASS)
-                print(f"Files in {meipass_path}:", file=sys.stderr)
-                try:
-                    for item in meipass_path.iterdir():
-                        print(f"  {item}", file=sys.stderr)
-                        if item.is_dir() and item.name == "pydms":
-                            print("    pydms directory contents:", file=sys.stderr)
-                            for subitem in item.iterdir():
-                                print(f"      {subitem}", file=sys.stderr)
-                except Exception as e:
-                    print(f"  Error listing files: {e}", file=sys.stderr)
-
         sys.exit(1)
 
     # Set environment variables for better executable compatibility
