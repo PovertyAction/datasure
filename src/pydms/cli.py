@@ -56,15 +56,26 @@ def main():
             )
             sys.exit(1)
 
-        # Create a temporary directory and copy the entire pydms package there
+        # Create a temporary directory and copy just the app.py file
         temp_dir = Path(tempfile.mkdtemp(prefix="pydms_"))
-        temp_pydms_dir = temp_dir / "pydms"
-        bundle_pydms_dir = Path(sys._MEIPASS) / "pydms"
+        temp_app_path = temp_dir / "app.py"
 
         try:
-            # Copy the entire pydms directory to temp location
-            shutil.copytree(bundle_pydms_dir, temp_pydms_dir)
-            app_path = temp_pydms_dir / "app.py"
+            # Add the bundle path to sys.path so imports work correctly
+            sys.path.insert(0, str(Path(sys._MEIPASS)))
+
+            # Read and copy just the app.py file with proper encoding
+            with open(bundle_app_path, encoding="utf-8") as src:
+                app_content = src.read()
+
+            # Write to temp location with proper permissions
+            with open(temp_app_path, "w", encoding="utf-8") as dst:
+                dst.write(app_content)
+
+            # Set readable permissions explicitly
+            os.chmod(temp_app_path, 0o644)
+
+            app_path = temp_app_path
 
             # Register cleanup function
             import atexit
@@ -72,7 +83,7 @@ def main():
             atexit.register(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
 
         except Exception as e:
-            print(f"Error copying app files to temp directory: {e}", file=sys.stderr)
+            print(f"Error setting up app file: {e}", file=sys.stderr)
             sys.exit(1)
     else:
         # Running normally
