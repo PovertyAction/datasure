@@ -51,6 +51,20 @@ data.append((str(streamlit_path / "runtime"), "streamlit/runtime"))
 # Include streamlit web files
 data.append((str(streamlit_path / "web"), "streamlit/web"))
 
+# Include package metadata to fix importlib.metadata issues
+from PyInstaller.utils.hooks import collect_data_files
+try:
+    # Collect metadata for streamlit and other packages
+    metadata_packages = ['streamlit', 'altair', 'plotly', 'pandas', 'numpy', 'PIL', 'pydeck']
+    for pkg in metadata_packages:
+        try:
+            pkg_data = collect_data_files(pkg, include_py_files=False)
+            data.extend(pkg_data)
+        except Exception:
+            pass  # Skip if package not found
+except ImportError:
+    pass  # Skip if PyInstaller utils not available
+
 # Hidden imports for streamlit and dependencies
 hiddenimports = [
     # pyDMS package modules
@@ -120,7 +134,25 @@ hiddenimports = [
     'typing_extensions',
     'watchdog.observers',
     'watchdog.events',
+    # Metadata handling
+    'importlib.metadata',
+    'importlib_metadata',
+    'pkg_resources',
 ]
+
+# Collect metadata for packages using importlib.metadata
+from PyInstaller.utils.hooks import collect_data_files, copy_metadata
+try:
+    # Collect metadata for critical packages
+    critical_packages = ['streamlit', 'altair', 'plotly', 'pandas', 'numpy', 'Pillow', 'pydeck', 'tornado']
+    for pkg in critical_packages:
+        try:
+            metadata = copy_metadata(pkg)
+            data.extend(metadata)
+        except Exception:
+            pass  # Skip if package not found
+except ImportError:
+    pass  # Skip if PyInstaller utils not available
 
 a = Analysis(
     [str(package_path / "cli.py")],
