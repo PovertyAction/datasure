@@ -1,10 +1,10 @@
 import polars as pl
 import streamlit as st
 
-from src.processing import (
+from pydms.processing import (
     correction_apply_action,
 )
-from src.utils import duckdb_get_table, duckdb_save_table, get_check_config_settings
+from pydms.utils import duckdb_get_table, duckdb_save_table, get_check_config_settings
 
 # DEFINE CONSTANTS FOR CORRECTION'
 

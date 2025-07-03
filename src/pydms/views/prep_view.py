@@ -3,8 +3,8 @@ import polars as pl
 import streamlit as st
 from millify import prettify
 
-from src.processing import prep_apply_action
-from src.utils import (
+from pydms.processing import prep_apply_action
+from pydms.utils import (
     duckdb_get_table,
     duckdb_save_table,
     get_df_info,

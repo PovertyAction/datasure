@@ -2,7 +2,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from src.utils import get_check_config_settings
+from pydms.utils import get_check_config_settings
 
 ##### Backchecks #####
 
@@ -1067,10 +1067,10 @@ def backchecks_report(project_id: str, survey_data, backcheck_data, page_num) ->
                 .reset_index()
             )
             enumerator_statistics["% back checked"] = enumerator_statistics.apply(
-                lambda x: f"{(x['# backchecks']/x['# surveys'])*100:.2f}%", axis=1
+                lambda x: f"{(x['# backchecks'] / x['# surveys']) * 100:.2f}%", axis=1
             )
             enumerator_statistics["Error Rate"] = enumerator_statistics.apply(
-                lambda x: f"{(x['# different']/x['# compared'])*100:.2f}%", axis=1
+                lambda x: f"{(x['# different'] / x['# compared']) * 100:.2f}%", axis=1
             )
 
             enumerator_statistics = enumerator_statistics.rename(

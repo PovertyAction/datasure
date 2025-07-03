@@ -5,7 +5,7 @@ from unittest.mock import patch
 import polars as pl
 import pytest
 
-from src.processing.corrections import correction_apply_action
+from pydms.processing.corrections import correction_apply_action
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def sample_corrections_log():
     )
 
 
-@patch("src.processing.corrections.st")
+@patch("pydms.processing.corrections.st")
 def test_correction_apply_action_modify_value_string_column(mock_st):
     """Test applying modify value action on string column."""
     # Setup mock session state
@@ -79,7 +79,7 @@ def test_correction_apply_action_modify_value_string_column(mock_st):
     assert log.item(0, "new value") == "Janet"
 
 
-@patch("src.processing.corrections.st")
+@patch("pydms.processing.corrections.st")
 def test_correction_apply_action_modify_value_numeric_column(mock_st):
     """Test applying modify value action on numeric column."""
     # Setup mock session state
@@ -126,7 +126,7 @@ def test_correction_apply_action_modify_value_numeric_column(mock_st):
     assert corrected_data.filter(pl.col("survey_key") == "key2").item(0, "age") == 31
 
 
-@patch("src.processing.corrections.st")
+@patch("pydms.processing.corrections.st")
 def test_correction_apply_action_remove_value(mock_st):
     """Test applying remove value action."""
     # Setup mock session state
@@ -173,7 +173,7 @@ def test_correction_apply_action_remove_value(mock_st):
     assert corrected_data.filter(pl.col("survey_key") == "key2").item(0, "name") is None
 
 
-@patch("src.processing.corrections.st")
+@patch("pydms.processing.corrections.st")
 def test_correction_apply_action_remove_row(mock_st):
     """Test applying remove row action."""
     # Setup mock session state
@@ -221,7 +221,7 @@ def test_correction_apply_action_remove_row(mock_st):
     assert not (corrected_data["survey_key"] == "key2").any()
 
 
-@patch("src.processing.corrections.st")
+@patch("pydms.processing.corrections.st")
 def test_correction_apply_action_multiple_corrections(mock_st):
     """Test applying multiple corrections in sequence."""
     # Setup mock session state with existing corrections
@@ -286,7 +286,7 @@ def test_correction_apply_action_multiple_corrections(mock_st):
     assert log.item(1, "new value") == "Janet"
 
 
-@patch("src.processing.corrections.st")
+@patch("pydms.processing.corrections.st")
 def test_correction_apply_action_string_conversion(mock_st):
     """Test that all correction values are converted to strings."""
     # Setup mock session state
@@ -332,7 +332,7 @@ def test_correction_apply_action_string_conversion(mock_st):
     assert log.item(0, "reason") == ""  # None converted to empty string
 
 
-@patch("src.processing.corrections.st")
+@patch("pydms.processing.corrections.st")
 def test_correction_apply_action_no_action_parameter(mock_st):
     """Test applying corrections when no action parameter is provided."""
     # Setup mock session state with existing corrections

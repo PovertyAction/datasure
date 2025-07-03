@@ -1,3 +1,4 @@
+from .cache_utils import ensure_cache_dir, get_cache_base_dir, get_cache_path
 from .chart_utils import donut_chart, donut_chart2
 from .dataframe_utils import get_df_info
 from .duckdb_utils import (
@@ -23,6 +24,9 @@ __all__ = [
     "duckdb_get_table",
     "duckdb_row_filter",
     "duckdb_save_table",
+    "ensure_cache_dir",
+    "get_cache_base_dir",
+    "get_cache_path",
     "get_check_config_settings",
     "get_df_info",
     "get_hash_id",

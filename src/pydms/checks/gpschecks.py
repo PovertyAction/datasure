@@ -8,7 +8,7 @@ import streamlit as st
 from geopy.distance import geodesic
 from sklearn.neighbors import LocalOutlierFactor
 
-from src.utils import (
+from pydms.utils import (
     get_check_config_settings,
     load_check_settings,
     save_check_settings,
@@ -516,7 +516,9 @@ def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
         )
         return group
 
-    outlier_df = grouped_df.apply(flag_outliers).reset_index(drop=True)
+    outlier_df = grouped_df.apply(flag_outliers, include_groups=False).reset_index(
+        drop=True
+    )
 
     return outlier_df
 

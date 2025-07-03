@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pandas as pd
 import streamlit as st
 
-from src.checks.duplicates import (
+from pydms.checks.duplicates import (
     compute_duplicates_statistics,
     compute_id_duplicates,
     load_default_duplicates_settings,
@@ -24,7 +24,7 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
         if hasattr(self, "_session_state_patcher"):
             self._session_state_patcher = None
 
-    @patch("src.checks.duplicates.st")
+    @patch("pydms.checks.duplicates.st")
     def test_compute_id_duplicates(self, mock_st):
         """Test the compute_id_duplicates function."""
         mock_st.session_state = {"resolved_duplicates": 5}
@@ -75,7 +75,7 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
         self.assertIn("id_dup_count", result4.columns)
         self.assertIn("id_dup_percent", result4.columns)
 
-    @patch("src.checks.duplicates.st")
+    @patch("pydms.checks.duplicates.st")
     def test_compute_duplicates_statistics(self, mock_st):
         """Test the compute_duplicates_statistics function."""
         mock_st.session_state = {"resolved_duplicates": 5}
@@ -143,7 +143,7 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
         self.assertEqual(result4[4], 0)  # total_id_dups
         self.assertEqual(result4[5], 5)
 
-    @patch("src.checks.duplicates.st")
+    @patch("pydms.checks.duplicates.st")
     def test_resolved_duplicates_from_session_state(self, mock_st):
         """
         Test the compute_duplicates_statistics function
@@ -161,7 +161,7 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
         result = compute_duplicates_statistics(df, "id", "col1", ["col1", "col2"])
         self.assertEqual(result[5], 42)
 
-    @patch("src.checks.duplicates.st")
+    @patch("pydms.checks.duplicates.st")
     def test_resolved_duplicates_default_zero(self, mock_st):
         """
         Test the compute_duplicates_statistics function
@@ -179,7 +179,7 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
         result = compute_duplicates_statistics(df, "id", "col1", ["col1", "col2"])
         self.assertEqual(result[5], 0)
 
-    @patch("src.checks.duplicates.st")
+    @patch("pydms.checks.duplicates.st")
     def test_empty_dataframe(self, mock_st):
         """
         Test the compute_duplicates_statistics function
@@ -195,7 +195,7 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
         self.assertEqual(result[4], 0)
         self.assertEqual(result[5], 0)
 
-    @patch("src.checks.duplicates.st")
+    @patch("pydms.checks.duplicates.st")
     def test_nonexistent_columns(self, mock_st):
         """
         Test the compute_duplicates_statistics function
@@ -212,9 +212,9 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
         with self.assertRaises(KeyError):
             compute_duplicates_statistics(df, "id", "col1", ["col1", "colX"])
 
-    @patch("src.checks.duplicates.get_check_config_settings")
-    @patch("src.checks.duplicates.os.path.exists")
-    @patch("src.checks.duplicates.load_check_settings")
+    @patch("pydms.checks.duplicates.get_check_config_settings")
+    @patch("pydms.checks.duplicates.os.path.exists")
+    @patch("pydms.checks.duplicates.load_check_settings")
     def test_load_default_duplicates_settings_file_exists(
         self, mock_load_check_settings, mock_exists, mock_config_settings
     ):
@@ -250,9 +250,9 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
         self.assertEqual(result[3], ["enumid", "latitude", "longitude"])
         self.assertEqual(result[4], ["enumid", "latitude"])
 
-    @patch("src.checks.duplicates.get_check_config_settings")
-    @patch("src.checks.duplicates.os.path.exists")
-    @patch("src.checks.duplicates.load_check_settings")
+    @patch("pydms.checks.duplicates.get_check_config_settings")
+    @patch("pydms.checks.duplicates.os.path.exists")
+    @patch("pydms.checks.duplicates.load_check_settings")
     def test_load_default_duplicates_settings_file_missing(
         self, mock_load_check_settings, mock_exists, mock_config_settings
     ):
@@ -279,9 +279,9 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
         self.assertIsNone(result[3])
         self.assertIsNone(result[4])
 
-    @patch("src.checks.duplicates.get_check_config_settings")
-    @patch("src.checks.duplicates.os.path.exists")
-    @patch("src.checks.duplicates.load_check_settings")
+    @patch("pydms.checks.duplicates.get_check_config_settings")
+    @patch("pydms.checks.duplicates.os.path.exists")
+    @patch("pydms.checks.duplicates.load_check_settings")
     def test_load_default_duplicates_settings_file_exists_partial_settings(
         self, mock_load_check_settings, mock_exists, mock_config_settings
     ):
@@ -314,9 +314,9 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
         self.assertIsNone(result[3])
         self.assertIsNone(result[4])
 
-    @patch("src.checks.duplicates.get_check_config_settings")
-    @patch("src.checks.duplicates.os.path.exists")
-    @patch("src.checks.duplicates.load_check_settings")
+    @patch("pydms.checks.duplicates.get_check_config_settings")
+    @patch("pydms.checks.duplicates.os.path.exists")
+    @patch("pydms.checks.duplicates.load_check_settings")
     def test_load_default_duplicates_settings_missing_config_pages(
         self, mock_load_check_settings, mock_exists, mock_config_settings
     ):

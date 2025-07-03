@@ -7,7 +7,12 @@ import seaborn as sns
 import streamlit as st
 from streamlit_extras.stylable_container import stylable_container
 
-from src.utils import load_check_settings, save_check_settings, trigger_save
+from pydms.utils import (
+    get_cache_path,
+    load_check_settings,
+    save_check_settings,
+    trigger_save,
+)
 
 
 @st.cache_data
@@ -767,8 +772,8 @@ def missing_report(
         [1.0, "#da3b46"],
     ]
 
-    missing_setting_file = (
-        f"cache/{project_id}/settings/missing_settings_{page_name}.json"
+    missing_setting_file = get_cache_path(
+        project_id, "settings", f"missing_settings_{page_name}.json"
     )
 
     missing_codes = missing_settings(missing_setting_file=missing_setting_file)

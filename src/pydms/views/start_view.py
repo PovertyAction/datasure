@@ -6,6 +6,8 @@ from pathlib import Path
 
 import streamlit as st
 
+from pydms.utils.cache_utils import get_cache_path
+
 
 def _validate_project_id(project_id: str) -> bool:
     """Validate project ID to prevent path traversal attacks."""
@@ -21,13 +23,12 @@ def get_project_id(project_name: str) -> str:
 
 def get_project_names() -> list[str]:
     """Get a list of project names from the local directory."""
-    projects_file = "cache/projects.json"
+    projects_file = get_cache_path("projects.json")
     project_names = []
-    if os.path.exists(projects_file):
+    if projects_file.exists():
         with open(projects_file) as f:
             projects = json.load(f)
         project_names = [project["name"] for project in projects.values()]
-    return project_names + ["Create New Project"]
     return project_names + ["Create New Project"]
 
 
@@ -49,8 +50,8 @@ def valid_project_name(project_name: str) -> bool:
 
 def load_projects() -> dict:
     """Load available projects from the local directory."""
-    projects_file = "cache/projects.json"
-    if os.path.exists(projects_file):
+    projects_file = get_cache_path("projects.json")
+    if projects_file.exists():
         with open(projects_file) as f:
             projects = json.load(f)
         return projects
@@ -62,8 +63,7 @@ def save_project(project_name: str, project_id: str):
     if not _validate_project_id(project_id):
         raise ValueError(f"Invalid project ID: {project_id}")
 
-    cache_base = Path("cache")
-    project_path = cache_base / project_id
+    project_path = get_cache_path(project_id)
 
     if not project_path.exists():
         project_path.mkdir(parents=True, exist_ok=True)
@@ -74,9 +74,12 @@ def save_project(project_name: str, project_id: str):
     else:
         # get created at date from existing project
         project_info_path = project_path / "settings" / "project_info.json"
-        with open(project_info_path) as f:
-            project_info = json.load(f)
-        created_at = project_info.get("created_at")
+        if project_info_path.exists():
+            with open(project_info_path) as f:
+                project_info = json.load(f)
+            created_at = project_info.get("created_at")
+        else:
+            created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         last_used = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     projects = load_projects() or {}
     new_project = {
@@ -86,7 +89,8 @@ def save_project(project_name: str, project_id: str):
     }
     projects[project_id] = new_project
 
-    with open("cache/projects.json", "w") as f:
+    projects_file = get_cache_path("projects.json")
+    with open(projects_file, "w") as f:
         json.dump(projects, f, indent=4)
 
 
@@ -99,18 +103,11 @@ def delete_project(project_id: str):
     projects = load_projects()
     if project_id in projects:
         projects.pop(project_id)
-        with open("cache/projects.json", "w") as f:
+        projects_file = get_cache_path("projects.json")
+        with open(projects_file, "w") as f:
             json.dump(projects, f, indent=4)
 
-        cache_base = Path("cache")
-        project_path = cache_base / project_id
-
-        # Ensure the path is within the cache directory (additional safety)
-        try:
-            project_path.resolve().relative_to(cache_base.resolve())
-        except ValueError:
-            st.error("Invalid project path detected")
-            return
+        project_path = get_cache_path(project_id)
 
         if project_path.exists():
             for root, dirs, files in os.walk(project_path, topdown=False):
@@ -133,7 +130,10 @@ st.set_page_config(
 _, page_canvas, _ = st.columns([0.1, 0.8, 0.1])
 with page_canvas:
     st.write("version 0.1.1 26 Jul 2025")
-    st.image("assets/LinkedIn Cover IPA20.png", use_container_width=True)
+    # Get the path to the assets directory relative to the package
+    assets_dir = Path(__file__).parent.parent / "assets"
+    image_path = assets_dir / "LinkedIn Cover IPA20.png"
+    st.image(str(image_path), use_container_width=True)
 
     st.title("Welcome to pyDMS")
 

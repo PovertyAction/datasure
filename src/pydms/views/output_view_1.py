@@ -1,8 +1,6 @@
-from pathlib import Path
-
 import streamlit as st
 
-from src.checks import (
+from pydms.checks import (
     backchecks_report,
     descriptive_report,
     duplicates_report,
@@ -13,7 +11,7 @@ from src.checks import (
     progress_report,
     summary_report,
 )
-from src.utils import duckdb_get_table, get_check_config_settings
+from pydms.utils import duckdb_get_table, get_cache_path, get_check_config_settings
 
 # define page number
 page_number = 1
@@ -41,7 +39,7 @@ project_id = st.session_state.st_project_id
 page_name_id = page_name.lower().replace(" ", "_").replace("-", "_")
 
 # set setting file path
-cache_settings_base = Path("cache") / project_id / "settings"
+cache_settings_base = get_cache_path(project_id, "settings")
 
 # define setting file
 setting_file = cache_settings_base / f"page_{page_name_id}_settings.json"

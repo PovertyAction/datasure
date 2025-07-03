@@ -2,14 +2,14 @@ import polars as pl
 import streamlit as st
 from millify import prettify
 
-from src.connectors import (
+from pydms.connectors import (
     local_add_form,
     local_load_action,
     scto_add_form,
     scto_import_data,
     scto_login_form,
 )
-from src.utils import (
+from pydms.utils import (
     duckdb_get_aliases,
     duckdb_get_imported_datasets,
     duckdb_get_table,

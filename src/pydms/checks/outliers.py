@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 import seaborn as sns
 import streamlit as st
 
-from src.utils import (
+from pydms.utils import (
     get_check_config_settings,
     load_check_settings,
     save_check_settings,

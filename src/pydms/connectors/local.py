@@ -1,11 +1,12 @@
 import os
+from pathlib import Path
 
 import pandas as pd
 import polars as pl
 import streamlit as st
 from openpyxl import load_workbook
 
-from src.utils import duckdb_get_table, duckdb_save_table
+from pydms.utils import duckdb_get_table, duckdb_save_table
 
 # --- Get List of sheet from excel ---#
 
@@ -95,7 +96,10 @@ def local_add_form(
             return False
         return True
 
-    st.image("assets/hard-disk.png", width=100)
+    # Get the path to the assets directory relative to the package
+    assets_dir = Path(__file__).parent.parent / "assets"
+    image_path = assets_dir / "hard-disk.png"
+    st.image(str(image_path), width=100)
     st.subheader("Add File from Local Storage")
 
     if edit_mode:

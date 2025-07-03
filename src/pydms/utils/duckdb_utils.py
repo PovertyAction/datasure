@@ -4,6 +4,8 @@ import duckdb
 import pandas as pd
 import polars as pl
 
+from .cache_utils import get_cache_path
+
 
 def _validate_table_name(table_name: str) -> str:
     """Validate and sanitize table name to prevent SQL injection.
@@ -66,9 +68,9 @@ def duckdb_save_table(
     db_name: str : name of the DuckDB database
     """
     db_path = (
-        f"cache/{project_id}/settings/logs.duckdb"
+        get_cache_path(project_id, "settings", "logs.duckdb")
         if db_name == "logs"
-        else f"cache/{project_id}/data/{db_name}.duckdb"
+        else get_cache_path(project_id, "data", f"{db_name}.duckdb")
     )
 
     # convert alias to table name format and validate
@@ -115,9 +117,9 @@ def duckdb_get_table(project_id: str, alias: str, db_name: str) -> pl.DataFrame:
     pl.DataFrame : data from the DuckDB table
     """
     db_path = (
-        f"cache/{project_id}/settings/logs.duckdb"
+        get_cache_path(project_id, "settings", "logs.duckdb")
         if db_name == "logs"
-        else f"cache/{project_id}/data/{db_name}.duckdb"
+        else get_cache_path(project_id, "data", f"{db_name}.duckdb")
     )
 
     table_id = _validate_table_name(alias.lower().replace(" ", "_").replace("-", "_"))
@@ -153,9 +155,9 @@ def duckdb_row_filter(
     None
     """
     db_path = (
-        f"cache/{project_id}/settings/logs.duckdb"
+        get_cache_path(project_id, "settings", "logs.duckdb")
         if db_name == "logs"
-        else f"cache/{project_id}/data/{db_name}.duckdb"
+        else get_cache_path(project_id, "data", f"{db_name}.duckdb")
     )
     table_id = alias.lower().replace(" ", "_").replace("-", "_")
     with duckdb.connect(db_path) as conn:
@@ -181,7 +183,7 @@ def duckdb_get_aliases(project_id: str, to_load: bool = True) -> list[str]:
     -------
     list[str] : list of aliases (table names)
     """
-    db_path = f"cache/{project_id}/settings/logs.duckdb"
+    db_path = get_cache_path(project_id, "settings", "logs.duckdb")
 
     with duckdb.connect(db_path) as conn:
         # create the import_log table if it doesn't exist
@@ -231,7 +233,7 @@ def duckdb_get_imported_datasets(project_id: str) -> list[str]:
     aliases = duckdb_get_aliases(project_id, to_load=True)
 
     # get list of tables in the database
-    db_path = f"cache/{project_id}/data/raw.duckdb"
+    db_path = get_cache_path(project_id, "data", "raw.duckdb")
     with duckdb.connect(db_path) as conn:
         table_names = conn.execute(
             "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"

@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from src.utils import duckdb_get_table, duckdb_save_table
+from pydms.utils import duckdb_get_table, duckdb_save_table
 
 
 def prep_apply_action(

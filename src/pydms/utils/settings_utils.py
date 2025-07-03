@@ -5,7 +5,7 @@ from functools import lru_cache
 
 import streamlit as st
 
-from src.utils import duckdb_get_table
+from .duckdb_utils import duckdb_get_table
 
 
 @st.cache_data

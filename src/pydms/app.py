@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import streamlit as st
 
 # --- PAGE SETUP --- #
@@ -16,9 +18,13 @@ if "show_checks_section" not in st.session_state:
     st.session_state.show_checks_section = False
 
 
+# Get the directory where this module is located
+_package_dir = Path(__file__).parent
+_views_dir = _package_dir / "views"
+
 # start page
 start_page = st.Page(
-    page="views/start_view.py",
+    page=str(_views_dir / "start_view.py"),
     title="start here",
     icon=":material/home:",
     default=True,
@@ -26,19 +32,21 @@ start_page = st.Page(
 
 # config data import page
 import_data_page = st.Page(
-    page="views/import_view.py",
+    page=str(_views_dir / "import_view.py"),
     title="Import Data",
     icon=":material/sync:",
 )
 
 # config data prep page
 prep_data_page = st.Page(
-    page="views/prep_view.py", title="Prepare Data", icon=":material/rule_settings:"
+    page=str(_views_dir / "prep_view.py"),
+    title="Prepare Data",
+    icon=":material/rule_settings:",
 )
 
 # config data checks config page
 config_checks_page = st.Page(
-    page="views/config_view.py",
+    page=str(_views_dir / "config_view.py"),
     title="Configure Checks",
     icon=":material/manufacturing:",
 )
@@ -78,7 +86,15 @@ if st.session_state.show_checks_section:
 
 # --- GLOBAL ASSETS --- #
 
-st.logo("assets/IPA-primary-full-color-abbreviated.png")
+# Try to find assets in package first, then fallback to project root
+_assets_dir = _package_dir / "assets"
+if not _assets_dir.exists():
+    # Fallback for development
+    _assets_dir = Path.cwd() / "assets"
+
+_logo_path = _assets_dir / "IPA-primary-full-color-abbreviated.png"
+if _logo_path.exists():
+    st.logo(str(_logo_path))
 
 # --- RUN NAVIGATION --- #
 

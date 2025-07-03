@@ -1,7 +1,7 @@
 import polars as pl
 import streamlit as st
 
-from src.utils import (
+from pydms.utils import (
     duckdb_get_table,
     duckdb_save_table,
     get_df_info,

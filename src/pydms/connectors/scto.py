@@ -1,9 +1,11 @@
+import contextlib
 import datetime
 import json
 import os
 import re
 import time
 from io import StringIO
+from pathlib import Path
 
 import pandas as pd
 import polars as pl
@@ -11,7 +13,7 @@ import pysurveycto
 import requests
 import streamlit as st
 
-from src.utils import duckdb_get_table, duckdb_save_table
+from pydms.utils import duckdb_get_table, duckdb_save_table, get_cache_path
 
 # --- SurveyCTO Server Connect Button Click Action --- #
 
@@ -30,7 +32,8 @@ def scto_get_server_cache(project_id: str) -> dict:
 
     """
     try:
-        with open(f"cache/{project_id}/settings/scto.json") as file:
+        scto_file = get_cache_path(project_id, "settings", "scto.json")
+        with open(scto_file) as file:
             file = json.load(file)
 
     except FileNotFoundError:
@@ -93,7 +96,8 @@ def scto_load_forms(servername: str) -> pd.DataFrame:
     """
     # load form details from last session
     try:
-        file = pd.read_json(f"cache/{servername}_pyDMS_forms_cache.json")
+        cache_file = get_cache_path(f"{servername}_pyDMS_forms_cache.json")
+        file = pd.read_json(cache_file)
         form_inputs = file.to_dict()
 
         return pd.DataFrame(form_inputs)
@@ -424,14 +428,14 @@ def scto_import_data(
         # convert default str datetime cols to datetime
         for col in ["CompletionDate", "SubmissionDate", "starttime", "endtime"]:
             if col in scto_data.columns:
-                scto_data[col] = pd.to_datetime(
-                    scto_data[col], format="mixed", errors="ignore"
-                )
+                with contextlib.suppress(ValueError, TypeError):
+                    scto_data[col] = pd.to_datetime(scto_data[col], format="mixed")
 
         # convert default numeric variables to numeric
         for col in ["duration", "formdef_version"]:
             if col in scto_data.columns:
-                scto_data[col] = pd.to_numeric(scto_data[col], errors="ignore")
+                with contextlib.suppress(ValueError, TypeError):
+                    scto_data[col] = pd.to_numeric(scto_data[col])
 
         # loop through fields and convert numeric variables to appropriate
         # data types
@@ -533,7 +537,8 @@ def scto_add_form(
 
     # import server list from cache file
     try:
-        with open(f"cache/{project_id}/settings/scto.json") as file:
+        scto_file = get_cache_path(project_id, "settings", "scto.json")
+        with open(scto_file) as file:
             server_cache = json.load(file)
             server_list = server_cache.get("server", [])
     except FileNotFoundError:
@@ -548,7 +553,10 @@ def scto_add_form(
 
     # create form for adding SurveyCTO form
     with st.form(key="scto_form"):
-        st.image("assets/SurveyCTO-Logo-CMYK.png", width=200)
+        # Get the path to the assets directory relative to the package
+        assets_dir = Path(__file__).parent.parent / "assets"
+        image_path = assets_dir / "SurveyCTO-Logo-CMYK.png"
+        st.image(str(image_path), width=200)
 
         alias = st.text_input(
             label="Alias*",
@@ -669,7 +677,10 @@ def scto_login_form(project_id: str) -> None:
     """
     # define server details input
     with st.form(key="server_form"):
-        st.image("assets/SurveyCTO-Logo-CMYK.png", width=200)
+        # Get the path to the assets directory relative to the package
+        assets_dir = Path(__file__).parent.parent / "assets"
+        image_path = assets_dir / "SurveyCTO-Logo-CMYK.png"
+        st.image(str(image_path), width=200)
 
         st.markdown("*Server Details:*")
 
@@ -711,7 +722,10 @@ def scto_login_form(project_id: str) -> None:
             }
 
             # save server cache to file
-            with open(f"cache/{project_id}/settings/scto.json", "w") as file:
+            scto_file = get_cache_path(project_id, "settings", "scto.json")
+            # Ensure parent directory exists
+            scto_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(scto_file, "w") as file:
                 json.dump(server_details, file)
 
             st.success(

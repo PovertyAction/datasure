@@ -4,7 +4,7 @@ import pandas as pd
 import seaborn as sns
 import streamlit as st
 
-from src.utils import load_check_settings, save_check_settings, trigger_save
+from pydms.utils import load_check_settings, save_check_settings, trigger_save
 
 
 @st.cache_data
