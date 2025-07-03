@@ -6,8 +6,8 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 
 # Set path to virtual environment's python
 
-python_dir := ".venv/Scripts"
-python := python_dir + if os_family() == "windows" { "/python.exe" } else { "/python3" }
+python_dir := ".venv/"
+python := python_dir + if os_family() == "windows" { "Scripts/python.exe" } else { "bin/python3" }
 
 # Display system information
 system-info:
