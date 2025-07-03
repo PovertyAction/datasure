@@ -134,27 +134,6 @@ pypi-info:
 package-workflow: test clean-build build-package test-cli
     @echo "Package workflow completed successfully!"
 
-# Build Windows executable with PyInstaller
-build-windows:
-    uv sync --extra build
-    uv run python scripts/build-windows.py
-
-# Clean PyInstaller build artifacts
-clean-pyinstaller:
-    rm -rf dist/
-    rm -rf build/
-    rm -rf *.spec
-
-# Prepare winget manifest for a version
-prepare-winget version:
-    uv run python scripts/prepare-winget-manifest.py {{ version }}
-
-# Complete Windows release workflow
-release-windows version: clean-pyinstaller build-windows
-    @echo "Windows executable built for version {{ version }}"
-    @echo "Upload the installer to GitHub releases, then run:"
-    @echo "just prepare-winget {{ version }}"
-
 [windows]
 pre-install:
     winget install Casey.Just astral-sh.uv GitHub.cli
@@ -163,6 +142,7 @@ pre-install:
 [linux]
 pre-install:
     brew install just uv gh markdownlint-cli
+
 [macos]
 pre-install:
     brew install just uv gh markdownlint-cli

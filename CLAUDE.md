@@ -31,8 +31,6 @@ This is **pyDMS** - an IPA (Innovations for Poverty Action) Data Management Syst
 ├── tests/                      # Comprehensive pytest test suite
 ├── cache/                      # Project data and configuration storage (gitignored)
 ├── docs/                       # Documentation including PACKAGING.md
-├── scripts/                    # Build automation scripts (Windows builds, winget)
-├── winget/                     # Windows Package Manager manifests
 ├── archived/                   # Legacy/experimental code (gitignored)
 ├── pyproject.toml             # Modern Python package configuration
 ├── Justfile                   # Cross-platform command runner
@@ -94,9 +92,8 @@ just package-workflow     # Complete workflow: test, build, and verify
 just publish-test         # Publish to TestPyPI
 just publish              # Publish to PyPI
 
-# Windows builds
-just build-windows        # Build Windows executable with PyInstaller
-just release-windows 0.1.0  # Complete Windows release workflow
+# Release workflow
+just release-windows 0.1.0  # Shows deprecation message for Windows builds
 ```
 
 ## Package Architecture
@@ -233,7 +230,7 @@ Defined in `conftest.py`:
 def sample_survey_data():
     """Realistic survey data with various data quality issues"""
 
-@pytest.fixture  
+@pytest.fixture
 def gps_outlier_data():
     """GPS coordinates with known outliers for testing"""
 
@@ -315,7 +312,7 @@ cache/
 # Local development build
 just build-package
 
-# Install and test locally  
+# Install and test locally
 just install-package
 uv run pydms --version
 

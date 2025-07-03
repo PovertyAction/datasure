@@ -81,195 +81,26 @@ jobs:
         TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
       run: |
         uv run --with twine twine upload dist/*
-  build-windows:
-    runs-on: windows-latest
+  create-release:
+    needs: [build-python-package]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-
-    - name: Install UV
-      uses: astral-sh/setup-uv@v3
-      with:
-        enable-cache: true
-        cache-dependency-glob: "uv.lock"
-
-    - name: Install dependencies
-      run: |
-        uv sync --extra build
-
-    - name: Get version
-      id: version
-      shell: bash
-      run: |
-        if [[ "${{ github.event_name }}" == "push" ]]; then
-          VERSION=${GITHUB_REF#refs/tags/}
-        else
-          VERSION="${{ github.event.inputs.version }}"
-        fi
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
-        echo "version_number=${VERSION#v}" >> $GITHUB_OUTPUT
-
-    - name: Update version in package
-      shell: bash
-      run: |
-        VERSION_NUMBER="${{ steps.version.outputs.version_number }}"
-        sed -i "s/__version__ = \".*\"/__version__ = \"$VERSION_NUMBER\"/" src/pydms/__init__.py
-
-    - name: Build Windows executable
-      run: |
-        python scripts/build-windows.py
-
-    - name: Create installer with NSIS (optional)
-      shell: bash
-      run: |
-        # Download and install NSIS
-        curl -L -o nsis-setup.exe "https://prdownloads.sourceforge.net/nsis/nsis-3.08-setup.exe?download"
-        ./nsis-setup.exe /S
-
-        # Create NSIS script
-        cat > installer.nsi << 'EOF'
-        !define APPNAME "pyDMS"
-        !define COMPANYNAME "Innovations for Poverty Action"
-        !define DESCRIPTION "IPA Data Management System Dashboard"
-        !define VERSIONMAJOR 0
-        !define VERSIONMINOR 1
-        !define VERSIONBUILD 0
-        !define HELPURL "https://github.com/PovertyAction/pydms"
-        !define UPDATEURL "https://github.com/PovertyAction/pydms/releases"
-        !define ABOUTURL "https://github.com/PovertyAction/pydms"
-        !define INSTALLSIZE 200000
-
-        RequestExecutionLevel admin
-        InstallDir "$PROGRAMFILES64\${COMPANYNAME}\${APPNAME}"
-
-        Name "${APPNAME}"
-        Icon "assets\IPA-primary-full-color-abbreviated.png"
-        outFile "pydms-installer.exe"
-
-        !include LogicLib.nsh
-
-        page directory
-        page instfiles
-
-        !macro VerifyUserIsAdmin
-        UserInfo::GetAccountType
-        pop $0
-        ${If} $0 != "admin"
-            messageBox mb_iconstop "Administrator rights required!"
-            setErrorLevel 740
-            quit
-        ${EndIf}
-        !macroend
-
-        function .onInit
-            setShellVarContext all
-            !insertmacro VerifyUserIsAdmin
-        functionEnd
-
-        section "install"
-            setOutPath $INSTDIR
-            file /r "dist\pydms\*"
-
-            writeUninstaller "$INSTDIR\uninstall.exe"
-
-            createDirectory "$SMPROGRAMS\${COMPANYNAME}"
-            createShortCut "$SMPROGRAMS\${COMPANYNAME}\${APPNAME}.lnk" "$INSTDIR\pydms.exe"
-            createShortCut "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\pydms.exe"
-
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANYNAME} ${APPNAME}" "DisplayName" "${APPNAME}"
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANYNAME} ${APPNAME}" "DisplayIcon" "$INSTDIR\pydms.exe"
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANYNAME} ${APPNAME}" "Publisher" "${COMPANYNAME}"
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANYNAME} ${APPNAME}" "HelpLink" "${HELPURL}"
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANYNAME} ${APPNAME}" "URLUpdateInfo" "${UPDATEURL}"
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANYNAME} ${APPNAME}" "URLInfoAbout" "${ABOUTURL}"
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANYNAME} ${APPNAME}" "DisplayVersion" "${VERSIONMAJOR}.${VERSIONMINOR}.${VERSIONBUILD}"
-            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANYNAME} ${APPNAME}" "VersionMajor" ${VERSIONMAJOR}
-            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANYNAME} ${APPNAME}" "VersionMinor" ${VERSIONMINOR}
-            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANYNAME} ${APPNAME}" "NoModify" 1
-            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANYNAME} ${APPNAME}" "NoRepair" 1
-            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANYNAME} ${APPNAME}" "EstimatedSize" ${INSTALLSIZE}
-        sectionEnd
-
-        section "uninstall"
-            delete "$SMPROGRAMS\${COMPANYNAME}\${APPNAME}.lnk"
-            delete "$DESKTOP\${APPNAME}.lnk"
-            rmDir "$SMPROGRAMS\${COMPANYNAME}"
-
-            delete $INSTDIR\uninstall.exe
-            rmDir /r $INSTDIR
-
-            DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANYNAME} ${APPNAME}"
-        sectionEnd
-        EOF
-
-        # Build installer
-        "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
-      continue-on-error: true
-
-    - name: Create portable archive
-      shell: bash
-      run: |
-        cd dist
-        7z a -tzip ../pydms-${{ steps.version.outputs.version }}-windows-portable.zip pydms/
-
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: windows-builds
-        path: |
-          pydms-*.zip
-          pydms-installer.exe
-        retention-days: 30
-
     - name: Download Python package artifacts
-      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
       uses: actions/download-artifact@v4
       with:
         name: python-package
         path: python-dist/
 
     - name: Create Release
-      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          pydms-*.zip
-          pydms-installer.exe
           python-dist/*.whl
           python-dist/*.tar.gz
         generate_release_notes: true
         draft: false
-        prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+        prerelease: ${{ contains(github.ref, '-') }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  update-winget:
-    needs: [build-python-package, build-windows]
-    runs-on: windows-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && !contains(github.ref, '-')
-
-    steps:
-    - name: Get version
-      id: version
-      shell: bash
-      run: |
-        VERSION=${GITHUB_REF#refs/tags/}
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
-        echo "version_number=${VERSION#v}" >> $GITHUB_OUTPUT
-
-    - name: Update winget package
-      uses: vedantmgoyal2009/winget-releaser@v2
-      with:
-        identifier: PovertyAction.pyDMS
-        version: ${{ steps.version.outputs.version_number }}
-        installers-regex: 'pydms-installer\.exe$'
-        token: ${{ secrets.WINGET_TOKEN }}
-        fork-user: ${{ secrets.WINGET_FORK_USER }}
