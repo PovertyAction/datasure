@@ -8,6 +8,9 @@ from pathlib import Path
 
 block_cipher = None
 
+# Set recursion limit to handle complex imports
+sys.setrecursionlimit(5000)
+
 # Define paths
 project_root = Path.cwd()
 src_path = project_root / "src"
@@ -34,11 +37,19 @@ if package_path.exists():
         if subdir_path.exists():
             data.append((str(subdir_path), f"pydms/{subdir}"))
 
+# Include Streamlit configuration
+streamlit_config_path = project_root / ".streamlit"
+if streamlit_config_path.exists():
+    data.append((str(streamlit_config_path), ".streamlit"))
+
 # Include streamlit static files
 import streamlit
 streamlit_path = Path(streamlit.__file__).parent
 data.append((str(streamlit_path / "static"), "streamlit/static"))
 data.append((str(streamlit_path / "runtime"), "streamlit/runtime"))
+
+# Include streamlit web files
+data.append((str(streamlit_path / "web"), "streamlit/web"))
 
 # Hidden imports for streamlit and dependencies
 hiddenimports = [
@@ -57,6 +68,10 @@ hiddenimports = [
     'streamlit.runtime.state',
     'streamlit.runtime.uploaded_file_manager',
     'streamlit.components.v1',
+    'streamlit.web.server',
+    'streamlit.web.server.server',
+    'streamlit.runtime.caching',
+    'streamlit.runtime.metrics_util',
     'streamlit_extras',
     # Data analysis
     'plotly',
@@ -94,10 +109,21 @@ hiddenimports = [
     'certifi',
     'charset_normalizer',
     'idna',
+    # Additional critical imports
+    'blinker',
+    'cachetools',
+    'gitpython',
+    'pydeck',
+    'pympler',
+    'rich',
+    'tenacity',
+    'typing_extensions',
+    'watchdog.observers',
+    'watchdog.events',
 ]
 
 a = Analysis(
-    [str(package_path / "app.py")],
+    [str(package_path / "cli.py")],
     pathex=[str(project_root), str(src_path)],
     binaries=[],
     datas=data,

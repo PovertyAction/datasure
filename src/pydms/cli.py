@@ -6,6 +6,7 @@ as a command-line application.
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -48,6 +49,11 @@ def main():
         print("Make sure the package is installed properly.", file=sys.stderr)
         sys.exit(1)
 
+    # Set environment variables for better executable compatibility
+    os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
+    os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
+    os.environ["STREAMLIT_GLOBAL_DEVELOPMENT_MODE"] = "false"
+
     # Launch Streamlit with the app.py file
     sys.argv = [
         "streamlit",
@@ -61,9 +67,18 @@ def main():
         "true",
         "--browser.gatherUsageStats",
         "false",
+        "--global.developmentMode",
+        "false",
     ]
 
-    sys.exit(stcli.main())
+    try:
+        stcli.main()
+    except SystemExit as e:
+        # Handle normal Streamlit exit
+        sys.exit(e.code)
+    except Exception as e:
+        print(f"Error running Streamlit: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def get_version():
