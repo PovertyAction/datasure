@@ -365,7 +365,9 @@ def prep_transform_columns(prep_data: pd.DataFrame, description: str):
         prep_data[columns] = prep_data[columns].apply(math_operations[func])
     elif func in arithmetic_ops:
         # Extract the numeric value from the description
-        value_operation = float(re.search(r"\d+\.?\d*$", description).group(0))
+        value_operation = float(
+            re.search(r"\s\d{1,10}(?:\.\d{1,10})?$", description).group(0).strip()
+        )
         prep_data[columns] = arithmetic_ops[func](prep_data[columns], value_operation)
     elif func in string_ops:
         prep_data[columns] = string_ops[func](prep_data[columns])
