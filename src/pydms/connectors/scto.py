@@ -62,13 +62,13 @@ def scto_server_connect(servername: str, username: str, password: str) -> str:
         st.stop()
 
     # check that servername is valid
-    elif not re.fullmatch(r"\b[a-z]+[a-z0-9]+\b", servername):
+    elif not re.fullmatch(r"^[a-z][a-z0-9]{1,63}$", servername):
         st.warning("Invalid server name.")
         st.stop()
 
     # check that user field is a valid email
     elif not re.fullmatch(
-        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b", username
+        r"^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,63}\.[A-Za-z]{2,7}$", username
     ):
         st.warning("Invalid email address")
         st.stop()
