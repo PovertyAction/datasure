@@ -27,39 +27,39 @@ def test_compute_summary_submissions_structure(sample_date_data_10000):
     ### test for 0, 10, 1000, and 10000 observations
     # Compute summary for 0 observations
     summary_0 = compute_summary_submissions(test_data_0, "SubmissionDate")
-    assert isinstance(
-        summary_0, tuple
-    ), "0 ROWS: Returned value for compute_summary_submissions should be a tuple"
-    assert (
-        len(summary_0) == 10
-    ), "0 ROWS: Returned value for compute_summary_submissions should have 10 elements"
+    assert isinstance(summary_0, tuple), (
+        "0 ROWS: Returned value for compute_summary_submissions should be a tuple"
+    )
+    assert len(summary_0) == 10, (
+        "0 ROWS: Returned value for compute_summary_submissions should have 10 elements"
+    )
 
     # Compute summary for 10 observations
     summary_10 = compute_summary_submissions(test_data_10, "SubmissionDate")
-    assert isinstance(
-        summary_10, tuple
-    ), "10 ROWS: Returned value for compute_summary_submissions should be a tuple"
-    assert (
-        len(summary_10) == 10
-    ), "10 ROWS: Returned value for compute_summary_submissions should have 10 elements"
+    assert isinstance(summary_10, tuple), (
+        "10 ROWS: Returned value for compute_summary_submissions should be a tuple"
+    )
+    assert len(summary_10) == 10, (
+        "10 ROWS: Returned value for compute_summary_submissions should have 10 elements"
+    )
 
     # Compute summary for 1000 observations
     summary_1000 = compute_summary_submissions(test_data_1000, "SubmissionDate")
-    assert isinstance(
-        summary_1000, tuple
-    ), "1000 ROWS: Returned value for compute_summary_submissions should be a tuple"
-    assert (
-        len(summary_1000) == 10
-    ), "1000 ROWS: Returned value for compute_summary_submissions should have 10 elements"
+    assert isinstance(summary_1000, tuple), (
+        "1000 ROWS: Returned value for compute_summary_submissions should be a tuple"
+    )
+    assert len(summary_1000) == 10, (
+        "1000 ROWS: Returned value for compute_summary_submissions should have 10 elements"
+    )
 
     # Compute summary for 10000 observations
     summary_10000 = compute_summary_submissions(test_data_10000, "SubmissionDate")
-    assert isinstance(
-        summary_10000, tuple
-    ), "10000 ROWS: Returned value for compute_summary_submissions should be a tuple"
-    assert (
-        len(summary_10000) == 10
-    ), "10000 ROWS: Returned value for compute_summary_submissions should have 10 elements"
+    assert isinstance(summary_10000, tuple), (
+        "10000 ROWS: Returned value for compute_summary_submissions should be a tuple"
+    )
+    assert len(summary_10000) == 10, (
+        "10000 ROWS: Returned value for compute_summary_submissions should have 10 elements"
+    )
 
 
 # Test 2: type of returned values
@@ -87,9 +87,9 @@ def test_compute_summary_submissions_type(sample_date_data_10000, name, index, t
     summary = compute_summary_submissions(test_data, "SubmissionDate")
 
     # Check if the value is of the expected type
-    assert isinstance(
-        summary[index], type
-    ), f"Value at index {name} should be of type {type.__name__}"
+    assert isinstance(summary[index], type), (
+        f"Value at index {name} should be of type {type.__name__}"
+    )
 
 
 def test_compute_submissions_with_missing_dates(sample_date_data_10000):
@@ -138,9 +138,9 @@ def test_compute_submissions_values_0(name, index, result):
     # Check if the value is of the expected type
     if index == 9:
         # For submissions_by_date, we expect an empty DataFrame
-        assert summary[
-            index
-        ].empty, f"Value at index {name} should be an empty DataFrame"
+        assert summary[index].empty, (
+            f"Value at index {name} should be an empty DataFrame"
+        )
     else:
         assert summary[index] == result, f"Value at index {name} should be {result}"
 
@@ -225,9 +225,9 @@ def test_compute_submissions_values_10(sample_date_data_10000, size):
         else 0
     )
     assert summary[8] == test_submissions_this_month_delta * 100
-    assert isinstance(
-        summary[9], pd.DataFrame
-    ), "submissions_by_date should be a DataFrame"
+    assert isinstance(summary[9], pd.DataFrame), (
+        "submissions_by_date should be a DataFrame"
+    )
     assert not summary[9].empty, "submissions_by_date should not be empty"
 
 
