@@ -209,7 +209,7 @@ uv run python -m pytest tests/test_file.py
 
 ## Package Building and Distribution
 
-pyDMS is set up as a proper Python package using [uv](https://docs.astral.sh/uv/) for building and publishing. This allows for easy distribution and installation.
+pyDMS is set up as a proper Python package using [uv](https://docs.astral.sh/uv/) with the `uv_build` backend for simple and fast building and publishing.
 
 ### Building the Package
 
@@ -258,7 +258,7 @@ uv run pydms --host 0.0.0.0 --port 8080
 ### Package Development Workflow
 
 1. **Make changes** to the code
-2. **Update version** in `src/pydms/__init__.py`
+2. **Update version** in `pyproject.toml`
 3. **Run tests** to ensure everything works:
 
    ```bash
@@ -280,7 +280,7 @@ uv run pydms --host 0.0.0.0 --port 8080
 
 ### Version Management
 
-The version number is stored in `src/pydms/__init__.py` and follows [semantic versioning](https://semver.org/):
+The version number is stored directly in `pyproject.toml` and follows [semantic versioning](https://semver.org/):
 
 - **MAJOR** version when you make incompatible API changes
 - **MINOR** version when you add functionality in a backward compatible manner
@@ -288,18 +288,15 @@ The version number is stored in `src/pydms/__init__.py` and follows [semantic ve
 
 To update the version:
 
-1. **Edit the version in `src/pydms/__init__.py`**:
-
-   ```python
-   __version__ = "0.2.0"  # Update this line
-   ```
-
-2. **The build system automatically uses this version** when building packages via the hatch configuration in `pyproject.toml`:
+1. **Edit the version in `pyproject.toml`**:
 
    ```toml
-   [tool.hatch.version]
-   path = "src/pydms/__init__.py"
+   [project]
+   name = "pyDMS"
+   version = "0.2.0"  # Update this line
    ```
+
+2. **The build system uses this static version** directly from the project configuration
 
 3. **Verify the version update**:
 

@@ -8,7 +8,7 @@ This is **pyDMS** - an IPA (Innovations for Poverty Action) Data Management Syst
 
 **Key Characteristics:**
 
-- Modern Python package using src/ layout with hatchling build backend
+- Modern Python package using src/ layout with uv_build backend
 - Streamlit-based web application with sophisticated navigation
 - Professional-grade build system with multi-platform distribution
 - Comprehensive testing framework with pytest and extensive fixtures
@@ -346,7 +346,7 @@ just package-workflow  # Tests, builds, and verifies package
 
 Modern Python package configuration with:
 
-- Build system specification (hatchling)
+- Build system specification (uv_build)
 - Dependency management with optional groups
 - Tool configuration (ruff, pytest, coverage)
 - Package metadata and entry points

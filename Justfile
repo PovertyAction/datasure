@@ -100,11 +100,10 @@ build-package:
 clean-build:
     rm -rf dist/
     rm -rf build/
-    rm -rf src/pyDMS.egg-info/
 
 # Install the package locally from the built wheel
 install-package: build-package
-    uv pip install --force-reinstall dist/pyDMS-*.whl
+    uv pip install --force-reinstall dist/pydms-*.whl
 
 # Uninstall the package
 uninstall-package:
