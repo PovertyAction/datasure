@@ -45,14 +45,6 @@ lab:
 streamlit-run f:
     uv run streamlit run {{ f }}
 
-# Preview the handbook
-preview-docs:
-    quarto preview
-
-# Build the handbook
-build-docs:
-    quarto render
-
 # Lint python code
 lint-py:
     uv run ruff check
