@@ -58,9 +58,6 @@ path = "src/pydms/__init__.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/pydms"]
 
-[tool.hatch.build.sources]
-"src" = ""
-
 [tool.uv]
 dev-dependencies = [
     "jupyter>=1.1.1",

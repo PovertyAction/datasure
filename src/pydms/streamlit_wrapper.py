@@ -20,10 +20,25 @@ def run_streamlit_app():
     os.environ["STREAMLIT_GLOBAL_DEVELOPMENT_MODE"] = "false"
 
     # Get the app.py path
-    app_path = Path(__file__).parent / "app.py"
+    # Check if running in PyInstaller bundle
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        # Running in PyInstaller bundle
+        app_path = Path(sys._MEIPASS) / "pydms" / "app.py"
+    else:
+        # Running normally
+        app_path = Path(__file__).parent / "app.py"
 
     if not app_path.exists():
         print(f"Error: Could not find app.py at {app_path}", file=sys.stderr)
+
+        # Debug information for PyInstaller
+        if getattr(sys, "frozen", False):
+            print(
+                f"Running in PyInstaller bundle. sys._MEIPASS = {getattr(sys, '_MEIPASS', 'N/A')}",
+                file=sys.stderr,
+            )
+            print(f"__file__ = {__file__}", file=sys.stderr)
+
         sys.exit(1)
 
     # Configure sys.argv for Streamlit

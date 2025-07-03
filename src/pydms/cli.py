@@ -42,11 +42,41 @@ def main():
     args = parser.parse_args()
 
     # Find the app.py file in the package
-    app_path = Path(__file__).parent / "app.py"
+    # Check if running in PyInstaller bundle
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        # Running in PyInstaller bundle
+        app_path = Path(sys._MEIPASS) / "pydms" / "app.py"
+    else:
+        # Running normally
+        app_path = Path(__file__).parent / "app.py"
 
     if not app_path.exists():
         print(f"Error: Could not find app.py at {app_path}", file=sys.stderr)
         print("Make sure the package is installed properly.", file=sys.stderr)
+
+        # Debug information for PyInstaller
+        if getattr(sys, "frozen", False):
+            print(
+                f"Running in PyInstaller bundle. sys._MEIPASS = {getattr(sys, '_MEIPASS', 'N/A')}",
+                file=sys.stderr,
+            )
+            print(f"__file__ = {__file__}", file=sys.stderr)
+            print(f"sys.executable = {sys.executable}", file=sys.stderr)
+
+            # List available files for debugging
+            if hasattr(sys, "_MEIPASS"):
+                meipass_path = Path(sys._MEIPASS)
+                print(f"Files in {meipass_path}:", file=sys.stderr)
+                try:
+                    for item in meipass_path.iterdir():
+                        print(f"  {item}", file=sys.stderr)
+                        if item.is_dir() and item.name == "pydms":
+                            print("    pydms directory contents:", file=sys.stderr)
+                            for subitem in item.iterdir():
+                                print(f"      {subitem}", file=sys.stderr)
+                except Exception as e:
+                    print(f"  Error listing files: {e}", file=sys.stderr)
+
         sys.exit(1)
 
     # Set environment variables for better executable compatibility

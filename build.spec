@@ -21,6 +21,11 @@ data = []
 
 # Include package data (views and assets are now part of the package)
 if package_path.exists():
+    # Include the main app.py file
+    app_file = package_path / "app.py"
+    if app_file.exists():
+        data.append((str(app_file), "pydms/app.py"))
+    
     # Include views
     views_path = package_path / "views"
     if views_path.exists():
