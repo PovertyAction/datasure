@@ -392,6 +392,7 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, i: int):
         string_cols,
         num_cols,
         date_cols,
+        _,
     ) = get_df_info(prep_data, cols_only=True)
     with (
         pt1,
@@ -554,6 +555,7 @@ if show_prep_page_info:
             miss_count,
             miss_perc,
             all_cols,
+            _,
             _,
             _,
             _,
