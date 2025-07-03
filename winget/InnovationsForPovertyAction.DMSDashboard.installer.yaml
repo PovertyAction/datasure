@@ -1,0 +1,22 @@
+# Created with YamlCreate.ps1 v2.4.1 $debug=QUSU.CRLF.7-4-1.Win32NT
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+
+PackageIdentifier: PovertyAction.pyDMS
+PackageVersion: 0.1.0
+Platform:
+  - Windows.Desktop
+MinimumOSVersion: 10.0.0.0
+InstallerType: nullsoft
+Scope: machine
+InstallModes:
+  - interactive
+  - silent
+UpgradeBehavior: install
+ReleaseDate: 2024-07-02
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/PovertyAction/pydms/releases/download/v0.1.0/pydms-installer.exe
+    InstallerSha256: # This will be automatically filled by winget-releaser action
+    ProductCode: "{GUID-PLACEHOLDER}" # This will be generated during build
+ManifestType: installer
+ManifestVersion: 1.6.0

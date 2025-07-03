@@ -30,7 +30,8 @@ MANIFEST
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
-*.spec
+# Note: build.spec is kept in version control for this project
+# *.spec
 
 # Installer logs
 pip-log.txt
@@ -176,4 +177,3 @@ archived/notebooks/*test*.ipynb
 cache/*
 !cache/.gitkeep
 **.DS_Store
-CLAUDE.md

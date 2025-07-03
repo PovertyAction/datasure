@@ -67,15 +67,15 @@ fmt-py f:
 
 # Format all markdown and config files
 fmt-markdown:
-    uv run mdformat .
+    markdownlint --config .markdownlint.yaml "**/*.md" --fix
 
 # Format a single markdown file, "f"
 fmt-md f:
-    uv run mdformat {{ f }}
+    markdownlint --config .markdownlint.yaml {{ f }} --fix
 
 # Check format of all markdown files
 fmt-check-markdown:
-    uv run mdformat --check .
+    markdownlint --config .markdownlint.yaml "**/*.md" "**/*.md"
 
 fmt-all: lint-py fmt-python fmt-markdown
 
@@ -100,17 +100,77 @@ test-cov-xml:
 pre-commit-run:
     pre-commit run
 
+# Build the package using uv
+build-package:
+    uv build
+
+# Clean build artifacts
+clean-build:
+    rm -rf dist/
+    rm -rf build/
+    rm -rf src/pyDMS.egg-info/
+
+# Install the package locally from the built wheel
+install-package: build-package
+    uv pip install --force-reinstall dist/pyDMS-*.whl
+
+# Uninstall the package
+uninstall-package:
+    uv pip uninstall pydms
+
+# Test the CLI after installation
+test-cli: install-package
+    uv run pydms --version
+
+# Publish to TestPyPI (for testing)
+publish-test: build-package
+    uv run --with twine twine upload --repository testpypi dist/*
+
+# Publish to PyPI (production)
+publish: build-package
+    uv run --with twine twine upload dist/*
+
+# Check PyPI package before publishing
+check-pypi: build-package
+    uv run --with twine twine check dist/*
+
+# View PyPI package info
+pypi-info:
+    uv run --with twine twine check dist/* --verbose
+
+# Package development workflow: test, build, and verify
+package-workflow: test clean-build build-package test-cli
+    @echo "Package workflow completed successfully!"
+
+# Build Windows executable with PyInstaller
+build-windows:
+    uv sync --extra build
+    uv run python scripts/build-windows.py
+
+# Clean PyInstaller build artifacts
+clean-pyinstaller:
+    rm -rf dist/
+    rm -rf build/
+    rm -rf *.spec
+
+# Prepare winget manifest for a version
+prepare-winget version:
+    uv run python scripts/prepare-winget-manifest.py {{ version }}
+
+# Complete Windows release workflow
+release-windows version: clean-pyinstaller build-windows
+    @echo "Windows executable built for version {{ version }}"
+    @echo "Upload the installer to GitHub releases, then run:"
+    @echo "just prepare-winget {{ version }}"
+
 [windows]
 pre-install:
-    winget install Casey.Just astral-sh.uv GitHub.cli Posit.Quarto
+    winget install Casey.Just astral-sh.uv GitHub.cli
+    npm install -g markdownlint-cli
 
 [linux]
 pre-install:
-    brew install just uv gh
-    curl -sfL https://github.com/quarto-dev/quarto-cli/releases/download/v1.5.54/quarto-1.5.54-linux-amd64.deb  | sudo apt install ./quarto-1.5.54-linux-amd64.deb
-    rm quarto-1.5.54-linux-amd64.deb
-
+    brew install just uv gh markdownlint-cli
 [macos]
 pre-install:
-    brew install just uv gh
-    brew install --cask quarto
+    brew install just uv gh markdownlint-cli

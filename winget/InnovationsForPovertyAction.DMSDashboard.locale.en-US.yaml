@@ -1,0 +1,58 @@
+# Created with YamlCreate.ps1 v2.4.1 $debug=QUSU.CRLF.7-4-1.Win32NT
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+
+PackageIdentifier: PovertyAction.pyDMS
+PackageVersion: 0.1.0
+PackageLocale: en-US
+Publisher: Innovations for Poverty Action
+PublisherUrl: https://www.poverty-action.org/
+PublisherSupportUrl: https://github.com/PovertyAction/pydms/issues
+# PrivacyUrl:
+Author: Innovations for Poverty Action
+PackageName: pyDMS
+PackageUrl: https://github.com/PovertyAction/pydms
+License: MIT
+LicenseUrl: https://github.com/PovertyAction/pydms/blob/main/LICENSE
+Copyright: Copyright (c) 2024 Innovations for Poverty Action
+# CopyrightUrl:
+ShortDescription: IPA Data Management System Dashboard
+Description: |-
+  pyDMS is a web-based interface for data quality monitoring and high-frequency checks
+  in survey data collection projects. Built with Python and Streamlit, it provides comprehensive
+  data quality checks including progress monitoring, missing data analysis, duplicate detection,
+  GPS validation, enumerator performance tracking, and outlier detection.
+
+  Key Features:
+  - Nine data quality check modules
+  - Support for SurveyCTO, local files, and Python scripts
+  - Interactive charts and visualizations
+  - Configurable check parameters
+  - Export capabilities for reports
+Moniker: pydms
+Tags:
+  - data-analysis
+  - data-quality
+  - survey-data
+  - streamlit
+  - monitoring
+  - hfc
+  - surveycto
+  - research
+  - poverty-action
+  - ipa
+ReleaseNotes: |-
+  Initial release of pyDMS
+  - Complete data quality monitoring system
+  - Support for multiple data sources
+  - Interactive web interface
+  - Comprehensive check modules
+ReleaseNotesUrl: https://github.com/PovertyAction/pydms/releases/tag/v0.1.0
+# PurchaseUrl:
+# InstallationNotes:
+Documentations:
+  - DocumentLabel: User Guide
+    DocumentUrl: https://github.com/PovertyAction/pydms/blob/main/README.md
+  - DocumentLabel: API Documentation
+    DocumentUrl: https://github.com/PovertyAction/pydms/blob/main/CLAUDE.md
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
