@@ -261,7 +261,9 @@ def gps_check_settings(
                 gps_accuracy = default_gps_accuracy
 
         with enum_col:
-            default_date_index = survey_cols.get_loc(default_date)
+            default_date_index = (
+                survey_cols.get_loc(default_date) if default_date else None
+            )
 
             date = st.selectbox(
                 "Date",
@@ -281,7 +283,9 @@ def gps_check_settings(
                 index=default_survey_key_index,
             )
 
-            default_survey_id_index = survey_cols.get_loc(default_survey_id)
+            default_survey_id_index = (
+                survey_cols.get_loc(default_survey_id) if default_survey_id else None
+            )
 
             survey_id = st.selectbox(
                 "Survey ID",
@@ -291,7 +295,9 @@ def gps_check_settings(
                 index=default_survey_id_index,
             )
 
-            default_enumerator_index = survey_cols.get_loc(default_enumerator)
+            default_enumerator_index = (
+                survey_cols.get_loc(default_enumerator) if default_enumerator else None
+            )
 
             enumerator = st.selectbox(
                 "Enumerator",

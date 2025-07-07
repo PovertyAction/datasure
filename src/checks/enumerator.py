@@ -146,7 +146,7 @@ def enumerator_report_settings(
         with st.container(border=True):
             with uc1:
                 date_col_options = data.select_dtypes("datetime").columns.tolist()
-                default_date_index = date_col_options.index(date)
+                default_date_index = date_col_options.index(date) if date else None
 
                 date = st.selectbox(
                     label="Date",
@@ -381,6 +381,11 @@ def display_enumerator_overview(
     """
     st.write("---")
     st.markdown("## Enumerator Overview")
+    if not (all([enumerator, date])):
+        st.info(
+            "Enumerator overview requires a date and enumerator column to be selected. Go to the :material/settings: settings section above to select them.",
+        )
+        return
     (
         all_submissions,
         num_active_enumerators,
@@ -725,6 +730,12 @@ def display_enumerator_summary(
     """
     st.write("---")
     st.markdown("## Enumerator Summary")
+    if not (all([enumerator, date])):
+        st.warning(
+            "Please select a date and enumerator column to display the summary.",
+            icon=":material/error:",
+        )
+        return
     summary_df = compute_enumerator_summary(
         data=data,
         missing_setting_file=missing_setting_file,
@@ -843,11 +854,17 @@ def display_enumerator_productivity(
     -------
         None
     """
+    st.write("---")
+    st.markdown("## Enumerator Productivity")
+    if not (all([enumerator, date])):
+        st.warning(
+            "Please select a date and enumerator column to display the productivity.",
+            icon=":material/error:",
+        )
+        return
     default_setting = (
         load_check_settings(settings_file=setting_file, check_name="enumerator") or {}
     )
-    st.write("---")
-    st.markdown("## Enumerator Productivity")
     # Toggle for days, weeks, or months view
     st.markdown("##### Productivity")
     view_option_list = ("Daily", "Weekly", "Monthly")
