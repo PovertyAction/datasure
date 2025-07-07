@@ -45,8 +45,8 @@ def load_default_duplicates_settings(
     default_survey_id = default_settings.get("survey_id", config_survey_id)
     default_survey_key = default_settings.get("survey_key", config_survey_key)
     default_date = default_settings.get("date", config_survey_date)
-    default_dup_cols = default_settings.get("dup_cols", None)
-    default_display_cols = default_settings.get("display_cols", None)
+    default_dup_cols = default_settings.get("dup_cols")
+    default_display_cols = default_settings.get("display_cols")
 
     return (
         default_survey_id,
@@ -334,7 +334,7 @@ def id_duplicates_display(
         default_settings = load_check_settings(setting_file, "duplicates") or {}
     else:
         default_settings = {}
-    display_cols = default_settings.get("id_display_cols", None)
+    display_cols = default_settings.get("id_display_cols")
     display_col_options = [
         col for col in data.columns if col not in [survey_id, survey_key, survey_date]
     ]
@@ -478,7 +478,7 @@ def column_duplicates_display(
         default_settings = load_check_settings(setting_file, "duplicates") or {}
     else:
         default_settings = {}
-    dup_col = default_settings.get("dup_col", None)
+    dup_col = default_settings.get("dup_col")
     dup_col_index = dup_cols.index(dup_col) if dup_col and dup_col in dup_cols else 0
     display_cols = default_settings.get(f"{dup_col}/display_cols") if dup_col else None
     # make a list of columns with at least one duplicate

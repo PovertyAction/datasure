@@ -271,9 +271,9 @@ if load_pages:
     for i, name in enumerate(check_config_log["page_name"].to_list()):
         check_pages_to_add.append(
             st.Page(
-                page=f"views/output_view_{i+1}.py",
+                page=f"views/output_view_{i + 1}.py",
                 title=name,
-                icon=f":material/counter_{i+1}:",
+                icon=f":material/counter_{i + 1}:",
             )
         )
 
@@ -301,5 +301,5 @@ if st.session_state.show_checks_section:
         st.page_link(
             page,
             label=f"### {name}",
-            icon=f":material/counter_{i+1}:",
+            icon=f":material/counter_{i + 1}:",
         )

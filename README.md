@@ -171,7 +171,7 @@ uv pip compile pyproject.toml -o requirements.txt --no-annotate --no-header
 cp pydms.py app.py && uv run ploomber-cloud deploy --watch
 ```
 
-See Ploomber docs for more details on deployment options and configurations of [Streamlit apps](https://docs.cloud.ploomber.io/en/latest/apps/streamlit.html). Password protection docs are found [here](https://docs.cloud.ploomber.io/en/latest/user-guide/cli.html#password-protection).
+See Ploomber docs for more details on deployment options and configurations of [Streamlit apps](https://docs.cloud.ploomber.io/en/latest/apps/streamlit.html). Password protection docs are found [Ploomber docs](https://docs.cloud.ploomber.io/en/latest/user-guide/cli.html#password-protection).
 
 ## Code Quality Reports
 

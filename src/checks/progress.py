@@ -52,13 +52,13 @@ def load_default_progress_settings(
         default_settings.get("survey_id", config_survey_id),
         default_settings.get("enumerator", config_enumerator),
         default_settings.get("date", config_survey_date),
-        default_settings.get("target", None),
+        default_settings.get("target"),
     )
 
     # for default target, get the value in summary page if there is
     # no default for the progress page
     if not default_target:
-        default_target = summary_settings.get("target", None)
+        default_target = summary_settings.get("target")
 
     return (
         default_survey_id,
@@ -581,7 +581,7 @@ def compute_attempted_interviews(
     )
     attempt_dates_df = attempted_interviews["attempt_dates"].apply(pd.Series)
     attempt_dates_df.columns = [
-        f"Attempt Date {i+1}" for i in range(attempt_dates_df.shape[1])
+        f"Attempt Date {i + 1}" for i in range(attempt_dates_df.shape[1])
     ]
     attempted_interviews = pd.concat([attempted_interviews, attempt_dates_df], axis=1)
     attempted_interviews.drop(columns=["attempt_dates"], inplace=True)
