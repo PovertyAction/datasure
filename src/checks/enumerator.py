@@ -731,9 +731,8 @@ def display_enumerator_summary(
     st.write("---")
     st.markdown("## Enumerator Summary")
     if not (all([enumerator, date])):
-        st.warning(
-            "Please select a date and enumerator column to display the summary.",
-            icon=":material/error:",
+        st.info(
+            "Enumerator summary requires a date and enumerator column to be selected. Go to the :material/settings: settings section above to select them.",
         )
         return
     summary_df = compute_enumerator_summary(
@@ -857,9 +856,8 @@ def display_enumerator_productivity(
     st.write("---")
     st.markdown("## Enumerator Productivity")
     if not (all([enumerator, date])):
-        st.warning(
-            "Please select a date and enumerator column to display the productivity.",
-            icon=":material/error:",
+        st.info(
+            "Enumerator productivity requires a date and enumerator column to be selected. Go to the :material/settings: settings section above to select them.",
         )
         return
     default_setting = (
@@ -1013,6 +1011,11 @@ def display_enumerator_statistics(
     """
     st.write("---")
     st.markdown("## Enumerator Statistics")
+    if not enumerator:
+        st.info(
+            "Enumerator statistics requires an enumerator column to be selected. Go to the :material/settings: settings section above to select it.",
+        )
+        return
     # create enumerator statistics
     default_setting = (
         load_check_settings(settings_file=setting_file, check_name="enumerator") or {}
@@ -1182,6 +1185,11 @@ def display_enumerator_statistics_overtime(
     """
     st.write("---")
     st.markdown("## Enumerator Statistics Over Time")
+    if not (all([enumerator, date])):
+        st.info(
+            "Enumerator statistics over time requires a date and enumerator column to be selected. Go to the :material/settings: settings section above to select them.",
+        )
+        return
     # create enumerator statistics
 
     st.markdown("##### Statistics")
