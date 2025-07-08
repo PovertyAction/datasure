@@ -189,9 +189,7 @@ def prep_remove_rows(prep_data: pd.DataFrame, description: str) -> pd.DataFrame:
                 return
             if prep_data[first_col].dtypes == "datetime64[ns]":
                 try:
-                    values_use = [
-                        val for val in ast.literal_eval(values.replace("Timestamp", ""))
-                    ]
+                    values_use = list(ast.literal_eval(values.replace("Timestamp", "")))
                 except (ValueError, SyntaxError):
                     st.error(f"Invalid values specification: {values}")
                     return
@@ -326,11 +324,14 @@ def prep_transform_columns(prep_data: pd.DataFrame, description: str):
     )
 
     datetime_extractors = {
-        "day": lambda s: s.dt.day,
-        "week": lambda s: s.dt.isocalendar().week,
-        "month": lambda s: s.dt.month,
+        "day of month": lambda s: s.dt.day,
+        "day of week": lambda s: s.dt.dayofweek,
+        "day of year": lambda s: s.dt.dayofyear,
+        "date": lambda s: s.dt.date,
+        "week of year": lambda s: s.dt.isocalendar().week,
+        "month of year": lambda s: s.dt.month,
         "year": lambda s: s.dt.year,
-        "quarter": lambda s: s.dt.quarter,
+        "quarter of year": lambda s: s.dt.quarter,
         "hour": lambda s: s.dt.hour,
         "minute": lambda s: s.dt.minute,
         "second": lambda s: s.dt.second,
