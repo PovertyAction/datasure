@@ -77,10 +77,13 @@ DP_DATETIME_FUNCS: tuple = (
     "second",
     "minute",
     "hour",
-    "day",
-    "week",
-    "month",
-    "quarter",
+    "day of month",
+    "day of week",
+    "day of year",
+    "date",
+    "week of year",
+    "month of year",
+    "quarter of year",
     "year",
 )
 
