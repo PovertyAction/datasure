@@ -1,6 +1,7 @@
 import os
 
 import pandas as pd
+import plotly.express as px
 import plotly.graph_objects as go
 import seaborn as sns
 import streamlit as st
@@ -721,25 +722,63 @@ def display_attempted_interviews(
     cm3.metric(label="Min Attempts", value=min_attempts)
     cm4.metric(label="Max Attempts", value=max_attempts)
     pd.set_option("display.max_columns", None)
-    st.dataframe(
-        data=attempted_interviews.style.background_gradient(
-            subset=["num_interviews"],
-            cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
-        ),
-        use_container_width=True,
-        column_config={
-            survey_id: st.column_config.Column(pinned=True),
-            "num_interviews": st.column_config.Column(
-                pinned=True, label="Number of Interviews"
+
+    ai1, ai2 = st.columns([0.4, 0.6])
+    with ai1:
+        # aggregted attempted interviews into attempted_frequency
+        attempted_frequency = (
+            attempted_interviews.groupby("num_interviews")
+            .size()
+            .reset_index(name="frequency")
+        )
+        fig = px.bar(
+            attempted_frequency, x="frequency", y="num_interviews", orientation="h"
+        )
+        fig.update_layout(
+            title="Attempted Interviews Frequency",
+            title_x=0.5,
+            height=400,
+            margin=dict(t=50, b=50, l=50, r=50),
+            hovermode="x",
+            xaxis=dict(
+                title="Frequency",
+                showgrid=False,
+                gridcolor="lightgrey",
             ),
-            "last_attempt_date": st.column_config.DateColumn(
-                pinned=True, label="Last Attempt Date"
+            yaxis=dict(
+                title="Number of Attempts",
+                showgrid=False,
+                gridcolor="lightgrey",
+                autorange="reversed",
             ),
-        },
-        hide_index=True,
-    )
+        )
+        fig.update_traces(
+            marker_color="#F28C28",
+            hovertemplate="<b>Attempts: %{y}</b><br>"
+            + "Frequency: %{x}<extra></extra>",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with ai2:
+        st.dataframe(
+            data=attempted_interviews.style.background_gradient(
+                subset=["num_interviews"],
+                cmap=cmap,
+                vmin=vmin,
+                vmax=vmax,
+            ),
+            use_container_width=True,
+            column_config={
+                survey_id: st.column_config.Column(pinned=True),
+                "num_interviews": st.column_config.Column(
+                    pinned=True, label="Number of Interviews"
+                ),
+                "last_attempt_date": st.column_config.DateColumn(
+                    pinned=True, label="Last Attempt Date"
+                ),
+            },
+            hide_index=True,
+        )
 
 
 def progress_report(
