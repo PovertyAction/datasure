@@ -110,7 +110,6 @@ def progress_report_settings(
                 if default_survey_id and default_survey_id in id_enum_col_options
                 else None
             )
-            st.markdown("### Select survey ID column")
             survey_id = st.selectbox(
                 "Survey ID",
                 options=id_enum_col_options,
@@ -136,7 +135,6 @@ def progress_report_settings(
                 if default_date and default_date in datetime_columns
                 else None
             )
-            st.markdown("### Select survey date column")
             date = st.selectbox(
                 label="Date",
                 options=datetime_columns,
@@ -159,7 +157,6 @@ def progress_report_settings(
                 if default_enumerator and default_enumerator in id_enum_col_options
                 else None
             )
-            st.markdown("### Select enumerator column")
             enumerator = st.selectbox(
                 "Enumerator",
                 options=id_enum_col_options,
