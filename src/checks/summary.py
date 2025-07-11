@@ -17,7 +17,6 @@ from src.utils import (
 )
 
 
-@st.cache_data
 def load_default_settings(project_id: str, setting_file: str, page_num: int) -> tuple:
     """
     Load the default settings for the summary report.
@@ -80,14 +79,13 @@ def summary_settings(
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for summary report")
 
-        survey_cols = data.columns
-
         st.write("---")
         st.markdown("### Select columns to include in summary report")
 
         default_date, default_target, default_survey_id = load_default_settings(
             project_id=project_id, setting_file=setting_file, page_num=page_num
         )
+
         _, string_columns, numeric_columns, datetime_columns, _ = get_df_info(
             data, cols_only=True
         )
@@ -97,56 +95,75 @@ def summary_settings(
             with sc1:
                 id_col_options = string_columns + numeric_columns
                 default_survey_id_index = (
-                    survey_cols.get_loc(default_survey_id)
+                    id_col_options.index(default_survey_id)
                     if default_survey_id and default_survey_id in id_col_options
                     else None
                 )
+
                 survey_id = st.selectbox(
                     label="Survey ID",
                     options=id_col_options,
                     help="Column containing survey ID",
                     index=default_survey_id_index,
                     key="survey_id_summary",
+                    on_change=trigger_save,
+                    kwargs={"state_name": "summary_survey_id"},
                 )
+                if (
+                    "summary_survey_id" in st.session_state
+                    and st.session_state.summary_survey_id
+                ):
+                    save_check_settings(
+                        settings_file=setting_file,
+                        check_name="summary",
+                        check_settings={"survey_id": survey_id},
+                    )
+                    st.session_state.summary_survey_id = False
 
             with sc2:
                 default_date_index = (
-                    datetime_columns.get_loc(default_date)
+                    datetime_columns.index(default_date)
                     if default_date and default_date in datetime_columns
                     else None
                 )
                 date = st.selectbox(
-                    label="Date",
+                    label="Survey Date",
                     options=datetime_columns,
                     help="Column containing survey date",
                     index=default_date_index,
                     key="date_summary",
+                    on_change=trigger_save,
+                    kwargs={"state_name": "summary_date"},
                 )
+                if "summary_date" in st.session_state and st.session_state.summary_date:
+                    save_check_settings(
+                        settings_file=setting_file,
+                        check_name="summary",
+                        check_settings={"date": date},
+                    )
+                    st.session_state.summary_date = False
 
             with sc3:
                 target = st.number_input(
-                    label="Total goal",
+                    label="Total Expected Interviews",
                     min_value=0,
                     value=default_target,
                     help="Total number of interviews expected",
                     key="total_goal_summary",
+                    on_change=trigger_save,
+                    kwargs={"state_name": "summary_target"},
                 )
+                if (
+                    "summary_target" in st.session_state
+                    and st.session_state.summary_target
+                ):
+                    save_check_settings(
+                        settings_file=setting_file,
+                        check_name="summary",
+                        check_settings={"target": target},
+                    )
+                    st.session_state.summary_target = False
 
-        # define a save settings button
-        st.button(
-            label="Save settings",
-            on_click=save_check_settings,
-            key="save_summary_settings",
-            kwargs={
-                "settings_file": setting_file,
-                "check_name": "summary",
-                "check_settings": {
-                    "date": date,
-                    "target": target,
-                    "survey_id": survey_id,
-                },
-            },
-        )
     return date, target, survey_id or None
 
 
