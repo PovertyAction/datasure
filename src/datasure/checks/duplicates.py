@@ -5,6 +5,7 @@ import streamlit as st
 
 from datasure.utils import (
     get_check_config_settings,
+    get_df_info,
     load_check_settings,
     save_check_settings,
     trigger_save,
@@ -77,8 +78,6 @@ def duplicates_settings(
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for survey duplicates report")
 
-        survey_cols = data.columns.to_list()
-
         st.write("---")
 
         id_col, key_col, date_col = st.columns(3)
@@ -87,66 +86,83 @@ def duplicates_settings(
             load_default_duplicates_settings(project_id, settings_file, page_num)
         )
 
+        all_cols, string_columns, numeric_columns, datetime_columns, _ = get_df_info(
+            data, cols_only=True
+        )
+
+        id_key_cols = numeric_columns + string_columns
+
         with id_col:
             survey_id_index = (
-                survey_cols.index(survey_id)
-                if survey_id and survey_id in survey_cols
+                id_key_cols.index(survey_id)
+                if survey_id and survey_id in id_key_cols
                 else None
             )
-            st.markdown("### Select survey ID column")
             survey_id = st.selectbox(
                 label="Survey ID",
-                options=survey_cols,
+                options=id_key_cols,
                 key="survey_id_duplicates_key",
                 index=survey_id_index,
             )
 
         with key_col:
-            survey_key_index = survey_cols.index(survey_key) if survey_key else None
-            st.markdown("### Select survey key column")
+            survey_key_index = (
+                id_key_cols.index(survey_key)
+                if survey_key and survey_key in id_key_cols
+                else None
+            )
             survey_key = st.selectbox(
                 label="Survey Key",
-                options=survey_cols,
+                options=id_key_cols,
                 key="survey_key_duplicates_key",
                 index=survey_key_index,
+                on_change=trigger_save,
+                kwargs={"state_name": "duplicates_key_save"},
             )
+            if (
+                "duplicates_key_save" in st.session_state
+            ) and st.session_state.duplicates_key_save:
+                save_check_settings(
+                    settings_file=settings_file,
+                    check_name="duplicates",
+                    check_settings={"survey_key": survey_key},
+                )
+                st.session_state["duplicates_key_save"] = False
 
         with date_col:
-            st.markdown("### Select date column")
-            date_index = survey_cols.index(date) if date else None
+            date_index = (
+                datetime_columns.index(date)
+                if date and date in datetime_columns
+                else None
+            )
             date = st.selectbox(
                 label="Date",
-                options=survey_cols,
+                options=datetime_columns,
                 key="date_duplicates_key",
                 index=date_index,
+                on_change=trigger_save,
+                kwargs={"state_name": "duplicates_date_save"},
             )
 
-        st.markdown("### Select columns to check for duplicates")
-        dup_cols = st.multiselect(
-            label="Columns",
-            options=survey_cols,
-            key="dup_cols_key",
-            default=dup_cols,
+        default_dup_cols = (
+            [col for col in dup_cols if col in all_cols] if dup_cols else None
         )
 
-        # add button for saving settings
-        st.write("---")
-        st.write("Save settings")
-        st.button(
-            label="Save settings",
-            key="save_settings_duplicates",
-            on_click=save_check_settings,
-            args=(
-                settings_file,
-                "duplicates",
-                {
-                    "survey_id": survey_id,
-                    "survey_key": survey_key,
-                    "date": date,
-                    "dup_cols": dup_cols,
-                },
-            ),
+        dup_cols = st.multiselect(
+            label="Columns",
+            options=all_cols,
+            key="dup_cols_key",
+            default=default_dup_cols,
+            on_change=trigger_save,
+            kwargs={"state_name": "dup_cols_save"},
         )
+        if ("dup_cols_save" in st.session_state) and st.session_state.dup_cols_save:
+            save_check_settings(
+                settings_file=settings_file,
+                check_name="duplicates",
+                check_settings={"dup_cols": dup_cols},
+            )
+            st.session_state["dup_cols_save"] = False
 
     return survey_id, survey_key, date, dup_cols, display_cols
 
@@ -322,7 +338,13 @@ def compute_id_duplicates(
     else:
         id_dups_data = (
             id_dups_data[
-                [survey_id, survey_key, survey_date, "id_dup_count", "id_dup_percent"]
+                [
+                    survey_id,
+                    survey_key,
+                    survey_date[0],
+                    "id_dup_count",
+                    "id_dup_percent",
+                ]
             ]
             if survey_date
             else id_dups_data[[survey_id, survey_key, "id_dup_count", "id_dup_percent"]]
