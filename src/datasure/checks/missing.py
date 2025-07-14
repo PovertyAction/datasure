@@ -14,7 +14,6 @@ from datasure.utils import (
 )
 
 
-@st.cache_data
 def load_missing_settings(missing_setting_file: str) -> pd.DataFrame:
     """Load the default settings for the missing data report.
 
