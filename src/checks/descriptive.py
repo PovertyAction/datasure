@@ -7,7 +7,6 @@ import streamlit as st
 from src.utils import load_check_settings, save_check_settings, trigger_save
 
 
-@st.cache_data
 def load_default_summary_settings(setting_file: str, page_num: int) -> tuple:
     """
     Load default summary settings from a JSON file.
@@ -87,24 +86,38 @@ def descriptive_report_settings(
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for descriptive statistics")
 
-        survey_cols = data.columns.to_list()
+        all_cols = data.columns.tolist()
+
         default_selected_cols = (
             load_default_summary_settings(setting_file=setting_file, page_num=page_num)
             or []
         )
         default_selected_cols = [
-            col for col in default_selected_cols[0] if col in survey_cols
+            col for col in default_selected_cols[0] if col in all_cols
         ]
         # survey_cols]
 
         # Let users select columns for analysis (max 10)
         selected_cols = st.multiselect(
             label="Select columns to include in descriptive statistics (maximum 10)",
-            options=survey_cols,
+            options=all_cols,
             default=default_selected_cols,
             key="selected_cols_key",
             max_selections=10,
+            help="Select columns to include in descriptive statistics. Maximum of 10 columns can be selected.",
+            on_change=trigger_save,
+            kwargs={"state_name": "selected_cols_save"},
         )
+        if (
+            "selected_cols_save" in st.session_state
+            and st.session_state.selected_cols_save
+        ):
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="descriptive",
+                check_settings={"selected_cols": selected_cols},
+            )
+            st.session_state.selected_cols_save = False
 
         # return a list of date/datetime columns
         date_cols = [
@@ -154,28 +167,6 @@ def descriptive_report_settings(
             .select_dtypes(include=["object", "category"])
             .columns.tolist()
         ]
-
-        # save settings to file
-        # define a save settings button
-        st.button(
-            label="Save settings",
-            on_click=trigger_save,
-            key="save_descriptive_settings",
-            kwargs={"state_name": "save_descriptive_settings_save"},
-        )
-        if (
-            "save_descriptive_settings_save" in st.session_state
-            and st.session_state.save_descriptive_settings_save
-        ):
-            # save settings to file
-            save_check_settings(
-                settings_file=setting_file,
-                check_name="descriptive",
-                check_settings={
-                    "column_list": selected_cols,
-                },
-            )
-            st.session_state["save_descriptive_settings_save"] = False
 
     return selected_cols, date_cols, numeric_cols, categorical_cols
 
