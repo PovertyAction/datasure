@@ -9,7 +9,6 @@ import streamlit as st
 from src.utils import load_check_settings, save_check_settings, trigger_save
 
 
-@st.cache_data
 def load_missing_settings(missing_setting_file: str) -> pd.DataFrame:
     """Load the default settings for the missing data report.
 
