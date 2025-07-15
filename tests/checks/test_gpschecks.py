@@ -346,11 +346,11 @@ def test_plot_clusters_on_map(mock_pydeck_chart, sample_gps_data_with_outliers):
 
     plot_clusters_on_map(
         sample_gps_data_with_outliers,
+        "latitude",
+        "longitude",
         "enumerator",
         "submissiondate",
         "survey_id",
-        "latitude",
-        "longitude",
         "enumerator",
         "Outlier",
     )
@@ -374,11 +374,11 @@ def test_plot_clusters_on_map_all_normal_points(mock_pydeck_chart, sample_gps_da
 
     plot_clusters_on_map(
         sample_gps_data,
+        "latitude",
+        "longitude",
         "enumerator",
         "submissiondate",
         "survey_id",
-        "latitude",
-        "longitude",
         "enumerator",
         "Outlier",
     )

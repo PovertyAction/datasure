@@ -71,7 +71,7 @@ def add_check_configuration(project_id: str) -> None:
                     project_id=project_id, alias=survey_data_name, db_name="prep"
                 )
 
-                all_columns, string_columns, numeric_columns, datetime_columns = (
+                all_columns, string_columns, numeric_columns, datetime_columns, _ = (
                     get_df_info(survey_df, cols_only=True)
                 )
 
@@ -79,14 +79,14 @@ def add_check_configuration(project_id: str) -> None:
                     st.subheader("Select survey data columns")
                     survey_key = st.selectbox(
                         "Select Key Column (Required*)",
-                        options=all_columns,
+                        options=string_columns + numeric_columns,
                         index=None,
                         help="Select the column that uniquely identifies each record.",
                     )
 
                     survey_id = st.selectbox(
                         "Select ID Column (Optional)",
-                        options=all_columns,
+                        options=string_columns + numeric_columns,
                         index=None,
                         help="Select the column that contains the ID for each record.",
                     )
@@ -100,7 +100,7 @@ def add_check_configuration(project_id: str) -> None:
 
                     enumerator = st.selectbox(
                         "Select Enumerator Column (Optional)",
-                        options=string_columns,
+                        options=string_columns + numeric_columns,
                         index=None,
                         help="Select the column that contains the enumerator for each record.",
                     )

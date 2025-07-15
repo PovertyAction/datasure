@@ -88,7 +88,11 @@ def duplicates_settings(
         )
 
         with id_col:
-            survey_id_index = survey_cols.index(survey_id) if survey_id else 0
+            survey_id_index = (
+                survey_cols.index(survey_id)
+                if survey_id and survey_id in survey_cols
+                else None
+            )
             st.markdown("### Select survey ID column")
             survey_id = st.selectbox(
                 label="Survey ID",
@@ -149,7 +153,7 @@ def duplicates_settings(
 
 @st.cache_data
 def compute_duplicates_statistics(
-    data: pd.DataFrame, survey_id: str, survey_key: str, dup_cols: list
+    data: pd.DataFrame, survey_id: str | None, dup_cols: list
 ) -> tuple:
     """
     Compute statistics for duplicates in the dataset.
@@ -164,17 +168,24 @@ def compute_duplicates_statistics(
     Returns
     -------
         tuple: A tuple containing the total number of columns checked, the number of
-        columns with duplicates, the number of columns without duplicates, total number of duplicates
+        columns with duplicates, the number of columns without duplicates, total number
+            of duplicates
         total number of ID duplicates and total number of duplicates resolved.
-        id_duplicates_data (pd.DataFrame): A DataFrame containing the duplicate entries for the survey ID.
-        all_duplicates_data (pd.DataFrame): A DataFrame containing the duplicate entries for the selected columns.
-    """  # noqa: W505
+        id_duplicates_data (pd.DataFrame): A DataFrame containing the duplicate entries
+          for the survey ID.
+        all_duplicates_data (pd.DataFrame): A DataFrame containing the duplicate entries
+          for the selected columns.
+    """
     total_cols_checked = len(dup_cols)
     cols_with_dups = [x for x in dup_cols if data[x].duplicated().any()]
     total_cols_with_dups = len(cols_with_dups)
     total_cols_no_dups = total_cols_checked - total_cols_with_dups
-    id_dups_data = data[data.duplicated(subset=[survey_id], keep=False)]
-    total_id_dups = len(id_dups_data)
+    if survey_id:
+        id_dups_data = data[data.duplicated(subset=[survey_id], keep=False)]
+        total_id_dups = len(id_dups_data)
+    else:
+        id_dups_data, total_id_dups = pd.DataFrame(), 0
+
     total_resolved_dups = st.session_state.get("resolved_duplicates", 0)
     total_dups = 0
     for col in dup_cols:
@@ -192,8 +203,8 @@ def compute_duplicates_statistics(
     )
 
 
-def duplicates_statistics_overview(
-    data: pd.DataFrame, survey_id: str, survey_key: str, dup_cols: list
+def display_duplicates_statistics(
+    data: pd.DataFrame, survey_id: str, dup_cols: list
 ) -> None:
     """
     Display an overview of duplicates statistics in the dataset.
@@ -209,6 +220,12 @@ def duplicates_statistics_overview(
     -------
         None
     """
+    st.markdown("## Duplicates Statistics Overview")
+    if not (any([survey_id, dup_cols])):
+        st.info(
+            "Duplicates statistics requires a survey ID column or at least one column to check for duplicates. Go to :material/settings: settings to select a survey ID column and columns to check for duplicates."
+        )
+        return
     (
         total_cols_checked,
         total_cols_with_dups,
@@ -216,11 +233,7 @@ def duplicates_statistics_overview(
         total_dups,
         total_id_dups,
         total_resolved_dups,
-    ) = compute_duplicates_statistics(
-        data=data, survey_id=survey_id, survey_key=survey_key, dup_cols=dup_cols
-    )
-
-    st.markdown("## Duplicates Statistics Overview")
+    ) = compute_duplicates_statistics(data=data, survey_id=survey_id, dup_cols=dup_cols)
     _, gc2 = st.columns(2)
     with gc2:
         tc3, tc4 = st.columns(2, border=True)
@@ -262,7 +275,7 @@ def duplicates_statistics_overview(
 def compute_id_duplicates(
     data: pd.DataFrame,
     survey_id: str,
-    survey_date: str,
+    survey_date: str | None,
     survey_key: str,
     display_cols: list | None,
 ) -> pd.DataFrame:
@@ -285,31 +298,44 @@ def compute_id_duplicates(
     )
     id_dups_data["id_dup_percent"] = (id_dups_data["id_dup_count"] / len(data)) * 100
 
-    # Add user-selected display columns (if any). Join to duplicates data using
-    # survey_key
+    # default survey date to None if not provided
+    survey_date = [] if survey_date is None else [survey_date]
+
     if display_cols:
+        if survey_date:
+            display_cols = survey_date + display_cols
+
+        # remove any duplicate columns from display_cols
+        display_cols = list(set(display_cols))
         id_dups_data.merge(
-            data[[survey_key, survey_date] + display_cols],
+            data[[survey_key] + display_cols],
             on=survey_key,
             how="left",
         )
         id_dups_data = id_dups_data[
             [survey_id, survey_key, survey_date, "id_dup_count", "id_dup_percent"]
             + display_cols
+            if survey_date
+            else [survey_id, survey_key, "id_dup_count", "id_dup_percent"]
+            + display_cols
         ]
     else:
-        id_dups_data = id_dups_data[
-            [survey_id, survey_key, survey_date, "id_dup_count", "id_dup_percent"]
-        ]
+        id_dups_data = (
+            id_dups_data[
+                [survey_id, survey_key, survey_date, "id_dup_count", "id_dup_percent"]
+            ]
+            if survey_date
+            else id_dups_data[[survey_id, survey_key, "id_dup_count", "id_dup_percent"]]
+        )
     return id_dups_data.sort_values(
         [survey_id, "id_dup_count"], ascending=[False, True]
     )
 
 
-def id_duplicates_display(
+def display_id_duplicates(
     data: pd.DataFrame,
-    survey_id: str,
-    survey_date: str,
+    survey_id: str | None,
+    survey_date: str | None,
     survey_key: str,
     setting_file: str,
 ) -> None:
@@ -327,8 +353,12 @@ def id_duplicates_display(
         None
 
     """
-    st.markdown(f"## Duplicate Entries for {survey_id}")
-
+    if not survey_id:
+        st.markdown("## Duplicate Entries Survey ID")
+        st.info(
+            "Duplicate entries for survey ID requires a survey ID column to be selected. Go to :material/settings: settings to select a survey ID column."
+        )
+        return
     # Load settings from file if it exists
     if setting_file and os.path.exists(setting_file):
         default_settings = load_check_settings(setting_file, "duplicates") or {}
@@ -415,6 +445,11 @@ def compute_column_duplicates(
         var_dups_data[f"{dup_col}_dup_count"] / len(data)
     ) * 100
 
+    # get a list of vars that exist
+    existing_vars = [
+        col for col in ["survey_id", "survey_date"] if col in globals() and col
+    ]
+
     # Add user-selected display columns (if any). Join to duplicates data
     # using survey_key
     if display_cols:
@@ -424,10 +459,9 @@ def compute_column_duplicates(
             how="left",
         )
         var_dups_data = var_dups_data[
-            [
-                survey_id,
+            existing_vars
+            + [
                 dup_col,
-                survey_date,
                 f"{dup_col}_dup_count",
                 f"{dup_col}_dup_percent",
             ]
@@ -435,10 +469,9 @@ def compute_column_duplicates(
         ]
     else:
         var_dups_data = var_dups_data[
-            [
-                survey_id,
+            existing_vars
+            + [
                 dup_col,
-                survey_date,
                 f"{dup_col}_dup_count",
                 f"{dup_col}_dup_percent",
             ]
@@ -448,12 +481,12 @@ def compute_column_duplicates(
     )
 
 
-def column_duplicates_display(
+def display_column_duplicates(
     data: pd.DataFrame,
-    survey_id: str,
+    survey_id: str | None,
     survey_key: str,
-    survey_date: str,
-    dup_cols: str,
+    survey_date: str | None,
+    dup_cols: str | None,
     setting_file: str,
 ) -> None:
     """
@@ -472,6 +505,11 @@ def column_duplicates_display(
 
     """
     st.markdown("## Duplicate Entries for columns")
+    if not dup_cols:
+        st.info(
+            "Duplicate entries for columns requires at least one column to be selected. Go to :material/settings: settings to select columns to check for duplicates."
+        )
+        return
 
     # load settings from file if it exists
     if setting_file and os.path.exists(setting_file):
@@ -555,10 +593,10 @@ def column_duplicates_display(
                 use_container_width=True,
                 column_config={
                     f"{dup_col}_dup_count": st.column_config.Column(
-                        label=f"# of {dup_col} duplicates"
+                        label="# duplicates"
                     ),
                     f"{dup_col}_dup_percent": st.column_config.NumberColumn(
-                        label="% of total records", format="%.2f%%"
+                        label="% duplicates", format="%.2f%%"
                     ),
                 },
             )
@@ -591,29 +629,20 @@ def duplicates_report(
 
 
     """
-    survey_id, survey_key, date, dup_cols, display_cols = duplicates_settings(
+    survey_id, survey_key, date, dup_cols, _ = duplicates_settings(
         project_id, data, setting_file, page_num
     )
 
     # ---- Show report --- #
-    # Check that required options have been selected. If not, display a info message
-    # Modified to always allow survey_id, survey_key, and date to be processed
-    if not all([survey_id, survey_key, date]):
-        st.info(
-            body="Please select all required options to generate the progress report",
-            icon=":material/info:",
-        )
-        return
 
-    duplicates_statistics_overview(
+    display_duplicates_statistics(
         data=data,
         survey_id=survey_id,
-        survey_key=survey_key,
         dup_cols=dup_cols,
     )
 
     st.write("---")
-    id_duplicates_display(
+    display_id_duplicates(
         data=data,
         survey_id=survey_id,
         survey_date=date,
@@ -622,7 +651,7 @@ def duplicates_report(
     )
 
     st.write("---")
-    column_duplicates_display(
+    display_column_duplicates(
         data=data,
         survey_id=survey_id,
         survey_key=survey_key,

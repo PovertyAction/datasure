@@ -380,15 +380,20 @@ def detect_outliers(
     -------
         pd.DataFrame: DataFrame containing detected outliers with their details
     """
+    # get list of optional admin columns to include in the outliers report
+    existing_vars = []
+    if survey_id:
+        existing_vars.append(survey_id)
+    if enumerator:
+        existing_vars.append(enumerator)
     results = []
+    series_df = df[[survey_key] + existing_vars + cols].dropna(subset=cols)
     for col in cols:
-        series_df = df[[survey_key, survey_id, enumerator, col]].dropna(subset=col)
         series = series_df[col].astype("float64", errors="raise")
         # Drop NaN and missing values
         series = series.dropna()
         dk_refused_to_answer_vals = [-999, 0.999, -888, 0.888, -777, 0.777]
         series = series[~series.isin(dk_refused_to_answer_vals)]
-
         mean, std = series.mean(), series.std()
 
         if method == "Interquartile Range (IQR)":
@@ -403,8 +408,6 @@ def detect_outliers(
             outliers = pd.DataFrame(
                 {
                     survey_key: series_df.loc[mask.index[mask], survey_key],
-                    survey_id: series_df.loc[mask.index[mask], survey_id],
-                    enumerator: series_df.loc[mask.index[mask], enumerator],
                     "variable": col,
                     "value": series[mask],
                     "mean": mean,
@@ -413,10 +416,31 @@ def detect_outliers(
                     "upper_bound": upper,
                 }
             )
+            # optionally include enumerator and survey_id columns
+            if survey_id:
+                outliers[survey_id] = series_df.loc[mask.index[mask], survey_id]
+            if enumerator:
+                outliers[enumerator] = series_df.loc[mask.index[mask], enumerator]
             results.append(outliers)
     results_df = (
         pd.concat(results).reset_index(drop=True) if results else pd.DataFrame()
     )
+
+    if existing_vars:
+        # Reorder columns to have survey_key first, then enumerator/survey_id if present
+        cols_order = (
+            [survey_key]
+            + existing_vars
+            + [
+                "variable",
+                "value",
+                "mean",
+                "std",
+                "lower_bound",
+                "upper_bound",
+            ]
+        )
+        results_df = results_df[cols_order]
 
     return results_df
 
@@ -500,7 +524,7 @@ def plot_outlier_distributions(
 # Function to display outlier metrics
 @st.cache_data
 def display_outlier_metrics(
-    outliers_summary: pd.DataFrame, outlier_cols: list, enumerator: str
+    outliers_summary: pd.DataFrame, outlier_cols: list | None, enumerator: str | None
 ) -> None:
     """Display metrics related to outliers in a summary format.
     Args:
@@ -508,6 +532,12 @@ def display_outlier_metrics(
     outlier_cols (list): List of columns checked for outliers.
     enumerator (str): Column name for enumerator ID.
     """
+    st.markdown("## Outliers Overview")
+    if not outlier_cols:
+        st.info(
+            "Outlier columns are required to display metrics. Go to the :material/settings: settings section above to select columns."
+        )
+        return
     col1, col2, col3, col4 = st.columns(spec=4, border=True)
 
     cols_checked_outliers = len(outlier_cols)
@@ -516,7 +546,9 @@ def display_outlier_metrics(
         outliers_summary["variable"].nunique() if not outliers_summary.empty else 0
     )
     total_enumerators = (
-        outliers_summary[enumerator].nunique() if not outliers_summary.empty else 0
+        outliers_summary[enumerator].nunique()
+        if enumerator and not outliers_summary.empty
+        else 0
     )
 
     col1.metric(
@@ -537,11 +569,18 @@ def display_outlier_metrics(
         help="Total number of identified outliers",
     )
 
-    col4.metric(
-        label="Number of enumerators",
-        value=f"{total_enumerators}",
-        help="Number of enumerators with outliers flagged",
-    )
+    if enumerator:
+        col4.metric(
+            label="Number of enumerators",
+            value=f"{total_enumerators}",
+            help="Number of enumerators with outliers flagged",
+        )
+    else:
+        with col4:
+            st.write("Number of enumerators")
+            st.info(
+                "Enumerator column is not selected. Go to the :material/settings: settings section above to select the enumerator column."
+            )
 
     # Display the outliers summary table
     if not outliers_summary.empty:
@@ -738,13 +777,6 @@ def outliers_report(
     ) = outliers_report_settings(project_id, data, setting_file, page_num)
 
     # Check that required options have been selected. If not, display a info message
-
-    if not all([outlier_cols, outlier_method, survey_id, enumerator, survey_key]):
-        st.info("Please select all required options to generate the outliers report")
-        return
-
-    st.markdown("## Outliers")
-
     # Check for outliers
     table_data = detect_outliers(
         data,
