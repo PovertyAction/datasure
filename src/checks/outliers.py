@@ -142,33 +142,6 @@ def show_pattern_selection(df, survey_id, pattern_groups, selected_patterns):
     return None, None, None
 
 
-# get a list of numeric columns
-@st.cache_data
-def get_numeric_columns(data: pd.DataFrame) -> list:
-    """Check if columns in the DataFrame are numeric.
-
-    Args:
-        data (pd.DataFrame): Input DataFrame.
-
-    Returns
-    -------
-        list: List of numeric columns.
-    """
-    numeric_cols = []
-    for col in data.columns:
-        # Check if column is not all NaN or empty strings
-        if data[col].replace("", pd.NA).isna().sum() < len(data[col]):
-            # Skip datetime columns
-            if pd.api.types.is_datetime64_any_dtype(data[col]):
-                continue
-            try:
-                pd.to_numeric(data[col], errors="raise")
-                numeric_cols.append(col)
-            except (ValueError, TypeError):
-                continue
-    return numeric_cols
-
-
 # outliers check settings
 def outliers_report_settings(
     project_id: str, data: pd.DataFrame, settings_file: str, page_num: int
@@ -499,7 +472,7 @@ def detect_outliers(
         pd.concat(results).reset_index(drop=True) if results else pd.DataFrame()
     )
 
-    if existing_vars:
+    if existing_vars and not results_df.empty:
         # Reorder columns to have survey_key first, then enumerator/survey_id if present
         cols_order = (
             [survey_key]
@@ -560,6 +533,8 @@ def plot_outlier_distributions(
     -------
         None
     """
+    if outliers_summary.empty or data.empty or cols is None:
+        return
     no_outlier_vars = []
     for var in cols:
         if var in outliers_summary["variable"].values:
