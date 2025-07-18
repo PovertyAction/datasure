@@ -29,7 +29,7 @@ clean:
 # Clean venv
 [windows]
 clean:
-    rm .venv -Recurse -Force
+    if (Test-Path ".venv") { Remove-Item ".venv" -Recurse -Force }
 
 # Setup environment
 get-started: pre-install venv
@@ -120,8 +120,8 @@ clean-build:
 # Clean build artifacts
 [windows]
 clean-build:
-    rm dist\ -Recurse -Force -ErrorAction SilentlyContinue
-    rm build\ -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path "dist") { Remove-Item "dist" -Recurse -Force }
+    if (Test-Path "build") { Remove-Item "build" -Recurse -Force }
 
 # Install the package locally from the built wheel
 [windows]
