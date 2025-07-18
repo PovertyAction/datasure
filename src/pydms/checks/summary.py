@@ -10,6 +10,7 @@ from millify import millify, prettify
 from pydms.utils import (
     donut_chart2,
     get_check_config_settings,
+    get_df_info,
     load_check_settings,
     save_check_settings,
     trigger_save,
@@ -87,31 +88,39 @@ def summary_settings(
         default_date, default_target, default_survey_id = load_default_settings(
             project_id=project_id, setting_file=setting_file, page_num=page_num
         )
+        _, string_columns, numeric_columns, datetime_columns, _ = get_df_info(
+            data, cols_only=True
+        )
         with st.container(border=True):
             sc1, sc2, sc3 = st.columns(spec=3)
 
             with sc1:
-                default_date_index = (
-                    survey_cols.get_loc(default_date) if default_date else 0
-                )
-                date = st.selectbox(
-                    label="Date",
-                    options=survey_cols,
-                    help="Column containing survey date",
-                    index=default_date_index,
-                    key="date_summary",
-                )
-
-            with sc2:
+                id_col_options = string_columns + numeric_columns
                 default_survey_id_index = (
-                    survey_cols.get_loc(default_survey_id) if default_survey_id else 0
+                    survey_cols.get_loc(default_survey_id)
+                    if default_survey_id and default_survey_id in id_col_options
+                    else None
                 )
                 survey_id = st.selectbox(
                     label="Survey ID",
-                    options=survey_cols,
+                    options=id_col_options,
                     help="Column containing survey ID",
                     index=default_survey_id_index,
                     key="survey_id_summary",
+                )
+
+            with sc2:
+                default_date_index = (
+                    datetime_columns.get_loc(default_date)
+                    if default_date and default_date in datetime_columns
+                    else None
+                )
+                date = st.selectbox(
+                    label="Date",
+                    options=datetime_columns,
+                    help="Column containing survey date",
+                    index=default_date_index,
+                    key="date_summary",
                 )
 
             with sc3:
@@ -364,7 +373,9 @@ def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
         fig.update_yaxes(tick0=0)
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.warning("Please select a date column to view submissions details")
+        st.info(
+            "Submission details report requires a date column to be selected. Go to the :material/settings: settings section above."
+        )
 
 
 @st.cache_data
@@ -564,6 +575,11 @@ def summary_progress(
     """
     st.write("---")
     st.markdown("## Progress")
+    if not date:
+        st.info(
+            "Progress section requires a date column to be selected. go to the :material/settings: settings section above."
+        )
+        return
 
     (
         progress,
@@ -579,9 +595,12 @@ def summary_progress(
     mc1, mc2, mc3, mc4 = st.columns(spec=4, border=True)
     with mc1:
         st.write("Submission progress")
-        sp1, sp2 = st.columns([0.80, 0.20])
-        sp1.progress(value=int(progress))
-        sp2.write(f"{progress:.2f}%")
+        if not target:
+            st.info("Target not set. Progress cannot be computed.")
+        else:
+            sp1, sp2 = st.columns([0.80, 0.20])
+            sp1.progress(value=int(progress))
+            sp2.write(f"{progress:.2f}%")
     mc2.metric(
         label="Average submissions per day",
         value=f"{prettify(millify(average_submission_per_day, precision=2))}",
@@ -752,9 +771,12 @@ def compute_summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> t
             A tuple containing the summary values
 
     """
-    perc_duplicates = (
-        data.duplicated(subset=[survey_id]).mean() * 100 if survey_id else 0
-    )
+    if survey_id:
+        perc_duplicates = (
+            data.duplicated(subset=[survey_id]).mean() * 100 if survey_id else 0
+        )
+    else:
+        perc_duplicates = None
     perc_outliers = 0
     perc_missing = data.isnull().mean().mean() * 100
     perc_back_check_error_rate = 0
@@ -778,46 +800,49 @@ def summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> None:
     st.write("---")
     st.markdown("## Data Quality")
 
-    if survey_id:
-        perc_duplicates, perc_outliers, perc_missing, perc_back_check_error_rate = (
-            compute_summary_data_quality(
-                data=data,
-                survey_id=survey_id,
-            )
+    perc_duplicates, perc_outliers, perc_missing, perc_back_check_error_rate = (
+        compute_summary_data_quality(
+            data=data,
+            survey_id=survey_id,
         )
+    )
 
+    if survey_id:
         perc_duplicates_chart = donut_chart2(
             actual_value=perc_duplicates,
         )
         plt.close(perc_duplicates_chart)
-        perc_outliers_chart = donut_chart2(
-            actual_value=perc_outliers,
-        )
-        plt.close(perc_outliers_chart)
-        perc_missing_chart = donut_chart2(
-            actual_value=perc_missing,
-        )
-        plt.close(perc_missing_chart)
-        perc_back_check_error_rate_chart = donut_chart2(
-            actual_value=perc_back_check_error_rate,
-        )
+    perc_outliers_chart = donut_chart2(
+        actual_value=perc_outliers,
+    )
+    plt.close(perc_outliers_chart)
+    perc_missing_chart = donut_chart2(
+        actual_value=perc_missing,
+    )
+    plt.close(perc_missing_chart)
+    perc_back_check_error_rate_chart = donut_chart2(
+        actual_value=perc_back_check_error_rate,
+    )
 
-        dq1, dq2, dq3, dq4 = st.columns(spec=4, border=True)
-        with dq1:
+    dq1, dq2, dq3, dq4 = st.columns(spec=4, border=True)
+    with dq1:
+        if perc_duplicates:
             st.markdown(f"**% of duplicates values on {survey_id}**")
             st.pyplot(perc_duplicates_chart)
-        with dq2:
-            st.markdown("**% of values in XX columns**")
-            st.pyplot(perc_outliers_chart)
-        with dq3:
-            st.markdown("**% of missing values in survey dataset**")
-            st.pyplot(perc_missing_chart)
-        with dq4:
-            st.markdown("**Back check error rate**")
-            st.pyplot(perc_back_check_error_rate_chart)
-
-    else:
-        st.warning("Please select a survey ID column to view data quality details")
+        else:
+            st.markdown("**% of duplicates values ID Column**")
+            st.info(
+                "Percentage of duplicate values requires a survey ID column to be selected. Go to the :material/settings: settings section above."
+            )
+    with dq2:
+        st.markdown("**% of values flagged as outliers**")
+        st.pyplot(perc_outliers_chart)
+    with dq3:
+        st.markdown("**% of missing values in survey dataset**")
+        st.pyplot(perc_missing_chart)
+    with dq4:
+        st.markdown("**Back check error rate**")
+        st.pyplot(perc_back_check_error_rate_chart)
 
 
 def summary_report(
@@ -839,10 +864,10 @@ def summary_report(
     None
     """
     date, target, survey_id = summary_settings(project_id, data, setting_file, page_num)
+    summary_data_summary(data=data)
     summary_submissions(
-        data=data[[date]],
+        data=data,
         date=date,
     )
     summary_progress(data=data, date=date, target=target, setting_file=setting_file)
-    summary_data_summary(data=data)
     summary_data_quality(data=data, survey_id=survey_id)

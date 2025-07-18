@@ -230,11 +230,11 @@ if not import_log.is_empty():
         )
 
     if load_btn:
-        preview_options = duckdb_get_imported_datasets(project_id)
-        st.session_state.st_prep_dataset_list = preview_options
         with ld2:
             # Load raw datasets from import configurations
             load_raw_datasets(project_id)
+            preview_options = duckdb_get_imported_datasets(project_id)
+            st.session_state.st_prep_dataset_list = preview_options
 
         # display success message and link to the prep section
         with st.container(border=True):

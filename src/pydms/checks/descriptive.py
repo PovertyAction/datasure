@@ -596,6 +596,12 @@ def descriptive_report(data: pd.DataFrame, setting_file: str, page_num: int) -> 
         )
     )
 
+    if not selected_cols:
+        st.info(
+            "Descriptive statistics requires at least one column to be selected. Go to the :material/settings: settings section above to select columns.",
+        )
+        return
+
     # loop through selected columns and create a summary report
     for col in selected_cols:
         st.write("---")

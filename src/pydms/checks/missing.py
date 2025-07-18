@@ -369,13 +369,13 @@ def missing_over_time(data: pd.DataFrame, setting_file) -> None:
     default_settings = (
         load_check_settings(settings_file=setting_file, check_name="missing") or {}
     )
-    select_date_col = default_settings.get("select_date_col", date_cols[0])
+    select_date_col = default_settings.get("select_date_col", None)
     dc1, _ = st.columns([0.3, 0.7])
     with dc1:
         select_date_col_index = (
             date_cols.tolist().index(select_date_col)
-            if select_date_col in date_cols
-            else 0
+            if select_date_col and select_date_col in date_cols
+            else None
         )
         select_date_col = st.selectbox(
             "Select date column",
@@ -395,6 +395,12 @@ def missing_over_time(data: pd.DataFrame, setting_file) -> None:
                 check_settings={"select_date_col": select_date_col},
             )
             st.session_state["select_date_col_save"] = False
+
+    if not select_date_col:
+        st.info(
+            "Missingness over time requires a date column to be selected. Got to :material/settings: settings to select a date column."
+        )
+        return
 
     missingness_over_time = compute_missing_over_time(
         data=data, select_date_col=select_date_col
@@ -472,17 +478,21 @@ def missing_compare(data: pd.DataFrame, setting_file: str) -> None:
     mc_1, mc_2 = st.columns([0.3, 0.7])
 
     with mc_1:
+        # allow only categorical columns for grouping
+        allowed_cols = data.select_dtypes(
+            include=["object", "category"]
+        ).columns.tolist()
+
+        # get default settings for group_by_col and compare_col
         default_settings = (
             load_check_settings(settings_file=setting_file, check_name="missing") or {}
         )
         group_by_col = default_settings.get("group_by_col", None)
         group_by_col_index = (
-            data.columns.tolist().index(group_by_col) if group_by_col else None
+            allowed_cols.index(group_by_col)
+            if group_by_col and group_by_col in allowed_cols
+            else None
         )
-        # allow only categorical columns for grouping
-        allowed_cols = data.select_dtypes(
-            include=["object", "category"]
-        ).columns.tolist()
         group_by_col = st.selectbox(
             label="Select column to group missing data by",
             options=allowed_cols,
@@ -505,8 +515,6 @@ def missing_compare(data: pd.DataFrame, setting_file: str) -> None:
 
     with mc_2:
         compare_col = default_settings.get("compare_col", None)
-        if compare_col not in allowed_cols:
-            compare_col = allowed_cols[0] if allowed_cols else None
         compare_col = st.multiselect(
             label="Select column to compare missing data",
             options=allowed_cols,
@@ -552,7 +560,7 @@ def missing_compare(data: pd.DataFrame, setting_file: str) -> None:
 
     else:
         st.warning(
-            "Please select a column to group missing data by and a column to compare missing data."
+            "Select a column to group missing data by and a column to compare missing data."
         )
 
 
@@ -650,9 +658,7 @@ def missing_correlation(data: pd.DataFrame, color_map: str, setting_file: str) -
         st.plotly_chart(fig, use_container_width=True)
 
     else:
-        st.warning(
-            "Please select at least two columns to calculate nullity correlation."
-        )
+        st.warning("Select at least two columns to calculate nullity correlation.")
 
 
 @st.cache_data

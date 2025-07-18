@@ -36,7 +36,7 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
                 "survey_key": ["a", "b", "c", "d"],
             }
         )
-        result = compute_id_duplicates(df, "caseID", "survey_key", "survey_key", None)
+        result = compute_id_duplicates(df, "caseID", None, "survey_key", None)
         # Should be empty since there are no duplicates
         self.assertTrue(result.empty)
 
@@ -47,7 +47,7 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
                 "survey_key": ["a", "b", "b", "c", "d", "d", "d"],
             }
         )
-        result2 = compute_id_duplicates(df2, "caseID", "survey_key", "survey_key", None)
+        result2 = compute_id_duplicates(df2, "caseID", None, "survey_key", None)
         # Only rows with duplicated caseID should be present
         self.assertTrue((result2["caseID"].isin([2, 4])).all())
         # Check that id_dup_count is correct
@@ -63,13 +63,13 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
 
         # Test Case 3: All IDs are duplicates (all the same)
         df3 = pd.DataFrame({"caseID": [1, 1, 1, 1], "survey_key": ["a", "b", "c", "d"]})
-        result3 = compute_id_duplicates(df3, "caseID", "survey_key", "survey_key", None)
+        result3 = compute_id_duplicates(df3, "caseID", None, "survey_key", None)
         self.assertEqual(result3["id_dup_count"].iloc[0], 4)
         self.assertTrue((result3["id_dup_count"] == 4).all())
         self.assertTrue((result3["id_dup_percent"] == 100.0).all())
 
         # Test Case 4: display_cols is None
-        result4 = compute_id_duplicates(df2, "caseID", "survey_key", "survey_key", None)
+        result4 = compute_id_duplicates(df2, "caseID", None, "survey_key", None)
         self.assertIn("caseID", result4.columns)
         self.assertIn("survey_key", result4.columns)
         self.assertIn("id_dup_count", result4.columns)
@@ -87,7 +87,7 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
                 "col2": [10, 20, 30, 40],
             }
         )
-        result = compute_duplicates_statistics(df, "id", "col1", ["col1", "col2"])
+        result = compute_duplicates_statistics(df, "id", ["col1", "col2"])
         self.assertEqual(result[0], 2)  # total_cols_checked
         self.assertEqual(result[1], 0)  # total_cols_with_dups
         self.assertEqual(result[2], 2)  # total_cols_no_dups
@@ -103,7 +103,7 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
                 "col2": [10, 20, 20, 30, 40, 40, 40],
             }
         )
-        result2 = compute_duplicates_statistics(df2, "id", "col1", ["col1", "col2"])
+        result2 = compute_duplicates_statistics(df2, "id", ["col1", "col2"])
         self.assertEqual(result2[0], 2)  # total_cols_checked
         self.assertEqual(result2[1], 2)  # total_cols_with_dups
         self.assertEqual(result2[2], 0)  # total_cols_no_dups
@@ -119,7 +119,7 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
                 "col2": [5, 5, 5, 5],
             }
         )
-        result3 = compute_duplicates_statistics(df3, "id", "col1", ["col1", "col2"])
+        result3 = compute_duplicates_statistics(df3, "id", ["col1", "col2"])
         self.assertEqual(result3[0], 2)
         self.assertEqual(result3[1], 2)
         self.assertEqual(result3[2], 0)
@@ -135,7 +135,7 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
                 "col1": ["a", "b", "c"],
             }
         )
-        result4 = compute_duplicates_statistics(df4, "id", "col1", [])
+        result4 = compute_duplicates_statistics(df4, "id", [])
         self.assertEqual(result4[0], 0)  # total_cols_checked
         self.assertEqual(result4[1], 0)  # total_cols_with_dups
         self.assertEqual(result4[2], 0)  # total_cols_no_dups
@@ -158,7 +158,7 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
                 "col2": [10, 20, 20, 30, 40, 40, 40],
             }
         )
-        result = compute_duplicates_statistics(df, "id", "col1", ["col1", "col2"])
+        result = compute_duplicates_statistics(df, "id", ["col1", "col2"])
         self.assertEqual(result[5], 42)
 
     @patch("pydms.checks.duplicates.st")
@@ -176,7 +176,7 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
                 "col2": [10, 20, 30],
             }
         )
-        result = compute_duplicates_statistics(df, "id", "col1", ["col1", "col2"])
+        result = compute_duplicates_statistics(df, "id", ["col1", "col2"])
         self.assertEqual(result[5], 0)
 
     @patch("pydms.checks.duplicates.st")
@@ -187,7 +187,7 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
         """
         mock_st.session_state = {}
         df = pd.DataFrame(columns=["id", "col1", "col2"])
-        result = compute_duplicates_statistics(df, "id", "col1", ["col1", "col2"])
+        result = compute_duplicates_statistics(df, "id", ["col1", "col2"])
         self.assertEqual(result[0], 2)
         self.assertEqual(result[1], 0)
         self.assertEqual(result[2], 2)
@@ -210,7 +210,7 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
         )
         # dup_cols contains a column not in df
         with self.assertRaises(KeyError):
-            compute_duplicates_statistics(df, "id", "col1", ["col1", "colX"])
+            compute_duplicates_statistics(df, "id", ["col1", "colX"])
 
     @patch("pydms.checks.duplicates.get_check_config_settings")
     @patch("pydms.checks.duplicates.os.path.exists")

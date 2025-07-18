@@ -20,6 +20,7 @@ def get_df_info(stats_df: pl.DataFrame | pd.DataFrame, cols_only=False) -> tuple
         list[str]: list of string column types in the DataFrame
         list[str]: list of numeric column types in the DataFrame
         list[str]: list of datetime column types in the DataFrame
+        list[str]: list of categorical column types in the DataFrame
     """
     if isinstance(stats_df, pd.DataFrame):
         stats_df = pl.from_pandas(stats_df)
@@ -35,12 +36,17 @@ def get_df_info(stats_df: pl.DataFrame | pd.DataFrame, cols_only=False) -> tuple
         col for col in all_columns if stats_df[col].dtype == pl.Datetime
     ]
 
+    categorical_columns = [
+        col for col in all_columns if stats_df[col].dtype == pl.Categorical
+    ]
+
     if cols_only:
         return (
             all_columns,
             string_columns,
             numeric_columns,
             datetime_columns,
+            categorical_columns,
         )
 
     num_rows = stats_df.height
@@ -61,4 +67,5 @@ def get_df_info(stats_df: pl.DataFrame | pd.DataFrame, cols_only=False) -> tuple
         string_columns,
         numeric_columns,
         datetime_columns,
+        categorical_columns,
     )
