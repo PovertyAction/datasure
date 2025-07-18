@@ -17,8 +17,19 @@ system-info:
     @echo "Home directory: {{ home_directory() }}"
 
 # Clean venv
+[linux]
 clean:
     rm -rf .venv
+
+# Clean venv
+[macos]
+clean:
+    rm -rf .venv
+
+# Clean venv
+[windows]
+clean:
+    rm .venv -Recurse -Force
 
 # Setup environment
 get-started: pre-install venv
@@ -33,9 +44,6 @@ venv:
     uv sync
     uv tool install pre-commit
     pre-commit install
-
-activate-venv:
-    uv shell
 
 # launch jupyter lab
 lab:
@@ -69,6 +77,7 @@ fmt-md f:
 fmt-check-markdown:
     markdownlint --config .markdownlint.yaml "**/*.md" "**/*.md"
 
+# Run all linting and formatting
 fmt-all: lint-py fmt-python fmt-markdown
 
 # Run tests
@@ -97,11 +106,33 @@ build-package:
     uv build
 
 # Clean build artifacts
+[linux]
 clean-build:
     rm -rf dist/
     rm -rf build/
 
+# Clean build artifacts
+[macos]
+clean-build:
+    rm -rf dist/
+    rm -rf build/
+
+# Clean build artifacts
+[windows]
+clean-build:
+    rm dist\ -Recurse -Force -ErrorAction SilentlyContinue
+    rm build\ -Recurse -Force -ErrorAction SilentlyContinue
+
 # Install the package locally from the built wheel
+[windows]
+install-package: build-package
+    $wheel = Get-ChildItem -Path "dist" -Filter "*.whl" | Select-Object -First 1; uv pip install --force-reinstall $wheel.FullName
+
+[linux]
+install-package: build-package
+    uv pip install --force-reinstall dist/pydms-*.whl
+
+[macos]
 install-package: build-package
     uv pip install --force-reinstall dist/pydms-*.whl
 
@@ -130,18 +161,21 @@ pypi-info:
     uv run --with twine twine check dist/* --verbose
 
 # Package development workflow: test, build, and verify
-package-workflow: test clean-build build-package test-cli
+package-workflow: test build-package test-cli clean-build
     @echo "Package workflow completed successfully!"
 
+# install required software
 [windows]
 pre-install:
-    winget install Casey.Just astral-sh.uv GitHub.cli
+    winget install Casey.Just astral-sh.uv GitHub.cli OpenJS.NodeJS
     npm install -g markdownlint-cli
 
+# install required software
 [linux]
 pre-install:
     brew install just uv gh markdownlint-cli
 
+# install required software
 [macos]
 pre-install:
     brew install just uv gh markdownlint-cli
