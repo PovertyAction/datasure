@@ -6,7 +6,7 @@ import streamlit as st
 st.write("""
 
 
-# pyDMS - Data Management System
+# DataSure - Data Management System
 
 Data Management system for research data
 

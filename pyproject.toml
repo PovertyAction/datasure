@@ -3,12 +3,14 @@ requires = ["uv_build>=0.7.19,<0.8.0"]
 build-backend = "uv_build"
 
 [project]
-name = "pyDMS"
+name = "DataSure"
 version = "0.1.0"
 description = "IPA Data Management System Dashboard"
 readme = "README.md"
-license = {file = "LICENSE"}
-authors = [{name = "Innovations for Poverty Action", email = "researchsupport@poverty-action.org"}]
+license = { file = "LICENSE" }
+authors = [
+    { name = "Innovations for Poverty Action", email = "researchsupport@poverty-action.org" },
+]
 keywords = ["data-quality", "survey-data", "streamlit", "monitoring", "hfc"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -43,11 +45,11 @@ dependencies = [
 ]
 
 [project.urls]
-Source = "https://github.com/PovertyAction/pydms"
-Issues = "https://github.com/PovertyAction/pydms/issues"
+Source = "https://github.com/PovertyAction/datasure"
+Issues = "https://github.com/PovertyAction/datasure/issues"
 
 [project.scripts]
-pydms = "pydms.cli:main"
+datasure = "datasure.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0.0", "pytest-cov>=4.1.0", "ruff>=0.6.4"]
@@ -127,16 +129,11 @@ end_of_line = "lf" # possible values: {"lf", "crlf", "keep"}
 [tool.pytest.ini_options]
 minversion = "6.0"
 addopts = "-ra -q --strict-markers --strict-config"
-testpaths = [
-    "tests",
-]
+testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-filterwarnings = [
-    "ignore::DeprecationWarning",
-    "ignore::UserWarning",
-]
+filterwarnings = ["ignore::DeprecationWarning", "ignore::UserWarning"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
@@ -145,13 +142,7 @@ markers = [
 
 [tool.coverage.run]
 source = ["src"]
-omit = [
-    "tests/*",
-    "**/__init__.py",
-    "*/migrations/*",
-    "*/venv/*",
-    "*/.venv/*",
-]
+omit = ["tests/*", "**/__init__.py", "*/migrations/*", "*/venv/*", "*/.venv/*"]
 branch = true
 
 [tool.coverage.report]
@@ -175,7 +166,7 @@ fail_under = 23
 
 [tool.coverage.html]
 directory = "htmlcov"
-title = "pyDMS Coverage Report"
+title = "DataSure Coverage Report"
 
 [tool.coverage.xml]
 output = "coverage.xml"

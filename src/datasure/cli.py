@@ -1,7 +1,7 @@
 """
-Command-line interface for pyDMS.
+Command-line interface for DataSure.
 
-This module provides the main entry point for running pyDMS
+This module provides the main entry point for running DataSure
 as a command-line application.
 """
 
@@ -13,9 +13,9 @@ import streamlit.web.cli as stcli
 
 
 def main():
-    """Main CLI entry point for pyDMS."""
+    """Main CLI entry point for DataSure."""
     parser = argparse.ArgumentParser(
-        description="pyDMS - IPA Data Management System",
+        description="DataSure - IPA Data Management System",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
@@ -35,7 +35,7 @@ def main():
     parser.add_argument(
         "--version",
         action="version",
-        version=f"pyDMS {get_version()}",
+        version=f"DataSure {get_version()}",
     )
 
     args = parser.parse_args()
@@ -71,7 +71,7 @@ def get_version():
     try:
         from importlib.metadata import version
 
-        return version("pyDMS")
+        return version("DataSure")
     except Exception:
         return "0.1.0"
 

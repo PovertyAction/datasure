@@ -4,7 +4,7 @@ This file provides comprehensive guidance to Claude Code (claude.ai/code) when w
 
 ## Project Overview
 
-This is **pyDMS** - an IPA (Innovations for Poverty Action) Data Management System built with Python and Streamlit. It provides a web-based interface for data quality monitoring and high-frequency checks (HFCs) in survey data collection projects.
+This is **DataSure** - an IPA (Innovations for Poverty Action) Data Management System built with Python and Streamlit. It provides a web-based interface for data quality monitoring and high-frequency checks (HFCs) in survey data collection projects.
 
 **Key Characteristics:**
 
@@ -18,10 +18,10 @@ This is **pyDMS** - an IPA (Innovations for Poverty Action) Data Management Syst
 
 ```text
 /
-├── src/pydms/                   # Main package (source layout)
+├── src/datasure/                   # Main package (source layout)
 │   ├── __init__.py             # Package metadata (__version__ = "0.1.0")
 │   ├── app.py                  # Main Streamlit application entry point
-│   ├── cli.py                  # Command-line interface (pydms command)
+│   ├── cli.py                  # Command-line interface (datasure command)
 │   ├── assets/                 # Static assets (logos, images) - 9 files
 │   ├── checks/                 # 10 modular data quality check modules
 │   ├── connectors/             # Data source connectors (SurveyCTO, local, scripts)
@@ -53,7 +53,7 @@ just clean                # Remove virtual environment
 ### Development
 
 ```bash
-uv run pydms                 # Launch application via CLI
+uv run datasure                 # Launch application via CLI
 just lab                     # Launch Jupyter Lab
 ```
 
@@ -103,26 +103,26 @@ just release-windows 0.1.0  # Shows deprecation message for Windows builds
 - **Build System**: Hatchling (PEP 517/518 compliant)
 - **Package Manager**: UV (fast Python package installer)
 - **Layout**: src/ layout for better isolation and testing
-- **Version Management**: Dynamic versioning from `src/pydms/__init__.py`
-- **Entry Points**: CLI command `pydms` defined in pyproject.toml
+- **Version Management**: Dynamic versioning from `src/datasure/__init__.py`
+- **Entry Points**: CLI command `datasure` defined in pyproject.toml
 
 ### Core Application Components
 
-#### Main Application (`src/pydms/app.py`)
+#### Main Application (`src/datasure/app.py`)
 
 - Streamlit multi-page application with dynamic navigation
 - Session state management for complex UI interactions
 - Asset management with package-aware path resolution
 - Logo integration with fallback logic for development vs production
 
-#### CLI Interface (`src/pydms/cli.py`)
+#### CLI Interface (`src/datasure/cli.py`)
 
 - Argparse-based command-line interface
 - Streamlit server integration with custom host/port
 - Version reporting from package metadata
 - Error handling for missing package files
 
-#### Data Quality Checks (`src/pydms/checks/`)
+#### Data Quality Checks (`src/datasure/checks/`)
 
 **10 specialized check modules:**
 
@@ -137,13 +137,13 @@ just release-windows 0.1.0  # Shows deprecation message for Windows builds
 9. `backchecks.py` - Back-check validation workflows
 10. `__init__.py` - Standardized interfaces for all checks
 
-#### Data Connectors (`src/pydms/connectors/`)
+#### Data Connectors (`src/datasure/connectors/`)
 
 - **SurveyCTO** (`scto.py`): Direct API integration with form metadata and authentication
 - **Local Files** (`local.py`): CSV/Excel upload with automatic type detection
 - **Custom Scripts** (`script.py`): Python script execution for data processing
 
-#### Utilities (`src/pydms/utils/`)
+#### Utilities (`src/datasure/utils/`)
 
 - `cache_utils.py` - Cross-platform cache directory management
 - `duckdb_utils.py` - DuckDB database operations and table management
@@ -152,7 +152,7 @@ just release-windows 0.1.0  # Shows deprecation message for Windows builds
 - `dataframe_utils.py` - DataFrame manipulation utilities
 - `metric_utils.py` - Statistical calculations and metrics
 
-#### Views (`src/pydms/views/`)
+#### Views (`src/datasure/views/`)
 
 - `start_view.py` - Project selection and creation interface
 - `import_view.py` - Data import and connector management
@@ -275,8 +275,8 @@ uv run python -m pytest -m "not slow"     # Skip slow tests
 
 **Production Mode** (when installed as package):
 
-- Windows: `%APPDATA%/pydms/cache/`
-- Linux/macOS: `~/.local/share/pydms/cache/`
+- Windows: `%APPDATA%/datasure/cache/`
+- Linux/macOS: `~/.local/share/datasure/cache/`
 - Automatic user data directory creation
 
 **Cache Structure:**
@@ -314,7 +314,7 @@ just build-package
 
 # Install and test locally
 just install-package
-uv run pydms --version
+uv run datasure --version
 
 # Complete workflow
 just package-workflow  # Tests, builds, and verifies package
@@ -324,8 +324,8 @@ just package-workflow  # Tests, builds, and verifies package
 
 #### PyPI Distribution
 
-- **Standard Python Package**: `pip install pyDMS`
-- **Entry Point**: `pydms` command available globally
+- **Standard Python Package**: `pip install DataSure`
+- **Entry Point**: `datasure` command available globally
 - **Version Management**: Automatic from `__init__.py`
 
 #### Windows Distribution
@@ -395,39 +395,39 @@ Cross-platform command automation:
 
 ### Adding a New Data Quality Check
 
-1. Create new module in `src/pydms/checks/`
+1. Create new module in `src/datasure/checks/`
 2. Implement standardized interface with report function
-3. Add imports to `src/pydms/checks/__init__.py`
+3. Add imports to `src/datasure/checks/__init__.py`
 4. Create corresponding test file in `tests/checks/`
-5. Update navigation in `src/pydms/app.py` if needed
+5. Update navigation in `src/datasure/app.py` if needed
 
 ### Adding a New Data Connector
 
-1. Create new module in `src/pydms/connectors/`
+1. Create new module in `src/datasure/connectors/`
 2. Implement data loading and form functions
-3. Add imports to `src/pydms/connectors/__init__.py`
+3. Add imports to `src/datasure/connectors/__init__.py`
 4. Update import view to include new connector
 5. Add appropriate tests and documentation
 
 ### Modifying UI Components
 
-1. Edit appropriate view file in `src/pydms/views/`
+1. Edit appropriate view file in `src/datasure/views/`
 2. Use package-relative paths for assets
 3. Follow session state patterns for data persistence
 4. Test with different project configurations
 
 ### Package Version Updates
 
-1. Update `__version__` in `src/pydms/__init__.py`
+1. Update `__version__` in `src/datasure/__init__.py`
 2. Test package building: `just build-package`
-3. Verify CLI version: `uv run pydms --version`
+3. Verify CLI version: `uv run datasure --version`
 4. Update documentation if API changes
 
 ## Troubleshooting Common Issues
 
 ### Import Errors
 
-- Use absolute imports: `from pydms.utils import ...`
+- Use absolute imports: `from datasure.utils import ...`
 - Check package structure matches import paths
 - Verify `__init__.py` files exist in all directories
 
@@ -494,4 +494,4 @@ Cross-platform command automation:
 - Sign releases when possible
 - Monitor for security vulnerabilities in dependencies
 
-This comprehensive guide should help you navigate the pyDMS codebase effectively and maintain its professional standards. The project follows modern Python best practices and provides multiple distribution channels for different user needs.
+This comprehensive guide should help you navigate the DataSure codebase effectively and maintain its professional standards. The project follows modern Python best practices and provides multiple distribution channels for different user needs.

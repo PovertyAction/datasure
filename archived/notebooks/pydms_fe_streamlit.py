@@ -14,7 +14,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 st.set_page_config(layout="wide")
-st.title("PyDMS Dashboard")
+st.title("DataSure Dashboard")
 st.logo(
     "notebooks/IPA-primary-color-CMYK.jpg", size="large", link=None, icon_image=None
 )

@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pydms.checks import (
+from datasure.checks import (
     compute_summary_progress,
     compute_summary_progress_by_col,
     compute_summary_submissions,

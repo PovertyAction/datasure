@@ -1,6 +1,6 @@
 import streamlit as st
 
-from pydms.checks import (
+from datasure.checks import (
     backchecks_report,
     descriptive_report,
     duplicates_report,
@@ -11,7 +11,7 @@ from pydms.checks import (
     progress_report,
     summary_report,
 )
-from pydms.utils import duckdb_get_table, get_cache_path, get_check_config_settings
+from datasure.utils import duckdb_get_table, get_cache_path, get_check_config_settings
 
 # define page number
 page_number = 1

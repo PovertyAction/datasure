@@ -8,7 +8,7 @@ import streamlit as st
 from geopy.distance import geodesic
 from sklearn.neighbors import LocalOutlierFactor
 
-from pydms.utils import (
+from datasure.utils import (
     get_check_config_settings,
     load_check_settings,
     save_check_settings,

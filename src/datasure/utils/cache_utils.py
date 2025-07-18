@@ -1,4 +1,4 @@
-"""Cache directory utilities for pyDMS."""
+"""Cache directory utilities for DataSure."""
 
 import os
 from pathlib import Path
@@ -43,7 +43,7 @@ def get_cache_base_dir() -> Path:
             # Fallback to home directory
             base_dir = Path.home()
 
-        cache_dir = base_dir / "pydms" / "cache"
+        cache_dir = base_dir / "datasure" / "cache"
 
     # Create the cache directory if it doesn't exist
     cache_dir.mkdir(parents=True, exist_ok=True)

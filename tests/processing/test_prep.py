@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pydms.processing.prep import (
+from datasure.processing.prep import (
     prep_add_new_column,
     prep_remove_columns,
     prep_remove_rows,
@@ -64,7 +64,7 @@ class TestPrepRemoveColumns:
         assert "age" not in result.columns
         assert len(result.columns) == len(sample_prep_data.columns) - 2
 
-    @patch("pydms.processing.prep.st")
+    @patch("datasure.processing.prep.st")
     def test_invalid_column_specification(self, mock_st, sample_prep_data):
         """Test handling of invalid column specification."""
         prep_remove_columns(sample_prep_data, "remove column(s) invalid_format")
@@ -144,7 +144,7 @@ class TestPrepRemoveRows:
         if result is not None:
             assert all("A" not in name for name in result["name"])
 
-    @patch("pydms.processing.prep.st")
+    @patch("datasure.processing.prep.st")
     def test_invalid_row_specification(self, mock_st, sample_prep_data):
         """Test handling of invalid row specification."""
         prep_remove_rows(sample_prep_data, "remove row(s) by index invalid_format")
@@ -259,7 +259,7 @@ class TestPrepTransformColumns:
         # Should extract first capital letter from each name
         assert all(len(str(val)) <= 1 for val in result["name"] if pd.notna(val))
 
-    @patch("pydms.processing.prep.st")
+    @patch("datasure.processing.prep.st")
     def test_unknown_transformation(self, mock_st, sample_prep_data):
         """Test handling of unknown transformation function."""
         result = prep_transform_columns(
@@ -316,7 +316,7 @@ class TestPrepAddNewColumn:
                 result["age_diff"], expected_diff, check_names=False
             )
 
-    @patch("pydms.processing.prep.st")
+    @patch("datasure.processing.prep.st")
     def test_quotient_wrong_column_count(self, mock_st, sample_prep_data):
         """Test error handling when quotient operation has wrong number of columns."""
         prep_add_new_column(

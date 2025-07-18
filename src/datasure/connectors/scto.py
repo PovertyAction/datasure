@@ -13,7 +13,7 @@ import pysurveycto
 import requests
 import streamlit as st
 
-from pydms.utils import duckdb_get_table, duckdb_save_table, get_cache_path
+from datasure.utils import duckdb_get_table, duckdb_save_table, get_cache_path
 
 # --- SurveyCTO Server Connect Button Click Action --- #
 
@@ -96,7 +96,7 @@ def scto_load_forms(servername: str) -> pd.DataFrame:
     """
     # load form details from last session
     try:
-        cache_file = get_cache_path(f"{servername}_pyDMS_forms_cache.json")
+        cache_file = get_cache_path(f"{servername}_DataSure_forms_cache.json")
         file = pd.read_json(cache_file)
         form_inputs = file.to_dict()
 

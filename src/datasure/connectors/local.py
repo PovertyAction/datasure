@@ -6,7 +6,7 @@ import polars as pl
 import streamlit as st
 from openpyxl import load_workbook
 
-from pydms.utils import duckdb_get_table, duckdb_save_table
+from datasure.utils import duckdb_get_table, duckdb_save_table
 
 # --- Get List of sheet from excel ---#
 
