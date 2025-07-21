@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.checks.progress import (
+from src.pydms.checks.progress import (
     compute_attempted_interviews,
     compute_progress_chart,
     compute_progress_overtime,
@@ -323,8 +323,8 @@ class TestComputeAttemptedInterviews:
 class TestLoadDefaultProgressSettings:
     """Test load_default_progress_settings function."""
 
-    @patch("src.checks.progress.get_check_config_settings")
-    @patch("src.checks.progress.load_check_settings")
+    @patch("src.pydms.checks.progress.get_check_config_settings")
+    @patch("src.pydms.checks.progress.load_check_settings")
     @patch("os.path.exists")
     def test_load_default_progress_settings_with_existing_file(
         self, mock_exists, mock_load_settings, mock_get_config
@@ -357,8 +357,8 @@ class TestLoadDefaultProgressSettings:
         assert result[2] == "custom_date"  # date
         assert result[3] == 100  # target
 
-    @patch("src.checks.progress.get_check_config_settings")
-    @patch("src.checks.progress.load_check_settings")
+    @patch("src.pydms.checks.progress.get_check_config_settings")
+    @patch("src.pydms.checks.progress.load_check_settings")
     @patch("os.path.exists")
     def test_load_default_progress_settings_no_file(
         self, mock_exists, mock_load_settings, mock_get_config
@@ -386,8 +386,8 @@ class TestLoadDefaultProgressSettings:
         assert result[2] == "date_col"  # date from config
         assert result[3] is None  # target should be None
 
-    @patch("src.checks.progress.get_check_config_settings")
-    @patch("src.checks.progress.load_check_settings")
+    @patch("src.pydms.checks.progress.get_check_config_settings")
+    @patch("src.pydms.checks.progress.load_check_settings")
     @patch("os.path.exists")
     def test_load_default_progress_settings_fallback_target(
         self, mock_exists, mock_load_settings, mock_get_config
