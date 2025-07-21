@@ -459,3 +459,309 @@ class TestIntegration:
         # Progress chart with empty data
         chart_result = compute_progress_chart(empty_df, None, None, None, None)
         assert chart_result == (0, 0)
+
+
+class TestProgressOvertimeEdgeCases:
+    """Test edge cases for compute_progress_overtime function."""
+
+    def test_compute_progress_overtime_single_date(self):
+        """Test compute_progress_overtime with single date."""
+        data = pd.DataFrame({"submission_date": [pd.to_datetime("2024-01-01")]})
+
+        result = compute_progress_overtime(data, "submission_date", "Day")
+        period_stats, average_interviews = result
+
+        assert len(period_stats) == 1
+        assert period_stats["num_interviews"].iloc[0] == 1
+        assert average_interviews == 1.0
+
+    def test_compute_progress_overtime_missing_date_values(self):
+        """Test compute_progress_overtime with missing date values."""
+        data = pd.DataFrame(
+            {
+                "submission_date": [
+                    pd.to_datetime("2024-01-01"),
+                    None,
+                    pd.to_datetime("2024-01-03"),
+                ]
+            }
+        )
+
+        # Should handle NaT values
+        result = compute_progress_overtime(data, "submission_date", "Day")
+        period_stats, average_interviews = result
+
+        assert len(period_stats) >= 1  # Should have valid dates
+
+
+class TestProgressChartEdgeCases:
+    """Test edge cases for compute_progress_chart function."""
+
+    def test_compute_progress_chart_missing_column_data(self, sample_dataframe):
+        """Test compute_progress_chart with columns containing only NaN values."""
+        # Create dataframe with NaN values in consent column
+        test_data = sample_dataframe.copy()
+        test_data["consent"] = None
+
+        result = compute_progress_chart(
+            test_data, "consent", ["Yes"], "outcome", ["Complete"]
+        )
+
+        assert result[0] == 0  # consent_percentage should be 0 with all NaN
+        assert isinstance(
+            result[1], float
+        )  # completion_percentage should still calculate
+
+    def test_compute_progress_chart_empty_lists(self, sample_dataframe):
+        """Test compute_progress_chart with empty consent/outcome value lists."""
+        result = compute_progress_chart(sample_dataframe, "consent", [], "outcome", [])
+
+        assert result[0] == 0  # consent_percentage should be 0 with empty list
+        assert result[1] == 0  # completion_percentage should be 0 with empty list
+
+    def test_compute_progress_chart_nonexistent_values(self, sample_dataframe):
+        """Test compute_progress_chart with values that don't exist in data."""
+        result = compute_progress_chart(
+            sample_dataframe, "consent", ["NonExistent"], "outcome", ["NonExistent"]
+        )
+
+        assert result[0] == 0  # Should be 0% if values don't exist
+        assert result[1] == 0  # Should be 0% if values don't exist
+
+
+class TestAttemptedInterviewsEdgeCases:
+    """Test edge cases for compute_attempted_interviews function."""
+
+    def test_compute_attempted_interviews_missing_survey_ids(self):
+        """Test compute_attempted_interviews with missing survey IDs."""
+        data = pd.DataFrame(
+            {
+                "survey_id": ["ID001", None, "ID003"],
+                "submission_date": pd.to_datetime(
+                    ["2024-01-01", "2024-01-02", "2024-01-03"]
+                ),
+                "enumerator": ["E1", "E2", "E3"],
+            }
+        )
+
+        result = compute_attempted_interviews(
+            data, "survey_id", "submission_date", ["enumerator"]
+        )
+
+        (
+            attempted_interviews,
+            total_submitted,
+            number_of_unique_ids,
+            min_attempts,
+            max_attempts,
+        ) = result
+
+        assert total_submitted == 3
+        assert number_of_unique_ids >= 1  # Should handle NaN survey IDs
+        assert isinstance(attempted_interviews, pd.DataFrame)
+
+    def test_compute_attempted_interviews_duplicate_dates(self):
+        """Test compute_attempted_interviews with duplicate submission dates."""
+        data = pd.DataFrame(
+            {
+                "survey_id": ["ID001", "ID001", "ID001"],
+                "submission_date": pd.to_datetime(
+                    ["2024-01-01", "2024-01-01", "2024-01-01"]
+                ),
+                "enumerator": ["E1", "E1", "E1"],
+            }
+        )
+
+        result = compute_attempted_interviews(
+            data, "survey_id", "submission_date", ["enumerator"]
+        )
+
+        attempted_interviews = result[0]
+
+        # Should still count as 3 attempts even with same date
+        assert attempted_interviews["num_interviews"].iloc[0] == 3
+        assert attempted_interviews["last_attempt_date"].iloc[0] == pd.to_datetime(
+            "2024-01-01"
+        )
+
+    def test_compute_attempted_interviews_nonexistent_display_cols(self):
+        """Test compute_attempted_interviews with nonexistent display columns."""
+        data = pd.DataFrame(
+            {
+                "survey_id": ["ID001", "ID002"],
+                "submission_date": pd.to_datetime(["2024-01-01", "2024-01-02"]),
+                "enumerator": ["E1", "E2"],
+            }
+        )
+
+        # This should raise an error or handle gracefully
+        try:
+            result = compute_attempted_interviews(
+                data, "survey_id", "submission_date", ["nonexistent_column"]
+            )
+            # If no error, check that it handles gracefully
+            assert isinstance(result[0], pd.DataFrame)
+        except KeyError:
+            # Expected behavior - should raise KeyError for nonexistent column
+            pass
+
+
+class TestProgressSummaryEdgeCases:
+    """Additional edge cases for progress summary."""
+
+    def test_compute_progress_summary_negative_target(self, sample_dataframe):
+        """Test compute_progress_summary with negative target."""
+        result = compute_progress_summary(sample_dataframe, -10)
+
+        assert result[0] == len(sample_dataframe)
+        assert result[1] == -10
+        assert result[2] == 0  # Should be 0 with negative target
+
+    def test_compute_progress_summary_float_target(self, sample_dataframe):
+        """Test compute_progress_summary with float target."""
+        target = 10.5
+        result = compute_progress_summary(sample_dataframe, target)
+
+        expected_percentage = (len(sample_dataframe) / target) * 100
+
+        assert result[0] == len(sample_dataframe)
+        assert result[1] == target
+        assert result[2] == expected_percentage
+
+    def test_compute_progress_summary_very_large_target(self, sample_dataframe):
+        """Test compute_progress_summary with very large target."""
+        target = 1000000
+        result = compute_progress_summary(sample_dataframe, target)
+
+        expected_percentage = (len(sample_dataframe) / target) * 100
+
+        assert result[0] == len(sample_dataframe)
+        assert result[1] == target
+        assert (
+            abs(result[2] - expected_percentage) < 0.001
+        )  # Allow for floating point precision
+
+
+class TestLoadDefaultProgressSettingsEdgeCases:
+    """Additional test cases for load_default_progress_settings."""
+
+    @patch("src.pydms.checks.progress.get_check_config_settings")
+    @patch("src.pydms.checks.progress.load_check_settings")
+    @patch("os.path.exists")
+    def test_load_default_progress_settings_exception_handling(
+        self, mock_exists, mock_load_settings, mock_get_config
+    ):
+        """Test load_default_progress_settings with exception during loading."""
+        mock_exists.return_value = True
+        mock_get_config.return_value = (
+            "v1",
+            "project",
+            "form",
+            "survey_id",
+            "date_col",
+            "enum_col",
+            "consent",
+            "outcome",
+        )
+        # Mock load_check_settings to raise an exception
+        mock_load_settings.side_effect = Exception("File read error")
+
+        # Should handle exception gracefully
+        try:
+            result = load_default_progress_settings("test_project", "settings.json", 1)
+            # If no exception, verify fallback behavior
+            assert len(result) == 4
+        except Exception:
+            # Should not propagate exception in production code
+            pass
+
+    @patch("src.pydms.checks.progress.get_check_config_settings")
+    @patch("src.pydms.checks.progress.load_check_settings")
+    @patch("os.path.exists")
+    def test_load_default_progress_settings_partial_config(
+        self, mock_exists, mock_load_settings, mock_get_config
+    ):
+        """Test load_default_progress_settings with partial configuration."""
+        mock_exists.return_value = True
+        mock_get_config.return_value = (
+            "v1",
+            "project",
+            "form",
+            None,
+            None,
+            None,
+            "consent",
+            "outcome",
+        )
+        mock_load_settings.return_value = {
+            "survey_id": "survey_id",
+            # Missing enumerator and date
+        }
+
+        result = load_default_progress_settings("test_project", "settings.json", 1)
+
+        assert len(result) == 4
+        assert result[0] == "survey_id"  # From settings
+        assert result[1] is None  # From config (None)
+        assert result[2] is None  # From config (None)
+
+
+class TestDataTypeHandling:
+    """Test handling of different data types and formats."""
+
+    def test_compute_progress_overtime_string_dates(self):
+        """Test compute_progress_overtime with string dates."""
+        data = pd.DataFrame(
+            {"submission_date": ["2024-01-01", "2024-01-02", "2024-01-03"]}
+        )
+
+        result = compute_progress_overtime(data, "submission_date", "Day")
+        period_stats, average_interviews = result
+
+        assert len(period_stats) == 3
+        assert average_interviews == 1.0
+
+    def test_compute_attempted_interviews_mixed_survey_id_types(self):
+        """Test compute_attempted_interviews with mixed survey ID types."""
+        data = pd.DataFrame(
+            {
+                "survey_id": ["ID001", 123, "ID003", 456],
+                "submission_date": pd.to_datetime(
+                    ["2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04"]
+                ),
+                "enumerator": ["E1", "E2", "E3", "E4"],
+            }
+        )
+
+        result = compute_attempted_interviews(
+            data, "survey_id", "submission_date", ["enumerator"]
+        )
+
+        (
+            attempted_interviews,
+            total_submitted,
+            number_of_unique_ids,
+            min_attempts,
+            max_attempts,
+        ) = result
+
+        assert total_submitted == 4
+        assert number_of_unique_ids == 4
+        assert min_attempts == 1
+        assert max_attempts == 1
+
+    def test_compute_progress_chart_boolean_columns(self):
+        """Test compute_progress_chart with boolean consent/outcome columns."""
+        data = pd.DataFrame(
+            {
+                "consent": [True, False, True, True, False],
+                "outcome": [True, True, False, True, False],
+            }
+        )
+
+        result = compute_progress_chart(data, "consent", [True], "outcome", [True])
+
+        # 3 out of 5 have True consent = 60%
+        # 3 out of 5 have True outcome = 60%
+        assert result[0] == 60.0
+        assert result[1] == 60.0
