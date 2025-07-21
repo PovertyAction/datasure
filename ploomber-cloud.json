@@ -1,6 +1,7 @@
 {
     "id": "muddy-mountain-6219",
     "type": "streamlit",
+    "entrypoint": "src/pydms/app.py",
     "ignore": [
         "tests/",
         ".github/",
@@ -12,7 +13,11 @@
         ".vscode/",
         "archived/",
         "build/",
+        "dist/",
         "htmlcov/",
+        "winget/",
+        "scripts/",
+        "docs/",
         ".coverage",
         ".coverage.html",
         ".coverage.htmlcov",
@@ -23,7 +28,13 @@
         "Justfile",
         "README.md",
         "CLAUDE.md",
-        "pydms.py"
+        "pydms.py",
+        "build.spec",
+        "sonar-project.properties",
+        "*.whl",
+        "*.tar.gz",
+        "ruff-report.json",
+        "coverage.xml"
     ],
     "resources": {
         "cpu": 1.0,

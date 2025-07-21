@@ -6,8 +6,8 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 
 # Set path to virtual environment's python
 
-python_dir := ".venv/Scripts"
-python := python_dir + if os_family() == "windows" { "/python.exe" } else { "/python3" }
+python_dir := ".venv/"
+python := python_dir + if os_family() == "windows" { "Scripts/python.exe" } else { "bin/python3" }
 
 # Display system information
 system-info:
@@ -17,8 +17,19 @@ system-info:
     @echo "Home directory: {{ home_directory() }}"
 
 # Clean venv
+[linux]
 clean:
     rm -rf .venv
+
+# Clean venv
+[macos]
+clean:
+    rm -rf .venv
+
+# Clean venv
+[windows]
+clean:
+    if (Test-Path ".venv") { Remove-Item ".venv" -Recurse -Force }
 
 # Setup environment
 get-started: pre-install venv
@@ -34,9 +45,6 @@ venv:
     uv tool install pre-commit
     pre-commit install
 
-activate-venv:
-    uv shell
-
 # launch jupyter lab
 lab:
     uv run jupyter lab
@@ -44,14 +52,6 @@ lab:
 # Format a single python file, "f"
 streamlit-run f:
     uv run streamlit run {{ f }}
-
-# Preview the handbook
-preview-docs:
-    quarto preview
-
-# Build the handbook
-build-docs:
-    quarto render
 
 # Lint python code
 lint-py:
@@ -67,16 +67,17 @@ fmt-py f:
 
 # Format all markdown and config files
 fmt-markdown:
-    uv run mdformat .
+    markdownlint --config .markdownlint.yaml "**/*.md" --fix
 
 # Format a single markdown file, "f"
 fmt-md f:
-    uv run mdformat {{ f }}
+    markdownlint --config .markdownlint.yaml {{ f }} --fix
 
 # Check format of all markdown files
 fmt-check-markdown:
-    uv run mdformat --check .
+    markdownlint --config .markdownlint.yaml "**/*.md" "**/*.md"
 
+# Run all linting and formatting
 fmt-all: lint-py fmt-python fmt-markdown
 
 # Run tests
@@ -100,17 +101,81 @@ test-cov-xml:
 pre-commit-run:
     pre-commit run
 
+# Build the package using uv
+build-package:
+    uv build
+
+# Clean build artifacts
+[linux]
+clean-build:
+    rm -rf dist/
+    rm -rf build/
+
+# Clean build artifacts
+[macos]
+clean-build:
+    rm -rf dist/
+    rm -rf build/
+
+# Clean build artifacts
 [windows]
-pre-install:
-    winget install Casey.Just astral-sh.uv GitHub.cli Posit.Quarto
+clean-build:
+    if (Test-Path "dist") { Remove-Item "dist" -Recurse -Force }
+    if (Test-Path "build") { Remove-Item "build" -Recurse -Force }
+
+# Install the package locally from the built wheel
+[windows]
+install-package: build-package
+    $wheel = Get-ChildItem -Path "dist" -Filter "*.whl" | Select-Object -First 1; uv pip install --force-reinstall $wheel.FullName
 
 [linux]
-pre-install:
-    brew install just uv gh
-    curl -sfL https://github.com/quarto-dev/quarto-cli/releases/download/v1.5.54/quarto-1.5.54-linux-amd64.deb  | sudo apt install ./quarto-1.5.54-linux-amd64.deb
-    rm quarto-1.5.54-linux-amd64.deb
+install-package: build-package
+    uv pip install --force-reinstall dist/pydms-*.whl
 
 [macos]
+install-package: build-package
+    uv pip install --force-reinstall dist/pydms-*.whl
+
+# Uninstall the package
+uninstall-package:
+    uv pip uninstall pydms
+
+# Test the CLI after installation
+test-cli: install-package
+    uv run pydms --version
+
+# Publish to TestPyPI (for testing)
+publish-test: build-package
+    uv run --with twine twine upload --repository testpypi dist/*
+
+# Publish to PyPI (production)
+publish: build-package
+    uv run --with twine twine upload dist/*
+
+# Check PyPI package before publishing
+check-pypi: build-package
+    uv run --with twine twine check dist/*
+
+# View PyPI package info
+pypi-info:
+    uv run --with twine twine check dist/* --verbose
+
+# Package development workflow: test, build, and verify
+package-workflow: test build-package test-cli clean-build
+    @echo "Package workflow completed successfully!"
+
+# install required software
+[windows]
 pre-install:
-    brew install just uv gh
-    brew install --cask quarto
+    winget install Casey.Just astral-sh.uv GitHub.cli OpenJS.NodeJS
+    npm install -g markdownlint-cli
+
+# install required software
+[linux]
+pre-install:
+    brew install just uv gh markdownlint-cli
+
+# install required software
+[macos]
+pre-install:
+    brew install just uv gh markdownlint-cli

@@ -388,14 +388,14 @@ def mock_database_functions(monkeypatch):
 
     # Mock the duckdb_get_table function in all the places it might be imported
     monkeypatch.setattr(
-        "src.utils.duckdb_utils.duckdb_get_table", mock_duckdb_get_table
+        "pydms.utils.duckdb_utils.duckdb_get_table", mock_duckdb_get_table
     )
-    monkeypatch.setattr("src.utils.duckdb_get_table", mock_duckdb_get_table)
+    monkeypatch.setattr("pydms.utils.duckdb_get_table", mock_duckdb_get_table)
     monkeypatch.setattr(
-        "src.utils.settings_utils.duckdb_get_table", mock_duckdb_get_table
+        "pydms.utils.settings_utils.duckdb_get_table", mock_duckdb_get_table
     )
 
     # Also directly patch the function used in settings_utils
     monkeypatch.setattr(
-        "src.utils.settings_utils.get_check_config_settings", mock_config
+        "pydms.utils.settings_utils.get_check_config_settings", mock_config
     )
