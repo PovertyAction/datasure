@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from src.utils import (
+from pydms.utils import (
     get_check_config_settings,
     load_check_settings,
     save_check_settings,
@@ -61,19 +61,19 @@ def load_default_backcheck_settings(
         default_settings = {}
 
     return (
-        default_settings.get("duration", None),
+        default_settings.get("duration"),
         default_settings.get("date", config_survey_date),
-        default_settings.get("formversion", None),
+        default_settings.get("formversion"),
         default_settings.get("enumerator", config_enumerator),
-        default_settings.get("team", None),
-        default_settings.get("backchecker", None),
-        default_settings.get("bc_team", None),
+        default_settings.get("team"),
+        default_settings.get("backchecker"),
+        default_settings.get("bc_team"),
         default_settings.get("survey_id", config_survey_id),
         default_settings.get("survey_key", config_survey_key),
-        default_settings.get("consent", None),
-        default_settings.get("consent_vals", None),
-        default_settings.get("outcome", None),
-        default_settings.get("outcome_vals", None),
+        default_settings.get("consent"),
+        default_settings.get("consent_vals"),
+        default_settings.get("outcome"),
+        default_settings.get("outcome_vals"),
         default_settings.get("backcheck_goal", 0),
         default_settings.get("drop_duplicates", True),
     )
@@ -1390,10 +1390,10 @@ def backchecks_report(
             .reset_index()
         )
         enumerator_statistics["% back checked"] = enumerator_statistics.apply(
-            lambda x: f"{(x['# backchecks']/x['# surveys'])*100:.2f}%", axis=1
+            lambda x: f"{(x['# backchecks'] / x['# surveys']) * 100:.2f}%", axis=1
         )
         enumerator_statistics["Error Rate"] = enumerator_statistics.apply(
-            lambda x: f"{(x['# different']/x['# compared'])*100:.2f}%", axis=1
+            lambda x: f"{(x['# different'] / x['# compared']) * 100:.2f}%", axis=1
         )
         enumerator_statistics = enumerator_statistics.rename(
             columns={
