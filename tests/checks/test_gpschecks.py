@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.checks.gpschecks import (
+from pydms.checks.gpschecks import (
     calculate_gps_accuracy_statistics,
     detect_outliers_with_clusters,
     detect_outliers_with_lof,
@@ -126,8 +126,8 @@ def mock_session_state_gps():
     }
 
 
-@patch("src.checks.gpschecks.st.cache_data", lambda f: f)
-@patch("src.checks.gpschecks.get_check_config_settings")
+@patch("pydms.checks.gpschecks.st.cache_data", lambda f: f)
+@patch("pydms.checks.gpschecks.get_check_config_settings")
 def test_load_default_settings_no_file(mock_config_settings):
     """Test loading default settings when no settings file exists."""
     # Mock the config settings function to return expected values
@@ -153,7 +153,7 @@ def test_load_default_settings_no_file(mock_config_settings):
     assert result[5] is False  # lat_lon_exist
 
 
-@patch("src.checks.gpschecks.st.cache_data", lambda f: f)
+@patch("pydms.checks.gpschecks.st.cache_data", lambda f: f)
 def test_detect_outliers_with_clusters(sample_gps_data_with_outliers):
     """Test outlier detection using clustering method."""
     result = detect_outliers_with_clusters(
@@ -173,7 +173,7 @@ def test_detect_outliers_with_clusters(sample_gps_data_with_outliers):
     assert far_points["Outlier"].any()
 
 
-@patch("src.checks.gpschecks.st.cache_data", lambda f: f)
+@patch("pydms.checks.gpschecks.st.cache_data", lambda f: f)
 def test_detect_outliers_with_clusters_no_outliers():
     """Test outlier detection when there are no outliers."""
     # Create tight cluster with no outliers
@@ -196,7 +196,7 @@ def test_detect_outliers_with_clusters_no_outliers():
     assert "distance_from_centroid" in result.columns
 
 
-@patch("src.checks.gpschecks.st.cache_data", lambda f: f)
+@patch("pydms.checks.gpschecks.st.cache_data", lambda f: f)
 def test_detect_outliers_with_lof(sample_gps_data_with_outliers):
     """Test outlier detection using Local Outlier Factor."""
     result = detect_outliers_with_lof(
@@ -218,7 +218,7 @@ def test_detect_outliers_with_lof(sample_gps_data_with_outliers):
     assert result["Outlier"].dtype == bool
 
 
-@patch("src.checks.gpschecks.st.cache_data", lambda f: f)
+@patch("pydms.checks.gpschecks.st.cache_data", lambda f: f)
 def test_detect_outliers_with_lof_auto_contamination(sample_gps_data):
     """Test LOF with automatic contamination detection."""
     result = detect_outliers_with_lof(
@@ -229,7 +229,7 @@ def test_detect_outliers_with_lof_auto_contamination(sample_gps_data):
     assert len(result) == len(sample_gps_data)
 
 
-@patch("src.checks.gpschecks.st.cache_data", lambda f: f)
+@patch("pydms.checks.gpschecks.st.cache_data", lambda f: f)
 def test_calculate_gps_accuracy_statistics(sample_gps_data):
     """Test GPS accuracy statistics calculation."""
     stats_list = ["min", "max", "mean", "median", "std"]
@@ -253,7 +253,7 @@ def test_calculate_gps_accuracy_statistics(sample_gps_data):
     assert result["max"].max() > 0
 
 
-@patch("src.checks.gpschecks.st.cache_data", lambda f: f)
+@patch("pydms.checks.gpschecks.st.cache_data", lambda f: f)
 def test_calculate_gps_accuracy_statistics_with_percentiles(sample_gps_data):
     """Test GPS accuracy statistics with percentile calculations."""
     stats_list = ["min", "25th percentile", "75th percentile", "95th percentile", "max"]
@@ -268,7 +268,7 @@ def test_calculate_gps_accuracy_statistics_with_percentiles(sample_gps_data):
     assert "95th percentile" in result.columns
 
 
-@patch("src.checks.gpschecks.st.cache_data", lambda f: f)
+@patch("pydms.checks.gpschecks.st.cache_data", lambda f: f)
 def test_calculate_gps_accuracy_statistics_empty_data():
     """Test GPS accuracy statistics with empty DataFrame."""
     empty_df = pd.DataFrame(columns=["enumerator", "gps_accuracy"])
@@ -281,7 +281,7 @@ def test_calculate_gps_accuracy_statistics_empty_data():
     assert len(result) == 0
 
 
-@patch("src.checks.gpschecks.st.pydeck_chart")
+@patch("pydms.checks.gpschecks.st.pydeck_chart")
 def test_plot_gps_coordinates(mock_pydeck_chart, sample_gps_data):
     """Test GPS coordinates plotting function."""
     plot_gps_coordinates(
@@ -310,7 +310,7 @@ def test_plot_gps_coordinates(mock_pydeck_chart, sample_gps_data):
     assert layer.type == "ScatterplotLayer"
 
 
-@patch("src.checks.gpschecks.st.pydeck_chart")
+@patch("pydms.checks.gpschecks.st.pydeck_chart")
 def test_plot_gps_coordinates_with_missing_data(mock_pydeck_chart):
     """Test GPS coordinates plotting with missing coordinates."""
     data_with_missing = pd.DataFrame(
@@ -337,7 +337,7 @@ def test_plot_gps_coordinates_with_missing_data(mock_pydeck_chart):
     mock_pydeck_chart.assert_called_once()
 
 
-@patch("src.checks.gpschecks.st.pydeck_chart")
+@patch("pydms.checks.gpschecks.st.pydeck_chart")
 def test_plot_clusters_on_map(mock_pydeck_chart, sample_gps_data_with_outliers):
     """Test plotting clusters on map with outlier highlighting."""
     # Add outlier column
@@ -367,7 +367,7 @@ def test_plot_clusters_on_map(mock_pydeck_chart, sample_gps_data_with_outliers):
     assert len(deck_obj.layers) == 1
 
 
-@patch("src.checks.gpschecks.st.pydeck_chart")
+@patch("pydms.checks.gpschecks.st.pydeck_chart")
 def test_plot_clusters_on_map_all_normal_points(mock_pydeck_chart, sample_gps_data):
     """Test plotting clusters when all points are normal (no outliers)."""
     sample_gps_data["Outlier"] = False  # All points are normal
@@ -471,7 +471,7 @@ def test_calculate_gps_accuracy_statistics_missing_values():
     assert not result.isna().all().any()  # No columns should be all NaN
 
 
-@patch("src.checks.gpschecks.st.pydeck_chart")
+@patch("pydms.checks.gpschecks.st.pydeck_chart")
 def test_plot_gps_coordinates_many_unique_values(mock_pydeck_chart):
     """Test GPS plotting with many unique values for color coding."""
     # Create data with more than 10 unique enumerators
@@ -530,7 +530,7 @@ def test_detect_outliers_multiple_clusters():
     assert len(result) == 10
 
 
-@patch("src.checks.gpschecks.st.cache_data", lambda f: f)
+@patch("pydms.checks.gpschecks.st.cache_data", lambda f: f)
 def test_calculate_gps_accuracy_with_invalid_stats():
     """Test GPS accuracy calculation with invalid statistics names."""
     data = pd.DataFrame({"enumerator": ["E001", "E001"], "gps_accuracy": [4.5, 3.8]})

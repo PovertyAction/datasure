@@ -16,11 +16,26 @@ backgroundColor = "#FAF9F6"
 # textColor = "#262730"
 
 
+[global]
+developmentMode = false
+
 [client]
 toolbarMode = "minimal"
+showErrorDetails = false
+
+[browser]
+gatherUsageStats = false
+serverAddress = "localhost"
+serverPort = 8501
+
+[logger]
+level = "error"
 
 
 [server]
+headless = true
+port = 8501
+address = "localhost"
 
 # maximum amount of data in MB that can be handled by streamlit, default is 200
 maxMessageSize = 1000

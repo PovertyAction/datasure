@@ -1,4 +1,4 @@
-# DMS Dashboard
+# pyDMS
 
 IPA Dashboard Solution for Data Management Systems.
 
@@ -10,7 +10,6 @@ Development relies on the following software
 - `git` for source control management
 - `just` for running common command line patterns
 - `uv` for installing Python and managing virtual environments
-- `Quarto` framework for creating analytics products via code
 
 First, clone this repository to your local computer either via GitHub Desktop.
 
@@ -33,13 +32,11 @@ following from the command line:
 
 | Platform  | Commands                                                            |
 | --------- | ------------------------------------------------------------------- |
-| Windows   | `winget install Git.Git Casey.Just astral-sh.uv GitHub.cli Posit.Quarto` |
+| Windows   | `winget install Git.Git Casey.Just astral-sh.uv` |
 | Mac/Linux | `brew install just uv gh`                                          |
 
 This will make sure that you have the latest version of `Just`, as well as
 [uv](https://docs.astral.sh/uv/) (installer for Python) and
-[Quarto](https://quarto.org/docs/guide/) (for writing and compiling scientific and
-technical documents).
 
 - We use `Just` in order to make it easier for all IPA users to be productive with data
   and technology systems. The goal of using a `Justfile` is to help make the end goal of
@@ -47,9 +44,6 @@ technical documents).
   details of how we get to that goal.
 - We use `uv` to help ease use of Python. `uv` provides a global system for creating and
   building computing environments for Python.
-- We use Quarto to allow users to focus on writing and data analytics. Writing in
-  markdown, jupyter notebooks, python scripts, R scripts, etc. makes it easier to
-  review, update, and deploy technical documentation.
 
 As a shortcut, if you already have `Just` installed, you can run the following to
 install required software and build a python virtual environment that is used to build
@@ -71,6 +65,73 @@ environment:
 | Powershell | `.venv/Scripts/activate.ps1`            |
 | Nushell    | `overlay use .venv/Scripts/activate.nu` |
 
+## Available Justfile Commands
+
+This project uses [Just](https://github.com/casey/just) as a command runner to simplify common development tasks. Here are the available commands:
+
+### Environment Setup
+
+```bash
+just get-started          # Complete setup (install software + create venv)
+just venv                 # Create virtual environment and install dependencies
+just clean                # Remove virtual environment
+just activate-venv        # Activate the virtual environment
+```
+
+### Development
+
+```bash
+uv run pydms                  # Launch the pyDMS application
+just lab                     # Launch Jupyter Lab
+```
+
+### Code Quality
+
+```bash
+just lint-py              # Lint Python code with Ruff
+just fmt-python           # Format Python code with Ruff
+just fmt-py <file>         # Format a specific Python file
+just fmt-markdown          # Format all markdown files
+just fmt-md <file>         # Format a specific markdown file
+just fmt-check-markdown    # Check markdown formatting
+just fmt-all              # Format all code and markdown files
+just pre-commit-run        # Run pre-commit hooks
+```
+
+### Testing
+
+```bash
+just test                 # Run all tests
+just test-cov             # Run tests with coverage report (terminal)
+just test-cov-html        # Run tests with HTML coverage report
+just test-cov-xml         # Run tests with XML coverage report (for CI)
+```
+
+### Package Building
+
+```bash
+just build-package        # Build both wheel and source distribution
+just clean-build          # Clean build artifacts
+just install-package      # Install the package locally from built wheel
+just uninstall-package    # Uninstall the package
+just test-cli             # Test the CLI after installation
+just package-workflow     # Complete workflow: test, build, and verify
+```
+
+### Publishing
+
+```bash
+just publish-test         # Publish to TestPyPI (for testing)
+just publish              # Publish to PyPI (production)
+```
+
+### Utilities
+
+```bash
+just system-info          # Display system information
+just update-reqs          # Update project dependencies
+```
+
 ## Testing the Streamlit App
 
 Follow these steps to test the app:
@@ -88,20 +149,14 @@ Follow these steps to test the app:
 ### 2. Navigate to the Repository
 
 - Open your terminal (VS Code terminal, Command Prompt, or PowerShell).
-- Navigate to the folder where the repository is located. This folder should contain the `pydms.py` file.
+- Navigate to the folder where the repository is located.
 
 ### 3. Start the App
 
 - Run one of the following commands to launch the app:
 
     ```bash
-    just streamlit-run pydms.py
-    ```
-
-    or
-
-    ```bash
-    uv run streamlit run pydms.py
+    uv run pydms
     ```
 
 ---
@@ -152,6 +207,121 @@ To run a specific test file, use:
 uv run python -m pytest tests/test_file.py
 ```
 
+## Package Building and Distribution
+
+pyDMS is set up as a proper Python package using [uv](https://docs.astral.sh/uv/) with the `uv_build` backend for simple and fast building and publishing.
+
+### Building the Package
+
+To build the package for distribution:
+
+```bash
+# Build both wheel and source distribution
+just build-package
+
+# Or use uv directly
+uv build
+```
+
+This creates two files in the `dist/` directory:
+
+- `pydms-{version}-py3-none-any.whl` (wheel distribution)
+- `pydms-{version}.tar.gz` (source distribution)
+
+### Testing the Package
+
+To test the built package locally:
+
+```bash
+# Install the package locally
+just install-package
+
+# Or install directly from the wheel
+uv pip install dist/pydms-*.whl
+```
+
+### Using the CLI
+
+Once installed, you can use the command-line interface:
+
+```bash
+# Show version
+uv run pydms --version
+
+# Launch the dashboard (default: localhost:8501)
+uv run pydms
+
+# Launch with custom host/port
+uv run pydms --host 0.0.0.0 --port 8080
+```
+
+### Package Development Workflow
+
+1. **Make changes** to the code
+2. **Update version** in `pyproject.toml`
+3. **Run tests** to ensure everything works:
+
+   ```bash
+   just test
+   ```
+
+4. **Build the package**:
+
+   ```bash
+   just build-package
+   ```
+
+5. **Test the package installation**:
+
+   ```bash
+   just install-package
+   uv run pydms --version
+   ```
+
+### Version Management
+
+The version number is stored directly in `pyproject.toml` and follows [semantic versioning](https://semver.org/):
+
+- **MAJOR** version when you make incompatible API changes
+- **MINOR** version when you add functionality in a backward compatible manner
+- **PATCH** version when you make backward compatible bug fixes
+
+To update the version:
+
+1. **Edit the version in `pyproject.toml`**:
+
+   ```toml
+   [project]
+   name = "pyDMS"
+   version = "0.2.0"  # Update this line
+   ```
+
+2. **The build system uses this static version** directly from the project configuration
+
+3. **Verify the version update**:
+
+   ```bash
+   uv build
+   # Check that dist/ contains files with the new version number
+   ```
+
+### Publishing to PyPI
+
+When ready to publish:
+
+```bash
+# Build the package
+just build-package
+
+# Publish to TestPyPI first (recommended)
+just publish-test
+
+# Publish to PyPI
+just publish
+```
+
+**Note:** You'll need to configure your PyPI credentials before publishing. See [uv publishing documentation](https://docs.astral.sh/uv/guides/publish/) for details.
+
 ## Deployment
 
 pyDMS can be deployed using [Ploomber Cloud](https://docs.cloud.ploomber.io/en/latest/intro.html). You will need a deployment key from [Ploomber's platform console](https://www.platform.ploomber.io/).
@@ -168,15 +338,42 @@ uv pip compile pyproject.toml -o requirements.txt --no-annotate --no-header
 
 # make sure that app.py is the same as pydms.py and deploy the app
 # Ploomber needs to use app.py as the entry point for the Streamlit app
-cp pydms.py app.py && uv run ploomber-cloud deploy --watch
+cd src/pydms && uv run ploomber-cloud deploy --watch
 ```
 
-See Ploomber docs for more details on deployment options and configurations of [Streamlit apps](https://docs.cloud.ploomber.io/en/latest/apps/streamlit.html). Password protection docs are found [here](https://docs.cloud.ploomber.io/en/latest/user-guide/cli.html#password-protection).
+See Ploomber docs for more details on deployment options and configurations of [Streamlit apps](https://docs.cloud.ploomber.io/en/latest/apps/streamlit.html). Password protection docs are found in [Ploomber docs](https://docs.cloud.ploomber.io/en/latest/user-guide/cli.html#password-protection).
+
+## Data Storage and Cache
+
+pyDMS automatically manages data storage and caching for optimal performance across different environments:
+
+### Cache Directory Locations
+
+- **Development Mode** (when running from source): `./cache/` (in project root)
+- **Production Mode** (when installed as package):
+  - **Windows**: `%APPDATA%/pydms/cache/`
+  - **Linux/macOS**: `~/.local/share/pydms/cache/`
+
+### What's Stored
+
+The cache directory contains:
+
+- **Project configurations**: HFC page settings and form configurations
+- **Database files**: DuckDB databases for processed survey data
+- **SurveyCTO cache**: Cached form metadata and server connections
+- **User settings**: Check configurations and preferences
+
+### Cache Management
+
+- Cache directories are created automatically when needed
+- No manual setup required - pyDMS detects the environment and uses appropriate paths
+- Development and production modes use separate cache locations
+- Cache is preserved between application sessions
 
 ## Code Quality Reports
 
 Code quality metrics and reports are available on SonarQube Cloud:
 
-- **Dashboard**: [https://sonarcloud.io/project/overview?id=PovertyAction_dms-dashboard](https://sonarcloud.io/project/overview?id=PovertyAction_dms-dashboard)
+- **Dashboard**: [https://sonarcloud.io/project/overview?id=PovertyAction_pydms](https://sonarcloud.io/project/overview?id=PovertyAction_pydms)
 
 The SonarQube dashboard provides insights into code coverage, code smells, bugs, vulnerabilities, and maintainability ratings.
