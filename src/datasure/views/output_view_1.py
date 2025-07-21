@@ -162,6 +162,7 @@ with back_checks:
             project_id,
             page_data,
             backcheck_data,
+            setting_file,
             page_number,
         )
 
