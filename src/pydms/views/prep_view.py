@@ -41,6 +41,9 @@ DP_ADD_METHODS: tuple = (
     "product",
     "diff",
     "quotient",
+    "index",
+    "uuid",
+    "random",
 )
 
 # Methods for deleting rows
@@ -77,10 +80,13 @@ DP_DATETIME_FUNCS: tuple = (
     "second",
     "minute",
     "hour",
-    "day",
-    "week",
-    "month",
-    "quarter",
+    "day of month",
+    "day of week",
+    "day of year",
+    "date",
+    "week of year",
+    "month of year",
+    "quarter of year",
     "year",
 )
 
@@ -163,6 +169,13 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, i: int):
                     max_selections=max_selections,
                 )
                 return f"Add column '{dp_prep_add_col}' with {dp_prep_add_col_med} of columns {dp_prep_add_col_select}"
+
+            elif dp_prep_add_col_med in [
+                "index",
+                "uuid",
+                "random",
+            ]:
+                return f"Add column '{dp_prep_add_col}' with '{dp_prep_add_col_med}' values"
 
     def prep_transform_column() -> str:
         dp_prep_trf_col = st.selectbox(

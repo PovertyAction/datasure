@@ -1,4 +1,5 @@
 import ast
+import hashlib
 import operator
 import re
 
@@ -189,9 +190,7 @@ def prep_remove_rows(prep_data: pd.DataFrame, description: str) -> pd.DataFrame:
                 return
             if prep_data[first_col].dtypes == "datetime64[ns]":
                 try:
-                    values_use = [
-                        val for val in ast.literal_eval(values.replace("Timestamp", ""))
-                    ]
+                    values_use = list(ast.literal_eval(values.replace("Timestamp", "")))
                 except (ValueError, SyntaxError):
                     st.error(f"Invalid values specification: {values}")
                     return
@@ -326,11 +325,14 @@ def prep_transform_columns(prep_data: pd.DataFrame, description: str):
     )
 
     datetime_extractors = {
-        "day": lambda s: s.dt.day,
-        "week": lambda s: s.dt.isocalendar().week,
-        "month": lambda s: s.dt.month,
+        "day of month": lambda s: s.dt.day,
+        "day of week": lambda s: s.dt.dayofweek,
+        "day of year": lambda s: s.dt.dayofyear,
+        "date": lambda s: s.dt.date,
+        "week of year": lambda s: s.dt.isocalendar().week,
+        "month of year": lambda s: s.dt.month,
         "year": lambda s: s.dt.year,
-        "quarter": lambda s: s.dt.quarter,
+        "quarter of year": lambda s: s.dt.quarter,
         "hour": lambda s: s.dt.hour,
         "minute": lambda s: s.dt.minute,
         "second": lambda s: s.dt.second,
@@ -410,7 +412,7 @@ def prep_transform_columns(prep_data: pd.DataFrame, description: str):
 
 
 # functions for adding new columns
-def prep_add_new_column(prep_data: pd.DataFrame, description: str):
+def prep_add_new_column(prep_data: pd.DataFrame, description: str) -> pd.DataFrame:
     """Transform columns in dataset.
 
     PARAMS:
@@ -430,7 +432,21 @@ def prep_add_new_column(prep_data: pd.DataFrame, description: str):
     if "constant value" in value:
         value = value.replace("constant value ", "")
         prep_data[new_col] = value
-        return prep_data
+    elif value in ["index", "uuid", "random"]:
+        # handle special cases for index, uuid, and random
+        if value == "index":
+            # create an index column
+            prep_data[new_col] = prep_data.index
+        elif value == "uuid":
+            # get session state project ID
+            project_id = st.session_state.st_project_id
+            # create a UUID column
+            prep_data[new_col] = prep_data.index.to_series().apply(
+                lambda i: hashlib.sha256(f"{project_id}_{i}".encode()).hexdigest()
+            )
+        elif value == "random":
+            # create a random column
+            prep_data[new_col] = np.random.rand(len(prep_data))
     else:
         # get function from value
         func = re.search(r"with [a-z]+", description).group(0).replace("with ", "")
@@ -457,7 +473,7 @@ def prep_add_new_column(prep_data: pd.DataFrame, description: str):
         if func in agg_funcs:
             method = getattr(prep_data[columns_list], agg_funcs[func])
             prep_data[new_col] = method(axis=1)
-        elif func in ["quotient", "diff"]:
+        elif func in ["quotient", "diff", "index", "uuid", "random"]:
             # we need to handle quotient and diff separately
             if len(columns_list) != 2:
                 st.error("Quotient and diff require exactly two columns.")
@@ -472,4 +488,4 @@ def prep_add_new_column(prep_data: pd.DataFrame, description: str):
                 prep_data[new_col] = (
                     prep_data[columns_list[0]] - prep_data[columns_list[1]]
                 )
-        return prep_data
+    return prep_data

@@ -154,20 +154,50 @@ class TestPrepRemoveRows:
 class TestPrepTransformColumns:
     """Test prep_transform_columns function."""
 
-    def test_datetime_extraction_day(self, sample_prep_data):
+    def test_datetime_extraction_day_of_month(self, sample_prep_data):
         """Test extracting day from datetime column."""
         result = prep_transform_columns(
-            sample_prep_data, "transform column(s) 'date_joined to day'"
+            sample_prep_data, "transform column(s) 'date_joined to day of month'"
         )
         assert result["date_joined"].dtype in [np.int32, np.int64]
         assert all(1 <= day <= 31 for day in result["date_joined"])
 
-    def test_datetime_extraction_month(self, sample_prep_data):
+    def test_datetime_extraction_day_of_week(self, sample_prep_data):
+        """Test extracting day of week from datetime column."""
+        result = prep_transform_columns(
+            sample_prep_data, "transform column(s) 'date_joined to day of week'"
+        )
+        assert result["date_joined"].dtype in [np.int32, np.int64]
+        assert all(0 <= day <= 6 for day in result["date_joined"])
+
+    def test_datetime_extraction_day_of_year(self, sample_prep_data):
+        """Test extracting day of year from datetime column."""
+        result = prep_transform_columns(
+            sample_prep_data, "transform column(s) 'date_joined to day of year'"
+        )
+        assert result["date_joined"].dtype in [np.int32, np.int64]
+        assert all(1 <= day <= 366 for day in result["date_joined"])
+
+    def test_datetime_extraction_week_of_year(self, sample_prep_data):
+        """Test extracting week of year from datetime column."""
+        result = prep_transform_columns(
+            sample_prep_data, "transform column(s) 'date_joined' to 'week of year'"
+        )
+        assert all(1 <= week <= 53 for week in result["date_joined"])
+
+    def test_datetime_extraction_month_of_year(self, sample_prep_data):
         """Test extracting month from datetime column."""
         result = prep_transform_columns(
-            sample_prep_data, "transform column(s) 'date_joined to month'"
+            sample_prep_data, "transform column(s) 'date_joined to month of year'"
         )
         assert all(1 <= month <= 12 for month in result["date_joined"])
+
+    def test_datetime_extraction_quarter_of_year(self, sample_prep_data):
+        """Test extracting quarter from datetime column."""
+        result = prep_transform_columns(
+            sample_prep_data, "transform column(s) 'date_joined to quarter of year'"
+        )
+        assert all(1 <= quarter <= 4 for quarter in result["date_joined"])
 
     def test_datetime_extraction_year(self, sample_prep_data):
         """Test extracting year from datetime column."""
