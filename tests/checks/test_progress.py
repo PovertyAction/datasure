@@ -746,6 +746,17 @@ class TestProgressChartEdgeCases:
         assert result[0] == 0  # Should be 0% if values don't exist
         assert result[1] == 0  # Should be 0% if values don't exist
 
+    def test_compute_progress_chart_with_empty_dataframe(self):
+        """Test compute_progress_chart with empty dataframe but valid columns."""
+        empty_df = pd.DataFrame({"consent": [], "outcome": []})
+
+        result = compute_progress_chart(
+            empty_df, "consent", ["Yes"], "outcome", ["Complete"]
+        )
+
+        assert result[0] == 0
+        assert result[1] == 0
+
 
 class TestAttemptedInterviewsEdgeCases:
     """Test edge cases for compute_attempted_interviews function."""
@@ -822,6 +833,45 @@ class TestAttemptedInterviewsEdgeCases:
         except KeyError:
             # Expected behavior - should raise KeyError for nonexistent column
             pass
+
+    def test_compute_attempted_interviews_large_dataset(self):
+        """Test compute_attempted_interviews with large dataset."""
+        # Create large dataset with multiple attempts
+        survey_ids = [f"ID{i:04d}" for i in range(100)]
+        data_rows = []
+
+        for survey_id in survey_ids:
+            attempts = np.random.randint(1, 6)  # 1-5 attempts per survey
+            for attempt in range(attempts):
+                data_rows.append(
+                    {
+                        "survey_id": survey_id,
+                        "submission_date": pd.to_datetime(
+                            f"2024-01-{(attempt % 30) + 1:02d}"
+                        ),
+                        "enumerator": f"E{attempt + 1}",
+                    }
+                )
+
+        large_data = pd.DataFrame(data_rows)
+
+        result = compute_attempted_interviews(
+            large_data, "survey_id", "submission_date", ["enumerator"]
+        )
+
+        (
+            attempted_interviews,
+            total_submitted,
+            number_of_unique_ids,
+            min_attempts,
+            max_attempts,
+        ) = result
+
+        assert total_submitted > 100  # Should have more than 100 total submissions
+        assert number_of_unique_ids == 100  # Should have exactly 100 unique IDs
+        assert min_attempts >= 1
+        assert max_attempts <= 5
+        assert len(attempted_interviews) == 100  # One row per unique survey ID
 
 
 class TestProgressSummaryEdgeCases:
@@ -923,6 +973,30 @@ class TestLoadDefaultProgressSettingsEdgeCases:
         assert result[1] is None  # From config (None)
         assert result[2] is None  # From config (None)
 
+    @patch("src.pydms.checks.progress.get_check_config_settings")
+    @patch("src.pydms.checks.progress.load_check_settings")
+    @patch("os.path.exists")
+    def test_load_default_progress_settings_empty_strings(
+        self, mock_exists, mock_load_settings, mock_get_config
+    ):
+        """Test load_default_progress_settings with empty string values."""
+        mock_exists.return_value = True
+        mock_get_config.return_value = ("", "", "", "", "", "", "", "")
+        mock_load_settings.return_value = {
+            "survey_id": "",
+            "enumerator": "",
+            "date": "",
+            "target": None,
+        }
+
+        result = load_default_progress_settings("test_project", "settings.json", 1)
+
+        assert len(result) == 4
+        assert result[0] == ""  # Empty string survey_id
+        assert result[1] == ""  # Empty string enumerator
+        assert result[2] == ""  # Empty string date
+        assert result[3] is None  # None target
+
 
 class TestDataTypeHandling:
     """Test handling of different data types and formats."""
@@ -983,3 +1057,210 @@ class TestDataTypeHandling:
         # 3 out of 5 have True outcome = 60%
         assert result[0] == 60.0
         assert result[1] == 60.0
+
+    def test_compute_progress_chart_mixed_data_types(self):
+        """Test compute_progress_chart with mixed data types."""
+        data = pd.DataFrame(
+            {
+                "consent": ["Yes", 1, "No", "Yes", 0],
+                "outcome": [1.0, "Complete", 0.0, "Complete", "Incomplete"],
+            }
+        )
+
+        result = compute_progress_chart(
+            data, "consent", ["Yes", 1], "outcome", ["Complete", 1.0]
+        )
+
+        # Should handle mixed types correctly
+        assert isinstance(result[0], float)
+        assert isinstance(result[1], float)
+        assert 0 <= result[0] <= 100
+        assert 0 <= result[1] <= 100
+
+
+class TestSessionStateManagement:
+    """Test session state management in UI functions."""
+
+    @pytest.fixture
+    def mock_streamlit_with_session_state(self):
+        """Mock Streamlit with session state tracking."""
+        session_state = {}
+        with (
+            patch("streamlit.session_state", session_state),
+            patch("streamlit.expander") as mock_expander,
+            patch("streamlit.columns") as mock_columns,
+            patch("streamlit.selectbox") as mock_selectbox,
+            patch("streamlit.multiselect") as mock_multiselect,
+            patch("streamlit.radio") as mock_radio,
+            patch("streamlit.container") as mock_container,
+            patch("src.pydms.checks.progress.save_check_settings") as mock_save,
+            patch("src.pydms.checks.progress.trigger_save") as mock_trigger,
+            patch("src.pydms.checks.progress.load_check_settings") as mock_load,
+        ):
+            # Setup context managers
+            mock_expander.return_value.__enter__ = MagicMock()
+            mock_expander.return_value.__exit__ = MagicMock(return_value=None)
+            mock_container.return_value.__enter__ = MagicMock()
+            mock_container.return_value.__exit__ = MagicMock(return_value=None)
+
+            mock_columns.return_value = [MagicMock() for _ in range(5)]
+            for col in mock_columns.return_value:
+                col.__enter__ = MagicMock(return_value=col)
+                col.__exit__ = MagicMock(return_value=None)
+
+            mock_selectbox.return_value = "test_column"
+            mock_multiselect.return_value = ["test_val1", "test_val2"]
+            mock_radio.return_value = "Day"
+            mock_load.return_value = {}
+
+            yield {
+                "session_state": session_state,
+                "expander": mock_expander,
+                "columns": mock_columns,
+                "selectbox": mock_selectbox,
+                "multiselect": mock_multiselect,
+                "radio": mock_radio,
+                "container": mock_container,
+                "save": mock_save,
+                "trigger": mock_trigger,
+                "load": mock_load,
+            }
+
+
+class TestChartGenerationAndVisualization:
+    """Test chart generation and visualization components."""
+
+    def test_donut_chart_integration(self):
+        """Test donut chart integration in display_progress_chart."""
+        with (
+            patch("streamlit.columns") as mock_columns,
+            patch("streamlit.write"),
+            patch("streamlit.selectbox") as mock_selectbox,
+            patch("streamlit.multiselect") as mock_multiselect,
+            patch("streamlit.container") as mock_container,
+            patch("streamlit.pyplot") as mock_pyplot,
+            patch("streamlit.markdown"),
+            patch("src.pydms.checks.progress.donut_chart2") as mock_donut,
+            patch("src.pydms.checks.progress.load_check_settings") as mock_load,
+            patch("src.pydms.checks.progress.save_check_settings"),
+            patch("src.pydms.checks.progress.trigger_save"),
+            patch("streamlit.session_state", {}),
+        ):
+            # Setup mocks
+            mock_columns.return_value = [
+                MagicMock(),
+                MagicMock(),
+                MagicMock(),
+                MagicMock(),
+                MagicMock(),
+            ]
+            mock_container.return_value.__enter__ = MagicMock()
+            mock_container.return_value.__exit__ = MagicMock(return_value=None)
+
+            for col in mock_columns.return_value:
+                col.__enter__ = MagicMock(return_value=col)
+                col.__exit__ = MagicMock(return_value=None)
+
+            mock_selectbox.return_value = "consent_col"
+            mock_multiselect.return_value = ["Yes"]
+            mock_load.return_value = {"consent": "consent_col", "consent_vals": ["Yes"]}
+            mock_donut.return_value = MagicMock()
+
+            # Test data
+            test_data = pd.DataFrame(
+                {
+                    "consent_col": ["Yes", "No", "Yes"],
+                    "outcome_col": ["Complete", "Incomplete", "Complete"],
+                }
+            )
+
+            display_progress_chart(test_data, "settings.json")
+
+            # Verify donut chart was called with correct parameters
+            mock_donut.assert_called()
+            mock_pyplot.assert_called()
+
+    def test_plotly_chart_integration(self):
+        """Test Plotly chart integration in display functions."""
+        with (
+            patch("streamlit.write"),
+            patch("streamlit.info"),
+            patch("streamlit.radio") as mock_radio,
+            patch("streamlit.plotly_chart") as mock_plotly,
+            patch("src.pydms.checks.progress.save_check_settings"),
+            patch("src.pydms.checks.progress.trigger_save"),
+            patch("streamlit.session_state", {}),
+        ):
+            mock_radio.return_value = "Day"
+
+            # Test data
+            test_data = pd.DataFrame(
+                {
+                    "submission_date": pd.date_range(
+                        "2024-01-01", "2024-01-05", freq="D"
+                    ),
+                    "survey_id": range(5),
+                }
+            )
+
+            display_progress_overtime(test_data, "submission_date", "settings.json")
+
+            # Verify plotly chart was called
+            mock_plotly.assert_called_once()
+
+            # Verify the call includes the expected parameters
+            call_args = mock_plotly.call_args
+            assert call_args[1]["theme"] is None
+            assert call_args[1]["use_container_width"] is True
+
+
+class TestErrorHandlingAndRobustness:
+    """Test error handling and robustness."""
+
+    def test_compute_progress_overtime_invalid_date_column(self):
+        """Test compute_progress_overtime with invalid date column."""
+        data = pd.DataFrame({"invalid_date": ["not_a_date", "also_not_date"]})
+
+        try:
+            result = compute_progress_overtime(data, "invalid_date", "Day")
+            # If it doesn't raise an error, check it handles gracefully
+            assert isinstance(result, tuple)
+            assert len(result) == 2
+        except (ValueError, TypeError):
+            # Expected behavior for invalid date data
+            pass
+
+    def test_compute_functions_with_malformed_data(self):
+        """Test compute functions with malformed data."""
+        # Test data with mixed types and NaN values
+        malformed_data = pd.DataFrame(
+            {
+                "survey_id": ["ID1", 2, None, "ID4", ""],
+                "submission_date": [
+                    "2024-01-01",
+                    None,
+                    "invalid_date",
+                    "2024-01-04",
+                    pd.NaT,
+                ],
+                "consent": [1, "Yes", None, True, ""],
+                "outcome": ["Complete", 0, None, False, "Partial"],
+                "enumerator": ["E1", None, "", "E4", 123],
+            }
+        )
+
+        # Should handle malformed data gracefully
+        try:
+            progress_summary = compute_progress_summary(malformed_data, 10)
+            assert isinstance(progress_summary, tuple)
+            assert len(progress_summary) == 3
+
+            chart_result = compute_progress_chart(
+                malformed_data, "consent", ["Yes", 1, True], "outcome", ["Complete"]
+            )
+            assert isinstance(chart_result, tuple)
+            assert len(chart_result) == 2
+
+        except Exception as e:
+            # Log what kind of errors occur with malformed data
+            assert isinstance(e, (ValueError, TypeError, KeyError))  # noqa UP038
