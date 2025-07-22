@@ -97,6 +97,10 @@ test-cov-html:
 test-cov-xml:
     uv run python -m pytest --cov=src --cov-report=xml
 
+# Run tests for a specific file
+test-file f:
+    uv run python -m pytest {{ f }}
+
 # Run pre-commit hooks
 pre-commit-run:
     pre-commit run
