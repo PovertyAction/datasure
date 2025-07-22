@@ -8,12 +8,13 @@ import streamlit as st
 
 from pydms.utils import (
     get_check_config_settings,
+    get_df_info,
     load_check_settings,
     save_check_settings,
+    trigger_save,
 )
 
 
-@st.cache_data
 def load_default_settings(project_id: str, settings_file: str, page_num: int) -> tuple:
     """
     Load the default settings for the summary report.
@@ -141,33 +142,6 @@ def show_pattern_selection(df, survey_id, pattern_groups, selected_patterns):
     return None, None, None
 
 
-# get a list of numeric columns
-@st.cache_data
-def get_numeric_columns(data: pd.DataFrame) -> list:
-    """Check if columns in the DataFrame are numeric.
-
-    Args:
-        data (pd.DataFrame): Input DataFrame.
-
-    Returns
-    -------
-        list: List of numeric columns.
-    """
-    numeric_cols = []
-    for col in data.columns:
-        # Check if column is not all NaN or empty strings
-        if data[col].replace("", pd.NA).isna().sum() < len(data[col]):
-            # Skip datetime columns
-            if pd.api.types.is_datetime64_any_dtype(data[col]):
-                continue
-            try:
-                pd.to_numeric(data[col], errors="raise")
-                numeric_cols.append(col)
-            except (ValueError, TypeError):
-                continue
-    return numeric_cols
-
-
 # outliers check settings
 def outliers_report_settings(
     project_id: str, data: pd.DataFrame, settings_file: str, page_num: int
@@ -187,9 +161,11 @@ def outliers_report_settings(
             "###### Select columns and the outlier detection method to include in the report"
         )
 
-        # get numeric columns and survey columns
-        survey_cols = data.columns
-        numeric_cols = get_numeric_columns(data)
+        all_cols, string_columns, numeric_columns, datetime_columns, _ = get_df_info(
+            data, cols_only=True
+        )
+
+        id_enum_col_options = string_columns + datetime_columns
 
         # load default settings
         (
@@ -208,11 +184,23 @@ def outliers_report_settings(
         with var_col:
             outlier_cols = st.multiselect(
                 "Columns to check for outliers",
-                options=numeric_cols,
+                options=numeric_columns,
                 default=default_outlier_cols,
                 help="Columns to check for outliers",
                 key="outlier_cols",
+                on_change=trigger_save,
+                kwargs={"state_name": "outlier_cols_save"},
             )
+            if (
+                "outlier_cols_save" in st.session_state
+                and st.session_state.outlier_cols_save
+            ):
+                save_check_settings(
+                    settings_file=settings_file,
+                    check_name="outliers",
+                    check_settings={"outlier_cols": outlier_cols},
+                )
+                st.session_state["outlier_cols_save"] = False
         with method_col:
             outlier_method_options = [
                 "Interquartile Range (IQR)",
@@ -222,7 +210,19 @@ def outliers_report_settings(
                 label="Outlier Detection Method",
                 options=outlier_method_options,
                 index=default_outlier_method,
+                on_change=trigger_save,
+                kwargs={"state_name": "outlier_method_save"},
             )
+            if (
+                "outlier_method_save" in st.session_state
+                and st.session_state.outlier_method_save
+            ):
+                save_check_settings(
+                    settings_file=settings_file,
+                    check_name="outliers",
+                    check_settings={"outlier_method", outlier_method},
+                )
+                st.session_state.outlier_method_save = False
 
             if outlier_method == "Standard Deviation (SD)":
                 sd_value = st.number_input(
@@ -230,47 +230,110 @@ def outliers_report_settings(
                     value=3.0 if default_sd_value is None else default_sd_value,
                     key="sd_value_outliers",
                     help="The number of standard deviations from the mean to use for outlier detection.",
+                    on_change=trigger_save,
+                    kwargs={"state_name": "sd_value_save"},
                 )
+                if (
+                    "sd_value_save" in st.session_state
+                    and st.session_state.sd_value_save
+                ):
+                    save_check_settings(
+                        settings_file=settings_file,
+                        check_name="outliers",
+                        check_settings={"sd_value": sd_value},
+                    )
+                    st.session_state.sd_value_save = False
             else:
                 iqr_value = st.number_input(
                     "IQR Value:",
                     value=1.5 if default_iqr_value is None else default_iqr_value,
                     help="The IQR value is used to determine the range of values that are considered outliers.",
                     key="iqr_value_outliers",
+                    on_change=trigger_save,
+                    kwargs={"state_name": "iqr_value_save"},
                 )
+                if (
+                    "iqr_value_save" in st.session_state
+                    and st.session_state.iqr_value_save
+                ):
+                    save_check_settings(
+                        settings_file=settings_file,
+                        check_name="outliers",
+                        check_settings={"iqr_value": iqr_value},
+                    )
+                    st.session_state.iqr_value_save = False
         with survey_col:
             default_survey_id_index = (
-                survey_cols.get_loc(default_survey_id) if default_survey_id else None
+                id_enum_col_options.index(default_survey_id)
+                if default_survey_id and default_survey_id in id_enum_col_options
+                else None
             )
             survey_id = st.selectbox(
                 "Survey ID",
-                options=survey_cols,
+                options=id_enum_col_options,
                 help="Select the column that contains the survey ID",
                 key="survey_id_outliers",
                 index=default_survey_id_index,
+                on_change=trigger_save,
+                kwargs={"state_name": "survey_id_save"},
             )
+            if "survey_id_save" in st.session_state and st.session_state.survey_id_save:
+                save_check_settings(
+                    settings_file=settings_file,
+                    check_name="outliers",
+                    check_settings={"survey_id": survey_id},
+                )
+                st.session_state.survey_id_save = False
 
             default_enumerator_index = (
-                survey_cols.get_loc(default_enumerator) if default_enumerator else None
+                id_enum_col_options.index(default_enumerator)
+                if default_enumerator and default_enumerator in id_enum_col_options
+                else None
             )
             enumerator = st.selectbox(
                 "Enumerator ID",
-                options=survey_cols,
+                options=id_enum_col_options,
                 key="enumerator_outliers",
                 help="Select the column that contains the enumerator ID",
                 index=default_enumerator_index,
+                on_change=trigger_save,
+                kwargs={"state_name": "enumerator_save"},
             )
+            if (
+                "enumerator_save" in st.session_state
+                and st.session_state.enumerator_save
+            ):
+                save_check_settings(
+                    settings_file=settings_file,
+                    check_name="outliers",
+                    check_settings={"enumerator": enumerator},
+                )
+                st.session_state.enumerator_save = False
 
             default_survey_key_index = (
-                survey_cols.get_loc(default_survey_key) if default_survey_key else None
+                id_enum_col_options.index(default_survey_key)
+                if default_survey_key and default_survey_key in id_enum_col_options
+                else None
             )
             survey_key = st.selectbox(
                 "Survey Key",
-                options=survey_cols,
+                options=id_enum_col_options,
                 key="survey_key_outliers",
                 help="Select the column that contains the survey key",
                 index=default_survey_key_index,
+                on_change=trigger_save,
+                kwargs={"state_name": "survey_key_save"},
             )
+            if (
+                "survey_key_save" in st.session_state
+                and st.session_state.survey_key_save
+            ):
+                save_check_settings(
+                    settings_file=settings_file,
+                    check_name="outliers",
+                    check_settings={"survey_key": survey_key},
+                )
+                st.session_state.survey_key_save = False
 
         # joint outlier detection
         st.write("---")
@@ -283,17 +346,29 @@ def outliers_report_settings(
         )
         selected_pattern = st.multiselect(
             "Please select the set of variables",
-            options=numeric_cols,
+            options=numeric_columns,
             default=default_selected_pattern,
             key="selected_pattern",
             help="""Choose a group of related variables to analyze.
                     Only numeric variables are shown.
                     """,
+            on_change=trigger_save,
+            kwargs={"state_name": "selected_pattern_save"},
         )
+        if (
+            "selected_pattern_save" in st.session_state
+            and st.session_state.selected_pattern_save
+        ):
+            save_check_settings(
+                settings_file=settings_file,
+                check_name="outliers",
+                check_settings={"selected_pattern": selected_pattern},
+            )
+            st.session_state.selected_pattern_save = False
 
         if selected_pattern:
             # find variable patterns
-            pattern_groups = find_variable_patterns(numeric_cols)
+            pattern_groups = find_variable_patterns(numeric_columns)
 
             # show pattern selection
             base_pattern, selected_cols, reshaped_joint_outliers_df = (
@@ -307,35 +382,6 @@ def outliers_report_settings(
                         f"Below are selected variables for the selected pattern: '{base_pattern}'"
                     )
                     st.write(", ".join(selected_cols))
-
-        # save settings
-        st.write("---")
-        st.write("Save settings")
-
-        outliers_check_settings = {
-            "outlier_cols": outlier_cols if outlier_cols else [],
-            "outlier_method": outlier_method_options.index(outlier_method),
-            "sd_value": sd_value
-            if outlier_method == "Standard Deviation (SD)"
-            else None,
-            "iqr_value": iqr_value
-            if outlier_method == "Interquartile Range (IQR)"
-            else None,
-            "survey_id": survey_id,
-            "enumerator": enumerator,
-            "survey_key": survey_key,
-            "selected_pattern": selected_pattern if selected_pattern else [],
-        }
-
-        save_outliers_settings = st.button(
-            label="Save settings", key="save_outliers_settings"
-        )
-
-        if save_outliers_settings:
-            if outlier_cols:
-                save_check_settings(settings_file, "outliers", outliers_check_settings)
-            else:
-                st.warning("Please select at least one column to check for outliers.")
 
         return (
             outlier_cols,
@@ -426,7 +472,7 @@ def detect_outliers(
         pd.concat(results).reset_index(drop=True) if results else pd.DataFrame()
     )
 
-    if existing_vars:
+    if existing_vars and not results_df.empty:
         # Reorder columns to have survey_key first, then enumerator/survey_id if present
         cols_order = (
             [survey_key]
@@ -487,6 +533,8 @@ def plot_outlier_distributions(
     -------
         None
     """
+    if outliers_summary.empty or data.empty or cols is None:
+        return
     no_outlier_vars = []
     for var in cols:
         if var in outliers_summary["variable"].values:

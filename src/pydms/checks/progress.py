@@ -1,6 +1,7 @@
 import os
 
 import pandas as pd
+import plotly.express as px
 import plotly.graph_objects as go
 import seaborn as sns
 import streamlit as st
@@ -8,6 +9,7 @@ import streamlit as st
 from pydms.utils import (
     donut_chart2,
     get_check_config_settings,
+    get_df_info,
     load_check_settings,
     save_check_settings,
     trigger_save,
@@ -15,7 +17,6 @@ from pydms.utils import (
 
 
 #### Survey Progress ###
-@st.cache_data
 def load_default_progress_settings(
     project_id: str, setting_file: str, page_num: int
 ) -> tuple:
@@ -97,45 +98,84 @@ def progress_report_settings(
             default_target,
         ) = load_default_progress_settings(project_id, setting_file, page_num)
 
-        survey_cols = data.columns
+        _, string_columns, numeric_columns, datetime_columns, _ = get_df_info(
+            data, cols_only=True
+        )
 
+        id_enum_col_options = string_columns + numeric_columns
         uc1, uc2, uc3 = st.columns(3)
         with uc1:
             default_survey_id_index = (
-                survey_cols.get_loc(default_survey_id) if default_survey_id else None
+                id_enum_col_options.index(default_survey_id)
+                if default_survey_id and default_survey_id in id_enum_col_options
+                else None
             )
-            st.markdown("### Select survey ID column")
             survey_id = st.selectbox(
                 "Survey ID",
-                options=survey_cols,
+                options=id_enum_col_options,
                 help="Column containing survey ID",
                 key="surveyid_progress_settings",
                 index=default_survey_id_index,
+                on_change=trigger_save,
+                kwargs=({"state_name": "progress_surveyid"}),
             )
+            if (
+                "progress_surveyid" in st.session_state
+                and st.session_state.progress_surveyid
+            ):
+                save_check_settings(
+                    settings_file=setting_file,
+                    check_name="progress",
+                    check_settings={"survey_id": survey_id},
+                )
+                st.session_state["progress_surveyid"] = False
         with uc2:
             default_date_index = (
-                survey_cols.get_loc(default_date) if default_date else None
+                datetime_columns.index(default_date)
+                if default_date and default_date in datetime_columns
+                else None
             )
-            st.markdown("### Select survey date column")
             date = st.selectbox(
                 label="Date",
-                options=survey_cols,
+                options=datetime_columns,
                 help="Column containing survey date",
                 key="date_progress_settings",
                 index=default_date_index,
+                on_change=trigger_save,
+                kwargs=({"state_name": "progress_date"}),
             )
+            if "progress_date" in st.session_state and st.session_state.progress_date:
+                save_check_settings(
+                    settings_file=setting_file,
+                    check_name="progress",
+                    check_settings={"date": date},
+                )
+                st.session_state["progress_date"] = False
         with uc3:
             default_enumerator_index = (
-                survey_cols.get_loc(default_enumerator) if default_enumerator else None
+                id_enum_col_options.index(default_enumerator)
+                if default_enumerator and default_enumerator in id_enum_col_options
+                else None
             )
-            st.markdown("### Select enumerator column")
             enumerator = st.selectbox(
                 "Enumerator",
-                options=survey_cols,
+                options=id_enum_col_options,
                 help="Column containing survey enumerator",
                 key="enumerator_progress_settings",
                 index=default_enumerator_index,
+                on_change=trigger_save,
+                kwargs=({"state_name": "progress_enumerator"}),
             )
+            if (
+                "progress_enumerator" in st.session_state
+                and st.session_state.progress_enumerator
+            ):
+                save_check_settings(
+                    settings_file=setting_file,
+                    check_name="progress",
+                    check_settings={"enumerator": enumerator},
+                )
+                st.session_state["progress_enumerator"] = False
 
         st.write("---")
         tc1, tc2 = st.columns([0.4, 0.6])
@@ -148,26 +188,19 @@ def progress_report_settings(
                 help="Total number of interviews expected",
                 label_visibility="collapsed",
                 key="total_goal_progress_settings",
+                on_change=trigger_save,
+                kwargs=({"state_name": "progress_total_goal"}),
             )
-
-        # add button for saving settings
-        st.write("---")
-        st.write("Save settings")
-        st.button(
-            label="Save settings",
-            key="save_settings_progress",
-            on_click=save_check_settings,
-            args=(
-                setting_file,
-                "progress",
-                {
-                    "survey_id": survey_id,
-                    "date": date,
-                    "enumerator": enumerator,
-                    "target": target,
-                },
-            ),
-        )
+            if (
+                "progress_total_goal" in st.session_state
+                and st.session_state.progress_total_goal
+            ):
+                save_check_settings(
+                    settings_file=setting_file,
+                    check_name="progress",
+                    check_settings={"target": target},
+                )
+                st.session_state["progress_total_goal"] = False
 
     return survey_id, date, enumerator, target
 
@@ -721,25 +754,63 @@ def display_attempted_interviews(
     cm3.metric(label="Min Attempts", value=min_attempts)
     cm4.metric(label="Max Attempts", value=max_attempts)
     pd.set_option("display.max_columns", None)
-    st.dataframe(
-        data=attempted_interviews.style.background_gradient(
-            subset=["num_interviews"],
-            cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
-        ),
-        use_container_width=True,
-        column_config={
-            survey_id: st.column_config.Column(pinned=True),
-            "num_interviews": st.column_config.Column(
-                pinned=True, label="Number of Interviews"
+
+    ai1, ai2 = st.columns([0.4, 0.6])
+    with ai1:
+        # aggregted attempted interviews into attempted_frequency
+        attempted_frequency = (
+            attempted_interviews.groupby("num_interviews")
+            .size()
+            .reset_index(name="frequency")
+        )
+        fig = px.bar(
+            attempted_frequency, x="frequency", y="num_interviews", orientation="h"
+        )
+        fig.update_layout(
+            title="Attempted Interviews Frequency",
+            title_x=0.5,
+            height=400,
+            margin=dict(t=50, b=50, l=50, r=50),
+            hovermode="x",
+            xaxis=dict(
+                title="Frequency",
+                showgrid=False,
+                gridcolor="lightgrey",
             ),
-            "last_attempt_date": st.column_config.DateColumn(
-                pinned=True, label="Last Attempt Date"
+            yaxis=dict(
+                title="Number of Attempts",
+                showgrid=False,
+                gridcolor="lightgrey",
+                autorange="reversed",
             ),
-        },
-        hide_index=True,
-    )
+        )
+        fig.update_traces(
+            marker_color="#F28C28",
+            hovertemplate="<b>Attempts: %{y}</b><br>"
+            + "Frequency: %{x}<extra></extra>",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with ai2:
+        st.dataframe(
+            data=attempted_interviews.style.background_gradient(
+                subset=["num_interviews"],
+                cmap=cmap,
+                vmin=vmin,
+                vmax=vmax,
+            ),
+            use_container_width=True,
+            column_config={
+                survey_id: st.column_config.Column(pinned=True),
+                "num_interviews": st.column_config.Column(
+                    pinned=True, label="Number of Interviews"
+                ),
+                "last_attempt_date": st.column_config.DateColumn(
+                    pinned=True, label="Last Attempt Date"
+                ),
+            },
+            hide_index=True,
+        )
 
 
 def progress_report(

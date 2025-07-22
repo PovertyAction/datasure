@@ -10,12 +10,13 @@ from sklearn.neighbors import LocalOutlierFactor
 
 from pydms.utils import (
     get_check_config_settings,
+    get_df_info,
     load_check_settings,
     save_check_settings,
+    trigger_save,
 )
 
 
-@st.cache_data
 def load_default_settings(project_id: str, setting_file: str, page_num: int) -> tuple:
     """
     Load the default settings for the summary report.
@@ -119,7 +120,11 @@ def gps_check_settings(
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for GPS Checks Report")
 
-        survey_cols = data.columns
+        all_cols, string_columns, numeric_columns, datetime_columns, _ = get_df_info(
+            data, cols_only=True
+        )
+
+        string_numeric_cols = string_columns + numeric_columns
 
         # load default settings
         (
@@ -139,62 +144,144 @@ def gps_check_settings(
 
         with gps_col:
             gps_column_exists = st.toggle(
-                "Data contain GPS column(s)",
+                label="Data contain GPS column(s)",
                 value=default_gps_column_exists,
                 key="gps_column_exists",
+                help="Toggle if the survey data contains GPS column(s).",
+                on_change=trigger_save,
+                kwargs={"state_name": "gps_column_exists_save"},
             )
+            if (
+                "gps_column_exists_save" in st.session_state
+                and st.session_state.gps_column_exists_save
+            ):
+                save_check_settings(
+                    settings_file=setting_file,
+                    check_name="gpscheck",
+                    check_settings={
+                        "gps_column_exists": True,
+                    },
+                )
+                st.session_state.gps_column_exists_save = False
             if gps_column_exists:
                 lat_lon_columns_exist = st.toggle(
                     "GPS has latitude and longitude columns",
                     value=default_lat_lon_exist,
                     key="lat_long_columns_exist",
+                    help="Toggle if the survey data contains latitude and longitude columns.",
+                    on_change=trigger_save,
+                    kwargs={"state_name": "lat_long_columns_exist_save"},
                 )
+                if (
+                    "lat_long_columns_exist_save" in st.session_state
+                    and st.session_state.lat_long_columns_exist_save
+                ):
+                    save_check_settings(
+                        settings_file=setting_file,
+                        check_name="gpscheck",
+                        check_settings={
+                            "lat_lon_columns_exist": True,
+                        },
+                    )
+                    st.session_state.lat_long_columns_exist_save = False
                 if lat_lon_columns_exist:
                     default_gps_lat_col_index = (
-                        survey_cols.get_loc(default_gps_lat_col)
-                        if default_gps_lat_col
+                        all_cols.index(default_gps_lat_col)
+                        if default_gps_lat_col and default_gps_lat_col in all_cols
                         else None
                     )
                     default_gps_lon_col_index = (
-                        survey_cols.get_loc(default_gps_lon_col)
-                        if default_gps_lon_col
+                        all_cols.index(default_gps_lon_col)
+                        if default_gps_lon_col and default_gps_lon_col in all_cols
                         else None
                     )
                     default_gps_accuracy_index = (
-                        survey_cols.get_loc(default_gps_accuracy)
-                        if default_gps_accuracy
+                        all_cols.index(default_gps_accuracy)
+                        if default_gps_accuracy and default_gps_accuracy in all_cols
                         else None
                     )
                     gps_lat_col = st.selectbox(
                         "Select latitude column",
-                        survey_cols,
+                        all_cols,
                         default_gps_lat_col_index,
                         key="gps_lat_col",
+                        help="Select a column containing latitude data.",
+                        on_change=trigger_save,
+                        kwargs={"state_name": "gps_lat_col_save"},
                     )
+                    if (
+                        "gps_lat_col_save" in st.session_state
+                        and st.session_state.gps_lat_col_save
+                    ):
+                        save_check_settings(
+                            settings_file=setting_file,
+                            check_name="gpscheck",
+                            check_settings={"gps_lat_col": gps_lat_col},
+                        )
+                        st.session_state.gps_lat_col_save = False
                     gps_lon_col = st.selectbox(
                         "Select longitude column",
-                        survey_cols,
+                        all_cols,
                         default_gps_lon_col_index,
                         key="gps_lon_col",
+                        help="Select a column containing longitude data.",
+                        on_change=trigger_save,
+                        kwargs={"state_name": "gps_lon_col_save"},
                     )
+                    if (
+                        "gps_lon_col_save" in st.session_state
+                        and st.session_state.gps_lon_col_save
+                    ):
+                        save_check_settings(
+                            settings_file=setting_file,
+                            check_name="gpscheck",
+                            check_settings={"gps_lon_col": gps_lon_col},
+                        )
+                        st.session_state.gps_lon_col_save = False
                     gps_accuracy = st.selectbox(
                         "Select gps accuracy column",
-                        survey_cols,
+                        all_cols,
                         default_gps_accuracy_index,
                         key="gps_accuracy_col",
+                        help="Select a column containing GPS accuracy data.",
+                        on_change=trigger_save,
+                        kwargs={"state_name": "gps_accuracy_col_save"},
                     )
+                    if (
+                        "gps_accuracy_col_save" in st.session_state
+                        and st.session_state.gps_accuracy_col_save
+                    ):
+                        save_check_settings(
+                            settings_file=setting_file,
+                            check_name="gpscheck",
+                            check_settings={"gps_accuracy": gps_accuracy},
+                        )
+                        st.session_state.gps_accuracy_col_save = False
                 else:
                     default_gps_column_index = (
-                        survey_cols.get_loc(default_gps_column)
-                        if default_gps_column
+                        all_cols.index(default_gps_column)
+                        if default_gps_column and default_gps_column in all_cols
                         else None
                     )
                     gps_column = st.selectbox(
                         "Select GPS column",
-                        survey_cols,
+                        all_cols,
                         index=default_gps_column_index,
                         key="gps_column",
+                        help="Select a column containing GPS data. If the column contains latitude and longitude, it will be split into separate columns.",
+                        on_change=trigger_save,
+                        kwargs={"state_name": "gps_column_save"},
                     )
+                    if (
+                        "gps_column_save" in st.session_state
+                        and st.session_state.gps_column_save
+                    ):
+                        save_check_settings(
+                            settings_file=setting_file,
+                            check_name="gpscheck",
+                            check_settings={"gps_column": gps_column},
+                        )
+                        st.session_state.gps_column_save = False
 
                     if gps_column:
                         # Try to detect delimiter: comma, tab, or space
@@ -262,75 +349,105 @@ def gps_check_settings(
 
         with enum_col:
             default_date_index = (
-                survey_cols.get_loc(default_date) if default_date else None
+                datetime_columns.index(default_date)
+                if default_date and default_date in datetime_columns
+                else None
             )
 
             date = st.selectbox(
                 "Date",
-                options=survey_cols,
+                options=datetime_columns,
                 help="Column containing survey date",
                 key="date_gpscheck",
                 index=default_date_index,
+                on_change=trigger_save,
+                kwargs={"state_name": "date_gps_save"},
             )
+            if "date_gps_save" in st.session_state and st.session_state.date_gps_save:
+                save_check_settings(
+                    settings_file=setting_file,
+                    check_name="gpscheck",
+                    check_settings={"date": date},
+                )
+                st.session_state.date_gps_save = False
 
-            default_survey_key_index = survey_cols.get_loc(default_survey_key)
+            default_survey_key_index = (
+                string_numeric_cols.index(default_survey_key)
+                if default_survey_key and default_survey_key in string_numeric_cols
+                else None
+            )
 
             survey_key = st.selectbox(
                 "Survey KEY",
-                options=survey_cols,
+                options=string_numeric_cols,
                 help="Column containing Survey KEY",
                 key="survey_key_gpscheck",
                 index=default_survey_key_index,
+                on_change=trigger_save,
+                kwargs={"state_name": "survey_key_gps_save"},
             )
+            if (
+                "survey_key_gps_save" in st.session_state
+                and st.session_state.survey_key_gps_save
+            ):
+                save_check_settings(
+                    settings_file=setting_file,
+                    check_name="gpscheck",
+                    check_settings={"survey_key": survey_key},
+                )
+                st.session_state.survey_key_gps_save = False
 
             default_survey_id_index = (
-                survey_cols.get_loc(default_survey_id) if default_survey_id else None
+                string_numeric_cols.index(default_survey_id)
+                if default_survey_id and default_survey_id in string_numeric_cols
+                else None
             )
 
             survey_id = st.selectbox(
                 "Survey ID",
-                options=survey_cols,
+                options=string_numeric_cols,
                 help="Column containing survey ID",
                 key="survey_id_gpscheck",
                 index=default_survey_id_index,
+                on_change=trigger_save,
+                kwargs={"state_name": "survey_id_gps_save"},
             )
+            if (
+                "survey_id_gps_save" in st.session_state
+                and st.session_state.survey_id_gps_save
+            ):
+                save_check_settings(
+                    settings_file=setting_file,
+                    check_name="gpscheck",
+                    check_settings={"survey_id": survey_id},
+                )
+                st.session_state.survey_id_gps_save = False
 
             default_enumerator_index = (
-                survey_cols.get_loc(default_enumerator) if default_enumerator else None
+                string_numeric_cols.index(default_enumerator)
+                if default_enumerator and default_enumerator in string_numeric_cols
+                else None
             )
 
             enumerator = st.selectbox(
                 "Enumerator",
-                options=survey_cols,
+                options=string_numeric_cols,
                 help="Column containing survey enumerator",
                 key="enumerator_gpscheck",
                 index=default_enumerator_index,
+                on_change=trigger_save,
+                kwargs={"state_name": "enumerator_gps_save"},
             )
-        st.write("")
-
-        # save settings to file
-        gps_report_settings = {
-            "date": date,
-            "enumerator": enumerator,
-            "survey_key": survey_key,
-            "survey_id": survey_id,
-            "gps_column_exists": gps_column_exists,
-            "lat_lon_columns_exist": lat_lon_columns_exist
-            if gps_column_exists
-            else False,
-            "gps_lat_col": gps_lat_col if gps_column_exists else None,
-            "gps_lon_col": gps_lon_col if gps_column_exists else None,
-            "gps_accuracy": gps_accuracy if gps_column_exists else None,
-            "gps_column": gps_column if not lat_lon_columns_exist else None,
-        }
-
-        save_gpscheck_settings = st.button(
-            label="Save settings", key="save_gpscheck_settings"
-        )
-
-        if save_gpscheck_settings:
-            save_check_settings(setting_file, "gpscheck", gps_report_settings)
-            st.success("Settings saved successfully!")
+            if (
+                "enumerator_gps_save" in st.session_state
+                and st.session_state.enumerator_gps_save
+            ):
+                save_check_settings(
+                    settings_file=setting_file,
+                    check_name="gpscheck",
+                    check_settings={"enumerator": enumerator},
+                )
+                st.session_state.enumerator_gps_save = False
 
     return (
         gps_column_exists,

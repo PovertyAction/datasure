@@ -7,6 +7,7 @@ import streamlit as st
 
 from pydms.utils import (
     get_check_config_settings,
+    get_df_info,
     load_check_settings,
     save_check_settings,
     trigger_save,
@@ -15,7 +16,6 @@ from pydms.utils import (
 ##### Enumerator Statistics #####
 
 
-@st.cache_data
 def load_default_enumerator_settings(
     project_id: str, setting_file: str, page_num: str
 ) -> tuple:
@@ -129,7 +129,13 @@ def enumerator_report_settings(
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for enumerator report")
         st.write("---")
-        survey_cols = data.columns
+
+        all_cols, string_columns, numeric_columns, datetime_columns, _ = get_df_info(
+            data, cols_only=True
+        )
+
+        string_numeric_cols = string_columns + numeric_columns
+
         (
             date,
             formdef_version,
@@ -145,85 +151,168 @@ def enumerator_report_settings(
         uc1, uc2, uc3 = st.columns(3)
         with st.container(border=True):
             with uc1:
-                date_col_options = data.select_dtypes("datetime").columns.tolist()
-                default_date_index = date_col_options.index(date) if date else None
+                default_date_index = (
+                    datetime_columns.index(date)
+                    if date and date in datetime_columns
+                    else None
+                )
 
                 date = st.selectbox(
                     label="Date",
-                    options=date_col_options,
+                    options=datetime_columns,
                     help="Column containing survey date",
                     key="date_enumerator",
                     index=default_date_index,
+                    on_change=trigger_save,
+                    kwargs={"state_name": "date_enumerator_save"},
                 )
+                if (
+                    "date_enumerator_save" in st.session_state
+                    and st.session_state.date_enumerator_save
+                ):
+                    save_check_settings(
+                        settings_file=setting_file,
+                        check_name="enumerator",
+                        check_settings={"date": date},
+                    )
+                    st.session_state.date_enumerator_save = False
             with uc2:
                 default_formdef_index = (
-                    survey_cols.get_loc(formdef_version)
-                    if formdef_version in survey_cols
+                    string_numeric_cols.index(formdef_version)
+                    if formdef_version and formdef_version in string_numeric_cols
                     else None
                 )
                 formdef_version = st.selectbox(
                     label="Form Version",
-                    options=data.columns,
+                    options=string_numeric_cols,
                     help="Column containing survey form version",
                     key="formdef_version_enumerator",
                     index=default_formdef_index,
+                    on_change=trigger_save,
+                    kwargs={"state_name": "formdef_version_save"},
                 )
+                if (
+                    "formdef_version_save" in st.session_state
+                    and st.session_state.formdef_version_save
+                ):
+                    save_check_settings(
+                        settings_file=setting_file,
+                        check_name="enumerator",
+                        check_settings={"formdef_version": formdef_version},
+                    )
+                    st.session_state.formdef_version_save = False
             with uc3:
                 default_survey_id_index = (
-                    survey_cols.get_loc(survey_id) if survey_id in survey_cols else None
+                    string_numeric_cols.index(survey_id)
+                    if survey_id and survey_id in string_numeric_cols
+                    else None
                 )
                 survey_id = st.selectbox(
                     label="Survey ID",
-                    options=data.columns,
+                    options=string_numeric_cols,
                     help="Column containing survey ID",
                     key="survey_id_enumerator",
                     index=default_survey_id_index,
+                    on_change=trigger_save,
+                    kwargs={"state_name": "survey_id_enumerator_save"},
                 )
+                if (
+                    "survey_id_enumerator_save" in st.session_state
+                    and st.session_state.survey_id_enumerator_save
+                ):
+                    save_check_settings(
+                        settings_file=setting_file,
+                        check_name="enumerator",
+                        check_settings={"survey_id": survey_id},
+                    )
+                    st.session_state.survey_id_enumerator_save = False
         with st.container(border=True):
             mc1, mc2, mc3 = st.columns(3)
             with mc1:
                 default_duration_index = (
-                    survey_cols.get_loc(duration) if duration in survey_cols else None
+                    numeric_columns.index(duration)
+                    if duration and duration in numeric_columns
+                    else None
                 )
                 duration = st.selectbox(
                     label="Duration",
-                    options=data.columns,
+                    options=numeric_columns,
                     help="Column containing survey duration",
                     key="duration_enumerator",
                     index=default_duration_index,
+                    on_change=trigger_save,
+                    kwargs={"state_name": "duration_enumerator_save"},
                 )
+                if (
+                    "duration_enumerator_save" in st.session_state
+                    and st.session_state.duration_enumerator_save
+                ):
+                    save_check_settings(
+                        settings_file=setting_file,
+                        check_name="enumerator",
+                        check_settings={"duration": duration},
+                    )
+                    st.session_state.duration_enumerator_save = False
             with mc2:
                 default_enumerator_index = (
-                    survey_cols.get_loc(enumerator)
-                    if enumerator in survey_cols
+                    string_numeric_cols.index(enumerator)
+                    if enumerator and enumerator in string_numeric_cols
                     else None
                 )
                 enumerator = st.selectbox(
                     label="Enumerator",
-                    options=data.columns,
+                    options=string_numeric_cols,
                     help="Column containing survey enumerator",
                     key="enumerator_enumerator",
                     index=default_enumerator_index,
+                    on_change=trigger_save,
+                    kwargs={"state_name": "enumerator_enumerator_save"},
                 )
+                if (
+                    "enumerator_enumerator_save" in st.session_state
+                    and st.session_state.enumerator_enumerator_save
+                ):
+                    save_check_settings(
+                        settings_file=setting_file,
+                        check_name="enumerator",
+                        check_settings={"enumerator": enumerator},
+                    )
+                    st.session_state.enumerator_enumerator_save = False
             with mc3:
                 default_team_index = (
-                    survey_cols.get_loc(team) if team in survey_cols else None
+                    string_numeric_cols.index(team)
+                    if team and team in string_numeric_cols
+                    else None
                 )
                 team = st.selectbox(
                     label="Team",
-                    options=data.columns,
+                    options=string_numeric_cols,
                     help="Column containing survey team",
                     key="team_enumerator",
                     index=default_team_index,
+                    on_change=trigger_save,
+                    kwargs={"state_name": "team_enumerator_save"},
                 )
+                if (
+                    "team_enumerator_save" in st.session_state
+                    and st.session_state.team_enumerator_save
+                ):
+                    save_check_settings(
+                        settings_file=setting_file,
+                        check_name="enumerator",
+                        check_settings={"team": team},
+                    )
+                    st.session_state.team_enumerator_save = False
         bc1, _, bc2 = st.columns(3)
         with bc1, st.container(border=True):
             default_consent_index = (
-                survey_cols.get_loc(consent) if consent in survey_cols else None
+                string_numeric_cols.index(consent)
+                if consent and consent in string_numeric_cols
+                else None
             )
             consent = st.selectbox(
                 label="Consent",
-                options=survey_cols,
+                options=string_numeric_cols,
                 help="Column containing survey consent",
                 key="consent_enumerator",
                 index=default_consent_index,
@@ -236,18 +325,47 @@ def enumerator_report_settings(
                     help="Value(s) indicating valid consent",
                     key="consent_val_enumerator",
                     default=consent_vals,
+                    on_change=trigger_save,
+                    kwargs={"state_name": "consent_val_enumerator_save"},
                 )
+                if (
+                    "consent_val_enumerator_save" in st.session_state
+                    and st.session_state.consent_val_enumerator_save
+                ):
+                    save_check_settings(
+                        settings_file=setting_file,
+                        check_name="enumerator",
+                        check_settings={
+                            "consent": consent,
+                            "consent_vals": consent_vals,
+                        },
+                    )
+                    st.session_state.consent_val_enumerator_save = False
         with bc2, st.container(border=True):
             default_outcome_index = (
-                survey_cols.get_loc(outcome) if outcome in survey_cols else None
+                string_numeric_cols.get_loc(outcome)
+                if outcome in string_numeric_cols
+                else None
             )
             outcome = st.selectbox(
                 label="Outcome",
-                options=survey_cols,
+                options=string_numeric_cols,
                 help="Column containing survey outcome",
                 key="outcome_enumerator",
                 index=default_outcome_index,
+                on_change=trigger_save,
+                kwargs={"state_name": "outcome_enumerator_save"},
             )
+            if (
+                "outcome_enumerator_save" in st.session_state
+                and st.session_state.outcome_enumerator_save
+            ):
+                save_check_settings(
+                    settings_file=setting_file,
+                    check_name="enumerator",
+                    check_settings={"outcome": outcome},
+                )
+                st.session_state.outcome_enumerator_save = False
             if outcome:
                 outcome_options = data[outcome].unique().tolist()
                 outcome_vals = outcome_vals if outcome_vals in outcome_options else None
@@ -257,31 +375,22 @@ def enumerator_report_settings(
                     help="Value(s) indicating completed survey",
                     key="outcome_val_enumerator",
                     default=outcome_vals,
+                    on_change=trigger_save,
+                    kwargs={"state_name": "outcome_val_enumerator_save"},
                 )
-
-        # define a save settings button
-        st.button(
-            label="Save settings",
-            on_click=save_check_settings,
-            key="save_enumerator_settings",
-            kwargs={
-                "settings_file": setting_file,
-                "check_name": "enumerator",
-                "check_settings": {
-                    "date": date,
-                    "formdef_version": formdef_version,
-                    "survey_id": survey_id,
-                    "duration": duration,
-                    "enumerator": enumerator,
-                    "team": team,
-                    "consent": consent,
-                    "consent_vals": consent_vals,
-                    "outcome": outcome,
-                    "outcome_vals": outcome_vals,
-                },
-            },
-            help="Save settings for enumerator report",
-        )
+                if (
+                    "outcome_val_enumerator_save" in st.session_state
+                    and st.session_state.outcome_val_enumerator_save
+                ):
+                    save_check_settings(
+                        settings_file=setting_file,
+                        check_name="enumerator",
+                        check_settings={
+                            "outcome": outcome,
+                            "outcome_vals": outcome_vals,
+                        },
+                    )
+                    st.session_state.outcome_val_enumerator_save = False
 
     return (
         date,

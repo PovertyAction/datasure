@@ -5,7 +5,6 @@ import pandas as pd
 import plotly.express as px
 import seaborn as sns
 import streamlit as st
-from streamlit_extras.stylable_container import stylable_container
 
 from pydms.utils import (
     get_cache_path,
@@ -15,7 +14,6 @@ from pydms.utils import (
 )
 
 
-@st.cache_data
 def load_missing_settings(missing_setting_file: str) -> pd.DataFrame:
     """Load the default settings for the missing data report.
 
@@ -102,21 +100,21 @@ def missing_settings(missing_setting_file: str) -> pd.DataFrame:
                 key="missing_codes_labels",
                 num_rows="dynamic",
                 use_container_width=True,
+                on_change=trigger_save,
+                kwargs={"state_name": "missing_code_save"},
             )
+            if (
+                "missing_code_save" in st.session_state
+                and st.session_state.missing_code_save
+            ):
+                save_missing_settings(
+                    missing_settings_df=missing_settings_df_edited,
+                    setting_file=missing_setting_file,
+                )
 
         # check that rows are either completely empty or completely filled
         if missing_settings_df_edited.isnull().sum().sum() > 0:
             st.warning("Please fill in all missing codes and labels.")
-
-        st.write("---")
-        # add save settings button
-
-        st.button(
-            label="Save settings",
-            key="save_settings_missing",
-            on_click=save_missing_settings,
-            args=(missing_settings_df_edited, missing_setting_file),
-        )
 
     return missing_settings_df_edited
 
@@ -147,42 +145,36 @@ def missing_summary(data: pd.DataFrame) -> None:
     """Generate a summary of missing data in the dataset."""
     st.markdown("## Missing data")
 
-    with stylable_container(
-        key="missing_metrics",
-        css_styles="""
-            {
-                background-color: #F9F9F9;
-                border: 1px solid rgba(49, 51, 63, 0.2);
-                border-radius: 0.5rem;
-                padding: calc(1em - 1px)
-            }
-            """,
-    ):
+    with st.container():
         missing_values, all_missing, any_missing, no_missing = compute_missing_summary(
             data=data
         )
         mc1, mc2, mc3, mc4 = st.columns(4)
         mc1.metric(
-            label="% MISSING VALUES",
+            label="Percentage of missing values",
             value=f"{missing_values.mean():.2f}%",
+            border=True,
             help="Percentage of missing values in the dataset",
         )
 
         mc2.metric(
-            label="% ALL MISSING (COLUMNS)",
+            label="% of columns with all missing values",
             value=f"{all_missing.mean():.2f}%",
+            border=True,
             help="Percentage of columns with all missing values",
         )
 
         mc3.metric(
-            label="% AT LEAST ONE MISSING VALUE (COLUMNS)",
+            label="% of columns with any missing values",
             value=f"{any_missing.mean():.2f}%",
+            border=True,
             help="Percentage of columns with at least one missing value",
         )
 
         mc4.metric(
-            label="% NO MISSING VALUES (COLUMNS)",
+            label="% of columns with no missing values",
             value=f"{no_missing.mean():.2f}%",
+            border=True,
             help="Percentage of columns with no missing values",
         )
 
@@ -211,6 +203,9 @@ def compute_missing_columns(data: pd.DataFrame, missing_codes) -> pd.DataFrame:
     # Add total missing values and percentage of total missing values
     mv_data["Total Missing"] = mv_data["Null Values"]
     mv_data["% Total Missing"] = 0
+
+    # remove row if Missing Labels or Missing Codes columns is missing
+    missing_codes = missing_codes.dropna(subset=["Missing Labels", "Missing Codes"])
 
     for i in range(len(missing_codes)):
         miss_label = missing_codes["Missing Labels"][i]
