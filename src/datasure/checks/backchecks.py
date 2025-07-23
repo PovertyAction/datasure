@@ -74,6 +74,187 @@ def load_default_backcheck_settings(
     )
 
 
+def _handle_meta_settings(survey_cols, date, setting_file):
+    """Handle metadata column settings."""
+    default_date_index = (
+        survey_cols.get_loc(date) if date and date in survey_cols else None
+    )
+    date = st.selectbox(
+        "Date",
+        options=survey_cols,
+        help="Column containing survey date",
+        key="date_backcheck",
+        index=default_date_index,
+        on_change=trigger_save,
+        kwargs={"state_name": "backcheck_date"},
+    )
+    if "backcheck_date" in st.session_state and st.session_state.backcheck_date:
+        save_check_settings(
+            settings_file=setting_file,
+            check_name="backchecks",
+            check_settings={"date": date},
+        )
+        st.session_state.backcheck_date = False
+    return date
+
+
+def _handle_enum_settings(
+    survey_cols, backcheck_cols_list, enumerator, backchecker, setting_file
+):
+    """Handle enumerator column settings."""
+    default_enumerator_index = (
+        survey_cols.get_loc(enumerator)
+        if enumerator and enumerator in survey_cols
+        else None
+    )
+    enumerator = st.selectbox(
+        "Enumerator",
+        options=survey_cols,
+        help="Column containing survey enumerator",
+        key="enumerator_backcheck",
+        index=default_enumerator_index,
+        on_change=trigger_save,
+        kwargs={"state_name": "backcheck_enumerator"},
+    )
+    if (
+        "backcheck_enumerator" in st.session_state
+        and st.session_state.backcheck_enumerator
+    ):
+        save_check_settings(
+            settings_file=setting_file,
+            check_name="backchecks",
+            check_settings={"enumerator": enumerator},
+        )
+        st.session_state.backcheck_enumerator = False
+
+    default_backchecker_index = (
+        backcheck_cols_list.get_loc(backchecker)
+        if backchecker and backchecker in backcheck_cols_list
+        else None
+    )
+    backchecker = st.selectbox(
+        "Back Checker",
+        options=backcheck_cols_list,
+        help="Column containing back check enumerator",
+        key="backchecker_backcheck",
+        index=default_backchecker_index,
+        on_change=trigger_save,
+        kwargs={"state_name": "backcheck_backchecker"},
+    )
+    if (
+        "backcheck_backchecker" in st.session_state
+        and st.session_state.backcheck_backchecker
+    ):
+        save_check_settings(
+            settings_file=setting_file,
+            check_name="backchecks",
+            check_settings={"backchecker": backchecker},
+        )
+        st.session_state.backcheck_backchecker = False
+    return enumerator, backchecker
+
+
+def _handle_agg_settings(survey_cols, survey_id, survey_key, setting_file):
+    """Handle aggregation column settings."""
+    default_survey_id_index = (
+        survey_cols.get_loc(survey_id)
+        if survey_id and survey_id in survey_cols
+        else None
+    )
+    survey_id = st.selectbox(
+        "Survey ID (required)",
+        options=survey_cols,
+        help="Column containing survey ID",
+        key="surveyid_backcheck",
+        index=default_survey_id_index,
+        on_change=trigger_save,
+        kwargs={"state_name": "backcheck_survey_id"},
+    )
+    if (
+        "backcheck_survey_id" in st.session_state
+        and st.session_state.backcheck_survey_id
+    ):
+        save_check_settings(
+            settings_file=setting_file,
+            check_name="backchecks",
+            check_settings={"survey_id": survey_id},
+        )
+        st.session_state.backcheck_survey_id = False
+
+    default_survey_key_index = (
+        survey_cols.get_loc(survey_key)
+        if survey_key and survey_key in survey_cols
+        else None
+    )
+    survey_key = st.selectbox(
+        "Survey Key (required)",
+        options=survey_cols,
+        help="Column containing survey key",
+        key="surveykey_backcheck",
+        index=default_survey_key_index,
+        on_change=trigger_save,
+        kwargs={"state_name": "backcheck_survey_key"},
+    )
+    if (
+        "backcheck_survey_key" in st.session_state
+        and st.session_state.backcheck_survey_key
+    ):
+        save_check_settings(
+            settings_file=setting_file,
+            check_name="backchecks",
+            check_settings={"survey_key": survey_key},
+        )
+        st.session_state.backcheck_survey_key = False
+    return survey_id, survey_key
+
+
+def _handle_tracking_options(
+    setting_file, backcheck_goal, drop_duplicates, date, survey_id
+):
+    """Handle tracking options settings."""
+    backcheck_goal = st.number_input(
+        "Target number of backchecks",
+        min_value=0,
+        help="Total number of backchecks expected",
+        key="total_goal_backcheck",
+        value=backcheck_goal,
+        on_change=trigger_save,
+        kwargs={"state_name": "backcheck_goal"},
+    )
+    if "backcheck_goal" in st.session_state and st.session_state.backcheck_goal:
+        save_check_settings(
+            settings_file=setting_file,
+            check_name="backchecks",
+            check_settings={"backcheck_goal": backcheck_goal},
+        )
+        st.session_state.backcheck_goal = False
+
+    st.write("How would you like to handle duplicates?")
+    drop_duplicates = st.toggle(
+        label="Drop duplicates",
+        value=drop_duplicates,
+        key="drop_duplicates_backcheck",
+        on_change=trigger_save,
+        kwargs={"state_name": "backcheck_drop_duplicates"},
+    )
+    if drop_duplicates and (not date or not survey_id):
+        st.info(
+            "Please select date and survey id columns to drop duplicates correctly."
+        )
+
+    if (
+        "backcheck_drop_duplicates" in st.session_state
+        and st.session_state.backcheck_drop_duplicates
+    ):
+        save_check_settings(
+            settings_file=setting_file,
+            check_name="backchecks",
+            check_settings={"drop_duplicates": drop_duplicates},
+        )
+        st.session_state.backcheck_drop_duplicates = False
+    return backcheck_goal, drop_duplicates
+
+
 def backcheck_report_settings(
     project_id: str,
     survey_data: pd.DataFrame,
@@ -106,10 +287,9 @@ def backcheck_report_settings(
 
         survey_cols = survey_data.columns
         backcheck_cols_list = backcheck_data.columns
-
-        # get list of columns in both survey and backcheck data
         common_cols = [col for col in survey_data.columns if col in backcheck_cols_list]
 
+        settings = load_default_backcheck_settings(project_id, setting_file, page_num)
         (
             date,
             enumerator,
@@ -118,180 +298,28 @@ def backcheck_report_settings(
             survey_key,
             backcheck_goal,
             drop_duplicates,
-        ) = load_default_backcheck_settings(project_id, setting_file, page_num)
+        ) = settings
 
         agg_col, enum_col, meta_col = st.columns(spec=3, border=True)
 
         with meta_col:
-            default_date_index = (
-                survey_cols.get_loc(date) if date and date in survey_cols else None
-            )
-            date = st.selectbox(
-                "Date",
-                options=survey_cols,
-                help="Column containing survey date",
-                key="date_backcheck",
-                index=default_date_index,
-                on_change=trigger_save,
-                kwargs={"state_name": "backcheck_date"},
-            )
-            if "backcheck_date" in st.session_state and st.session_state.backcheck_date:
-                save_check_settings(
-                    settings_file=setting_file,
-                    check_name="backchecks",
-                    check_settings={"date": date},
-                )
-                st.session_state.backcheck_date = False
+            date = _handle_meta_settings(survey_cols, date, setting_file)
 
         with enum_col:
-            default_enumerator_index = (
-                survey_cols.get_loc(enumerator)
-                if enumerator and enumerator in survey_cols
-                else None
+            enumerator, backchecker = _handle_enum_settings(
+                survey_cols, backcheck_cols_list, enumerator, backchecker, setting_file
             )
-
-            enumerator = st.selectbox(
-                "Enumerator",
-                options=survey_cols,
-                help="Column containing survey enumerator",
-                key="enumerator_backcheck",
-                index=default_enumerator_index,
-                on_change=trigger_save,
-                kwargs={"state_name": "backcheck_enumerator"},
-            )
-            if (
-                "backcheck_enumerator" in st.session_state
-                and st.session_state.backcheck_enumerator
-            ):
-                save_check_settings(
-                    settings_file=setting_file,
-                    check_name="backchecks",
-                    check_settings={"enumerator": enumerator},
-                )
-                st.session_state.backcheck_enumerator = False
-
-            default_backchecker_index = (
-                backcheck_cols_list.get_loc(backchecker)
-                if backchecker and backchecker in backcheck_cols_list
-                else None
-            )
-            backchecker = st.selectbox(
-                "Back Checker",
-                options=backcheck_cols_list,
-                help="Column containing back check enumerator",
-                key="backchecker_backcheck",
-                index=default_backchecker_index,
-                on_change=trigger_save,
-                kwargs={"state_name": "backcheck_backchecker"},
-            )
-            if (
-                "backcheck_backchecker" in st.session_state
-                and st.session_state.backcheck_backchecker
-            ):
-                save_check_settings(
-                    settings_file=setting_file,
-                    check_name="backchecks",
-                    check_settings={"backchecker": backchecker},
-                )
-                st.session_state.backcheck_backchecker = False
 
         with agg_col:
-            default_survey_id_index = (
-                survey_cols.get_loc(survey_id)
-                if survey_id and survey_id in survey_cols
-                else None
+            survey_id, survey_key = _handle_agg_settings(
+                survey_cols, survey_id, survey_key, setting_file
             )
-            survey_id = st.selectbox(
-                "Survey ID (required)",
-                options=survey_cols,
-                help="Column containing survey ID",
-                key="surveyid_backcheck",
-                index=default_survey_id_index,
-                on_change=trigger_save,
-                kwargs={"state_name": "backcheck_survey_id"},
-            )
-            if (
-                "backcheck_survey_id" in st.session_state
-                and st.session_state.backcheck_survey_id
-            ):
-                save_check_settings(
-                    settings_file=setting_file,
-                    check_name="backchecks",
-                    check_settings={"survey_id": survey_id},
-                )
-                st.session_state.backcheck_survey_id = False
-
-            default_survey_key_index = (
-                survey_cols.get_loc(survey_key)
-                if survey_key and survey_key in survey_cols
-                else None
-            )
-            survey_key = st.selectbox(
-                "Survey Key (required)",
-                options=survey_cols,
-                help="Column containing survey key",
-                key="surveykey_backcheck",
-                index=default_survey_key_index,
-                on_change=trigger_save,
-                kwargs={"state_name": "backcheck_survey_key"},
-            )
-            if (
-                "backcheck_survey_key" in st.session_state
-                and st.session_state.backcheck_survey_key
-            ):
-                save_check_settings(
-                    settings_file=setting_file,
-                    check_name="backchecks",
-                    check_settings={"survey_key": survey_key},
-                )
-                st.session_state.backcheck_survey_key = False
 
         st.write("---")
         st.markdown("### Tracking Options")
-
-        # number of interviews expected
-        backcheck_goal = st.number_input(
-            "Target number of backchecks",
-            min_value=0,
-            help="Total number of backchecks expected",
-            key="total_goal_backcheck",
-            value=backcheck_goal,
-            on_change=trigger_save,
-            kwargs={"state_name": "backcheck_goal"},
+        backcheck_goal, drop_duplicates = _handle_tracking_options(
+            setting_file, backcheck_goal, drop_duplicates, date, survey_id
         )
-        if "backcheck_goal" in st.session_state and st.session_state.backcheck_goal:
-            save_check_settings(
-                settings_file=setting_file,
-                check_name="backchecks",
-                check_settings={"backcheck_goal": backcheck_goal},
-            )
-            st.session_state.backcheck_goal = False
-
-        # duplicates handling
-        st.write("How would you like to handle duplicates?")
-        drop_duplicates = st.toggle(
-            label="Drop duplicates",
-            value=drop_duplicates,
-            key="drop_duplicates_backcheck",
-            on_change=trigger_save,
-            kwargs={"state_name": "backcheck_drop_duplicates"},
-        )
-        # if drop duplicates, warn user to select date and survey id columns
-        if drop_duplicates and (not date or not survey_id):
-            st.info(
-                "Please select date and survey id columns to drop duplicates correctly."
-            )
-
-        if (
-            "backcheck_drop_duplicates" in st.session_state
-            and st.session_state.backcheck_drop_duplicates
-        ):
-            save_check_settings(
-                settings_file=setting_file,
-                check_name="backchecks",
-                check_settings={"drop_duplicates": drop_duplicates},
-            )
-            st.session_state.backcheck_drop_duplicates = False
 
         st.write("")
 
