@@ -2,7 +2,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from pydms.utils import get_check_config_settings
+from datasure.utils import get_check_config_settings
 
 ##### Backchecks #####
 

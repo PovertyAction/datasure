@@ -6,7 +6,7 @@ import plotly.express as px
 import seaborn as sns
 import streamlit as st
 
-from pydms.utils import (
+from datasure.utils import (
     get_cache_path,
     load_check_settings,
     save_check_settings,

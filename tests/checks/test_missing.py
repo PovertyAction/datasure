@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pydms.checks.missing import (
+from datasure.checks.missing import (
     compute_filtered_missing_columns,
     compute_missing_columns,
     compute_missing_compare,
@@ -99,7 +99,7 @@ def random_age_gender_df(n):
     )
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_load_missing_settings_file_found(sample_settings_dict, sample_settings_df):
     """
     Test that loading missing settings
@@ -115,7 +115,7 @@ def test_load_missing_settings_file_found(sample_settings_dict, sample_settings_
         os.remove(tmp_path)
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_load_missing_settings_file_not_found(sample_settings_df):
     """Test that loading missing settings
     from a non-existent file returns the default DataFrame.
@@ -130,7 +130,7 @@ def test_load_missing_settings_file_not_found(sample_settings_df):
     assert df["Missing Codes"].tolist() == sample_settings_df["Missing Codes"].tolist()
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_load_missing_settings_malformed_file():
     """Test that loading a malformed settings file
     returns a DataFrame with expected columns.
@@ -146,7 +146,7 @@ def test_load_missing_settings_malformed_file():
         os.remove(tmp_path)
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_save_and_load_missing_settings(sample_settings_df):
     """Test saving and loading missing settings
     to ensure data integrity.
@@ -169,7 +169,7 @@ def test_save_and_load_missing_settings(sample_settings_df):
         os.remove(tmp_path)
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_save_missing_settings_modified(sample_settings_df):
     """Test saving a modified version of the missing settings file."""
     with tempfile.NamedTemporaryFile(mode="w+", delete=False) as tmp:
@@ -193,7 +193,7 @@ def test_save_missing_settings_modified(sample_settings_df):
         os.remove(tmp_path)
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_summary(df_no_missing, df_some_missing, df_all_missing):
     """Test compute_missing_summary with DataFrames having
     no, some, and all missing values.
@@ -218,7 +218,7 @@ def test_compute_missing_summary(df_no_missing, df_some_missing, df_all_missing)
     assert (no_mv == 0).all()
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_columns():
     """Test compute_missing_columns with a
     DataFrame containing custom missing codes.
@@ -235,7 +235,7 @@ def test_compute_missing_columns():
     assert mv_data.shape[0] == 2
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_columns_multiple_codes():
     """Test compute_missing_columns with multiple missing codes per label."""
     missing_codes = pd.DataFrame(
@@ -250,7 +250,7 @@ def test_compute_missing_columns_multiple_codes():
     assert "% DontKnow" in mv_data.columns
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_columns_varying_dataset_sizes():
     """Test compute_missing_columns with datasets of varying sizes."""
     missing_codes = pd.DataFrame(
@@ -275,7 +275,7 @@ def test_compute_missing_columns_varying_dataset_sizes():
     assert "Missing" in mv_data_small.columns
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_filtered_missing_columns():
     """Test compute_filtered_missing_columns
     filters columns based on missing value threshold.
@@ -299,7 +299,7 @@ def test_compute_filtered_missing_columns():
     assert vmax == 100
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_filtered_missing_columns_all_match():
     """Test compute_filtered_missing_columns
     when all columns match the threshold.
@@ -321,7 +321,7 @@ def test_compute_filtered_missing_columns_all_match():
     assert vmax == 100
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_filtered_missing_columns_no_match():
     """Test compute_filtered_missing_columns
     when no columns match the threshold.
@@ -342,7 +342,7 @@ def test_compute_filtered_missing_columns_no_match():
     assert isinstance(perc_cols, list)
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_filtered_missing_columns_mixed_percentages():
     """Test compute_filtered_missing_columns with columns having mixed percentages."""
     df = pd.DataFrame(
@@ -364,7 +364,7 @@ def test_compute_filtered_missing_columns_mixed_percentages():
     assert vmax == 135  # Maximum percentage value in the filtered data
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_over_time(df_with_dates):
     """Test compute_missing_over_time
     with a DataFrame containing missing values over time.
@@ -375,7 +375,7 @@ def test_compute_missing_over_time(df_with_dates):
     assert len(result) == 5  # One row per date
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_over_time_all_missing():
     """Test compute_missing_over_time with all values missing."""
     dates = pd.date_range("2023-01-01", periods=3)
@@ -395,7 +395,7 @@ def test_compute_missing_over_time_all_missing():
     assert np.isclose(result["missingness_rate"], 66.67, atol=0.1).all()
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_over_time_no_missing():
     """Test compute_missing_over_time with no missing values."""
     dates = pd.date_range("2023-01-01", periods=3)
@@ -407,7 +407,7 @@ def test_compute_missing_over_time_no_missing():
     assert (result["missingness_rate"] == 0).all()
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_over_time_varying_missingness():
     """Test compute_missing_over_time with varying missingness patterns."""
     dates = pd.date_range("2023-01-01", periods=3)
@@ -439,7 +439,7 @@ def test_compute_missing_over_time_varying_missingness():
     assert missingness_rates[2] < 10  # Day 3 has low missingness
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_compare(df_with_groups):
     """Test compute_missing_compare
     with a DataFrame containing missing values in locations.
@@ -469,7 +469,7 @@ def test_compute_missing_compare(df_with_groups):
     assert np.isclose(south_row["age"], 0.0)
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_compare_multiple_columns(df_with_groups):
     """Test compute_missing_compare with multiple comparison columns."""
     group_by_data, vmin, vmax = compute_missing_compare(
@@ -493,7 +493,7 @@ def test_compute_missing_compare_multiple_columns(df_with_groups):
     assert np.isclose(south_row["gender"], 0.0)
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_compare_no_compare_col(df_with_groups):
     """Test compute_missing_compare with no comparison column."""
     group_by_data, vmin, vmax = compute_missing_compare(df_with_groups, "location", [])
@@ -505,7 +505,7 @@ def test_compute_missing_compare_no_compare_col(df_with_groups):
     assert "gender" not in group_by_data.columns
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_compare_no_missing():
     """Test compute_missing_compare
     when there are no missing values in the DataFrame.
@@ -517,7 +517,7 @@ def test_compute_missing_compare_no_missing():
     assert (group_by_data["val"] == 0).all()
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_correlation():
     """Test compute_missing_correlation
     with multiple columns containing missing values.
@@ -535,7 +535,7 @@ def test_compute_missing_correlation():
     assert np.isnan(np.diag(corr)).all() or (corr.values.diagonal() == 1).all()
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_correlation_single_col():
     """Test compute_missing_correlation
     with a single column containing missing values.
@@ -546,7 +546,7 @@ def test_compute_missing_correlation_single_col():
     assert corr.shape == (1, 1)
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_correlation_perfect_correlation():
     """Test compute_missing_correlation with perfectly correlated missing values."""
     df = pd.DataFrame({"age": [1, np.nan, 3, np.nan], "gender": [1, np.nan, 3, np.nan]})
@@ -559,7 +559,7 @@ def test_compute_missing_correlation_perfect_correlation():
     assert all(np.isclose(v, 1.0) or np.isnan(v) for v in corr.values.flatten())
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_correlation_negative_correlation():
     """Test compute_missing_correlation with negatively correlated missing values."""
     df = pd.DataFrame({"age": [1, np.nan, 3, np.nan], "gender": [np.nan, 2, np.nan, 4]})
@@ -573,7 +573,7 @@ def test_compute_missing_correlation_negative_correlation():
     assert all(np.isclose(v, -1.0, atol=1e-8) or np.isnan(v) for v in off_diag)
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_get_null_list():
     """Test get_null_list
     returns correct columns with and without nulls.
@@ -588,7 +588,7 @@ def test_get_null_list():
     assert "age" not in null_cols
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_get_null_list_no_nulls():
     """Test get_null_list
     returns an empty list when there are no nulls in the DataFrame.
@@ -598,7 +598,7 @@ def test_get_null_list_no_nulls():
     assert null_cols == []
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_get_null_list_all_null():
     """Test get_null_list
     returns an empty list when all columns contain only null values.
@@ -608,7 +608,7 @@ def test_get_null_list_all_null():
     assert null_cols == []
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_matrix():
     """Test compute_missing_matrix
     with a DataFrame containing missing values.
@@ -619,7 +619,7 @@ def test_compute_missing_matrix():
     assert matrix.shape == df.shape
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_matrix_sorted():
     """Test compute_missing_matrix with sorting by a column."""
     df = pd.DataFrame(
@@ -634,7 +634,7 @@ def test_compute_missing_matrix_sorted():
     assert matrix.index.tolist() == [1, 1, 2] or matrix.index.tolist() == [2, 1, 1]
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_matrix_no_missing():
     """Test compute_missing_matrix when there are no missing values."""
     df = pd.DataFrame({"age": [1, 2, 3], "gender": [4, 5, 6]})
@@ -644,7 +644,7 @@ def test_compute_missing_matrix_no_missing():
     assert (matrix == 0).all().all()
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_matrix_all_missing():
     """Test compute_missing_matrix when all values are missing."""
     df = pd.DataFrame({"age": [np.nan, np.nan], "gender": [np.nan, np.nan]})
@@ -657,7 +657,7 @@ def test_compute_missing_matrix_all_missing():
 # Additional tests for edge cases
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_missing_columns_with_multiple_missing_codes():
     """Test compute_missing_columns
     with multiple missing codes and labels.
@@ -676,7 +676,7 @@ def test_missing_columns_with_multiple_missing_codes():
     assert "% OtherMissing" in mv_data.columns
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_missing_summary_all_columns_missing():
     """Test compute_missing_summary when all columns are missing"""
     df = pd.DataFrame({"age": [np.nan, np.nan], "gender": [np.nan, np.nan]})
@@ -687,7 +687,7 @@ def test_missing_summary_all_columns_missing():
     assert (no_mv == 0).all()
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_missing_compare_with_nan_group():
     """
     Test compute_missing_compare
@@ -704,7 +704,7 @@ def test_missing_compare_with_nan_group():
     assert pd.isna(group_by_data.index).any()
 
 
-@patch("pydms.checks.missing.st.cache_data", lambda f: f)
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_missing_matrix_with_no_missing():
     """Test compute_missing_matrix
     when there are no missing values in the DataFrame.

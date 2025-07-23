@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.pydms.checks.progress import (
+from datasure.checks.progress import (
     compute_attempted_interviews,
     compute_progress_chart,
     compute_progress_overtime,
@@ -327,8 +327,8 @@ class TestComputeAttemptedInterviews:
 class TestLoadDefaultProgressSettings:
     """Test load_default_progress_settings function."""
 
-    @patch("src.pydms.checks.progress.get_check_config_settings")
-    @patch("src.pydms.checks.progress.load_check_settings")
+    @patch("datasure.checks.progress.get_check_config_settings")
+    @patch("datasure.checks.progress.load_check_settings")
     @patch("os.path.exists")
     def test_load_default_progress_settings_with_existing_file(
         self, mock_exists, mock_load_settings, mock_get_config
@@ -361,8 +361,8 @@ class TestLoadDefaultProgressSettings:
         assert result[2] == "custom_date"  # date
         assert result[3] == 100  # target
 
-    @patch("src.pydms.checks.progress.get_check_config_settings")
-    @patch("src.pydms.checks.progress.load_check_settings")
+    @patch("datasure.checks.progress.get_check_config_settings")
+    @patch("datasure.checks.progress.load_check_settings")
     @patch("os.path.exists")
     def test_load_default_progress_settings_no_file(
         self, mock_exists, mock_load_settings, mock_get_config
@@ -390,8 +390,8 @@ class TestLoadDefaultProgressSettings:
         assert result[2] == "date_col"  # date from config
         assert result[3] is None  # target should be None
 
-    @patch("src.pydms.checks.progress.get_check_config_settings")
-    @patch("src.pydms.checks.progress.load_check_settings")
+    @patch("datasure.checks.progress.get_check_config_settings")
+    @patch("datasure.checks.progress.load_check_settings")
     @patch("os.path.exists")
     def test_load_default_progress_settings_fallback_target(
         self, mock_exists, mock_load_settings, mock_get_config
@@ -444,13 +444,11 @@ class TestProgressReportSettings:
             patch("streamlit.number_input") as mock_number_input,
             patch("streamlit.write") as mock_write,
             patch(
-                "src.pydms.checks.progress.load_default_progress_settings"
+                "datasure.checks.progress.load_default_progress_settings"
             ) as mock_load_defaults,
-            patch("src.pydms.checks.progress.get_df_info") as mock_get_df_info,
-            patch("src.pydms.checks.progress.trigger_save") as mock_trigger_save,
-            patch(
-                "src.pydms.checks.progress.save_check_settings"
-            ) as mock_save_settings,
+            patch("datasure.checks.progress.get_df_info") as mock_get_df_info,
+            patch("datasure.checks.progress.trigger_save") as mock_trigger_save,
+            patch("datasure.checks.progress.save_check_settings") as mock_save_settings,
             patch("streamlit.session_state", {}) as mock_session_state,
         ):
             # Setup mock returns
@@ -515,12 +513,10 @@ class TestDisplayFunctions:
             patch("streamlit.multiselect") as mock_multiselect,
             patch("streamlit.selectbox") as mock_selectbox,
             patch("streamlit.container") as mock_container,
-            patch("src.pydms.checks.progress.donut_chart2") as mock_donut,
-            patch(
-                "src.pydms.checks.progress.load_check_settings"
-            ) as mock_load_settings,
-            patch("src.pydms.checks.progress.trigger_save") as mock_trigger,
-            patch("src.pydms.checks.progress.save_check_settings") as mock_save,
+            patch("datasure.checks.progress.donut_chart2") as mock_donut,
+            patch("datasure.checks.progress.load_check_settings") as mock_load_settings,
+            patch("datasure.checks.progress.trigger_save") as mock_trigger,
+            patch("datasure.checks.progress.save_check_settings") as mock_save,
             patch("streamlit.session_state", {}) as mock_session_state,
         ):
             # Setup mock returns
@@ -600,17 +596,15 @@ class TestProgressReport:
     def mock_all_display_functions(self):
         """Mock all display functions."""
         with (
+            patch("datasure.checks.progress.progress_report_settings") as mock_settings,
+            patch("datasure.checks.progress.display_progress_summary") as mock_summary,
             patch(
-                "src.pydms.checks.progress.progress_report_settings"
-            ) as mock_settings,
-            patch("src.pydms.checks.progress.display_progress_summary") as mock_summary,
-            patch(
-                "src.pydms.checks.progress.display_progress_overtime"
+                "datasure.checks.progress.display_progress_overtime"
             ) as mock_overtime,
             patch(
-                "src.pydms.checks.progress.display_attempted_interviews"
+                "datasure.checks.progress.display_attempted_interviews"
             ) as mock_attempted,
-            patch("src.pydms.checks.progress.display_progress_chart") as mock_chart,
+            patch("datasure.checks.progress.display_progress_chart") as mock_chart,
         ):
             # Setup mock returns
             mock_settings.return_value = ("survey_id", "date_col", "enumerator", 100)
@@ -919,8 +913,8 @@ class TestProgressSummaryEdgeCases:
 class TestLoadDefaultProgressSettingsEdgeCases:
     """Additional test cases for load_default_progress_settings."""
 
-    @patch("src.pydms.checks.progress.get_check_config_settings")
-    @patch("src.pydms.checks.progress.load_check_settings")
+    @patch("datasure.checks.progress.get_check_config_settings")
+    @patch("datasure.checks.progress.load_check_settings")
     @patch("os.path.exists")
     def test_load_default_progress_settings_exception_handling(
         self, mock_exists, mock_load_settings, mock_get_config
@@ -949,8 +943,8 @@ class TestLoadDefaultProgressSettingsEdgeCases:
             # Should not propagate exception in production code
             pass
 
-    @patch("src.pydms.checks.progress.get_check_config_settings")
-    @patch("src.pydms.checks.progress.load_check_settings")
+    @patch("datasure.checks.progress.get_check_config_settings")
+    @patch("datasure.checks.progress.load_check_settings")
     @patch("os.path.exists")
     def test_load_default_progress_settings_partial_config(
         self, mock_exists, mock_load_settings, mock_get_config
@@ -979,8 +973,8 @@ class TestLoadDefaultProgressSettingsEdgeCases:
         assert result[1] is None  # From config (None)
         assert result[2] is None  # From config (None)
 
-    @patch("src.pydms.checks.progress.get_check_config_settings")
-    @patch("src.pydms.checks.progress.load_check_settings")
+    @patch("datasure.checks.progress.get_check_config_settings")
+    @patch("datasure.checks.progress.load_check_settings")
     @patch("os.path.exists")
     def test_load_default_progress_settings_empty_strings(
         self, mock_exists, mock_load_settings, mock_get_config
@@ -1099,9 +1093,9 @@ class TestSessionStateManagement:
             patch("streamlit.multiselect") as mock_multiselect,
             patch("streamlit.radio") as mock_radio,
             patch("streamlit.container") as mock_container,
-            patch("src.pydms.checks.progress.save_check_settings") as mock_save,
-            patch("src.pydms.checks.progress.trigger_save") as mock_trigger,
-            patch("src.pydms.checks.progress.load_check_settings") as mock_load,
+            patch("datasure.checks.progress.save_check_settings") as mock_save,
+            patch("datasure.checks.progress.trigger_save") as mock_trigger,
+            patch("datasure.checks.progress.load_check_settings") as mock_load,
         ):
             # Setup context managers
             mock_expander.return_value.__enter__ = MagicMock()
@@ -1146,10 +1140,10 @@ class TestChartGenerationAndVisualization:
             patch("streamlit.container") as mock_container,
             patch("streamlit.pyplot") as mock_pyplot,
             patch("streamlit.markdown"),
-            patch("src.pydms.checks.progress.donut_chart2") as mock_donut,
-            patch("src.pydms.checks.progress.load_check_settings") as mock_load,
-            patch("src.pydms.checks.progress.save_check_settings"),
-            patch("src.pydms.checks.progress.trigger_save"),
+            patch("datasure.checks.progress.donut_chart2") as mock_donut,
+            patch("datasure.checks.progress.load_check_settings") as mock_load,
+            patch("datasure.checks.progress.save_check_settings"),
+            patch("datasure.checks.progress.trigger_save"),
             patch("streamlit.session_state", {}),
         ):
             # Setup mocks
@@ -1193,8 +1187,8 @@ class TestChartGenerationAndVisualization:
             patch("streamlit.info"),
             patch("streamlit.radio") as mock_radio,
             patch("streamlit.plotly_chart") as mock_plotly,
-            patch("src.pydms.checks.progress.save_check_settings"),
-            patch("src.pydms.checks.progress.trigger_save"),
+            patch("datasure.checks.progress.save_check_settings"),
+            patch("datasure.checks.progress.trigger_save"),
             patch("streamlit.session_state", {}),
         ):
             mock_radio.return_value = "Day"

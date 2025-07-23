@@ -134,19 +134,19 @@ install-package: build-package
 
 [linux]
 install-package: build-package
-    uv pip install --force-reinstall dist/pydms-*.whl
+    uv pip install --force-reinstall dist/datasure-*.whl
 
 [macos]
 install-package: build-package
-    uv pip install --force-reinstall dist/pydms-*.whl
+    uv pip install --force-reinstall dist/datasure-*.whl
 
 # Uninstall the package
 uninstall-package:
-    uv pip uninstall pydms
+    uv pip uninstall datasure
 
 # Test the CLI after installation
 test-cli: install-package
-    uv run pydms --version
+    uv run datasure --version
 
 # Publish to TestPyPI (for testing)
 publish-test: build-package

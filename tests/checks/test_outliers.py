@@ -6,7 +6,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import pytest
 
-from src.pydms.checks.outliers import (
+from datasure.checks.outliers import (
     calculate_joint_outliers_percentage,
     common_prefix,
     compute_joint_outlier_distribution,
@@ -72,9 +72,9 @@ class TestLoadDefaultSettings:
     def test_load_default_settings_file_exists(self):
         """Test when settings file exists."""
         with (
-            patch("src.pydms.checks.outliers.get_check_config_settings") as mock_config,
-            patch("src.pydms.checks.outliers.os.path.exists") as mock_exists,
-            patch("src.pydms.checks.outliers.load_check_settings") as mock_load,
+            patch("datasure.checks.outliers.get_check_config_settings") as mock_config,
+            patch("datasure.checks.outliers.os.path.exists") as mock_exists,
+            patch("datasure.checks.outliers.load_check_settings") as mock_load,
         ):
             mock_config.return_value = (
                 None,
@@ -112,8 +112,8 @@ class TestLoadDefaultSettings:
     def test_load_default_settings_file_missing(self):
         """Test when settings file is missing."""
         with (
-            patch("src.pydms.checks.outliers.get_check_config_settings") as mock_config,
-            patch("src.pydms.checks.outliers.os.path.exists") as mock_exists,
+            patch("datasure.checks.outliers.get_check_config_settings") as mock_config,
+            patch("datasure.checks.outliers.os.path.exists") as mock_exists,
         ):
             mock_config.return_value = (
                 None,
@@ -141,9 +141,9 @@ class TestLoadDefaultSettings:
     def test_load_default_settings_partial_config(self):
         """Test when settings file exists but has partial config."""
         with (
-            patch("src.pydms.checks.outliers.get_check_config_settings") as mock_config,
-            patch("src.pydms.checks.outliers.os.path.exists") as mock_exists,
-            patch("src.pydms.checks.outliers.load_check_settings") as mock_load,
+            patch("datasure.checks.outliers.get_check_config_settings") as mock_config,
+            patch("datasure.checks.outliers.os.path.exists") as mock_exists,
+            patch("datasure.checks.outliers.load_check_settings") as mock_load,
         ):
             mock_config.return_value = (
                 None,
@@ -520,10 +520,10 @@ class TestOutliersReportSettings:
     @patch("streamlit.number_input")
     @patch("streamlit.container")
     @patch("streamlit.write")
-    @patch("src.pydms.checks.outliers.get_df_info")
-    @patch("src.pydms.checks.outliers.load_default_settings")
-    @patch("src.pydms.checks.outliers.find_variable_patterns")
-    @patch("src.pydms.checks.outliers.show_pattern_selection")
+    @patch("datasure.checks.outliers.get_df_info")
+    @patch("datasure.checks.outliers.load_default_settings")
+    @patch("datasure.checks.outliers.find_variable_patterns")
+    @patch("datasure.checks.outliers.show_pattern_selection")
     def test_outliers_report_settings_basic(
         self,
         mock_show_pattern,
@@ -604,10 +604,10 @@ class TestOutliersReportSettings:
     @patch("streamlit.number_input")
     @patch("streamlit.container")
     @patch("streamlit.write")
-    @patch("src.pydms.checks.outliers.get_df_info")
-    @patch("src.pydms.checks.outliers.load_default_settings")
-    @patch("src.pydms.checks.outliers.find_variable_patterns")
-    @patch("src.pydms.checks.outliers.show_pattern_selection")
+    @patch("datasure.checks.outliers.get_df_info")
+    @patch("datasure.checks.outliers.load_default_settings")
+    @patch("datasure.checks.outliers.find_variable_patterns")
+    @patch("datasure.checks.outliers.show_pattern_selection")
     def test_outliers_report_settings_with_patterns(
         self,
         mock_show_pattern,

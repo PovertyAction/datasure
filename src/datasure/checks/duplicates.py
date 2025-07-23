@@ -3,7 +3,7 @@ import os
 import pandas as pd
 import streamlit as st
 
-from pydms.utils import (
+from datasure.utils import (
     get_check_config_settings,
     get_df_info,
     load_check_settings,

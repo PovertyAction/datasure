@@ -1,5 +1,5 @@
 """
-Compatibility layer for pyDMS imports.
+Compatibility layer for DataSure imports.
 
 This module provides backward compatibility for the existing import structure
 while the code is being transitioned to a proper package structure.
@@ -7,6 +7,6 @@ while the code is being transitioned to a proper package structure.
 
 import contextlib
 
-# Re-export all modules from the pydms package for backward compatibility
+# Re-export all modules from the datasure package for backward compatibility
 with contextlib.suppress(ImportError):
-    from .pydms import *  # noqa: F403
+    from .datasure import *  # noqa: F403

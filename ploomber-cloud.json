@@ -1,7 +1,7 @@
 {
     "id": "muddy-mountain-6219",
     "type": "streamlit",
-    "entrypoint": "src/pydms/app.py",
+    "entrypoint": "src/datasure/app.py",
     "ignore": [
         "tests/",
         ".github/",
@@ -28,7 +28,7 @@
         "Justfile",
         "README.md",
         "CLAUDE.md",
-        "pydms.py",
+        "datasure.py",
         "build.spec",
         "sonar-project.properties",
         "*.whl",

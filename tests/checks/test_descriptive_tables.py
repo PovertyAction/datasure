@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from pydms.checks.descriptive import (
+from datasure.checks.descriptive import (
     datetime_check,
     descriptive_report,
     load_default_summary_settings,
@@ -384,7 +384,7 @@ class TestDescriptiveTableFunctions:
 class TestLoadDefaultSummarySettings:
     """Test cases for load_default_summary_settings function."""
 
-    @patch("pydms.checks.descriptive.load_check_settings")
+    @patch("datasure.checks.descriptive.load_check_settings")
     @patch("os.path.exists")
     def test_load_with_existing_file(self, mock_exists, mock_load_settings):
         """Test loading settings when file exists."""
@@ -397,7 +397,7 @@ class TestLoadDefaultSummarySettings:
         mock_exists.assert_called_once_with("test_file.json")
         mock_load_settings.assert_called_once_with("test_file.json", "descriptive")
 
-    @patch("pydms.checks.descriptive.load_check_settings")
+    @patch("datasure.checks.descriptive.load_check_settings")
     @patch("os.path.exists")
     def test_load_with_nonexistent_file(self, mock_exists, mock_load_settings):
         """Test loading settings when file doesn't exist."""
@@ -409,7 +409,7 @@ class TestLoadDefaultSummarySettings:
         mock_exists.assert_called_once_with("nonexistent.json")
         mock_load_settings.assert_not_called()
 
-    @patch("pydms.checks.descriptive.load_check_settings")
+    @patch("datasure.checks.descriptive.load_check_settings")
     @patch("os.path.exists")
     def test_load_with_empty_settings(self, mock_exists, mock_load_settings):
         """Test loading settings when file exists but settings are empty."""
@@ -421,7 +421,7 @@ class TestLoadDefaultSummarySettings:
         assert result == ([],)
         mock_load_settings.assert_called_once_with("empty_file.json", "descriptive")
 
-    @patch("pydms.checks.descriptive.load_check_settings")
+    @patch("datasure.checks.descriptive.load_check_settings")
     @patch("os.path.exists")
     def test_load_with_missing_selected_cols(self, mock_exists, mock_load_settings):
         """Test loading settings when file exists but no selected_cols key."""
@@ -486,10 +486,10 @@ class TestDescriptiveReportSettings:
             patch("streamlit.markdown") as mock_markdown,
             patch("streamlit.multiselect") as mock_multiselect,
             patch(
-                "pydms.checks.descriptive.load_default_summary_settings"
+                "datasure.checks.descriptive.load_default_summary_settings"
             ) as mock_load,
-            patch("pydms.checks.descriptive.trigger_save") as mock_trigger,
-            patch("pydms.checks.descriptive.save_check_settings") as mock_save,
+            patch("datasure.checks.descriptive.trigger_save") as mock_trigger,
+            patch("datasure.checks.descriptive.save_check_settings") as mock_save,
         ):
             # Setup mock context manager for expander
             mock_expander.return_value.__enter__ = MagicMock()
@@ -763,7 +763,7 @@ class TestDescriptiveReport:
             }
         )
 
-    @patch("pydms.checks.descriptive.descriptive_report_settings")
+    @patch("datasure.checks.descriptive.descriptive_report_settings")
     @patch("streamlit.info")
     def test_descriptive_report_no_columns_selected(
         self, mock_info, mock_settings, sample_comprehensive_data
@@ -781,9 +781,9 @@ class TestDescriptiveReport:
             in mock_info.call_args[0][0]
         )
 
-    @patch("pydms.checks.descriptive.descriptive_report_settings")
-    @patch("pydms.checks.descriptive.plot_date_distribution")
-    @patch("pydms.checks.descriptive.plot_categorical_distribution")
+    @patch("datasure.checks.descriptive.descriptive_report_settings")
+    @patch("datasure.checks.descriptive.plot_date_distribution")
+    @patch("datasure.checks.descriptive.plot_categorical_distribution")
     @patch("streamlit.write")
     @patch("streamlit.markdown")
     def test_descriptive_report_with_mixed_columns(
@@ -813,8 +813,8 @@ class TestDescriptiveReport:
         # Should write headers for each column
         assert mock_markdown.call_count >= 3  # One for each selected column
 
-    @patch("pydms.checks.descriptive.descriptive_report_settings")
-    @patch("pydms.checks.descriptive.plot_categorical_distribution")
+    @patch("datasure.checks.descriptive.descriptive_report_settings")
+    @patch("datasure.checks.descriptive.plot_categorical_distribution")
     @patch("streamlit.write")
     @patch("streamlit.markdown")
     def test_descriptive_report_categorical_only(

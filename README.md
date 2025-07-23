@@ -1,4 +1,4 @@
-# pyDMS
+# DataSure
 
 IPA Dashboard Solution for Data Management Systems.
 
@@ -81,7 +81,7 @@ just activate-venv        # Activate the virtual environment
 ### Development
 
 ```bash
-uv run pydms                  # Launch the pyDMS application
+uv run datasure                  # Launch the DataSure application
 just lab                     # Launch Jupyter Lab
 ```
 
@@ -156,7 +156,7 @@ Follow these steps to test the app:
 - Run one of the following commands to launch the app:
 
     ```bash
-    uv run pydms
+    uv run datasure
     ```
 
 ---
@@ -209,7 +209,7 @@ uv run python -m pytest tests/test_file.py
 
 ## Package Building and Distribution
 
-pyDMS is set up as a proper Python package using [uv](https://docs.astral.sh/uv/) with the `uv_build` backend for simple and fast building and publishing.
+DataSure is set up as a proper Python package using [uv](https://docs.astral.sh/uv/) with the `uv_build` backend for simple and fast building and publishing.
 
 ### Building the Package
 
@@ -225,8 +225,8 @@ uv build
 
 This creates two files in the `dist/` directory:
 
-- `pydms-{version}-py3-none-any.whl` (wheel distribution)
-- `pydms-{version}.tar.gz` (source distribution)
+- `datasure-{version}-py3-none-any.whl` (wheel distribution)
+- `datasure-{version}.tar.gz` (source distribution)
 
 ### Testing the Package
 
@@ -237,7 +237,7 @@ To test the built package locally:
 just install-package
 
 # Or install directly from the wheel
-uv pip install dist/pydms-*.whl
+uv pip install dist/datasure-*.whl
 ```
 
 ### Using the CLI
@@ -246,13 +246,13 @@ Once installed, you can use the command-line interface:
 
 ```bash
 # Show version
-uv run pydms --version
+uv run datasure --version
 
 # Launch the dashboard (default: localhost:8501)
-uv run pydms
+uv run datasure
 
 # Launch with custom host/port
-uv run pydms --host 0.0.0.0 --port 8080
+uv run datasure --host 0.0.0.0 --port 8080
 ```
 
 ### Package Development Workflow
@@ -275,7 +275,7 @@ uv run pydms --host 0.0.0.0 --port 8080
 
    ```bash
    just install-package
-   uv run pydms --version
+   uv run datasure --version
    ```
 
 ### Version Management
@@ -292,7 +292,7 @@ To update the version:
 
    ```toml
    [project]
-   name = "pyDMS"
+   name = "DataSure"
    version = "0.2.0"  # Update this line
    ```
 
@@ -324,7 +324,7 @@ just publish
 
 ## Deployment
 
-pyDMS can be deployed using [Ploomber Cloud](https://docs.cloud.ploomber.io/en/latest/intro.html). You will need a deployment key from [Ploomber's platform console](https://www.platform.ploomber.io/).
+DataSure can be deployed using [Ploomber Cloud](https://docs.cloud.ploomber.io/en/latest/intro.html). You will need a deployment key from [Ploomber's platform console](https://www.platform.ploomber.io/).
 
 ```bash
 # make sure your venv is synced
@@ -336,23 +336,23 @@ uv run ploomber-cloud key YOUR-KEY
 # make sure that the requirements.txt file is up to date
 uv pip compile pyproject.toml -o requirements.txt --no-annotate --no-header
 
-# make sure that app.py is the same as pydms.py and deploy the app
+# make sure that app.py is the same as datasure.py and deploy the app
 # Ploomber needs to use app.py as the entry point for the Streamlit app
-cd src/pydms && uv run ploomber-cloud deploy --watch
+cd src/datasure && uv run ploomber-cloud deploy --watch
 ```
 
 See Ploomber docs for more details on deployment options and configurations of [Streamlit apps](https://docs.cloud.ploomber.io/en/latest/apps/streamlit.html). Password protection docs are found in [Ploomber docs](https://docs.cloud.ploomber.io/en/latest/user-guide/cli.html#password-protection).
 
 ## Data Storage and Cache
 
-pyDMS automatically manages data storage and caching for optimal performance across different environments:
+DataSure automatically manages data storage and caching for optimal performance across different environments:
 
 ### Cache Directory Locations
 
 - **Development Mode** (when running from source): `./cache/` (in project root)
 - **Production Mode** (when installed as package):
-  - **Windows**: `%APPDATA%/pydms/cache/`
-  - **Linux/macOS**: `~/.local/share/pydms/cache/`
+  - **Windows**: `%APPDATA%/datasure/cache/`
+  - **Linux/macOS**: `~/.local/share/datasure/cache/`
 
 ### What's Stored
 
@@ -366,7 +366,7 @@ The cache directory contains:
 ### Cache Management
 
 - Cache directories are created automatically when needed
-- No manual setup required - pyDMS detects the environment and uses appropriate paths
+- No manual setup required - DataSure detects the environment and uses appropriate paths
 - Development and production modes use separate cache locations
 - Cache is preserved between application sessions
 
@@ -374,6 +374,6 @@ The cache directory contains:
 
 Code quality metrics and reports are available on SonarQube Cloud:
 
-- **Dashboard**: [https://sonarcloud.io/project/overview?id=PovertyAction_pydms](https://sonarcloud.io/project/overview?id=PovertyAction_pydms)
+- **Dashboard**: [https://sonarcloud.io/project/overview?id=PovertyAction_datasure](https://sonarcloud.io/project/overview?id=PovertyAction_datasure)
 
 The SonarQube dashboard provides insights into code coverage, code smells, bugs, vulnerabilities, and maintainability ratings.

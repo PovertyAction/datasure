@@ -70,7 +70,7 @@ def scto_load_login() -> tuple:
     """
     # load server login details from last session
     try:
-        file = pd.read_json("cache/pyDMS_server_cache.json")
+        file = pd.read_json("cache/DataSure_server_cache.json")
         server_details = file.to_dict()
         return (server_details["name"][0], server_details["user"][0])
 
@@ -92,7 +92,7 @@ def scto_load_forms(servername: str) -> pd.DataFrame:
     """
     # load form details from last session
     try:
-        file = pd.read_json(f"cache/{servername}_pyDMS_forms_cache.json")
+        file = pd.read_json(f"cache/{servername}_DataSure_forms_cache.json")
         form_inputs = file.to_dict()
         return pd.DataFrame(form_inputs)
 

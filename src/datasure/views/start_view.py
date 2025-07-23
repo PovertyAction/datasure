@@ -6,7 +6,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from pydms.utils.cache_utils import get_cache_path
+from datasure.utils.cache_utils import get_cache_path
 
 
 def _validate_project_id(project_id: str) -> bool:
@@ -122,7 +122,7 @@ def delete_project(project_id: str):
 
 
 st.set_page_config(
-    page_title="pyDMS - Data Management System",
+    page_title="DataSure - Data Management System",
     page_icon=":material/home_app_logo:",
     layout="wide",
 )
@@ -135,19 +135,19 @@ with page_canvas:
     image_path = assets_dir / "LinkedIn Cover IPA20.png"
     st.image(str(image_path), use_container_width=True)
 
-    st.title("Welcome to pyDMS")
+    st.title("Welcome to DataSure")
 
     st.markdown("""
-    **pyDMS** is a comprehensive Data Management System designed to streamline survey data quality assurance and management workflows.
+    **DataSure** is a comprehensive Data Management System designed to streamline survey data quality assurance and management workflows.
     """)
 
     with st.expander(":material/info: Learn more"):
-        st.header("What is pyDMS?")
+        st.header("What is DataSure?")
 
         st.write(
-            "pyDMS is a Python-based Data Management System that simplifies the process of managing survey data. "
+            "DataSure is a Python-based Data Management System that simplifies the process of managing survey data. "
             "It provides tools for data import, preparation, quality assurance, correction, and reporting. "
-            "Whether you're a researcher, data manager, or field coordinator, pyDMS helps you ensure the integrity and quality of your survey data."
+            "Whether you're a researcher, data manager, or field coordinator, DataSure helps you ensure the integrity and quality of your survey data."
         )
 
         st.write("It provides intuitive interface for:")
@@ -176,7 +176,7 @@ with page_canvas:
         - **Export Capabilities**: Generate reports in multiple formats
         """)
 
-        st.header("Who Uses pyDMS?")
+        st.header("Who Uses DataSure?")
         st.write("""
         - Survey researchers
         - Data managers
@@ -192,7 +192,7 @@ with page_canvas:
     project_list = get_project_names()
     with pc1, st.container(border=True):
         st.write(
-            "Select a pyDMS project to get started. If you don't have a project yet, you can create a new project by selection the 'Create New Project' option."
+            "Select a DataSure project to get started. If you don't have a project yet, you can create a new project by selection the 'Create New Project' option."
         )
         project = st.selectbox(
             label="Select Project",

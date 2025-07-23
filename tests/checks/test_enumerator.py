@@ -9,7 +9,7 @@ import json
 import pandas as pd
 import pytest
 
-from pydms.checks.enumerator import (
+from datasure.checks.enumerator import (
     compute_enumerator_missing_table,
     compute_enumerator_overview,
     compute_enumerator_productivity,
