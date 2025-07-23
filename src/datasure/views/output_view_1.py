@@ -157,6 +157,20 @@ with back_checks:
             backcheck_data_name,
             db_name="corrected",
         ).to_pandas()
+        # if corrected backcheck data is empty, load prep data
+        if backcheck_data.empty:
+            backcheck_data = duckdb_get_table(
+                project_id,
+                backcheck_data_name,
+                db_name="prep",
+            ).to_pandas()
+        # if prep backcheck data is empty, load raw data
+        if backcheck_data.empty:
+            backcheck_data = duckdb_get_table(
+                project_id,
+                backcheck_data_name,
+                db_name="raw",
+            ).to_pandas()
 
         backchecks_report(
             project_id,
