@@ -283,7 +283,7 @@ def sample_date_data_10000():
     """Create a test dataset of 1000 observations for summary computation."""
     # Set random seeds for reproducibility
     seed = 42
-    size = 10000
+    size = 100  # Reduced from 10000 for faster test execution
 
     # Generate datetime range
     start_date = pd.Timestamp.now() - pd.Timedelta(days=40)

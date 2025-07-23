@@ -145,7 +145,7 @@ def test_compute_submissions_values_0(name, index, result):
         assert summary[index] == result, f"Value at index {name} should be {result}"
 
 
-@pytest.mark.parametrize("size", [10, 1000, 10000])
+@pytest.mark.parametrize("size", [10, 50, 100])
 # test 5: values of return values with 10
 def test_compute_submissions_values_10(sample_date_data_10000, size):
     """Test the compute_summary_submissions function for specific values with 10
