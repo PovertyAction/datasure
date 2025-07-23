@@ -24,6 +24,8 @@ class TestDonutChart:
         axes = fig.get_axes()
         assert len(axes) == 1
 
+        plt.close(fig)
+
     def test_donut_chart_with_title(self):
         """Test donut chart with title."""
         title = "Test Progress"
@@ -31,6 +33,8 @@ class TestDonutChart:
 
         axes = fig.get_axes()
         assert axes[0].get_title() == title
+
+        plt.close(fig)
 
     def test_donut_chart_custom_colors(self):
         """Test donut chart with custom colors."""
@@ -40,12 +44,16 @@ class TestDonutChart:
         # Check that figure is created without error
         assert isinstance(fig, plt.Figure)
 
+        plt.close(fig)
+
     def test_donut_chart_custom_prefix_suffix(self):
         """Test donut chart with custom prefix and suffix."""
         fig = donut_chart(1500, 2000, prefix="$", suffix="K")
 
         # Check that figure is created without error
         assert isinstance(fig, plt.Figure)
+
+        plt.close(fig)
 
     def test_donut_chart_full_completion(self):
         """Test donut chart when actual equals target."""
@@ -54,6 +62,8 @@ class TestDonutChart:
         # Should handle full completion without error
         assert isinstance(fig, plt.Figure)
 
+        plt.close(fig)
+
     def test_donut_chart_zero_value(self):
         """Test donut chart with zero actual value."""
         fig = donut_chart(0, 100)
@@ -61,12 +71,16 @@ class TestDonutChart:
         # Should handle zero value without error
         assert isinstance(fig, plt.Figure)
 
+        plt.close(fig)
+
     def test_donut_chart_custom_target(self):
         """Test donut chart with custom target value."""
         fig = donut_chart(25, 50, suffix=" items")
 
         # Should handle custom target without error
         assert isinstance(fig, plt.Figure)
+
+        plt.close(fig)
 
     @patch("matplotlib.pyplot.Circle")
     @patch("matplotlib.pyplot.axis")
@@ -97,6 +111,8 @@ class TestDonutChart2:
         axes = fig.get_axes()
         assert len(axes) == 1
 
+        plt.close(fig)
+
     def test_donut_chart2_with_title(self):
         """Test donut_chart2 with title."""
         title = "Large Progress Chart"
@@ -105,12 +121,16 @@ class TestDonutChart2:
         axes = fig.get_axes()
         assert axes[0].get_title() == title
 
+        plt.close(fig)
+
     def test_donut_chart2_default_colors(self):
         """Test donut_chart2 with default colors."""
         fig = donut_chart2(60, 100)
 
         # Should use default colors without error
         assert isinstance(fig, plt.Figure)
+
+        plt.close(fig)
 
     def test_donut_chart2_custom_colors(self):
         """Test donut_chart2 with custom colors."""
@@ -120,12 +140,16 @@ class TestDonutChart2:
         # Check that figure is created without error
         assert isinstance(fig, plt.Figure)
 
+        plt.close(fig)
+
     def test_donut_chart2_percentage_formatting(self):
         """Test donut_chart2 with percentage suffix formatting."""
         fig = donut_chart2(75.5555, 100, suffix="%")
 
         # Should format percentage to 2 decimal places
         assert isinstance(fig, plt.Figure)
+
+        plt.close(fig)
 
     def test_donut_chart2_non_percentage_suffix(self):
         """Test donut_chart2 with non-percentage suffix."""
@@ -134,12 +158,16 @@ class TestDonutChart2:
         # Should not format as percentage
         assert isinstance(fig, plt.Figure)
 
+        plt.close(fig)
+
     def test_donut_chart2_actual_exceeds_target(self):
         """Test donut_chart2 when actual value exceeds target."""
         fig = donut_chart2(120, 100)
 
         # Should handle exceeding target by setting remainder to 0
         assert isinstance(fig, plt.Figure)
+
+        plt.close(fig)
 
     def test_donut_chart2_actual_equals_target(self):
         """Test donut_chart2 when actual equals target."""
@@ -148,12 +176,16 @@ class TestDonutChart2:
         # Should handle equal values correctly
         assert isinstance(fig, plt.Figure)
 
+        plt.close(fig)
+
     def test_donut_chart2_zero_value(self):
         """Test donut_chart2 with zero actual value."""
         fig = donut_chart2(0, 100)
 
         # Should handle zero value without error
         assert isinstance(fig, plt.Figure)
+
+        plt.close(fig)
 
     @patch("matplotlib.pyplot.Circle")
     def test_donut_chart2_circle_creation(self, mock_circle):
@@ -183,6 +215,10 @@ class TestChartUtilsIntegration:
         assert isinstance(fig1, plt.Figure)
         assert isinstance(fig2, plt.Figure)
 
+        # Clean up to prevent memory warning
+        plt.close(fig1)
+        plt.close(fig2)
+
     def test_charts_with_same_data_different_appearance(self):
         """Test that both charts handle the same data correctly."""
         actual, target = 75, 100
@@ -194,6 +230,10 @@ class TestChartUtilsIntegration:
         # Both should create figures without error
         assert isinstance(fig1, plt.Figure)
         assert isinstance(fig2, plt.Figure)
+
+        # Clean up to prevent memory warning
+        plt.close(fig1)
+        plt.close(fig2)
 
     def test_edge_case_values(self):
         """Test both charts with edge case values."""
@@ -210,6 +250,10 @@ class TestChartUtilsIntegration:
 
             assert isinstance(fig1, plt.Figure)
             assert isinstance(fig2, plt.Figure)
+
+            # Clean up each figure to prevent memory warning
+            plt.close(fig1)
+            plt.close(fig2)
 
     @patch("matplotlib.pyplot.close")
     def test_memory_management(self, mock_close):

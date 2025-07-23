@@ -1,18 +1,12 @@
-"""Tests for correction_view.py functions."""
-
-from unittest.mock import patch
+"""Tests for correction_view.py logic patterns."""
 
 import polars as pl
 
 
-class TestCorrectionInputForm:
+class TestCorrectionInputFormLogic:
     """Test the correction_input_form function logic patterns."""
 
-    @patch("datasure.views.correction_view.duckdb_get_table")
-    @patch("datasure.views.correction_view.st")
-    def test_correction_form_data_type_validation_numeric(
-        self, mock_st, mock_get_table
-    ):
+    def test_correction_form_data_type_validation_numeric_logic(self):
         """Test numeric data type validation logic."""
         # Test numeric column validation logic
         column_name = "age"
@@ -38,10 +32,8 @@ class TestCorrectionInputForm:
         assert validated_value == 25.0
         assert error_message is None
 
-    @patch("datasure.views.correction_view.duckdb_get_table")
-    @patch("datasure.views.correction_view.st")
-    def test_correction_form_invalid_numeric_value(self, mock_st, mock_get_table):
-        """Test validation with invalid numeric value."""
+    def test_correction_form_invalid_numeric_value_logic(self):
+        """Test validation logic with invalid numeric value."""
         column_name = "age"
         column_schema = {"age": pl.Int64, "name": pl.Utf8}
         new_value_str = "not_a_number"
@@ -65,10 +57,8 @@ class TestCorrectionInputForm:
         assert validated_value is None
         assert error_message == "New value must be a number."
 
-    @patch("datasure.views.correction_view.duckdb_get_table")
-    @patch("datasure.views.correction_view.st")
-    def test_correction_form_string_data_type(self, mock_st, mock_get_table):
-        """Test string data type handling."""
+    def test_correction_form_string_data_type_logic(self):
+        """Test string data type handling logic."""
         column_name = "name"
         column_schema = {"age": pl.Int64, "name": pl.Utf8}
         new_value_str = "John Doe"
@@ -92,9 +82,7 @@ class TestCorrectionInputForm:
         assert validated_value == "John Doe"
         assert error_message is None
 
-    @patch("datasure.views.correction_view.duckdb_get_table")
-    @patch("datasure.views.correction_view.st")
-    def test_correction_form_datetime_handling(self, mock_st, mock_get_table):
+    def test_correction_form_datetime_handling_logic(self):
         """Test datetime data type handling logic."""
         # Simulate datetime input handling
         column_dtype = pl.Datetime
@@ -119,13 +107,8 @@ class TestCorrectionInputForm:
         # Note: pl.datetime returns a datetime expression, not a value
         assert converted_datetime is not None
 
-    @patch("datasure.views.correction_view.duckdb_get_table")
-    @patch("datasure.views.correction_view.st")
-    def test_correction_form_action_types(self, mock_st, mock_get_table):
-        """Test different correction action types."""
-        # Test different correction actions and their requirements
-        # actions_requiring_column = ["modify value", "remove value"]
-        # actions_not_requiring_column = ["remove row"]
+    def test_correction_form_action_types_logic(self):
+        """Test different correction action types logic."""
 
         def requires_column_selection(action):
             return action in ["modify value", "remove value"]
@@ -154,9 +137,7 @@ class TestCorrectionInputForm:
             else:
                 assert warning_message is None
 
-    @patch("datasure.views.correction_view.duckdb_get_table")
-    @patch("datasure.views.correction_view.st")
-    def test_correction_form_data_retrieval_logic(self, mock_st, mock_get_table):
+    def test_correction_form_data_retrieval_logic(self):
         """Test the data retrieval and filtering logic."""
         # Mock corrected data
         mock_corrected_data = pl.DataFrame(
@@ -167,8 +148,6 @@ class TestCorrectionInputForm:
                 "city": ["NYC", "LA", "Chicago"],
             }
         )
-
-        mock_get_table.return_value = mock_corrected_data
 
         # Test current value retrieval logic
         survey_key = "KEY"
@@ -181,9 +160,7 @@ class TestCorrectionInputForm:
 
         assert current_value == "Bob"
 
-    @patch("datasure.views.correction_view.duckdb_get_table")
-    @patch("datasure.views.correction_view.st")
-    def test_correction_form_unique_key_options(self, mock_st, mock_get_table):
+    def test_correction_form_unique_key_options_logic(self):
         """Test unique key options retrieval logic."""
         # Mock corrected data with duplicate keys
         mock_corrected_data = pl.DataFrame(
@@ -193,8 +170,6 @@ class TestCorrectionInputForm:
                 "age": [25, 30, 25, 35],
             }
         )
-
-        mock_get_table.return_value = mock_corrected_data
 
         # Test unique key retrieval logic
         survey_key = "KEY"
@@ -208,10 +183,8 @@ class TestCorrectionInputForm:
         assert len(unique_keys) == 3
         assert set(unique_keys) == set(expected_unique_keys)
 
-    @patch("datasure.views.correction_view.duckdb_get_table")
-    @patch("datasure.views.correction_view.st")
-    def test_correction_form_column_options_logic(self, mock_st, mock_get_table):
-        """Test column options for modification."""
+    def test_correction_form_column_options_logic(self):
+        """Test column options for modification logic."""
         # Mock corrected data
         mock_corrected_data = pl.DataFrame(
             {
@@ -223,8 +196,6 @@ class TestCorrectionInputForm:
             }
         )
 
-        mock_get_table.return_value = mock_corrected_data
-
         # Test column options logic
         available_columns = mock_corrected_data.columns
 
@@ -232,10 +203,10 @@ class TestCorrectionInputForm:
         expected_columns = ["KEY", "name", "age", "city", "score"]
         assert available_columns == expected_columns
 
-    @patch("datasure.views.correction_view.duckdb_get_table")
-    @patch("datasure.views.correction_view.st")
-    def test_correction_form_schema_type_checking(self, mock_st, mock_get_table):
-        """Test schema-based data type checking."""
+    def test_correction_form_schema_type_checking_logic(self):
+        """Test schema-based data type checking logic."""
+        from datetime import datetime
+
         # Mock corrected data with different data types
         mock_corrected_data = pl.DataFrame(
             {
@@ -244,9 +215,9 @@ class TestCorrectionInputForm:
                 "score": [95.5, 87.2, 92.1],
                 "active": [True, False, True],
                 "created_date": [
-                    pl.datetime(2024, 1, 1),
-                    pl.datetime(2024, 1, 2),
-                    pl.datetime(2024, 1, 3),
+                    datetime(2024, 1, 1),
+                    datetime(2024, 1, 2),
+                    datetime(2024, 1, 3),
                 ],
             }
         )
@@ -273,9 +244,7 @@ class TestCorrectionInputForm:
             else:
                 assert is_numeric is False
 
-    @patch("datasure.views.correction_view.duckdb_get_table")
-    @patch("datasure.views.correction_view.st")
-    def test_correction_form_remove_row_logic(self, mock_st, mock_get_table):
+    def test_correction_form_remove_row_logic(self):
         """Test remove row action logic."""
         # Test remove row action handling
         action = "remove row"
@@ -297,9 +266,7 @@ class TestCorrectionInputForm:
         assert current_value is None
         assert col_to_modify is None
 
-    @patch("datasure.views.correction_view.duckdb_get_table")
-    @patch("datasure.views.correction_view.st")
-    def test_correction_form_remove_value_logic(self, mock_st, mock_get_table):
+    def test_correction_form_remove_value_logic(self):
         """Test remove value action logic."""
         # Test remove value action (sets new_value to None)
         action = "remove value"
@@ -317,30 +284,24 @@ class TestCorrectionInputForm:
         assert new_value_required is False
         assert new_value is None
 
-    @patch("datasure.views.correction_view.duckdb_get_table")
-    @patch("datasure.views.correction_view.st")
-    def test_correction_form_edge_cases(self, mock_st, mock_get_table):
+    def test_correction_form_edge_cases_logic(self):
         """Test edge cases in correction form logic."""
         # Test empty dataset
         empty_data = pl.DataFrame()
-        mock_get_table.return_value = empty_data
 
         # Empty dataset should have no columns
         assert len(empty_data.columns) == 0
 
         # Test single row dataset
         single_row_data = pl.DataFrame({"KEY": ["uuid:123"], "value": [42]})
-        mock_get_table.return_value = single_row_data
 
         # Should still work with single row
         assert len(single_row_data) == 1
         assert "KEY" in single_row_data.columns
         assert "value" in single_row_data.columns
 
-    @patch("datasure.views.correction_view.duckdb_get_table")
-    @patch("datasure.views.correction_view.st")
-    def test_correction_form_numeric_edge_cases(self, mock_st, mock_get_table):
-        """Test numeric validation edge cases."""
+    def test_correction_form_numeric_edge_cases_logic(self):
+        """Test numeric validation edge cases logic."""
         # Test various numeric input scenarios
         test_cases = [
             ("42", 42.0, True),  # Integer string
@@ -375,18 +336,12 @@ class TestCorrectionInputForm:
             else:
                 assert validated_value is None
 
-    @patch("datasure.views.correction_view.duckdb_get_table")
-    @patch("datasure.views.correction_view.st")
-    def test_correction_form_database_interaction(self, mock_st, mock_get_table):
-        """Test database interaction parameters."""
+    def test_correction_form_database_interaction_logic(self):
+        """Test database interaction parameters logic."""
         project_id = "test_project_123"
         alias = "survey_data"
 
-        # Mock function call would retrieve corrected data
-        mock_corrected_data = pl.DataFrame({"KEY": ["uuid:123"], "name": ["Test"]})
-        mock_get_table.return_value = mock_corrected_data
-
-        # Test that the function would call duckdb_get_table with correct parameters
+        # Test that the function logic would call duckdb_get_table with correct params
         expected_project_id = project_id
         expected_alias = alias
         expected_db_name = "corrected"

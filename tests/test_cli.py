@@ -79,15 +79,15 @@ class TestMain:
         finally:
             sys.argv = original_argv
 
-    @patch("sys.exit")
     @patch("builtins.print")
     @patch.object(Path, "exists", return_value=False)
-    def test_main_app_not_found(self, mock_path_exists, mock_print, mock_exit):
+    def test_main_app_not_found(self, mock_path_exists, mock_print):
         """Test main function when app.py is not found."""
         original_argv = sys.argv[:]
         try:
             sys.argv = ["datasure"]
-            main()
+            with pytest.raises(SystemExit) as exc_info:
+                main()
 
             # Check that error messages were printed
             assert mock_print.call_count == 2
@@ -98,8 +98,8 @@ class TestMain:
                 for call in error_calls
             )
 
-            # Check that sys.exit was called with error code
-            mock_exit.assert_called_once_with(1)
+            # Check that sys.exit was called with error code 1
+            assert exc_info.value.code == 1
         finally:
             sys.argv = original_argv
 
