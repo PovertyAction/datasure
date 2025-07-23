@@ -6,7 +6,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import pytest
 
-from src.pydms.checks.outliers import (
+from datasure.checks.outliers import (
     calculate_joint_outliers_percentage,
     common_prefix,
     compute_joint_outlier_distribution,

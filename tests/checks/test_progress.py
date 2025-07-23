@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.pydms.checks.progress import (
+from datasure.checks.progress import (
     compute_attempted_interviews,
     compute_progress_chart,
     compute_progress_overtime,

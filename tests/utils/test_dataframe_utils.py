@@ -4,7 +4,7 @@ import pandas as pd
 import polars as pl
 import pytest
 
-from pydms.utils.dataframe_utils import get_df_info
+from datasure.utils.dataframe_utils import get_df_info
 
 
 class TestGetDfInfo:

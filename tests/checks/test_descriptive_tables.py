@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from pydms.checks.descriptive import (
+from datasure.checks.descriptive import (
     datetime_check,
     descriptive_report,
     load_default_summary_settings,
