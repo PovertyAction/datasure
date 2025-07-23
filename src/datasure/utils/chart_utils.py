@@ -41,16 +41,27 @@ def donut_chart(
         ax.set_title(title, fontsize=14)
 
     # Create the pie chart
+    # Handle case where actual exceeds target
+    remainder = max(0, target_value - actual_value)
+    if remainder == 0:
+        # If actual exceeds target, show just the actual value
+        pie_values = [actual_value]
+        pie_colors = [(colors or ["#2C5F2D", "#CCCCCC"])[0]]
+    else:
+        pie_values = [actual_value, remainder]
+        pie_colors = colors or ["#2C5F2D", "#CCCCCC"]
+
     pie = ax.pie(
-        [actual_value, target_value - actual_value],
-        colors=colors or ["#2C5F2D", "#CCCCCC"],
+        pie_values,
+        colors=pie_colors,
         startangle=90,
         labeldistance=1.15,
         counterclock=False,
     )
 
-    # Make the background segment semi-transparent
-    pie[0][1].set_alpha(0.4)
+    # Make the background segment semi-transparent (if it exists)
+    if len(pie[0]) > 1:
+        pie[0][1].set_alpha(0.4)
 
     # Add center circle to create donut
     centre_circle = plt.Circle((0, 0), 0.7, fc="#FFFFFF")
@@ -58,6 +69,7 @@ def donut_chart(
 
     # Add center text
     centre_text = f"{prefix}{actual_value}{suffix}"
+    text_color = (colors or ["#2C5F2D", "#CCCCCC"])[0]
     ax.text(
         0,
         0,
@@ -66,7 +78,7 @@ def donut_chart(
         verticalalignment="center",
         fontsize=20,
         fontweight="bold",
-        color=colors[0],
+        color=text_color,
     )
 
     # Remove axes
