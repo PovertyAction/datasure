@@ -64,19 +64,11 @@ def load_default_backcheck_settings(
         default_settings = {}
 
     return (
-        default_settings.get("duration"),
         default_settings.get("date", config_survey_date),
-        default_settings.get("formversion"),
         default_settings.get("enumerator", config_enumerator),
-        default_settings.get("team"),
         default_settings.get("backchecker"),
-        default_settings.get("bc_team"),
         default_settings.get("survey_id", config_survey_id),
         default_settings.get("survey_key", config_survey_key),
-        default_settings.get("consent"),
-        default_settings.get("consent_vals"),
-        default_settings.get("outcome"),
-        default_settings.get("outcome_vals"),
         default_settings.get("backcheck_goal", 0),
         default_settings.get("drop_duplicates", True),
     )
@@ -119,51 +111,18 @@ def backcheck_report_settings(
         common_cols = [col for col in survey_data.columns if col in backcheck_cols_list]
 
         (
-            duration,
             date,
-            formversion,
             enumerator,
-            team,
             backchecker,
-            bc_team,
             survey_id,
             survey_key,
-            consent,
-            consent_vals,
-            outcome,
-            outcome_vals,
             backcheck_goal,
             drop_duplicates,
         ) = load_default_backcheck_settings(project_id, setting_file, page_num)
 
-        meta_col, enum_col, agg_col = st.columns(spec=3, border=True)
+        agg_col, enum_col, meta_col = st.columns(spec=3, border=True)
 
         with meta_col:
-            default_duration_index = (
-                survey_cols.get_loc(duration)
-                if duration and duration in survey_cols
-                else None
-            )
-            duration = st.selectbox(
-                "Duration",
-                options=survey_cols,
-                help="Column containing survey duration",
-                key="duration_backcheck",
-                index=default_duration_index,
-                on_change=trigger_save,
-                kwargs={"state_name": "backcheck_duration"},
-            )
-            if (
-                "backcheck_duration" in st.session_state
-                and st.session_state.backcheck_duration
-            ):
-                save_check_settings(
-                    settings_file=setting_file,
-                    check_name="backchecks",
-                    check_settings={"duration": duration},
-                )
-                st.session_state.backcheck_duration = False
-
             default_date_index = (
                 survey_cols.get_loc(date) if date and date in survey_cols else None
             )
@@ -183,31 +142,6 @@ def backcheck_report_settings(
                     check_settings={"date": date},
                 )
                 st.session_state.backcheck_date = False
-
-            default_formversion_index = (
-                survey_cols.get_loc(formversion)
-                if formversion and formversion in survey_cols
-                else None
-            )
-            formversion = st.selectbox(
-                "Form Version",
-                options=survey_cols,
-                help="Column containing survey form version",
-                key="formversion_backcheck",
-                index=default_formversion_index,
-                on_change=trigger_save,
-                kwargs={"state_name": "backcheck_formversion"},
-            )
-            if (
-                "backcheck_formversion" in st.session_state
-                and st.session_state.backcheck_formversion
-            ):
-                save_check_settings(
-                    settings_file=setting_file,
-                    check_name="backchecks",
-                    check_settings={"formversion": formversion},
-                )
-                st.session_state.backcheck_formversion = False
 
         with enum_col:
             default_enumerator_index = (
@@ -236,26 +170,6 @@ def backcheck_report_settings(
                 )
                 st.session_state.backcheck_enumerator = False
 
-            default_team_index = (
-                survey_cols.get_loc(team) if team and team in survey_cols else None
-            )
-            team = st.selectbox(
-                "Enumerator Team",
-                options=survey_cols,
-                help="Column containing survey team",
-                key="team_backcheck",
-                index=default_team_index,
-                on_change=trigger_save,
-                kwargs={"state_name": "backcheck_team"},
-            )
-            if "backcheck_team" in st.session_state and st.session_state.backcheck_team:
-                save_check_settings(
-                    settings_file=setting_file,
-                    check_name="backchecks",
-                    check_settings={"team": team},
-                )
-                st.session_state.backcheck_team = False
-
             default_backchecker_index = (
                 backcheck_cols_list.get_loc(backchecker)
                 if backchecker and backchecker in backcheck_cols_list
@@ -280,31 +194,6 @@ def backcheck_report_settings(
                     check_settings={"backchecker": backchecker},
                 )
                 st.session_state.backcheck_backchecker = False
-
-            default_bc_team_index = (
-                backcheck_cols_list.get_loc(bc_team)
-                if bc_team and bc_team in backcheck_cols_list
-                else None
-            )
-            bc_team = st.selectbox(
-                "Back Check Team",
-                options=backcheck_cols_list,
-                help="Column containing survey team",
-                key="backcheck_team_backcheck",
-                index=default_bc_team_index,
-                on_change=trigger_save,
-                kwargs={"state_name": "backcheck_bc_team"},
-            )
-            if (
-                "backcheck_bc_team" in st.session_state
-                and st.session_state.backcheck_bc_team
-            ):
-                save_check_settings(
-                    settings_file=setting_file,
-                    check_name="backchecks",
-                    check_settings={"bc_team": bc_team},
-                )
-                st.session_state.backcheck_bc_team = False
 
         with agg_col:
             default_survey_id_index = (
@@ -357,76 +246,6 @@ def backcheck_report_settings(
                 )
                 st.session_state.backcheck_survey_key = False
 
-            default_consent_index = (
-                survey_cols.get_loc(consent)
-                if consent and consent in survey_cols
-                else None
-            )
-            consent = st.selectbox(
-                "Consent",
-                options=survey_cols,
-                help="Column containing survey consent",
-                key="consent_backcheck",
-                index=default_consent_index,
-                on_change=trigger_save,
-                kwargs={"state_name": "backcheck_consent"},
-            )
-            if (
-                "backcheck_consent" in st.session_state
-                and st.session_state.backcheck_consent
-            ):
-                save_check_settings(
-                    settings_file=setting_file,
-                    check_name="backchecks",
-                    check_settings={"consent": consent},
-                )
-                st.session_state.backcheck_consent = False
-
-            if consent:
-                consent_options = survey_data[consent].unique().tolist()
-                consent_vals = st.multiselect(
-                    "Consent value(s)",
-                    options=consent_options,
-                    help="Value(s) indicating valid consent",
-                    key="consent_val_backcheck",
-                    default=consent_vals,
-                )
-
-            default_outcome_index = (
-                survey_cols.get_loc(outcome)
-                if outcome and outcome in survey_cols
-                else None
-            )
-            outcome = st.selectbox(
-                "Outcome",
-                options=survey_cols,
-                help="Column containing survey outcome",
-                key="outcome_backcheck",
-                index=default_outcome_index,
-                on_change=trigger_save,
-                kwargs={"state_name": "backcheck_outcome"},
-            )
-            if (
-                "backcheck_outcome" in st.session_state
-                and st.session_state.backcheck_outcome
-            ):
-                save_check_settings(
-                    settings_file=setting_file,
-                    check_name="backchecks",
-                    check_settings={"outcome": outcome},
-                )
-                st.session_state.backcheck_outcome = False
-
-            if outcome:
-                outcome_options = survey_data[outcome].unique().tolist()
-                outcome_vals = st.multiselect(
-                    "Outcome value(s)",
-                    options=outcome_options,
-                    help="Value(s) indicating completed survey",
-                    key="outcome_val_backcheck",
-                    default=outcome_vals,
-                )
-
         st.write("---")
         st.markdown("### Tracking Options")
 
@@ -476,34 +295,12 @@ def backcheck_report_settings(
 
         st.write("")
 
-        # Save consent and outcome values when they change
-        if consent and consent_vals:
-            save_check_settings(
-                settings_file=setting_file,
-                check_name="backchecks",
-                check_settings={"consent_vals": consent_vals},
-            )
-        if outcome and outcome_vals:
-            save_check_settings(
-                settings_file=setting_file,
-                check_name="backchecks",
-                check_settings={"outcome_vals": outcome_vals},
-            )
-
     return (
-        duration,
         date,
-        formversion,
         enumerator,
-        team,
         backchecker,
-        bc_team,
         survey_id,
         survey_key,
-        consent,
-        consent_vals,
-        outcome,
-        outcome_vals,
         backcheck_goal,
         drop_duplicates,
         common_cols,
@@ -1248,19 +1045,11 @@ def backchecks_report(
     """
     # Get settings
     (
-        duration,
         date,
-        formversion,
         enumerator,
-        team,
         backchecker,
-        bc_team,
         survey_id,
         survey_key,
-        consent,
-        consent_vals,
-        outcome,
-        outcome_vals,
         backcheck_goal,
         drop_duplicates,
         common_cols,
@@ -1289,8 +1078,6 @@ def backchecks_report(
     survey_cols_for_merge = [survey_id]
     if enumerator and enumerator not in survey_cols_for_merge:
         survey_cols_for_merge.append(enumerator)
-    if consent and consent not in survey_cols_for_merge:
-        survey_cols_for_merge.append(consent)
     if date and date not in survey_cols_for_merge:
         survey_cols_for_merge.append(date)
 
@@ -1300,8 +1087,6 @@ def backchecks_report(
     backcheck_cols_for_merge = [survey_id]
     if backchecker and backchecker not in backcheck_cols_for_merge:
         backcheck_cols_for_merge.append(backchecker)
-    if consent and consent not in backcheck_cols_for_merge:
-        backcheck_cols_for_merge.append(consent)
     if date and date not in backcheck_cols_for_merge:
         backcheck_cols_for_merge.append(date)
 
