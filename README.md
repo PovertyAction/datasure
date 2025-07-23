@@ -322,27 +322,6 @@ just publish
 
 **Note:** You'll need to configure your PyPI credentials before publishing. See [uv publishing documentation](https://docs.astral.sh/uv/guides/publish/) for details.
 
-## Deployment
-
-DataSure can be deployed using [Ploomber Cloud](https://docs.cloud.ploomber.io/en/latest/intro.html). You will need a deployment key from [Ploomber's platform console](https://www.platform.ploomber.io/).
-
-```bash
-# make sure your venv is synced
-uv sync
-
-# set your Ploomber Cloud key locally
-uv run ploomber-cloud key YOUR-KEY
-
-# make sure that the requirements.txt file is up to date
-uv pip compile pyproject.toml -o requirements.txt --no-annotate --no-header
-
-# make sure that app.py is the same as datasure.py and deploy the app
-# Ploomber needs to use app.py as the entry point for the Streamlit app
-cd src/datasure && uv run ploomber-cloud deploy --watch
-```
-
-See Ploomber docs for more details on deployment options and configurations of [Streamlit apps](https://docs.cloud.ploomber.io/en/latest/apps/streamlit.html). Password protection docs are found in [Ploomber docs](https://docs.cloud.ploomber.io/en/latest/user-guide/cli.html#password-protection).
-
 ## Data Storage and Cache
 
 DataSure automatically manages data storage and caching for optimal performance across different environments:
