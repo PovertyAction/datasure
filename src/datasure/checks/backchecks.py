@@ -377,7 +377,7 @@ def compute_backcheck_overview(
     survey_df_bc: pd.DataFrame,
     backcheck_df_bc: pd.DataFrame,
     merged_df: pd.DataFrame,
-    enumerator: str,
+    enumerator: str | None,
     backcheck_goal: int,
     min_backcheck_rate: float,
 ) -> tuple:
@@ -405,40 +405,43 @@ def compute_backcheck_overview(
     """
     total_backchecks = len(backcheck_df_bc)
 
-    # Calculate backcheck rate by enumerator
-    backcheck_sum_df = (
-        survey_df_bc.groupby("_svy_" + enumerator)
-        .size()
-        .reset_index(name="total_surveys")
-    )
-
-    backcheck_sum_df = backcheck_sum_df.merge(
-        merged_df.groupby("_svy_" + enumerator)
-        .size()
-        .reset_index(name="total_backchecks"),
-        left_on="_svy_" + enumerator,
-        right_on="_svy_" + enumerator,
-        how="outer",
-    )
-
-    backcheck_sum_df["backcheck_rate"] = (
-        backcheck_sum_df["total_backchecks"] / backcheck_sum_df["total_surveys"]
-    ) * 100
-
-    bc_target_met_df = backcheck_sum_df[
-        backcheck_sum_df["backcheck_rate"] >= min_backcheck_rate
-    ]
-
-    num_enumerators_bc = bc_target_met_df["_svy_" + enumerator].nunique()
-    total_enumerators = len(survey_df_bc["_svy_" + enumerator].unique())
-
     # Handle case when backchecks > target
     backcheck_goal_update = (
         max(backcheck_goal, total_backchecks)
         if backcheck_goal > 0
         else total_backchecks
     )
+    # Calculate backcheck rate by enumerator
+    if enumerator:
+        backcheck_sum_df = (
+            survey_df_bc.groupby("_svy_" + enumerator)
+            .size()
+            .reset_index(name="total_surveys")
+        )
 
+        backcheck_sum_df = backcheck_sum_df.merge(
+            merged_df.groupby("_svy_" + enumerator)
+            .size()
+            .reset_index(name="total_backchecks"),
+            left_on="_svy_" + enumerator,
+            right_on="_svy_" + enumerator,
+            how="outer",
+        )
+
+        backcheck_sum_df["backcheck_rate"] = (
+            backcheck_sum_df["total_backchecks"] / backcheck_sum_df["total_surveys"]
+        ) * 100
+
+        bc_target_met_df = backcheck_sum_df[
+            backcheck_sum_df["backcheck_rate"] >= min_backcheck_rate
+        ]
+
+        num_enumerators_bc = bc_target_met_df["_svy_" + enumerator].nunique()
+        total_enumerators = len(survey_df_bc["_svy_" + enumerator].unique())
+
+    else:
+        num_enumerators_bc = 0
+        total_enumerators = 0
     return (
         total_backchecks,
         backcheck_goal_update,
@@ -453,9 +456,9 @@ def generate_column_summary(
     survey_data: pd.DataFrame,
     backcheck_data: pd.DataFrame,
     survey_id: str,
-    enumerator: str,
-    backchecker: str,
-    summary_col: str,
+    enumerator: str | None,
+    backchecker: str | None,
+    summary_col: str | None,
 ) -> tuple:
     """Generate a summary for each column configuration.
 
@@ -488,8 +491,11 @@ def generate_column_summary(
     backcheck_data = backcheck_data.add_prefix("_bc_").rename(
         columns={"_bc_" + survey_id: survey_id}
     )
-    enumerator = "_svy_" + enumerator
-    backchecker = "_bc_" + backchecker
+
+    if enumerator:
+        enumerator = "_svy_" + enumerator
+    if backchecker:
+        backchecker = "_bc_" + backchecker
 
     summary_data = []
     merged_results_df = pd.DataFrame()
@@ -558,7 +564,12 @@ def generate_column_summary(
                 backchecker: "Back Checker",
             }
         )
-        enum_bc_cols = [survey_id, "Enumerator", "Back Checker"]
+        enum_bc_cols = [survey_id]
+        if enumerator:
+            enum_bc_cols.append("Enumerator")
+        if backchecker:
+            enum_bc_cols.append("Back Checker")
+
         other_cols = [
             col for col in merged_results_df.columns if col not in enum_bc_cols
         ]
@@ -571,16 +582,22 @@ def _create_merged_comparison_df(
     survey_data: pd.DataFrame,
     backcheck_data: pd.DataFrame,
     survey_id: str,
-    enumerator: str,
-    backchecker: str,
+    enumerator: str | None,
+    backchecker: str | None,
     svy_col: str,
     bc_col: str,
-    summary_col: str,
+    summary_col: str | None,
 ) -> pd.DataFrame:
     """Create merged dataframe for comparison."""
     # Determine columns to include
-    svy_summary_cols = [survey_id, enumerator, svy_col]
-    bc_summary_cols = [survey_id, backchecker, bc_col]
+    if enumerator:
+        svy_summary_cols = [survey_id, enumerator, svy_col]
+    else:
+        svy_summary_cols = [survey_id, svy_col]
+    if backchecker:
+        bc_summary_cols = [survey_id, backchecker, bc_col]
+    else:
+        bc_summary_cols = [survey_id, bc_col]
 
     if summary_col:
         if summary_col == backchecker:
@@ -851,35 +868,41 @@ def display_overview_charts(
 
     with cl3:
         # Create pie chart for enumerator backcheck coverage
-        fig_enum = px.pie(
-            names=["Backchecked", "Not backchecked"],
-            values=[num_enumerators_bc, total_enumerators - num_enumerators_bc],
-            hole=0.6,
-            title="% of enumerators backchecked",
-        )
-        fig_enum.update_layout(
-            width=400,
-            height=350,
-            showlegend=False,
-            title=dict(
-                xanchor="left", y=0.9, yanchor="top", font=dict(weight="normal")
-            ),
-        )
-        fig_enum.update_traces(
-            textinfo="none",
-            marker=dict(colors=chart_colors),
-            direction="clockwise",
-        )
-        fig_enum.add_annotation(
-            dict(
-                text=f"{(num_enumerators_bc / total_enumerators) * 100:.0f}%",
-                x=0.5,
-                y=0.5,
-                font_size=30,
-                showarrow=False,
+        if total_enumerators == 0:
+            st.write("**% of enumerators backchecked**")
+            st.info(
+                "Percentage of enumerators backchecked requires an enumerator column. Go to :material/settings: settings above."
             )
-        )
-        st.plotly_chart(fig_enum)
+        else:
+            fig_enum = px.pie(
+                names=["Backchecked", "Not backchecked"],
+                values=[num_enumerators_bc, total_enumerators - num_enumerators_bc],
+                hole=0.6,
+                title="% of enumerators backchecked",
+            )
+            fig_enum.update_layout(
+                width=400,
+                height=350,
+                showlegend=False,
+                title=dict(
+                    xanchor="left", y=0.9, yanchor="top", font=dict(weight="normal")
+                ),
+            )
+            fig_enum.update_traces(
+                textinfo="none",
+                marker=dict(colors=chart_colors),
+                direction="clockwise",
+            )
+            fig_enum.add_annotation(
+                dict(
+                    text=f"{(num_enumerators_bc / total_enumerators) * 100:.0f}%",
+                    x=0.5,
+                    y=0.5,
+                    font_size=30,
+                    showarrow=False,
+                )
+            )
+            st.plotly_chart(fig_enum)
 
 
 def display_error_trends(
@@ -985,7 +1008,8 @@ def display_statistics_tables(
     enumerator_statistics: pd.DataFrame,
     backchecker_statistics: pd.DataFrame,
     comparison_df: pd.DataFrame,
-    enumerator: str,
+    enumerator: str | None,
+    backchecker: str | None,
 ) -> None:
     """Display enumerator, backchecker, and comparison statistics.
 
@@ -1002,60 +1026,75 @@ def display_statistics_tables(
     """
     # Enumerator Statistics
     st.subheader("Enumerator Statistics")
-    selected_enum_list = st.multiselect(
-        "Filter enumerators:",
-        enumerator_statistics[enumerator].unique(),
-    )
+    if enumerator is not None:
+        selected_enum_list = st.multiselect(
+            "Filter enumerators:",
+            enumerator_statistics[enumerator].unique(),
+        )
 
-    if selected_enum_list:
-        filtered_enumerator_stats = enumerator_statistics[
-            enumerator_statistics[enumerator].isin(selected_enum_list)
-        ]
+        if selected_enum_list:
+            filtered_enumerator_stats = enumerator_statistics[
+                enumerator_statistics[enumerator].isin(selected_enum_list)
+            ]
+        else:
+            filtered_enumerator_stats = enumerator_statistics
+
+        st.dataframe(
+            filtered_enumerator_stats,
+            use_container_width=True,
+            hide_index=True,
+        )
     else:
-        filtered_enumerator_stats = enumerator_statistics
-
-    st.dataframe(
-        filtered_enumerator_stats,
-        use_container_width=True,
-        hide_index=True,
-    )
+        st.info(
+            "Enumerator statistics require an enumerator column. Go to :material/settings: settings above to select an enumerator column."
+        )
 
     # Backchecker Statistics
     st.subheader("Backchecker Statistics")
-    selected_bcer_list = st.multiselect(
-        "Filter back checkers:",
-        backchecker_statistics["Back Checker"].unique(),
-    )
+    if backchecker is not None:
+        selected_bcer_list = st.multiselect(
+            "Filter back checkers:",
+            backchecker_statistics["Back Checker"].unique(),
+        )
 
-    if selected_bcer_list:
-        filtered_backchecker_stats = backchecker_statistics[
-            backchecker_statistics["Back Checker"].isin(selected_bcer_list)
-        ]
+        if selected_bcer_list:
+            filtered_backchecker_stats = backchecker_statistics[
+                backchecker_statistics["Back Checker"].isin(selected_bcer_list)
+            ]
+        else:
+            filtered_backchecker_stats = backchecker_statistics
+
+        st.dataframe(
+            filtered_backchecker_stats,
+            use_container_width=True,
+            hide_index=True,
+        )
     else:
-        filtered_backchecker_stats = backchecker_statistics
-
-    st.dataframe(
-        filtered_backchecker_stats,
-        use_container_width=True,
-        hide_index=True,
-    )
+        st.info(
+            "Backchecker statistics require a backchecker column. Go to :material/settings: settings above to select a back checker column."
+        )
     st.write("")
 
     # Comparison Details
     st.subheader("Comparison Details")
-    selected_var_list = st.multiselect(
-        "Select variables to display:",
-        comparison_df["variable"].unique(),
-    )
-
-    if selected_var_list:
-        filtered_comparison_df = comparison_df[
-            comparison_df["variable"].isin(selected_var_list)
-        ]
+    if comparison_df.empty:
+        st.info(
+            "Backcheck columns not set. Go to :material/settings: settings above to set backcheck columns."
+        )
     else:
-        filtered_comparison_df = comparison_df
+        selected_var_list = st.multiselect(
+            "Select variables to display:",
+            comparison_df["variable"].unique(),
+        )
 
-    st.dataframe(filtered_comparison_df, use_container_width=True, hide_index=True)
+        if selected_var_list:
+            filtered_comparison_df = comparison_df[
+                comparison_df["variable"].isin(selected_var_list)
+            ]
+        else:
+            filtered_comparison_df = comparison_df
+
+        st.dataframe(filtered_comparison_df, use_container_width=True, hide_index=True)
 
 
 def backchecks_report(
@@ -1289,12 +1328,12 @@ def backchecks_report(
         num_enumerators_bc,
         total_enumerators,
     ) = compute_backcheck_overview(
-        survey_df_bc,
-        backcheck_df_bc,
-        merged_df,
-        enumerator,
-        backcheck_goal,
-        min_backcheck_rate,
+        survey_df_bc=survey_df_bc,
+        backcheck_df_bc=backcheck_df_bc,
+        merged_df=merged_df,
+        enumerator=enumerator if enumerator else None,
+        backcheck_goal=backcheck_goal,
+        min_backcheck_rate=min_backcheck_rate,
     )
 
     col1, _, col3 = st.columns(3)
@@ -1343,29 +1382,22 @@ def backchecks_report(
     else:
         st.subheader("Column Statistics")
         st.dataframe(column_category_summary, use_container_width=True, hide_index=True)
+
     st.write("")
 
-    # Generate statistics for enumerator and backchecker
-    if not bc_column_config_df.empty and enumerator and backchecker:
+    # Generate statistics for enumerator if enumerator is set
+    if not bc_column_config_df.empty and enumerator:
         enumerator_stats_summary, _ = generate_column_summary(
             column_config_data=bc_column_config_df,
             survey_data=survey_data,
             backcheck_data=backcheck_data,
             survey_id=survey_id,
-            enumerator=enumerator,
-            backchecker=backchecker,
-            summary_col=enumerator,
-        )
-        backchecker_statistics, _ = generate_column_summary(
-            column_config_data=bc_column_config_df,
-            survey_data=survey_data,
-            backcheck_data=backcheck_data,
-            survey_id=survey_id,
-            enumerator=enumerator,
-            backchecker=backchecker,
-            summary_col=backchecker,
+            enumerator=enumerator if enumerator else None,
+            backchecker=backchecker if backchecker else None,
+            summary_col=enumerator if enumerator else None,
         )
 
+        # Prepare enumerator statistics
         enumerator_statistics = (
             enumerator_stats_summary.groupby([enumerator])
             .agg(
@@ -1391,6 +1423,20 @@ def backchecks_report(
                 "# compared": "# of values compared",
                 "# different": "# of values different",
             }
+        )
+    else:
+        enumerator_statistics = pd.DataFrame()
+
+    # generate statistics for backchecker if backchecker is set
+    if not bc_column_config_df.empty and backchecker:
+        backchecker_statistics, _ = generate_column_summary(
+            column_config_data=bc_column_config_df,
+            survey_data=survey_data,
+            backcheck_data=backcheck_data,
+            survey_id=survey_id,
+            enumerator=enumerator if enumerator else None,
+            backchecker=backchecker if backchecker else None,
+            summary_col=backchecker if backchecker else None,
         )
 
         # Prepare backchecker statistics
@@ -1418,22 +1464,16 @@ def backchecks_report(
                 "Error Rate",
             ]
         ].copy()
-
-        # Display statistics tables
-        display_statistics_tables(
-            enumerator_statistics,
-            backchecker_statistics,
-            svy_bc_comparison_df,
-            enumerator,
-        )
     else:
-        st.write("Enumerator Statistics")
-        st.info(NO_BACKCHECK_COLUMNS_SET)
-        st.write("")
-        st.write("Backchecker Statistics")
-        st.info(NO_BACKCHECK_COLUMNS_SET)
-        st.write("")
-        st.write("Comparison Details")
-        st.info(NO_BACKCHECK_COLUMNS_SET)
+        backchecker_statistics = pd.DataFrame()
+
+    # Display statistics tables
+    display_statistics_tables(
+        enumerator_statistics=enumerator_statistics,
+        backchecker_statistics=backchecker_statistics,
+        comparison_df=svy_bc_comparison_df,
+        enumerator=enumerator if enumerator else None,
+        backchecker=backchecker if backchecker else None,
+    )
 
     st.write("")
