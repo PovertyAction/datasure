@@ -49,9 +49,9 @@ venv:
 lab:
     uv run jupyter lab
 
-# Format a single python file, "f"
-streamlit-run f:
-    uv run streamlit run {{ f }}
+# Launch DataSure Streamlit app for local testing
+datasure-dev:
+    uv run streamlit run src/datasure/app.py
 
 # Lint python code
 lint-py:
