@@ -20,7 +20,7 @@ from datasure.checks.backchecks import (
     _compute_group_stats,
     _compute_overall_stats,
     _create_merged_comparison_df,
-    _generate_personnel_statistics,
+    _generate_staff_statistics,
     _get_merge_columns,
     compute_backcheck_overview,
     generate_column_summary,
@@ -142,18 +142,24 @@ def test_process_duplicate_data(backcheck_survey_data, backcheck_data):
     assert len(backcheck_processed) == 3  # Original 3 unique survey_ids
 
     # Check that most recent dates are kept
-    assert (
-        survey_processed[survey_processed["survey_id"] == "S001"][
-            "submission_date"
-        ].iloc[0]
-        == "2024-01-10"
-    )
-    assert (
-        backcheck_processed[backcheck_processed["survey_id"] == "S001"][
-            "submission_date"
-        ].iloc[0]
-        == "2024-01-15"
-    )
+    # Convert to string for comparison since process_duplicate_data converts to datetime
+    survey_date = survey_processed[survey_processed["survey_id"] == "S001"][
+        "submission_date"
+    ].iloc[0]
+    backcheck_date = backcheck_processed[backcheck_processed["survey_id"] == "S001"][
+        "submission_date"
+    ].iloc[0]
+
+    # Handle both datetime and string formats
+    if hasattr(survey_date, "strftime"):
+        assert survey_date.strftime("%Y-%m-%d") == "2024-01-10"
+    else:
+        assert survey_date == "2024-01-10"
+
+    if hasattr(backcheck_date, "strftime"):
+        assert backcheck_date.strftime("%Y-%m-%d") == "2024-01-15"
+    else:
+        assert backcheck_date == "2024-01-15"
 
 
 def test_process_duplicate_data_no_duplicates(backcheck_survey_data, backcheck_data):
@@ -875,11 +881,11 @@ def test_get_merge_columns():
     assert result == ["survey_id"]
 
 
-def test_generate_personnel_statistics_enumerator(
+def test_generate_staff_statistics_enumerator(
     backcheck_survey_data, backcheck_data, backcheck_column_config
 ):
-    """Test _generate_personnel_statistics for enumerators."""
-    result = _generate_personnel_statistics(
+    """Test _generate_staff_statistics for enumerators."""
+    result = _generate_staff_statistics(
         backcheck_column_config,
         backcheck_survey_data,
         backcheck_data,
@@ -897,11 +903,11 @@ def test_generate_personnel_statistics_enumerator(
     assert "Error Rate" in result.columns
 
 
-def test_generate_personnel_statistics_backchecker(
+def test_generate_staff_statistics_backchecker(
     backcheck_survey_data, backcheck_data, backcheck_column_config
 ):
-    """Test _generate_personnel_statistics for backcheckers."""
-    result = _generate_personnel_statistics(
+    """Test _generate_staff_statistics for backcheckers."""
+    result = _generate_staff_statistics(
         backcheck_column_config,
         backcheck_survey_data,
         backcheck_data,
@@ -918,8 +924,8 @@ def test_generate_personnel_statistics_backchecker(
     assert "Error Rate" in result.columns
 
 
-def test_generate_personnel_statistics_empty_config():
-    """Test _generate_personnel_statistics with empty configuration."""
+def test_generate_staff_statistics_empty_config():
+    """Test _generate_staff_statistics with empty configuration."""
     empty_config = pd.DataFrame(
         columns=["column", "category", "ok_range", "comparison_condition"]
     )
@@ -928,7 +934,7 @@ def test_generate_personnel_statistics_empty_config():
         {"survey_id": [1], "backchecker": ["B1"], "age": [25]}
     )
 
-    result = _generate_personnel_statistics(
+    result = _generate_staff_statistics(
         empty_config,
         survey_data,
         backcheck_data,
@@ -942,8 +948,8 @@ def test_generate_personnel_statistics_empty_config():
     assert result.empty
 
 
-def test_generate_personnel_statistics_no_summary_col():
-    """Test _generate_personnel_statistics with no summary column."""
+def test_generate_staff_statistics_no_summary_col():
+    """Test _generate_staff_statistics with no summary column."""
     column_config = pd.DataFrame(
         {
             "column": ["age"],
@@ -957,7 +963,7 @@ def test_generate_personnel_statistics_no_summary_col():
         {"survey_id": [1], "backchecker": ["B1"], "age": [25]}
     )
 
-    result = _generate_personnel_statistics(
+    result = _generate_staff_statistics(
         column_config,
         survey_data,
         backcheck_data,

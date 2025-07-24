@@ -1181,6 +1181,18 @@ def _create_merged_comparison_df(
     svy_summary_cols = list(dict.fromkeys(svy_summary_cols))
     bc_summary_cols = list(dict.fromkeys(bc_summary_cols))
 
+    # Check if required columns exist before proceeding
+    missing_survey_cols = [
+        col for col in svy_summary_cols if col not in survey_data.columns
+    ]
+    missing_backcheck_cols = [
+        col for col in bc_summary_cols if col not in backcheck_data.columns
+    ]
+
+    if missing_survey_cols or missing_backcheck_cols:
+        # Return empty DataFrame if required columns are missing
+        return pd.DataFrame()
+
     # Get data for columns
     survey_col_data = survey_data[svy_summary_cols]
     backcheck_col_data = backcheck_data[bc_summary_cols]
@@ -1193,9 +1205,8 @@ def _create_merged_comparison_df(
         merged_df = pd.merge(
             survey_col_data, backcheck_col_data, on=survey_id, how="inner"
         )
-    except KeyError as e:
+    except KeyError:
         # Handle case where survey_id column doesn't exist
-        st.error(f"Column '{survey_id}' not found in data: {e}")
         return pd.DataFrame()
     else:
         return merged_df
@@ -1245,7 +1256,7 @@ def _handle_same_values(
 
 def _compare_numeric_values(svy_val: Any, bc_val: Any, ok_range: str) -> str | None:
     """Compare numeric values within specified range."""
-    with suppress(ValueError, TypeError):
+    try:
         svy_num = float(svy_val)
         bc_num = float(bc_val)
         diff = abs(svy_num - bc_num)
@@ -1266,6 +1277,9 @@ def _compare_numeric_values(svy_val: Any, bc_val: Any, ok_range: str) -> str | N
         else:
             allowed_diff = float(ok_range)
             return "not_different" if diff <= allowed_diff else "different"
+    except (ValueError, TypeError):
+        # If numeric conversion fails, mark as not_compared
+        return "not_compared"
     return None
 
 
