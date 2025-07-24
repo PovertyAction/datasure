@@ -1,9 +1,10 @@
 name: Build and Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_run:
+    workflows: ["Code Coverage"]
+    types:
+      - completed
   workflow_dispatch:
     inputs:
       version:
@@ -17,43 +18,44 @@ env:
 jobs:
   build-python-package:
     runs-on: ubuntu-latest
+    # Only run if:
+    # 1. Code Coverage workflow completed successfully AND was triggered by a tag push, OR
+    # 2. Manually triggered via workflow_dispatch
+    if: |
+      (github.event_name == 'workflow_run' && 
+       github.event.workflow_run.conclusion == 'success' && 
+       startsWith(github.event.workflow_run.head_branch, 'v')) ||
+      github.event_name == 'workflow_dispatch'
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
+        # For workflow_run events, checkout the tag that triggered the original workflow
+        ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || github.ref }}
 
     - name: Install UV
       uses: astral-sh/setup-uv@v6
       with:
+        python-version: ${{ env.PYTHON_VERSION }}
         enable-cache: true
         cache-dependency-glob: "uv.lock"
 
-    - name: Get version
+    - name: Get version for release conditions
       id: version
       shell: bash
       run: |
-        if [[ "${{ github.event_name }}" == "push" ]]; then
-          VERSION=${GITHUB_REF#refs/tags/}
-        else
+        if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+          VERSION="${{ github.event.workflow_run.head_branch }}"
+        elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
           VERSION="${{ github.event.inputs.version }}"
+        else
+          VERSION=${GITHUB_REF#refs/tags/}
         fi
         echo "version=$VERSION" >> $GITHUB_OUTPUT
-        echo "version_number=${VERSION#v}" >> $GITHUB_OUTPUT
 
-    - name: Update version in package
-      shell: bash
-      run: |
-        VERSION_NUMBER="${{ steps.version.outputs.version_number }}"
-        sed -i "s/__version__ = \".*\"/__version__ = \"$VERSION_NUMBER\"/" src/datasure/__init__.py
-
-    - name: Install dependencies and build package
+    - name: Build package
       run: |
         uv sync
         uv build
@@ -66,25 +68,25 @@ jobs:
         retention-days: 30
 
     - name: Publish to Test PyPI
-      if: contains(steps.version.outputs.version, '-') || github.event.inputs.version
+      if: contains(steps.version.outputs.version, '-') || github.event_name == 'workflow_dispatch'
       env:
-        TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        UV_PUBLISH_TOKEN: ${{ secrets.TEST_PYPI_API_TOKEN }}
       run: |
-        uv run --with twine twine upload --repository testpypi dist/*
+        uv publish --check-url https://test.pypi.org/simple --publish-url https://test.pypi.org/legacy/
       continue-on-error: true
 
     - name: Publish to PyPI
-      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && !contains(github.ref, '-')
+      if: |
+        (github.event_name == 'workflow_run' && !contains(steps.version.outputs.version, '-')) ||
+        (github.event_name == 'workflow_dispatch' && !contains(github.event.inputs.version, '-'))
       env:
-        TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
       run: |
-        uv run --with twine twine upload dist/*
+        uv publish
   create-release:
     needs: [build-python-package]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'workflow_run' && startsWith(github.event.workflow_run.head_branch, 'v')
 
     steps:
     - name: Download Python package artifacts
@@ -101,6 +103,6 @@ jobs:
           python-dist/*.tar.gz
         generate_release_notes: true
         draft: false
-        prerelease: ${{ contains(github.ref, '-') }}
+        prerelease: ${{ contains(github.event.workflow_run.head_branch, '-') }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
