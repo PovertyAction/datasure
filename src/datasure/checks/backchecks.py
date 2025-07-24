@@ -1394,9 +1394,13 @@ def backchecks_report(
         )
 
         # Prepare backchecker statistics
-        bcer_col = [  # noqa: RUF015
+        bcer_cols = [
             col for col in backchecker_statistics.columns if backchecker in col
-        ][0]
+        ]
+        if not bcer_cols:
+            st.error(f"Backchecker column '{backchecker}' not found in data.")
+            return
+        bcer_col = bcer_cols[0]
         backchecker_statistics = backchecker_statistics.rename(
             columns={
                 bcer_col: "Back Checker",
