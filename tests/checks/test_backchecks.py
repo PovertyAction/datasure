@@ -20,6 +20,8 @@ from datasure.checks.backchecks import (
     _compute_group_stats,
     _compute_overall_stats,
     _create_merged_comparison_df,
+    _generate_personnel_statistics,
+    _get_merge_columns,
     compute_backcheck_overview,
     generate_column_summary,
     load_default_backcheck_settings,
@@ -754,6 +756,219 @@ def test_backcheck_workflow_integration(backcheck_survey_data, backcheck_data):
     )
     assert len(results_df) > 0
     assert "comparison_result" in results_df.columns
+
+
+# ============================================
+# PERFORMANCE AND EDGE CASE TESTS
+# ============================================
+
+
+def test_generate_column_summary_performance():
+    """Test generate_column_summary with larger dataset for performance."""
+    # Create larger test datasets
+    survey_data = pd.DataFrame(
+        {
+            "survey_id": [f"S{i:03d}" for i in range(100)],
+            "enumerator": [f"E{i % 10}" for i in range(100)],
+            "age": range(25, 125),
+            "income": range(50000, 150000, 1000),
+        }
+    )
+
+    backcheck_data = pd.DataFrame(
+        {
+            "survey_id": [
+                f"S{i:03d}" for i in range(0, 100, 2)
+            ],  # 50 backcheck records
+            "backchecker": [f"B{i % 5}" for i in range(50)],
+            "age": range(25, 125, 2),
+            "income": range(50000, 150000, 2000),
+        }
+    )
+
+    column_config = pd.DataFrame(
+        {
+            "column": ["age", "income"],
+            "category": [1, 2],
+            "ok_range": ["2", "1000"],
+            "comparison_condition": ["", ""],
+        }
+    )
+
+    # Should complete without performance issues
+    summary_df, results_df = generate_column_summary(
+        column_config,
+        survey_data,
+        backcheck_data,
+        "survey_id",
+        "enumerator",
+        "backchecker",
+        None,
+    )
+
+    assert len(summary_df) == 2  # Two columns configured
+    assert len(results_df) == 100  # 50 backcheck records * 2 columns
+
+
+def test_create_merged_comparison_df_empty_data():
+    """Test _create_merged_comparison_df with empty data."""
+    empty_survey = pd.DataFrame(columns=["survey_id", "_svy_enumerator", "_svy_age"])
+    empty_backcheck = pd.DataFrame(columns=["survey_id", "_bc_backchecker", "_bc_age"])
+
+    result = _create_merged_comparison_df(
+        empty_survey,
+        empty_backcheck,
+        "survey_id",
+        "_svy_enumerator",
+        "_bc_backchecker",
+        "_svy_age",
+        "_bc_age",
+        None,
+    )
+
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 0
+
+
+def test_create_merged_comparison_df_missing_survey_id():
+    """Test _create_merged_comparison_df when survey_id column is missing."""
+    survey_data = pd.DataFrame({"_svy_enumerator": ["E1"], "_svy_age": [25]})
+    backcheck_data = pd.DataFrame({"_bc_backchecker": ["B1"], "_bc_age": [25]})
+
+    # Should handle missing survey_id gracefully
+    result = _create_merged_comparison_df(
+        survey_data,
+        backcheck_data,
+        "survey_id",  # This column doesn't exist
+        "_svy_enumerator",
+        "_bc_backchecker",
+        "_svy_age",
+        "_bc_age",
+        None,
+    )
+
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 0
+
+
+# ============================================
+# NEW HELPER FUNCTIONS TESTS
+# ============================================
+
+
+def test_get_merge_columns():
+    """Test _get_merge_columns helper function."""
+    # Test with no optional columns
+    result = _get_merge_columns(["survey_id"])
+    assert result == ["survey_id"]
+
+    # Test with optional columns (some None)
+    result = _get_merge_columns(["survey_id"], "enumerator", None, "date")
+    assert result == ["survey_id", "enumerator", "date"]
+
+    # Test avoiding duplicates
+    result = _get_merge_columns(["survey_id"], "survey_id", "enumerator")
+    assert result == ["survey_id", "enumerator"]
+
+    # Test all None optional columns
+    result = _get_merge_columns(["survey_id"], None, None, None)
+    assert result == ["survey_id"]
+
+
+def test_generate_personnel_statistics_enumerator(
+    backcheck_survey_data, backcheck_data, backcheck_column_config
+):
+    """Test _generate_personnel_statistics for enumerators."""
+    result = _generate_personnel_statistics(
+        backcheck_column_config,
+        backcheck_survey_data,
+        backcheck_data,
+        "survey_id",
+        "enumerator",
+        "backchecker",
+        "enumerator",
+        "enumerator",
+    )
+
+    assert not result.empty
+    assert "Enumerator" in result.columns or "enumerator" in result.columns
+    assert "# back checked" in result.columns
+    assert "% back checked" in result.columns
+    assert "Error Rate" in result.columns
+
+
+def test_generate_personnel_statistics_backchecker(
+    backcheck_survey_data, backcheck_data, backcheck_column_config
+):
+    """Test _generate_personnel_statistics for backcheckers."""
+    result = _generate_personnel_statistics(
+        backcheck_column_config,
+        backcheck_survey_data,
+        backcheck_data,
+        "survey_id",
+        "enumerator",
+        "backchecker",
+        "backchecker",
+        "backchecker",
+    )
+
+    assert not result.empty
+    assert "Back Checker" in result.columns or "backchecker" in result.columns
+    assert "# back checked" in result.columns
+    assert "Error Rate" in result.columns
+
+
+def test_generate_personnel_statistics_empty_config():
+    """Test _generate_personnel_statistics with empty configuration."""
+    empty_config = pd.DataFrame(
+        columns=["column", "category", "ok_range", "comparison_condition"]
+    )
+    survey_data = pd.DataFrame({"survey_id": [1], "enumerator": ["E1"], "age": [25]})
+    backcheck_data = pd.DataFrame(
+        {"survey_id": [1], "backchecker": ["B1"], "age": [25]}
+    )
+
+    result = _generate_personnel_statistics(
+        empty_config,
+        survey_data,
+        backcheck_data,
+        "survey_id",
+        "enumerator",
+        "backchecker",
+        "enumerator",
+        "enumerator",
+    )
+
+    assert result.empty
+
+
+def test_generate_personnel_statistics_no_summary_col():
+    """Test _generate_personnel_statistics with no summary column."""
+    column_config = pd.DataFrame(
+        {
+            "column": ["age"],
+            "category": [1],
+            "ok_range": [""],
+            "comparison_condition": [""],
+        }
+    )
+    survey_data = pd.DataFrame({"survey_id": [1], "enumerator": ["E1"], "age": [25]})
+    backcheck_data = pd.DataFrame(
+        {"survey_id": [1], "backchecker": ["B1"], "age": [25]}
+    )
+
+    result = _generate_personnel_statistics(
+        column_config,
+        survey_data,
+        backcheck_data,
+        "survey_id",
+        "enumerator",
+        "backchecker",
+        None,  # No summary column
+        "enumerator",
+    )
+
+    assert result.empty
 
 
 # ============================================
