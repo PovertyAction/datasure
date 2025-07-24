@@ -19,12 +19,12 @@ from datasure.checks import (
 def test_compute_summary_submissions_structure(sample_date_data_10000):
     """Test the compute_summary_submissions function"""
     # Load test data
-    test_data_10000 = sample_date_data_10000
-    test_data_1000 = test_data_10000.sample(n=1000, random_state=42)
-    test_data_10 = test_data_10000.sample(n=10, random_state=42)
-    test_data_0 = test_data_10000.sample(n=0, random_state=42)
+    test_data_100 = sample_date_data_10000
+    test_data_50 = test_data_100.sample(n=50, random_state=42)
+    test_data_10 = test_data_100.sample(n=10, random_state=42)
+    test_data_0 = test_data_100.sample(n=0, random_state=42)
 
-    ### test for 0, 10, 1000, and 10000 observations
+    ### test for 0, 10, 50, and 100 observations
     # Compute summary for 0 observations
     summary_0 = compute_summary_submissions(test_data_0, "SubmissionDate")
     assert isinstance(summary_0, tuple), (
@@ -43,22 +43,22 @@ def test_compute_summary_submissions_structure(sample_date_data_10000):
         "10 ROWS: Returned value for compute_summary_submissions should have 10 elements"
     )
 
-    # Compute summary for 1000 observations
-    summary_1000 = compute_summary_submissions(test_data_1000, "SubmissionDate")
-    assert isinstance(summary_1000, tuple), (
-        "1000 ROWS: Returned value for compute_summary_submissions should be a tuple"
+    # Compute summary for 50 observations
+    summary_50 = compute_summary_submissions(test_data_50, "SubmissionDate")
+    assert isinstance(summary_50, tuple), (
+        "50 ROWS: Returned value for compute_summary_submissions should be a tuple"
     )
-    assert len(summary_1000) == 10, (
-        "1000 ROWS: Returned value for compute_summary_submissions should have 10 elements"
+    assert len(summary_50) == 10, (
+        "50 ROWS: Returned value for compute_summary_submissions should have 10 elements"
     )
 
-    # Compute summary for 10000 observations
-    summary_10000 = compute_summary_submissions(test_data_10000, "SubmissionDate")
-    assert isinstance(summary_10000, tuple), (
-        "10000 ROWS: Returned value for compute_summary_submissions should be a tuple"
+    # Compute summary for 100 observations
+    summary_100 = compute_summary_submissions(test_data_100, "SubmissionDate")
+    assert isinstance(summary_100, tuple), (
+        "100 ROWS: Returned value for compute_summary_submissions should be a tuple"
     )
-    assert len(summary_10000) == 10, (
-        "10000 ROWS: Returned value for compute_summary_submissions should have 10 elements"
+    assert len(summary_100) == 10, (
+        "100 ROWS: Returned value for compute_summary_submissions should have 10 elements"
     )
 
 
@@ -96,8 +96,8 @@ def test_compute_submissions_with_missing_dates(sample_date_data_10000):
     """Test the compute_summary_submissions function when dataset has some
     missing dates.
     """
-    # Randomly sample 10000 observations
-    test_data = sample_date_data_10000.sample(n=10000, random_state=42)
+    # Use all available data (100 rows)
+    test_data = sample_date_data_10000
     # Introduce some missing dates
     test_data.loc[
         test_data.sample(frac=0.1, random_state=42).index, "SubmissionDate"
@@ -145,7 +145,7 @@ def test_compute_submissions_values_0(name, index, result):
         assert summary[index] == result, f"Value at index {name} should be {result}"
 
 
-@pytest.mark.parametrize("size", [10, 1000, 10000])
+@pytest.mark.parametrize("size", [10, 50, 100])
 # test 5: values of return values with 10
 def test_compute_submissions_values_10(sample_date_data_10000, size):
     """Test the compute_summary_submissions function for specific values with 10

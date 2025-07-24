@@ -377,6 +377,71 @@ Cross-platform command automation:
 - **Pre-commit Hooks**: Automatic formatting and linting
 - **Line Length**: 88 characters (Black-compatible)
 
+#### ⚠️ CRITICAL: Linting Requirements for Claude Code
+
+**ALWAYS run linting checks before completing any coding task to prevent pre-commit hook failures:**
+
+```bash
+just lint-py              # Must pass with no errors
+```
+
+**Common linting errors to avoid:**
+
+1. **F841 - Unused variables**: Remove or prefix with underscore
+
+   ```python
+   # Bad
+   result = some_function()
+   
+   # Good - if not using result
+   some_function()
+   
+   # Good - if intentionally unused
+   _result = some_function()
+   ```
+
+2. **F811 - Redefinition**: Check for duplicate class/function names
+3. **W505 - Line too long**: Keep lines ≤ 88 characters
+4. **B007 - Unused loop variables**: Prefix with underscore
+
+   ```python
+   # Bad
+   for item in items:
+       process_something()
+   
+   # Good
+   for _item in items:
+       process_something()
+   ```
+
+5. **TRY301 - Abstract raise**: Move raise statements to helper functions
+
+   ```python
+   # Bad
+   if condition:
+       raise ValueError("Error")
+   
+   # Good
+   def _handle_error():
+       raise ValueError("Error")
+   
+   if condition:
+       _handle_error()
+   ```
+
+**Mandatory workflow for code changes:**
+
+1. Write/modify code
+2. Run `just lint-py`
+3. Fix any linting errors
+4. Only then commit changes
+
+**If linting fails:**
+
+- Fix ALL errors before proceeding
+- Never ignore linting errors
+- Pre-commit hooks WILL block commits with linting violations
+
 ### Code Quality Checks
 
 - **SonarQube Cloud**: Continuous code quality analysis
