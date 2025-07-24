@@ -685,22 +685,25 @@ def _calculate_column_summary_stats(
 
     # get corresponding summary column name in merged_df
     if summary_col:
-        summary_col_name = [col for col in merged_df.columns if summary_col in col][0]  # noqa: RUF015
+        matching_cols = [col for col in merged_df.columns if summary_col in col]
+        summary_col_name = matching_cols[0] if matching_cols else None
 
-    if summary_col and len(summary_col_name) > 0:
-        # Group by summary column
-        merged_df = merged_df.rename(columns={summary_col_name: summary_col})
-        for group_name, group_df in merged_df.groupby(summary_col):
-            stats = _compute_group_stats(group_df, merged_df, summary_col, group_name)
-            summary_data.append(
-                {
-                    "column": column_name,
-                    "data type": data_type,
-                    "category": column_type,
-                    summary_col: group_name,
-                    **stats,
-                }
-            )
+        if summary_col_name:
+            # Group by summary column
+            merged_df = merged_df.rename(columns={summary_col_name: summary_col})
+            for group_name, group_df in merged_df.groupby(summary_col):
+                stats = _compute_group_stats(
+                    group_df, merged_df, summary_col, group_name
+                )
+                summary_data.append(
+                    {
+                        "column": column_name,
+                        "data type": data_type,
+                        "category": column_type,
+                        summary_col: group_name,
+                        **stats,
+                    }
+                )
     else:
         # Overall statistics
         stats = _compute_overall_stats(merged_df)
@@ -900,8 +903,14 @@ def display_error_trends(
     st.subheader("Error Trends")
     trend_cols = st.columns([2, 1])
 
+    date_columns = [col for col in error_trends_summary if date in col]
+    if not date_columns:
+        st.error(
+            f"No columns in the data match the date string '{date}'. Please check your date column name."
+        )
+        return
+    date_col = date_columns[0]
     category_list = error_trends_summary["category"].unique().tolist()
-    date_col = [col for col in error_trends_summary if date in col][0]  # noqa: RUF015
 
     error_trends_summary[date_col] = pd.to_datetime(error_trends_summary[date_col])
 
