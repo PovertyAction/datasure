@@ -1,5 +1,5 @@
 import os
-from collections import defaultdict
+import re
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -7,6 +7,8 @@ import seaborn as sns
 import streamlit as st
 
 from datasure.utils import (
+    duckdb_get_table,
+    duckdb_save_table,
     get_check_config_settings,
     get_df_info,
     load_check_settings,
@@ -69,82 +71,132 @@ def load_default_settings(project_id: str, settings_file: str, page_num: int) ->
     )
 
 
-# Function for joint outlier detection: find variable patterns
-@st.cache_data
-def find_variable_patterns(columns):
-    """Identify patterns in variable names based on underscores.
+def expand_col_names(col_names, pattern, search_type='exact'):
+    """
+    Expand column names based on a pattern and search type.
     Args:
-        columns (list): List of column names.
-
-    Returns
-    -------
-        dict: Dictionary with base patterns as keys and lists
-        of matching columns as values.
+        col_names (list): List of column names to search in.
+        pattern (str): Pattern to match against column names.
+        search_type (str): Type of search to perform. Options are:
+            - 'exact': Match exactly
+            - 'startswith': Match if column name starts with the pattern
+            - 'endswith': Match if column name ends with the pattern
+            - 'contains': Match if column name contains the pattern
+            - 'regex': Use regex to match column names
+    Returns:
+        list: List of column names that match the pattern based on the search type.
     """
-    patterns = defaultdict(list)
-    for col in columns:
-        # Split the column name on underscores
-        parts = col.split("_")
+    # Validate input parameters
+    if not isinstance(col_names, list):
+        raise TypeError("col_names must be a list of column names.")
+    if not pattern and not isinstance(pattern, str):
+        raise TypeError("pattern must be a string.")
 
-        # Identify the base pattern
-        base = "_".join(parts[:-1])
+    search_funcs = {
+        'exact': lambda col: col == pattern,
+        'startswith': lambda col: col.startswith(pattern),
+        'endswith': lambda col: col.endswith(pattern),
+        'contains': lambda col: pattern in col,
+        'regex': lambda col: re.match(pattern, col)
+    }
 
-        # Append the column to the list for this base pattern
-        patterns[base].append(col)
+    # Check if the search_type is valid
+    if search_type not in search_funcs:
+        raise ValueError(f"Invalid search_type '{search_type}'. Choose from: {', '.join(search_funcs.keys())}.")
 
-    # Filter out single-variable patterns
-    return {k: v for k, v in patterns.items() if len(v) > 1}
+    return [col for col in col_names if search_funcs[search_type](col)]
 
 
-# Function for joint outlier detection: show pattern selection
-@st.cache_data
-def show_pattern_selection(df, survey_id, pattern_groups, selected_patterns):
-    """Generate a pattern from selected variable names and
-    return the selected columns and melted DataFrame.
+def update_outlier_settings(
+    project_id: str,
+    label: str,
+    search_type: str,
+    outlier_cols: list,
+    outlier_method: str,
+    outlier_multiplier: float,
+    grouped_cols: bool | None,
+    pattern: str | None,
+    lock_cols: bool | None,
+    soft_min: float | None,
+    soft_max: float | None,
+) -> None:
     """
-    if pattern_groups:
-        # Create pattern options for display
-        pattern_options = [
-            f"{pattern} ({len(cols)} variables)"
-            for pattern, cols in pattern_groups.items()
-        ]
+    Update the outlier settings based on user input.
+    Args:
+        search_type (str): Type of search to perform on the column names.
+        pattern (str): Pattern to match against column names.
+        outlier_cols (list): List of columns to check for outliers.
+        lock_cols (bool): Whether to lock the selected columns.
+        outlier_method (str): Outlier detection method.
+        outlier_multiplier (float): Multiplier for outlier detection.
+        soft_min (float | None): Soft minimum value for outlier detection.
+        soft_max (float | None): Soft maximum value for outlier detection.
+        settings_file (str): Path to the settings file.
+    """
+    # validate input parameters
+    if not isinstance(outlier_cols, list):
+        raise TypeError("outlier_cols must be a list of column names.")
+    if not isinstance(search_type, str):
+        raise TypeError("search_type must be a string.")
+    if pattern is not None and not isinstance(pattern, str):
+        raise TypeError("pattern must be a string.")
+    if not isinstance(outlier_method, str):
+        raise TypeError("outlier_method must be a string.")
+    if not isinstance(outlier_multiplier, (int, float)): #noqa UP038
+        raise TypeError("outlier_multiplier must be a number.")
+    if soft_min is not None and not isinstance(soft_min, (int, float)): #noqa UP038
+        raise TypeError("soft_min must be a number or None.")
+    if soft_max is not None and not isinstance(soft_max, (int, float)): #noqa UP038
+        raise TypeError("soft_max must be a number or None.")
+    if lock_cols is not None and not isinstance(lock_cols, bool):
+        raise TypeError("lock_cols must be a boolean or None.")
+    if grouped_cols is not None and not isinstance(grouped_cols, bool):
+        raise TypeError("grouped_cols must be a boolean or None.")
 
-        # Create mapping from display name to base pattern
-        pattern_to_base = {  # noqa: F841
-            display: pattern
-            for pattern, display in zip(
-                pattern_groups.keys(), pattern_options, strict=False
-            )
-        }
+    # get current settings data
+    logs = duckdb_get_table(
+        project_id=project_id,
+        alias=f"outliers_setting_logs_{label}",
+        db_name="logs",
+    ).to_pandas()
 
-        # Handle selected patterns
-        if selected_patterns:
-            # Get all columns from selected patterns
-            selected_cols = []
-            base_patterns = []
-            for pattern in selected_patterns:
-                if pattern in pattern_groups:
-                    selected_cols.extend(pattern_groups[pattern])
-                    base_patterns.append(pattern)
+    # append new settings to the logs
+    new_settings = {
+        "search_type": search_type,
+        "pattern": pattern,
+        "outlier_cols": outlier_cols,
+        "lock_cols": lock_cols,
+        "grouped_cols": grouped_cols,
+        "outlier_method": outlier_method,
+        "outlier_multiplier": outlier_multiplier,
+        "soft_min": soft_min,
+        "soft_max": soft_max,
+    }
 
-            if selected_cols:
-                base_pattern = " & ".join(base_patterns)  # Combine pattern names
-                df_subset = df[[survey_id] + selected_cols]
-                reshaped_joint_outliers_df = pd.melt(
-                    df_subset,
-                    id_vars=[survey_id],
-                    value_vars=selected_cols,
-                    var_name="name_variable",
-                    value_name="new_var",
-                )
-                return base_pattern, selected_cols, reshaped_joint_outliers_df
+    if not logs.empty:
+        # if logs already exist, append new settings
+        logs = pd.concat([logs, pd.DataFrame([new_settings])], ignore_index=True)
+        # check if there are duplicate settings and drop one 
+        logs = logs.drop_duplicates(
+            subset=["outlier_cols"],
+            keep="last",
+        )
+    else:
+        # if logs do not exist, create new logs with the new settings
+        logs = pd.DataFrame([new_settings])
 
-    return None, None, None
+    # save the updated settings to the database
+    duckdb_save_table(
+        project_id=project_id,
+        table_data= logs,
+        alias=f"outliers_setting_logs_{label}",
+        db_name="logs",
+    )
 
 
 # outliers check settings
 def outliers_report_settings(
-    project_id: str, data: pd.DataFrame, settings_file: str, page_num: int
+    project_id: str, data: pd.DataFrame, settings_file: str, label: str
 ) -> tuple:
     """
     Function to create a report on survey duplicates
@@ -161,239 +213,258 @@ def outliers_report_settings(
             "###### Select columns and the outlier detection method to include in the report"
         )
 
-        all_cols, string_columns, numeric_columns, datetime_columns, _ = get_df_info(
+        all_cols, _, numeric_columns, _, _ = get_df_info(
             data, cols_only=True
         )
 
-        id_enum_col_options = string_columns + datetime_columns
+        search_type_options = [
+            "exact",
+            "startswith",
+            "endswith",
+            "contains",
+            "regex"
+        ]
 
-        # load default settings
-        (
-            default_survey_id,
-            default_enumerator,
-            default_survey_key,
-            default_outlier_cols,
-            default_outlier_method,
-            default_sd_value,
-            default_iqr_value,
-            default_selected_pattern,
-        ) = load_default_settings(project_id, settings_file, page_num)
-
-        var_col, method_col, survey_col = st.columns(spec=3, border=True)
-
-        with var_col:
-            outlier_cols = st.multiselect(
-                "Columns to check for outliers",
-                options=numeric_columns,
-                default=default_outlier_cols,
-                help="Columns to check for outliers",
-                key="outlier_cols",
-                on_change=trigger_save,
-                kwargs={"state_name": "outlier_cols_save"},
-            )
-            if (
-                "outlier_cols_save" in st.session_state
-                and st.session_state.outlier_cols_save
-            ):
-                save_check_settings(
-                    settings_file=settings_file,
-                    check_name="outliers",
-                    check_settings={"outlier_cols": outlier_cols},
-                )
-                st.session_state["outlier_cols_save"] = False
-        with method_col:
-            outlier_method_options = [
-                "Interquartile Range (IQR)",
-                "Standard Deviation (SD)",
-            ]
-            outlier_method = st.radio(
-                label="Outlier Detection Method",
-                options=outlier_method_options,
-                index=default_outlier_method,
-                on_change=trigger_save,
-                kwargs={"state_name": "outlier_method_save"},
-            )
-            if (
-                "outlier_method_save" in st.session_state
-                and st.session_state.outlier_method_save
-            ):
-                save_check_settings(
-                    settings_file=settings_file,
-                    check_name="outliers",
-                    check_settings={"outlier_method", outlier_method},
-                )
-                st.session_state.outlier_method_save = False
-
-            if outlier_method == "Standard Deviation (SD)":
-                sd_value = st.number_input(
-                    "Number of Standard Deviations:",
-                    value=3.0 if default_sd_value is None else default_sd_value,
-                    key="sd_value_outliers",
-                    help="The number of standard deviations from the mean to use for outlier detection.",
-                    on_change=trigger_save,
-                    kwargs={"state_name": "sd_value_save"},
-                )
-                if (
-                    "sd_value_save" in st.session_state
-                    and st.session_state.sd_value_save
-                ):
-                    save_check_settings(
-                        settings_file=settings_file,
-                        check_name="outliers",
-                        check_settings={"sd_value": sd_value},
-                    )
-                    st.session_state.sd_value_save = False
-            else:
-                iqr_value = st.number_input(
-                    "IQR Value:",
-                    value=1.5 if default_iqr_value is None else default_iqr_value,
-                    help="The IQR value is used to determine the range of values that are considered outliers.",
-                    key="iqr_value_outliers",
-                    on_change=trigger_save,
-                    kwargs={"state_name": "iqr_value_save"},
-                )
-                if (
-                    "iqr_value_save" in st.session_state
-                    and st.session_state.iqr_value_save
-                ):
-                    save_check_settings(
-                        settings_file=settings_file,
-                        check_name="outliers",
-                        check_settings={"iqr_value": iqr_value},
-                    )
-                    st.session_state.iqr_value_save = False
-        with survey_col:
-            default_survey_id_index = (
-                id_enum_col_options.index(default_survey_id)
-                if default_survey_id and default_survey_id in id_enum_col_options
-                else None
-            )
-            survey_id = st.selectbox(
-                "Survey ID",
-                options=id_enum_col_options,
-                help="Select the column that contains the survey ID",
-                key="survey_id_outliers",
-                index=default_survey_id_index,
-                on_change=trigger_save,
-                kwargs={"state_name": "survey_id_save"},
-            )
-            if "survey_id_save" in st.session_state and st.session_state.survey_id_save:
-                save_check_settings(
-                    settings_file=settings_file,
-                    check_name="outliers",
-                    check_settings={"survey_id": survey_id},
-                )
-                st.session_state.survey_id_save = False
-
-            default_enumerator_index = (
-                id_enum_col_options.index(default_enumerator)
-                if default_enumerator and default_enumerator in id_enum_col_options
-                else None
-            )
-            enumerator = st.selectbox(
-                "Enumerator ID",
-                options=id_enum_col_options,
-                key="enumerator_outliers",
-                help="Select the column that contains the enumerator ID",
-                index=default_enumerator_index,
-                on_change=trigger_save,
-                kwargs={"state_name": "enumerator_save"},
-            )
-            if (
-                "enumerator_save" in st.session_state
-                and st.session_state.enumerator_save
-            ):
-                save_check_settings(
-                    settings_file=settings_file,
-                    check_name="outliers",
-                    check_settings={"enumerator": enumerator},
-                )
-                st.session_state.enumerator_save = False
-
-            default_survey_key_index = (
-                id_enum_col_options.index(default_survey_key)
-                if default_survey_key and default_survey_key in id_enum_col_options
-                else None
-            )
-            survey_key = st.selectbox(
-                "Survey Key",
-                options=id_enum_col_options,
-                key="survey_key_outliers",
-                help="Select the column that contains the survey key",
-                index=default_survey_key_index,
-                on_change=trigger_save,
-                kwargs={"state_name": "survey_key_save"},
-            )
-            if (
-                "survey_key_save" in st.session_state
-                and st.session_state.survey_key_save
-            ):
-                save_check_settings(
-                    settings_file=settings_file,
-                    check_name="outliers",
-                    check_settings={"survey_key": survey_key},
-                )
-                st.session_state.survey_key_save = False
-
-        # joint outlier detection
-        st.write("---")
-        st.markdown("###### Joint Outlier Detection")
-        st.write(
-            """If you'd like to detect outliers based on a joint
-            distribution of several variables (for example,
-            same variable corresponding to different household
-            members), please select the set of variables""",
-        )
-        selected_pattern = st.multiselect(
-            "Please select the set of variables",
-            options=numeric_columns,
-            default=default_selected_pattern,
-            key="selected_pattern",
-            help="""Choose a group of related variables to analyze.
-                    Only numeric variables are shown.
-                    """,
+        # show display columns
+        st.markdown("### Display columns")
+        outlier_display_cols = st.multiselect(
+            label="Select columns to display in the outliers report",
+            options=all_cols,
+            default=None,
+            help="Select columns to display in the outliers report eg. survey key, enumerator, survey ID, etc.",
             on_change=trigger_save,
-            kwargs={"state_name": "selected_pattern_save"},
+            kwargs={"state_name", "outlier_disp_save"},
         )
-        if (
-            "selected_pattern_save" in st.session_state
-            and st.session_state.selected_pattern_save
-        ):
+        if "outlier_disp_save" in st.session_state and st.session_state.outlier_disp_save:
             save_check_settings(
                 settings_file=settings_file,
                 check_name="outliers",
-                check_settings={"selected_pattern": selected_pattern},
+                check_settings={"outlier_disp_cols": outlier_display_cols},
             )
-            st.session_state.selected_pattern_save = False
 
-        if selected_pattern:
-            # find variable patterns
-            pattern_groups = find_variable_patterns(numeric_columns)
+        # adding outlier columns and settings
+        st.markdown("### Outlier columns")
+        st.info("Use the :material/add: button to add columns to check for outliers. Use the :material/edit: button to modify "
+        "and the :material/delete: button to remove columns.")
 
-            # show pattern selection
-            base_pattern, selected_cols, reshaped_joint_outliers_df = (
-                show_pattern_selection(
-                    data, survey_id, pattern_groups, selected_pattern
+        oc1, oc2, _ = st.columns([0.4, 0.3, 0.3])
+        with oc1, st.popover(
+            label=":material/add: Add outlier column", use_container_width=True):
+            search_type = st.selectbox(
+                label="Search type",
+                options=search_type_options,
+                index=0,
+                help="Select the type of search to perform on the column names.",
+            )
+
+            def search_type_info(search_type: str) -> None:
+                """Display info based on the selected search type."""
+                if search_type == "exact":
+                    st.info("Select columns that match the exact name. You may select multiple columns.")
+                elif search_type == "startswith":
+                    st.info("Select columns that start with the specified pattern. You will have to enter the pattern in the input box below.")
+                elif search_type == "endswith":
+                    st.info("Select columns that end with the specified pattern. You will have to enter the pattern in the input box below.")
+                elif search_type == "contains":
+                    st.info("Select columns that contain the specified pattern. You will have to enter the pattern in the input box below.")
+                elif search_type == "regex":
+                    st.info("Select columns that match the specified regex pattern. You will have to enter the pattern in the input box below.")
+
+            search_type_info(search_type=search_type)
+
+
+            if search_type == "exact":
+                outlier_cols_sel = st.multiselect(
+                    label="Select columns to check for outliers",
+                    options=numeric_columns,
+                    default=None,
+                    help="Select column or group of columns to check for outliers. " \
+                    "Only numeric columns are available for outlier detection.",
                 )
-            )
-            if selected_cols:
-                with st.container():
-                    st.write(
-                        f"Below are selected variables for the selected pattern: '{base_pattern}'"
-                    )
-                    st.write(", ".join(selected_cols))
 
-        return (
-            outlier_cols,
-            survey_id,
-            enumerator,
-            survey_key,
-            outlier_method,
-            sd_value if outlier_method == "Standard Deviation (SD)" else None,
-            iqr_value if outlier_method == "Interquartile Range (IQR)" else None,
-            selected_cols if selected_pattern else [],
-            reshaped_joint_outliers_df if selected_pattern else None,
-        )
+                # set other options to None
+                pattern, lock_cols = None, None
+            else:
+                pattern = st.text_input(
+                    label="Enter pattern to match column names",
+                    placeholder="Enter pattern to match column names",
+                    help="Enter the pattern to match column names based on the selected search type.",
+                )
+                if pattern:
+                    outlier_cols_patt = expand_col_names(
+                        numeric_columns, pattern, search_type=search_type
+                    )
+                else:
+                    outlier_cols_patt = []
+
+                st.write("**Columns Selected:**, ", ", ".join(outlier_cols_patt) if outlier_cols_patt else "None")
+
+            outlier_cols = outlier_cols_sel if search_type == "exact" else outlier_cols_patt
+
+            if outlier_cols:
+                with st.container(border=True):
+                    st.write("**Column Options:**")
+
+                    gc1, gc2 = st.columns([0.5, 0.5])
+                    with gc1:
+                        grouped_cols = st.toggle(
+                            label="Group columns",
+                            key="outlier_cols_grouped",
+                            help="Group selected columns together for outlier detection. " \
+                            "If grouped, outliers will be detected across all selected columns as a single group.",
+                            disabled=not outlier_cols or len(outlier_cols) < 2,
+                        )
+                    with gc2:
+                        lock_cols = st.toggle(
+                            label="Lock column selection",
+                            key="outlier_cols_lock",
+                            help="Lock the selected columns to prevent changes. " \
+                            "If unlocked, column list may be updated when the data changes.",
+                            disabled=not outlier_cols or len(outlier_cols) < 2 or search_type == "exact",
+                        )
+            else:
+                grouped_cols, lock_cols = False, False
+
+            if not outlier_cols:
+                st.warning("No columns selected. Please select columns to check for outliers.")
+            else:
+                with st.container(border=True):
+                    st.write("**Outlier Options:**")
+                    uc1, uc2 = st.columns([0.5, 0.5])
+
+                    with uc1:
+                        outlier_method = st.selectbox(
+                            label="Select outlier detection method",
+                            options=[
+                                "Interquartile Range (IQR)",
+                                "Standard Deviation (SD)",
+                            ],
+                            index=0,
+                            help="Select the method to use for outlier detection.",
+                            key="outlier_method",
+                        )
+                    with uc2:
+                        outlier_multiplier = st.number_input(
+                            label="Select multiplier for outlier detection",
+                            min_value=0.0,
+                            max_value=3.0,
+                            value=1.5 if outlier_method == "Interquartile Range (IQR)" else 3.0,
+                            step=0.1,
+                            help="Select the multiplier to use for outlier detection. " \
+                            "For IQR method, this is the multiplier for the interquartile range. " \
+                            "For SD method, this is the number of standard deviations from the mean.",
+                            key="outlier_multiplier",
+                        )
+
+                    lc1, lc2 = st.columns([0.5, 0.5])
+                    with lc1:
+                        soft_min = st.number_input(
+                            label="(OPTIONAL) Soft minimum",
+                            help="(OPTIONAL) Soft minimum value for outlier detection. " \
+                            "All values below this will be considered as outliers regardless of the method used.",
+                            value=None,
+                        )
+                    with lc2:
+                        soft_max = st.number_input(
+                            label="(OPTIONAL) Soft maximum",
+                            help="(OPTIONAL) Soft maximum value for outlier detection. " \
+                            "All values above this will be considered as outliers regardless of the method used.",
+                            value=None,
+                        )
+
+            st.button(
+                label="Add outlier column",
+                type="primary",
+                use_container_width=True,
+                on_click=update_outlier_settings,
+                kwargs={
+                    "project_id": project_id,
+                    "label": label,
+                    "search_type": search_type,
+                    "outlier_cols": outlier_cols,
+                    "outlier_method": outlier_method,
+                    "outlier_multiplier": outlier_multiplier,
+                    "grouped_cols": grouped_cols,
+                    "pattern": pattern,
+                    "lock_cols": lock_cols,
+                    "soft_min": soft_min,
+                    "soft_max": soft_max,
+                },
+                disabled=not outlier_cols,
+            )
+
+        with oc2, st.popover(label=":material/delete: Delete outlier column", use_container_width=True):
+            st.markdown("### Remove outlier columns")
+
+            logs = duckdb_get_table(
+                project_id=project_id,
+                alias=f"outliers_setting_logs_{label}",
+                db_name="logs",
+            ).to_pandas()
+
+            if logs.empty:
+                st.info("No outlier columns have been added yet. Please add outlier columns to remove them.")
+            else:
+                 # add new new column combine index, search_type and pattern
+                logs["index"] = logs.index.astype(str) + " - " + logs["search_type"] + " - " + logs["pattern"].fillna("")
+
+                # get unique values in index
+                unique_index = logs["index"].unique().tolist()
+
+                selected_index = st.selectbox(label="Select outlier column to remove",
+                    options=unique_index,
+                    help="Select the outlier column to remove from the list of added outlier columns.",
+                )
+
+                if selected_index:
+                    # confirm deletion
+                    confirm_delete = st.button(
+                        label="Confirm deletion",
+                        type="primary",
+                        use_container_width=True,
+                    )
+                    if confirm_delete:
+                        # remove the selected index from the logs
+                        logs = logs[logs["index"] != selected_index]
+
+                        # remove index column
+                        logs = logs.drop(columns=["index"])
+
+                        # save the updated logs to the database
+                        duckdb_save_table(
+                            project_id=project_id,
+                            table_data=logs,
+                            alias=f"outliers_setting_logs_{label}",
+                            db_name="logs",
+                        )
+
+        outlier_logs = duckdb_get_table(project_id=project_id, alias=f"outliers_setting_logs_{label}",
+        db_name="logs",).to_pandas()
+
+        if outlier_logs.empty:
+            st.info("No outlier columns have been added yet. Please add outlier columns to see the settings.")
+
+        else:
+            st.dataframe(outlier_logs, use_container_width=True, hide_index=False,column_config={
+                "search_type": st.column_config.Column("Search Type"),
+                "pattern": st.column_config.Column("Pattern"),
+                "outlier_cols": st.column_config.Column("Outlier Columns"),
+                "lock_cols": st.column_config.Column("Lock Columns"),
+                "grouped_cols": st.column_config.Column("Grouped Columns"),
+                "outlier_method": st.column_config.Column("Outlier Method"),
+                "outlier_multiplier": st.column_config.NumberColumn(
+                    "Outlier Multiplier", format="%.2f"
+                ),
+                "soft_min": st.column_config.NumberColumn(
+                    "Soft Min", format="%.2f", width="small"
+                ),
+                "soft_max": st.column_config.NumberColumn(
+                    "Soft Max", format="%.2f", width="small"
+                ),
+            })
+
+
+
 
 
 # Function to detect outliers
@@ -811,6 +882,12 @@ def outliers_report(
     Returns:
 
     """
+    current_pages_df = duckdb_get_table(
+        project_id=project_id, alias="check_config", db_name="logs"
+    ).to_pandas()
+
+    label = current_pages_df.iloc[page_num-1]["page_name"]
+
     # outliers settings
     (
         outlier_cols,
@@ -822,7 +899,7 @@ def outliers_report(
         iqr_value,
         selected_cols,
         reshaped_joint_outliers_df,
-    ) = outliers_report_settings(project_id, data, setting_file, page_num)
+    ) = outliers_report_settings(project_id, data, setting_file, label)
 
     # Check that required options have been selected. If not, display a info message
     # Check for outliers
