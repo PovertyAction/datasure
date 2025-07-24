@@ -502,7 +502,6 @@ def _generate_backcheck_summaries(
         else:
             st.session_state.total_backcheck_error_rate = "n/a"
     else:
-        st.info("Configure backcheck columns in the settings section above.")
         column_category_summary = pd.DataFrame()
         svy_bc_comparison_df = pd.DataFrame()
 
@@ -643,7 +642,7 @@ def _display_category_and_trends(
         st.write("")
 
 
-def _generate_personnel_statistics(
+def _generate_staff_statistics(
     bc_column_config_df: pd.DataFrame,
     survey_data: pd.DataFrame,
     backcheck_data: pd.DataFrame,
@@ -651,7 +650,7 @@ def _generate_personnel_statistics(
     enumerator: str | None,
     backchecker: str | None,
     summary_col: str,
-    personnel_type: str,
+    staff_type: str,
 ) -> pd.DataFrame:
     """Generate statistics for enumerators or backcheckers."""
     if bc_column_config_df.empty or not summary_col:
@@ -678,22 +677,19 @@ def _generate_personnel_statistics(
         "# different": "sum",
     }
 
-    personnel_stats = stats_summary.groupby([summary_col]).agg(agg_dict).reset_index()
+    staff_stats = stats_summary.groupby([summary_col]).agg(agg_dict).reset_index()
 
-    if personnel_type == "enumerator":
+    if staff_type == "enumerator":
         # Calculate percentage back checked and error rate for enumerators
-        personnel_stats["% back checked"] = (
-            (personnel_stats["# backchecks"] / personnel_stats["# surveys"]) * 100
+        staff_stats["% back checked"] = (
+            (staff_stats["# backchecks"] / staff_stats["# surveys"]) * 100
         ).round(2).astype(str) + "%"
 
         # Calculate error rate with division by zero protection
-        mask = personnel_stats["# compared"] > 0
-        personnel_stats["Error Rate"] = "0.00%"
-        personnel_stats.loc[mask, "Error Rate"] = (
-            (
-                personnel_stats.loc[mask, "# different"]
-                / personnel_stats.loc[mask, "# compared"]
-            )
+        mask = staff_stats["# compared"] > 0
+        staff_stats["Error Rate"] = "0.00%"
+        staff_stats.loc[mask, "Error Rate"] = (
+            (staff_stats.loc[mask, "# different"] / staff_stats.loc[mask, "# compared"])
             * 100
         ).round(2).astype(str) + "%"
 
@@ -703,23 +699,21 @@ def _generate_personnel_statistics(
             "# compared": "# of values compared",
             "# different": "# of values different",
         }
-        if "_svy_" + summary_col in personnel_stats.columns:
-            rename_dict["_svy_" + summary_col] = "Enumerator"
+        enum_cols = [col for col in staff_stats.columns if summary_col in col]
+        if enum_cols:
+            rename_dict[enum_cols[0]] = "Enumerator"
 
     else:  # backchecker
         # For backcheckers, calculate error rate differently
-        mask = personnel_stats["# compared"] > 0
-        personnel_stats["Error Rate"] = "0.00%"
-        personnel_stats.loc[mask, "Error Rate"] = (
-            (
-                personnel_stats.loc[mask, "# different"]
-                / personnel_stats.loc[mask, "# compared"]
-            )
+        mask = staff_stats["# compared"] > 0
+        staff_stats["Error Rate"] = "0.00%"
+        staff_stats.loc[mask, "Error Rate"] = (
+            (staff_stats.loc[mask, "# different"] / staff_stats.loc[mask, "# compared"])
             * 100
         ).round(2).astype(str) + "%"
 
         # Find backchecker column and rename appropriately
-        bcer_cols = [col for col in personnel_stats.columns if summary_col in col]
+        bcer_cols = [col for col in staff_stats.columns if summary_col in col]
         rename_dict = {
             "# backchecks": "# back checked",
             "# compared": "# values compared",
@@ -728,7 +722,7 @@ def _generate_personnel_statistics(
         if bcer_cols:
             rename_dict[bcer_cols[0]] = "Back Checker"
 
-    return personnel_stats.rename(columns=rename_dict)
+    return staff_stats.rename(columns=rename_dict)
 
 
 def _generate_enumerator_statistics(
@@ -740,7 +734,7 @@ def _generate_enumerator_statistics(
     backchecker: str | None,
 ) -> pd.DataFrame:
     """Generate enumerator statistics."""
-    return _generate_personnel_statistics(
+    return _generate_staff_statistics(
         bc_column_config_df,
         survey_data,
         backcheck_data,
@@ -761,7 +755,7 @@ def _generate_backchecker_statistics(
     backchecker: str | None,
 ) -> pd.DataFrame:
     """Generate backchecker statistics."""
-    stats = _generate_personnel_statistics(
+    stats = _generate_staff_statistics(
         bc_column_config_df,
         survey_data,
         backcheck_data,
@@ -1707,7 +1701,7 @@ def _display_filtered_statistics(
     title: str,
     filter_column: str,
     filter_label: str,
-    personnel_type: str | None = None,
+    staff_type: str | None = None,
 ) -> None:
     """Display statistics table with filtering capability."""
     st.subheader(title)
@@ -1716,9 +1710,9 @@ def _display_filtered_statistics(
         st.info(NO_BACKCHECK_COLUMNS_SET)
         return
 
-    if personnel_type and personnel_type not in stats_df.columns:
+    if staff_type and staff_type not in stats_df.columns:
         st.info(
-            f"{title} require a {personnel_type.lower()} column. "
+            f"{title} require a {staff_type.lower()} column. "
             "Go to :material/settings: settings above to select the appropriate column."
         )
         return
