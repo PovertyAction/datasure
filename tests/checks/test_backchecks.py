@@ -29,7 +29,6 @@ from datasure.checks.backchecks import (
 # ============================================
 # FIXTURES FOR BACKCHECK-SPECIFIC DATA
 # ============================================
-# Note: Main backcheck fixtures are now in tests/conftest.py for reusability
 
 
 @pytest.fixture
@@ -387,25 +386,18 @@ def test_generate_column_summary_empty_config():
         {"survey_id": [1], "backchecker": ["B1"], "age": [25]}
     )
 
-    # The function has a bug where it tries to rename columns even with empty config
-    # This causes a KeyError when trying to access non-existent columns in empty df
-    try:
-        summary_df, results_df = generate_column_summary(
-            empty_config,
-            survey_data,
-            backcheck_data,
-            "survey_id",
-            "enumerator",
-            "backchecker",
-            None,
-        )
-        # If it doesn't raise an error, check the expected behavior
-        assert len(summary_df) == 0
-        assert len(results_df) == 0
-    except KeyError:
-        # This is the current actual behavior due to the bug in the function
-        # The function tries to rename columns that don't exist in an empty DataFrame
-        pass
+    summary_df, results_df = generate_column_summary(
+        empty_config,
+        survey_data,
+        backcheck_data,
+        "survey_id",
+        "enumerator",
+        "backchecker",
+        None,
+    )
+
+    assert len(summary_df) == 0
+    assert len(results_df) == 0
 
 
 def test_generate_column_summary_with_grouping(

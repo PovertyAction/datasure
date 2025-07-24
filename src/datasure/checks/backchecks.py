@@ -550,16 +550,19 @@ def generate_column_summary(
         )
         summary_data.extend(summary_stats)
 
-    # Clean merged table results
-    merged_results_df = merged_results_df.rename(
-        columns={
-            enumerator: "Enumerator",
-            backchecker: "Back Checker",
-        }
-    )
-    enum_bc_cols = [survey_id, "Enumerator", "Back Checker"]
-    other_cols = [col for col in merged_results_df.columns if col not in enum_bc_cols]
-    merged_results_df = merged_results_df[enum_bc_cols + other_cols]
+    # Clean merged table results (only if DataFrame is not empty)
+    if not merged_results_df.empty:
+        merged_results_df = merged_results_df.rename(
+            columns={
+                enumerator: "Enumerator",
+                backchecker: "Back Checker",
+            }
+        )
+        enum_bc_cols = [survey_id, "Enumerator", "Back Checker"]
+        other_cols = [
+            col for col in merged_results_df.columns if col not in enum_bc_cols
+        ]
+        merged_results_df = merged_results_df[enum_bc_cols + other_cols]
 
     return pd.DataFrame(summary_data), merged_results_df
 
