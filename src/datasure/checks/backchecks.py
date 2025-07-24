@@ -1241,8 +1241,8 @@ def backchecks_report(
             survey_data=survey_data,
             backcheck_data=backcheck_data,
             survey_id=survey_id,
-            enumerator=enumerator,
-            backchecker=backchecker,
+            enumerator=enumerator if enumerator else None,
+            backchecker=backchecker if backchecker else None,
             summary_col=None,
         )
 
