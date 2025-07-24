@@ -16,7 +16,7 @@ from datasure.utils import (
 IGNORE_MISSING_VALUES = "ignore_missing_values"
 DO_NOT_COMPARE_VALUES = "Do not compare if the values contain:"
 TREAT_VALUES_AS_SAME = "Treat these values as the same:"
-NO_BACKCHECK_COLUMNS_SET = "Backcheck columns settings required. Go to the :material/settings: Backcheck columns settings section above."
+NO_BACKCHECK_COLUMNS_SET = "Backcheck columns configuration required. Go to the :material/settings: settings section above and configure backcheck columns."
 
 
 ##### Backchecks #####
@@ -354,6 +354,577 @@ def _handle_tracking_options(
     return backcheck_goal, drop_duplicates
 
 
+def _handle_column_configuration(common_cols: list[str]) -> pd.DataFrame:
+    """Handle backcheck column configuration settings.
+
+    Parameters
+    ----------
+    common_cols : list[str]
+        List of common columns between survey and backcheck data.
+
+    Returns
+    -------
+    pd.DataFrame
+        Column configuration dataframe.
+    """
+    st.write("---")
+    st.markdown("#### Backcheck Columns Configuration")
+
+    # Initialize session state for table data if not already present
+    if "column_config_data" not in st.session_state:
+        st.session_state.column_config_data = pd.DataFrame(
+            columns=["column", "category", "ok_range", "comparison_condition"]
+        )
+
+    # Display the table and allow user interaction
+    with st.popover(
+        "Add a backcheck column",
+        icon=":material/add:",
+        use_container_width=True,
+    ):
+        column_name = st.selectbox(
+            "column",
+            options=common_cols,
+            help="Select a column to configure",
+            key="column",
+        )
+        column_type = st.selectbox(
+            "category",
+            options=[1, 2, 3],
+            help="Select the backcheck category of the column",
+            key="category",
+        )
+        ok_range_type = st.selectbox(
+            "ok_range",
+            options=["None", "absolute value", "range", "percentage"],
+            help="Select the type of range condition",
+            key="ok_range",
+        )
+        if ok_range_type == "absolute value":
+            absolute_ok_range = st.number_input(
+                label="Absolute Value",
+                min_value=0,
+                help="Enter the absolute value",
+            )
+            ok_range = f"{absolute_ok_range}"
+        elif ok_range_type == "percentage":
+            ok_range_percentage = st.number_input(
+                "Percentage", min_value=0, help="Enter a percentage value"
+            )
+            ok_range = f"{ok_range_percentage}%"
+        elif ok_range_type == "range":
+            range_min = st.number_input(
+                "Minimum Value",
+                max_value=0,
+                help="Enter the minimum value (less than zero)",
+            )
+            range_max = st.number_input(
+                "Maximum Value",
+                min_value=0,
+                help="Enter the maximum value (greater than zero)",
+            )
+            ok_range = f"[{range_min} , {range_max}]"
+        else:
+            ok_range = ""
+
+        compare_condition = st.selectbox(
+            label="comparison_condition",
+            options=[
+                "None",
+                "Do not compare missing values or null values",
+                "Do not compare if the values contain:",
+                "Treat these values as the same:",
+            ],
+            help="Specify any additional conditions",
+            key="comparison_condition",
+        )
+        if compare_condition == "Do not compare if the values contain:":
+            contains_condition = st.text_input(
+                "Enter values not to compare separated by a comma",
+                help="Values not to compare if they contain these values",
+            )
+            comparison_condition = f"{compare_condition}: {contains_condition}"
+        elif compare_condition == "Treat these values as the same:":
+            same_condition = st.text_input(
+                "Enter values separated by a comma",
+                help="Enter values separated by a comma",
+            )
+            comparison_condition = f"{compare_condition}: {same_condition}"
+        elif compare_condition == "Do not compare missing values or null values":
+            comparison_condition = "ignore_missing_values"
+        else:
+            comparison_condition = ""
+
+        if st.button("Add Column"):
+            new_row = {
+                "column": column_name,
+                "category": column_type,
+                "ok_range": ok_range,
+                "comparison_condition": comparison_condition,
+            }
+            st.session_state.column_config_data = pd.concat(
+                [
+                    st.session_state.column_config_data,
+                    pd.DataFrame([new_row]),
+                ],
+                ignore_index=True,
+            )
+
+    # Create an editable dataframe
+    bc_column_config_df = st.data_editor(
+        st.session_state.column_config_data,
+        num_rows="dynamic",
+        use_container_width=True,
+    )
+
+    return bc_column_config_df
+
+
+def _validate_backcheck_requirements(
+    survey_key: str | None, survey_id: str | None, backcheck_data: pd.DataFrame
+) -> bool:
+    """Validate that required settings are configured for backcheck report.
+
+    Parameters
+    ----------
+    survey_key : str | None
+        Survey key column name.
+    survey_id : str | None
+        Survey ID column name.
+    backcheck_data : pd.DataFrame
+        Backcheck data.
+
+    Returns
+    -------
+    bool
+        True if requirements are met, False otherwise.
+    """
+    if not survey_key or not survey_id:
+        st.info(
+            "Please select Survey Key and Survey ID columns to generate the backcheck report."
+        )
+        return False
+
+    if backcheck_data.empty:
+        st.info("No back check data available")
+        return False
+
+    return True
+
+
+def _prepare_merged_dataframes(
+    survey_data: pd.DataFrame,
+    backcheck_data: pd.DataFrame,
+    survey_id: str,
+    enumerator: str | None,
+    backchecker: str | None,
+    date: str | None,
+) -> pd.DataFrame:
+    """Prepare and merge survey and backcheck dataframes.
+
+    Parameters
+    ----------
+    survey_data : pd.DataFrame
+        Survey data.
+    backcheck_data : pd.DataFrame
+        Backcheck data.
+    survey_id : str
+        Survey ID column name.
+    enumerator : str | None
+        Enumerator column name.
+    backchecker : str | None
+        Backchecker column name.
+    date : str | None
+        Date column name.
+
+    Returns
+    -------
+    pd.DataFrame
+        Merged dataframe.
+    """
+    # Merge survey and backcheck data - handle missing optional columns
+    survey_cols_for_merge = [survey_id]
+    if enumerator and enumerator not in survey_cols_for_merge:
+        survey_cols_for_merge.append(enumerator)
+    if date and date not in survey_cols_for_merge:
+        survey_cols_for_merge.append(date)
+
+    survey_df_bc = survey_data[survey_cols_for_merge].add_prefix("_svy_")
+    survey_df_bc.rename(columns={"_svy_" + survey_id: survey_id}, inplace=True)
+
+    backcheck_cols_for_merge = [survey_id]
+    if backchecker and backchecker not in backcheck_cols_for_merge:
+        backcheck_cols_for_merge.append(backchecker)
+    if date and date not in backcheck_cols_for_merge:
+        backcheck_cols_for_merge.append(date)
+
+    backcheck_df_bc = backcheck_data[backcheck_cols_for_merge].add_prefix("_bc_")
+    backcheck_df_bc.rename(columns={"_bc_" + survey_id: survey_id}, inplace=True)
+
+    return pd.merge(survey_df_bc, backcheck_df_bc, on=survey_id, how="inner")
+
+
+def _generate_backcheck_summaries(
+    bc_column_config_df: pd.DataFrame,
+    survey_data: pd.DataFrame,
+    backcheck_data: pd.DataFrame,
+    survey_id: str,
+    enumerator: str | None,
+    backchecker: str | None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Generate column summaries and comparison data.
+
+    Parameters
+    ----------
+    bc_column_config_df : pd.DataFrame
+        Column configuration dataframe.
+    survey_data : pd.DataFrame
+        Survey data.
+    backcheck_data : pd.DataFrame
+        Backcheck data.
+    survey_id : str
+        Survey ID column name.
+    enumerator : str | None
+        Enumerator column name.
+    backchecker : str | None
+        Backchecker column name.
+
+    Returns
+    -------
+    tuple[pd.DataFrame, pd.DataFrame]
+        Column category summary and comparison dataframes.
+    """
+    if not bc_column_config_df.empty:
+        column_category_summary, svy_bc_comparison_df = generate_column_summary(
+            column_config_data=bc_column_config_df,
+            survey_data=survey_data,
+            backcheck_data=backcheck_data,
+            survey_id=survey_id,
+            enumerator=enumerator,
+            backchecker=backchecker,
+            summary_col=None,
+        )
+
+        # Calculate total backcheck error rate
+        if column_category_summary.shape[0] > 0:
+            total_backcheck_error_rate = (
+                column_category_summary["# different"].sum()
+                / column_category_summary["# compared"].sum()
+            ) * 100
+            st.session_state.total_backcheck_error_rate = total_backcheck_error_rate
+        else:
+            st.session_state.total_backcheck_error_rate = "n/a"
+    else:
+        st.info("Configure backcheck columns in the settings section above.")
+        column_category_summary = pd.DataFrame()
+        svy_bc_comparison_df = pd.DataFrame()
+
+    return column_category_summary, svy_bc_comparison_df
+
+
+def _display_overview_section(
+    survey_df_bc: pd.DataFrame,
+    backcheck_df_bc: pd.DataFrame,
+    merged_df: pd.DataFrame,
+    enumerator: str | None,
+    backcheck_goal: int,
+) -> tuple[int, int, int, int]:
+    """Display the overview section with metrics and charts.
+
+    Parameters
+    ----------
+    survey_df_bc : pd.DataFrame
+        Survey data with prefixes.
+    backcheck_df_bc : pd.DataFrame
+        Backcheck data with prefixes.
+    merged_df : pd.DataFrame
+        Merged dataframe.
+    enumerator : str | None
+        Enumerator column name.
+    backcheck_goal : int
+        Target number of backchecks.
+
+    Returns
+    -------
+    tuple[int, int, int, int]
+        Overview metrics.
+    """
+    st.subheader("Overview")
+    min_backcheck_rate = st.number_input(
+        "Enter a minimum percentage target of surveys backchecked by enumerator e.g. 10%",
+        min_value=0,
+        max_value=100,
+        value=10,
+        key="total_surveys_backcheck",
+        help="This is the minimum percentage of surveys that have been backchecked by enumerator",
+    )
+
+    # Compute and display overview metrics
+    (
+        total_backchecks,
+        backcheck_goal_update,
+        num_enumerators_bc,
+        total_enumerators,
+    ) = compute_backcheck_overview(
+        survey_df_bc=survey_df_bc,
+        backcheck_df_bc=backcheck_df_bc,
+        merged_df=merged_df,
+        enumerator=enumerator,
+        backcheck_goal=backcheck_goal,
+        min_backcheck_rate=min_backcheck_rate,
+    )
+
+    col1, _, col3 = st.columns(3)
+    col1.metric("Total number of backchecks", total_backchecks)
+    with col3:
+        try:
+            st.metric(
+                "Total backcheck error rate",
+                f"{st.session_state.total_backcheck_error_rate:.0f}%",
+            )
+        except (AttributeError, TypeError, ValueError):
+            st.metric("Total backcheck error rate", "n/a")
+
+    # Display overview charts
+    display_overview_charts(
+        total_backchecks, backcheck_goal_update, num_enumerators_bc, total_enumerators
+    )
+
+    return (
+        total_backchecks,
+        backcheck_goal_update,
+        num_enumerators_bc,
+        total_enumerators,
+    )
+
+
+def _display_category_and_trends(
+    bc_column_config_df: pd.DataFrame,
+    column_category_summary: pd.DataFrame,
+    survey_data: pd.DataFrame,
+    backcheck_data: pd.DataFrame,
+    survey_id: str,
+    enumerator: str | None,
+    backchecker: str | None,
+    date: str | None,
+) -> None:
+    """Display category error rates and trends sections.
+
+    Parameters
+    ----------
+    bc_column_config_df : pd.DataFrame
+        Column configuration dataframe.
+    column_category_summary : pd.DataFrame
+        Column category summary data.
+    survey_data : pd.DataFrame
+        Survey data.
+    backcheck_data : pd.DataFrame
+        Backcheck data.
+    survey_id : str
+        Survey ID column name.
+    enumerator : str | None
+        Enumerator column name.
+    backchecker : str | None
+        Backchecker column name.
+    date : str | None
+        Date column name.
+    """
+    # Display category error rates
+    if bc_column_config_df.empty:
+        st.write("Backcheck category summary")
+        st.info(NO_BACKCHECK_COLUMNS_SET)
+        st.write("")
+    else:
+        st.write("")
+        display_category_error_rates(column_category_summary)
+
+        # Error trends - only generate if date column is available
+        if date:
+            error_trends_category_summary, _ = generate_column_summary(
+                column_config_data=bc_column_config_df,
+                survey_data=survey_data,
+                backcheck_data=backcheck_data,
+                survey_id=survey_id,
+                enumerator=enumerator,
+                backchecker=backchecker,
+                summary_col=date,
+            )
+        else:
+            error_trends_category_summary = pd.DataFrame()
+
+        display_error_trends(error_trends_category_summary, date)
+        st.write("")
+
+
+def _generate_enumerator_statistics(
+    bc_column_config_df: pd.DataFrame,
+    survey_data: pd.DataFrame,
+    backcheck_data: pd.DataFrame,
+    survey_id: str,
+    enumerator: str | None,
+    backchecker: str | None,
+) -> pd.DataFrame:
+    """Generate enumerator statistics.
+
+    Parameters
+    ----------
+    bc_column_config_df : pd.DataFrame
+        Column configuration dataframe.
+    survey_data : pd.DataFrame
+        Survey data.
+    backcheck_data : pd.DataFrame
+        Backcheck data.
+    survey_id : str
+        Survey ID column name.
+    enumerator : str | None
+        Enumerator column name.
+    backchecker : str | None
+        Backchecker column name.
+
+    Returns
+    -------
+    pd.DataFrame
+        Enumerator statistics dataframe.
+    """
+    if not bc_column_config_df.empty and enumerator:
+        enumerator_stats_summary, _ = generate_column_summary(
+            column_config_data=bc_column_config_df,
+            survey_data=survey_data,
+            backcheck_data=backcheck_data,
+            survey_id=survey_id,
+            enumerator=enumerator,
+            backchecker=backchecker,
+            summary_col=enumerator,
+        )
+
+        if not enumerator_stats_summary.empty:
+            if enumerator not in enumerator_stats_summary.columns:
+                return pd.DataFrame()
+
+            # Prepare enumerator statistics with vectorized operations
+            agg_dict = {
+                "# surveys": "sum",
+                "# backchecks": "sum",
+                "# compared": "sum",
+                "# different": "sum",
+            }
+
+            enumerator_statistics = (
+                enumerator_stats_summary.groupby([enumerator])
+                .agg(agg_dict)
+                .reset_index()
+            )
+
+            # Vectorized percentage calculations
+            enumerator_statistics["% back checked"] = (
+                (
+                    enumerator_statistics["# backchecks"]
+                    / enumerator_statistics["# surveys"]
+                )
+                * 100
+            ).round(2).astype(str) + "%"
+
+            # Avoid division by zero
+            mask = enumerator_statistics["# compared"] > 0
+            enumerator_statistics["Error Rate"] = "0.00%"
+            enumerator_statistics.loc[mask, "Error Rate"] = (
+                (
+                    enumerator_statistics.loc[mask, "# different"]
+                    / enumerator_statistics.loc[mask, "# compared"]
+                )
+                * 100
+            ).round(2).astype(str) + "%"
+
+            # Rename columns
+            rename_dict = {
+                "# backchecks": "# back checked",
+                "# compared": "# of values compared",
+                "# different": "# of values different",
+            }
+            if "_svy_" + enumerator in enumerator_statistics.columns:
+                rename_dict["_svy_" + enumerator] = "Enumerator"
+
+            return enumerator_statistics.rename(columns=rename_dict)
+
+    return pd.DataFrame()
+
+
+def _generate_backchecker_statistics(
+    bc_column_config_df: pd.DataFrame,
+    survey_data: pd.DataFrame,
+    backcheck_data: pd.DataFrame,
+    survey_id: str,
+    enumerator: str | None,
+    backchecker: str | None,
+) -> pd.DataFrame:
+    """Generate backchecker statistics.
+
+    Parameters
+    ----------
+    bc_column_config_df : pd.DataFrame
+        Column configuration dataframe.
+    survey_data : pd.DataFrame
+        Survey data.
+    backcheck_data : pd.DataFrame
+        Backcheck data.
+    survey_id : str
+        Survey ID column name.
+    enumerator : str | None
+        Enumerator column name.
+    backchecker : str | None
+        Backchecker column name.
+
+    Returns
+    -------
+    pd.DataFrame
+        Backchecker statistics dataframe.
+    """
+    if not bc_column_config_df.empty and backchecker:
+        backchecker_statistics, _ = generate_column_summary(
+            column_config_data=bc_column_config_df,
+            survey_data=survey_data,
+            backcheck_data=backcheck_data,
+            survey_id=survey_id,
+            enumerator=enumerator,
+            backchecker=backchecker,
+            summary_col=backchecker,
+        )
+
+        if not backchecker_statistics.empty:
+            # Find backchecker column more efficiently
+            bcer_cols = [
+                col for col in backchecker_statistics.columns if backchecker in col
+            ]
+            if bcer_cols:
+                bcer_col = bcer_cols[0]
+                rename_dict = {
+                    bcer_col: "Back Checker",
+                    "# backchecks": "# back checked",
+                    "# compared": "# values compared",
+                    "error rate": "Error Rate",
+                }
+                backchecker_statistics = backchecker_statistics.rename(
+                    columns=rename_dict
+                )
+
+                # Select only required columns that exist
+                required_cols = [
+                    "Back Checker",
+                    "# back checked",
+                    "# values compared",
+                    "# different",
+                    "Error Rate",
+                ]
+                existing_cols = [
+                    col
+                    for col in required_cols
+                    if col in backchecker_statistics.columns
+                ]
+                return backchecker_statistics[existing_cols].copy()
+
+    return pd.DataFrame()
+
+
 def backcheck_report_settings(
     project_id: str,
     survey_data: pd.DataFrame,
@@ -416,10 +987,13 @@ def backcheck_report_settings(
             )
 
         st.write("---")
-        st.markdown("### Tracking Options")
+        st.markdown("#### Tracking Options")
         backcheck_goal, drop_duplicates = _handle_tracking_options(
             setting_file, backcheck_goal, drop_duplicates, date, survey_id
         )
+
+        # Add column configuration section
+        bc_column_config_df = _handle_column_configuration(common_cols)
 
         st.write("")
 
@@ -432,6 +1006,7 @@ def backcheck_report_settings(
         backcheck_goal,
         drop_duplicates,
         common_cols,
+        bc_column_config_df,
     )
 
 
@@ -770,88 +1345,99 @@ def _create_merged_comparison_df(
         return merged_df
 
 
-def _compare_values(
-    row: pd.Series, svy_col: str, bc_col: str, ok_range: str, comparison_condition: str
-) -> str:
-    """Compare values based on conditions and ranges.
-
-    Parameters
-    ----------
-    row : pd.Series
-        Row data containing both survey and backcheck values.
-    svy_col : str
-        Survey column name.
-    bc_col : str
-        Backcheck column name.
-    ok_range : str
-        Range specification for numeric comparisons.
-    comparison_condition : str
-        Special comparison conditions.
-
-    Returns
-    -------
-    str
-        Comparison result: 'different', 'not_different', or 'not_compared'.
-    """
-    svy_val = row[svy_col]
-    bc_val = row[bc_col]
-
-    # Early return for missing values
+def _handle_missing_values(
+    svy_val: Any, bc_val: Any, comparison_condition: str
+) -> str | None:
+    """Handle missing value comparison."""
     if (
         pd.isna(svy_val) or pd.isna(bc_val)
     ) and comparison_condition == IGNORE_MISSING_VALUES:
         return "not_compared"
+    return None
+
+
+def _handle_excluded_values(
+    svy_val: Any, bc_val: Any, comparison_condition: str
+) -> str | None:
+    """Handle excluded value comparison."""
+    if DO_NOT_COMPARE_VALUES in str(comparison_condition):
+        with suppress(IndexError):
+            exclude_values = comparison_condition.split(":")[1].strip().split(",")
+            exclude_values = [val.strip() for val in exclude_values]
+            if (
+                str(svy_val).strip() in exclude_values
+                or str(bc_val).strip() in exclude_values
+            ):
+                return "not_compared"
+    return None
+
+
+def _handle_same_values(
+    svy_val: Any, bc_val: Any, comparison_condition: str
+) -> str | None:
+    """Handle values to be treated as same."""
+    if TREAT_VALUES_AS_SAME in str(comparison_condition):
+        with suppress(IndexError):
+            same_values = comparison_condition.split(":")[1].strip().split(",")
+            same_values = [val.strip() for val in same_values]
+            svy_str = str(svy_val).strip()
+            bc_str = str(bc_val).strip()
+            if svy_str in same_values and bc_str in same_values:
+                return "not_different"
+    return None
+
+
+def _compare_numeric_values(svy_val: Any, bc_val: Any, ok_range: str) -> str | None:
+    """Compare numeric values within specified range."""
+    with suppress(ValueError, TypeError):
+        svy_num = float(svy_val)
+        bc_num = float(bc_val)
+        diff = abs(svy_num - bc_num)
+
+        if "%" in ok_range:
+            percentage = float(ok_range.replace("%", ""))
+            if svy_num != 0:
+                allowed_diff = (percentage / 100) * abs(svy_num)
+                return "not_different" if diff <= allowed_diff else "different"
+        elif "[" in ok_range:
+            range_vals = ok_range.strip("[]").split(",")
+            if len(range_vals) == 2:
+                min_val, max_val = (
+                    float(range_vals[0].strip()),
+                    float(range_vals[1].strip()),
+                )
+                return "not_different" if min_val <= diff <= max_val else "different"
+        else:
+            allowed_diff = float(ok_range)
+            return "not_different" if diff <= allowed_diff else "different"
+    return None
+
+
+def _compare_values(
+    row: pd.Series, svy_col: str, bc_col: str, ok_range: str, comparison_condition: str
+) -> str:
+    """Compare values based on conditions and ranges."""
+    svy_val = row[svy_col]
+    bc_val = row[bc_col]
+
+    # Check each comparison type in sequence
+    result = _handle_missing_values(svy_val, bc_val, comparison_condition)
+    if result:
+        return result
 
     if comparison_condition:
-        # Handle values to exclude
-        if DO_NOT_COMPARE_VALUES in str(comparison_condition):
-            with suppress(IndexError):
-                exclude_values = comparison_condition.split(":")[1].strip().split(",")
-                exclude_values = [
-                    val.strip() for val in exclude_values
-                ]  # Strip whitespace
-                if (
-                    str(svy_val).strip() in exclude_values
-                    or str(bc_val).strip() in exclude_values
-                ):
-                    return "not_compared"
+        result = _handle_excluded_values(svy_val, bc_val, comparison_condition)
+        if result:
+            return result
 
-        # Handle values to treat as same
-        elif TREAT_VALUES_AS_SAME in str(comparison_condition):
-            with suppress(IndexError):
-                same_values = comparison_condition.split(":")[1].strip().split(",")
-                same_values = [val.strip() for val in same_values]  # Strip whitespace
-                svy_str = str(svy_val).strip()
-                bc_str = str(bc_val).strip()
-                if svy_str in same_values and bc_str in same_values:
-                    return "not_different"
+        result = _handle_same_values(svy_val, bc_val, comparison_condition)
+        if result:
+            return result
 
-    # Handle numeric ranges
     if ok_range:
-        with suppress(ValueError, TypeError):
-            svy_num = float(svy_val)
-            bc_num = float(bc_val)
-            diff = abs(svy_num - bc_num)
-
-            if "%" in ok_range:  # Percentage range
-                percentage = float(ok_range.replace("%", ""))
-                if svy_num != 0:  # Avoid division by zero
-                    allowed_diff = (percentage / 100) * abs(svy_num)
-                    return "not_different" if diff <= allowed_diff else "different"
-            elif "[" in ok_range:  # Range format [min,max]
-                range_vals = ok_range.strip("[]").split(",")
-                if len(range_vals) == 2:
-                    min_val, max_val = (
-                        float(range_vals[0].strip()),
-                        float(range_vals[1].strip()),
-                    )
-                    return (
-                        "not_different" if min_val <= diff <= max_val else "different"
-                    )
-            else:  # Absolute value
-                allowed_diff = float(ok_range)
-                return "not_different" if diff <= allowed_diff else "different"
-        # If numeric conversion fails, fall through to string comparison
+        result = _compare_numeric_values(svy_val, bc_val, ok_range)
+        if result:
+            return result
 
     # Default string comparison
     return (
@@ -1074,7 +1660,7 @@ def display_overview_charts(
     total_enumerators : int
         Total number of enumerators.
     """
-    cl1, cl2, cl3 = st.columns(3)
+    cl1, _, cl3 = st.columns(3)
     chart_colors = ["#35904A", "lightgrey"]
 
     with cl1:
@@ -1359,25 +1945,25 @@ def backchecks_report(
     setting_file: str,
     page_num: int,
 ) -> None:
-    """
-    Create a backcheck report for a given survey and backcheck data.
+    """Create a backcheck report for a given survey and backcheck data.
 
-    PARAMS:
-    -------
-    project_id: str
-        Project ID
-    survey_data: pd.DataFrame
-        Survey data to be used for backcheck report
-    backcheck_data: pd.DataFrame
-        Backcheck data to be used for backcheck report
-    page_num: int
-        Page number for the backcheck report
+    This function orchestrates the entire backcheck report generation process
+    by coordinating settings, data processing, analysis, and display.
 
-    Returns
-    -------
-    None
+    Parameters
+    ----------
+    project_id : str
+        Project ID for the backcheck report.
+    survey_data : pd.DataFrame
+        Survey data to be used for backcheck report.
+    backcheck_data : pd.DataFrame
+        Backcheck data to be used for backcheck report.
+    setting_file : str
+        Path to the settings file.
+    page_num : int
+        Page number for the backcheck report.
     """
-    # Get settings
+    # Get settings and configuration
     (
         date,
         enumerator,
@@ -1387,28 +1973,27 @@ def backchecks_report(
         backcheck_goal,
         drop_duplicates,
         common_cols,
+        bc_column_config_df,
     ) = backcheck_report_settings(
         project_id, survey_data, backcheck_data, setting_file, page_num
     )
 
-    # Check that required options have been selected
-    if not survey_key or not survey_id:
-        st.info(
-            "Please select Survey Key and Survey ID columns in the settings section to generate the backcheck report."
-        )
+    # Validate requirements
+    if not _validate_backcheck_requirements(survey_key, survey_id, backcheck_data):
         return
 
-    if backcheck_data.empty:
-        st.info("No back check data available")
-        return
-
-    # Process duplicate data
+    # Process duplicates if requested
     if drop_duplicates and survey_id and date:
         survey_data, backcheck_data = process_duplicate_data(
             survey_data, backcheck_data, survey_id, date, drop_duplicates
         )
 
-    # Merge survey and backcheck data - handle missing optional columns
+    # Prepare merged dataframes
+    merged_df = _prepare_merged_dataframes(
+        survey_data, backcheck_data, survey_id, enumerator, backchecker, date
+    )
+
+    # Get the individual survey and backcheck dataframes for overview calculations
     survey_cols_for_merge = [survey_id]
     if enumerator and enumerator not in survey_cols_for_merge:
         survey_cols_for_merge.append(enumerator)
@@ -1427,216 +2012,34 @@ def backchecks_report(
     backcheck_df_bc = backcheck_data[backcheck_cols_for_merge].add_prefix("_bc_")
     backcheck_df_bc.rename(columns={"_bc_" + survey_id: survey_id}, inplace=True)
 
-    merged_df = pd.merge(survey_df_bc, backcheck_df_bc, on=survey_id, how="inner")
-
-    # Column category selection
-    with st.expander(
-        "Backcheck columns settings", expanded=False, icon=":material/settings:"
-    ):
-        # Initialize session state for table data if not already present
-        if "column_config_data" not in st.session_state:
-            st.session_state.column_config_data = pd.DataFrame(
-                columns=["column", "category", "ok_range", "comparison_condition"]
-            )
-
-        # Display the table and allow user interaction
-        with st.popover(
-            "Add a backcheck column",
-            icon=":material/add:",
-            use_container_width=True,
-        ):
-            column_name = st.selectbox(
-                "column",
-                options=common_cols,
-                help="Select a column to configure",
-                key="column",
-            )
-            column_type = st.selectbox(
-                "category",
-                options=[1, 2, 3],
-                help="Select the backcheck category of the column",
-                key="category",
-            )
-            ok_range_type = st.selectbox(
-                "ok_range",
-                options=["None", "absolute value", "range", "percentage"],
-                help="Select the type of range condition",
-                key="ok_range",
-            )
-            if ok_range_type == "absolute value":
-                absolute_ok_range = st.number_input(
-                    label="Absolute Value",
-                    min_value=0,
-                    help="Enter the absolute value",
-                )
-                ok_range = f"{absolute_ok_range}"
-            elif ok_range_type == "percentage":
-                ok_range_percentage = st.number_input(
-                    "Percentage", min_value=0, help="Enter a percentage value"
-                )
-                ok_range = f"{ok_range_percentage}%"
-            elif ok_range_type == "range":
-                range_min = st.number_input(
-                    "Minimum Value",
-                    max_value=0,
-                    help="Enter the minimum value (less than zero)",
-                )
-                range_max = st.number_input(
-                    "Maximum Value",
-                    min_value=0,
-                    help="Enter the maximum value (greater than zero)",
-                )
-                ok_range = f"[{range_min} , {range_max}]"
-            else:
-                ok_range = ""
-
-            compare_condition = st.selectbox(
-                label="comparison_condition",
-                options=[
-                    "None",
-                    "Do not compare missing values or null values",
-                    "Do not compare if the values contain:",
-                    "Treat these values as the same:",
-                ],
-                help="Specify any additional conditions",
-                key="comparison_condition",
-            )
-            if compare_condition == "Do not compare if the values contain:":
-                contains_condition = st.text_input(
-                    "Enter values not to compare separated by a comma",
-                    help="Values not to compare if they contain these values",
-                )
-                comparison_condition = f"{compare_condition} {contains_condition}"
-            elif compare_condition == "Treat these values as the same:":
-                same_condition = st.text_input(
-                    "Enter values separated by a comma",
-                    help="Enter values separated by a comma",
-                )
-                comparison_condition = f"{compare_condition} {same_condition}"
-            elif compare_condition == "Do not compare missing values or null values":
-                comparison_condition = "ignore_missing_values"
-            else:
-                comparison_condition = ""
-
-            if st.button("Add Column"):
-                new_row = {
-                    "column": column_name,
-                    "category": column_type,
-                    "ok_range": ok_range,
-                    "comparison_condition": comparison_condition,
-                }
-                st.session_state.column_config_data = pd.concat(
-                    [
-                        st.session_state.column_config_data,
-                        pd.DataFrame([new_row]),
-                    ],
-                    ignore_index=True,
-                )
-
-        # Create an editable dataframe
-        bc_column_config_df = st.data_editor(
-            st.session_state.column_config_data,
-            num_rows="dynamic",
-            use_container_width=True,
-        )
-
-    # Generate the column summary without group value
-    if not bc_column_config_df.empty:
-        column_category_summary, svy_bc_comparison_df = generate_column_summary(
-            column_config_data=bc_column_config_df,
-            survey_data=survey_data,
-            backcheck_data=backcheck_data,
-            survey_id=survey_id,
-            enumerator=enumerator if enumerator else None,
-            backchecker=backchecker if backchecker else None,
-            summary_col=None,
-        )
-
-        # Calculate total backcheck error rate
-        if column_category_summary.shape[0] > 0:
-            total_backcheck_error_rate = (
-                column_category_summary["# different"].sum()
-                / column_category_summary["# compared"].sum()
-            ) * 100
-            st.session_state.total_backcheck_error_rate = total_backcheck_error_rate
-        else:
-            st.session_state.total_backcheck_error_rate = "n/a"
-
-    else:
-        st.info("Configure backcheck columns above.")
-        # Initialize empty dataframes when no column config is provided
-        column_category_summary = pd.DataFrame()
-        svy_bc_comparison_df = pd.DataFrame()
-
-    # Overview Statistics
-    st.subheader("Overview")
-    min_backcheck_rate = st.number_input(
-        "Enter a minimum percentage target of surveys backchecked by enumerator e.g. 10%",
-        min_value=0,
-        max_value=100,
-        value=10,
-        key="total_surveys_backcheck",
-        help="This is the minimum percentage of surveys that have been backchecked by enumerator",
+    # Generate column summaries and comparison data
+    column_category_summary, svy_bc_comparison_df = _generate_backcheck_summaries(
+        bc_column_config_df,
+        survey_data,
+        backcheck_data,
+        survey_id,
+        enumerator,
+        backchecker,
     )
 
-    # Compute and display overview metrics
-    (
-        total_backchecks,
-        backcheck_goal_update,
-        num_enumerators_bc,
-        total_enumerators,
-    ) = compute_backcheck_overview(
-        survey_df_bc=survey_df_bc,
-        backcheck_df_bc=backcheck_df_bc,
-        merged_df=merged_df,
-        enumerator=enumerator if enumerator else None,
-        backcheck_goal=backcheck_goal,
-        min_backcheck_rate=min_backcheck_rate,
+    # Display overview section
+    _display_overview_section(
+        survey_df_bc, backcheck_df_bc, merged_df, enumerator, backcheck_goal
     )
 
-    col1, _, col3 = st.columns(3)
-    col1.metric("Total number of backchecks", total_backchecks)
-    with col3:
-        try:
-            st.metric(
-                "Total backcheck error rate",
-                f"{st.session_state.total_backcheck_error_rate:.0f}%",
-            )
-        except (AttributeError, TypeError, ValueError):
-            st.metric("Total backcheck error rate", "n/a")
-
-    # Display overview charts
-    display_overview_charts(
-        total_backchecks, backcheck_goal_update, num_enumerators_bc, total_enumerators
+    # Display category error rates and trends
+    _display_category_and_trends(
+        bc_column_config_df,
+        column_category_summary,
+        survey_data,
+        backcheck_data,
+        survey_id,
+        enumerator,
+        backchecker,
+        date,
     )
 
-    # Display category error rates
-    if bc_column_config_df.empty:
-        st.write("Backcheck category summary")
-        st.info(NO_BACKCHECK_COLUMNS_SET)
-        st.write("")
-    else:
-        st.write("")
-        display_category_error_rates(column_category_summary)
-
-        # Error trends - only generate if date column is available
-        if date:
-            error_trends_category_summary, _ = generate_column_summary(
-                column_config_data=bc_column_config_df,
-                survey_data=survey_data,
-                backcheck_data=backcheck_data,
-                survey_id=survey_id,
-                enumerator=enumerator,
-                backchecker=backchecker,
-                summary_col=date,
-            )
-        else:
-            error_trends_category_summary = pd.DataFrame()
-
-        display_error_trends(error_trends_category_summary, date)
-        st.write("")
-
-    # Column statistics
+    # Display column statistics
     if bc_column_config_df.empty:
         st.write("Column Statistics")
         st.info(NO_BACKCHECK_COLUMNS_SET)
@@ -1646,130 +2049,32 @@ def backchecks_report(
 
     st.write("")
 
-    # Generate statistics for enumerator if enumerator is set
-    if not bc_column_config_df.empty and enumerator:
-        enumerator_stats_summary, _ = generate_column_summary(
-            column_config_data=bc_column_config_df,
-            survey_data=survey_data,
-            backcheck_data=backcheck_data,
-            survey_id=survey_id,
-            enumerator=enumerator,
-            backchecker=backchecker,
-            summary_col=enumerator,
-        )
+    # Generate and display statistics
+    enumerator_statistics = _generate_enumerator_statistics(
+        bc_column_config_df,
+        survey_data,
+        backcheck_data,
+        survey_id,
+        enumerator,
+        backchecker,
+    )
 
-        if not enumerator_stats_summary.empty:
-            if enumerator not in enumerator_stats_summary.columns:
-                enumerator_statistics = pd.DataFrame()
-            else:
-                # Prepare enumerator statistics with vectorized operations
-                agg_dict = {
-                    "# surveys": "sum",
-                    "# backchecks": "sum",
-                    "# compared": "sum",
-                    "# different": "sum",
-                }
-
-                enumerator_statistics = (
-                    enumerator_stats_summary.groupby([enumerator])
-                    .agg(agg_dict)
-                    .reset_index()
-                )
-
-                # Vectorized percentage calculations
-                enumerator_statistics["% back checked"] = (
-                    (
-                        enumerator_statistics["# backchecks"]
-                        / enumerator_statistics["# surveys"]
-                    )
-                    * 100
-                ).round(2).astype(str) + "%"
-
-                # Avoid division by zero
-                mask = enumerator_statistics["# compared"] > 0
-                enumerator_statistics["Error Rate"] = "0.00%"
-                enumerator_statistics.loc[mask, "Error Rate"] = (
-                    (
-                        enumerator_statistics.loc[mask, "# different"]
-                        / enumerator_statistics.loc[mask, "# compared"]
-                    )
-                    * 100
-                ).round(2).astype(str) + "%"
-
-                # Rename columns
-                rename_dict = {
-                    "# backchecks": "# back checked",
-                    "# compared": "# of values compared",
-                    "# different": "# of values different",
-                }
-                if "_svy_" + enumerator in enumerator_statistics.columns:
-                    rename_dict["_svy_" + enumerator] = "Enumerator"
-
-                enumerator_statistics = enumerator_statistics.rename(
-                    columns=rename_dict
-                )
-        else:
-            enumerator_statistics = pd.DataFrame()
-    else:
-        enumerator_statistics = pd.DataFrame()
-
-    # Generate statistics for backchecker if backchecker is set
-    if not bc_column_config_df.empty and backchecker:
-        backchecker_statistics, _ = generate_column_summary(
-            column_config_data=bc_column_config_df,
-            survey_data=survey_data,
-            backcheck_data=backcheck_data,
-            survey_id=survey_id,
-            enumerator=enumerator,
-            backchecker=backchecker,
-            summary_col=backchecker,
-        )
-
-        if not backchecker_statistics.empty:
-            # Find backchecker column more efficiently
-            bcer_cols = [
-                col for col in backchecker_statistics.columns if backchecker in col
-            ]
-            if bcer_cols:
-                bcer_col = bcer_cols[0]
-                rename_dict = {
-                    bcer_col: "Back Checker",
-                    "# backchecks": "# back checked",
-                    "# compared": "# values compared",
-                    "error rate": "Error Rate",
-                }
-                backchecker_statistics = backchecker_statistics.rename(
-                    columns=rename_dict
-                )
-
-                # Select only required columns that exist
-                required_cols = [
-                    "Back Checker",
-                    "# back checked",
-                    "# values compared",
-                    "# different",
-                    "Error Rate",
-                ]
-                existing_cols = [
-                    col
-                    for col in required_cols
-                    if col in backchecker_statistics.columns
-                ]
-                backchecker_statistics = backchecker_statistics[existing_cols].copy()
-            else:
-                backchecker_statistics = pd.DataFrame()
-        else:
-            backchecker_statistics = pd.DataFrame()
-    else:
-        backchecker_statistics = pd.DataFrame()
+    backchecker_statistics = _generate_backchecker_statistics(
+        bc_column_config_df,
+        survey_data,
+        backcheck_data,
+        survey_id,
+        enumerator,
+        backchecker,
+    )
 
     # Display statistics tables
     display_statistics_tables(
         enumerator_statistics=enumerator_statistics,
         backchecker_statistics=backchecker_statistics,
         comparison_df=svy_bc_comparison_df,
-        enumerator=enumerator if enumerator else None,
-        backchecker=backchecker if backchecker else None,
+        enumerator=enumerator,
+        backchecker=backchecker,
     )
 
     st.write("")
