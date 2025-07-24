@@ -14,7 +14,7 @@ from datasure.utils import (
 IGNORE_MISSING_VALUES = "ignore_missing_values"
 DO_NOT_COMPARE_VALUES = "Do not compare if the values contain:"
 TREAT_VALUES_AS_SAME = "Treat these values as the same:"
-NO_BACKCHECK_COLUMNS_SET = "Please configure backcheck columns in the Backcheck columns settings section above."
+NO_BACKCHECK_COLUMNS_SET = "Backcheck columns settings required. Go to the :material/settings: Backcheck columns settings section above."
 
 
 ##### Backchecks #####
@@ -1257,7 +1257,7 @@ def backchecks_report(
             st.session_state.total_backcheck_error_rate = "n/a"
 
     else:
-        st.info("Please configure backcheck columns above.")
+        st.info("Configure backcheck columns above.")
 
     # Overview Statistics
     st.subheader("Overview")
@@ -1285,7 +1285,7 @@ def backchecks_report(
         min_backcheck_rate,
     )
 
-    col1, col2, col3 = st.columns(3)
+    col1, _, col3 = st.columns(3)
     col1.metric("Total number of backchecks", total_backchecks)
     with col3:
         try:
@@ -1335,7 +1335,7 @@ def backchecks_report(
 
     # Generate statistics for enumerator and backchecker
     if not bc_column_config_df.empty and enumerator and backchecker:
-        enumerator_stats_summary, enumerator_category_summary = generate_column_summary(
+        enumerator_stats_summary, _ = generate_column_summary(
             column_config_data=bc_column_config_df,
             survey_data=survey_data,
             backcheck_data=backcheck_data,
