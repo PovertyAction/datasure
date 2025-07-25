@@ -121,6 +121,8 @@ just package-workflow     # Complete workflow: test, build, and verify
 ### Publishing
 
 ```bash
+just check-pypi           # Check package metadata and structure
+just pypi-info            # View package info and version
 just publish-test         # Publish to TestPyPI (for testing)
 just publish              # Publish to PyPI (production)
 ```
@@ -280,47 +282,231 @@ uv run datasure --host 0.0.0.0 --port 8080
 
 ### Version Management
 
-The version number is stored directly in `pyproject.toml` and follows [semantic versioning](https://semver.org/):
+DataSure uses automated version management through `uv version` commands. The package follows [semantic versioning](https://semver.org/):
 
 - **MAJOR** version when you make incompatible API changes
 - **MINOR** version when you add functionality in a backward compatible manner
 - **PATCH** version when you make backward compatible bug fixes
 
-To update the version:
-
-1. **Edit the version in `pyproject.toml`**:
-
-   ```toml
-   [project]
-   name = "DataSure"
-   version = "0.2.0"  # Update this line
-   ```
-
-2. **The build system uses this static version** directly from the project configuration
-
-3. **Verify the version update**:
-
-   ```bash
-   uv build
-   # Check that dist/ contains files with the new version number
-   ```
-
-### Publishing to PyPI
-
-When ready to publish:
+#### Version Bump Commands
 
 ```bash
-# Build the package
-just build-package
+# Alpha releases (early development testing)
+just bump-patch-alpha     # 0.1.0 -> 0.1.1a1
+just bump-minor-alpha     # 0.1.0 -> 0.2.0a1
+just bump-major-alpha     # 0.1.0 -> 1.0.0a1
 
-# Publish to TestPyPI first (recommended)
-just publish-test
+# Beta releases (feature-complete testing)
+just bump-patch-beta      # 0.1.0 -> 0.1.1b1
+just bump-minor-beta      # 0.1.0 -> 0.2.0b1
+just bump-major-beta      # 0.1.0 -> 1.0.0b1
 
-# Publish to PyPI
-just publish
+# Release candidates (final testing)
+just bump-patch-rc        # 0.1.0 -> 0.1.1rc1
+just bump-minor-rc        # 0.1.0 -> 0.2.0rc1
+just bump-major-rc        # 0.1.0 -> 1.0.0rc1
+
+# Final releases
+just bump-patch           # 0.1.0 -> 0.1.1
+just bump-minor           # 0.1.0 -> 0.2.0
+just bump-major           # 0.1.0 -> 1.0.0
 ```
 
-**Note:** You'll need to configure your PyPI credentials before publishing. See [uv publishing documentation](https://docs.astral.sh/uv/guides/publish/) for details.
+These commands automatically:
+
+- Update the version in `src/datasure/__init__.py`
+- Run `uv sync` to update the lock file
+- Commit the changes to git
+- Create a git tag for the new version
+
+#### Git Tag Management
+
+```bash
+# Create git tag for current version (if it doesn't exist)
+just tag-version          # Creates tag like v0.1.2
+
+# Push tag to remote repository
+just push-tag            # Push the current version tag
+
+# Push both commits and tags
+just push-all            # Push commits and current version tag
+```
+
+**Note:** The version bump commands (`just bump-*`) automatically create git tags, so you typically don't need to run `just tag-version` manually.
+
+### Testing the Build and Publish Workflow
+
+Before publishing your package, it's essential to test the entire workflow using TestPyPI:
+
+#### 1. Set Up TestPyPI Account
+
+1. Login at <https://test.pypi.org/account> (you need to be a member of the IPA PyPI organization)
+2. Generate an API token:
+   - Go to <https://test.pypi.org/manage/account/>
+   - Click "Add API token"
+   - Give it a name (e.g., "datasure-test")
+   - Copy the token (starts with `pypi-`)
+
+#### 2. Configure Authentication
+
+Set the `UV_PUBLISH_TOKEN` environment variable with your TestPyPI token:
+
+**Windows (PowerShell):**
+
+```powershell
+$env:UV_PUBLISH_TOKEN = "pypi-your-token-here"
+```
+
+**Windows (Command Prompt):**
+
+```cmd
+set UV_PUBLISH_TOKEN=pypi-your-token-here
+```
+
+**Linux/macOS:**
+
+```bash
+export UV_PUBLISH_TOKEN="pypi-your-token-here"
+```
+
+**Permanent Setup (recommended):**
+Add the token to your shell profile (`.bashrc`, `.zshrc`, or Windows Environment Variables) to avoid setting it each time.
+
+#### 3. Test the Complete Workflow
+
+```bash
+# 1. Clean any existing build artifacts
+just clean-build
+
+# 2. Bump version for testing (use alpha for test releases)
+just bump-patch-alpha
+
+# 3. Verify the version was updated
+uv run datasure --version
+
+# 4. Build the package
+just build-package
+
+# 5. Publish to TestPyPI
+just publish-test
+
+# 6. Install from TestPyPI to verify it works
+uv pip install --index-url https://test.pypi.org/simple/ datasure
+```
+
+#### 4. Troubleshooting Common Issues
+
+**Version Already Exists Error:**
+
+```bash
+error: Local file and index file do not match for datasure-X.Y.Z
+```
+
+Solution: Bump the version again - you cannot republish the same version.
+
+**Authentication Error:**
+
+```bash
+error: 401 Unauthorized
+```
+
+Solution: Verify your `UV_PUBLISH_TOKEN` is set correctly and the token is valid.
+
+### Publishing to PyPI (Production)
+
+Once you've successfully tested with TestPyPI
+
+#### 1. Set Up PyPI Account
+
+1. Create an account at <https://pypi.org/account/register/>
+2. Generate an API token at <https://pypi.org/manage/account/>
+3. Set the token as `UV_PUBLISH_TOKEN` (same as TestPyPI setup)
+
+#### 2. Production Publishing Workflow
+
+```bash
+# 1. Ensure you're on the main branch with latest changes
+git checkout main
+git pull
+
+# 2. Run tests to ensure everything works
+just test
+
+# 3. Bump to final version (automatically creates git tag and commits)
+just bump-patch  # or bump-minor/bump-major as appropriate
+
+# 4. Push changes and tags to trigger automated release
+just push-all
+
+# 5. GitHub Actions will automatically:
+#    - Run Code Coverage workflow (tests + quality checks)
+#    - If successful, run Build and Release workflow
+#    - Build package and publish to PyPI
+#    - Create GitHub release with artifacts
+```
+
+## Automated Release Pipeline
+
+DataSure uses GitHub Actions for automated testing and releasing:
+
+### Workflow Dependencies
+
+1. **Code Coverage Workflow** (`.github/workflows/build.yml`)
+   - Runs on: branches `main`, tags `v*`, and pull requests
+   - Executes: pre-commit hooks, tests, SonarQube analysis
+   - **Must pass** before releases can proceed
+
+2. **Build and Release Workflow** (`.github/workflows/build-and-release.yml`)
+   - **Triggered by**: Code Coverage workflow completion
+   - **Only runs if**: Code Coverage succeeded AND triggered by tag push
+   - Executes: package building, PyPI publishing, GitHub release creation
+
+### Release Process
+
+```bash
+# Step 1: Create a release (this triggers both workflows)
+just bump-patch  # Creates git tag v1.0.1
+
+# Step 2: Push to trigger automation
+just push-all    # Pushes commits and tags
+
+# Step 3: Monitor workflows in GitHub Actions
+# - Code Coverage runs first (quality gate)
+# - Build and Release runs only if Code Coverage passes
+# - Package published to PyPI automatically
+# - GitHub release created with artifacts
+```
+
+### Manual Release Override
+
+For emergency releases bypassing quality checks:
+
+```bash
+# Trigger Build and Release workflow manually
+# Go to GitHub Actions → Build and Release → Run workflow
+# Enter version (e.g., v1.0.1) and click "Run workflow"
+```
+
+### Quality Gates
+
+- **Pre-commit hooks**: Code formatting and linting
+- **Test suite**: All tests must pass
+- **SonarQube analysis**: Code quality and security checks
+- **Failed quality checks** = **No release**
+
+#### 3. Verifying Package Before Publishing
+
+Before publishing, you can verify your package:
+
+```bash
+# Check package metadata and structure
+just check-pypi
+
+# View package info
+just pypi-info
+```
+
+**Note:** The project now uses `uv publish` for all publishing operations.
 
 ## Data Storage and Cache
 
