@@ -629,7 +629,7 @@ def compute_outlier_stats(series: pd.Series, outlier_type: str | None, multiplie
     if series.empty:
         raise ValueError("The Series is empty.")
 
-    if outlier_type not in [None, "sd", "iqr"]:
+    if outlier_type not in [None, "Interquartile Range (IQR)", "Standard Deviation (SD)"]:
         raise ValueError("Invalid outlier type. Use 'sd' or 'iqr'.")
 
     if multiplier is not None and multiplier <= 0:
@@ -639,12 +639,12 @@ def compute_outlier_stats(series: pd.Series, outlier_type: str | None, multiplie
     median = series.median()
     sd = series.std()
 
-    if outlier_type in "sd":
+    if outlier_type in "Standard Deviation (SD)":
         if not multiplier:
             multiplier = 3.0 # default to 3 standard deviations
         lower_bound = mean - (multiplier * sd)
         upper_bound = mean + (multiplier * sd)
-    elif outlier_type in [None, "iqr"]: # default to IQR if not specified
+    elif outlier_type in [None, "Interquartile Range (IQR)"]: # default to IQR if not specified
         if not multiplier:
             multiplier = 1.5 # default to 1.5 IQR
         q1 = series.quantile(0.25)
@@ -664,10 +664,9 @@ def compute_outlier_stats(series: pd.Series, outlier_type: str | None, multiplie
 # Function to detect outliers
 @st.cache_data
 def compute_outlier_output(
-    project_id: str,
-    label: str,
     df: pd.DataFrame,
-    display_cols: list | None,
+    outlier_settings: pd.DataFrame,
+    display_cols: list,
     min_threshold: float | None,
     survey_key: str,
     survey_id: str | None,
@@ -691,38 +690,40 @@ def compute_outlier_output(
         raise ValueError("The DataFrame is empty. Please provide a valid DataFrame.")
 
     # get a list of columns to include in the output
-    # Build a list of columns to include in the output, avoiding duplicates and None values
+    # Build a list of columns to include in the output, avoiding duplicates 
+    # and None values
     include_cols = []
     for col in (display_cols or []):
         if col and col not in include_cols:
             include_cols.append(col)
-    for col in [survey_id, enumerator]:
+    for col in [survey_key, survey_id, enumerator]:
         if col and col not in include_cols:
             include_cols.append(col)
 
     # create an empty DataFrame to store the outlier results
     outlier_results = pd.DataFrame()
 
-    outlier_settings = duckdb_get_table(
-        project_id=project_id,
-        alias=f"outliers_setting_logs_{label}",
-        db_name="logs",
-    ).to_pandas()
+    # create admin_data DataFrame to store survey metadata
+    admin_data = df[include_cols].copy(deep=True)
 
     # Iterate through each row in the outlier settings DataFrame
     for _, row in outlier_settings.iterrows():
-        search_type = row["search_type"]
-        pattern = row["pattern"]
-        outlier_cols = row["outlier_cols"]
-        grouped_cols = row["grouped_cols"]
-        lock_cols = row["lock_cols"]
-        outlier_method = row["outlier_method"]
-        outlier_multiplier = row["outlier_multiplier"]
+        # Extract outlier settings with defaults for robustness
+        outlier_cols = row.get("outlier_cols", [])
+        grouped_cols = row.get("grouped_cols", False)
+        outlier_method = row.get("outlier_method", "Interquartile Range (IQR)")
+        outlier_multiplier = row.get("outlier_multiplier", 1.5)
         soft_min = row.get("soft_min", None)
         soft_max = row.get("soft_max", None)
 
+        # Ensure outlier_cols is a list
+        if isinstance(outlier_cols, str):
+            outlier_cols = [outlier_cols]
+        elif not isinstance(outlier_cols, list):
+            outlier_cols = list(outlier_cols)
+
         # create a subset of the dataset containing
-        outlier_df = df[[survey_key + include_cols + outlier_cols]].copy(deep=True)
+        outlier_df = df[[survey_key] + outlier_cols].copy(deep=True)
 
         if min_threshold is None:
             min_threshold = 20 if outlier_method == "Interquartile Range (IQR)" else 30
@@ -733,7 +734,7 @@ def compute_outlier_output(
 
             # compute outlier stats for the single column
             outlier_stats = compute_outlier_stats(outlier_df[outlier_cols[0]],
-                                                  outlier_type=outlier_method.lower(),
+                                                  outlier_type=outlier_method,
                                                   multiplier=outlier_multiplier)
         else:
             if grouped_cols:
@@ -743,11 +744,11 @@ def compute_outlier_output(
                 )
                 # count the number of non-null values in the stacked series
                 non_null_count = stacked_series.count()
-                
+
                 # compute outlier stats for the stacked series
                 outlier_stats = compute_outlier_stats(
                     stacked_series,
-                    outlier_type=outlier_method.lower(),
+                    outlier_type=outlier_method,
                     multiplier=outlier_multiplier,
                 )
             else:
@@ -765,74 +766,75 @@ def compute_outlier_output(
             if not grouped_cols:
                 outlier_stats = compute_outlier_stats(
                     outlier_df[col],
-                    outlier_type=outlier_method.lower(),
+                    outlier_type=outlier_method,
                     multiplier=outlier_multiplier,
                 )
 
-
             # add new column showing reason for flag
-            outlier_df["outlier reason"] = (
-                outlier_df.apply(
-                    lambda x: f"Value {x[col]} is below lower bound {outlier_stats['lower_bound']:.2f}"
-                    if x["outlier flagged"] and x[col] < outlier_stats["lower_bound"]
-                    else (
-                        f"Value {x[col]} is above upper bound {outlier_stats['upper_bound']:.2f}"
-                        if x["outlier flagged"] and x[col] > outlier_stats["upper_bound"]
-                        else "No outlier"
-                    ),
-                    axis=1,
+            def add_outlier_reason(value, soft_min, soft_max, outlier_stats):
+                """Add a reason for outlier based on the value and
+                outlier statistics.
+                """
+                if value < outlier_stats["lower_bound"]:
+                    return f"Value is below lower bound {outlier_stats['lower_bound']:.2f}"
+                elif value > outlier_stats["upper_bound"]:
+                    return f"Value is above upper bound {outlier_stats['upper_bound']:.2f}"
+                else:
+                    if soft_min is not None and value < soft_min:
+                        return f"Value is below soft minimum {soft_min:.2f}"
+                    elif soft_max is not None and value > soft_max:
+                        return f"Value is above soft maximum {soft_max:.2f}"
+                    else:
+                        return "no outlier" # return empty string if no reason
+
+            # apply the function to the column to create a new column for outlier reason
+            outlier_df["outlier reason"] = outlier_df[col].apply(
+                lambda x, soft_min = soft_min, soft_max = soft_max, outlier_stats = outlier_stats: add_outlier_reason(
+                    x, soft_min, soft_max, outlier_stats
                 )
             )
 
-            # add a reason if value is not flagged but is below soft min or above soft max
-            if soft_min is not None:
-                outlier_df["outlier reason"] = outlier_df.apply(
-                    lambda x: f"Value {x[col]} is below soft minimum {soft_min:.2f}"
-                    if x[col] < soft_min and not x["outlier flagged"]
-                    else x["outlier reason"],
-                    axis=1,
-                )
-
-            if soft_max is not None:
-                outlier_df["outlier reason"] = outlier_df.apply(
-                    lambda x: f"Value {x[col]} is above soft maximum {soft_max:.2f}"
-                    if x[col] > soft_max and not x["outlier flagged"]
-                    else x["outlier reason"],
-                    axis=1,
-                )
-
             # count the number of outliers in the column
-            outlier_count = outlier_df[outlier_df["outlier flagged"]].shape[0]
-            
+            outlier_count = outlier_df[outlier_df["outlier reason"] != "no outlier"].shape[0]
+
             if outlier_count > 0:
-                outlier_append = outlier_df[[survey_key] + include_cols + [col, "outlier reason"]].copy(deep=True)
 
-                # add a variable column to the DataFrame
-                outlier_append["variable"] = col
+                # Filter out non-outliers
+                outlier_df = outlier_df[outlier_df["outlier reason"] != "no outlier"].copy()
 
-                # rename col to value
-                outlier_append = outlier_append.rename(columns={col: "value"})
+                # Assign variable name and rename value column
+                outlier_df["variable"] = col
+                outlier_df = outlier_df.rename(columns={col: "value"})
 
-                # add mean, std, lower_bound, upper_bound columns
-                outlier_append["mean"] = outlier_stats["mean"]
-                outlier_append["std"] = outlier_stats["sd"]
-                outlier_append["lower_bound"] = outlier_stats["lower_bound"]
-                outlier_append["upper_bound"] = outlier_stats["upper_bound"]
-                # add a column for the outlier method used
-                outlier_append["outlier_method"] = outlier_method
-                # add a column for the outlier multiplier used
-                outlier_append["outlier_multiplier"] = outlier_multiplier
-                # add a column for the soft min used
-                outlier_append["soft_min"] = soft_min
-                # add a column for the soft max used
-                outlier_append["soft_max"] = soft_max
-
+                # Prepare stats columns to add
+                stats_map = {
+                    "mean": outlier_stats.get("mean", None),
+                    "std": outlier_stats.get("sd", None),
+                    "lower_bound": outlier_stats.get("lower_bound", None),
+                    "upper_bound": outlier_stats.get("upper_bound", None),
+                    "outlier_method": outlier_method,
+                    "outlier_multiplier": outlier_multiplier,
+                    "soft_min": soft_min,
+                    "soft_max": soft_max,
+                }
+                for k, v in stats_map.items():
+                    outlier_df[k] = v
 
                 # append to the outlier results DataFrame
                 outlier_results = pd.concat(
-                    [outlier_results, outlier_append],
+                    [outlier_results, outlier_df],
                     ignore_index=True,
                 )
+
+                # merge admin_data with outlier_df in (1:m) relationship
+                merged_results = pd.merge(
+                    admin_data,
+                    outlier_results,
+                    how="left",
+                    on=survey_key,
+                )
+
+    return merged_results[merged_results["value"].notnull()]
 
 
 def display_outlier_output(project_id: str,
@@ -858,9 +860,15 @@ def display_outlier_output(project_id: str,
         db_name="logs",
     ).to_pandas()
 
-    outlier_data = compute_outlier_output(
+    data = duckdb_get_table(
         project_id=project_id,
-        label=label,
+        alias=f"outliers_data_{label}",
+        db_name="data",
+    ).to_pandas()
+
+    outlier_data = compute_outlier_output(
+        df=data,
+        outlier_settings=outlier_settings,
         display_cols= display_cols,
         min_threshold=min_threshold,
         survey_key=survey_key,
