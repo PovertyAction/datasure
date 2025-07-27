@@ -101,6 +101,38 @@ def expand_col_names(col_names, pattern, search_type='exact'):
     return [col for col in col_names if search_funcs[search_type](col)]
 
 @st.cache_data
+def update_unlocked_cols(outlier_settings: pd.DataFrame, col_names: list) -> pd.DataFrame:
+    """Update column names for unlocked rows in outlier settings"""
+    # validate that essential columns are present
+    essential_cols = ["outlier_cols", "lock_cols"]
+    for col in essential_cols:
+        if col not in outlier_settings.columns:
+            raise ValueError(f"Essential column '{col}' is missing from outlier settings.")
+
+    # count the number of unlocked rows. ie, search_type is not "exact" and 
+    # lock_cols is False
+    unlocked_rows_count = outlier_settings[
+        (outlier_settings["search_type"] != "exact") &
+        (outlier_settings["lock_cols"] == False)].shape[0]  # noqa: E712
+
+    if unlocked_rows_count == 0:
+        return outlier_settings  # No unlocked rows to update
+    else: # update unlocked rows
+        # loop through each row and update the outlier_cols
+        for index, row in outlier_settings.iterrows():
+            search_type = row["search_type"]
+            if search_type != "exact" and not row["lock_cols"]:
+                pattern = row["pattern"]
+                if not pattern:
+                    raise ValueError(f"Missing pattern for row {index}. Please provide a valid pattern.")
+
+                new_col_names = expand_col_names(col_names, pattern, search_type)
+                # update the outlier_cols with new col_names
+                outlier_settings.at[index, "outlier_cols"] = new_col_names
+
+    return outlier_settings
+
+@st.cache_data
 def update_outlier_settings(
     project_id: str,
     label: str,
@@ -834,38 +866,31 @@ def compute_outlier_output(
                     on=survey_key,
                 )
 
-    return merged_results[merged_results["value"].notnull()]
+                merged_results = merged_results["value"].notnull()
+            else:
+                merged_results = pd.DataFrame()
+
+    return merged_results
 
 
-def display_outlier_output(project_id: str,
-                           label: str,
+def display_outlier_output(data: pd.DataFrame,
+                           outlier_settings: pd.DataFrame,
                            display_cols: list | None,
                            min_threshold: int,
                            survey_key: str,
                            survey_id: str, enumerator: str) -> None:
-    """Display the outlier output in a Streamlit app.
-
-    Args:
-        project_id (str): Project ID for the DuckDB database.
-        label (str): Label for the outlier settings.
-
-    Returns
-    -------
-        None
-    """
+    """Display the outlier output in a Streamlit app."""
     # Get the outlier settings from the database
-    outlier_settings = duckdb_get_table(
-        project_id=project_id,
-        alias=f"outliers_setting_logs_{label}",
-        db_name="logs",
-    ).to_pandas()
 
-    data = duckdb_get_table(
-        project_id=project_id,
-        alias=f"outliers_data_{label}",
-        db_name="data",
-    ).to_pandas()
+    if data.empty:
+        st.info("No data available to check for outliers. Please upload data in the data section.")
+        return
 
+    if outlier_settings.empty:
+        st.info("No outlier settings found. Please configure outlier settings in the settings section.")
+        return
+
+    # compute outlier output
     outlier_data = compute_outlier_output(
         df=data,
         outlier_settings=outlier_settings,
@@ -1054,163 +1079,6 @@ def display_outlier_metrics(
     else:
         st.success("No outliers detected in the selected variables.")
 
-
-# Function to find the common prefix
-def common_prefix(strs):
-    """Find the longest common prefix string amongst an array
-    of strings.
-
-    Args:
-        strs (list): List of strings.
-
-    Returns
-    -------
-        str: The longest common prefix.
-
-    """
-    if not strs:
-        return ""
-    prefix = strs[0]
-    for s in strs[1:]:
-        while not s.startswith(prefix):
-            prefix = prefix[:-1]
-            if not prefix:
-                return ""
-    return prefix
-
-
-# Function to calculate joint outlier distribution
-@st.cache_data
-def compute_joint_outlier_distribution(
-    data, selected_cols, survey_id, outlier_method, iqr_value, sd_value
-) -> pd.DataFrame:
-    """
-    Calculate the joint outlier distribution for a set of selected columns using the
-    specified outlier detection method.
-
-    Args:
-        data (pd.DataFrame): Melted DataFrame containing the variables to analyze.
-        selected_cols (list): List of selected variable columns.
-        survey_id (str): Column name for survey ID.
-        outlier_method (str): Outlier detection method ("Interquartile Range (IQR)" or
-        "Standard Deviation (SD)").
-        iqr_value (float): IQR multiplier for IQR method.
-        sd_value (float): Number of standard deviations for SD method.
-
-    Returns
-    -------
-        pd.DataFrame: DataFrame containing outlier joint outlier distribution.
-    """
-    series = data["new_var"].dropna()
-
-    if outlier_method == "Interquartile Range (IQR)":
-        Q1 = series.quantile(0.25)
-        Q3 = series.quantile(0.75)
-        IQR = Q3 - Q1
-        lower_bound = Q1 - iqr_value * IQR
-        upper_bound = Q3 + iqr_value * IQR
-    else:
-        mean = series.mean()
-        std_dev = series.std()
-        lower_bound = mean - sd_value * std_dev
-        upper_bound = mean + sd_value * std_dev
-
-    outliers = series[(series < lower_bound) | (series > upper_bound)]
-    outliers_df = data[data["new_var"].isin(outliers)]
-
-    table_data = outliers_df[[survey_id, "name_variable"]].copy()
-    table_data["new_var"] = outliers_df["new_var"].round(2)
-    table_data["mean"] = round(series.mean(), 2)
-    table_data["lower_bound"] = round(lower_bound, 2)
-    table_data["upper_bound"] = round(upper_bound, 2)
-
-    return table_data, outliers_df
-
-
-# display joint outlier distribution summary
-@st.cache_data
-def display_joint_outlier_summary(joint_outlier_summary):
-    """Display the joint outlier distribution summary.
-    Args:
-        joint_outlier_summary (pd.DataFrame): DataFrame containing
-        joint outlier summary.
-    """
-    st.subheader("Joint Outlier Distribution")
-    st.dataframe(
-        joint_outlier_summary,
-        hide_index=True,
-        use_container_width=True,
-        column_config={
-            "id": st.column_config.Column("ID", width="small"),
-            "name_variable": st.column_config.Column("Variable Name"),
-            "new_var": st.column_config.NumberColumn(
-                "Value", format="%.2f", width="small"
-            ),
-            "mean": st.column_config.NumberColumn("Mean", format="%.2f", width="small"),
-            "lower_bound": st.column_config.NumberColumn(
-                "Lower Bound", format="%.2f", width="small"
-            ),
-            "upper_bound": st.column_config.NumberColumn(
-                "Upper Bound", format="%.2f", width="small"
-            ),
-        },
-    )
-
-
-# calculate joint outliers metrics
-@st.cache_data
-def calculate_joint_outliers_percentage(
-    outliers_df: pd.DataFrame, selected_cols: list
-) -> tuple:
-    """
-    Calculate metrics for joint outliers.
-
-    Args:
-        outliers_df (pd.DataFrame): DataFrame containing outlier data.
-        selected_cols (list): List of selected variable columns.
-
-    Returns
-    -------
-        tuple: A tuple containing the number of outliers, total count,
-        and percentage of outliers.
-    """
-    if outliers_df.empty:
-        return "0.00%"
-
-    outlier_count = len(outliers_df)
-    total_count = len(outliers_df[selected_cols].dropna())
-    outlier_percentage = (outlier_count / total_count) * 100 if total_count > 0 else 0.0
-    formatted_outlier_percentage = f"{outlier_percentage:.2f}%"
-
-    return formatted_outlier_percentage
-
-
-# plot joint outliers distribution
-def plot_joint_outliers_distribution(reshaped_joint_outliers_df, selected_cols):
-    """Plot the joint outliers distribution for selected columns.
-    Args:
-        reshaped_joint_outliers_df (pd.DataFrame): Melted DataFrame
-        containing the variables to analyze.
-        selected_cols (list): List of selected variable columns.
-    """
-    # Get common prefix
-    x_axis_label = common_prefix(selected_cols)
-
-    fig = go.Figure(
-        data=go.Violin(
-            y=reshaped_joint_outliers_df["new_var"],
-            box_visible=True,
-            line_color="black",
-            meanline_visible=True,
-            fillcolor="forestgreen",
-            opacity=0.6,
-            x0=x_axis_label,
-        )
-    )
-
-    st.plotly_chart(fig, theme="streamlit", use_container_width=True)
-
-
 # define function to create outliers report
 def outliers_report(
     project_id: str, data: pd.DataFrame, setting_file: str, page_num: int
@@ -1237,10 +1105,31 @@ def outliers_report(
         enumerator,
     ) = outliers_report_settings(project_id, data, setting_file, page_num, label)
 
+    outlier_settings = duckdb_get_table(
+        project_id=project_id,
+        alias=f"outliers_setting_logs_{label}",
+        db_name="logs",
+    ).to_pandas()
+
+    # update unlocked columns in outlier settings
+    _, _, numeric_cols, _, _ = get_df_info(data, cols_only=True)  # get numeric columns
+    outlier_settings = update_unlocked_cols(
+        outlier_settings=outlier_settings,
+        col_names=numeric_cols,
+    )
+
+    # save updated outlier settings
+    duckdb_save_table(
+        project_id=project_id,
+        table_data=outlier_settings,
+        alias=f"outliers_setting_logs_{label}",
+        db_name="logs",
+    )
+
     # display outlier output
     display_outlier_output(
-        project_id=project_id,
-        label=label,
+        data=data,
+        outlier_settings=outlier_settings,
         display_cols=display_cols,
         min_threshold=min_threshold,
         survey_key=survey_key,
