@@ -22,7 +22,7 @@ htbuilder==0.9.0
 idna==3.10
 jinja2==3.1.6
 joblib==1.5.1
-jsonschema==4.24.0
+jsonschema==4.25.0
 jsonschema-specifications==2025.4.1
 kiwisolver==1.4.8
 lxml==5.4.0
