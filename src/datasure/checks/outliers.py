@@ -5,7 +5,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import seaborn as sns
 import streamlit as st
-from millify import millify, prettify
+from millify import prettify
 
 from datasure.utils import (
     duckdb_get_table,
