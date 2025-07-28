@@ -25,20 +25,12 @@ def get_df_info(stats_df: pl.DataFrame | pd.DataFrame, cols_only=False) -> tuple
     if isinstance(stats_df, pd.DataFrame):
         stats_df = pl.from_pandas(stats_df)
 
+    # return column types
     all_columns = stats_df.columns
-    string_columns = [col for col in all_columns if stats_df[col].dtype == pl.Utf8]
-
-    numeric_columns = [
-        col for col in all_columns if stats_df[col].dtype in [pl.Int64, pl.Float64]
-    ]
-
-    datetime_columns = [
-        col for col in all_columns if stats_df[col].dtype == pl.Datetime
-    ]
-
-    categorical_columns = [
-        col for col in all_columns if stats_df[col].dtype == pl.Categorical
-    ]
+    string_columns = stats_df.select(pl.col(pl.Utf8)).columns
+    numeric_columns = stats_df.select(pl.col(pl.NUMERIC_DTYPES)).columns
+    datetime_columns = stats_df.select(pl.col(pl.Date, pl.Datetime)).columns
+    categorical_columns = stats_df.select(pl.col(pl.Categorical)).columns
 
     if cols_only:
         return (
