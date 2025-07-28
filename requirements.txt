@@ -42,7 +42,7 @@ plotly==6.2.0
 polars==1.31.0
 prometheus-client==0.22.1
 protobuf==5.29.5
-pyarrow==20.0.0
+pyarrow==21.0.0
 pydeck==0.9.1
 pymdown-extensions==10.16
 pyparsing==3.2.3
