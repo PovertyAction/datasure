@@ -539,20 +539,23 @@ if show_prep_page_info:
             project_id=project_id,
             alias=f"prep_log_{label}",
             db_name="logs",
-        ).to_pandas()
+            type="pd",
+        )
 
         prep_data = duckdb_get_table(
             project_id=project_id,
             alias=label,
             db_name="prep",
-        ).to_pandas()
+            type="pd",
+        )
 
         if prep_data.empty:
             prep_data = duckdb_get_table(
                 project_id=project_id,
                 alias=label,
                 db_name="raw",
-            ).to_pandas()
+                type="pd",
+            )
 
             duckdb_save_table(
                 project_id,
