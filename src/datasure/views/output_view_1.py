@@ -52,21 +52,24 @@ page_data = duckdb_get_table(
     project_id,
     survey_data_name,
     db_name="corrected",
-).to_pandas()
+    type='pd',
+)
 # if corrected data is empty, load prep data
-if page_data.empty:
+if page_data.empty():
     page_data = duckdb_get_table(
         project_id,
         survey_data_name,
         db_name="prep",
-    ).to_pandas()
+        type='pd',
+    )
     # if prep data is empty, load raw data
-    if page_data.empty:
+    if page_data.empty():
         page_data = duckdb_get_table(
             project_id,
             survey_data_name,
             db_name="raw",
-        ).to_pandas()
+            type='pd',
+        )
 
 (
     summary,
@@ -156,7 +159,8 @@ with back_checks:
             project_id,
             backcheck_data_name,
             db_name="corrected",
-        ).to_pandas()
+            type='pd',
+        )
 
         backchecks_report(
             project_id,
