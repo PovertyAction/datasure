@@ -5,7 +5,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import seaborn as sns
 import streamlit as st
-from millify import prettify
+from millify import millify, prettify
 
 from datasure.utils import (
     duckdb_get_table,
@@ -854,6 +854,13 @@ def compute_outlier_output(
             outlier_df["column name"] = col
             outlier_df = outlier_df.rename(columns={col: "column value"})
 
+            # reorder columns to ensure consistent output
+            outlier_df = outlier_df[[survey_key, "column name", "column value",
+                                     "min_value", "max_value", "mean", "median",
+                                     "std", "iqr", "lower_bound", "upper_bound",
+                                     "outlier reason", "outlier_method",
+                                     "outlier_multiplier", "soft_min", "soft_max"]]
+
             # append to the outlier results DataFrame
             outlier_results = pd.concat(
                 [outlier_results, outlier_df],
@@ -886,14 +893,47 @@ def display_outlier_output(outlier_data: pd.DataFrame) -> None:
     st.dataframe(outlier_data_disp, use_container_width=True, hide_index=True,
         column_config={
             "column name": st.column_config.Column("Column Name"),
-            "value": st.column_config.NumberColumn(
-                "Value", format="%.2f", width="small"
+            "column value": st.column_config.Column(
+                "Column Value",
+                help="The value of the column that is flagged as an outlier.",
+            ),
+            "min_value": st.column_config.NumberColumn(
+                "Min Value", format="%.2f",
+            ),
+            "max_value": st.column_config.NumberColumn(
+                "Max Value", format="%.2f",
             ),
             "mean": st.column_config.NumberColumn(
-                "Mean", format="%.2f", width="small"
+                "Mean", format="%.4f",
             ),
             "std": st.column_config.NumberColumn(
-                "Standard Deviation", format="%.2f", width="small"
+                "SD", format="%.4f",
+            ),
+            "median": st.column_config.NumberColumn(
+                "Median", format="%.4f",
+            ),
+            "iqr": st.column_config.NumberColumn(
+                "IQR", format="%.2f",
+            ),
+            "outlier reason": st.column_config.Column(
+                "Outlier Reason",
+                help="Reason for flagging the value as an outlier. " \
+                "This includes whether the value is below the lower bound, above the upper bound, " \
+                "or below/above the soft minimum/maximum.",
+            ),
+            "outlier_method": st.column_config.Column(
+                "Outlier Method",
+                help="Method used for outlier detection. " \
+                "This can be either Interquartile Range (IQR) or Standard Deviation (SD)" \
+            ),
+            "soft_min": st.column_config.NumberColumn(
+                "Soft Min",
+            ),
+            "soft_max": st.column_config.NumberColumn(
+                "Soft Max",
+            ),
+            "outlier_multiplier": st.column_config.NumberColumn(
+                "Outlier Multiplier",
             ),
             "lower_bound": st.column_config.NumberColumn(
                 "Lower Bound", format="%.2f", width="small"
@@ -922,8 +962,9 @@ def compute_column_outlier_summary(
     )
 
     # count number of outliers per column
-    outlier_summary["flagged as outlier"] = outlier_summary.groupby("column name")["outlier reason"].transform(
-        lambda x: x != "no outlier").sum()
+    outlier_summary["flagged as outlier"] = outlier_summary.apply(
+        lambda row: 1 if row["outlier reason"] != "no outlier" else 0, axis=1
+    )
 
     outlier_counts = outlier_summary.groupby("column name")["flagged as outlier"].sum().reset_index()
     outlier_counts.columns = ["column name", "outlier count"]
@@ -1051,15 +1092,14 @@ def create_violin_plot(data: pd.Series, title: str) -> go.Figure:
 def plot_col_distribution(
     data: pd.DataFrame, col_name: str) -> go.Figure:
     """Plot the distribution of a specific column in the data."""
-
     # Check if the column exists in the DataFrame
     if col_name not in data.columns:
         raise ValueError(f"Column '{col_name}' does not exist in the DataFrame.")
-    
+
     # Check if the column is numeric
     if not pd.api.types.is_numeric_dtype(data[col_name]):
         raise ValueError(f"Column '{col_name}' is not numeric. Cannot plot distribution.")
-    
+
     # create a histogram of the column
     fig = go.Figure(
         data=go.Histogram(
@@ -1076,7 +1116,6 @@ def plot_col_distribution(
         template="plotly_white",
     )
     return fig
-    
 
 def get_outlier_cols(outlier_settings: pd.DataFrame) -> list:
     """Get a list of outlier columns from the outlier settings DataFrame."""
@@ -1106,7 +1145,7 @@ def display_outlier_metrics(
     outlier_cols_count = len(outlier_cols)
 
     # number of outliers flagged
-    total_outliers = outliers_data.shape[0]
+    total_outliers = outliers_data[outliers_data["outlier reason"] != "no outlier"].shape[0]
 
     # columns flagged with at least one outlier
     at_least_one_outlier = (
@@ -1124,26 +1163,26 @@ def display_outlier_metrics(
 
     col1.metric(
         label="Variables checked",
-        value=f"{outlier_cols_count}",
+        value=f"{prettify(outlier_cols_count)}",
         help="Columns checked for outlier values",
     )
 
     col2.metric(
         label="Outlier variables",
-        value=f"{at_least_one_outlier}",
+        value=f"{prettify(at_least_one_outlier)}",
         help="Variables with at least one outlier",
     )
 
     col3.metric(
         label="Number of outliers",
-        value=f"{total_outliers}",
+        value=f"{prettify(total_outliers)}",
         help="Total number of identified outliers",
     )
 
     if enumerator:
         col4.metric(
             label="Number of enumerators",
-            value=f"{total_enumerators}",
+            value=f"{prettify(total_enumerators)}",
             help="Number of enumerators with outliers flagged",
         )
     else:
@@ -1256,16 +1295,16 @@ def inpect_outliers_columns(data: pd.DataFrame, outlier_data: pd.DataFrame, col_
               value=prettify(col_summary_row["max_value"]),
               help="Maximum value in the column.")
     mu5.metric(label="Mean",
-              value=prettify(col_summary_row["mean"]),
+              value=prettify(millify(col_summary_row["mean"], precision=4)),
               help="Mean value in the column.")
     ml1.metric(label="Median",
-              value=prettify(col_summary_row["median"]),
+              value=prettify(millify(col_summary_row["median"], precision=4)),
               help="Median value in the column.")
     ml2.metric(label="Standard Deviation",
-              value=prettify(col_summary_row["std"]),
+              value=prettify(millify(col_summary_row["std"], precision=4)),
               help="Standard deviation of the values in the column.")
     ml3.metric(label="Interquartile Range",
-              value=prettify(col_summary_row["iqr"]),
+              value=prettify(millify(col_summary_row["iqr"], precision=4)),
               help="Interquartile range of the values in the column.")
     ml4.metric(label="Lower Bound",
               value=prettify(col_summary_row["lower_bound"]),
