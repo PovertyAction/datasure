@@ -1,6 +1,7 @@
 import os
 import re
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import seaborn as sns
@@ -350,14 +351,17 @@ def outliers_report_settings(
                 default=default_outlier_display_cols,
                 help="Select columns to display in the outliers report eg. survey key, enumerator, survey ID, etc.",
                 on_change=trigger_save,
-                kwargs={"state_name", "outlier_disp_save"},
+                kwargs={"state_name": "outlier_display_cols_save"},
             )
-            if "outlier_disp_save" in st.session_state and st.session_state.outlier_disp_save:
+
+            if "outlier_display_cols_save" in st.session_state and st.session_state.outlier_display_cols_save:
+                st.write("Oulier Display Columns:", outlier_display_cols)
                 save_check_settings(
                     settings_file=settings_file,
                     check_name="outliers",
                     check_settings={"outlier_display_cols": outlier_display_cols},
                 )
+                st.session_state.outlier_disp_save = False
 
             st.markdown("### Minimum Threshold")
             mt1, _ = st.columns([0.2, 0.8])
@@ -1120,13 +1124,16 @@ def plot_col_distribution(
 def get_outlier_cols(outlier_settings: pd.DataFrame) -> list:
     """Get a list of outlier columns from the outlier settings DataFrame."""
     # Count the number of columns checked for outliers
-    cols = outlier_settings["outlier_cols"].tolist()
-    cols_list = []  # Get unique column names
-    for col in cols:
-        cols_list.extend(col if isinstance(col, list) else [col])
-    outlier_cols = set(cols_list[0])  # Remove duplicates
+    cols = []
+    for i in range(len(outlier_settings)):
+        col = outlier_settings.iloc[i]["outlier_cols"]
+        if isinstance(col, np.ndarray):
+            cols.append(col[0])
+        elif isinstance(col, list):
+            cols.extend(col)
 
-    return list(outlier_cols)  # Convert to list for consistency
+
+    return cols
 
 # Function to display outlier metrics
 @st.cache_data
@@ -1154,7 +1161,7 @@ def display_outlier_metrics(
 
     # number of enumerators with outliers flagged
     total_enumerators = (
-        outliers_data[enumerator].nunique()
+        outliers_data[outliers_data["outlier reason"] != "no outlier"][enumerator].nunique()
         if enumerator and not outliers_data.empty
         else 0
     )
@@ -1181,7 +1188,7 @@ def display_outlier_metrics(
 
     if enumerator:
         col4.metric(
-            label="Number of enumerators",
+            label="Number of enumerators with outliers",
             value=f"{prettify(total_enumerators)}",
             help="Number of enumerators with outliers flagged",
         )
