@@ -55,7 +55,7 @@ page_data = duckdb_get_table(
     type='pd',
 )
 # if corrected data is empty, load prep data
-if page_data.empty():
+if page_data.empty:
     page_data = duckdb_get_table(
         project_id,
         survey_data_name,
@@ -63,7 +63,7 @@ if page_data.empty():
         type='pd',
     )
     # if prep data is empty, load raw data
-    if page_data.empty():
+    if page_data.empty:
         page_data = duckdb_get_table(
             project_id,
             survey_data_name,
