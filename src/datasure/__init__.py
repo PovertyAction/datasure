@@ -5,7 +5,7 @@ A web-based interface for data quality monitoring and high-frequency checks
 in survey data collection projects.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "Innovations for Poverty Action"
 __email__ = "researchsupport@poverty-action.org"
 

@@ -129,7 +129,7 @@ st.set_page_config(
 
 _, page_canvas, _ = st.columns([0.1, 0.8, 0.1])
 with page_canvas:
-    st.write("version 0.1.1 26 Jul 2025")
+    st.write("version 0.2.0  28 Jul 2025")
     # Get the path to the assets directory relative to the package
     assets_dir = Path(__file__).parent.parent / "assets"
     image_path = assets_dir / "LinkedIn Cover IPA20.png"
