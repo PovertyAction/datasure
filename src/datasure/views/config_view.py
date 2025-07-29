@@ -71,7 +71,7 @@ def add_check_configuration(project_id: str) -> None:
                     project_id=project_id, alias=survey_data_name, db_name="prep"
                 )
 
-                all_columns, string_columns, numeric_columns, datetime_columns, _ = (
+                _, string_columns, numeric_columns, datetime_columns, _ = (
                     get_df_info(survey_df, cols_only=True)
                 )
 
