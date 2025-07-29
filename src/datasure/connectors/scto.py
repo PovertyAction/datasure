@@ -444,8 +444,7 @@ def scto_import_data(
             if row["name"] in repeat_fields:
                 cols = scto_get_repeat_cols(field=row["name"], data_cols=scto_data_cols)
             else:
-                cols = row["name"]
-
+                cols = [row["name"]]
             cols = [col for col in cols if col in scto_data.columns]
             if not cols:
                 continue # skip if no columns found
@@ -762,28 +761,27 @@ def scto_download_action(project_id: str, form_inputs: pd.DataFrame) -> None:
 
     # download data
     for i, row in enumerate(form_inputs.itertuples()):
-        if f"scto_raw_data{i}" in st.session_state:
-            st.session_state[f"scto_raw_data{i}"], new_data_count = scto_import_data(
-                project_id=project_id,
-                alias=row.alias,
-                form_id=row.form_id,
-                refresh=row.refresh,
-                key=row.private_key,
-                saveas=row.save_to,
-                attachments=row.attachments,
+        new_data_count = scto_import_data(
+            project_id=project_id,
+            alias=row.alias,
+            form_id=row.form_id,
+            refresh=row.refresh,
+            key=row.private_key,
+            saveas=row.save_to,
+            attachments=row.attachments,
+        )
+        time.sleep(3)
+        progress_bar.progress(
+            (i + 1) / form_count,
+            text=f"Download in progress...{i + 1}/{form_count}",
+        )
+        saveas = row.save_to
+        if saveas is not None:
+            st.write(
+                f"{i + 1}/{form_count}: downloaded {new_data_count} new data successfully and saved as {saveas}"
             )
-            time.sleep(3)
-            progress_bar.progress(
-                (i + 1) / form_count,
-                text=f"Download in progress...{i + 1}/{form_count}",
-            )
-            saveas = row.save_to
-            if saveas is not None:
-                st.write(
-                    f"{i + 1}/{form_count}: downloaded {new_data_count} new data successfully and saved as {saveas}"
-                )
-            else:
-                st.write(f"{i + 1}/{form_count}: downloaded successfully")
+        else:
+            st.write(f"{i + 1}/{form_count}: downloaded successfully")
 
     st.success("Data download complete")
 
