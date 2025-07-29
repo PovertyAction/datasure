@@ -6,6 +6,7 @@ as a command-line application.
 """
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 
@@ -49,22 +50,14 @@ def main():
         sys.exit(1)
 
     # Launch Streamlit with the app.py file
-    sys.argv = [
-        "streamlit",
-        "run",
-        str(app_path),
-        "--server.address",
-        args.host,
-        "--server.port",
-        str(args.port),
-        "--server.headless",
-        "true",
-        "--browser.gatherUsageStats",
-        "false",
-    ]
+    subprocess.run([
+        "streamlit", "run", str(app_path),
+        "--server.address", args.host,
+        "--server.port", str(args.port),
+        "--browser.gatherUsageStats", "false"
+    ])
 
     sys.exit(stcli.main())
-
 
 def get_version():
     """Get the package version."""
@@ -73,7 +66,7 @@ def get_version():
 
         return version("DataSure")
     except Exception:
-        return "0.1.0"
+        return "0.2.0"
 
 
 if __name__ == "__main__":
