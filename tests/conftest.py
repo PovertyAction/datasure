@@ -342,6 +342,67 @@ def cleanup_test_cache():
         shutil.rmtree(test_project_dir)
 
 
+@pytest.fixture
+def backcheck_survey_data():
+    """Create sample survey data specifically for backcheck testing."""
+    return pd.DataFrame(
+        {
+            "survey_id": ["S001", "S002", "S003", "S004", "S005"],
+            "enumerator": ["E1", "E2", "E1", "E3", "E2"],
+            "submission_date": [
+                "2024-01-01",
+                "2024-01-02",
+                "2024-01-03",
+                "2024-01-04",
+                "2024-01-05",
+            ],
+            "age": [25, 30, 28, 35, 32],
+            "income": [50000, 60000, 55000, 70000, 65000],
+            "education": [
+                "High School",
+                "Bachelor",
+                "Master",
+                "Bachelor",
+                "High School",
+            ],
+            "household_size": [4, 3, 5, 2, 4],
+        }
+    )
+
+
+@pytest.fixture
+def backcheck_data():
+    """Create sample backcheck data for testing."""
+    return pd.DataFrame(
+        {
+            "survey_id": ["S001", "S002", "S003"],
+            "backchecker": ["B1", "B2", "B1"],
+            "submission_date": ["2024-01-06", "2024-01-07", "2024-01-08"],
+            "age": [25, 31, 28],  # S002 has different age (30 vs 31)
+            "income": [
+                50000,
+                60000,
+                56000,
+            ],  # S003 has different income (55000 vs 56000)
+            "education": ["High School", "Bachelor", "Master"],
+            "household_size": [4, 3, 5],
+        }
+    )
+
+
+@pytest.fixture
+def backcheck_column_config():
+    """Create sample column configuration for backcheck testing."""
+    return pd.DataFrame(
+        {
+            "column": ["age", "income", "education"],
+            "category": [1, 2, 3],
+            "ok_range": ["", "1000", ""],
+            "comparison_condition": ["", "", "ignore_missing_values"],
+        }
+    )
+
+
 @pytest.fixture(autouse=True)
 def mock_database_functions(monkeypatch):
     """Mock database functions to avoid needing actual database files during tests."""

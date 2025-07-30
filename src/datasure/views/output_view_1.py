@@ -162,10 +162,29 @@ with back_checks:
             type='pd',
         )
 
+        # if corrected backcheck data is empty, load prep data
+        if backcheck_data.empty:
+            backcheck_data = duckdb_get_table(
+                project_id,
+                backcheck_data_name,
+                db_name="prep",
+                type='pd'
+            )
+            
+        # if prep backcheck data is empty, load raw data
+        if backcheck_data.empty:
+            backcheck_data = duckdb_get_table(
+                project_id,
+                backcheck_data_name,
+                db_name="raw",
+                type='pd',
+            )
+
         backchecks_report(
             project_id,
             page_data,
             backcheck_data,
+            setting_file,
             page_number,
         )
 

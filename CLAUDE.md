@@ -80,20 +80,72 @@ uv run python -m pytest -k "test_missing"               # Run tests matching pat
 uv run python -m pytest --markers                       # Show available test markers
 ```
 
+### Version Management & Git Tagging
+
+```bash
+# Alpha releases (pre-releases for early testing)
+just bump-patch-alpha     # 0.1.0 -> 0.1.1a1
+just bump-minor-alpha     # 0.1.0 -> 0.2.0a1
+just bump-major-alpha     # 0.1.0 -> 1.0.0a1
+
+# Beta releases (feature-complete pre-releases)
+just bump-patch-beta      # 0.1.0 -> 0.1.1b1
+just bump-minor-beta      # 0.1.0 -> 0.2.0b1
+just bump-major-beta      # 0.1.0 -> 1.0.0b1
+
+# Release candidates (final testing before release)
+just bump-patch-rc        # 0.1.0 -> 0.1.1rc1
+just bump-minor-rc        # 0.1.0 -> 0.2.0rc1
+just bump-major-rc        # 0.1.0 -> 1.0.0rc1
+
+# Final releases (automatically creates git tags)
+just bump-patch           # 0.1.0 -> 0.1.1
+just bump-minor           # 0.1.0 -> 0.2.0
+just bump-major           # 0.1.0 -> 1.0.0
+
+# Git tag management
+just tag-version          # Create git tag for current version
+just push-tag            # Push current version tag to remote
+just push-all            # Push commits and tags to remote
+```
+
+**Cross-Platform Git Tagging:**
+The Justfile includes platform-specific implementations for Windows (PowerShell), Linux, and macOS (bash) to ensure consistent git tagging behavior across all development environments.
+
 ### Package Building & Distribution
 
 ```bash
+# Building
 just build-package        # Build wheel and source distribution
 just install-package      # Install package locally from built wheel
 just test-cli             # Test CLI after installation
 just package-workflow     # Complete workflow: test, build, and verify
+just clean-build          # Clean build artifacts (dist/, build/)
+
+# Version Management (using uv version command)
+# Alpha releases
+just bump-patch-alpha     # Bump patch version with alpha suffix (e.g., 0.1.1a1)
+just bump-minor-alpha     # Bump minor version with alpha suffix (e.g., 0.2.0a1)
+just bump-major-alpha     # Bump major version with alpha suffix (e.g., 1.0.0a1)
+
+# Beta releases
+just bump-patch-beta      # Bump patch version with beta suffix (e.g., 0.1.1b1)
+just bump-minor-beta      # Bump minor version with beta suffix (e.g., 0.2.0b1)
+just bump-major-beta      # Bump major version with beta suffix (e.g., 1.0.0b1)
+
+# Release candidate releases
+just bump-patch-rc        # Bump patch version with rc suffix (e.g., 0.1.1rc1)
+just bump-minor-rc        # Bump minor version with rc suffix (e.g., 0.2.0rc1)
+just bump-major-rc        # Bump major version with rc suffix (e.g., 1.0.0rc1)
+
+# Final releases
+just bump-patch           # Bump patch version (e.g., 0.1.0 -> 0.1.1)
+just bump-minor           # Bump minor version (e.g., 0.1.0 -> 0.2.0)
+just bump-major           # Bump major version (e.g., 0.1.0 -> 1.0.0)
 
 # Publishing (requires credentials)
-just publish-test         # Publish to TestPyPI
-just publish              # Publish to PyPI
-
-# Release workflow
-just release-windows 0.1.0  # Shows deprecation message for Windows builds
+just publish-test # Publish to Test PyPI using uv publish
+just publish      # Publish to PyPI using uv publish
 ```
 
 ## Package Architecture
@@ -361,12 +413,20 @@ PyInstaller configuration for Windows builds:
 
 #### `Justfile`
 
-Cross-platform command automation:
+Cross-platform command automation with platform-specific implementations:
 
-- Environment setup and management
-- Development workflow commands
-- Build and distribution automation
-- Platform-specific installation helpers
+- **Environment setup and management** (Windows/Linux/macOS variants)
+- **Development workflow commands** (unified across platforms)
+- **Build and distribution automation** (platform-aware Python/UV handling)
+- **Platform-specific installation helpers** (winget/brew integration)
+
+**Cross-Platform Compatibility Features:**
+
+- Windows PowerShell recipes with proper command execution (`&` operator)
+- Linux/macOS bash recipes with traditional shell syntax
+- Platform-specific Python path resolution (`.venv/Scripts/` vs `.venv/bin/`)
+- Conditional recipe execution based on OS detection (`[windows]`, `[linux]`, `[macos]`)
+- Error suppression and output filtering for Windows compatibility (pytest-cov workarounds)
 
 ## Code Quality Standards
 
@@ -392,10 +452,10 @@ just lint-py              # Must pass with no errors
    ```python
    # Bad
    result = some_function()
-   
+
    # Good - if not using result
    some_function()
-   
+
    # Good - if intentionally unused
    _result = some_function()
    ```
@@ -408,7 +468,7 @@ just lint-py              # Must pass with no errors
    # Bad
    for item in items:
        process_something()
-   
+
    # Good
    for _item in items:
        process_something()
@@ -420,11 +480,11 @@ just lint-py              # Must pass with no errors
    # Bad
    if condition:
        raise ValueError("Error")
-   
+
    # Good
    def _handle_error():
        raise ValueError("Error")
-   
+
    if condition:
        _handle_error()
    ```
@@ -449,12 +509,49 @@ just lint-py              # Must pass with no errors
 - **Type Hints**: Encouraged but not strictly enforced
 - **Docstrings**: NumPy-style documentation
 
-### Git Workflow
+### Git Workflow & CI/CD Pipeline
 
 - **Pre-commit Hooks**: Run automatically on commit
 - **Branch Protection**: Required for main branch
 - **Conventional Commits**: Encouraged for clear history
-- **GitHub Actions**: CI/CD pipeline for testing and building
+- **GitHub Actions**: Automated CI/CD pipeline with quality gates
+
+#### Automated Release Pipeline
+
+**Workflow Dependencies:**
+
+1. **Code Coverage Workflow** (`.github/workflows/build.yml`)
+   - Triggers: main branch pushes, tag pushes (`v*`), pull requests
+   - Executes: pre-commit hooks, pytest suite, SonarQube analysis
+   - **Quality Gate**: Must pass before releases proceed
+
+2. **Build and Release Workflow** (`.github/workflows/build-and-release.yml`)
+   - Triggers: Code Coverage workflow completion (workflow_run)
+   - Conditions: Code Coverage succeeded AND triggered by tag push
+   - Executes: package building, PyPI publishing, GitHub release creation
+
+**Release Process:**
+
+```bash
+# Step 1: Create release with quality gate enforcement
+just bump-patch              # Updates version, commits, creates tag
+
+# Step 2: Push to trigger automated pipeline
+just push-all                # Pushes commits and tags
+
+# Step 3: GitHub Actions workflow sequence
+# → Code Coverage runs first (tests + quality checks)
+# → If successful → Build and Release runs automatically
+# → Package built and published to PyPI
+# → GitHub release created with artifacts
+```
+
+**Quality Gates Enforced:**
+
+- Linting and formatting (Ruff)
+- Test suite completion (pytest)
+- Code quality analysis (SonarQube)
+- Pre-commit hook validation
 
 ## Common Development Tasks
 
@@ -481,12 +578,75 @@ just lint-py              # Must pass with no errors
 3. Follow session state patterns for data persistence
 4. Test with different project configurations
 
-### Package Version Updates
+### Package Version Updates & Automated Release
 
-1. Update `__version__` in `src/datasure/__init__.py`
-2. Test package building: `just build-package`
-3. Verify CLI version: `uv run datasure --version`
-4. Update documentation if API changes
+#### Version Bump Workflow (Automated)
+
+1. **Choose appropriate version bump command:**
+   - `just bump-patch` for bug fixes (0.1.0 → 0.1.1)
+   - `just bump-minor` for new features (0.1.0 → 0.2.0)
+   - `just bump-major` for breaking changes (0.1.0 → 1.0.0)
+   - Add `-alpha`, `-beta`, or `-rc` suffix for pre-releases
+
+2. **The command automatically performs:**
+   - Updates `__version__` in `src/datasure/__init__.py`
+   - Runs `uv sync` to update lock file with new version
+   - Commits changes to git with descriptive message
+   - Creates git tag for the new version (e.g., `v0.1.1`)
+
+3. **Test locally before releasing:**
+
+   ```bash
+   just build-package        # Build the package
+   uv run datasure --version # Verify version number
+   just test                 # Run tests to ensure nothing broke
+   ```
+
+4. **Trigger automated release pipeline:**
+
+   ```bash
+   just push-all             # Push commits and tags to remote
+   ```
+
+5. **GitHub Actions handles the rest automatically:**
+   - Runs Code Coverage workflow (quality gate)
+   - If successful, runs Build and Release workflow
+   - Builds and publishes package to PyPI
+   - Creates GitHub release with artifacts
+
+#### Manual Testing Workflow (Pre-Release)
+
+For testing before automated release:
+
+```bash
+# 1. Create alpha/beta version for testing
+just bump-patch-alpha
+
+# 2. Test locally
+just build-package
+just install-package
+uv run datasure --version
+
+# 3. Test on TestPyPI (set UV_PUBLISH_TOKEN for test.pypi.org)
+just publish-test
+
+# 4. When ready for production, bump to final version
+just bump-patch
+
+# 5. Trigger automated release
+just push-all
+```
+
+#### Emergency Manual Release
+
+For bypassing quality gates in emergencies:
+
+1. Go to GitHub Actions → "Build and Release" workflow
+2. Click "Run workflow"
+3. Enter version (e.g., `v1.0.1`)
+4. Click "Run workflow" button
+
+**Note:** Manual releases skip the Code Coverage quality gate and should only be used for critical hotfixes.
 
 ## Troubleshooting Common Issues
 
