@@ -103,7 +103,9 @@ def duckdb_save_table(
             conn.execute(f"CREATE TABLE {table_id} AS SELECT * FROM table_data")
 
 
-def duckdb_get_table(project_id: str, alias: str, db_name: str, type: str = 'pl') -> pl.DataFrame:
+def duckdb_get_table(
+    project_id: str, alias: str, db_name: str, type: str = "pl"
+) -> pl.DataFrame:
     """Get a table from a DuckDB database.
 
     PARAMS:
@@ -117,8 +119,10 @@ def duckdb_get_table(project_id: str, alias: str, db_name: str, type: str = 'pl'
     pl.DataFrame : data from the DuckDB table
     """
     # validate return type
-    if type not in ['pl', 'pd']:
-        raise ValueError("Invalid type specified. Use 'pl' for Polars or 'pd' for Pandas.")
+    if type not in ["pl", "pd"]:
+        raise ValueError(
+            "Invalid type specified. Use 'pl' for Polars or 'pd' for Pandas."
+        )
     db_path = (
         get_cache_path(project_id, "settings", "logs.duckdb")
         if db_name == "logs"
@@ -136,12 +140,12 @@ def duckdb_get_table(project_id: str, alias: str, db_name: str, type: str = 'pl'
             > 0
         )
         if table_exists:
-            if type == 'pd':
+            if type == "pd":
                 return conn.execute(f"SELECT * FROM {table_id}").fetchdf()
             else:
                 return conn.execute(f"SELECT * FROM {table_id}").pl()
         else:
-            if type == 'pd':
+            if type == "pd":
                 return pd.DataFrame()
             else:
                 return pl.DataFrame()

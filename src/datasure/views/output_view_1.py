@@ -52,7 +52,7 @@ page_data = duckdb_get_table(
     project_id,
     survey_data_name,
     db_name="corrected",
-    type='pd',
+    type="pd",
 )
 # if corrected data is empty, load prep data
 if page_data.empty:
@@ -60,7 +60,7 @@ if page_data.empty:
         project_id,
         survey_data_name,
         db_name="prep",
-        type='pd',
+        type="pd",
     )
     # if prep data is empty, load raw data
     if page_data.empty:
@@ -68,7 +68,7 @@ if page_data.empty:
             project_id,
             survey_data_name,
             db_name="raw",
-            type='pd',
+            type="pd",
         )
 
 (
@@ -159,16 +159,13 @@ with back_checks:
             project_id,
             backcheck_data_name,
             db_name="corrected",
-            type='pd',
+            type="pd",
         )
 
         # if corrected backcheck data is empty, load prep data
         if backcheck_data.empty:
             backcheck_data = duckdb_get_table(
-                project_id,
-                backcheck_data_name,
-                db_name="prep",
-                type='pd'
+                project_id, backcheck_data_name, db_name="prep", type="pd"
             )
 
         # if prep backcheck data is empty, load raw data
@@ -177,7 +174,7 @@ with back_checks:
                 project_id,
                 backcheck_data_name,
                 db_name="raw",
-                type='pd',
+                type="pd",
             )
 
         backchecks_report(

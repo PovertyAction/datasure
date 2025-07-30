@@ -22,18 +22,20 @@ def get_df_info(stats_df: pl.DataFrame | pd.DataFrame, cols_only=False) -> tuple
         list[str]: list of datetime column types in the DataFrame
         list[str]: list of categorical column types in the DataFrame
     """
-    if isinstance(stats_df, pd.DataFrame): # get info from pandas dataframe
+    if isinstance(stats_df, pd.DataFrame):  # get info from pandas dataframe
         all_columns = stats_df.columns.tolist()
         string_columns = stats_df.select_dtypes(include=["object"]).columns.tolist()
         numeric_columns = stats_df.select_dtypes(include=["number"]).columns.tolist()
         datetime_columns = stats_df.select_dtypes(include=["datetime"]).columns.tolist()
-        categorical_columns = stats_df.select_dtypes(include=["category"]).columns.tolist()
+        categorical_columns = stats_df.select_dtypes(
+            include=["category"]
+        ).columns.tolist()
 
         num_rows = stats_df.shape[0]
         num_columns = stats_df.shape[1]
         num_missing = stats_df.isna().sum().sum()
         perc_missing = (num_missing / (num_rows * num_columns)) * 100
-    else: # get info from polars dataframe
+    else:  # get info from polars dataframe
         all_columns = stats_df.columns
         string_columns = stats_df.select(pl.col(pl.Utf8)).columns
         numeric_columns = stats_df.select(pl.col(pl.NUMERIC_DTYPES)).columns
@@ -49,7 +51,6 @@ def get_df_info(stats_df: pl.DataFrame | pd.DataFrame, cols_only=False) -> tuple
         num_missing = num_missing["row_total"][0]
         perc_missing = (num_missing / (num_rows * num_columns)) * 100
 
-
     if cols_only:
         return (
             all_columns,
@@ -58,7 +59,6 @@ def get_df_info(stats_df: pl.DataFrame | pd.DataFrame, cols_only=False) -> tuple
             datetime_columns,
             categorical_columns,
         )
-
 
     return (
         num_rows,

@@ -191,9 +191,9 @@ class TestValidPageNameLogic:
 
             assert is_valid == expected_valid, f"Failed for page_name: '{page_name}'"
             if expected_error_contains:
-                assert expected_error_contains in (error_message or ""), (
-                    f"Error message check failed for: '{page_name}'"
-                )
+                assert expected_error_contains in (
+                    error_message or ""
+                ), f"Error message check failed for: '{page_name}'"
 
     def test_valid_page_name_database_interaction_logic(self):
         """Test database interaction logic patterns."""
@@ -233,9 +233,9 @@ class TestValidPageNameLogic:
             else:
                 error_message = None
 
-            assert error_message == expected_error, (
-                f"Error message mismatch for '{page_name}'"
-            )
+            assert (
+                error_message == expected_error
+            ), f"Error message mismatch for '{page_name}'"
 
         # Test duplicate name error scenario
         page_name = "existing"

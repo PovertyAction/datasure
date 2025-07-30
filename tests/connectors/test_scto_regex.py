@@ -188,9 +188,9 @@ class TestServerNameRegex:
         ]
 
         for name in realistic_names:
-            assert re.fullmatch(bounded_pattern, name), (
-                f"Should match realistic name: {name}"
-            )
+            assert re.fullmatch(
+                bounded_pattern, name
+            ), f"Should match realistic name: {name}"
 
 
 class TestEmailRegexSecurity:
@@ -336,6 +336,6 @@ class TestServerNameValidation:
             safe_result = validate_server_name_safe(input_str)
 
             # Both should return truthy values for valid inputs
-            assert bool(vulnerable_result) == bool(safe_result), (
-                f"Mismatch for '{input_str}'"
-            )
+            assert bool(vulnerable_result) == bool(
+                safe_result
+            ), f"Mismatch for '{input_str}'"

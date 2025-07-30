@@ -39,7 +39,9 @@ class TestMain:
     @patch("sys.exit")
     @patch("subprocess.run")
     @patch.object(Path, "exists", return_value=True)
-    def test_main_default_args(self, mock_path_exists, mock_subprocess, mock_exit, mock_stcli_main):
+    def test_main_default_args(
+        self, mock_path_exists, mock_subprocess, mock_exit, mock_stcli_main
+    ):
         """Test main function with default arguments."""
         original_argv = sys.argv[:]
         try:
@@ -68,7 +70,9 @@ class TestMain:
     @patch("sys.exit")
     @patch("subprocess.run")
     @patch.object(Path, "exists", return_value=True)
-    def test_main_custom_host_port(self, mock_path_exists, mock_subprocess, mock_exit, mock_stcli_main):
+    def test_main_custom_host_port(
+        self, mock_path_exists, mock_subprocess, mock_exit, mock_stcli_main
+    ):
         """Test main function with custom host and port."""
         original_argv = sys.argv[:]
         try:
@@ -126,7 +130,9 @@ class TestMain:
     @patch("sys.exit")
     @patch("subprocess.run")
     @patch.object(Path, "exists", return_value=True)
-    def test_main_stcli_nonzero_return(self, mock_path_exists, mock_subprocess, mock_exit, mock_stcli_main):
+    def test_main_stcli_nonzero_return(
+        self, mock_path_exists, mock_subprocess, mock_exit, mock_stcli_main
+    ):
         """Test main function when stcli.main returns non-zero exit code."""
         original_argv = sys.argv[:]
         try:
@@ -146,7 +152,9 @@ class TestMain:
     @patch("sys.exit")
     @patch("subprocess.run")
     @patch.object(Path, "exists", return_value=True)
-    def test_main_app_path_construction(self, mock_path_exists, mock_subprocess, mock_exit, mock_stcli_main):
+    def test_main_app_path_construction(
+        self, mock_path_exists, mock_subprocess, mock_exit, mock_stcli_main
+    ):
         """Test that app.py path is constructed correctly."""
         original_argv = sys.argv[:]
         try:

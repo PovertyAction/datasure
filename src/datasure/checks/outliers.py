@@ -66,8 +66,9 @@ def load_default_settings(project_id: str, settings_file: str, page_num: int) ->
         default_min_threshold,
     )
 
+
 @st.cache_data
-def expand_col_names(col_names, pattern, search_type='exact'):
+def expand_col_names(col_names, pattern, search_type="exact"):
     """
     Expand column names based on a pattern and search type.
     Args:
@@ -91,50 +92,61 @@ def expand_col_names(col_names, pattern, search_type='exact'):
         raise TypeError("pattern must be a string.")
 
     search_funcs = {
-        'exact': lambda col: col == pattern,
-        'startswith': lambda col: col.startswith(pattern),
-        'endswith': lambda col: col.endswith(pattern),
-        'contains': lambda col: pattern in col,
-        'regex': lambda col: re.match(pattern, col)
+        "exact": lambda col: col == pattern,
+        "startswith": lambda col: col.startswith(pattern),
+        "endswith": lambda col: col.endswith(pattern),
+        "contains": lambda col: pattern in col,
+        "regex": lambda col: re.match(pattern, col),
     }
 
     # Check if the search_type is valid
     if search_type not in search_funcs:
-        raise ValueError(f"Invalid search_type '{search_type}'. Choose from: {', '.join(search_funcs.keys())}.")
+        raise ValueError(
+            f"Invalid search_type '{search_type}'. Choose from: {', '.join(search_funcs.keys())}."
+        )
 
     return [col for col in col_names if search_funcs[search_type](col)]
 
+
 @st.cache_data
-def update_unlocked_cols(outlier_settings: pd.DataFrame, col_names: list) -> pd.DataFrame:
+def update_unlocked_cols(
+    outlier_settings: pd.DataFrame, col_names: list
+) -> pd.DataFrame:
     """Update column names for unlocked rows in outlier settings"""
     # validate that essential columns are present
     essential_cols = ["outlier_cols", "lock_cols"]
     for col in essential_cols:
         if col not in outlier_settings.columns:
-            raise ValueError(f"Essential column '{col}' is missing from outlier settings.")
+            raise ValueError(
+                f"Essential column '{col}' is missing from outlier settings."
+            )
 
     # count the number of unlocked rows. ie, search_type is not "exact" and
     # lock_cols is False
     unlocked_rows_count = outlier_settings[
-        (outlier_settings["search_type"] != "exact") &
-        (outlier_settings["lock_cols"] == False)].shape[0]  # noqa: E712
+        (outlier_settings["search_type"] != "exact")
+        & (outlier_settings["lock_cols"] == False)
+    ].shape[0]  # noqa: E712
 
     if unlocked_rows_count == 0:
         return outlier_settings  # No unlocked rows to update
-    else: # update unlocked rows
+    else:  # update unlocked rows
         # loop through each row and update the outlier_cols
         for index, row in outlier_settings.iterrows():
             search_type = row["search_type"]
             if search_type != "exact" and not row["lock_cols"]:
                 pattern = row["pattern"]
                 if not pattern:
-                    raise ValueError(f"Missing pattern for row {index}. Please provide a valid pattern.")
+                    raise ValueError(
+                        f"Missing pattern for row {index}. Please provide a valid pattern."
+                    )
 
                 new_col_names = expand_col_names(col_names, pattern, search_type)
                 # update the outlier_cols with new col_names
                 outlier_settings.at[index, "outlier_cols"] = new_col_names
 
     return outlier_settings
+
 
 @st.cache_data
 def update_outlier_settings(
@@ -172,11 +184,11 @@ def update_outlier_settings(
         raise TypeError("pattern must be a string.")
     if not isinstance(outlier_method, str):
         raise TypeError("outlier_method must be a string.")
-    if not isinstance(outlier_multiplier, (int, float)): #noqa UP038
+    if not isinstance(outlier_multiplier, (int, float)):  # noqa UP038
         raise TypeError("outlier_multiplier must be a number.")
-    if soft_min is not None and not isinstance(soft_min, (int, float)): #noqa UP038
+    if soft_min is not None and not isinstance(soft_min, (int, float)):  # noqa UP038
         raise TypeError("soft_min must be a number or None.")
-    if soft_max is not None and not isinstance(soft_max, (int, float)): #noqa UP038
+    if soft_max is not None and not isinstance(soft_max, (int, float)):  # noqa UP038
         raise TypeError("soft_max must be a number or None.")
     if lock_cols is not None and not isinstance(lock_cols, bool):
         raise TypeError("lock_cols must be a boolean or None.")
@@ -219,7 +231,7 @@ def update_outlier_settings(
     # save the updated settings to the database
     duckdb_save_table(
         project_id=project_id,
-        table_data= logs,
+        table_data=logs,
         alias=f"outliers_setting_logs_{label}",
         db_name="logs",
     )
@@ -245,7 +257,9 @@ def outliers_report_settings(
             data, cols_only=True
         )
 
-        string_numeric_cols = [col for col in all_cols if col in string_columns or col in numeric_columns]
+        string_numeric_cols = [
+            col for col in all_cols if col in string_columns or col in numeric_columns
+        ]
 
         # load default settings
         (
@@ -274,7 +288,10 @@ def outliers_report_settings(
                     on_change=trigger_save,
                     kwargs={"state_name": "survey_id_save"},
                 )
-                if "survey_id_save" in st.session_state and st.session_state.survey_id_save:
+                if (
+                    "survey_id_save" in st.session_state
+                    and st.session_state.survey_id_save
+                ):
                     save_check_settings(
                         settings_file=settings_file,
                         check_name="outliers",
@@ -334,17 +351,14 @@ def outliers_report_settings(
                     )
                     st.session_state.enumerator_save = False
 
-
-        search_type_options = [
-            "exact",
-            "startswith",
-            "endswith",
-            "contains",
-            "regex"
-        ]
+        search_type_options = ["exact", "startswith", "endswith", "contains", "regex"]
 
         with st.container(border=True):
-            default_outlier_display_cols = [col for col in default_display_cols if col in all_cols] if default_display_cols else None
+            default_outlier_display_cols = (
+                [col for col in default_display_cols if col in all_cols]
+                if default_display_cols
+                else None
+            )
             # show display columns
             st.markdown("### Display columns")
             outlier_display_cols = st.multiselect(
@@ -356,7 +370,10 @@ def outliers_report_settings(
                 kwargs={"state_name": "outlier_display_cols_save"},
             )
 
-            if "outlier_display_cols_save" in st.session_state and st.session_state.outlier_display_cols_save:
+            if (
+                "outlier_display_cols_save" in st.session_state
+                and st.session_state.outlier_display_cols_save
+            ):
                 st.write("Oulier Display Columns:", outlier_display_cols)
                 save_check_settings(
                     settings_file=settings_file,
@@ -368,34 +385,47 @@ def outliers_report_settings(
             st.markdown("### Minimum Threshold")
             mt1, _ = st.columns([0.2, 0.8])
             with mt1:
-                default_min_threshold_value = default_min_threshold if default_min_threshold else None
-                min_threshold = st.number_input(label="Set general minimum threshold",
-                                                min_value=20,
-                                                max_value=50,
-                                                value=default_min_threshold_value,
-                                                step=1,
-                                                help="Set the minimum threshold for outlier detection. " \
-                                                "This is the minimum number of non-null values required to consider a column for outlier detection." \
-                                                "The default value is 30 for standard deviation and 20 for Inter-Quartile Range.",
-                                                key="min_threshold_key",
-                                                on_change=trigger_save,
-                                                kwargs={"state_name": "min_threshold_save"}
-                                )
-                if "min_threshold_save" in st.session_state and st.session_state.min_threshold_save:
-                    save_check_settings(settings_file=settings_file,
-                                        check_name="outliers",
-                                        check_settings={"min_threshold": min_threshold}
-                                        )
+                default_min_threshold_value = (
+                    default_min_threshold if default_min_threshold else None
+                )
+                min_threshold = st.number_input(
+                    label="Set general minimum threshold",
+                    min_value=20,
+                    max_value=50,
+                    value=default_min_threshold_value,
+                    step=1,
+                    help="Set the minimum threshold for outlier detection. "
+                    "This is the minimum number of non-null values required to consider a column for outlier detection."
+                    "The default value is 30 for standard deviation and 20 for Inter-Quartile Range.",
+                    key="min_threshold_key",
+                    on_change=trigger_save,
+                    kwargs={"state_name": "min_threshold_save"},
+                )
+                if (
+                    "min_threshold_save" in st.session_state
+                    and st.session_state.min_threshold_save
+                ):
+                    save_check_settings(
+                        settings_file=settings_file,
+                        check_name="outliers",
+                        check_settings={"min_threshold": min_threshold},
+                    )
                     st.session_state.min_threshold_save = False
 
         # adding outlier columns and settings
         st.markdown("### Outlier columns")
-        st.info("Use the :material/add: button to add columns to check for outliers and the "
-        ":material/delete: button to remove columns.")
+        st.info(
+            "Use the :material/add: button to add columns to check for outliers and the "
+            ":material/delete: button to remove columns."
+        )
 
         oc1, oc2, _ = st.columns([0.4, 0.3, 0.3])
-        with oc1, st.popover(
-            label=":material/add: Add outlier column", use_container_width=True):
+        with (
+            oc1,
+            st.popover(
+                label=":material/add: Add outlier column", use_container_width=True
+            ),
+        ):
             search_type = st.selectbox(
                 label="Search type",
                 options=search_type_options,
@@ -406,25 +436,34 @@ def outliers_report_settings(
             def search_type_info(search_type: str) -> None:
                 """Display info based on the selected search type."""
                 if search_type == "exact":
-                    st.info("Select columns that match the exact name. You may select multiple columns.")
+                    st.info(
+                        "Select columns that match the exact name. You may select multiple columns."
+                    )
                 elif search_type == "startswith":
-                    st.info("Select columns that start with the specified pattern. You will have to enter the pattern in the input box below.")
+                    st.info(
+                        "Select columns that start with the specified pattern. You will have to enter the pattern in the input box below."
+                    )
                 elif search_type == "endswith":
-                    st.info("Select columns that end with the specified pattern. You will have to enter the pattern in the input box below.")
+                    st.info(
+                        "Select columns that end with the specified pattern. You will have to enter the pattern in the input box below."
+                    )
                 elif search_type == "contains":
-                    st.info("Select columns that contain the specified pattern. You will have to enter the pattern in the input box below.")
+                    st.info(
+                        "Select columns that contain the specified pattern. You will have to enter the pattern in the input box below."
+                    )
                 elif search_type == "regex":
-                    st.info("Select columns that match the specified regex pattern. You will have to enter the pattern in the input box below.")
+                    st.info(
+                        "Select columns that match the specified regex pattern. You will have to enter the pattern in the input box below."
+                    )
 
             search_type_info(search_type=search_type)
-
 
             if search_type == "exact":
                 outlier_cols_sel = st.multiselect(
                     label="Select columns to check for outliers",
                     options=numeric_columns,
                     default=None,
-                    help="Select column or group of columns to check for outliers. " \
+                    help="Select column or group of columns to check for outliers. "
                     "Only numeric columns are available for outlier detection.",
                 )
 
@@ -443,9 +482,14 @@ def outliers_report_settings(
                 else:
                     outlier_cols_patt = []
 
-                st.write("**Columns Selected:**, ", ", ".join(outlier_cols_patt) if outlier_cols_patt else "None")
+                st.write(
+                    "**Columns Selected:**, ",
+                    ", ".join(outlier_cols_patt) if outlier_cols_patt else "None",
+                )
 
-            outlier_cols = outlier_cols_sel if search_type == "exact" else outlier_cols_patt
+            outlier_cols = (
+                outlier_cols_sel if search_type == "exact" else outlier_cols_patt
+            )
 
             if outlier_cols:
                 with st.container(border=True):
@@ -456,7 +500,7 @@ def outliers_report_settings(
                         grouped_cols = st.toggle(
                             label="Group columns",
                             key="outlier_cols_grouped",
-                            help="Group selected columns together for outlier detection. " \
+                            help="Group selected columns together for outlier detection. "
                             "If grouped, outliers will be detected across all selected columns as a single group.",
                             disabled=not outlier_cols or len(outlier_cols) < 2,
                         )
@@ -464,9 +508,11 @@ def outliers_report_settings(
                         lock_cols = st.toggle(
                             label="Lock column selection",
                             key="outlier_cols_lock",
-                            help="Lock the selected columns to prevent changes. " \
+                            help="Lock the selected columns to prevent changes. "
                             "If unlocked, column list may be updated when the data changes.",
-                            disabled=not outlier_cols or len(outlier_cols) < 2 or search_type == "exact",
+                            disabled=not outlier_cols
+                            or len(outlier_cols) < 2
+                            or search_type == "exact",
                         )
 
                     with st.container(border=True):
@@ -489,10 +535,12 @@ def outliers_report_settings(
                                 label="Select multiplier for outlier detection",
                                 min_value=0.0,
                                 max_value=3.0,
-                                value=1.5 if outlier_method == "Interquartile Range (IQR)" else 3.0,
+                                value=1.5
+                                if outlier_method == "Interquartile Range (IQR)"
+                                else 3.0,
                                 step=0.1,
-                                help="Select the multiplier to use for outlier detection. " \
-                                "For IQR method, this is the multiplier for the interquartile range. " \
+                                help="Select the multiplier to use for outlier detection. "
+                                "For IQR method, this is the multiplier for the interquartile range. "
                                 "For SD method, this is the number of standard deviations from the mean.",
                                 key="outlier_multiplier",
                             )
@@ -501,23 +549,31 @@ def outliers_report_settings(
                         with lc1:
                             soft_min = st.number_input(
                                 label="(OPTIONAL) Soft minimum",
-                                help="(OPTIONAL) Soft minimum value for outlier detection. " \
+                                help="(OPTIONAL) Soft minimum value for outlier detection. "
                                 "All values below this will be considered as outliers regardless of the method used.",
                                 value=None,
                             )
                         with lc2:
                             soft_max = st.number_input(
                                 label="(OPTIONAL) Soft maximum",
-                                help="(OPTIONAL) Soft maximum value for outlier detection. " \
+                                help="(OPTIONAL) Soft maximum value for outlier detection. "
                                 "All values above this will be considered as outliers regardless of the method used.",
                                 value=None,
                             )
             else:
-                st.warning("No columns selected. Please select columns to check for outliers.")
-                outlier_cols, outlier_method, outlier_multiplier, grouped_cols, pattern, lock_cols, soft_min, soft_max = (
-                    [], "", 0, False, None, False, 0, 0
+                st.warning(
+                    "No columns selected. Please select columns to check for outliers."
                 )
-
+                (
+                    outlier_cols,
+                    outlier_method,
+                    outlier_multiplier,
+                    grouped_cols,
+                    pattern,
+                    lock_cols,
+                    soft_min,
+                    soft_max,
+                ) = ([], "", 0, False, None, False, 0, 0)
 
             st.button(
                 label="Add outlier column",
@@ -540,7 +596,13 @@ def outliers_report_settings(
                 disabled=not outlier_cols,
             )
 
-        with oc2, st.popover(label=":material/delete: Delete outlier column", use_container_width=True):
+        with (
+            oc2,
+            st.popover(
+                label=":material/delete: Delete outlier column",
+                use_container_width=True,
+            ),
+        ):
             st.markdown("### Remove outlier columns")
 
             logs = duckdb_get_table(
@@ -550,15 +612,24 @@ def outliers_report_settings(
             ).to_pandas()
 
             if logs.empty:
-                st.info("No outlier columns have been added yet. Please add outlier columns to remove them.")
+                st.info(
+                    "No outlier columns have been added yet. Please add outlier columns to remove them."
+                )
             else:
-                 # add new new column combine index, search_type and pattern
-                logs["index"] = logs.index.astype(str) + " - " + logs["search_type"] + " - " + logs["pattern"].fillna("")
+                # add new new column combine index, search_type and pattern
+                logs["index"] = (
+                    logs.index.astype(str)
+                    + " - "
+                    + logs["search_type"]
+                    + " - "
+                    + logs["pattern"].fillna("")
+                )
 
                 # get unique values in index
                 unique_index = logs["index"].unique().tolist()
 
-                selected_index = st.selectbox(label="Select outlier column to remove",
+                selected_index = st.selectbox(
+                    label="Select outlier column to remove",
                     options=unique_index,
                     help="Select the outlier column to remove from the list of added outlier columns.",
                 )
@@ -585,37 +656,42 @@ def outliers_report_settings(
                             db_name="logs",
                         )
 
-        outlier_logs = duckdb_get_table(project_id=project_id, alias=f"outliers_setting_logs_{label}",
-        db_name="logs",).to_pandas()
+        outlier_logs = duckdb_get_table(
+            project_id=project_id,
+            alias=f"outliers_setting_logs_{label}",
+            db_name="logs",
+        ).to_pandas()
 
         if outlier_logs.empty:
-            st.info("No outlier columns have been added yet. Please add outlier columns to see the settings.")
+            st.info(
+                "No outlier columns have been added yet. Please add outlier columns to see the settings."
+            )
 
         else:
-            st.dataframe(outlier_logs, use_container_width=True, hide_index=False,column_config={
-                "search_type": st.column_config.Column("Search Type"),
-                "pattern": st.column_config.Column("Pattern"),
-                "outlier_cols": st.column_config.Column("Outlier Columns"),
-                "lock_cols": st.column_config.Column("Lock Columns"),
-                "grouped_cols": st.column_config.Column("Grouped Columns"),
-                "outlier_method": st.column_config.Column("Outlier Method"),
-                "outlier_multiplier": st.column_config.NumberColumn(
-                    "Outlier Multiplier", format="%.2f"
-                ),
-                "soft_min": st.column_config.NumberColumn(
-                    "Soft Min", format="%.2f", width="small"
-                ),
-                "soft_max": st.column_config.NumberColumn(
-                    "Soft Max", format="%.2f", width="small"
-                ),
-            })
-    return (
-        outlier_display_cols,
-        min_threshold,
-        survey_id,
-        survey_key,
-        enumerator
-    )
+            st.dataframe(
+                outlier_logs,
+                use_container_width=True,
+                hide_index=False,
+                column_config={
+                    "search_type": st.column_config.Column("Search Type"),
+                    "pattern": st.column_config.Column("Pattern"),
+                    "outlier_cols": st.column_config.Column("Outlier Columns"),
+                    "lock_cols": st.column_config.Column("Lock Columns"),
+                    "grouped_cols": st.column_config.Column("Grouped Columns"),
+                    "outlier_method": st.column_config.Column("Outlier Method"),
+                    "outlier_multiplier": st.column_config.NumberColumn(
+                        "Outlier Multiplier", format="%.2f"
+                    ),
+                    "soft_min": st.column_config.NumberColumn(
+                        "Soft Min", format="%.2f", width="small"
+                    ),
+                    "soft_max": st.column_config.NumberColumn(
+                        "Soft Max", format="%.2f", width="small"
+                    ),
+                },
+            )
+    return (outlier_display_cols, min_threshold, survey_id, survey_key, enumerator)
+
 
 @st.cache_data
 def stack_outlier_columns(df: pd.DataFrame, col_names: list) -> pd.Series:
@@ -641,7 +717,7 @@ def stack_outlier_columns(df: pd.DataFrame, col_names: list) -> pd.Series:
     for col in col_names:
         if not pd.api.types.is_numeric_dtype(df[col]):
             try:
-                df[col] = pd.to_numeric(df[col], errors='raise')
+                df[col] = pd.to_numeric(df[col], errors="raise")
             except ValueError:
                 raise ValueError(f"Column '{col}' cannot be converted to numeric type.")  # noqa: B904
 
@@ -650,8 +726,11 @@ def stack_outlier_columns(df: pd.DataFrame, col_names: list) -> pd.Series:
 
     return stacked_values.reset_index(drop=True)
 
+
 @st.cache_data
-def compute_outlier_stats(series: pd.Series, outlier_type: str | None, multiplier: float | None) -> dict:
+def compute_outlier_stats(
+    series: pd.Series, outlier_type: str | None, multiplier: float | None
+) -> dict:
     """Compute outlier statistics for a given Series.
     Args:
         series (pd.Series): The Series to compute statistics for.
@@ -668,7 +747,11 @@ def compute_outlier_stats(series: pd.Series, outlier_type: str | None, multiplie
     if series.empty:
         raise ValueError("The Series is empty.")
 
-    if outlier_type not in [None, "Interquartile Range (IQR)", "Standard Deviation (SD)"]:
+    if outlier_type not in [
+        None,
+        "Interquartile Range (IQR)",
+        "Standard Deviation (SD)",
+    ]:
         raise ValueError("Invalid outlier type. Use 'sd' or 'iqr'.")
 
     if multiplier is not None and multiplier <= 0:
@@ -684,12 +767,15 @@ def compute_outlier_stats(series: pd.Series, outlier_type: str | None, multiplie
 
     if outlier_type in "Standard Deviation (SD)":
         if not multiplier:
-            multiplier = 3.0 # default to 3 standard deviations
+            multiplier = 3.0  # default to 3 standard deviations
         lower_bound = mean - (multiplier * sd)
         upper_bound = mean + (multiplier * sd)
-    elif outlier_type in [None, "Interquartile Range (IQR)"]: # default to IQR if not specified
+    elif outlier_type in [
+        None,
+        "Interquartile Range (IQR)",
+    ]:  # default to IQR if not specified
         if not multiplier:
-            multiplier = 1.5 # default to 1.5 IQR
+            multiplier = 1.5  # default to 1.5 IQR
         q1 = series.quantile(0.25)
         q3 = series.quantile(0.75)
         iqr = q3 - q1
@@ -705,8 +791,9 @@ def compute_outlier_stats(series: pd.Series, outlier_type: str | None, multiplie
         "sd": sd,
         "iqr": iqr,
         "lower_bound": lower_bound,
-        "upper_bound": upper_bound
+        "upper_bound": upper_bound,
     }
+
 
 # Function to detect outliers
 @st.cache_data
@@ -740,7 +827,7 @@ def compute_outlier_output(
     # Build a list of columns to include in the output, avoiding duplicates
     # and None values
     include_cols = []
-    for col in (display_cols or []):
+    for col in display_cols or []:
         if col and col not in include_cols:
             include_cols.append(col)
     for col in [survey_key, survey_id, enumerator]:
@@ -780,14 +867,14 @@ def compute_outlier_output(
             non_null_count = outlier_df_all[outlier_cols[0]].count()
 
             # compute outlier stats for the single column
-            outlier_stats = compute_outlier_stats(outlier_df_all[outlier_cols[0]],
-                                                  outlier_type=outlier_method,
-                                                  multiplier=outlier_multiplier)
-        elif grouped_cols is True: # compute group outlier stats
-            # stack cols
-            stacked_series = stack_outlier_columns(
-                outlier_df_all, outlier_cols
+            outlier_stats = compute_outlier_stats(
+                outlier_df_all[outlier_cols[0]],
+                outlier_type=outlier_method,
+                multiplier=outlier_multiplier,
             )
+        elif grouped_cols is True:  # compute group outlier stats
+            # stack cols
+            stacked_series = stack_outlier_columns(outlier_df_all, outlier_cols)
             # count the number of non-null values in the stacked series
             non_null_count = stacked_series.count()
 
@@ -816,16 +903,20 @@ def compute_outlier_output(
                 outlier statistics.
                 """
                 if value < outlier_stats["lower_bound"]:
-                    return f"Value is below lower bound {outlier_stats['lower_bound']:.2f}"
+                    return (
+                        f"Value is below lower bound {outlier_stats['lower_bound']:.2f}"
+                    )
                 elif value > outlier_stats["upper_bound"]:
-                    return f"Value is above upper bound {outlier_stats['upper_bound']:.2f}"
+                    return (
+                        f"Value is above upper bound {outlier_stats['upper_bound']:.2f}"
+                    )
                 else:
                     if soft_min is not None and value < soft_min:
                         return f"Value is below soft minimum {soft_min:.2f}"
                     elif soft_max is not None and value > soft_max:
                         return f"Value is above soft maximum {soft_max:.2f}"
                     else:
-                        return "no outlier" # return empty string if no reason
+                        return "no outlier"  # return empty string if no reason
 
             if non_null_count < min_threshold:
                 outlier_df["outlier reason"] = "no outlier"
@@ -833,7 +924,10 @@ def compute_outlier_output(
                 # apply the function to the column to create a new column for
                 # outlier reason
                 outlier_df["outlier reason"] = outlier_df[col].apply(
-                    lambda x, soft_min = soft_min, soft_max = soft_max, outlier_stats = outlier_stats: add_outlier_reason(
+                    lambda x,
+                    soft_min=soft_min,
+                    soft_max=soft_max,
+                    outlier_stats=outlier_stats: add_outlier_reason(
                         x, soft_min, soft_max, outlier_stats
                     )
                 )
@@ -862,11 +956,26 @@ def compute_outlier_output(
             outlier_df = outlier_df.rename(columns={col: "column value"})
 
             # reorder columns to ensure consistent output
-            outlier_df = outlier_df[[survey_key, "column name", "column value",
-                                     "min_value", "max_value", "mean", "median",
-                                     "std", "iqr", "lower_bound", "upper_bound",
-                                     "outlier reason", "outlier_method",
-                                     "outlier_multiplier", "soft_min", "soft_max"]]
+            outlier_df = outlier_df[
+                [
+                    survey_key,
+                    "column name",
+                    "column value",
+                    "min_value",
+                    "max_value",
+                    "mean",
+                    "median",
+                    "std",
+                    "iqr",
+                    "lower_bound",
+                    "upper_bound",
+                    "outlier reason",
+                    "outlier_method",
+                    "outlier_multiplier",
+                    "soft_min",
+                    "soft_max",
+                ]
+            ]
 
             # append to the outlier results DataFrame
             outlier_results = pd.concat(
@@ -884,6 +993,7 @@ def compute_outlier_output(
 
     return merged_results
 
+
 def display_outlier_output(outlier_data: pd.DataFrame) -> None:
     """Display the outlier output in a Streamlit app."""
     # Get the outlier settings from the database
@@ -897,7 +1007,10 @@ def display_outlier_output(outlier_data: pd.DataFrame) -> None:
         st.info("No outliers detected in the selected columns.")
         return
 
-    st.dataframe(outlier_data_disp, use_container_width=True, hide_index=True,
+    st.dataframe(
+        outlier_data_disp,
+        use_container_width=True,
+        hide_index=True,
         column_config={
             "column name": st.column_config.Column("Column Name"),
             "column value": st.column_config.Column(
@@ -905,33 +1018,39 @@ def display_outlier_output(outlier_data: pd.DataFrame) -> None:
                 help="The value of the column that is flagged as an outlier.",
             ),
             "min_value": st.column_config.NumberColumn(
-                "Min Value", format="%.2f",
+                "Min Value",
+                format="%.2f",
             ),
             "max_value": st.column_config.NumberColumn(
-                "Max Value", format="%.2f",
+                "Max Value",
+                format="%.2f",
             ),
             "mean": st.column_config.NumberColumn(
-                "Mean", format="%.4f",
+                "Mean",
+                format="%.4f",
             ),
             "std": st.column_config.NumberColumn(
-                "SD", format="%.4f",
+                "SD",
+                format="%.4f",
             ),
             "median": st.column_config.NumberColumn(
-                "Median", format="%.4f",
+                "Median",
+                format="%.4f",
             ),
             "iqr": st.column_config.NumberColumn(
-                "IQR", format="%.2f",
+                "IQR",
+                format="%.2f",
             ),
             "outlier reason": st.column_config.Column(
                 "Outlier Reason",
-                help="Reason for flagging the value as an outlier. " \
-                "This includes whether the value is below the lower bound, above the upper bound, " \
+                help="Reason for flagging the value as an outlier. "
+                "This includes whether the value is below the lower bound, above the upper bound, "
                 "or below/above the soft minimum/maximum.",
             ),
             "outlier_method": st.column_config.Column(
                 "Outlier Method",
-                help="Method used for outlier detection. " \
-                "This can be either Interquartile Range (IQR) or Standard Deviation (SD)" \
+                help="Method used for outlier detection. "
+                "This can be either Interquartile Range (IQR) or Standard Deviation (SD)",
             ),
             "soft_min": st.column_config.NumberColumn(
                 "Soft Min",
@@ -951,8 +1070,10 @@ def display_outlier_output(outlier_data: pd.DataFrame) -> None:
         },
     )
 
+
 def compute_column_outlier_summary(
-    outlier_data: pd.DataFrame, survey_key) -> pd.DataFrame:
+    outlier_data: pd.DataFrame, survey_key
+) -> pd.DataFrame:
     """Compute a summary of outliers for each column in the DataFrame."""
     # validate that outlier_data is not empty
     if outlier_data.empty:
@@ -973,7 +1094,9 @@ def compute_column_outlier_summary(
         lambda row: 1 if row["outlier reason"] != "no outlier" else 0, axis=1
     )
 
-    outlier_counts = outlier_summary.groupby("column name")["flagged as outlier"].sum().reset_index()
+    outlier_counts = (
+        outlier_summary.groupby("column name")["flagged as outlier"].sum().reset_index()
+    )
     outlier_counts.columns = ["column name", "outlier count"]
 
     # merge outlier counts with the summary
@@ -984,39 +1107,44 @@ def compute_column_outlier_summary(
     )
 
     # keep only relevant columns
-    outlier_summary = outlier_summary[[
-        "column name",
-        "count",
-        "outlier count",
-        "min_value",
-        "max_value",
-        "mean",
-        "median",
-        "std",
-        "iqr",
-        "lower_bound",
-        "upper_bound",
-    ]]
+    outlier_summary = outlier_summary[
+        [
+            "column name",
+            "count",
+            "outlier count",
+            "min_value",
+            "max_value",
+            "mean",
+            "median",
+            "std",
+            "iqr",
+            "lower_bound",
+            "upper_bound",
+        ]
+    ]
 
     # reorder columns
-    outlier_summary = outlier_summary[[
-        "column name",
-        "count",
-        "outlier count",
-        "min_value",
-        "max_value",
-        "mean",
-        "median",
-        "std",
-        "iqr",
-        "lower_bound",
-        "upper_bound",
-    ]]
+    outlier_summary = outlier_summary[
+        [
+            "column name",
+            "count",
+            "outlier count",
+            "min_value",
+            "max_value",
+            "mean",
+            "median",
+            "std",
+            "iqr",
+            "lower_bound",
+            "upper_bound",
+        ]
+    ]
 
     # remove duplicates by column name and keep the first occurrence
     outlier_summary = outlier_summary.drop_duplicates(subset=["column name"])
 
     return outlier_summary
+
 
 def display_outlier_column_summary(outlier_summary: pd.DataFrame) -> None:
     """Display the outlier summary in a Streamlit app."""
@@ -1024,11 +1152,15 @@ def display_outlier_column_summary(outlier_summary: pd.DataFrame) -> None:
     st.title("Outlier Column Summary")
 
     if outlier_summary.empty:
-        raise ValueError("No outlier summary data available. Please check the outlier settings and data.")
+        raise ValueError(
+            "No outlier summary data available. Please check the outlier settings and data."
+        )
 
     cmap = sns.light_palette("pink", as_cmap=True)
 
-    outlier_summary = outlier_summary.style.background_gradient(subset=["outlier count"], cmap=cmap)
+    outlier_summary = outlier_summary.style.background_gradient(
+        subset=["outlier count"], cmap=cmap
+    )
 
     st.dataframe(
         outlier_summary,
@@ -1036,38 +1168,40 @@ def display_outlier_column_summary(outlier_summary: pd.DataFrame) -> None:
         hide_index=True,
         column_config={
             "column name": st.column_config.Column("Column Name"),
-            "count": st.column_config.NumberColumn(
-                "# of Values", format="%.0f"
-            ),
+            "count": st.column_config.NumberColumn("# of Values", format="%.0f"),
             "outlier count": st.column_config.NumberColumn(
-                "# of Outliers", format="%.0f",
+                "# of Outliers",
+                format="%.0f",
             ),
-            "min_value": st.column_config.NumberColumn(
-                "Mimimum Value", format="%.0f"
-            ),
-            "max_value": st.column_config.NumberColumn(
-                "Maximum Value", format="%.0f"
-            ),
+            "min_value": st.column_config.NumberColumn("Mimimum Value", format="%.0f"),
+            "max_value": st.column_config.NumberColumn("Maximum Value", format="%.0f"),
             "mean": st.column_config.NumberColumn(
-                "Mean", format="%.2f",
+                "Mean",
+                format="%.2f",
             ),
             "median": st.column_config.NumberColumn(
-                "Median", format="%.2f",
+                "Median",
+                format="%.2f",
             ),
             "iqr": st.column_config.NumberColumn(
-                "Interquartile Range", format="%.2f",
+                "Interquartile Range",
+                format="%.2f",
             ),
             "std": st.column_config.NumberColumn(
-                "Standard Deviation", format="%.2f",
+                "Standard Deviation",
+                format="%.2f",
             ),
             "lower_bound": st.column_config.NumberColumn(
-                "Lower Bound", format="%.2f",
+                "Lower Bound",
+                format="%.2f",
             ),
             "upper_bound": st.column_config.NumberColumn(
-                "Upper Bound", format="%.2f",
+                "Upper Bound",
+                format="%.2f",
             ),
         },
     )
+
 
 # function to create outlier distribution
 @st.cache_data
@@ -1096,8 +1230,7 @@ def create_violin_plot(data: pd.Series, title: str) -> go.Figure:
 
 
 @st.cache_data
-def plot_col_distribution(
-    data: pd.DataFrame, col_name: str) -> go.Figure:
+def plot_col_distribution(data: pd.DataFrame, col_name: str) -> go.Figure:
     """Plot the distribution of a specific column in the data."""
     # Check if the column exists in the DataFrame
     if col_name not in data.columns:
@@ -1105,7 +1238,9 @@ def plot_col_distribution(
 
     # Check if the column is numeric
     if not pd.api.types.is_numeric_dtype(data[col_name]):
-        raise ValueError(f"Column '{col_name}' is not numeric. Cannot plot distribution.")
+        raise ValueError(
+            f"Column '{col_name}' is not numeric. Cannot plot distribution."
+        )
 
     # create a histogram of the column
     fig = go.Figure(
@@ -1124,6 +1259,7 @@ def plot_col_distribution(
     )
     return fig
 
+
 def get_outlier_cols(outlier_settings: pd.DataFrame) -> list:
     """Get a list of outlier columns from the outlier settings DataFrame."""
     # Count the number of columns checked for outliers
@@ -1135,13 +1271,17 @@ def get_outlier_cols(outlier_settings: pd.DataFrame) -> list:
         elif isinstance(col, list):
             cols.extend(col)
 
-
     return cols
+
 
 # Function to display outlier metrics
 @st.cache_data
 def display_outlier_metrics(
-    outliers_data: pd.DataFrame, outlier_cols: list, survey_key: str, survey_id: str | None, enumerator: str | None
+    outliers_data: pd.DataFrame,
+    outlier_cols: list,
+    survey_key: str,
+    survey_id: str | None,
+    enumerator: str | None,
 ) -> None:
     """Display metrics related to outliers in a summary format.
     Args:
@@ -1155,7 +1295,9 @@ def display_outlier_metrics(
     outlier_cols_count = len(outlier_cols)
 
     # number of outliers flagged
-    total_outliers = outliers_data[outliers_data["outlier reason"] != "no outlier"].shape[0]
+    total_outliers = outliers_data[
+        outliers_data["outlier reason"] != "no outlier"
+    ].shape[0]
 
     # columns flagged with at least one outlier
     at_least_one_outlier = (
@@ -1164,7 +1306,9 @@ def display_outlier_metrics(
 
     # number of enumerators with outliers flagged
     total_enumerators = (
-        outliers_data[outliers_data["outlier reason"] != "no outlier"][enumerator].nunique()
+        outliers_data[outliers_data["outlier reason"] != "no outlier"][
+            enumerator
+        ].nunique()
         if enumerator and not outliers_data.empty
         else 0
     )
@@ -1202,7 +1346,16 @@ def display_outlier_metrics(
                 "Enumerator column is not selected. Go to the :material/settings: settings section above to select the enumerator column."
             )
 
-def inpect_outliers_columns(data: pd.DataFrame, outlier_data: pd.DataFrame, col_summary: pd.DataFrame, outlier_cols: list, survey_key: str, survey_id: str, enumerator: str) -> None:
+
+def inpect_outliers_columns(
+    data: pd.DataFrame,
+    outlier_data: pd.DataFrame,
+    col_summary: pd.DataFrame,
+    outlier_cols: list,
+    survey_key: str,
+    survey_id: str,
+    enumerator: str,
+) -> None:
     """Inspect outlier columns in the DataFrame.
 
     Args:
@@ -1215,7 +1368,9 @@ def inpect_outliers_columns(data: pd.DataFrame, outlier_data: pd.DataFrame, col_
     """
     st.title("Inspect Columns")
     if outlier_data.empty:
-        st.info("No outlier columns selected. Please select outlier columns to inspect.")
+        st.info(
+            "No outlier columns selected. Please select outlier columns to inspect."
+        )
         return
 
     include_cols = []
@@ -1230,14 +1385,14 @@ def inpect_outliers_columns(data: pd.DataFrame, outlier_data: pd.DataFrame, col_
         selected_col = st.selectbox(
             label="Select outlier columns to inspect",
             options=outlier_cols,
-            help="Select the outlier columns to inspect. " \
+            help="Select the outlier columns to inspect. "
             "You can only select one column at a time.",
         )
 
         # check if the selected column is in the outlier data
         if selected_col not in data.columns:
             raise ValueError(
-                f"Selected column '{selected_col}' is not present in the data. " \
+                f"Selected column '{selected_col}' is not present in the data. "
                 "Please select a valid column."
             )
 
@@ -1246,7 +1401,7 @@ def inpect_outliers_columns(data: pd.DataFrame, outlier_data: pd.DataFrame, col_
             label="Select columns to display",
             options=data.columns.tolist(),
             default=[selected_col],
-            help="Select the columns to display in the inspection table. " \
+            help="Select the columns to display in the inspection table. "
             "You can select multiple columns to display alongside the outlier column.",
             disabled=not selected_col,
         )
@@ -1257,7 +1412,9 @@ def inpect_outliers_columns(data: pd.DataFrame, outlier_data: pd.DataFrame, col_
     if selected_col:
         # check if the selected column is in the outlier data
         if selected_col not in outlier_data["column name"].unique():
-            st.warning(f"Column '{selected_col}' is not an outlier column. Please select a valid outlier column.")
+            st.warning(
+                f"Column '{selected_col}' is not an outlier column. Please select a valid outlier column."
+            )
             return
 
         # filter the outlier data for the selected column
@@ -1274,7 +1431,9 @@ def inpect_outliers_columns(data: pd.DataFrame, outlier_data: pd.DataFrame, col_
     )
 
     # reorder columns
-    disp_cols = [col for col in include_cols if col not in [survey_key, "outlier reason"]]
+    disp_cols = [
+        col for col in include_cols if col not in [survey_key, "outlier reason"]
+    ]
     col_outlier_details = col_outlier_details[
         [survey_key, "outlier reason"] + disp_cols
     ]
@@ -1284,7 +1443,7 @@ def inpect_outliers_columns(data: pd.DataFrame, outlier_data: pd.DataFrame, col_
     col_summary_row = col_summary[col_summary["column name"] == selected_col]
     if col_summary_row.empty:
         raise ValueError(
-            f"No summary data found for column '{selected_col}'. " \
+            f"No summary data found for column '{selected_col}'. "
             "Please check the outlier settings and data."
         )
     col_summary_row = col_summary_row.iloc[0].to_dict()
@@ -1292,44 +1451,65 @@ def inpect_outliers_columns(data: pd.DataFrame, outlier_data: pd.DataFrame, col_
     mu1, mu2, mu3, mu4, mu5 = st.columns(5, border=True)
     ml1, ml2, ml3, ml4, ml5 = st.columns(5, border=True)
 
-    mu1.metric(label="# of Values",
-              value=prettify(col_summary_row["count"]),
-              help="Total number of values in the column.")
-    mu2.metric(label="# of Outliers",
-              value=prettify(col_summary_row["outlier count"]),
-              help="Total number of outliers in the column.")
-    mu3.metric(label="Minimum Value",
-              value=prettify(col_summary_row["min_value"]),
-              help="Minimum value in the column.")
-    mu4.metric(label="Maximum Value",
-              value=prettify(col_summary_row["max_value"]),
-              help="Maximum value in the column.")
-    mu5.metric(label="Mean",
-              value=prettify(millify(col_summary_row["mean"], precision=4)),
-              help="Mean value in the column.")
-    ml1.metric(label="Median",
-              value=prettify(millify(col_summary_row["median"], precision=4)),
-              help="Median value in the column.")
-    ml2.metric(label="Standard Deviation",
-              value=prettify(millify(col_summary_row["std"], precision=4)),
-              help="Standard deviation of the values in the column.")
-    ml3.metric(label="Interquartile Range",
-              value=prettify(millify(col_summary_row["iqr"], precision=4)),
-              help="Interquartile range of the values in the column.")
-    ml4.metric(label="Lower Bound",
-              value=prettify(col_summary_row["lower_bound"]),
-              help="Lower bound for outlier detection in the column.")
-    ml5.metric(label="Upper Bound",
-                value=prettify(col_summary_row["upper_bound"]),
-                help="Upper bound for outlier detection in the column.")
+    mu1.metric(
+        label="# of Values",
+        value=prettify(col_summary_row["count"]),
+        help="Total number of values in the column.",
+    )
+    mu2.metric(
+        label="# of Outliers",
+        value=prettify(col_summary_row["outlier count"]),
+        help="Total number of outliers in the column.",
+    )
+    mu3.metric(
+        label="Minimum Value",
+        value=prettify(col_summary_row["min_value"]),
+        help="Minimum value in the column.",
+    )
+    mu4.metric(
+        label="Maximum Value",
+        value=prettify(col_summary_row["max_value"]),
+        help="Maximum value in the column.",
+    )
+    mu5.metric(
+        label="Mean",
+        value=prettify(millify(col_summary_row["mean"], precision=4)),
+        help="Mean value in the column.",
+    )
+    ml1.metric(
+        label="Median",
+        value=prettify(millify(col_summary_row["median"], precision=4)),
+        help="Median value in the column.",
+    )
+    ml2.metric(
+        label="Standard Deviation",
+        value=prettify(millify(col_summary_row["std"], precision=4)),
+        help="Standard deviation of the values in the column.",
+    )
+    ml3.metric(
+        label="Interquartile Range",
+        value=prettify(millify(col_summary_row["iqr"], precision=4)),
+        help="Interquartile range of the values in the column.",
+    )
+    ml4.metric(
+        label="Lower Bound",
+        value=prettify(col_summary_row["lower_bound"]),
+        help="Lower bound for outlier detection in the column.",
+    )
+    ml5.metric(
+        label="Upper Bound",
+        value=prettify(col_summary_row["upper_bound"]),
+        help="Upper bound for outlier detection in the column.",
+    )
     st.write("---")
-
 
     dc1, dc2 = st.columns(2)
     with dc1:
         st.subheader(f"Distribution of {selected_col} values")
         # plot outlier distribution
-        fig = plot_col_distribution(data=col_outlier_details[[selected_col]], col_name=selected_col)
+        fig = plot_col_distribution(
+            data=col_outlier_details[[selected_col]], col_name=selected_col
+        )
         st.plotly_chart(fig, use_container_width=True)
 
     with dc2:
@@ -1341,9 +1521,11 @@ def inpect_outliers_columns(data: pd.DataFrame, outlier_data: pd.DataFrame, col_
         )
         st.plotly_chart(violin_fig, use_container_width=True)
 
-    st.dataframe(col_outlier_details, use_container_width=True, hide_index=False,)
-
-
+    st.dataframe(
+        col_outlier_details,
+        use_container_width=True,
+        hide_index=False,
+    )
 
 
 # define function to create outliers report
@@ -1361,7 +1543,7 @@ def outliers_report(
         project_id=project_id, alias="check_config", db_name="logs"
     ).to_pandas()
 
-    label = current_pages_df.iloc[page_num-1]["page_name"]
+    label = current_pages_df.iloc[page_num - 1]["page_name"]
 
     # outliers settings
     (
@@ -1379,7 +1561,9 @@ def outliers_report(
     ).to_pandas()
 
     if outlier_settings.empty:
-        st.warning("No outlier settings found. Please add outlier columns in the settings section.")
+        st.warning(
+            "No outlier settings found. Please add outlier columns in the settings section."
+        )
         return
 
     # update unlocked columns in outlier settings
@@ -1401,7 +1585,7 @@ def outliers_report(
     outlier_data = compute_outlier_output(
         df=data,
         outlier_settings=outlier_settings,
-        display_cols= display_cols,
+        display_cols=display_cols,
         min_threshold=min_threshold,
         survey_key=survey_key,
         survey_id=survey_id,
@@ -1411,15 +1595,18 @@ def outliers_report(
     outlier_cols = get_outlier_cols(outlier_settings)
 
     # display outlier metrics
-    display_outlier_metrics(outliers_data=outlier_data,
-                            outlier_cols=outlier_cols,
-                            survey_key=survey_key,
-                            survey_id=survey_id,
-                            enumerator=enumerator,
+    display_outlier_metrics(
+        outliers_data=outlier_data,
+        outlier_cols=outlier_cols,
+        survey_key=survey_key,
+        survey_id=survey_id,
+        enumerator=enumerator,
     )
 
     # compute outlier summary
-    outlier_summary = compute_column_outlier_summary(outlier_data=outlier_data, survey_key=survey_key)
+    outlier_summary = compute_column_outlier_summary(
+        outlier_data=outlier_data, survey_key=survey_key
+    )
 
     # display outlier summary
     display_outlier_column_summary(outlier_summary)

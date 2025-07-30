@@ -50,14 +50,22 @@ def main():
         sys.exit(1)
 
     # Launch Streamlit with the app.py file
-    subprocess.run([
-        "streamlit", "run", str(app_path),
-        "--server.address", args.host,
-        "--server.port", str(args.port),
-        "--browser.gatherUsageStats", "false"
-    ])
+    subprocess.run(
+        [
+            "streamlit",
+            "run",
+            str(app_path),
+            "--server.address",
+            args.host,
+            "--server.port",
+            str(args.port),
+            "--browser.gatherUsageStats",
+            "false",
+        ]
+    )
 
     sys.exit(stcli.main())
+
 
 def get_version():
     """Get the package version."""

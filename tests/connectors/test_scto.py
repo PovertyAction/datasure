@@ -50,9 +50,9 @@ class TestValidationFunctions:
         ]
 
         for name in invalid_names:
-            assert not valid_server_name(name), (
-                f"Server name '{name}' should be invalid"
-            )
+            assert not valid_server_name(
+                name
+            ), f"Server name '{name}' should be invalid"
 
     def test_valid_email_valid_inputs(self):
         """Test valid_email with valid email addresses."""

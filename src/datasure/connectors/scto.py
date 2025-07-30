@@ -206,6 +206,7 @@ def scto_get_xls(scto: object, form_id: str) -> tuple:
 
     return (questions, choices)
 
+
 # --- Get List of Repeat Fields in SurveyCTO Form --- #
 def scto_get_repeat_fields(questions: pd.DataFrame) -> list:
     """Get list of repeat fields in SurveyCTO form.
@@ -229,18 +230,24 @@ def scto_get_repeat_fields(questions: pd.DataFrame) -> list:
     for _, row in fields.iterrows():
         if row["type"] == "begin repeat":
             begin_count += 1
-            continue # Skip to next row
+            continue  # Skip to next row
         elif row["type"] == "end repeat":
             end_count += 1
-            continue # Skip to next row
+            continue  # Skip to next row
 
         # if begin_count is greater than end_count, add field to repeat_fields
-        if len(row["name"]) > 1 and (begin_count > end_count) and row["type"] not in ["begin group", "end group"]:
+        if (
+            len(row["name"]) > 1
+            and (begin_count > end_count)
+            and row["type"] not in ["begin group", "end group"]
+        ):
             repeat_fields.append(row["name"])
 
     return repeat_fields
 
+
 # --- Get repeat columns from repeat fields --- #
+
 
 def scto_get_repeat_cols(field: str, data_cols: list) -> list:
     """Get repeat columns from repeat fields.
@@ -447,7 +454,7 @@ def scto_import_data(
                 cols = [row["name"]]
             cols = [col for col in cols if col in scto_data.columns]
             if not cols:
-                continue # skip if no columns found
+                continue  # skip if no columns found
 
             for col in cols:
                 if row["type"] in ["date", "datetime", "time"]:
