@@ -1,14 +1,12 @@
 """Test the outliers module."""
 
-import os
-import re
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
-import pytest
-import streamlit as st
+import plotly.graph_objects as go  # type: ignore
+import pytest  # type: ignore
+import streamlit as st  # noqa: F401
 
 from datasure.checks.outliers import (
     compute_column_outlier_summary,
@@ -23,7 +21,7 @@ from datasure.checks.outliers import (
     inpect_outliers_columns,
     load_default_settings,
     outliers_report,
-    outliers_report_settings,
+    outliers_report_settings,  # noqa: F401
     plot_col_distribution,
     stack_outlier_columns,
     update_outlier_settings,
@@ -244,10 +242,10 @@ class TestExpandColNames:
         """Test with invalid input."""
         with pytest.raises(TypeError):
             expand_col_names("not_a_list", "pattern", "exact")
-        
+
         with pytest.raises(TypeError):
             expand_col_names(["col1"], None, "exact")
-        
+
         with pytest.raises(ValueError):
             expand_col_names(["col1"], "pattern", "invalid_type")
 
@@ -265,7 +263,7 @@ class TestUpdateUnlockedCols:
         """Test basic functionality."""
         col_names = ["hh_member_1_age", "hh_member_2_age", "hh_member_3_age", "numeric_col1"]
         result = update_unlocked_cols(outlier_settings_data, col_names)
-        
+
         assert isinstance(result, pd.DataFrame)
         assert "outlier_cols" in result.columns
         assert "lock_cols" in result.columns
@@ -274,7 +272,7 @@ class TestUpdateUnlockedCols:
         """Test with missing essential columns."""
         df = pd.DataFrame({"other_col": [1, 2, 3]})
         col_names = ["col1", "col2"]
-        
+
         with pytest.raises(ValueError, match="Essential column 'outlier_cols' is missing"):
             update_unlocked_cols(df, col_names)
 
@@ -287,7 +285,7 @@ class TestUpdateUnlockedCols:
             "lock_cols": [True, True],
         })
         col_names = ["col1", "col2"]
-        
+
         result = update_unlocked_cols(df, col_names)
         assert result.equals(df)
 
@@ -300,7 +298,7 @@ class TestUpdateUnlockedCols:
             "lock_cols": [False],
         })
         col_names = ["col1", "col2"]
-        
+
         with pytest.raises(ValueError, match="Missing pattern for row 0"):
             update_unlocked_cols(df, col_names)
 
@@ -313,7 +311,7 @@ class TestUpdateOutlierSettings:
     def test_update_outlier_settings_basic(self, mock_save, mock_get):
         """Test basic functionality."""
         mock_get.return_value.to_pandas.return_value = pd.DataFrame()
-        
+
         update_outlier_settings(
             project_id="test_project",
             label="test_label",
@@ -327,7 +325,7 @@ class TestUpdateOutlierSettings:
             soft_min=None,
             soft_max=None,
         )
-        
+
         mock_get.assert_called_once()
         mock_save.assert_called_once()
 
@@ -347,7 +345,7 @@ class TestUpdateOutlierSettings:
                 soft_min=None,
                 soft_max=None,
             )
-        
+
         with pytest.raises(TypeError, match="search_type must be a string"):
             update_outlier_settings(
                 project_id="test",
@@ -379,7 +377,7 @@ class TestUpdateOutlierSettings:
             "soft_max": [None],
         })
         mock_get.return_value.to_pandas.return_value = existing_logs
-        
+
         update_outlier_settings(
             project_id="test_project",
             label="test_label",
@@ -393,7 +391,7 @@ class TestUpdateOutlierSettings:
             soft_min=10.0,
             soft_max=100.0,
         )
-        
+
         mock_get.assert_called_once()
         mock_save.assert_called_once()
 
@@ -405,28 +403,28 @@ class TestStackOutlierColumns:
         """Test basic functionality."""
         col_names = ["numeric_col1", "numeric_col2"]
         result = stack_outlier_columns(sample_data, col_names)
-        
+
         assert isinstance(result, pd.Series)
         assert len(result) == len(sample_data) * len(col_names)
 
     def test_stack_outlier_columns_empty_dataframe(self, empty_dataframe):
         """Test with empty DataFrame."""
         col_names = ["col1", "col2"]
-        
+
         with pytest.raises(ValueError, match="The DataFrame is empty"):
             stack_outlier_columns(empty_dataframe, col_names)
 
     def test_stack_outlier_columns_missing_column(self, sample_data):
         """Test with missing column."""
         col_names = ["nonexistent_col"]
-        
+
         with pytest.raises(ValueError, match="Column 'nonexistent_col' does not exist"):
             stack_outlier_columns(sample_data, col_names)
 
     def test_stack_outlier_columns_non_numeric(self, sample_data):
         """Test with non-numeric column that can't be converted."""
         col_names = ["string_col"]
-        
+
         with pytest.raises(ValueError, match="Column 'string_col' cannot be converted to numeric type"):
             stack_outlier_columns(sample_data, col_names)
 
@@ -434,7 +432,7 @@ class TestStackOutlierColumns:
         """Test with single column."""
         col_names = ["numeric_col1"]
         result = stack_outlier_columns(sample_data, col_names)
-        
+
         assert isinstance(result, pd.Series)
         assert len(result) == len(sample_data)
 
@@ -445,12 +443,12 @@ class TestComputeOutlierStats:
     def test_compute_outlier_stats_iqr_method(self, numeric_series):
         """Test with IQR method."""
         result = compute_outlier_stats(numeric_series, "Interquartile Range (IQR)", 1.5)
-        
+
         assert isinstance(result, dict)
         expected_keys = ["count", "min_value", "max_value", "mean", "median", "sd", "iqr", "lower_bound", "upper_bound"]
         for key in expected_keys:
             assert key in result
-        
+
         assert result["count"] == 6
         assert result["min_value"] == 1
         assert result["max_value"] == 100
@@ -458,7 +456,7 @@ class TestComputeOutlierStats:
     def test_compute_outlier_stats_sd_method(self, numeric_series):
         """Test with Standard Deviation method."""
         result = compute_outlier_stats(numeric_series, "Standard Deviation (SD)", 2.0)
-        
+
         assert isinstance(result, dict)
         expected_keys = ["count", "min_value", "max_value", "mean", "median", "sd", "iqr", "lower_bound", "upper_bound"]
         for key in expected_keys:
@@ -467,7 +465,7 @@ class TestComputeOutlierStats:
     def test_compute_outlier_stats_empty_series(self):
         """Test with empty series."""
         empty_series = pd.Series([])
-        
+
         with pytest.raises(ValueError, match="The Series is empty"):
             compute_outlier_stats(empty_series, "Interquartile Range (IQR)", 1.5)
 
@@ -487,7 +485,7 @@ class TestComputeOutlierStats:
         result_iqr = compute_outlier_stats(numeric_series, "Interquartile Range (IQR)", None)
         assert "lower_bound" in result_iqr
         assert "upper_bound" in result_iqr
-        
+
         # Test SD with None multiplier (should default to 3.0)
         result_sd = compute_outlier_stats(numeric_series, "Standard Deviation (SD)", None)
         assert "lower_bound" in result_sd
@@ -508,10 +506,10 @@ class TestComputeOutlierOutput:
             survey_id="survey_id",
             enumerator="enumerator"
         )
-        
+
         assert isinstance(result, pd.DataFrame)
-        expected_columns = ["survey_key", "column name", "column value", "min_value", "max_value", 
-                          "mean", "median", "std", "iqr", "lower_bound", "upper_bound", 
+        expected_columns = ["survey_key", "column name", "column value", "min_value", "max_value",
+                          "mean", "median", "std", "iqr", "lower_bound", "upper_bound",
                           "outlier reason", "outlier_method", "outlier_multiplier", "soft_min", "soft_max"]
         for col in expected_columns:
             assert col in result.columns
@@ -542,7 +540,7 @@ class TestComputeOutlierOutput:
             "soft_min": [None],
             "soft_max": [None],
         })
-        
+
         result = compute_outlier_output(
             df=large_dataset,
             outlier_settings=outlier_settings,
@@ -552,10 +550,10 @@ class TestComputeOutlierOutput:
             survey_id="survey_id",
             enumerator="enumerator"
         )
-        
+
         assert isinstance(result, pd.DataFrame)
         assert "outlier reason" in result.columns
-        
+
         # Should have some outliers flagged
         outliers = result[result["outlier reason"] != "no outlier"]
         assert len(outliers) > 0
@@ -601,7 +599,7 @@ class TestPlotColDistribution:
     def test_plot_col_distribution_basic(self, sample_data):
         """Test basic functionality."""
         result = plot_col_distribution(sample_data, "numeric_col1")
-        
+
         assert isinstance(result, go.Figure)
         assert len(result.data) == 1
         assert result.data[0].type == "histogram"
@@ -623,7 +621,7 @@ class TestGetOutlierCols:
     def test_get_outlier_cols_basic(self, outlier_settings_data):
         """Test basic functionality."""
         result = get_outlier_cols(outlier_settings_data)
-        
+
         assert isinstance(result, list)
         assert len(result) > 0
 
@@ -632,7 +630,7 @@ class TestGetOutlierCols:
         df = pd.DataFrame({
             "outlier_cols": [np.array(["col1"]), ["col2", "col3"]]
         })
-        
+
         result = get_outlier_cols(df)
         assert "col1" in result
         assert "col2" in result
@@ -657,9 +655,9 @@ class TestComputeColumnOutlierSummary:
             "lower_bound": [10, 10, 10, 20, 20],
             "upper_bound": [90, 90, 90, 180, 180],
         })
-        
+
         result = compute_column_outlier_summary(outlier_data, "survey_key")
-        
+
         assert isinstance(result, pd.DataFrame)
         assert "column name" in result.columns
         assert "outlier count" in result.columns
@@ -681,7 +679,7 @@ class TestDisplayFunctions:
         outlier_data = pd.DataFrame({
             "outlier reason": ["no outlier", "no outlier"]
         })
-        
+
         display_outlier_output(outlier_data)
         mock_info.assert_called_once()
         mock_dataframe.assert_not_called()
@@ -695,7 +693,7 @@ class TestDisplayFunctions:
             "column name": ["col1", "col2"],
             "column value": [100, 50],
         })
-        
+
         display_outlier_output(outlier_data)
         mock_info.assert_not_called()
         mock_dataframe.assert_called_once()
@@ -709,7 +707,7 @@ class TestDisplayFunctions:
             "count": [10],
             "outlier count": [2],
         })
-        
+
         display_outlier_column_summary(summary_data)
         mock_title.assert_called_once()
         mock_dataframe.assert_called_once()
@@ -727,13 +725,13 @@ class TestDisplayFunctions:
         mock_col = MagicMock()
         mock_col.metric = MagicMock()
         mock_columns.return_value = [mock_col, mock_col, mock_col, mock_col]
-        
+
         outliers_data = pd.DataFrame({
             "outlier reason": ["outlier", "no outlier"],
             "column name": ["col1", "col2"],
             "enumerator": ["E1", "E2"],
         })
-        
+
         display_outlier_metrics(outliers_data, ["col1", "col2"], "survey_key", "survey_id", "enumerator")
         mock_title.assert_called_once()
         mock_columns.assert_called_once()
@@ -755,7 +753,7 @@ class TestInspectOutliersColumns:
             survey_id="survey_id",
             enumerator="enumerator"
         )
-        
+
         mock_title.assert_called_once()
         mock_info.assert_called_once()
 
@@ -776,13 +774,13 @@ class TestIntegration:
             survey_id="survey_id",
             enumerator="enumerator"
         )
-        
+
         # Step 2: Compute column summary
         summary = compute_column_outlier_summary(outlier_data, "survey_key")
-        
+
         # Step 3: Get outlier columns
         outlier_cols = get_outlier_cols(outlier_settings_data.iloc[:1])
-        
+
         assert isinstance(outlier_data, pd.DataFrame)
         assert isinstance(summary, pd.DataFrame)
         assert isinstance(outlier_cols, list)
@@ -792,10 +790,10 @@ class TestIntegration:
         """Test stacking columns and computing statistics."""
         # Stack columns
         stacked = stack_outlier_columns(sample_data, ["numeric_col1", "numeric_col2"])
-        
+
         # Compute stats on stacked series
         stats = compute_outlier_stats(stacked, "Interquartile Range (IQR)", 1.5)
-        
+
         assert isinstance(stacked, pd.Series)
         assert isinstance(stats, dict)
         assert len(stacked) == len(sample_data) * 2
@@ -815,7 +813,7 @@ class TestOutliersReport:
     @patch("datasure.checks.outliers.display_outlier_output")
     @patch("datasure.checks.outliers.inpect_outliers_columns")
     @patch("streamlit.warning")
-    def test_outliers_report_no_settings(self, mock_warning, mock_inspect, mock_display_output, 
+    def test_outliers_report_no_settings(self, mock_warning, mock_inspect, mock_display_output,
                                         mock_display_summary, mock_display_metrics, mock_get_df_info,
                                         mock_settings, mock_save, mock_get):
         """Test outliers report when no settings are found."""
@@ -824,11 +822,11 @@ class TestOutliersReport:
             MagicMock(to_pandas=MagicMock(return_value=pd.DataFrame({"page_name": ["test"]}))),
             MagicMock(to_pandas=MagicMock(return_value=pd.DataFrame()))  # Empty outlier settings
         ]
-        
+
         mock_settings.return_value = (["col1"], 30, "survey_id", "survey_key", "enumerator")
-        
+
         outliers_report("test_project", pd.DataFrame({"col1": [1, 2, 3]}), "settings.json", 1)
-        
+
         mock_warning.assert_called_once_with("No outlier settings found. Please add outlier columns in the settings section.")
 
     @patch("datasure.checks.outliers.duckdb_get_table")
@@ -853,7 +851,7 @@ class TestOutliersReport:
             MagicMock(to_pandas=MagicMock(return_value=pd.DataFrame({"page_name": ["test"]}))),
             MagicMock(to_pandas=MagicMock(return_value=outlier_settings_data))
         ]
-        
+
         # Mock function returns
         mock_settings.return_value = (["col1"], 30, "survey_id", "survey_key", "enumerator")
         mock_get_df_info.return_value = ([], [], ["numeric_col1", "numeric_col2"], [], [])
@@ -861,9 +859,9 @@ class TestOutliersReport:
         mock_compute_output.return_value = pd.DataFrame({"column name": ["col1"], "outlier reason": ["outlier"]})
         mock_get_cols.return_value = ["col1"]
         mock_compute_summary.return_value = pd.DataFrame({"column name": ["col1"], "outlier count": [1]})
-        
+
         outliers_report("test_project", sample_data, "settings.json", 1)
-        
+
         # Verify all major functions were called
         mock_settings.assert_called_once()
         mock_get_df_info.assert_called_once()
