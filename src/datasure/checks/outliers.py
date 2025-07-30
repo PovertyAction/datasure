@@ -125,8 +125,8 @@ def update_unlocked_cols(
     # lock_cols is False
     unlocked_rows_count = outlier_settings[
         (outlier_settings["search_type"] != "exact")
-        & (outlier_settings["lock_cols"] == False)
-    ].shape[0]  # noqa: E712
+        & (outlier_settings["lock_cols"] is False)
+    ].shape[0]
 
     if unlocked_rows_count == 0:
         return outlier_settings  # No unlocked rows to update
