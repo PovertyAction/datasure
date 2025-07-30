@@ -85,7 +85,9 @@ def expand_col_names(col_names, pattern, search_type='exact'):
     # Validate input parameters
     if not isinstance(col_names, list):
         raise TypeError("col_names must be a list of column names.")
-    if not pattern and not isinstance(pattern, str):
+    if not pattern:
+        raise TypeError("pattern must be provided.")
+    if pattern and not isinstance(pattern, str):
         raise TypeError("pattern must be a string.")
 
     search_funcs = {
@@ -984,6 +986,7 @@ def compute_column_outlier_summary(
     outlier_summary = outlier_summary[[
         "column name",
         "count",
+        "outlier count",
         "min_value",
         "max_value",
         "mean",
@@ -992,7 +995,6 @@ def compute_column_outlier_summary(
         "iqr",
         "lower_bound",
         "upper_bound",
-        "outlier count"
     ]]
 
     # reorder columns
