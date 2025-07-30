@@ -55,8 +55,8 @@ def load_default_settings(project_id: str, settings_file: str, page_num: int) ->
     default_survey_id = default_settings.get("survey_id", config_survey_id)
     default_enumerator = default_settings.get("enumerator", config_enumerator)
     default_survey_key = default_settings.get("survey_key", config_survey_key)
-    default_display_cols = default_settings.get("outlier_display_cols", None)
-    default_min_threshold = default_settings.get("min_threshod", None)
+    default_display_cols = default_settings.get("outlier_display_cols")
+    default_min_threshold = default_settings.get("min_threshold")
 
     return (
         default_survey_id,
@@ -1173,7 +1173,7 @@ def display_outlier_column_summary(outlier_summary: pd.DataFrame) -> None:
                 "# of Outliers",
                 format="%.0f",
             ),
-            "min_value": st.column_config.NumberColumn("Mimimum Value", format="%.0f"),
+            "min_value": st.column_config.NumberColumn("Minimum Value", format="%.0f"),
             "max_value": st.column_config.NumberColumn("Maximum Value", format="%.0f"),
             "mean": st.column_config.NumberColumn(
                 "Mean",
@@ -1347,7 +1347,7 @@ def display_outlier_metrics(
             )
 
 
-def inpect_outliers_columns(
+def inspect_outliers_columns(
     data: pd.DataFrame,
     outlier_data: pd.DataFrame,
     col_summary: pd.DataFrame,
@@ -1615,7 +1615,7 @@ def outliers_report(
     display_outlier_output(outlier_data)
 
     # inspect outlier columns
-    inpect_outliers_columns(
+    inspect_outliers_columns(
         data=data,
         outlier_data=outlier_data,
         col_summary=outlier_summary,

@@ -18,7 +18,7 @@ from datasure.checks.outliers import (
     display_outlier_output,
     expand_col_names,
     get_outlier_cols,
-    inpect_outliers_columns,
+    inspect_outliers_columns,
     load_default_settings,
     outliers_report,
     outliers_report_settings,  # noqa: F401
@@ -99,7 +99,7 @@ def large_dataset():
         {
             "survey_key": [f"K{i:03d}" for i in range(size)],
             "survey_id": [f"S{i:03d}" for i in range(size)],
-            "enumerator": [f"E{i%10:03d}" for i in range(size)],
+            "enumerator": [f"E{i % 10:03d}" for i in range(size)],
             "normal_values": np.random.normal(50, 10, size),
             "outlier_values": np.concatenate(
                 [np.random.normal(50, 10, size - 5), [200, 300, 400, 500, 600]]
@@ -146,7 +146,7 @@ class TestLoadDefaultSettings:
                 "enumerator": "test_enum",
                 "survey_key": "test_key",
                 "outlier_display_cols": ["col1", "col2"],
-                "min_threshod": 25,
+                "min_threshold": 25,
             }
 
             result = load_default_settings("project1", "settings.json", 1)
@@ -818,13 +818,13 @@ class TestDisplayFunctions:
 
 
 class TestInspectOutliersColumns:
-    """Test inpect_outliers_columns function."""
+    """Test inspect_outliers_columns function."""
 
     @patch("streamlit.title")
     @patch("streamlit.info")
     def test_inspect_outliers_columns_empty_data(self, mock_info, mock_title):
         """Test with empty outlier data."""
-        inpect_outliers_columns(
+        inspect_outliers_columns(
             data=pd.DataFrame(),
             outlier_data=pd.DataFrame(),
             col_summary=pd.DataFrame(),
@@ -891,7 +891,7 @@ class TestOutliersReport:
     @patch("datasure.checks.outliers.display_outlier_metrics")
     @patch("datasure.checks.outliers.display_outlier_column_summary")
     @patch("datasure.checks.outliers.display_outlier_output")
-    @patch("datasure.checks.outliers.inpect_outliers_columns")
+    @patch("datasure.checks.outliers.inspect_outliers_columns")
     @patch("streamlit.warning")
     def test_outliers_report_no_settings(
         self,
@@ -943,7 +943,7 @@ class TestOutliersReport:
     @patch("datasure.checks.outliers.compute_column_outlier_summary")
     @patch("datasure.checks.outliers.display_outlier_column_summary")
     @patch("datasure.checks.outliers.display_outlier_output")
-    @patch("datasure.checks.outliers.inpect_outliers_columns")
+    @patch("datasure.checks.outliers.inspect_outliers_columns")
     def test_outliers_report_with_settings(
         self,
         mock_inspect,
