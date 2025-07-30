@@ -3,7 +3,7 @@ import re
 
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
+import plotly.graph_objects as go  # type: ignore
 import seaborn as sns
 import streamlit as st
 from millify import millify, prettify
@@ -113,7 +113,7 @@ def update_unlocked_cols(outlier_settings: pd.DataFrame, col_names: list) -> pd.
         if col not in outlier_settings.columns:
             raise ValueError(f"Essential column '{col}' is missing from outlier settings.")
 
-    # count the number of unlocked rows. ie, search_type is not "exact" and 
+    # count the number of unlocked rows. ie, search_type is not "exact" and
     # lock_cols is False
     unlocked_rows_count = outlier_settings[
         (outlier_settings["search_type"] != "exact") &
@@ -206,7 +206,7 @@ def update_outlier_settings(
     if not logs.empty:
         # if logs already exist, append new settings
         logs = pd.concat([logs, pd.DataFrame([new_settings])], ignore_index=True)
-        # check if there are duplicate settings and drop one 
+        # check if there are duplicate settings and drop one
         logs = logs.drop_duplicates(
             subset=["outlier_cols"],
             keep="last",
@@ -636,7 +636,7 @@ def stack_outlier_columns(df: pd.DataFrame, col_names: list) -> pd.Series:
     for col in col_names:
         if col not in df.columns:
             raise ValueError(f"Column '{col}' does not exist in the DataFrame.")
-    # for each column, check if it is numeric, if not, check if it can 
+    # for each column, check if it is numeric, if not, check if it can
     # be converted to numeric, else raise an error
     for col in col_names:
         if not pd.api.types.is_numeric_dtype(df[col]):
@@ -655,14 +655,14 @@ def compute_outlier_stats(series: pd.Series, outlier_type: str | None, multiplie
     """Compute outlier statistics for a given Series.
     Args:
         series (pd.Series): The Series to compute statistics for.
-        outlier_type (str | None): The type of outlier detection method to use. Options 
-        are "sd" for standard deviation or "iqr" for interquartile range.
-        multiplier (float | None): The multiplier to use for outlier detection. If None, 
+        outlier_type (str | None): The type of outlier detection method to use.
+        Options are "sd" for standard deviation or "iqr" for interquartile range.
+        multiplier (float | None): The multiplier to use for outlier detection. If None,
         defaults to 3 for standard deviation and 1.5 for IQR.
 
     Returns
     -------
-        dict: A dictionary containing the computed statistics including mean, median, 
+        dict: A dictionary containing the computed statistics including mean, median,
         standard deviation, lower bound, and upper bound.
     """
     if series.empty:
@@ -737,7 +737,7 @@ def compute_outlier_output(
         raise ValueError("The DataFrame is empty. Please provide a valid DataFrame.")
 
     # get a list of columns to include in the output
-    # Build a list of columns to include in the output, avoiding duplicates 
+    # Build a list of columns to include in the output, avoiding duplicates
     # and None values
     include_cols = []
     for col in (display_cols or []):
@@ -830,7 +830,8 @@ def compute_outlier_output(
             if non_null_count < min_threshold:
                 outlier_df["outlier reason"] = "no outlier"
             else:
-                # apply the function to the column to create a new column for outlier reason
+                # apply the function to the column to create a new column for
+                # outlier reason
                 outlier_df["outlier reason"] = outlier_df[col].apply(
                     lambda x, soft_min = soft_min, soft_max = soft_max, outlier_stats = outlier_stats: add_outlier_reason(
                         x, soft_min, soft_max, outlier_stats

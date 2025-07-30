@@ -170,7 +170,7 @@ with back_checks:
                 db_name="prep",
                 type='pd'
             )
-            
+
         # if prep backcheck data is empty, load raw data
         if backcheck_data.empty:
             backcheck_data = duckdb_get_table(

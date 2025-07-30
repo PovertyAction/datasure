@@ -746,10 +746,6 @@ class TestSctoImportData:
         assert result == 1
         mock_save_table.assert_called_once()
 
-        # Get the data that was passed to save_table
-        save_call_args = mock_save_table.call_args[0]
-        saved_data = save_call_args[1]  # The data parameter
-
     @patch("datasure.connectors.scto.scto_get_server_cache")
     @patch("datasure.connectors.scto.scto_server_connect")
     @patch("datasure.connectors.scto.scto_load_existing_data")
