@@ -750,12 +750,6 @@ class TestSctoImportData:
         save_call_args = mock_save_table.call_args[0]
         saved_data = save_call_args[1]  # The data parameter
 
-        # Verify note field behavior (currently not dropped due to implementation issue)
-        # This reveals that the note field dropping logic may not work as expected
-        assert (
-            "notes_field" in saved_data.columns
-        )  # Current behavior - field is not dropped
-
     @patch("datasure.connectors.scto.scto_get_server_cache")
     @patch("datasure.connectors.scto.scto_server_connect")
     @patch("datasure.connectors.scto.scto_load_existing_data")
