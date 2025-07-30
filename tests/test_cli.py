@@ -29,7 +29,7 @@ class TestGetVersion:
 
         result = get_version()
 
-        assert result == "0.1.0"
+        assert result == "0.2.0"
 
 
 class TestMain:
@@ -37,45 +37,53 @@ class TestMain:
 
     @patch("datasure.cli.stcli.main", return_value=0)
     @patch("sys.exit")
+    @patch("subprocess.run")
     @patch.object(Path, "exists", return_value=True)
-    def test_main_default_args(self, mock_path_exists, mock_exit, mock_stcli_main):
+    def test_main_default_args(self, mock_path_exists, mock_subprocess, mock_exit, mock_stcli_main):
         """Test main function with default arguments."""
         original_argv = sys.argv[:]
         try:
             sys.argv = ["datasure"]
             main()
 
-            # Verify stcli.main was called
+            # Verify subprocess.run was called with correct arguments
+            mock_subprocess.assert_called_once()
+            call_args = mock_subprocess.call_args[0][0]
+            assert call_args[0] == "streamlit"
+            assert call_args[1] == "run"
+            assert "--server.address" in call_args
+            assert "localhost" in call_args
+            assert "--server.port" in call_args
+            assert "8501" in call_args
+            assert "--browser.gatherUsageStats" in call_args
+            assert "false" in call_args
+
+            # Verify stcli.main was called and sys.exit called with its return value
             mock_stcli_main.assert_called_once()
             mock_exit.assert_called_once_with(0)
-
-            # Check that sys.argv was modified for streamlit
-            assert sys.argv[0] == "streamlit"
-            assert sys.argv[1] == "run"
-            assert "--server.address" in sys.argv
-            assert "localhost" in sys.argv
-            assert "--server.port" in sys.argv
-            assert "8501" in sys.argv
         finally:
             sys.argv = original_argv
 
-    @patch("datasure.cli.stcli.main", return_value=0)
+    @patch("datasure.cli.stcli.main", return_value=1)
     @patch("sys.exit")
+    @patch("subprocess.run")
     @patch.object(Path, "exists", return_value=True)
-    def test_main_custom_host_port(self, mock_path_exists, mock_exit, mock_stcli_main):
+    def test_main_custom_host_port(self, mock_path_exists, mock_subprocess, mock_exit, mock_stcli_main):
         """Test main function with custom host and port."""
         original_argv = sys.argv[:]
         try:
             sys.argv = ["datasure", "--host", "0.0.0.0", "--port", "9000"]
             main()
 
-            # Verify stcli.main was called
-            mock_stcli_main.assert_called_once()
-            mock_exit.assert_called_once_with(0)
+            # Verify subprocess.run was called with custom host and port
+            mock_subprocess.assert_called_once()
+            call_args = mock_subprocess.call_args[0][0]
+            assert "0.0.0.0" in call_args
+            assert "9000" in call_args
 
-            # Check that custom host and port were used
-            assert "0.0.0.0" in sys.argv
-            assert "9000" in sys.argv
+            # Verify stcli.main was called and sys.exit called with its return value
+            mock_stcli_main.assert_called_once()
+            mock_exit.assert_called_once_with(1)
         finally:
             sys.argv = original_argv
 
@@ -111,5 +119,44 @@ class TestMain:
             # The --version flag should cause argparse to exit
             with pytest.raises(SystemExit):
                 main()
+        finally:
+            sys.argv = original_argv
+
+    @patch("datasure.cli.stcli.main", return_value=2)
+    @patch("sys.exit")
+    @patch("subprocess.run")
+    @patch.object(Path, "exists", return_value=True)
+    def test_main_stcli_nonzero_return(self, mock_path_exists, mock_subprocess, mock_exit, mock_stcli_main):
+        """Test main function when stcli.main returns non-zero exit code."""
+        original_argv = sys.argv[:]
+        try:
+            sys.argv = ["datasure"]
+            main()
+
+            # Verify subprocess.run was called
+            mock_subprocess.assert_called_once()
+
+            # Verify stcli.main was called and sys.exit called with its return value
+            mock_stcli_main.assert_called_once()
+            mock_exit.assert_called_once_with(2)
+        finally:
+            sys.argv = original_argv
+
+    @patch("datasure.cli.stcli.main", return_value=0)
+    @patch("sys.exit")
+    @patch("subprocess.run")
+    @patch.object(Path, "exists", return_value=True)
+    def test_main_app_path_construction(self, mock_path_exists, mock_subprocess, mock_exit, mock_stcli_main):
+        """Test that app.py path is constructed correctly."""
+        original_argv = sys.argv[:]
+        try:
+            sys.argv = ["datasure"]
+            main()
+
+            # Verify subprocess.run was called with correct app path
+            mock_subprocess.assert_called_once()
+            call_args = mock_subprocess.call_args[0][0]
+            app_path_arg = call_args[2]  # Third argument should be the app path
+            assert app_path_arg.endswith("app.py")
         finally:
             sys.argv = original_argv
