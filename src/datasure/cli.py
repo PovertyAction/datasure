@@ -9,7 +9,7 @@ import argparse
 import sys
 from pathlib import Path
 
-import streamlit.web.cli as stcli  # noqa: F401
+import streamlit.web.cli as stcli
 
 
 def main():
@@ -62,6 +62,8 @@ def main():
         "--browser.gatherUsageStats",
         "false",
     ]
+
+    sys.exit(stcli.main())
 
 
 def get_version():
