@@ -4,8 +4,6 @@ import sys  # noqa: F401
 from pathlib import Path  # noqa: F401
 from unittest.mock import patch
 
-import pytest  # type: ignore
-
 from datasure.cli import get_version, main  # noqa: F401
 
 
