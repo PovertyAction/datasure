@@ -124,8 +124,7 @@ def update_unlocked_cols(
     # count the number of unlocked rows. ie, search_type is not "exact" and
     # lock_cols is False
     outlier_settings["to_expand"] = outlier_settings.apply(
-        lambda row: row["search_type"] != "exact" and not row["lock_cols"],
-        axis=1
+        lambda row: row["search_type"] != "exact" and not row["lock_cols"], axis=1
     )
     unlocked_rows_count = outlier_settings["to_expand"].sum()
 
