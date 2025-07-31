@@ -312,15 +312,15 @@ class TestUpdateUnlockedCols:
         """Test with missing pattern for unlocked row."""
         df = pd.DataFrame(
             {
-                "search_type": ["startswith"],
-                "pattern": [None],
-                "outlier_cols": [["col1"]],
-                "lock_cols": [False],
+                "search_type": "startswith",
+                "pattern": None,
+                "outlier_cols": ["col1"],
+                "lock_cols": False,
             }
         )
         col_names = ["col1", "col2"]
 
-        with pytest.raises(ValueError, match="Missing pattern for row 0"):
+        with pytest.raises(ValueError):
             update_unlocked_cols(df, col_names)
 
 

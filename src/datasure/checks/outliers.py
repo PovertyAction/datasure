@@ -123,10 +123,11 @@ def update_unlocked_cols(
 
     # count the number of unlocked rows. ie, search_type is not "exact" and
     # lock_cols is False
-    unlocked_rows_count = outlier_settings[
-        (outlier_settings["search_type"] != "exact")
-        & (outlier_settings["lock_cols"] is False)
-    ].shape[0]
+    outlier_settings["to_expand"] = outlier_settings.apply(
+        lambda row: row["search_type"] != "exact" and not row["lock_cols"],
+        axis=1
+    )
+    unlocked_rows_count = outlier_settings["to_expand"].sum()
 
     if unlocked_rows_count == 0:
         return outlier_settings  # No unlocked rows to update
@@ -136,7 +137,7 @@ def update_unlocked_cols(
             search_type = row["search_type"]
             if search_type != "exact" and not row["lock_cols"]:
                 pattern = row["pattern"]
-                if not pattern:
+                if pattern is None or pattern.strip() == "":
                     raise ValueError(
                         f"Missing pattern for row {index}. Please provide a valid pattern."
                     )
