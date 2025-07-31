@@ -63,6 +63,7 @@ def main():
         "false",
     ]
 
+
 def get_version():
     """Get the package version."""
     try:
