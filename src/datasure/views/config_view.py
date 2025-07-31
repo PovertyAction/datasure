@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import polars as pl
 import streamlit as st
 
@@ -268,10 +270,12 @@ st.write("---")
 if load_pages:
     check_pages_to_add = []
 
+    views_path = Path(__file__).parent
+
     for i, name in enumerate(check_config_log["page_name"].to_list()):
         check_pages_to_add.append(
             st.Page(
-                page=f"views/output_view_{i + 1}.py",
+                page=f"{views_path}/output_view_{i + 1}.py",
                 title=name,
                 icon=f":material/counter_{i + 1}:",
             )
@@ -282,7 +286,7 @@ if load_pages:
 
     # config data checks config page
     config_corr_page = st.Page(
-        page="views/correction_view.py",
+        page=f"{views_path}/correction_view.py",
         title="Correct Data",
         icon=":material/edit_note:",
     )
