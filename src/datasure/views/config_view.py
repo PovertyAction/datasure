@@ -303,7 +303,7 @@ if st.session_state.show_checks_section:
     for i, name in enumerate(check_config_log["page_name"].to_list()):
         page = st.session_state.all_pages["Review Quality Checks"][i]
         st.page_link(
-            page,
+            st.session_state.package_dir / page,
             label=f"### {name}",
             icon=f":material/counter_{i + 1}:",
         )

@@ -242,7 +242,7 @@ if not import_log.is_empty():
                 "Data loaded successfully! You can now preview the imported data in the Prep section."
             )
             st.page_link(
-                "views/prep_view.py",
+                st.session_state.package_dir / "views/prep_view.py",
                 label="Click to go to Prep Section",
                 icon=":material/arrow_forward:",
             )

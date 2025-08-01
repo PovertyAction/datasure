@@ -17,10 +17,16 @@ if "show_prep_section" not in st.session_state:
 if "show_checks_section" not in st.session_state:
     st.session_state.show_checks_section = False
 
+if "st_prep_dataset_list" not in st.session_state:
+    st.session_state.st_prep_dataset_list = []
+
 
 # Get the directory where this module is located
 _package_dir = Path(__file__).parent
 _views_dir = _package_dir / "views"
+
+if "package_dir" not in st.session_state:
+    st.session_state.package_dir = _package_dir
 
 # start page
 start_page = st.Page(

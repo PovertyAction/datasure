@@ -12,14 +12,6 @@ from datasure.utils import (
 
 # Get list of dataset alias
 project_id: str = st.session_state.st_project_id
-
-# Initialize st_prep_dataset_list if it doesn't exist or is None
-if (
-    "st_prep_dataset_list" not in st.session_state
-    or st.session_state.st_prep_dataset_list is None
-):
-    st.session_state.st_prep_dataset_list = []
-
 alias_list: list[str] = st.session_state.st_prep_dataset_list
 
 # -- DEFINE CONSTANTS FOR DATA PREP --#
