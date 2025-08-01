@@ -67,7 +67,6 @@ nav_menu = st.navigation(
         "Import Data": [import_data_page],
         "Prepare Data": [prep_data_page],
     },
-    position="hidden",
 )
 if st.session_state.show_prep_section:
     nav_menu = st.navigation(

@@ -17,8 +17,21 @@ from datasure.utils import (
     duckdb_save_table,
 )
 
+# --- CONFIGURE PAGE --- #
+
+st.set_page_config("Import Data", page_icon=":sync:", layout="wide")
+st.title("Import Data")
+st.write("---")
+
 # --- define project ID --- #
 project_id = st.session_state.st_project_id
+
+if not project_id:
+    st.info(
+        "Please select a project from the Start page to import data. "
+        "You can also create a new project from the Start page."
+    )
+    st.stop()
 
 # add session state for raw dataset list
 if "st_raw_dataset_list" not in st.session_state:
@@ -112,12 +125,6 @@ def load_raw_datasets(project_id: str) -> None:
                 label="Data loaded successfully!", state="complete", expanded=False
             )
 
-
-# --- CONFIGURE PAGE --- #
-
-st.set_page_config("Import Data", page_icon=":sync:", layout="wide")
-st.title("Import Data")
-st.write("---")
 
 # --- add login configuration ---#
 lc1, _, _ = st.columns(3)
