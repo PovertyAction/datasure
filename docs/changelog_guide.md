@@ -9,11 +9,13 @@ This document provides guidance for maintaining the technical changelog (CHANGEL
 ## Purpose and Audience
 
 ### Technical Changelog (CHANGELOG.md)
+
 - **Audience**: Developers, contributors, maintainers
 - **Content**: Technical implementation details, API changes, dependency updates, architectural changes
 - **Style**: References to specific modules and functions
 
 ### Release Notes (RELEASENOTES.md)
+
 - **Audience**: End users, data managers, survey coordinators
 - **Content**: New features, user-visible improvements, usage instructions
 - **Style**: User-friendly language, focuses on benefits and impact
@@ -187,19 +189,23 @@ Always include migration instructions:
 ## Integration with Release Process
 
 ### During Development
+
 1. Add entries to `## [Unreleased]` section as features are implemented
 2. Use technical language and include code references
 3. Link to relevant GitHub issues/PRs with technical context
 
 ### Before Release
+
 1. Move unreleased changes to new version section
 2. Ensure all breaking changes have migration instructions
 3. Cross-reference with RELEASENOTES.md for consistency
+
 ---
 
 ## Quality Standards
 
 ### Required Information
+
 - **Module/file references**: Specific paths for all changes
 - **Function signatures**: For new/modified APIs
 - **Performance metrics**: Before/after measurements where applicable
@@ -207,6 +213,7 @@ Always include migration instructions:
 - **Security context**: CVE references, impact assessment
 
 ### Code Examples
+
 Include minimal, runnable examples:
 
 ```python
@@ -220,6 +227,7 @@ outliers = detector.find_outliers(df['survey_duration'])
 ```
 
 ### Cross-References
+
 - Link to relevant RELEASENOTES.md sections
 - Reference GitHub issues/PRs with context
 - Include links to updated documentation sections

@@ -6,7 +6,6 @@ Thank you for your interest in contributing to DataSure! This guide will help yo
 
 - [Development Setup](#development-setup)
 - [Development Workflow](#development-workflow)
-- [Code Quality Standards](#code-quality-standards)
 - [Testing](#testing)
 - [Package Building](#package-building)
 - [Version Management](#version-management)
@@ -157,6 +156,7 @@ DataSure uses automated version management with semantic versioning (MAJOR.MINOR
 ### Version Bump Commands
 
 #### Alpha Releases (Early Development Testing)
+
 ```bash
 just bump-patch-alpha     # 0.1.0 -> 0.1.1a1
 just bump-minor-alpha     # 0.1.0 -> 0.2.0a1
@@ -164,6 +164,7 @@ just bump-major-alpha     # 0.1.0 -> 1.0.0a1
 ```
 
 #### Beta Releases (Feature-Complete Testing)
+
 ```bash
 just bump-patch-beta      # 0.1.0 -> 0.1.1b1
 just bump-minor-beta      # 0.1.0 -> 0.2.0b1
@@ -171,6 +172,7 @@ just bump-major-beta      # 0.1.0 -> 1.0.0b1
 ```
 
 #### Release Candidates (Final Testing)
+
 ```bash
 just bump-patch-rc        # 0.1.0 -> 0.1.1rc1
 just bump-minor-rc        # 0.1.0 -> 0.2.0rc1
@@ -178,6 +180,7 @@ just bump-major-rc        # 0.1.0 -> 1.0.0rc1
 ```
 
 #### Final Releases
+
 ```bash
 just bump-patch           # 0.1.0 -> 0.1.1
 just bump-minor           # 0.1.0 -> 0.2.0
@@ -185,6 +188,7 @@ just bump-major           # 0.1.0 -> 1.0.0
 ```
 
 These commands automatically:
+
 - Update the version in `src/datasure/__init__.py`
 - Run `uv sync` to update the lock file
 - Commit the changes to git
@@ -207,13 +211,15 @@ DataSure uses an automated GitHub Actions pipeline for releases with comprehensi
 Before making any release, developers must update both technical and user-facing documentation:
 
 #### Technical Changelog (CHANGELOG.md)
+
 - Use [docs/changelog_guide.md](docs/changelog_guide.md) for guidance
 - Include technical implementation details, API changes, dependency updates
 - Reference specific modules and functions (e.g., `src/datasure/checks/gpschecks.py:123`)
 - Provide migration instructions for breaking changes
 - Include performance metrics and code examples
 
-#### User-Facing Release Notes (RELEASENOTES.md) 
+#### User-Facing Release Notes (RELEASENOTES.md)
+
 - Use [docs/release_notes_guide.md](docs/release_notes_guide.md) for guidance
 - Focus on user benefits and workflow improvements
 - Use plain language familiar to data managers and survey coordinators
@@ -244,6 +250,7 @@ just push-all    # Pushes commits and tags
 ### Quality Gates
 
 All releases must pass:
+
 - **Pre-commit hooks**: Code formatting and linting
 - **Test suite**: All tests must pass
 - **SonarQube analysis**: Code quality and security checks
@@ -266,6 +273,7 @@ Failed quality checks prevent releases.
 ### Manual Release Override
 
 For emergency releases only:
+
 1. Go to GitHub Actions → Build and Release → Run workflow
 2. Enter version (e.g., `v1.0.1`) and click "Run workflow"
 3. **Note**: Manual releases should still update documentation post-release
@@ -278,14 +286,18 @@ For emergency releases only:
 2. **Make your changes** following the coding standards
 3. **Write or update tests** for your changes
 4. **Run the full test suite**:
+
    ```bash
    just test
    just lint-py
    ```
+
 5. **Build and test the package**:
+
    ```bash
    just package-workflow
    ```
+
 6. **Commit your changes** with descriptive commit messages
 7. **Push to your fork** and create a pull request
 
@@ -307,6 +319,7 @@ For emergency releases only:
 ## Development Architecture
 
 ### Project Structure
+
 ```text
 src/datasure/                   # Main package (source layout)
 ├── app.py                  # Main Streamlit application entry point
@@ -328,6 +341,7 @@ src/datasure/                   # Main package (source layout)
 ### Adding New Features
 
 #### Adding a New Data Quality Check
+
 1. Create new module in `src/datasure/checks/`
 2. Implement standardized interface with report function
 3. Add imports to `src/datasure/checks/__init__.py`
@@ -335,6 +349,7 @@ src/datasure/                   # Main package (source layout)
 5. Update navigation in `src/datasure/app.py` if needed
 
 #### Adding a New Data Connector
+
 1. Create new module in `src/datasure/connectors/`
 2. Implement data loading and form functions
 3. Add imports to `src/datasure/connectors/__init__.py`

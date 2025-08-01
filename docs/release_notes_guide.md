@@ -9,11 +9,13 @@ This document provides guidance for maintaining the user-facing release notes (R
 ## Purpose and Audience
 
 ### Release Notes (RELEASENOTES.md)
+
 - **Audience**: End users, data managers, survey coordinators, research teams
 - **Content**: New features, user-visible improvements, usage instructions, benefits
 - **Style**: User-friendly language, focuses on value and impact to data quality workflows
 
 ### Technical Changelog (CHANGELOG.md)
+
 - **Audience**: Developers, contributors, maintainers
 - **Content**: Technical implementation details, API changes, dependency updates
 - **Style**: Detailed technical language with code references
@@ -33,12 +35,14 @@ This document provides guidance for maintaining the user-facing release notes (R
 ### Language Guidelines
 
 **Use familiar data management terms:**
+
 - "Survey data quality checks" instead of "data validation algorithms"
 - "Export reports" instead of "data serialization"
 - "Import from SurveyCTO" instead of "API integration"
 - "GPS coordinate validation" instead of "geospatial data processing"
 
 **Focus on outcomes:**
+
 - "Identify duplicate survey responses faster" instead of "improved duplicate detection performance"
 - "Visualize outliers with interactive charts" instead of "added Plotly visualization components"
 - "Configure check thresholds per project" instead of "implemented configurable parameters"
@@ -48,6 +52,7 @@ This document provides guidance for maintaining the user-facing release notes (R
 ## Release Notes Structure
 
 ### Version Header Format
+
 ```markdown
 ## Version X.Y.Z - Release Name
 *Released: Month DD, YYYY*
@@ -58,6 +63,7 @@ This document provides guidance for maintaining the user-facing release notes (R
 ### Standard Sections
 
 #### New Features
+
 Highlight major new capabilities that improve data quality workflows:
 
 ```markdown
@@ -75,6 +81,7 @@ Highlight major new capabilities that improve data quality workflows:
 ```
 
 #### Improvements
+
 Focus on enhanced existing features and workflow optimizations:
 
 ```markdown
@@ -92,6 +99,7 @@ Focus on enhanced existing features and workflow optimizations:
 ```
 
 #### Bug Fixes
+
 Describe fixes in terms of improved user experience:
 
 ```markdown
@@ -111,6 +119,7 @@ Describe fixes in terms of improved user experience:
 ### Feature Categories
 
 **Data Quality Checks:**
+
 - Summary statistics and progress monitoring
 - Missing data patterns and completeness analysis
 - Duplicate response identification and management
@@ -122,6 +131,7 @@ Describe fixes in terms of improved user experience:
 - Back-check workflow management and verification
 
 **Data Management:**
+
 - Multi-source data import (SurveyCTO, CSV, Excel)
 - Project-based organization and settings
 - Data preparation and cleaning workflows
@@ -129,6 +139,7 @@ Describe fixes in terms of improved user experience:
 - Cache management and performance optimization
 
 **Reporting and Visualization:**
+
 - Interactive charts and dashboards
 - Export capabilities for different audiences
 - Custom report generation
@@ -175,21 +186,25 @@ Provide clear instructions for different user types:
 ## Version Communication Strategy
 
 ### Major Releases (X.0.0)
+
 - **Announcement**: Highlight transformative new capabilities
 - **Migration Guide**: Help users transition from previous versions
 - **Training Materials**: Link to updated documentation and tutorials
 
 ### Minor Releases (0.X.0)
+
 - **Feature Focus**: Emphasize new functionality and workflow improvements
 - **Compatibility**: Reassure users about backward compatibility
 - **Integration**: Explain how new features work with existing workflows
 
 ### Patch Releases (0.0.X)
+
 - **Reliability**: Focus on improved stability and performance
 - **Quick Fixes**: Address urgent user-reported issues
 - **Maintenance**: Routine updates and dependency improvements
 
 ### Pre-releases (Alpha/Beta/RC)
+
 - **Testing Invitation**: Encourage user feedback and testing
 - **Feature Preview**: Give users early look at upcoming capabilities
 - **Feedback Channels**: Provide clear ways to report issues and suggestions
@@ -245,6 +260,7 @@ Connect directly to your SurveyCTO server with enhanced security and faster data
 ## Release Timeline and Coordination
 
 ### Pre-Release Process
+
 1. **Feature Freeze**: All new features implemented and tested
 2. **User Documentation**: Update help text and tutorials
 3. **Release Notes Draft**: Create user-focused content based on technical changelog
@@ -252,12 +268,14 @@ Connect directly to your SurveyCTO server with enhanced security and faster data
 5. **Final Edit**: Polish language and ensure clarity
 
 ### Release Day
+
 1. **Version Publication**: Automated release through GitHub Actions
 2. **Release Notes Publication**: Update RELEASENOTES.md with final content
 3. **Communication**: Notify users through appropriate channels
 4. **Support Preparation**: Ensure support team knows about changes
 
 ### Post-Release
+
 1. **User Feedback**: Monitor for questions and issues
 2. **Documentation Updates**: Address any gaps in user guidance
 3. **Next Release Planning**: Begin planning based on user feedback
@@ -282,13 +300,16 @@ Before publishing release notes, verify:
 ## Support Integration
 
 ### Help Documentation Links
+
 Always include links to relevant help sections:
+
 - Getting Started guides for new features
 - Updated workflow documentation
 - Video tutorials for complex new capabilities
 - FAQ updates for common questions
 
 ### User Communication Channels
+
 - GitHub Issues for bug reports and feature requests
 - Email support for installation and usage questions
 - Documentation site for comprehensive guides
