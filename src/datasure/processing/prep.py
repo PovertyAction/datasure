@@ -111,7 +111,7 @@ def prep_remove_columns(prep_data: pd.DataFrame, description: str) -> pd.DataFra
         columns = ast.literal_eval(columns)
     except (ValueError, SyntaxError):
         st.error(f"Invalid column specification: {columns}")
-        return
+        return prep_data
 
     # drop columns from dataset
     return prep_data.drop(columns=columns, axis=1)
@@ -139,7 +139,7 @@ def prep_remove_rows(prep_data: pd.DataFrame, description: str) -> pd.DataFrame:
             rows_list = ast.literal_eval(rows)
         except (ValueError, SyntaxError):
             st.error(f"Invalid row specification: {rows}")
-            return
+            return prep_data
         for row in rows_list:
             if ":" in row:
                 start, end = row.split(":")
@@ -160,14 +160,15 @@ def prep_remove_rows(prep_data: pd.DataFrame, description: str) -> pd.DataFrame:
                 cols_list = ast.literal_eval(cols)
             except (ValueError, SyntaxError):
                 st.error(f"Invalid column specification: {cols}")
-                return
-            return prep_data.dropna(subset=cols_list, inplace=True)
+                return prep_data
+            prep_data.dropna(subset=cols_list, inplace=True)
+            return prep_data
         elif condition == "value is not missing":
             try:
                 cols_list = ast.literal_eval(cols)
             except (ValueError, SyntaxError):
                 st.error(f"Invalid column specification: {cols}")
-                return
+                return prep_data
             drop_index = prep_data.dropna(subset=cols_list)
             if drop_index is not None:
                 drop_index = list(drop_index.index)
@@ -187,19 +188,19 @@ def prep_remove_rows(prep_data: pd.DataFrame, description: str) -> pd.DataFrame:
                 first_col = cols_list[0]
             except (ValueError, SyntaxError, IndexError):
                 st.error(f"Invalid column specification: {cols}")
-                return
+                return prep_data
             if prep_data[first_col].dtypes == "datetime64[ns]":
                 try:
                     values_use = list(ast.literal_eval(values.replace("Timestamp", "")))
                 except (ValueError, SyntaxError):
                     st.error(f"Invalid values specification: {values}")
-                    return
+                    return prep_data
             else:
                 try:
                     values_use = ast.literal_eval(values)
                 except (ValueError, SyntaxError):
                     st.error(f"Invalid values specification: {values}")
-                    return
+                    return prep_data
             if condition == "value is equal to":
                 return prep_data.query(f"{first_col} not in {values_use}")
             else:
@@ -231,13 +232,13 @@ def prep_remove_rows(prep_data: pd.DataFrame, description: str) -> pd.DataFrame:
                     value = value_list[0]
                 except (ValueError, SyntaxError, IndexError):
                     st.error(f"Invalid value specification: {value}")
-                    return
+                    return prep_data
             try:
                 cols_list = ast.literal_eval(cols)
                 cols = cols_list[0]
             except (ValueError, SyntaxError, IndexError):
                 st.error(f"Invalid column specification: {cols}")
-                return
+                return prep_data
 
             drop_logic = {
                 "value is greater than": "<=",
@@ -261,7 +262,7 @@ def prep_remove_rows(prep_data: pd.DataFrame, description: str) -> pd.DataFrame:
                 cols = cols_list[0]
             except (ValueError, SyntaxError, IndexError):
                 st.error(f"Invalid column specification: {cols}")
-                return
+                return prep_data
             values = values.split(" and ")
             values_use = []
             for value in values:
@@ -293,7 +294,7 @@ def prep_remove_rows(prep_data: pd.DataFrame, description: str) -> pd.DataFrame:
                 cols = cols_list[0]
             except (ValueError, SyntaxError, IndexError):
                 st.error(f"Invalid column specification: {cols}")
-                return
+                return prep_data
             if condition == "value is like":
                 return prep_data.query(
                     f"not {cols}.str.contains('{value}')", engine="python"
@@ -456,7 +457,7 @@ def prep_add_new_column(prep_data: pd.DataFrame, description: str) -> pd.DataFra
             columns_list = ast.literal_eval(columns)
         except (ValueError, SyntaxError):
             st.error(f"Invalid column specification: {columns}")
-            return
+            return prep_data
 
         agg_funcs = {
             "sum": "sum",
@@ -477,7 +478,7 @@ def prep_add_new_column(prep_data: pd.DataFrame, description: str) -> pd.DataFra
             # we need to handle quotient and diff separately
             if len(columns_list) != 2:
                 st.error("Quotient and diff require exactly two columns.")
-                return
+                return prep_data
             if func == "quotient":
                 # calculate quotient of two columns
                 prep_data[new_col] = (
