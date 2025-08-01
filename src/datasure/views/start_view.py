@@ -227,7 +227,7 @@ with page_canvas:
                 st.session_state.st_project_id = project_id
                 views_path = Path(__file__).parent
                 st.switch_page(
-                    st.session_state.package_dir / "views/import_view.py",
+                    str(st.session_state.package_dir / "views/import_view.py"),
                 )
             with st.expander(":material/delete: delete project"):
                 if (
