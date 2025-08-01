@@ -226,10 +226,8 @@ with page_canvas:
                 st.session_state.st_load_project = True
                 st.session_state.st_project_id = project_id
                 views_path = Path(__file__).parent
-                st.page_link(
+                st.switch_page(
                     views_path / "import_view.py",
-                    label="Go to Import Data",
-                    icon=":material/open_in_new:",
                 )
             with st.expander(":material/delete: delete project"):
                 if (
