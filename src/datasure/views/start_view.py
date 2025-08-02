@@ -225,10 +225,7 @@ with page_canvas:
                 st.write(f"Loading project '{project}'...")
                 st.session_state.st_load_project = True
                 st.session_state.st_project_id = project_id
-                views_path = Path(__file__).parent
-                st.switch_page(
-                    str(st.session_state.package_dir / "views/import_view.py"),
-                )
+                st.write("Proceed to the import data page to start working with your project.")
             with st.expander(":material/delete: delete project"):
                 if (
                     st.button("Confirm delete", use_container_width=True)
