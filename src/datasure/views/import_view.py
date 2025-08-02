@@ -248,11 +248,6 @@ if not import_log.is_empty():
             st.success(
                 "Data loaded successfully! You can now preview the imported data in the Prep section."
             )
-            st.page_link(
-                st.session_state.package_dir / "views/prep_view.py",
-                label="Click to go to Prep Section",
-                icon=":material/arrow_forward:",
-            )
 
     preview_options = duckdb_get_imported_datasets(project_id)
     if preview_options:

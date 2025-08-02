@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import polars as pl
 import streamlit as st
 
@@ -14,6 +12,12 @@ st.markdown("Add a page for each dataset you want to check")
 
 project_id: str = st.session_state.st_project_id
 alias_list = st.session_state.st_prep_dataset_list
+
+if not project_id:
+    st.info(
+        "Select a project from the Start page and import data. You can also create a new project from the Start page."
+    )
+    st.stop()
 
 
 # --- Add new configuration --- #
@@ -215,6 +219,9 @@ def remove_check_configuration(project_id: str) -> None:
             st.success(f"Check configuration '{remove_data}' removed successfully.")
 
 
+# --- Display check configurations --- #
+st.subheader("Check Configurations")
+
 cc1, cc2, _ = st.columns([0.4, 0.3, 0.3])
 # --- Add new check configuration --- #
 with cc1:
@@ -227,9 +234,6 @@ with cc2:
 check_config_log = duckdb_get_table(
     project_id=project_id, alias="check_config", db_name="logs"
 )
-
-# --- Display check configurations --- #
-st.subheader("Check Configurations")
 
 if check_config_log.is_empty():
     st.info("No check configurations found. Please add a check configuration to start.")
@@ -254,56 +258,3 @@ else:
 check_page_names = (
     check_config_log["page_name"].to_list() if not check_config_log.is_empty() else []
 )
-
-lcp1, _ = st.columns([0.4, 0.7])
-with lcp1:
-    load_pages = st.button(
-        "Load Check Pages",
-        type="primary",
-        use_container_width=True,
-        key="load_check_pages_btn",
-        disabled=check_config_log.is_empty(),
-    )
-
-st.write("---")
-
-if load_pages:
-    check_pages_to_add = []
-
-    views_path = Path(__file__).parent
-
-    for i, name in enumerate(check_config_log["page_name"].to_list()):
-        check_pages_to_add.append(
-            st.Page(
-                page=f"{views_path}/output_view_{i + 1}.py",
-                title=name,
-                icon=f":material/counter_{i + 1}:",
-            )
-        )
-
-    st.session_state["all_pages"] = st.session_state.static_pages.copy()
-    st.session_state["all_pages"].update({"Review Quality Checks": check_pages_to_add})
-
-    # config data checks config page
-    config_corr_page = st.Page(
-        page=f"{views_path}/correction_view.py",
-        title="Correct Data",
-        icon=":material/edit_note:",
-    )
-
-    st.session_state["all_pages"].update({"Correct Data": [config_corr_page]})
-    st.session_state.show_checks_section = True
-
-
-if st.session_state.show_checks_section:
-    st.subheader("Review Quality Checks")
-    st.markdown(
-        "Click on the page names below to review the quality checks for each dataset."
-    )
-    for i, name in enumerate(check_config_log["page_name"].to_list()):
-        page = st.session_state.all_pages["Review Quality Checks"][i]
-        st.page_link(
-            st.session_state.package_dir / page,
-            label=f"### {name}",
-            icon=f":material/counter_{i + 1}:",
-        )

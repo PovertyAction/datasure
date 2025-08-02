@@ -14,7 +14,17 @@ from datasure.utils import (
 
 CORRECTION_ACTIONS = ("modify value", "remove value", "remove row")
 
+st.title("Correct Data")
+st.markdown("Make necessary corrections to data based on issues identified in checks.")
+
 project_id: str = st.session_state.st_project_id
+
+if not project_id:
+    st.info(
+        "Select a project from the Start page and import data. You can also create a new project from the Start page."
+    )
+    st.stop()
+
 hfc_config_logs = duckdb_get_table(
     project_id=project_id, alias="check_config", db_name="logs"
 )
@@ -23,8 +33,6 @@ hfc_pages = hfc_config_logs["page_name"].to_list()
 # -- DATA CORERCTIONS PAGE --#
 # Creates page for data preprocessing
 
-st.title("Correct Data")
-st.markdown("Make necessary corrections to data based on issues identified in checks.")
 
 # show/hide data prep page
 

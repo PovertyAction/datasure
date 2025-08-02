@@ -20,6 +20,13 @@ page_data_index = page_number - 1
 # define project ID
 project_id = st.session_state.st_project_id
 
+if not project_id:
+    st.title("DQA Report 1")
+    st.info(
+        "Select a project from the Start page and import data. You can also create a new project from the Start page."
+    )
+    st.stop()
+
 # get page config information
 (
     page_name,

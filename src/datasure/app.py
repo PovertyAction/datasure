@@ -25,9 +25,6 @@ if "st_prep_dataset_list" not in st.session_state:
 _package_dir = Path(__file__).parent
 _views_dir = _package_dir / "views"
 
-if "package_dir" not in st.session_state:
-    st.session_state.package_dir = _package_dir
-
 # start page
 start_page = st.Page(
     page=str(_views_dir / "start_view.py"),
@@ -57,37 +54,29 @@ config_checks_page = st.Page(
     icon=":material/manufacturing:",
 )
 
+output_page_1 = st.Page(
+    page=str(_views_dir / "output_view_1.py"),
+    title="Report 1",
+    icon=":material/counter_1:",
+)
+
+corr_page = st.Page(
+    page=str(_views_dir / "correction_view.py"),
+    title="Correct Data",
+    icon=":material/cleaning_services:",
+)
+
 
 # --- NAVIGATION MENU --- #
 
 
 nav_menu = st.navigation(
     {
-        "": [start_page],
-        "Import Data": [import_data_page],
-        "Prepare Data": [prep_data_page],
+        "": [start_page, import_data_page, prep_data_page, config_checks_page],
+        "DQA Reports": [output_page_1],
+        "---": [corr_page],
     },
 )
-if st.session_state.show_prep_section:
-    nav_menu = st.navigation(
-        {
-            "": [start_page],
-            "Import Data": [import_data_page],
-            "Prepare Data": [prep_data_page],
-            "Configure Checks": [config_checks_page],
-        }
-    )
-
-# create a session state to hold all pages, update in config page
-st.session_state.static_pages = {
-    "": [start_page],
-    "Import Data": [import_data_page],
-    "Prepare Data": [prep_data_page],
-    "Configure Checks": [config_checks_page],
-}
-
-if st.session_state.show_checks_section:
-    nav_menu = st.navigation(st.session_state.all_pages)
 
 # --- GLOBAL ASSETS --- #
 
