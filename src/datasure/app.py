@@ -11,12 +11,6 @@ if "st_load_project" not in st.session_state:
 if "st_project_id" not in st.session_state:
     st.session_state.st_project_id = ""
 
-if "show_prep_section" not in st.session_state:
-    st.session_state.show_prep_section = False
-
-if "show_checks_section" not in st.session_state:
-    st.session_state.show_checks_section = False
-
 if "st_prep_dataset_list" not in st.session_state:
     st.session_state.st_prep_dataset_list = []
 
