@@ -28,6 +28,13 @@ if not project_id:
 hfc_config_logs = duckdb_get_table(
     project_id=project_id, alias="check_config", db_name="logs"
 )
+if hfc_config_logs.is_empty():
+    st.info(
+        "No checks configured. Please configure checks on the Configure Checks page."
+    )
+    st.stop()
+
+# get list of HFC pages from check config logs
 hfc_pages = hfc_config_logs["page_name"].to_list()
 
 # -- DATA CORERCTIONS PAGE --#

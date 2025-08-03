@@ -225,7 +225,9 @@ with page_canvas:
                 st.write(f"Loading project '{project}'...")
                 st.session_state.st_load_project = True
                 st.session_state.st_project_id = project_id
-                st.write("Proceed to the import data page to start working with your project.")
+                st.success(
+                    "Proceed to the import data page to start working with your project."
+                )
             with st.expander(":material/delete: delete project"):
                 if (
                     st.button("Confirm delete", use_container_width=True)
@@ -233,4 +235,6 @@ with page_canvas:
                 ):
                     delete_project(project_id)
                     st.success(f"Project '{project}' deleted successfully!")
+                    if "st_load_project" in st.session_state:
+                        st.session_state.st_project_id = ""
                     st.rerun()

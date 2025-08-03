@@ -5,14 +5,30 @@ from millify import prettify
 
 from datasure.processing import prep_apply_action
 from datasure.utils import (
+    duckdb_get_aliases,
     duckdb_get_table,
     duckdb_save_table,
     get_df_info,
 )
 
-# Get list of dataset alias
+# Get project id
 project_id: str = st.session_state.st_project_id
-alias_list: list[str] = st.session_state.st_prep_dataset_list
+
+if not project_id:
+    st.info(
+        "Select a project from the Start page and import data. You can also create a new project from the Start page."
+    )
+    st.stop()
+
+# get list of database aliases
+alias_list: list[str] = duckdb_get_aliases(project_id=project_id)
+# show/hide data prep page
+show_prep_page_info = len(alias_list) > 0
+if not show_prep_page_info:
+    st.info(
+        "No data prep page available. Please import data from the Import Data page or create a new project."
+    )
+    st.stop()
 
 # -- DEFINE CONSTANTS FOR DATA PREP --#
 
@@ -521,19 +537,8 @@ def prep_remove_step():
                 )
 
 
-# show/hide data prep page
-
-show_prep_page_info = False
-
-try:
-    tabs = st.tabs(sorted(alias_list))
-    show_prep_page_info = True
-except Exception as e:  # noqa: F841
-    st.info(
-        "No data available to prepare. Load a dataset from the import page to continue."
-    )
-
 if show_prep_page_info:
+    tabs = st.tabs(sorted(alias_list))
     for i, (label, tab) in enumerate(zip(sorted(alias_list), tabs, strict=False)):
         prep_log = duckdb_get_table(
             project_id=project_id,

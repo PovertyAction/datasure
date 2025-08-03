@@ -2,6 +2,7 @@ import polars as pl
 import streamlit as st
 
 from datasure.utils import (
+    duckdb_get_aliases,
     duckdb_get_table,
     duckdb_save_table,
     get_df_info,
@@ -10,14 +11,17 @@ from datasure.utils import (
 st.title("Configure Checks")
 st.markdown("Add a page for each dataset you want to check")
 
+# get project ID
 project_id: str = st.session_state.st_project_id
-alias_list = st.session_state.st_prep_dataset_list
 
 if not project_id:
     st.info(
         "Select a project from the Start page and import data. You can also create a new project from the Start page."
     )
     st.stop()
+
+# get list of dataset aliases
+alias_list = duckdb_get_aliases(project_id=project_id)
 
 
 # --- Add new configuration --- #
