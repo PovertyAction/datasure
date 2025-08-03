@@ -7,8 +7,7 @@ import pydeck as pdk
 import streamlit as st
 from geopy.distance import geodesic
 from sklearn.neighbors import LocalOutlierFactor
-
-from datasure.utils import (
+from utils import (
     get_check_config_settings,
     get_df_info,
     load_check_settings,

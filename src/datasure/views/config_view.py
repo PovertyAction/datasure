@@ -1,7 +1,6 @@
 import polars as pl
 import streamlit as st
-
-from datasure.utils import (
+from utils import (
     duckdb_get_aliases,
     duckdb_get_table,
     duckdb_save_table,

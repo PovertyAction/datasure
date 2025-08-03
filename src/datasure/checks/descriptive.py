@@ -3,8 +3,7 @@ import os
 import pandas as pd
 import seaborn as sns
 import streamlit as st
-
-from datasure.utils import load_check_settings, save_check_settings, trigger_save
+from utils import load_check_settings, save_check_settings, trigger_save
 
 
 def load_default_summary_settings(setting_file: str, page_num: int) -> tuple:

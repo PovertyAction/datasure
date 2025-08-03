@@ -6,8 +6,7 @@ import re
 import numpy as np
 import pandas as pd
 import streamlit as st
-
-from datasure.utils import duckdb_get_table, duckdb_save_table
+from utils import duckdb_get_table, duckdb_save_table
 
 
 def prep_apply_action(

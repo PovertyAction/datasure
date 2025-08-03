@@ -6,8 +6,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 import streamlit as st
-
-from datasure.utils.cache_utils import get_cache_path
+from utils.cache_utils import get_cache_path
 
 
 def _validate_project_id(project_id: str) -> bool:

@@ -1,10 +1,9 @@
 import polars as pl
 import streamlit as st
-
-from datasure.processing import (
+from processing import (
     correction_apply_action,
 )
-from datasure.utils import (
+from utils import (
     duckdb_get_table,
     duckdb_save_table,
     get_check_config_settings,

@@ -1,14 +1,13 @@
 import polars as pl
 import streamlit as st
-
-from datasure.connectors import (
+from connectors import (
     local_add_form,
     local_load_action,
     scto_add_form,
     scto_import_data,
     scto_login_form,
 )
-from datasure.utils import (
+from utils import (
     duckdb_get_aliases,
     duckdb_get_imported_datasets,
     duckdb_get_table,

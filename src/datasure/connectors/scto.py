@@ -12,8 +12,7 @@ import polars as pl
 import pysurveycto
 import requests
 import streamlit as st
-
-from datasure.utils import duckdb_get_table, duckdb_save_table, get_cache_path
+from utils import duckdb_get_table, duckdb_save_table, get_cache_path
 
 # --- SurveyCTO Server Connect Button Click Action --- #
 

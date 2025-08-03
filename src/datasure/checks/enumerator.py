@@ -4,8 +4,7 @@ import os
 import pandas as pd
 import seaborn as sns
 import streamlit as st
-
-from datasure.utils import (
+from utils import (
     get_check_config_settings,
     get_df_info,
     load_check_settings,

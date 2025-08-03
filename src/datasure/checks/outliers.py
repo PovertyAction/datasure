@@ -6,8 +6,7 @@ import pandas as pd
 import plotly.graph_objects as go  # type: ignore
 import seaborn as sns
 import streamlit as st
-
-from datasure.utils import (
+from utils import (
     duckdb_get_table,
     duckdb_save_table,
     get_check_config_settings,
