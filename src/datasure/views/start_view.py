@@ -223,7 +223,6 @@ with page_canvas:
             projects = load_projects()
             if st.button("Load Project", type="primary", use_container_width=True):
                 st.write(f"Loading project '{project}'...")
-                st.session_state.st_load_project = True
                 st.session_state.st_project_id = project_id
                 st.success(
                     "Proceed to the import data page to start working with your project."
@@ -235,6 +234,6 @@ with page_canvas:
                 ):
                     delete_project(project_id)
                     st.success(f"Project '{project}' deleted successfully!")
-                    if "st_load_project" in st.session_state:
+                    if "st_project_id" in st.session_state:
                         st.session_state.st_project_id = ""
                     st.rerun()

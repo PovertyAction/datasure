@@ -5,9 +5,6 @@ import streamlit as st
 # --- PAGE SETUP --- #
 
 # initialize session states
-if "st_load_project" not in st.session_state:
-    st.session_state.st_load_project = False
-
 if "st_project_id" not in st.session_state:
     st.session_state.st_project_id = ""
 
@@ -62,9 +59,7 @@ corr_page = st.Page(
 
 nav_menu = st.navigation(
     {
-        "": [start_page, import_data_page, prep_data_page, config_checks_page],
-        "DQA Reports": [output_page_1],
-        "---": [corr_page],
+        "": [start_page, import_data_page, prep_data_page],
     },
 )
 
