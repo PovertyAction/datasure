@@ -1,6 +1,5 @@
 import polars as pl
 import streamlit as st
-from millify import prettify
 
 from datasure.connectors import (
     local_add_form,
@@ -272,7 +271,7 @@ if not import_log.is_empty():
         num_rows = preview_data.height
         mb1.metric(
             label="Rows",
-            value=prettify(num_rows),
+            value=num_rows,
             help="Number of rows in the imported dataset.",
             border=True,
         )
@@ -280,7 +279,7 @@ if not import_log.is_empty():
         num_columns = preview_data.width
         mb2.metric(
             label="Columns",
-            value=prettify(num_columns),
+            value=num_columns,
             help="Number of columns in the imported dataset.",
             border=True,
         )

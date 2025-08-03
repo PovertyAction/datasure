@@ -5,7 +5,6 @@ import pandas as pd
 import plotly.express as px
 import seaborn as sns
 import streamlit as st
-from millify import millify, prettify
 
 from datasure.utils import (
     donut_chart2,
@@ -358,24 +357,24 @@ def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
         mc1.metric(
             label="Today",
             value=submissions_today,
-            delta=f"{prettify(millify(submissions_today_delta, precision=2))}%",
+            delta=submissions_today_delta,
             help="Number of submissions today. Delta is the percentage change from yesterday.",
         )
         mc2.metric(
             label="This week",
             value=submissions_this_week,
-            delta=f"{prettify(millify(submissions_this_week_delta, precision=2))}%",
+            delta=submissions_this_week_delta,
             help="Number of submissions this week. Delta is the percentage change from last week.",
         )
         mc3.metric(
             label="This month",
             value=submissions_this_month,
-            delta=f"{prettify(millify(submissions_this_month_delta, precision=2))}%",
+            delta=submissions_this_month_delta,
             help="Number of submissions this month. Delta is the percentage change from last month",
         )
         mc4.metric(
             label="Total",
-            value=f"{prettify(submissions_total)}",
+            value=submissions_total,
             help="Total number of submissions",
         )
 
@@ -620,17 +619,17 @@ def summary_progress(
             sp2.write(f"{progress:.2f}%")
     mc2.metric(
         label="Average submissions per day",
-        value=f"{prettify(millify(average_submission_per_day, precision=2))}",
+        value=average_submission_per_day,
         help="Average number of submissions per day",
     )
     mc3.metric(
         label="Average submissions per week",
-        value=f"{prettify(millify(average_submission_per_week, precision=2))}",
+        value=average_submission_per_week,
         help="Average number of submissions per week",
     )
     mc4.metric(
         label="Average submissions per month",
-        value=f"{prettify(millify(average_submission_per_month, precision=2))}",
+        value=average_submission_per_month,
         help="Average number of submissions per month",
     )
 

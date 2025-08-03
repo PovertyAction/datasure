@@ -6,7 +6,6 @@ import pandas as pd
 import plotly.graph_objects as go  # type: ignore
 import seaborn as sns
 import streamlit as st
-from millify import millify, prettify
 
 from datasure.utils import (
     duckdb_get_table,
@@ -1317,26 +1316,26 @@ def display_outlier_metrics(
 
     col1.metric(
         label="Variables checked",
-        value=f"{prettify(outlier_cols_count)}",
+        value=outlier_cols_count,
         help="Columns checked for outlier values",
     )
 
     col2.metric(
         label="Outlier variables",
-        value=f"{prettify(at_least_one_outlier)}",
+        value=at_least_one_outlier,
         help="Variables with at least one outlier",
     )
 
     col3.metric(
         label="Number of outliers",
-        value=f"{prettify(total_outliers)}",
+        value=total_outliers,
         help="Total number of identified outliers",
     )
 
     if enumerator:
         col4.metric(
             label="Number of enumerators with outliers",
-            value=f"{prettify(total_enumerators)}",
+            value=total_enumerators,
             help="Number of enumerators with outliers flagged",
         )
     else:
@@ -1453,52 +1452,52 @@ def inspect_outliers_columns(
 
     mu1.metric(
         label="# of Values",
-        value=prettify(col_summary_row["count"]),
+        value=col_summary_row["count"],
         help="Total number of values in the column.",
     )
     mu2.metric(
         label="# of Outliers",
-        value=prettify(col_summary_row["outlier count"]),
+        value=col_summary_row["outlier count"],
         help="Total number of outliers in the column.",
     )
     mu3.metric(
         label="Minimum Value",
-        value=prettify(col_summary_row["min_value"]),
+        value=col_summary_row["min_value"],
         help="Minimum value in the column.",
     )
     mu4.metric(
         label="Maximum Value",
-        value=prettify(col_summary_row["max_value"]),
+        value=col_summary_row["max_value"],
         help="Maximum value in the column.",
     )
     mu5.metric(
         label="Mean",
-        value=prettify(millify(col_summary_row["mean"], precision=4)),
+        value=col_summary_row["mean"],
         help="Mean value in the column.",
     )
     ml1.metric(
         label="Median",
-        value=prettify(millify(col_summary_row["median"], precision=4)),
+        value=col_summary_row["median"],
         help="Median value in the column.",
     )
     ml2.metric(
         label="Standard Deviation",
-        value=prettify(millify(col_summary_row["std"], precision=4)),
+        value=col_summary_row["std"],
         help="Standard deviation of the values in the column.",
     )
     ml3.metric(
         label="Interquartile Range",
-        value=prettify(millify(col_summary_row["iqr"], precision=4)),
+        value=col_summary_row["iqr"],
         help="Interquartile range of the values in the column.",
     )
     ml4.metric(
         label="Lower Bound",
-        value=prettify(col_summary_row["lower_bound"]),
+        value=col_summary_row["lower_bound"],
         help="Lower bound for outlier detection in the column.",
     )
     ml5.metric(
         label="Upper Bound",
-        value=prettify(col_summary_row["upper_bound"]),
+        value=col_summary_row["upper_bound"],
         help="Upper bound for outlier detection in the column.",
     )
     st.write("---")

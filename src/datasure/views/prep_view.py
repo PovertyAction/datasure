@@ -1,7 +1,6 @@
 import pandas as pd
 import polars as pl
 import streamlit as st
-from millify import prettify
 
 from datasure.processing import prep_apply_action
 from datasure.utils import (
@@ -623,8 +622,8 @@ if show_prep_page_info:
 
                 mc1, mc2, mc3 = st.columns((0.3, 0.3, 0.4))
 
-                mc1.metric(label="Rows", value=prettify(row_count), border=True)
-                mc2.metric(label="Columns", value=prettify(col_count), border=True)
+                mc1.metric(label="Rows", value=row_count, border=True)
+                mc2.metric(label="Columns", value=col_count, border=True)
                 mc3.metric(
                     label="Percentage missing values",
                     value=f"{miss_perc:.2f}%",

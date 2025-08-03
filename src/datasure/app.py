@@ -59,7 +59,9 @@ corr_page = st.Page(
 
 nav_menu = st.navigation(
     {
-        "": [start_page, import_data_page, prep_data_page],
+        ".": [start_page, import_data_page, prep_data_page],
+        "DQA Reports": [output_page_1],
+        "---": [corr_page],
     },
 )
 
