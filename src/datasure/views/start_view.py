@@ -221,7 +221,8 @@ with page_canvas:
         elif project:
             project_id = get_project_id(project)
             projects = load_projects()
-            if st.button("Load Project", type="primary", use_container_width=True):
+            select_project = st.button("Load Project", type="primary", use_container_width=True):
+            if select_project:
                 st.write(f"Loading project '{project}'...")
                 st.session_state.st_project_id = project_id
                 st.success(
