@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import streamlit.web.cli as stcli
+from streamlit import runtime
 
 
 def main():
@@ -73,8 +74,8 @@ def get_version():
 
         return version("DataSure")
     except Exception:
-        return "0.2.0"
+        return "0.1.0"
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" and not runtime.exists():
     main()
