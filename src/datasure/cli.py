@@ -6,7 +6,10 @@ as a command-line application.
 """
 
 import subprocess
+import sys
 from pathlib import Path
+
+from streamlit.web import cli as stcli
 
 
 def main():
@@ -27,3 +30,4 @@ def get_version():
 
 if __name__ == "__main__":
     main()
+    sys.exit(stcli.main())
