@@ -5,7 +5,8 @@ import pandas as pd
 import plotly.express as px
 import seaborn as sns
 import streamlit as st
-from utils import (
+
+from datasure.utils import (
     donut_chart2,
     get_check_config_settings,
     get_df_info,

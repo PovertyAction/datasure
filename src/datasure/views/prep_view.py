@@ -2,7 +2,8 @@ import pandas as pd
 import polars as pl
 import streamlit as st
 from processing import prep_apply_action
-from utils import (
+
+from datasure.utils import (
     duckdb_get_aliases,
     duckdb_get_table,
     duckdb_save_table,

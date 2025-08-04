@@ -1,7 +1,9 @@
 import re
 
 import streamlit as st
-from checks import (
+from utils import duckdb_get_table, get_cache_path, get_check_config_settings
+
+from datasure.checks import (
     backchecks_report,
     descriptive_report,
     duplicates_report,
@@ -12,7 +14,6 @@ from checks import (
     progress_report,
     summary_report,
 )
-from utils import duckdb_get_table, get_cache_path, get_check_config_settings
 
 
 def get_page_number() -> int | None:

@@ -5,7 +5,8 @@ from typing import Any
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from utils import (
+
+from datasure.utils import (
     get_check_config_settings,
     load_check_settings,
     save_check_settings,
