@@ -1,6 +1,6 @@
 {
     "sonarlint.connectedMode.project": {
         "connectionId": "povertyaction",
-        "projectKey": "PovertyAction_dms-dashboard"
+        "projectKey": "PovertyAction_datasure"
     }
 }
