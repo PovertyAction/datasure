@@ -271,7 +271,7 @@ if not import_log.is_empty():
         num_rows = preview_data.height
         mb1.metric(
             label="Rows",
-            value=num_rows,
+            value=f"{num_rows:,}",
             help="Number of rows in the imported dataset.",
             border=True,
         )
@@ -279,7 +279,7 @@ if not import_log.is_empty():
         num_columns = preview_data.width
         mb2.metric(
             label="Columns",
-            value=num_columns,
+            value=f"{num_columns:,}",
             help="Number of columns in the imported dataset.",
             border=True,
         )
@@ -289,12 +289,12 @@ if not import_log.is_empty():
             pl.sum_horizontal(pl.all()).alias("row_total")
         )
         perc_missing = (
-            f"{(num_missing['row_total'][0] / (num_rows * num_columns)) * 100:.2f}%"
+            (num_missing['row_total'][0] / (num_rows * num_columns)) * 100
         )
 
         mb3.metric(
             label="Missing Data",
-            value=perc_missing,
+            value=f"{perc_missing:.2f}%",
             help="Percentage of missing data in the imported dataset.",
             border=True,
         )

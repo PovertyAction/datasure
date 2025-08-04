@@ -356,25 +356,25 @@ def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
 
         mc1.metric(
             label="Today",
-            value=submissions_today,
+            value=f"{submissions_today:,}",
             delta=submissions_today_delta,
             help="Number of submissions today. Delta is the percentage change from yesterday.",
         )
         mc2.metric(
             label="This week",
-            value=submissions_this_week,
+            value=f"{submissions_this_week:,}",
             delta=submissions_this_week_delta,
             help="Number of submissions this week. Delta is the percentage change from last week.",
         )
         mc3.metric(
             label="This month",
-            value=submissions_this_month,
-            delta=submissions_this_month_delta,
+            value=f"{submissions_this_month:,}",
+            delta=f"{submissions_this_month_delta:.2f}%",
             help="Number of submissions this month. Delta is the percentage change from last month",
         )
         mc4.metric(
             label="Total",
-            value=submissions_total,
+            value=f"{submissions_total:,}",
             help="Total number of submissions",
         )
 
@@ -619,17 +619,17 @@ def summary_progress(
             sp2.write(f"{progress:.2f}%")
     mc2.metric(
         label="Average submissions per day",
-        value=average_submission_per_day,
+        value=f"{average_submission_per_day:,.2f}",
         help="Average number of submissions per day",
     )
     mc3.metric(
         label="Average submissions per week",
-        value=average_submission_per_week,
+        value=f"{average_submission_per_week:,.2f}",
         help="Average number of submissions per week",
     )
     mc4.metric(
         label="Average submissions per month",
-        value=average_submission_per_month,
+        value=f"{average_submission_per_month:,.2f}",
         help="Average number of submissions per month",
     )
 
@@ -759,13 +759,13 @@ def summary_data_summary(data: pd.DataFrame) -> None:
 
     ds1, ds2, ds3, ds4 = st.columns(spec=4, border=True)
     ds1.metric(
-        label="String Columns", value=num_str_cols, help="Number of string columns"
+        label="String Columns", value=f"{num_str_cols:,}", help="Number of string columns"
     )
     ds2.metric(
-        label="Numeric Columns", value=num_num_cols, help="Number of numeric columns"
+        label="Numeric Columns", value=f"{num_num_cols:,}", help="Number of numeric columns"
     )
-    ds3.metric(label="Date Columns", value=num_date_cols, help="Number of date columns")
-    ds4.metric(label="Total Columns", value=col_count, help="Total number of columns")
+    ds3.metric(label="Date Columns", value=f"{num_date_cols:,}", help="Number of date columns")
+    ds4.metric(label="Total Columns", value=f"{col_count:,}", help="Total number of columns")
 
 
 @st.cache_data
