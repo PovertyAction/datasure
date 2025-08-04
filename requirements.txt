@@ -66,7 +66,7 @@ streamlit-avatar==0.1.3
 streamlit-camera-input-live==0.2.0
 streamlit-card==1.0.2
 streamlit-embedcode==0.1.2
-streamlit-extras==0.6.0
+streamlit-extras==0.7.5
 streamlit-faker==0.0.3
 streamlit-image-coordinates==0.1.9
 streamlit-keyup==0.3.0
