@@ -373,7 +373,6 @@ def outliers_report_settings(
                 "outlier_display_cols_save" in st.session_state
                 and st.session_state.outlier_display_cols_save
             ):
-                st.write("Oulier Display Columns:", outlier_display_cols)
                 save_check_settings(
                     settings_file=settings_file,
                     check_name="outliers",
@@ -1351,6 +1350,7 @@ def inspect_outliers_columns(
     outlier_data: pd.DataFrame,
     col_summary: pd.DataFrame,
     outlier_cols: list,
+    display_cols: list | None,
     survey_key: str,
     survey_id: str,
     enumerator: str,
@@ -1373,9 +1373,13 @@ def inspect_outliers_columns(
         return
 
     include_cols = []
+    # add global display columns to include_cols
+    if display_cols:
+        include_cols.extend(display_cols)
     for col in [survey_key, survey_id, enumerator]:
         if col and col not in include_cols:
             include_cols.append(col)
+
 
     ic1, ic2 = st.columns([0.2, 0.8])
 
@@ -1629,6 +1633,7 @@ def outliers_report(
         outlier_data=outlier_data,
         col_summary=outlier_summary,
         outlier_cols=outlier_cols,
+        display_cols=display_cols,
         survey_key=survey_key,
         survey_id=survey_id,
         enumerator=enumerator,
