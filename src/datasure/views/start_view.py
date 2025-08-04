@@ -225,10 +225,11 @@ with page_canvas:
                 "Load Project", type="primary", use_container_width=True
             )
             if select_project:
+                views_dir = Path(__file__).parent
                 st.write(f"Loading project '{project}'...")
                 st.session_state.st_project_id = project_id
-                st.success(
-                    "Proceed to the import data page to start working with your project."
+                st.switch_page(
+                    st.session_state.st_import_data_page
                 )
             with st.expander(":material/delete: delete project"):
                 if (

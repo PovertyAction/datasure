@@ -8,6 +8,9 @@ import streamlit as st
 if "st_project_id" not in st.session_state:
     st.session_state.st_project_id = ""
 
+if "st_import_data_page" not in st.session_state:
+    st.session_state.st_import_data_page = None
+
 # Get the directory where this module is located
 _package_dir = Path(__file__).parent
 _views_dir = _package_dir / "views"
@@ -26,6 +29,8 @@ import_data_page = st.Page(
     title="Import Data",
     icon=":material/sync:",
 )
+
+st.session_state.st_import_data_page = import_data_page
 
 # config data prep page
 prep_data_page = st.Page(
