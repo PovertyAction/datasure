@@ -829,6 +829,7 @@ class TestInspectOutliersColumns:
             outlier_data=pd.DataFrame(),
             col_summary=pd.DataFrame(),
             outlier_cols=[],
+            display_cols=[],
             survey_key="survey_key",
             survey_id="survey_id",
             enumerator="enumerator",
