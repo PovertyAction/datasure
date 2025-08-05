@@ -228,9 +228,7 @@ with page_canvas:
                 views_dir = Path(__file__).parent
                 st.write(f"Loading project '{project}'...")
                 st.session_state.st_project_id = project_id
-                st.switch_page(
-                    st.session_state.st_import_data_page
-                )
+                st.switch_page(st.session_state.st_import_data_page)
             with st.expander(":material/delete: delete project"):
                 if (
                     st.button("Confirm delete", use_container_width=True)

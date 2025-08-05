@@ -759,13 +759,21 @@ def summary_data_summary(data: pd.DataFrame) -> None:
 
     ds1, ds2, ds3, ds4 = st.columns(spec=4, border=True)
     ds1.metric(
-        label="String Columns", value=f"{num_str_cols:,}", help="Number of string columns"
+        label="String Columns",
+        value=f"{num_str_cols:,}",
+        help="Number of string columns",
     )
     ds2.metric(
-        label="Numeric Columns", value=f"{num_num_cols:,}", help="Number of numeric columns"
+        label="Numeric Columns",
+        value=f"{num_num_cols:,}",
+        help="Number of numeric columns",
     )
-    ds3.metric(label="Date Columns", value=f"{num_date_cols:,}", help="Number of date columns")
-    ds4.metric(label="Total Columns", value=f"{col_count:,}", help="Total number of columns")
+    ds3.metric(
+        label="Date Columns", value=f"{num_date_cols:,}", help="Number of date columns"
+    )
+    ds4.metric(
+        label="Total Columns", value=f"{col_count:,}", help="Total number of columns"
+    )
 
 
 @st.cache_data

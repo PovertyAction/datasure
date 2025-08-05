@@ -288,9 +288,7 @@ if not import_log.is_empty():
         num_missing = num_missing.with_columns(
             pl.sum_horizontal(pl.all()).alias("row_total")
         )
-        perc_missing = (
-            (num_missing['row_total'][0] / (num_rows * num_columns)) * 100
-        )
+        perc_missing = (num_missing["row_total"][0] / (num_rows * num_columns)) * 100
 
         mb3.metric(
             label="Missing Data",

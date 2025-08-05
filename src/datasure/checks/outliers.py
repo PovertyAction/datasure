@@ -1380,7 +1380,6 @@ def inspect_outliers_columns(
         if col and col not in include_cols:
             include_cols.append(col)
 
-
     ic1, ic2 = st.columns([0.2, 0.8])
 
     with ic1:
@@ -1487,31 +1486,31 @@ def inspect_outliers_columns(
     col_summary_row_median = col_summary_row["median"]
     ml1.metric(
         label="Median",
-        value= f"{col_summary_row_median:,.2f}",
+        value=f"{col_summary_row_median:,.2f}",
         help="Median value in the column.",
     )
     col_summary_row_std = col_summary_row["std"]
     ml2.metric(
         label="Standard Deviation",
-        value= f"{col_summary_row_std:,.4f}",
+        value=f"{col_summary_row_std:,.4f}",
         help="Standard deviation of the values in the column.",
     )
     col_summary_row_iqr = col_summary_row["iqr"]
     ml3.metric(
         label="Interquartile Range",
-        value= f"{col_summary_row_iqr:,.2f}",
+        value=f"{col_summary_row_iqr:,.2f}",
         help="Interquartile range of the values in the column.",
     )
     col_summary_row_lower_bound = col_summary_row["lower_bound"]
     ml4.metric(
         label="Lower Bound",
-        value= f"{col_summary_row_lower_bound:,.2f}",
+        value=f"{col_summary_row_lower_bound:,.2f}",
         help="Lower bound for outlier detection in the column.",
     )
     col_summary_row_upper_bound = col_summary_row["upper_bound"]
     ml5.metric(
         label="Upper Bound",
-        value= f"{col_summary_row_upper_bound:,.2f}",
+        value=f"{col_summary_row_upper_bound:,.2f}",
         help="Upper bound for outlier detection in the column.",
     )
     st.write("---")
