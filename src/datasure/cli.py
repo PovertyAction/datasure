@@ -73,7 +73,7 @@ def get_version():
 
         return version("DataSure")
     except Exception:
-        return "0.1.0"
+        return "0.2.0"
 
 
 if __name__ == "__main__":

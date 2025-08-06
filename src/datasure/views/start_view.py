@@ -225,9 +225,9 @@ with page_canvas:
                 st.write(f"Loading project '{project}'...")
                 st.session_state.st_load_project = True
                 st.session_state.st_project_id = project_id
-                st.success(f"Project '{project}' loaded successfully!")
+                views_path = Path(__file__).parent
                 st.page_link(
-                    "views/import_view.py",
+                    views_path / "import_view.py",
                     label="Go to Import Data",
                     icon=":material/open_in_new:",
                 )

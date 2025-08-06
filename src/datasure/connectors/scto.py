@@ -187,7 +187,12 @@ def scto_get_xls(scto: object, form_id: str) -> tuple:
 
     """
     # download form definition
-    scto_form = scto.get_form_definition(form_id)
+    try:
+        scto_form = scto.get_form_definition(form_id)
+    # if connection error, raise warning and stop
+    except requests.ConnectionError as conn_err:
+        st.warning(f"{conn_err}. Check your internet connection and try again.")
+        st.stop()
 
     questions = pd.DataFrame(
         scto_form["fieldsRowsAndColumns"][1:],
@@ -215,30 +220,29 @@ def scto_get_repeat_fields(questions: pd.DataFrame) -> list:
     list of repeat fields
 
     """
-    fields: pd.DataFrame = questions[["type", "name"]]
+    fields: pd.DataFrame = questions[["type", "name"]].copy(deep=True)
 
-    current_group: str = ""
+    repeat_fields = []
+    begin_count = 0
+    end_count = 0
 
     # Iterate through rows
-    for i, row in fields.iterrows():
-        if "begin repeat" in row["type"]:
-            if current_group == "":
-                current_group = row["name"]
-            else:
-                current_group = "/".join(row["name"])
+    for _, row in fields.iterrows():
+        if row["type"] == "begin repeat":
+            begin_count += 1
+            continue  # Skip to next row
+        elif row["type"] == "end repeat":
+            end_count += 1
+            continue  # Skip to next row
 
-            fields.at[i, "group"] = current_group
+        # if begin_count is greater than end_count, add field to repeat_fields
+        if (
+            len(row["name"]) > 1
+            and (begin_count > end_count)
+            and row["type"] not in ["begin group", "end group"]
+        ):
+            repeat_fields.append(row["name"])
 
-        elif "end repeat" in row["type"]:
-            fields.at[i, "group"] = current_group
-            current_group = current_group.split("/")[1:]
-            current_group = "/".join(current_group)
-        else:
-            questions.at[i, "group"] = current_group
-
-        repeat_fields = questions[questions["group"].notna()]["name"].tolist()
-
-    # Return list of repeat fields as a list
     return repeat_fields
 
 
@@ -447,17 +451,20 @@ def scto_import_data(
             if row["name"] in repeat_fields:
                 cols = scto_get_repeat_cols(field=row["name"], data_cols=scto_data_cols)
             else:
-                cols = row["name"]
-
+                cols = [row["name"]]
             cols = [col for col in cols if col in scto_data.columns]
+            if not cols:
+                continue  # skip if no columns found
 
-            if cols:
+            for col in cols:
                 if row["type"] in ["date", "datetime", "time"]:
-                    scto_data[cols] = scto_data[cols].astype("datetime64[ns]")
+                    scto_data[col] = scto_data[col].astype("datetime64[ns]")
                 elif row["type"] in ["integer", "decimal"]:
-                    pass
+                    # check if column is numeric, if not, convert to numeric
+                    if not pd.api.types.is_numeric_dtype(scto_data[col]):
+                        scto_data[col] = pd.to_numeric(scto_data[col], errors="coerce")
                 elif row["type"] == "note":
-                    scto_data.drop(columns=cols, axis=1, inplace=True)
+                    scto_data.drop(columns=col, axis=1, inplace=True)
                 else:
                     # for all other types, ignore
                     pass
@@ -761,28 +768,27 @@ def scto_download_action(project_id: str, form_inputs: pd.DataFrame) -> None:
 
     # download data
     for i, row in enumerate(form_inputs.itertuples()):
-        if f"scto_raw_data{i}" in st.session_state:
-            st.session_state[f"scto_raw_data{i}"], new_data_count = scto_import_data(
-                project_id=project_id,
-                alias=row.alias,
-                form_id=row.form_id,
-                refresh=row.refresh,
-                key=row.private_key,
-                saveas=row.save_to,
-                attachments=row.attachments,
+        new_data_count = scto_import_data(
+            project_id=project_id,
+            alias=row.alias,
+            form_id=row.form_id,
+            refresh=row.refresh,
+            key=row.private_key,
+            saveas=row.save_to,
+            attachments=row.attachments,
+        )
+        time.sleep(3)
+        progress_bar.progress(
+            (i + 1) / form_count,
+            text=f"Download in progress...{i + 1}/{form_count}",
+        )
+        saveas = row.save_to
+        if saveas is not None:
+            st.write(
+                f"{i + 1}/{form_count}: downloaded {new_data_count} new data successfully and saved as {saveas}"
             )
-            time.sleep(3)
-            progress_bar.progress(
-                (i + 1) / form_count,
-                text=f"Download in progress...{i + 1}/{form_count}",
-            )
-            saveas = row.save_to
-            if saveas is not None:
-                st.write(
-                    f"{i + 1}/{form_count}: downloaded {new_data_count} new data successfully and saved as {saveas}"
-                )
-            else:
-                st.write(f"{i + 1}/{form_count}: downloaded successfully")
+        else:
+            st.write(f"{i + 1}/{form_count}: downloaded successfully")
 
     st.success("Data download complete")
 

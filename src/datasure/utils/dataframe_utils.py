@@ -22,23 +22,34 @@ def get_df_info(stats_df: pl.DataFrame | pd.DataFrame, cols_only=False) -> tuple
         list[str]: list of datetime column types in the DataFrame
         list[str]: list of categorical column types in the DataFrame
     """
-    if isinstance(stats_df, pd.DataFrame):
-        stats_df = pl.from_pandas(stats_df)
+    if isinstance(stats_df, pd.DataFrame):  # get info from pandas dataframe
+        all_columns = stats_df.columns.tolist()
+        string_columns = stats_df.select_dtypes(include=["object"]).columns.tolist()
+        numeric_columns = stats_df.select_dtypes(include=["number"]).columns.tolist()
+        datetime_columns = stats_df.select_dtypes(include=["datetime"]).columns.tolist()
+        categorical_columns = stats_df.select_dtypes(
+            include=["category"]
+        ).columns.tolist()
 
-    all_columns = stats_df.columns
-    string_columns = [col for col in all_columns if stats_df[col].dtype == pl.Utf8]
+        num_rows = stats_df.shape[0]
+        num_columns = stats_df.shape[1]
+        num_missing = stats_df.isna().sum().sum()
+        perc_missing = (num_missing / (num_rows * num_columns)) * 100
+    else:  # get info from polars dataframe
+        all_columns = stats_df.columns
+        string_columns = stats_df.select(pl.col(pl.Utf8)).columns
+        numeric_columns = stats_df.select(pl.col(pl.NUMERIC_DTYPES)).columns
+        datetime_columns = stats_df.select(pl.col(pl.Date, pl.Datetime)).columns
+        categorical_columns = stats_df.select(pl.col(pl.Categorical)).columns
 
-    numeric_columns = [
-        col for col in all_columns if stats_df[col].dtype in [pl.Int64, pl.Float64]
-    ]
-
-    datetime_columns = [
-        col for col in all_columns if stats_df[col].dtype == pl.Datetime
-    ]
-
-    categorical_columns = [
-        col for col in all_columns if stats_df[col].dtype == pl.Categorical
-    ]
+        num_rows = stats_df.height
+        num_columns = stats_df.width
+        num_missing = stats_df.null_count().sum()
+        num_missing = num_missing.with_columns(
+            pl.sum_horizontal(pl.all()).alias("row_total")
+        )
+        num_missing = num_missing["row_total"][0]
+        perc_missing = (num_missing / (num_rows * num_columns)) * 100
 
     if cols_only:
         return (
@@ -48,15 +59,6 @@ def get_df_info(stats_df: pl.DataFrame | pd.DataFrame, cols_only=False) -> tuple
             datetime_columns,
             categorical_columns,
         )
-
-    num_rows = stats_df.height
-    num_columns = stats_df.width
-    num_missing = stats_df.null_count().sum()
-    num_missing = num_missing.with_columns(
-        pl.sum_horizontal(pl.all()).alias("row_total")
-    )
-    num_missing = num_missing["row_total"][0]
-    perc_missing = (num_missing / (num_rows * num_columns)) * 100
 
     return (
         num_rows,

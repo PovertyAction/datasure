@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
+import pytest  # type: ignore
 
 from datasure.cli import get_version, main
 
@@ -29,7 +29,7 @@ class TestGetVersion:
 
         result = get_version()
 
-        assert result == "0.1.0"
+        assert result == "0.2.0"
 
 
 class TestMain:
