@@ -27,14 +27,14 @@ Development requires the following software:
 
 | Platform  | Commands                                                            |
 | --------- | ------------------------------------------------------------------- |
-| Windows   | `winget install Git.Git Casey.Just astral-sh.uv` |
+| Windows   | `winget install Git.Git Casey.Just astral-sh.uv GitHub.cli` |
 | Mac/Linux | `brew install just uv gh`                                          |
 
 ### Quick Start
 
 ```bash
 # Clone the repository
-git clone https://github.com/PovertyAction/dms-dashboard.git
+git clone https://github.com/PovertyAction/datasure.git
 cd datasure
 
 # Complete setup (install software + create venv)

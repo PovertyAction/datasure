@@ -46,7 +46,7 @@ datasure --version
 
 ```bash
 # if datasure is already install, get latest version with
-uv tool install datasure --upgrade
+uv tool upgrade datasure
 ```
 
 ## Quick Start

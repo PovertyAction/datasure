@@ -38,6 +38,28 @@ This version focuses on improving the core application architecture and preparin
 
 #### Install with uv
 
+Ensure that you have uv  installed:
+
+#### with winget
+
+```bash
+winget install astral-sh.uv
+```
+
+#### with homebrew
+
+```bash
+brew install uv
+```
+
+#### verify uv installation
+
+```bash
+uv --version
+```
+
+#### Install DataSure
+
 ```bash
 uv tool install dataSure
 ```
@@ -47,7 +69,7 @@ or
 #### Update current version
 
 ```bash
-uv tool install dataSure --upgrade
+uv tool upgrade datasure
 ```
 
 ### Quick Start
