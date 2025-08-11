@@ -1,4 +1,7 @@
+import re
+
 import streamlit as st
+from utils import duckdb_get_table, get_cache_path, get_check_config_settings
 
 from datasure.checks import (
     backchecks_report,
@@ -11,14 +14,50 @@ from datasure.checks import (
     progress_report,
     summary_report,
 )
-from datasure.utils import duckdb_get_table, get_cache_path, get_check_config_settings
 
-# define page number
-page_number = 1
+
+def get_page_number() -> int | None:
+    """
+    Get the page number from filename.
+    The filename should be in the format 'output_view_X.py' where X is the page number.
+
+    Parameters
+    ----------
+        None
+    Returns:
+        int: The Page Number.
+    """
+    match = re.search(r"_view_(\d+)\.py$", __file__)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+# Get Page Number from filename
+page_number = get_page_number()
 page_data_index = page_number - 1
 
 # define project ID
 project_id = st.session_state.st_project_id
+
+st.title(f"DQA Report {page_number}")
+
+if not project_id:
+    st.info(
+        "Select a project from the Start page and import data. You can also create a new project from the Start page."
+    )
+    st.stop()
+
+# if no configured checks, stop
+check_log = duckdb_get_table(
+    project_id=project_id, alias="check_config", db_name="logs"
+)
+
+if check_log.is_empty():
+    st.info(
+        "No checks configured. Please configure checks on the Configure Checks page."
+    )
+    st.stop()
 
 # get page config information
 (

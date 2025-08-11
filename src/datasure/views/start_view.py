@@ -221,16 +221,14 @@ with page_canvas:
         elif project:
             project_id = get_project_id(project)
             projects = load_projects()
-            if st.button("Load Project", type="primary", use_container_width=True):
+            select_project = st.button(
+                "Load Project", type="primary", use_container_width=True
+            )
+            if select_project:
+                views_dir = Path(__file__).parent
                 st.write(f"Loading project '{project}'...")
-                st.session_state.st_load_project = True
                 st.session_state.st_project_id = project_id
-                views_path = Path(__file__).parent
-                st.page_link(
-                    views_path / "import_view.py",
-                    label="Go to Import Data",
-                    icon=":material/open_in_new:",
-                )
+                st.switch_page(st.session_state.st_import_data_page)
             with st.expander(":material/delete: delete project"):
                 if (
                     st.button("Confirm delete", use_container_width=True)
@@ -238,4 +236,6 @@ with page_canvas:
                 ):
                     delete_project(project_id)
                     st.success(f"Project '{project}' deleted successfully!")
+                    if "st_project_id" in st.session_state:
+                        st.session_state.st_project_id = ""
                     st.rerun()

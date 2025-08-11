@@ -1,6 +1,5 @@
 import polars as pl
 import streamlit as st
-from millify import prettify
 
 from datasure.connectors import (
     local_add_form,
@@ -17,8 +16,21 @@ from datasure.utils import (
     duckdb_save_table,
 )
 
+# --- CONFIGURE PAGE --- #
+
+st.set_page_config("Import Data", page_icon=":sync:", layout="wide")
+st.title("Import Data")
+st.write("---")
+
 # --- define project ID --- #
 project_id = st.session_state.st_project_id
+
+if not project_id:
+    st.info(
+        "Please select a project from the Start page to import data. "
+        "You can also create a new project from the Start page."
+    )
+    st.stop()
 
 # add session state for raw dataset list
 if "st_raw_dataset_list" not in st.session_state:
@@ -112,12 +124,6 @@ def load_raw_datasets(project_id: str) -> None:
                 label="Data loaded successfully!", state="complete", expanded=False
             )
 
-
-# --- CONFIGURE PAGE --- #
-
-st.set_page_config("Import Data", page_icon=":sync:", layout="wide")
-st.title("Import Data")
-st.write("---")
 
 # --- add login configuration ---#
 lc1, _, _ = st.columns(3)
@@ -241,17 +247,11 @@ if not import_log.is_empty():
             st.success(
                 "Data loaded successfully! You can now preview the imported data in the Prep section."
             )
-            st.page_link(
-                "views/prep_view.py",
-                label="Click to go to Prep Section",
-                icon=":material/arrow_forward:",
-            )
 
     preview_options = duckdb_get_imported_datasets(project_id)
     if preview_options:
         # --- Preview imported data --- #
         # activate prep section
-        st.session_state.show_prep_section = True
 
         st.subheader("Preview Imported Data")
         sb, _, mb1, mb2, mb3 = st.columns([0.3, 0.25, 0.15, 0.15, 0.15])
@@ -271,7 +271,7 @@ if not import_log.is_empty():
         num_rows = preview_data.height
         mb1.metric(
             label="Rows",
-            value=prettify(num_rows),
+            value=f"{num_rows:,}",
             help="Number of rows in the imported dataset.",
             border=True,
         )
@@ -279,7 +279,7 @@ if not import_log.is_empty():
         num_columns = preview_data.width
         mb2.metric(
             label="Columns",
-            value=prettify(num_columns),
+            value=f"{num_columns:,}",
             help="Number of columns in the imported dataset.",
             border=True,
         )
@@ -288,13 +288,11 @@ if not import_log.is_empty():
         num_missing = num_missing.with_columns(
             pl.sum_horizontal(pl.all()).alias("row_total")
         )
-        perc_missing = (
-            f"{(num_missing['row_total'][0] / (num_rows * num_columns)) * 100:.2f}%"
-        )
+        perc_missing = (num_missing["row_total"][0] / (num_rows * num_columns)) * 100
 
         mb3.metric(
             label="Missing Data",
-            value=perc_missing,
+            value=f"{perc_missing:.2f}%",
             help="Percentage of missing data in the imported dataset.",
             border=True,
         )

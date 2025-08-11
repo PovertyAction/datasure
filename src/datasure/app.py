@@ -5,18 +5,11 @@ import streamlit as st
 # --- PAGE SETUP --- #
 
 # initialize session states
-if "st_load_project" not in st.session_state:
-    st.session_state.st_load_project = False
-
 if "st_project_id" not in st.session_state:
     st.session_state.st_project_id = ""
 
-if "show_prep_section" not in st.session_state:
-    st.session_state.show_prep_section = False
-
-if "show_checks_section" not in st.session_state:
-    st.session_state.show_checks_section = False
-
+if "st_import_data_page" not in st.session_state:
+    st.session_state.st_import_data_page = None
 
 # Get the directory where this module is located
 _package_dir = Path(__file__).parent
@@ -37,6 +30,8 @@ import_data_page = st.Page(
     icon=":material/sync:",
 )
 
+st.session_state.st_import_data_page = import_data_page
+
 # config data prep page
 prep_data_page = st.Page(
     page=str(_views_dir / "prep_view.py"),
@@ -51,38 +46,29 @@ config_checks_page = st.Page(
     icon=":material/manufacturing:",
 )
 
+output_page_1 = st.Page(
+    page=str(_views_dir / "output_view_1.py"),
+    title="Report 1",
+    icon=":material/counter_1:",
+)
+
+corr_page = st.Page(
+    page=str(_views_dir / "correction_view.py"),
+    title="Correct Data",
+    icon=":material/cleaning_services:",
+)
+
 
 # --- NAVIGATION MENU --- #
 
 
 nav_menu = st.navigation(
     {
-        "": [start_page],
-        "Import Data": [import_data_page],
-        "Prepare Data": [prep_data_page],
+        "": [start_page, import_data_page, prep_data_page, config_checks_page],
+        "DQA Reports": [output_page_1],
+        "---": [corr_page],
     },
-    position="hidden",
 )
-if st.session_state.show_prep_section:
-    nav_menu = st.navigation(
-        {
-            "": [start_page],
-            "Import Data": [import_data_page],
-            "Prepare Data": [prep_data_page],
-            "Configure Checks": [config_checks_page],
-        }
-    )
-
-# create a session state to hold all pages, update in config page
-st.session_state.static_pages = {
-    "": [start_page],
-    "Import Data": [import_data_page],
-    "Prepare Data": [prep_data_page],
-    "Configure Checks": [config_checks_page],
-}
-
-if st.session_state.show_checks_section:
-    nav_menu = st.navigation(st.session_state.all_pages)
 
 # --- GLOBAL ASSETS --- #
 

@@ -27,12 +27,13 @@ def get_cache_base_dir() -> Path:
         # Development mode - use cache in project root
         cache_dir = current_dir / "cache"
     else:
+        os_name = os.name
         # Production mode - use user data directory
-        if os.name == "nt":  # Windows
+        if os_name == "nt":  # Windows
             base_dir = Path(
                 os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")
             )
-        elif os.name == "posix":  # Unix/Linux/macOS
+        elif os_name == "posix":  # Unix/Linux/macOS
             # Use XDG Base Directory specification
             xdg_data_home = os.environ.get("XDG_DATA_HOME")
             if xdg_data_home:

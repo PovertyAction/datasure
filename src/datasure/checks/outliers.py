@@ -6,7 +6,6 @@ import pandas as pd
 import plotly.graph_objects as go  # type: ignore
 import seaborn as sns
 import streamlit as st
-from millify import millify, prettify
 
 from datasure.utils import (
     duckdb_get_table,
@@ -374,7 +373,6 @@ def outliers_report_settings(
                 "outlier_display_cols_save" in st.session_state
                 and st.session_state.outlier_display_cols_save
             ):
-                st.write("Oulier Display Columns:", outlier_display_cols)
                 save_check_settings(
                     settings_file=settings_file,
                     check_name="outliers",
@@ -1317,26 +1315,26 @@ def display_outlier_metrics(
 
     col1.metric(
         label="Variables checked",
-        value=f"{prettify(outlier_cols_count)}",
+        value=f"{outlier_cols_count:,}",
         help="Columns checked for outlier values",
     )
 
     col2.metric(
         label="Outlier variables",
-        value=f"{prettify(at_least_one_outlier)}",
+        value=f"{at_least_one_outlier:,}",
         help="Variables with at least one outlier",
     )
 
     col3.metric(
         label="Number of outliers",
-        value=f"{prettify(total_outliers)}",
+        value=f"{total_outliers:,}",
         help="Total number of identified outliers",
     )
 
     if enumerator:
         col4.metric(
             label="Number of enumerators with outliers",
-            value=f"{prettify(total_enumerators)}",
+            value=f"{total_enumerators:,}",
             help="Number of enumerators with outliers flagged",
         )
     else:
@@ -1352,6 +1350,7 @@ def inspect_outliers_columns(
     outlier_data: pd.DataFrame,
     col_summary: pd.DataFrame,
     outlier_cols: list,
+    display_cols: list | None,
     survey_key: str,
     survey_id: str,
     enumerator: str,
@@ -1374,6 +1373,9 @@ def inspect_outliers_columns(
         return
 
     include_cols = []
+    # add global display columns to include_cols
+    if display_cols:
+        include_cols.extend(display_cols)
     for col in [survey_key, survey_id, enumerator]:
         if col and col not in include_cols:
             include_cols.append(col)
@@ -1451,54 +1453,64 @@ def inspect_outliers_columns(
     mu1, mu2, mu3, mu4, mu5 = st.columns(5, border=True)
     ml1, ml2, ml3, ml4, ml5 = st.columns(5, border=True)
 
+    col_summary_row_count = col_summary_row["count"]
     mu1.metric(
         label="# of Values",
-        value=prettify(col_summary_row["count"]),
+        value=f"{col_summary_row_count:,}",
         help="Total number of values in the column.",
     )
+    col_summary_row_outlier_count = col_summary_row["outlier count"]
     mu2.metric(
         label="# of Outliers",
-        value=prettify(col_summary_row["outlier count"]),
+        value=f"{col_summary_row_outlier_count:,}",
         help="Total number of outliers in the column.",
     )
+    col_summary_row_min_value = col_summary_row["min_value"]
     mu3.metric(
         label="Minimum Value",
-        value=prettify(col_summary_row["min_value"]),
+        value=f"{col_summary_row_min_value:,.2f}",
         help="Minimum value in the column.",
     )
+    col_summary_row_max_value = col_summary_row["max_value"]
     mu4.metric(
         label="Maximum Value",
-        value=prettify(col_summary_row["max_value"]),
+        value=f"{col_summary_row_max_value:,.2f}",
         help="Maximum value in the column.",
     )
+    col_summary_row_mean = col_summary_row["mean"]
     mu5.metric(
         label="Mean",
-        value=prettify(millify(col_summary_row["mean"], precision=4)),
+        value=f"{col_summary_row_mean:,.4f}",
         help="Mean value in the column.",
     )
+    col_summary_row_median = col_summary_row["median"]
     ml1.metric(
         label="Median",
-        value=prettify(millify(col_summary_row["median"], precision=4)),
+        value=f"{col_summary_row_median:,.2f}",
         help="Median value in the column.",
     )
+    col_summary_row_std = col_summary_row["std"]
     ml2.metric(
         label="Standard Deviation",
-        value=prettify(millify(col_summary_row["std"], precision=4)),
+        value=f"{col_summary_row_std:,.4f}",
         help="Standard deviation of the values in the column.",
     )
+    col_summary_row_iqr = col_summary_row["iqr"]
     ml3.metric(
         label="Interquartile Range",
-        value=prettify(millify(col_summary_row["iqr"], precision=4)),
+        value=f"{col_summary_row_iqr:,.2f}",
         help="Interquartile range of the values in the column.",
     )
+    col_summary_row_lower_bound = col_summary_row["lower_bound"]
     ml4.metric(
         label="Lower Bound",
-        value=prettify(col_summary_row["lower_bound"]),
+        value=f"{col_summary_row_lower_bound:,.2f}",
         help="Lower bound for outlier detection in the column.",
     )
+    col_summary_row_upper_bound = col_summary_row["upper_bound"]
     ml5.metric(
         label="Upper Bound",
-        value=prettify(col_summary_row["upper_bound"]),
+        value=f"{col_summary_row_upper_bound:,.2f}",
         help="Upper bound for outlier detection in the column.",
     )
     st.write("---")
@@ -1620,6 +1632,7 @@ def outliers_report(
         outlier_data=outlier_data,
         col_summary=outlier_summary,
         outlier_cols=outlier_cols,
+        display_cols=display_cols,
         survey_key=survey_key,
         survey_id=survey_id,
         enumerator=enumerator,
