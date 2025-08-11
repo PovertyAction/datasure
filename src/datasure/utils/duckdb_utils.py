@@ -1,4 +1,5 @@
 import re
+import time
 
 import duckdb
 import pandas as pd
@@ -73,22 +74,13 @@ def duckdb_save_table(
         else get_cache_path(project_id, "data", f"{db_name}.duckdb")
     )
 
+    # Ensure parent directory exists
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
     # convert alias to table name format and validate
     table_id = _validate_table_name(alias.lower().replace(" ", "_").replace("-", "_"))
 
-    with duckdb.connect(db_path) as conn:
-        table_exists = (
-            conn.execute(
-                f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table_id}'"
-            ).fetchone()[0]
-            > 0
-        )
-        if table_exists:
-            conn.execute(
-                f"CREATE OR REPLACE TABLE {table_id} AS SELECT * FROM table_data"
-            )
-        else:
-            conn.execute(f"CREATE TABLE {table_id} AS SELECT * FROM table_data")
+    with duckdb.connect(str(db_path)) as conn:
         table_exists = (
             conn.execute(
                 f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table_id}'"
@@ -131,7 +123,7 @@ def duckdb_get_table(
 
     table_id = _validate_table_name(alias.lower().replace(" ", "_").replace("-", "_"))
 
-    with duckdb.connect(db_path) as conn:
+    with duckdb.connect(str(db_path)) as conn:
         # Check if the table exists
         table_exists = (
             conn.execute(
@@ -173,7 +165,7 @@ def duckdb_row_filter(
         else get_cache_path(project_id, "data", f"{db_name}.duckdb")
     )
     table_id = alias.lower().replace(" ", "_").replace("-", "_")
-    with duckdb.connect(db_path) as conn:
+    with duckdb.connect(str(db_path)) as conn:
         # Create a new table with filtered rows
         conn.execute(
             f"CREATE OR REPLACE TABLE {table_id} AS SELECT * FROM {table_id} WHERE {filter_condition}"
@@ -198,33 +190,49 @@ def duckdb_get_aliases(project_id: str, to_load: bool = True) -> list[str]:
     """
     db_path = get_cache_path(project_id, "settings", "logs.duckdb")
 
-    with duckdb.connect(db_path) as conn:
-        # create the import_log table if it doesn't exist
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS import_log (
-                refresh BOOLEAN,
-                load BOOLEAN,
-                source VARCHAR,
-                alias VARCHAR,
-                filename VARCHAR,
-                sheet_name VARCHAR,
-                server VARCHAR,
-                form_id VARCHAR,
-                private_key VARCHAR,
-                save_to VARCHAR,
-                attachments BOOLEAN
-            )
-            """
-        )
+    # Ensure parent directory exists
+    db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        if to_load:
-            result = conn.execute(
-                "SELECT DISTINCT alias FROM import_log WHERE load = TRUE"
-            ).fetchall()
-        else:
-            result = conn.execute("SELECT DISTINCT alias FROM import_log").fetchall()
-        return [row[0] for row in result] if result else []
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            with duckdb.connect(str(db_path)) as conn:
+                # create the import_log table if it doesn't exist
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS import_log (
+                        refresh BOOLEAN,
+                        load BOOLEAN,
+                        source VARCHAR,
+                        alias VARCHAR,
+                        filename VARCHAR,
+                        sheet_name VARCHAR,
+                        server VARCHAR,
+                        form_id VARCHAR,
+                        private_key VARCHAR,
+                        save_to VARCHAR,
+                        attachments BOOLEAN
+                    )
+                    """
+                )
+
+                if to_load:
+                    result = conn.execute(
+                        "SELECT DISTINCT alias FROM import_log WHERE load = TRUE"
+                    ).fetchall()
+                else:
+                    result = conn.execute(
+                        "SELECT DISTINCT alias FROM import_log"
+                    ).fetchall()
+                return [row[0] for row in result] if result else []
+        except Exception as e:
+            if attempt == max_attempts - 1:
+                # Last attempt failed, return empty list instead of crashing
+                print(
+                    f"Failed to connect to database after {max_attempts} attempts: {e}"
+                )
+                return []
+            time.sleep(0.5)  # Brief delay before retry
 
 
 # --- Get list of imported and loaded datasets ---#
@@ -247,7 +255,7 @@ def duckdb_get_imported_datasets(project_id: str) -> list[str]:
 
     # get list of tables in the database
     db_path = get_cache_path(project_id, "data", "raw.duckdb")
-    with duckdb.connect(db_path) as conn:
+    with duckdb.connect(str(db_path)) as conn:
         table_names = conn.execute(
             "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
         ).fetchall()
