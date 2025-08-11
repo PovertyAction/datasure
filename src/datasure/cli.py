@@ -33,6 +33,13 @@ def main():
     )
 
     parser.add_argument(
+        "--logging",
+        type=str,
+        default="info",
+        help="Level of logging for Streamlit's internal logger: 'error', 'warning', 'info', or 'debug'. (default: info)",
+    )
+
+    parser.add_argument(
         "--version",
         action="version",
         version=f"DataSure {get_version()}",
@@ -61,6 +68,8 @@ def main():
         "true",
         "--browser.gatherUsageStats",
         "false",
+        "--logger.level",
+        str(args.logging),
     ]
 
     sys.exit(stcli.main())
