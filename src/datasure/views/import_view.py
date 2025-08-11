@@ -1,12 +1,13 @@
+import numpy as np
 import polars as pl
 import streamlit as st
 
 from datasure.connectors import (
+    FormConfig,
+    SurveyCTOUI,
+    download_forms,
     local_add_form,
     local_load_action,
-    scto_add_form,
-    scto_import_data,
-    scto_login_form,
 )
 from datasure.utils import (
     duckdb_get_aliases,
@@ -20,6 +21,7 @@ from datasure.utils import (
 
 st.set_page_config("Import Data", page_icon=":sync:", layout="wide")
 st.title("Import Data")
+st.write(st.session_state.st_assets_dir)
 st.write("---")
 
 # --- define project ID --- #
@@ -108,14 +110,18 @@ def load_raw_datasets(project_id: str) -> None:
                         sheet_name=row["sheet_name"] if row["sheet_name"] else None,
                     )
                 elif row["source"] == "SurveyCTO" and row["refresh"] is True:
-                    scto_import_data(
+                    # if private_key or save_to is Null, set to None
+                    form_configs = FormConfig(alias=row["alias"],
+                                             form_id=row["form_id"],
+                                             server=row["server"],
+                                             private_key=row["private_key"] if row["private_key"] else None,
+                                             save_to=row["save_to"] if row["save_to"] else None,
+                                             attachments=row["attachments"],
+                                             refresh=row["refresh"]
+                                             )
+                    download_forms(
                         project_id=project_id,
-                        alias=row["alias"],
-                        form_id=row["form_id"],
-                        refresh=row["refresh"],
-                        key=row["private_key"],
-                        saveas=row["save_to"],
-                        attachments=row["attachments"],
+                        form_configs=[form_configs],
                     )
 
                 if row["alias"] not in st.session_state.st_raw_dataset_list:
@@ -136,7 +142,7 @@ with st.container(border=True):
             "Add SurveyCTO Server", use_container_width=True, icon=":material/login:"
         ),
     ):
-        st.session_state.st_scto = scto_login_form(project_id)
+        st.session_state.st_scto = SurveyCTOUI(project_id).render_login_form()
 
 st.subheader("Import data from multiple sources")
 
@@ -154,7 +160,7 @@ with (
     if import_type == "local storage":
         local_add_form(project_id)
     elif import_type == "SurveyCTO":
-        scto_add_form(project_id)
+        SurveyCTOUI(project_id).render_form_config()
 with (
     ac2,
     st.popover(
@@ -219,7 +225,7 @@ if not import_log.is_empty():
             "private_key": st.column_config.TextColumn("Private Key", disabled=True),
             "save_to": st.column_config.TextColumn("Save To", disabled=True),
             "attachments": st.column_config.CheckboxColumn(
-                "Download Attachments?", disabled=True
+                "Download Attachments?"
             ),
         },
         on_change=update_import_log,
