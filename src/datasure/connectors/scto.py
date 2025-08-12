@@ -1,6 +1,7 @@
 import contextlib
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -66,20 +67,22 @@ class ServerCredentials(BaseModel):
     """Model for server credentials with validation."""
 
     server: str = Field(..., min_length=2, max_length=64)
-    user: str = Field(...)
+    user: str = Field(..., min_length=4, max_length=128)
     password: str = Field(..., min_length=1)
 
     @field_validator("server")
     def validate_server(cls, v):
         """Validate server name format."""
-        if not re.fullmatch(r"^[a-z][a-z0-9]{1,63}$", v):
+        if not re.fullmatch(r"^[a-z][a-z0-9]{1,63}", v):
             raise ValueError("Invalid SurveyCTO server name format")
         return v
 
     @field_validator("user")
     def validate_user(cls, v):
         """Validate user email format."""
-        if not re.fullmatch(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}$", v):
+        if not re.fullmatch(
+            r"^[A-Za-z0-9\._\-\+%]+@[A-Za-z0-9\.\-]+\.[A-Z|a-z]{2,7}$", v
+        ):
             raise ValueError("Invalid email format for SurveyCTO user")
         return v
 
@@ -739,42 +742,44 @@ class SurveyCTOUI:
                 encrypted = False
 
             # Rest of the form fields
-            key = st.text_input(
+            encryption_key_file = st.text_input(
                 "Encryption Key",
                 value=defaults.get("key", ""),
                 type="password",
                 disabled=not encrypted,
                 help="Enter encryption key if the form is encrypted (optional)",
             )
-            if encrypted and not key:
+
+            if encrypted and not encryption_key_file:
                 st.warning(
                     "Encryption key is required for encrypted forms. Only published fields will be downloaded."
                 )
 
             # validate encryption key is a valid file path
-            if key and not Path(str(key)).exists():
+            if encryption_key_file and not os.path.exists(str(encryption_key_file)):
                 st.error("Encryption key must be a valid file path to a key file.")
                 return
 
             # validate file has extension.pem
-            if key and not key.endswith(".pem"):
+            if encryption_key_file and not encryption_key_file.endswith(".pem"):
                 st.error("Encryption key file must have a .pem extension.")
                 return
 
-            save_path = (
-                st.text_input(
-                    "Save as",
-                    value=defaults.get("saveas", ""),
-                    disabled=not selected_form,
-                    help="File path to save the data (e.g., data/survey.csv)",
-                ),
+            save_file = st.text_input(
+                "Save as",
+                value=defaults.get("saveas", ""),
+                disabled=not selected_form,
+                help="File path to save the data (e.g., data/survey.csv)",
             )
 
-            if save_path and not Path(str(save_path)).parent.exists():
-                st.error(
-                    "Save path must be a valid directory. Please create the directory first."
-                )
-                return
+            # check that save file is a valid file path
+            if save_file and os.path.exists(str(save_file)):
+                save_path = Path(str(save_file)).parent
+                if not save_path.exists():
+                    st.error(
+                        f"Save directory '{save_path}' does not exist. Please create it first."
+                    )
+                    return
 
             attachments = st.checkbox(
                 "Download attachments",
@@ -805,8 +810,8 @@ class SurveyCTOUI:
                             alias=alias,
                             form_id=form_id,
                             server=server,
-                            private_key=str(key) or None,
-                            save_to=str(save_path) or None,
+                            private_key=str(encryption_key_file) or None,
+                            save_to=str(save_file) or None,
                             attachments=attachments,
                         )
                     )
