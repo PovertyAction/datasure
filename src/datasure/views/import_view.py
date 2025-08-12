@@ -1,4 +1,3 @@
-import numpy as np
 import polars as pl
 import streamlit as st
 
@@ -21,7 +20,6 @@ from datasure.utils import (
 
 st.set_page_config("Import Data", page_icon=":sync:", layout="wide")
 st.title("Import Data")
-st.write(st.session_state.st_assets_dir)
 st.write("---")
 
 # --- define project ID --- #
@@ -111,14 +109,15 @@ def load_raw_datasets(project_id: str) -> None:
                     )
                 elif row["source"] == "SurveyCTO" and row["refresh"] is True:
                     # if private_key or save_to is Null, set to None
-                    form_configs = FormConfig(alias=row["alias"],
-                                             form_id=row["form_id"],
-                                             server=row["server"],
-                                             private_key=row["private_key"] if row["private_key"] else None,
-                                             save_to=row["save_to"] if row["save_to"] else None,
-                                             attachments=row["attachments"],
-                                             refresh=row["refresh"]
-                                             )
+                    form_configs = FormConfig(
+                        alias=row["alias"],
+                        form_id=row["form_id"],
+                        server=row["server"],
+                        private_key=row["private_key"] if row["private_key"] else None,
+                        save_to=row["save_to"] if row["save_to"] else None,
+                        attachments=row["attachments"],
+                        refresh=row["refresh"],
+                    )
                     download_forms(
                         project_id=project_id,
                         form_configs=[form_configs],
@@ -224,9 +223,7 @@ if not import_log.is_empty():
             "form_id": st.column_config.TextColumn("Form ID", disabled=True),
             "private_key": st.column_config.TextColumn("Private Key", disabled=True),
             "save_to": st.column_config.TextColumn("Save To", disabled=True),
-            "attachments": st.column_config.CheckboxColumn(
-                "Download Attachments?"
-            ),
+            "attachments": st.column_config.CheckboxColumn("Download Attachments?"),
         },
         on_change=update_import_log,
     )
