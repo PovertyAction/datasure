@@ -506,7 +506,7 @@ requires-dist = [
     { name = "polars", specifier = ">=1.30.0" },
     { name = "pyarrow", specifier = ">=16.0.0" },
     { name = "pydantic", specifier = ">=2.11.7" },
-    { name = "pysurveycto", specifier = ">=0.0.14" },
+    { name = "pysurveycto", specifier = ">=0.0.15" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
     { name = "requests", specifier = ">=2.32.3" },
@@ -2088,15 +2088,15 @@ wheels = [
 
 [[package]]
 name = "pysurveycto"
-version = "0.0.14"
+version = "0.0.15"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "requests" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e0/0c/fce9b6c00a3d16fea9243b126f7013295d59b0a7bd798213f7ee1b00cb51/pysurveycto-0.0.14.tar.gz", hash = "sha256:905e844bf7b5f8707a69c938f7794c9258a05759867f0fb8121d5a422393586b", size = 10985, upload-time = "2023-06-09T05:19:56.52Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4f/05/410fa2652a9056895657993585f6c483e7473d41fb6a8f79c13825f876df/pysurveycto-0.0.15.tar.gz", hash = "sha256:496b24abe1a881bdd81aa8dce504692d1a192de7a233294c6db17d842def642a", size = 11273, upload-time = "2025-02-01T03:22:40.207Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b1/b4/b56b8ea045127a9ff37ca6f023f679f9e86a9f0b421a845027d8bcbebd61/pysurveycto-0.0.14-py3-none-any.whl", hash = "sha256:090994c041e63ef1aaa0c7232befe860aa5d28d46a1987941441d4a7cef45749", size = 9669, upload-time = "2023-06-09T05:19:54.447Z" },
+    { url = "https://files.pythonhosted.org/packages/3b/da/eef9f801296d1881064fe1fe5a068b659f908fa7d31677a82e1c39115f0f/pysurveycto-0.0.15-py3-none-any.whl", hash = "sha256:c9067b852542384d9212291129c379f6684cb470515887677f99c8dd70060a20", size = 9858, upload-time = "2025-02-01T03:22:36.501Z" },
 ]
 
 [[package]]
