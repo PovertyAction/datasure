@@ -590,11 +590,10 @@ class SurveyCTOClient:
 
         if media_fields:
             media_folder = Path(form_config.save_to).parent / "media"
-            repeat_fields = self.data_processor.get_repeat_fields(questions)
 
             downloader = MediaDownloader(self._scto_client, self.config)
             downloader.download_media_files(
-                media_fields, repeat_fields, data, media_folder, form_config.private_key
+                media_fields, data, media_folder, form_config.private_key
             )
 
 
