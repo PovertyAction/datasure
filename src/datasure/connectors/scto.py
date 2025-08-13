@@ -266,9 +266,7 @@ class MediaDownloader:
         media_folder.mkdir(parents=True, exist_ok=True)
 
         for field in media_fields:
-            self._download_field_media(
-                field, data, media_folder, encryption_key
-            )
+            self._download_field_media(field, data, media_folder, encryption_key)
 
     def _download_field_media(
         self,
