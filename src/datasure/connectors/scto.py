@@ -258,7 +258,6 @@ class MediaDownloader:
     def download_media_files(
         self,
         media_fields: list[str],
-        repeat_fields: list[str],
         data: pd.DataFrame,
         media_folder: Path,
         encryption_key: str | None = None,
@@ -268,7 +267,7 @@ class MediaDownloader:
 
         for field in media_fields:
             self._download_field_media(
-                field, repeat_fields, data, media_folder, encryption_key
+                field, data, media_folder, encryption_key
             )
 
     def _download_field_media(
@@ -716,7 +715,7 @@ class SurveyCTOUI:
             # Show form details in an expander
             if selected_form:
                 # split selected form into id and title
-                selected_form_split = re.match(r"^(.*) \((.*)\)$", selected_form)
+                selected_form_split = re.match(r"^(.*?) \((.*)\)$", selected_form)
                 form_id = (
                     selected_form_split.group(1)
                     if selected_form_split
