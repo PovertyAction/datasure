@@ -674,7 +674,11 @@ class SurveyCTOUI:
             else:
                 st.markdown("### SurveyCTO Form Configuration")
 
-            alias = st.text_input("Alias*", help="Unique identifier for this form")
+            alias = st.text_input(
+                "Alias*",
+                help="Unique identifier for this form",
+                value=defaults.get("alias", ""),
+            )
 
             # Server selection
             server_list = self._get_server_list()
@@ -693,17 +697,17 @@ class SurveyCTOUI:
                 form[0] + " (" + form[1] + ")" for form in forms_info["forms_list"]
             ]
 
+            form_ids_only = [form[0] for form in forms_info["forms_list"]]
+
             # Show form selection dropdown
-            default_index = None
-            if edit_mode and defaults.get("form_id"):
-                # Try to find the default form in the list
-                for i, (fid, _) in enumerate(form_options):
-                    if fid == defaults.get("form_id"):
-                        default_index = i
-                        break
+            default_index = (
+                form_ids_only.index(defaults.get("form_id", ""))
+                if defaults and defaults.get("form_id", "") in form_ids_only
+                else None
+            )
 
             selected_form = st.selectbox(
-                "Form*",
+                "Select Form ID*",
                 options=form_options,
                 index=default_index,
                 help="Select a form from the available forms on the server",
@@ -738,34 +742,33 @@ class SurveyCTOUI:
                 encrypted = False
 
             # Rest of the form fields
-            encryption_key_file = st.text_input(
-                "Encryption Key",
-                value=defaults.get("key", ""),
-                type="password",
+            private_key_file = st.text_input(
+                "File path for Private Key",
+                value=defaults.get("private_key", ""),
                 disabled=not encrypted,
-                help="Enter encryption key if the form is encrypted (optional)",
+                help="Enter encryption key if the form is encrypted (optional) eg. C/Users/documents/Surevy_PRIVATEKEY.pem",
             )
 
-            if encrypted and not encryption_key_file:
+            if encrypted and not private_key_file:
                 st.warning(
                     "Encryption key is required for encrypted forms. Only published fields will be downloaded."
                 )
 
             # validate encryption key is a valid file path
-            if encryption_key_file and not os.path.exists(str(encryption_key_file)):
+            if private_key_file and not os.path.exists(str(private_key_file)):
                 st.error("Encryption key must be a valid file path to a key file.")
                 return
 
             # validate file has extension.pem
-            if encryption_key_file and not encryption_key_file.endswith(".pem"):
+            if private_key_file and not private_key_file.endswith(".pem"):
                 st.error("Encryption key file must have a .pem extension.")
                 return
 
             save_file = st.text_input(
-                "Save as",
-                value=defaults.get("saveas", ""),
+                "File path to save data",
+                value=defaults.get("save_to", ""),
                 disabled=not selected_form,
-                help="File path to save the data (e.g., data/survey.csv)",
+                help="File path to save the data (e.g., C:/Users/documents/data/survey.csv)",
             )
 
             # check that save file is a valid file path
@@ -787,7 +790,7 @@ class SurveyCTOUI:
             st.markdown("**required*")
 
             if st.button(
-                "Add Form",
+                "Add Form" if not edit_mode else "Update Form",
                 type="primary",
                 use_container_width=True,
                 disabled=not selected_form,
@@ -800,21 +803,32 @@ class SurveyCTOUI:
                     st.error("Please select or enter a form ID.")
                     return
 
-                try:
-                    self._add_form_to_project(
-                        FormConfig(
-                            alias=alias,
-                            form_id=form_id,
-                            server=server,
-                            private_key=str(encryption_key_file) or None,
-                            save_to=str(save_file) or None,
-                            attachments=attachments,
-                        )
-                    )
-                    st.success("Form added successfully")
-                    st.rerun()  # Refresh the page to clear the form
-                except Exception as e:
-                    st.error(f"Failed to add form: {e}")
+                form_config = FormConfig(
+                    alias=alias,
+                    form_id=form_id,
+                    server=server,
+                    private_key=str(private_key_file) or None,
+                    save_to=str(save_file) or None,
+                    attachments=attachments,
+                )
+
+                if not edit_mode:
+                    try:
+                        self._add_form_to_project(form_config)
+                        st.success("Form added successfully")
+                    except Exception as e:
+                        st.error(f"Failed to add form: {e}")
+                        return
+                else:
+                    # Update existing form configuration
+                    try:
+                        self._update_form_on_project(form_config)
+                        st.success("Form updated successfully")
+                    except Exception as e:
+                        st.error(f"Failed to update form: {e}")
+                        return
+
+                st.rerun()
 
     def _get_form_options(self, server: str) -> list[tuple[str, str]] | None:
         """
@@ -979,7 +993,47 @@ class SurveyCTOUI:
             "attachments": form_config.attachments,
         }
 
-        updated_log = pl.concat([import_log, pl.DataFrame([new_entry])], how="vertical")
+        updated_log = pl.concat([import_log, pl.DataFrame([new_entry])], how="diagonal")
+        duckdb_save_table(
+            self.project_id, updated_log, alias="import_log", db_name="logs"
+        )
+
+    def _update_form_on_project(self, form_config: FormConfig) -> None:
+        """Update existing form configuration in project."""
+        import_log = duckdb_get_table(
+            self.project_id, alias="import_log", db_name="logs"
+        )
+
+        # Find existing entry
+        existing_entry = import_log.filter(pl.col("alias") == form_config.alias)
+        if existing_entry.is_empty():
+            raise ValidationError(f"Alias '{form_config.alias}' does not exist")
+
+        # Update entry
+        updated_entry = {
+            "refresh": True,
+            "load": True,
+            "source": "SurveyCTO",
+            "alias": form_config.alias,
+            "filename": "",
+            "sheet_name": "",
+            "server": form_config.server,
+            "form_id": form_config.form_id,
+            "private_key": form_config.private_key,
+            "save_to": form_config.save_to,
+            "attachments": form_config.attachments,
+        }
+
+        updated_log = import_log.with_columns(
+            [
+                pl.when(pl.col("alias") == form_config.alias)
+                .then(pl.lit(value))
+                .otherwise(pl.col(column))
+                .alias(column)
+                for column, value in updated_entry.items()
+            ]
+        )
+
         duckdb_save_table(
             self.project_id, updated_log, alias="import_log", db_name="logs"
         )

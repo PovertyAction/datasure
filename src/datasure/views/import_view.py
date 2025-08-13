@@ -40,43 +40,6 @@ if "st_prep_dataset_list" not in st.session_state:
     st.session_state.st_prep_dataset_list = None
 
 
-def edit_import_configuration(project_id: str, alias: str) -> None:
-    """Edit import configuration in the cache file.
-
-    PARAMS:
-    -------
-    project_id: str : project ID
-
-    Returns
-    -------
-    None
-    """
-    import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
-
-    source = import_log.filter(pl.col("alias") == alias).select("source").to_series()[0]
-    if source == "local storage":
-        current_filename = (
-            import_log.filter(pl.col("alias") == alias)
-            .select("filename")
-            .to_series()[0]
-        )
-        current_sheet_name = (
-            import_log.filter(pl.col("alias") == alias)
-            .select("sheet_name")
-            .to_series()[0]
-        )
-        defaults = {
-            "alias": alias,
-            "filename": current_filename,
-            "sheet_name": current_sheet_name,
-        }
-        local_add_form(
-            project_id=project_id,
-            defaults=defaults,
-            edit_mode=True,
-        )
-
-
 # --- Load raw dataset list from import configurations --- #
 def load_raw_datasets(project_id: str) -> None:
     """Load raw dataset list from the cache file.
@@ -147,6 +110,7 @@ st.subheader("Import data from multiple sources")
 
 # -- Add configurations for import data -- #
 ac1, ac2, ac3 = st.columns([0.4, 0.4, 0.2])
+aliases = duckdb_get_aliases(project_id, to_load=False)
 with (
     ac1,
     st.popover(
@@ -163,23 +127,33 @@ with (
 with (
     ac2,
     st.popover(
-        "Edit Import Configuration", use_container_width=True, icon=":material/edit:"
+        "Edit Import Configuration",
+        use_container_width=True,
+        icon=":material/edit:",
+        disabled=not aliases,
     ),
 ):
-    if st.session_state.st_raw_dataset_list:
-        edit_config = st.selectbox(
-            "Select Data to Edit",
-            options=st.session_state.st_raw_dataset_list,
-            index=None,
+    edit_config = st.selectbox(
+        "Select Data to Edit",
+        options=aliases,
+        index=None,
+    )
+    if edit_config:
+        import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
+        # -- Get the selected import configuration details -- #
+        selected_config = import_log.filter(pl.col("alias") == edit_config).to_dicts()[
+            0
+        ]
+        SurveyCTOUI(project_id).render_form_config(
+            edit_mode=True, defaults=selected_config
         )
-        if edit_config:
-            edit_import_configuration(project_id, edit_config)
-    else:
-        st.info("No import configurations found. Please add import configurations.")
 with (
     ac3,
     st.popover(
-        "Remove Import Configuration", use_container_width=True, icon=":material/clear:"
+        "Remove Import Configuration",
+        use_container_width=True,
+        icon=":material/clear:",
+        disabled=not aliases,
     ),
 ):
     st.warning("This will remove the import configuration.")
