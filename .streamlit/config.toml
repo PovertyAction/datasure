@@ -20,7 +20,7 @@ backgroundColor = "#FAF9F6"
 developmentMode = false
 
 [client]
-toolbarMode = "minimal"
+toolbarMode = "viewer"
 showErrorDetails = false
 
 [browser]
@@ -33,7 +33,7 @@ level = "error"
 
 
 [server]
-headless = true
+headless = false
 port = 8501
 address = "localhost"
 
