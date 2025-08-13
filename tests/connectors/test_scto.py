@@ -939,7 +939,7 @@ class TestSurveyCTOClient:
 
         # Check the call arguments
         args = mock_downloader.download_media_files.call_args[0]
-        media_fields, repeat_fields, data_arg, media_folder, encryption_key = args
+        media_fields, _, media_folder, encryption_key = args
 
         assert "photo" in media_fields
         assert "voice" in media_fields
