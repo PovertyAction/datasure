@@ -453,7 +453,7 @@ wheels = [
 
 [[package]]
 name = "datasure"
-version = "0.3.26a1"
+version = "0.3.27a1"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
