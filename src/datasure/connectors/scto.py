@@ -17,6 +17,7 @@ from datasure.utils import duckdb_get_table, duckdb_save_table, get_cache_path
 
 # Import secure credential storage
 from datasure.utils.secure_credentials import (
+    has_scto_credentials,
     migrate_plaintext_credentials,
     retrieve_scto_credentials,
     store_scto_credentials,
@@ -597,15 +598,24 @@ def scto_add_form(
         default_key = defaults.get("key", "")
         default_saveas = defaults.get("saveas", "")
 
-    # import server list from cache file
-    try:
-        scto_file = get_cache_path(project_id, "settings", "scto.json")
-        with open(scto_file) as file:
-            server_cache = json.load(file)
-            server_list = server_cache.get("server", [])
-    except FileNotFoundError:
-        # if file not found, create empty list
-        server_list = []
+    # Check if secure credentials exist for this project
+    if has_scto_credentials(project_id):
+        # Get server info from secure credential metadata
+        result = retrieve_scto_credentials(project_id)
+        if result["success"]:
+            server_info = result["credentials"]["server"]
+            server_list = [server_info] if server_info else []
+        else:
+            server_list = []
+    else:
+        # Fallback: check for legacy cache file and migrate if found
+        try:
+            scto_file = get_cache_path(project_id, "settings", "scto.json")
+            with open(scto_file) as file:
+                server_cache = json.load(file)
+                server_list = server_cache.get("server", [])
+        except FileNotFoundError:
+            server_list = []
 
     if not server_list:
         st.warning(
