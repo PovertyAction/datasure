@@ -532,6 +532,17 @@ class SurveyCTOClient:
 
         return len(data)
 
+    def _import_private_key(self, private_key: str) -> str:
+        """Import private key from file."""
+        if not private_key or not Path(private_key).exists():
+            raise ValidationError("Private key file does not exist or is empty")
+
+        try:
+            with open(private_key) as f:
+                return f.read().strip()
+        except Exception as e:
+            raise ValidationError(f"Failed to read private key: {e}")  # noqa: B904
+
     def _import_regular_form(self, form_config: FormConfig) -> int:
         """Import from regular form with incremental updates."""
         # Load existing data
@@ -549,7 +560,9 @@ class SurveyCTOClient:
             form_id=form_config.form_id,
             format="json",
             oldest_completion_date=last_date,
-            key=form_config.private_key,
+            key=self._import_private_key(form_config.private_key)
+            if form_config.private_key
+            else None,
         )
 
         new_data = pd.DataFrame(new_data_json)
@@ -988,8 +1001,8 @@ class SurveyCTOUI:
             "sheet_name": "",
             "server": form_config.server,
             "form_id": form_config.form_id,
-            "private_key": form_config.private_key,
-            "save_to": form_config.save_to,
+            "private_key": form_config.private_key or "",
+            "save_to": form_config.save_to or "",
             "attachments": form_config.attachments,
         }
 
