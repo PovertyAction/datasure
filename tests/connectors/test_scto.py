@@ -1,7 +1,6 @@
 """Tests for the SurveyCTO connector module."""
 
 import datetime
-import json
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -194,30 +193,86 @@ class TestSctoGetRepeatCols:
 class TestSctoGetServerCache:
     """Test the scto_get_server_cache function."""
 
-    @patch("datasure.connectors.scto.get_cache_path")
-    def test_get_server_cache_file_exists(self, mock_get_cache_path, tmp_path):
-        """Test getting server cache when file exists."""
-        cache_file = tmp_path / "scto.json"
-        test_data = {"server": "testserver", "forms": ["form1", "form2"]}
-        cache_file.write_text(json.dumps(test_data))
-
-        mock_get_cache_path.return_value = str(cache_file)
+    @patch("datasure.connectors.scto.retrieve_scto_credentials")
+    def test_get_server_cache_secure_credentials_exist(self, mock_retrieve_credentials):
+        """Test getting server cache from secure credential storage."""
+        # Mock successful credential retrieval from secure storage
+        mock_retrieve_credentials.return_value = {
+            "success": True,
+            "credentials": {
+                "server": "testserver",
+                "username": "user@example.com",
+                "password": "secure_password_123",
+            },
+        }
 
         result = scto_get_server_cache("test_project")
 
-        assert result == test_data
-        mock_get_cache_path.assert_called_once_with(
-            "test_project", "settings", "scto.json"
-        )
+        expected_result = {
+            "server": "testserver",
+            "user": "user@example.com",  # Legacy format uses "user"
+            "password": "secure_password_123",
+        }
+        assert result == expected_result
+        mock_retrieve_credentials.assert_called_once_with("test_project")
 
-    @patch("datasure.connectors.scto.get_cache_path")
-    def test_get_server_cache_file_not_found(self, mock_get_cache_path):
-        """Test getting server cache when file doesn't exist."""
-        mock_get_cache_path.return_value = "/nonexistent/path/scto.json"
+    @patch("datasure.connectors.scto.retrieve_scto_credentials")
+    @patch("datasure.connectors.scto.migrate_plaintext_credentials")
+    def test_get_server_cache_migration_success(
+        self, mock_migrate_credentials, mock_retrieve_credentials
+    ):
+        """Test getting server cache with successful plaintext migration."""
+        # Mock initial retrieval failure, then migration success, then retry success
+        mock_retrieve_credentials.side_effect = [
+            {"success": False, "error": "No credentials found"},
+            {
+                "success": True,
+                "credentials": {
+                    "server": "migrated_server",
+                    "username": "migrated@example.com",
+                    "password": "migrated_password",
+                },
+            },
+        ]
+
+        mock_migrate_credentials.return_value = {"success": True}
+
+        result = scto_get_server_cache("test_project")
+
+        expected_result = {
+            "server": "migrated_server",
+            "user": "migrated@example.com",
+            "password": "migrated_password",
+        }
+        assert result == expected_result
+        mock_migrate_credentials.assert_called_once_with(
+            "test_project", delete_plaintext=True
+        )
+        assert mock_retrieve_credentials.call_count == 2
+
+    @patch("datasure.connectors.scto.retrieve_scto_credentials")
+    @patch("datasure.connectors.scto.migrate_plaintext_credentials")
+    def test_get_server_cache_no_credentials_found(
+        self, mock_migrate_credentials, mock_retrieve_credentials
+    ):
+        """Test getting server cache when no credentials exist."""
+        # Mock both secure retrieval and migration failure
+        mock_retrieve_credentials.return_value = {
+            "success": False,
+            "error": "No credentials found",
+        }
+        mock_migrate_credentials.return_value = {
+            "success": False,
+            "error": "No plaintext file found",
+        }
 
         result = scto_get_server_cache("test_project")
 
         assert result == {}
+        mock_retrieve_credentials.assert_called_once_with("test_project")
+        mock_migrate_credentials.assert_called_once_with(
+            "test_project", delete_plaintext=True
+        )
 
 
 class TestSctoLoadForms:
