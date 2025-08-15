@@ -21,6 +21,7 @@ from datasure.utils.secure_credentials import (
     migrate_plaintext_credentials,
     retrieve_scto_credentials,
     store_scto_credentials,
+    test_keyring_availability,
 )
 
 # --- SurveyCTO Server Connect Button Click Action --- #
@@ -608,13 +609,38 @@ def scto_add_form(
         else:
             server_list = []
     else:
-        # Fallback: check for legacy cache file and migrate if found
-        try:
-            scto_file = get_cache_path(project_id, "settings", "scto.json")
-            with open(scto_file) as file:
-                server_cache = json.load(file)
-                server_list = server_cache.get("server", [])
-        except FileNotFoundError:
+        # Check for legacy credentials and offer migration
+        legacy_file = get_cache_path(project_id, "settings", "scto.json")
+        if legacy_file.exists():
+            # Show migration prompt
+            st.info(
+                "🔄 Legacy credentials detected. Would you like to migrate them to secure storage?"
+            )
+            col1, col2 = st.columns(2)
+
+            with col1:
+                if st.button(
+                    "✅ Migrate Now", use_container_width=True
+                ) and migrate_legacy_credentials(project_id):
+                    st.rerun()  # Refresh to load migrated credentials
+
+            with col2:
+                if st.button("⏭️ Skip Migration", use_container_width=True):
+                    # Store choice in session state to avoid repeated prompts
+                    st.session_state[f"skip_migration_{project_id}"] = True
+                    st.rerun()
+
+            # If user hasn't made a choice yet, stop here
+            st.stop()
+        elif st.session_state.get(f"skip_migration_{project_id}", False):
+            # User previously chose to skip migration, read legacy file
+            try:
+                with open(legacy_file) as file:
+                    server_cache = json.load(file)
+                    server_list = server_cache.get("server", [])
+            except (FileNotFoundError, json.JSONDecodeError):
+                server_list = []
+        else:
             server_list = []
 
     if not server_list:
@@ -754,6 +780,20 @@ def scto_login_form(project_id: str) -> None:
         image_path = assets_dir / "SurveyCTO-Logo-CMYK.png"
         st.image(str(image_path), width=200)
 
+        # Add keyring status check
+        with st.expander("🔐 Secure Storage Status", expanded=False):
+            keyring_status = test_keyring_availability()
+
+            if keyring_status["success"] and keyring_status["available"]:
+                st.success(
+                    f"✅ Secure credential storage is working ({keyring_status['backend']})"
+                )
+            else:
+                st.error(f"❌ Secure storage unavailable: {keyring_status['error']}")
+                st.warning(
+                    "Credentials will be stored less securely. Consider enabling system keyring."
+                )
+
         st.markdown("*Server Details:*")
 
         scto_server_name = st.text_input(
@@ -786,6 +826,12 @@ def scto_login_form(project_id: str) -> None:
                 st.warning("Invalid email address. Please enter a valid email address.")
                 st.stop()
 
+            # Test keyring before storing credentials
+            keyring_test = test_keyring_availability()
+            if not keyring_test["success"]:
+                st.warning(f"⚠️ Keyring test failed: {keyring_test['error']}")
+                st.info("Credentials will still be stored, but may be less secure.")
+
             # Store credentials securely using keyring
             result = store_scto_credentials(
                 project_id=project_id,
@@ -795,11 +841,23 @@ def scto_login_form(project_id: str) -> None:
             )
 
             if result["success"]:
-                st.success(
-                    f"SurveyCTO Connection for {scto_server_name} added successfully"
-                )
+                if keyring_test["success"]:
+                    st.success(
+                        f"✅ SurveyCTO Connection for {scto_server_name} added successfully"
+                    )
+                    st.success(
+                        f"🔐 Credentials stored securely using {keyring_test['backend']}"
+                    )
+                else:
+                    st.success(
+                        f"✅ SurveyCTO Connection for {scto_server_name} added successfully"
+                    )
+                    st.info("📝 Credentials stored (fallback mode)")
             else:
-                st.error(f"Failed to store credentials: {result['error']}")
+                st.error(f"❌ Failed to store credentials: {result['error']}")
+                # Offer diagnostic help
+                if st.button("🔧 Run Diagnostics"):
+                    st.json(test_keyring_availability())
 
 
 # --- SCTO Download button action --- #
