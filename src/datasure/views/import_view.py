@@ -8,6 +8,7 @@ from datasure.connectors import (
     scto_import_data,
     scto_login_form,
 )
+from datasure.connectors.scto import migrate_legacy_credentials
 from datasure.utils import (
     duckdb_get_aliases,
     duckdb_get_imported_datasets,
@@ -15,6 +16,7 @@ from datasure.utils import (
     duckdb_row_filter,
     duckdb_save_table,
 )
+from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.secure_credentials import test_keyring_availability
 
 # --- CONFIGURE PAGE --- #
@@ -163,14 +165,10 @@ with st.container(border=True):
         st.write("**Migration Status:**")
         legacy_file = st.session_state.get("st_project_id")
         if legacy_file:
-            from datasure.utils.cache_utils import get_cache_path
-
             legacy_path = get_cache_path(legacy_file, "settings", "scto.json")
             if legacy_path.exists():
                 st.warning("🔄 Legacy credentials detected")
                 if st.button("Migrate Legacy Credentials", use_container_width=True):
-                    from datasure.connectors.scto import migrate_legacy_credentials
-
                     if migrate_legacy_credentials(legacy_file):
                         st.success("Migration completed!")
                     else:
