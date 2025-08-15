@@ -519,7 +519,6 @@ class SurveyCTOClient:
             # Try server dataset first
             return self._import_server_dataset(form_config)
         except:
-            # Fall back to regular form
             return self._import_regular_form(form_config)
 
     def _import_server_dataset(self, form_config: FormConfig) -> int:
@@ -562,7 +561,7 @@ class SurveyCTOClient:
             oldest_completion_date=last_date,
             key=self._import_private_key(form_config.private_key)
             if form_config.private_key
-            else None,
+            else False,
         )
 
         new_data = pd.DataFrame(new_data_json)
@@ -687,12 +686,6 @@ class SurveyCTOUI:
             else:
                 st.markdown("### SurveyCTO Form Configuration")
 
-            alias = st.text_input(
-                "Alias*",
-                help="Unique identifier for this form",
-                value=defaults.get("alias", ""),
-            )
-
             # Server selection
             server_list = self._get_server_list()
             if not server_list:
@@ -701,7 +694,9 @@ class SurveyCTOUI:
                 )
                 return
 
-            server = st.selectbox("Server*", options=server_list)
+            server = st.selectbox(
+                "Server*", options=server_list, key=f"surveyctoui_server{edit_mode}"
+            )
 
             # Form selection with dynamic loading
             forms_info = self._get_forms_info()
@@ -753,14 +748,29 @@ class SurveyCTOUI:
                     st.write(f"**Encrypted:** {'Yes' if encrypted else 'No'}")
             else:
                 encrypted = False
+                form_title = ""
+
+            # remove symbols from form tile to create alias
+            alias_default = re.sub(r"[^\w]", "_", form_title)
+            alias = st.text_input(
+                "Alias*",
+                help="Unique identifier for this form",
+                value=defaults.get("alias", alias_default),
+                key=f"surveyctoui_alias{edit_mode}",
+                disabled=edit_mode or not selected_form,
+            )
 
             # Rest of the form fields
             private_key_file = st.text_input(
                 "File path for Private Key",
                 value=defaults.get("private_key", ""),
                 disabled=not encrypted,
+                key=f"surveyctoui_private_key{edit_mode}",
                 help="Enter encryption key if the form is encrypted (optional) eg. C/Users/documents/Surevy_PRIVATEKEY.pem",
             )
+
+            if not encrypted:
+                private_key_file = ""
 
             if encrypted and not private_key_file:
                 st.warning(
@@ -1064,18 +1074,25 @@ def download_forms(project_id: str, form_configs: list[FormConfig]) -> None:
     client = SurveyCTOClient(project_id)
     progress_bar = st.progress(0, text="Downloading from SurveyCTO...")
 
+    success_count = 0
+    failed_count = 0
     for i, form_config in enumerate(form_configs):
         try:
             new_count = client.import_data(form_config)
             st.write(
                 f"{i + 1}/{len(form_configs)}: Downloaded {new_count} new records for {form_config.alias}"
             )
+            success_count += 1
         except Exception as e:
             st.error(f"Failed to download {form_config.alias}: {e}")
+            failed_count += 1
         finally:
             progress_bar.progress(
                 (i + 1) / len(form_configs),
                 text=f"Progress: {i + 1}/{len(form_configs)}",
             )
 
-    st.success("Download complete")
+    if success_count > 0:
+        st.success(f"Successfully downloaded {success_count} forms")
+    if failed_count > 0:
+        st.error(f"Failed to download {failed_count} forms")
