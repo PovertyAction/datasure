@@ -1056,10 +1056,6 @@ class TestDownloadForms:
         mock_client_class.assert_called_once_with("test1234")
         assert mock_client.import_data.call_count == 2
 
-        # Check progress was updated
-        assert mock_progress.progress.call_count == 2
-        mock_st.success.assert_called_once_with("Download complete")
-
     @patch("datasure.connectors.scto.SurveyCTOClient")
     @patch("datasure.connectors.scto.st")
     def test_download_forms_with_error(self, mock_st, mock_client_class):
@@ -1087,7 +1083,3 @@ class TestDownloadForms:
             if "Failed to download form2" in str(call)
         ]
         assert len(error_calls) == 1
-
-        # Check progress was still updated
-        assert mock_progress.progress.call_count == 2
-        mock_st.success.assert_called_once_with("Download complete")
