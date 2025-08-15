@@ -71,7 +71,7 @@ def load_raw_datasets(project_id: str) -> None:
                         sheet_name=row["sheet_name"] if row["sheet_name"] else None,
                     )
                 elif row["source"] == "SurveyCTO" and row["refresh"] is True:
-                    # if private_key or save_to is Null, set to None
+                    # if private_key or save_to is Null, set to ""
                     form_configs = FormConfig(
                         alias=row["alias"],
                         form_id=row["form_id"],
@@ -89,7 +89,7 @@ def load_raw_datasets(project_id: str) -> None:
                 if row["alias"] not in st.session_state.st_raw_dataset_list:
                     st.session_state.st_raw_dataset_list.append(row["alias"])
             status.update(
-                label="Data loaded successfully!", state="complete", expanded=False
+                label="Data loaded successfully!", state="complete", expanded=True
             )
 
 
