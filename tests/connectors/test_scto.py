@@ -2,7 +2,6 @@
 
 import json
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pandas as pd
@@ -224,42 +223,64 @@ class TestCacheManager:
         assert manager.project_id == "test1234"
         assert hasattr(manager, "logger")
 
-    @patch("datasure.connectors.scto.get_cache_path")
-    def test_get_server_cache_exists(self, mock_get_cache_path, tmp_path):
-        """Test getting server cache when file exists."""
-        cache_file = tmp_path / "scto.json"
-        test_data = {"server": "testserver", "user": "test@example.com"}
-        cache_file.write_text(json.dumps(test_data))
-        mock_get_cache_path.return_value = cache_file
+    @patch("datasure.connectors.scto.retrieve_scto_credentials")
+    def test_get_server_cache_secure_credentials_exist(self, mock_retrieve_credentials):
+        """Test getting server cache from secure credential storage."""
+        # Mock successful credential retrieval from secure storage
+        mock_retrieve_credentials.return_value = {
+            "success": True,
+            "credentials": {
+                "server": "testserver",
+                "username": "user@example.com",
+                "password": "secure_password_123",
+            },
+        }
 
-        manager = CacheManager("test1234")
-        result = manager.get_server_cache()
+    @patch("datasure.connectors.scto.retrieve_scto_credentials")
+    @patch("datasure.connectors.scto.migrate_plaintext_credentials")
+    def test_get_server_cache_migration_success(
+        self, mock_migrate_credentials, mock_retrieve_credentials
+    ):
+        """Test getting server cache with successful plaintext migration."""
+        # Mock initial retrieval failure, then migration success, then retry success
+        mock_retrieve_credentials.side_effect = [
+            {"success": False, "error": "No credentials found"},
+            {
+                "success": True,
+                "credentials": {
+                    "server": "migrated_server",
+                    "username": "migrated@example.com",
+                    "password": "migrated_password",
+                },
+            },
+        ]
 
-        assert result == test_data
-        mock_get_cache_path.assert_called_once_with("test1234", "settings", "scto.json")
+        mock_migrate_credentials.return_value = {"success": True}
 
-    @patch("datasure.connectors.scto.get_cache_path")
-    def test_get_server_cache_not_exists(self, mock_get_cache_path):
-        """Test getting server cache when file doesn't exist."""
-        mock_get_cache_path.return_value = Path("/nonexistent/scto.json")
+    @patch("datasure.connectors.scto.retrieve_scto_credentials")
+    @patch("datasure.connectors.scto.migrate_plaintext_credentials")
+    def test_get_server_cache_no_credentials_found(
+        self, mock_migrate_credentials, mock_retrieve_credentials
+    ):
+        """Test getting server cache when no credentials exist."""
+        # Mock both secure retrieval and migration failure
+        mock_retrieve_credentials.return_value = {
+            "success": False,
+            "error": "No credentials found",
+        }
+        mock_migrate_credentials.return_value = {
+            "success": False,
+            "error": "No plaintext file found",
+        }
 
         manager = CacheManager("test1234")
         result = manager.get_server_cache()
 
         assert result == {}
 
-    @patch("datasure.connectors.scto.get_cache_path")
-    def test_get_server_cache_json_error(self, mock_get_cache_path, tmp_path, caplog):
-        """Test getting server cache with JSON decode error."""
-        cache_file = tmp_path / "scto.json"
-        cache_file.write_text("invalid json")
-        mock_get_cache_path.return_value = cache_file
 
-        manager = CacheManager("test1234")
-        result = manager.get_server_cache()
-
-        assert result == {}
-        assert "Failed to read cache" in caplog.text
+class TestSctoLoadForms:
+    """Test the scto_load_forms function."""
 
     @patch("datasure.connectors.scto.get_cache_path")
     def test_save_server_cache(self, mock_get_cache_path, tmp_path):

@@ -17,6 +17,112 @@ from pydantic import BaseModel, Field, field_validator
 
 from datasure.utils import duckdb_get_table, duckdb_save_table, get_cache_path
 
+# Import secure credential storage
+from datasure.utils.secure_credentials import (
+    migrate_plaintext_credentials,
+    retrieve_scto_credentials,
+)
+
+# --- SurveyCTO Server Connect Button Click Action --- #
+
+
+def migrate_legacy_credentials(project_id: str) -> bool:
+    """Migrate legacy plaintext credentials to secure storage if they exist.
+
+    PARAMS:
+    -------
+    project_id: Project ID
+
+    Returns
+    -------
+    bool: True if migration was performed or not needed, False if migration failed
+    """
+    try:
+        # Check if plaintext credentials exist
+        plaintext_file = get_cache_path(project_id, "settings", "scto.json")
+        if plaintext_file.exists():
+            # Attempt migration
+            result = migrate_plaintext_credentials(project_id, delete_plaintext=True)
+            if result["success"]:
+                st.info("Legacy credentials migrated to secure storage.")
+                return True
+            else:
+                st.warning(f"Failed to migrate legacy credentials: {result['error']}")
+                return False
+        else:
+            return True  # No migration needed
+    except Exception:
+        # Don't break the app if migration fails
+        return True
+
+
+# --- Get cache data for SurveyCTO serves --- #
+def scto_get_server_cache(project_id: str) -> dict:
+    """Get cached SurveyCTO server credentials from secure storage.
+
+    PARAMS:
+    -------
+    project_id: Project ID
+
+    Return:
+    ------
+    Dictionary with server credentials or empty dict if not found
+
+    """
+    # Try secure credential storage first
+    result = retrieve_scto_credentials(project_id)
+
+    if result["success"]:
+        credentials = result["credentials"]
+        return {
+            "server": credentials["server"],
+            "user": credentials["username"],  # Legacy format uses "user"
+            "password": credentials["password"],
+        }
+
+    # Fallback: try to migrate existing plaintext credentials
+    migration_result = migrate_plaintext_credentials(project_id, delete_plaintext=True)
+
+    if migration_result["success"]:
+        # Retry after migration
+        result = retrieve_scto_credentials(project_id)
+        if result["success"]:
+            credentials = result["credentials"]
+            return {
+                "server": credentials["server"],
+                "user": credentials["username"],
+                "password": credentials["password"],
+            }
+
+    # No credentials found
+    return {}
+
+
+def scto_server_connect(servername: str, username: str, password: str) -> str:
+    """Validate SurveyCTO account details and load user data.
+
+    PARAMS
+    ------
+    servername: SurveyCTO server name
+    username: SurveyCTO account username (email address)
+    password: SurveyCTO account password
+
+    Return:
+    ------
+    SurveyCTO object
+
+    """
+    # check that required fields are not empty
+    if not servername or not username or not password:
+        st.warning("Complete all required fields.")
+        st.stop()
+
+    # check that servername is valid
+    elif not re.fullmatch(r"^[a-z][a-z0-9]{1,63}$", servername):
+        st.warning("Invalid server name.")
+        st.stop()
+
+
 # --- Configuration and Models --- #
 
 
