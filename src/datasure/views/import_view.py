@@ -8,6 +8,7 @@ from datasure.connectors import (
     scto_import_data,
     scto_login_form,
 )
+from datasure.connectors.scto import migrate_legacy_credentials
 from datasure.utils import (
     duckdb_get_aliases,
     duckdb_get_imported_datasets,
@@ -15,6 +16,8 @@ from datasure.utils import (
     duckdb_row_filter,
     duckdb_save_table,
 )
+from datasure.utils.cache_utils import get_cache_path
+from datasure.utils.secure_credentials import test_keyring_availability
 
 # --- CONFIGURE PAGE --- #
 
@@ -126,7 +129,7 @@ def load_raw_datasets(project_id: str) -> None:
 
 
 # --- add login configuration ---#
-lc1, _, _ = st.columns(3)
+lc1, lc2, _ = st.columns(3)
 with st.container(border=True):
     st.subheader("Import Configuration")
     st.write("Configure the import connections for your project.")
@@ -137,6 +140,45 @@ with st.container(border=True):
         ),
     ):
         st.session_state.st_scto = scto_login_form(project_id)
+
+    with (
+        lc2,
+        st.popover(
+            "🔐 Check Security", use_container_width=True, icon=":material/security:"
+        ),
+    ):
+        st.write("**Keyring Diagnostics**")
+        if st.button("Test Keyring Availability", use_container_width=True):
+            keyring_status = test_keyring_availability()
+            if keyring_status["success"]:
+                st.success(f"✅ Keyring working: {keyring_status['backend']}")
+                st.info(keyring_status["message"])
+            else:
+                st.error(f"❌ Keyring issue: {keyring_status['error']}")
+                st.info("**Troubleshooting Tips:**")
+                st.markdown("""
+                - **Windows**: Ensure Windows Credential Manager is accessible
+                - **macOS**: Check Keychain Access permissions
+                - **Linux**: Install and configure a keyring backend (gnome-keyring, kwallet)
+                """)
+
+        st.write("**Migration Status:**")
+        legacy_file = st.session_state.get("st_project_id")
+        if legacy_file:
+            legacy_path = get_cache_path(legacy_file, "settings", "scto.json")
+            if legacy_path.exists():
+                st.warning("🔄 Legacy credentials detected")
+                if st.button("Migrate Legacy Credentials", use_container_width=True):
+                    if migrate_legacy_credentials(legacy_file):
+                        st.success("Migration completed!")
+                    else:
+                        st.error("Migration failed")
+            else:
+                st.success("✅ No legacy credentials found")
+
+        st.write("**Raw Diagnostic Data:**")
+        if st.button("Show Details", use_container_width=True):
+            st.json(test_keyring_availability())
 
 st.subheader("Import data from multiple sources")
 
