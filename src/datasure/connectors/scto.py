@@ -19,41 +19,15 @@ from datasure.utils import duckdb_get_table, duckdb_save_table, get_cache_path
 
 # Import secure credential storage
 from datasure.utils.secure_credentials import (
-    migrate_plaintext_credentials,
+    list_stored_credentials,
     retrieve_scto_credentials,
+    store_scto_credentials,
 )
 
+# --- Constants --- #
+SCTO_KEY_IMPORT_OPTIONS = ("Import from File", "Paste private key text")
+
 # --- SurveyCTO Server Connect Button Click Action --- #
-
-
-def migrate_legacy_credentials(project_id: str) -> bool:
-    """Migrate legacy plaintext credentials to secure storage if they exist.
-
-    PARAMS:
-    -------
-    project_id: Project ID
-
-    Returns
-    -------
-    bool: True if migration was performed or not needed, False if migration failed
-    """
-    try:
-        # Check if plaintext credentials exist
-        plaintext_file = get_cache_path(project_id, "settings", "scto.json")
-        if plaintext_file.exists():
-            # Attempt migration
-            result = migrate_plaintext_credentials(project_id, delete_plaintext=True)
-            if result["success"]:
-                st.info("Legacy credentials migrated to secure storage.")
-                return True
-            else:
-                st.warning(f"Failed to migrate legacy credentials: {result['error']}")
-                return False
-        else:
-            return True  # No migration needed
-    except Exception:
-        # Don't break the app if migration fails
-        return True
 
 
 # --- Get cache data for SurveyCTO serves --- #
@@ -79,22 +53,12 @@ def scto_get_server_cache(project_id: str) -> dict:
             "user": credentials["username"],  # Legacy format uses "user"
             "password": credentials["password"],
         }
-
-    # Fallback: try to migrate existing plaintext credentials
-    migration_result = migrate_plaintext_credentials(project_id, delete_plaintext=True)
-
-    if migration_result["success"]:
-        # Retry after migration
-        result = retrieve_scto_credentials(project_id)
-        if result["success"]:
-            credentials = result["credentials"]
-            return {
-                "server": credentials["server"],
-                "user": credentials["username"],
-                "password": credentials["password"],
-            }
-
-    # No credentials found
+    else:
+        # return error message if credentials not found
+        if result["error"]:
+            logging.warning(f"Failed to retrieve credentials: {result['error']}")
+        else:
+            logging.warning("No cached credentials found for SurveyCTO server.")
     return {}
 
 
@@ -770,14 +734,47 @@ class SurveyCTOUI:
 
             st.markdown("**required*")
 
-            if st.button("Connect to server", type="primary", use_container_width=True):
+            if st.button(
+                ":material/key_vertical: Connect & Save Credentials",
+                type="primary",
+                use_container_width=True,
+            ):
                 try:
                     credentials = ServerCredentials(
                         server=server, user=email, password=password
                     )
                     self.client.connect(credentials)
+                    store_scto_credentials(
+                        self.project_id,
+                        username=email,
+                        password=password,
+                        server=server,
+                        type="scto_login",
+                    )
                 except Exception as e:
                     st.error(f"Connection failed: {e}")
+
+    def _validate_private_key_text(self, private_key_text: str) -> bool:
+        """Validate the private key text format."""
+        if (
+            not private_key_text
+            or private_key_text is None
+            or not isinstance(private_key_text, str)
+        ):
+            raise ValidationError("Private key text cannot be empty")
+
+        startswith_p = "-----BEGIN RSA PRIVATE KEY-----"
+        endswith_p = "-----END RSA PRIVATE KEY-----"
+
+        # Check for PEM format
+        if not private_key_text.startswith(
+            startswith_p
+        ) or not private_key_text.endswith(endswith_p):
+            raise ValidationError(
+                f"Private key must start with '{startswith_p}' and end with '{endswith_p}'"
+            )
+
+        return True
 
     def render_form_config(
         self, edit_mode: bool = False, defaults: dict | None = None
@@ -792,18 +789,47 @@ class SurveyCTOUI:
             else:
                 st.markdown("### SurveyCTO Form Configuration")
 
-            # Server selection
-            server_list = self._get_server_list()
-            if not server_list:
+            # Credential selection
+            login_credentials = list_stored_credentials(self.project_id).get(
+                "credentials", {}
+            )
+            if not login_credentials:
                 st.warning(
-                    "No SurveyCTO servers configured. Please connect to a server first."
+                    "No SurveyCTO servers configured. Please connect to a server using the credential manager."
                 )
                 return
 
-            server = st.selectbox(
-                "Server*", options=server_list, key=f"surveyctoui_server{edit_mode}"
+            select_cred = st.selectbox(
+                "Select Server Credentials*",
+                options=list(login_credentials.keys()),
+                index=None,
+                help="Select the server credentials to use for this form",
+                key="scto_select_cred",
             )
 
+            try:
+                server = login_credentials[select_cred]["server"]
+                user = login_credentials[select_cred]["username"]
+                scto_cred = retrieve_scto_credentials(
+                    self.project_id, type="scto_login", server=server
+                )
+                if scto_cred:
+                    password = scto_cred.get("credentials", "").get("password", "")
+
+                # Validate credentials
+                try:
+                    self.client.connect(
+                        ServerCredentials(server=server, user=user, password=password),
+                        validate_permissions=True,
+                    )
+                except ConnectionError as e:
+                    st.error(f"Connection failed: {e}")
+                    return
+            except KeyError:
+                st.error(
+                    "Invalid credentials selected. Please check your credential manager."
+                )
+                return
             # Form selection with dynamic loading
             forms_info = self._get_forms_info()
             # concat form id and form names to create options
