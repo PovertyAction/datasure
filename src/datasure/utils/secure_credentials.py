@@ -17,7 +17,7 @@ from .cache_utils import get_cache_path
 logger = logging.getLogger(__name__)
 
 # Service identifiers for keyring
-SCTO_SERVICE_PREFIX = "datasure_scto"
+SCTO_SERVICE_PREFIX = "datasure"
 CREDENTIAL_METADATA_FILE = "credential_metadata.json"
 
 
@@ -25,18 +25,20 @@ class SecureCredentialError(Exception):
     """Exception raised when credential operations fail."""
 
 
-def _get_service_name(project_id: str, credential_type: str = "scto") -> str:
+def _get_service_name(
+    project_id: str, server: str = "", credential_type: str = "scto_login"
+) -> str:
     """Generate service name for keyring storage.
 
     Args:
         project_id: Project identifier
-        credential_type: Type of credential (default: scto)
+        credential_type: Type of credential (default: scto_login)
 
     Returns
     -------
         Service name for keyring
     """
-    return f"{SCTO_SERVICE_PREFIX}_{credential_type}_{project_id}"
+    return f"{SCTO_SERVICE_PREFIX}_{credential_type}_{server}_{project_id}"
 
 
 def _get_metadata_path(project_id: str) -> Path:
@@ -54,53 +56,80 @@ def _get_metadata_path(project_id: str) -> Path:
 
 def store_scto_credentials(
     project_id: str,
-    server: str,
     username: str,
     password: str,
+    server: str | None = None,
+    type: str = "scto_login",
     **metadata: Any,
 ) -> dict[str, Any]:
     """Store SurveyCTO credentials securely using system keyring.
 
     Args:
         project_id: Project identifier
-        server: SurveyCTO server name
-        username: SurveyCTO username/email
-        password: SurveyCTO password
+        server: SurveyCTO server name | None
+        username: SurveyCTO username/email | Alias
+        password: SurveyCTO password | private key
         **metadata: Additional metadata to store
 
     Returns
     -------
         Result dictionary with success/error status
     """
+    if type not in ["scto_login"]:
+        raise SecureCredentialError(
+            f"Invalid credential type: {type}. Must be 'scto_login'"
+        )
     try:
-        service_name = _get_service_name(project_id)
+        service_name = _get_service_name(project_id, server, type)
 
         # Store password in system keyring
         keyring.set_password(service_name, username, password)
 
         # Store non-sensitive metadata in JSON file
         metadata_info = {
-            "server": server,
-            "username": username,
-            "service_name": service_name,
-            "credential_type": "scto",
-            **metadata,
+            service_name: {
+                "server": server,
+                "username": username,
+                "credential_type": type,
+                **metadata,
+            }
         }
 
         metadata_path = _get_metadata_path(project_id)
         metadata_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # Load existing metadata
+        if metadata_path.exists():
+            try:
+                with open(metadata_path, encoding="utf-8") as f:
+                    existing_metadata = json.load(f)
+            except Exception:
+                print(f"Warning: Invalid JSON in {metadata_path}, starting fresh")
+                logger.warning(f"Invalid JSON in {metadata_path}, starting fresh")
+                existing_metadata = {}
+        else:
+            existing_metadata = {}
+
+        # Update with new service info
+        existing_metadata[service_name] = {
+            "server": server,
+            "username": username,
+            "credential_type": type,
+            **metadata,
+        }
+
+        # Save updated metadata
         with open(metadata_path, "w", encoding="utf-8") as f:
-            json.dump(metadata_info, f, indent=2)
+            json.dump(existing_metadata, f, indent=2)
 
-        # Set restrictive permissions on metadata file (owner read/write only)
-        try:
-            metadata_path.chmod(0o600)
-        except (OSError, NotImplementedError):
-            # Windows or other systems may not support chmod
-            logger.warning("Could not set restrictive permissions on metadata file")
+            # Set restrictive permissions on metadata file (owner read/write only)
+            try:
+                metadata_path.chmod(0o600)
+            except (OSError, NotImplementedError):
+                # Windows or other systems may not support chmod
+                logger.warning("Could not set restrictive permissions on metadata file")
 
-        logger.info(f"Stored SCTO credentials for project {project_id}")
+            logger.info(f"Stored {type} credentials for project {project_id}")
 
     except KeyringError as e:
         error_msg = f"Failed to store credentials in system keyring: {e}"
@@ -111,7 +140,7 @@ def store_scto_credentials(
             "error_type": "keyring_error",
         }
 
-    except (OSError, json.JSONEncodeError) as e:
+    except OSError as e:
         error_msg = f"Failed to store credential metadata: {e}"
         logger.exception(error_msg)
         return {
@@ -136,7 +165,9 @@ def store_scto_credentials(
         }
 
 
-def retrieve_scto_credentials(project_id: str) -> dict[str, Any]:
+def retrieve_scto_credentials(
+    project_id: str, server: str, type: str = "scto_login"
+) -> dict[str, Any]:
     """Retrieve SurveyCTO credentials from secure storage.
 
     Args:
@@ -160,8 +191,8 @@ def retrieve_scto_credentials(project_id: str) -> dict[str, Any]:
         with open(metadata_path, encoding="utf-8") as f:
             metadata = json.load(f)
 
-        service_name = metadata.get("service_name", _get_service_name(project_id))
-        username = metadata.get("username")
+        service_name = _get_service_name(project_id, server, type)
+        username = metadata.get(service_name).get("username")
 
         if not username:
             return {
@@ -179,19 +210,17 @@ def retrieve_scto_credentials(project_id: str) -> dict[str, Any]:
                 "error": "Password not found in system keyring",
                 "error_type": "password_not_found",
             }
-
-        logger.info(f"Retrieved SCTO credentials for project {project_id}")
-
-        return {
-            "success": True,
-            "credentials": {
-                "server": metadata.get("server"),
-                "username": username,
-                "password": password,
-            },
-            "metadata": metadata,
-        }
-
+        else:
+            logger.info(f"Retrieved SCTO credentials for project {project_id}")
+            return {
+                "success": True,
+                "credentials": {
+                    "server": server,
+                    "username": username,
+                    "password": password,
+                },
+                "metadata": metadata,
+            }
     except KeyringError as e:
         error_msg = f"Failed to retrieve password from keyring: {e}"
         logger.exception(error_msg)
@@ -220,7 +249,9 @@ def retrieve_scto_credentials(project_id: str) -> dict[str, Any]:
         }
 
 
-def delete_scto_credentials(project_id: str) -> dict[str, Any]:
+def delete_stored_credentials(
+    project_id: str, server: str, credential_type: str = "scto_login"
+) -> dict[str, Any]:
     """Delete SurveyCTO credentials from secure storage.
 
     Args:
@@ -243,7 +274,9 @@ def delete_scto_credentials(project_id: str) -> dict[str, Any]:
         with open(metadata_path, encoding="utf-8") as f:
             metadata = json.load(f)
 
-        service_name = metadata.get("service_name", _get_service_name(project_id))
+        service_name = metadata.get(
+            "service_name", _get_service_name(project_id, server, credential_type)
+        )
         username = metadata.get("username")
 
         # Delete from keyring
@@ -258,8 +291,14 @@ def delete_scto_credentials(project_id: str) -> dict[str, Any]:
 
         # Delete metadata file
         try:
-            metadata_path.unlink()
-            logger.info(f"Deleted credential metadata file: {metadata_path}")
+            # remove service-specific metadata
+            if service_name in metadata:
+                del metadata[service_name]
+            with open(metadata_path, "w", encoding="utf-8") as f:
+                json.dump(metadata, f, indent=2)
+            logger.info(
+                f"Deleted credential {service_name} from metadata file: {metadata_path}"
+            )
         except OSError as e:
             logger.warning(f"Could not delete metadata file: {e}")
 
@@ -292,8 +331,8 @@ def has_scto_credentials(project_id: str) -> bool:
     return metadata_path.exists()
 
 
-def list_stored_credentials() -> dict[str, Any]:
-    """List all projects with stored credentials.
+def list_stored_credentials(project_id: str) -> dict[str, Any]:
+    """List stored credentials for current project.
 
     Returns
     -------
@@ -301,38 +340,29 @@ def list_stored_credentials() -> dict[str, Any]:
     """
     try:
         cache_base = get_cache_path()
-        projects_with_credentials = []
+        credentials = {}
 
         if cache_base.exists():
-            for project_dir in cache_base.iterdir():
-                if project_dir.is_dir():
-                    metadata_path = project_dir / "settings" / CREDENTIAL_METADATA_FILE
-                    if metadata_path.exists():
-                        try:
-                            with open(metadata_path, encoding="utf-8") as f:
-                                metadata = json.load(f)
+            metadata_path = (
+                cache_base / project_id / "settings" / CREDENTIAL_METADATA_FILE
+            )
+            if metadata_path.exists():
+                try:
+                    with open(metadata_path, encoding="utf-8") as f:
+                        metadata = json.load(f)
 
-                            projects_with_credentials.append(
-                                {
-                                    "project_id": project_dir.name,
-                                    "server": metadata.get("server"),
-                                    "username": metadata.get("username"),
-                                    "credential_type": metadata.get(
-                                        "credential_type", "scto"
-                                    ),
-                                }
-                            )
-                        except (json.JSONDecodeError, OSError):
-                            logger.warning(
-                                f"Could not read metadata for {project_dir.name}"
-                            )
-
-        return {
-            "success": True,
-            "projects": projects_with_credentials,
-            "count": len(projects_with_credentials),
-        }
-
+                    for k in metadata:
+                        cred = metadata.get(k, {})
+                        dict_key = f"{cred.get('credential_type', 'scto_login')} - {cred.get('server', '')} - {cred.get('username', '')}"
+                        credentials[dict_key] = {
+                            "server": cred.get("server"),
+                            "username": cred.get("username"),
+                            "credential_type": cred.get(
+                                "credential_type", "scto_login"
+                            ),
+                        }
+                except (json.JSONDecodeError, OSError):
+                    logger.warning(f"Could not read metadata for {project_id}")
     except Exception as e:
         error_msg = f"Error listing stored credentials: {e}"
         logger.exception(error_msg)
@@ -341,6 +371,12 @@ def list_stored_credentials() -> dict[str, Any]:
             "error": error_msg,
             "error_type": "listing_error",
         }
+
+    return {
+        "success": True,
+        "credentials": credentials,
+        "count": len(credentials),
+    }
 
 
 def test_keyring_availability() -> dict[str, Any]:
