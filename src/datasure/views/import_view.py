@@ -8,7 +8,6 @@ from datasure.connectors import (
     local_add_form,
     local_load_action,
 )
-from datasure.connectors.scto import migrate_legacy_credentials
 from datasure.utils import (
     duckdb_get_aliases,
     duckdb_get_imported_datasets,
@@ -16,8 +15,14 @@ from datasure.utils import (
     duckdb_row_filter,
     duckdb_save_table,
 )
-from datasure.utils.cache_utils import get_cache_path
-from datasure.utils.secure_credentials import test_keyring_availability
+from datasure.utils.secure_credentials import (
+    delete_stored_credentials,
+    list_stored_credentials,
+    test_keyring_availability,
+)
+
+# --- Constants --- #
+CREDENTIAL_TYPE = ("SurveyCTO Login", "SurveyCTO Private Key")
 
 # --- CONFIGURE PAGE --- #
 
@@ -96,23 +101,60 @@ def load_raw_datasets(project_id: str) -> None:
             )
 
 
-# --- add login configuration ---#
-lc1, lc2, _ = st.columns(3)
+# --- Credential Manager --- #
 with st.container(border=True):
-    st.subheader("Import Configuration")
-    st.write("Configure the import connections for your project.")
-    with (
-        lc1,
-        st.popover(
-            "Add SurveyCTO Server", use_container_width=True, icon=":material/login:"
-        ),
-    ):
-        st.session_state.st_scto = SurveyCTOUI(project_id).render_login_form()
+    st.subheader(":material/key: Manage Credentials")
+    st.write("Import and manage your credentials for data import.")
+
+    kc1, kc2, kc3 = st.columns([0.4, 0.3, 0.3])
 
     with (
-        lc2,
+        kc1,
+        st.popover("Add Credentials", use_container_width=True, icon=":material/add:"),
+    ):
+        st.write("Add your credentials for data import.")
+        select_cred_type = st.selectbox(
+            "Select Credential Type",
+            options=CREDENTIAL_TYPE,
+            index=0,
+            key="cred_type_select",
+            disabled=True,
+        )
+        if select_cred_type == "SurveyCTO Login":
+            SurveyCTOUI(project_id).render_login_form()
+
+    with (
+        kc2,
         st.popover(
-            "🔐 Check Security", use_container_width=True, icon=":material/security:"
+            "Remove Credentials", use_container_width=True, icon=":material/delete:"
+        ),
+    ):
+        st.write("**Remove Credentials**")
+        saved_credentials = list_stored_credentials(project_id).get("credentials", {})
+        select_credentials = st.selectbox(
+            "Select Crendetials to Deleted",
+            options=saved_credentials.keys(),
+            index=None,
+        )
+        if st.button(
+            "Delete Credentials",
+            type="primary",
+            use_container_width=True,
+            disabled=not select_credentials,
+        ):
+            selected_server = saved_credentials[select_credentials].get("server", "")
+            selected_type = saved_credentials[select_credentials].get("type", "")
+            delete_stored_credentials(
+                project_id=project_id,
+                server=selected_type,
+                credential_type=selected_type,
+            )
+            st.success(f"Credentials for {select_credentials} deleted successfully.")
+
+    with (
+        kc3,
+        st.popover(
+            "Keyring Diagnostics", use_container_width=True, icon=":material/build:"
         ),
     ):
         st.write("**Keyring Diagnostics**")
@@ -129,24 +171,6 @@ with st.container(border=True):
                 - **macOS**: Check Keychain Access permissions
                 - **Linux**: Install and configure a keyring backend (gnome-keyring, kwallet)
                 """)
-
-        st.write("**Migration Status:**")
-        legacy_file = st.session_state.get("st_project_id")
-        if legacy_file:
-            legacy_path = get_cache_path(legacy_file, "settings", "scto.json")
-            if legacy_path.exists():
-                st.warning("🔄 Legacy credentials detected")
-                if st.button("Migrate Legacy Credentials", use_container_width=True):
-                    if migrate_legacy_credentials(legacy_file):
-                        st.success("Migration completed!")
-                    else:
-                        st.error("Migration failed")
-            else:
-                st.success("✅ No legacy credentials found")
-
-        st.write("**Raw Diagnostic Data:**")
-        if st.button("Show Details", use_container_width=True):
-            st.json(test_keyring_availability())
 
 st.subheader("Import data from multiple sources")
 
