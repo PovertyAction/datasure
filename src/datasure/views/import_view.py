@@ -20,6 +20,7 @@ from datasure.utils.secure_credentials import (
     list_stored_credentials,
     test_keyring_availability,
 )
+from datasure.utils.settings_utils import trigger_save
 
 # --- Constants --- #
 CREDENTIAL_TYPE = ("SurveyCTO Login", "SurveyCTO Private Key")
@@ -84,6 +85,7 @@ def load_raw_datasets(project_id: str) -> None:
                         alias=row["alias"],
                         form_id=row["form_id"],
                         server=row["server"],
+                        username=row["username"] if row["username"] else None,
                         private_key=row["private_key"] if row["private_key"] else None,
                         save_to=row["save_to"] if row["save_to"] else None,
                         attachments=row["attachments"],
@@ -99,6 +101,58 @@ def load_raw_datasets(project_id: str) -> None:
             status.update(
                 label="Data loaded successfully!", state="complete", expanded=True
             )
+
+
+# --- Update import log in the cache file --- #
+def update_import_log(import_log: pl.DataFrame) -> None:
+    """Update the import log in the cache file."""
+    # reaarnge columns to match the import log structure
+    import_log = import_log.select(
+        [
+            "refresh",
+            "load",
+            "alias",
+            "filename",
+            "sheet_name",
+            "source",
+            "server",
+            "username",
+            "form_id",
+            "private_key",
+            "save_to",
+            "attachments",
+        ]
+    )
+    edited_import_log = st.data_editor(
+        data=import_log,
+        key="import_data_editor",
+        use_container_width=True,
+        column_config={
+            "refresh": st.column_config.CheckboxColumn("Refresh?"),
+            "load": st.column_config.CheckboxColumn("Load?"),
+            "alias": st.column_config.TextColumn("Alias", disabled=True),
+            "filename": st.column_config.TextColumn("Filename", disabled=True),
+            "sheet_name": st.column_config.TextColumn("Sheet Name", disabled=True),
+            "source": st.column_config.TextColumn("Source", disabled=True),
+            "server": st.column_config.TextColumn("Server", disabled=True),
+            "username": st.column_config.TextColumn("Username", disabled=True),
+            "form_id": st.column_config.TextColumn("Form ID", disabled=True),
+            "private_key": st.column_config.TextColumn("Private Key", disabled=True),
+            "save_to": st.column_config.TextColumn("Save To", disabled=True),
+            "attachments": st.column_config.CheckboxColumn("Download Media?"),
+        },
+        on_change=trigger_save,
+        kwargs={"state_name": "refresh_import_log"},
+    )
+    if "refresh_import_log" in st.session_state and st.session_state.refresh_import_log:
+        # Save the edited import log to the database
+        duckdb_save_table(
+            project_id=project_id,
+            table_data=edited_import_log,
+            alias="import_log",
+            db_name="logs",
+        )
+        st.session_state.refresh_import_log = False
 
 
 # --- Credential Manager --- #
@@ -239,34 +293,7 @@ with (
 import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
 if not import_log.is_empty():
     # -- Update import log in the DB on change -- #
-    def update_import_log():
-        """Update the import log in the cache file."""
-        duckdb_save_table(
-            project_id,
-            edited_import_log,
-            alias="import_log",
-            db_name="logs",
-        )
-
-    edited_import_log = st.data_editor(
-        data=import_log,
-        key="import_data_editor",
-        use_container_width=True,
-        column_config={
-            "refresh": st.column_config.CheckboxColumn("Refresh"),
-            "load": st.column_config.CheckboxColumn("Load"),
-            "alias": st.column_config.TextColumn("Alias", disabled=True),
-            "filename": st.column_config.TextColumn("Filename", disabled=True),
-            "sheet_name": st.column_config.TextColumn("Sheet Name", disabled=True),
-            "source": st.column_config.TextColumn("Source", disabled=True),
-            "server": st.column_config.TextColumn("Server", disabled=True),
-            "form_id": st.column_config.TextColumn("Form ID", disabled=True),
-            "private_key": st.column_config.TextColumn("Private Key", disabled=True),
-            "save_to": st.column_config.TextColumn("Save To", disabled=True),
-            "attachments": st.column_config.CheckboxColumn("Download Attachments?"),
-        },
-        on_change=update_import_log,
-    )
+    update_import_log(import_log)
 
     # -- Load data from import configurations -- #
     ld1, ld2 = st.columns([0.3, 0.7])
