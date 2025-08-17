@@ -1,5 +1,4 @@
 import contextlib
-import json
 import logging
 import os
 import re
@@ -15,7 +14,7 @@ import requests
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
 
-from datasure.utils import duckdb_get_table, duckdb_save_table, get_cache_path
+from datasure.utils import duckdb_get_table, duckdb_save_table
 
 # Import secure credential storage
 from datasure.utils.secure_credentials import (
@@ -163,6 +162,7 @@ class FormConfig(BaseModel):
     alias: str = Field(..., min_length=1, max_length=64)
     form_id: str = Field(..., min_length=1, max_length=64)
     server: str = Field(..., min_length=2, max_length=64)
+    username: str | None = Field(None, min_length=4, max_length=128)
     private_key: str | None = None
     save_to: str | None = None
     attachments: bool = False
@@ -199,24 +199,6 @@ class CacheManager:
     def __init__(self, project_id: str):
         self.project_id = project_id
         self.logger = logging.getLogger(__name__)
-
-    def get_server_cache(self) -> dict:
-        """Get cached server credentials."""
-        try:
-            cache_file = get_cache_path(self.project_id, "settings", "scto.json")
-            if cache_file.exists():
-                return json.loads(cache_file.read_text())
-            else:
-                return {}
-        except Exception as e:
-            self.logger.warning(f"Failed to read cache: {e}")
-            return {}
-
-    def save_server_cache(self, credentials: ServerCredentials) -> None:
-        """Save server credentials to cache."""
-        cache_file = get_cache_path(self.project_id, "settings", "scto.json")
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
-        cache_file.write_text(credentials.json())
 
     def get_existing_data(self, file_path: str) -> tuple[pd.DataFrame, datetime]:
         """Load existing data and return with latest submission date."""
@@ -351,6 +333,7 @@ class MediaDownloader:
 
         for col in cols:
             media_data = data[data[col].notna()][["KEY", col]].reset_index()
+            media_data = media_data[media_data[col].str.strip() != ""]
 
             if len(media_data) > 0:
                 progress_bar = st.progress(0, text=f"Downloading {col} media files...")
@@ -382,8 +365,10 @@ class MediaDownloader:
         clean_key = submission_key.replace("uuid:", "")
         filename = f"{field_name}_{clean_key}{file_ext}"
 
-        media_content = self.scto_client.get_attachment(url, key=encryption_key)
-        (media_folder / filename).write_bytes(media_content)
+        # if file exists, skip download
+        if not (media_folder / filename).exists():
+            media_content = self.scto_client.get_attachment(url, key=encryption_key)
+            (media_folder / filename).write_bytes(media_content)
 
 
 class SurveyCTOClient:
@@ -398,7 +383,7 @@ class SurveyCTOClient:
         self._scto_client = None
 
     def connect(
-        self, credentials: ServerCredentials, validate_permissions: bool = True
+        self, credentials: ServerCredentials, validate_permissions: bool = False
     ) -> dict[str, any]:
         """
         Establish connection to SurveyCTO server and validate credentials.
@@ -460,9 +445,6 @@ class SurveyCTOClient:
                         f"Successfully connected to {credentials.server}. Found {server_forms_count} forms."
                     )
 
-                    # Save credentials only after successful validation
-                    self.cache_manager.save_server_cache(credentials)
-
                     # Show success message with details
                     if len(forms_list) > 0:
                         st.success(
@@ -500,7 +482,6 @@ class SurveyCTOClient:
             else:
                 # Skip validation, just create connection
                 connection_info["connected"] = True
-                self.cache_manager.save_server_cache(credentials)
                 st.success(
                     f"✅ Connection created for server '{credentials.server}' (validation skipped)."
                 )
@@ -577,14 +558,25 @@ class SurveyCTOClient:
     def import_data(self, form_config: FormConfig) -> int:
         """Import data from SurveyCTO form."""
         if not self._scto_client:
-            # Try to reconnect using cached credentials
-            cache = self.cache_manager.get_server_cache()
-            if cache:
-                credentials = ServerCredentials(**cache)
-                self.connect(credentials)
-            else:
-                raise ConnectionError("Not connected to server")
+            server = form_config.server
+            user = form_config.username
+            if not server or not user:
+                raise ValueError("Server and username must be provided")
+            try:
+                scto_cred = retrieve_scto_credentials(
+                    self.project_id, type="scto_login", server=server
+                )
+                password = scto_cred.get("credentials", {}).get("password", "")
+            except KeyError:
+                raise KeyError("Credentials not found in secure storage") from None
 
+            credentials = ServerCredentials(server=server, user=user, password=password)
+            try:
+                self._scto_client = self._scto_client = pysurveycto.SurveyCTOObject(
+                    credentials.server, credentials.user, credentials.password
+                )
+            except ConnectionError:
+                raise ConnectionError("Not connected to server") from None
         try:
             # Try server dataset first
             return self._import_server_dataset(form_config)
@@ -743,7 +735,7 @@ class SurveyCTOUI:
                     credentials = ServerCredentials(
                         server=server, user=email, password=password
                     )
-                    self.client.connect(credentials)
+                    self.client.connect(credentials, validate_permissions=True)
                     store_scto_credentials(
                         self.project_id,
                         username=email,
@@ -820,7 +812,7 @@ class SurveyCTOUI:
                 try:
                     self.client.connect(
                         ServerCredentials(server=server, user=user, password=password),
-                        validate_permissions=True,
+                        validate_permissions=False,
                     )
                 except ConnectionError as e:
                     st.error(f"Connection failed: {e}")
@@ -962,6 +954,7 @@ class SurveyCTOUI:
                     alias=alias,
                     form_id=form_id,
                     server=server,
+                    username=user,
                     private_key=str(private_key_file) or None,
                     save_to=str(save_file) or None,
                     attachments=attachments,
@@ -1142,6 +1135,7 @@ class SurveyCTOUI:
             "filename": "",
             "sheet_name": "",
             "server": form_config.server,
+            "username": form_config.username or "",
             "form_id": form_config.form_id,
             "private_key": form_config.private_key or "",
             "save_to": form_config.save_to or "",
