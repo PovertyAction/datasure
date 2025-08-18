@@ -192,6 +192,12 @@ def retrieve_scto_credentials(
             metadata = json.load(f)
 
         service_name = _get_service_name(project_id, server, type)
+        if not service_name or service_name not in metadata:
+            return {
+                "success": False,
+                "error": f"Invalid credential metadata: missing service '{service_name}'",
+                "error_type": "invalid_metadata",
+            }
         username = metadata.get(service_name).get("username")
 
         if not username:
