@@ -14,7 +14,7 @@ import requests
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
 
-from datasure.utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 
 # Import secure credential storage
 from datasure.utils.secure_credentials import (
@@ -22,9 +22,101 @@ from datasure.utils.secure_credentials import (
     retrieve_scto_credentials,
     store_scto_credentials,
 )
+from datasure.utils.settings_utils import ProjectID
 
 # --- Constants --- #
 SCTO_KEY_IMPORT_OPTIONS = ("Import from File", "Paste private key text")
+
+# --- Configuration and Models --- #
+
+
+class FormType(str, Enum):
+    """Enum for form types."""
+
+    REGULAR = "regular"
+    SERVER_DATASET = "server_dataset"
+
+
+class MediaType(str, Enum):
+    """Enum for media types."""
+
+    IMAGE = "image"
+    AUDIO = "audio"
+    VIDEO = "video"
+    FILE = "file"
+    COMMENTS = "comments"
+    TEXT_AUDIT = "text audit"
+    AUDIO_AUDIT = "audio audit"
+    SENSOR_STREAM = "sensor stream"
+
+
+@dataclass
+class SurveyCTOConfig:
+    """Configuration for SurveyCTO operations."""
+
+    max_retries: int = 3
+    timeout: int = 30
+    chunk_size: int = 1000
+    default_date: datetime = datetime(2024, 1, 1, 13, 40, 40)
+
+
+class ServerCredentials(BaseModel):
+    """Model for server credentials with validation."""
+
+    server: str = Field(..., min_length=2, max_length=64)
+    user: str = Field(..., min_length=4, max_length=128)
+    password: str = Field(..., min_length=1)
+
+    @field_validator("server")
+    def validate_server(cls, v):
+        """Validate server name format."""
+        if not re.fullmatch(r"^[a-z][a-z0-9]{1,63}", v):
+            raise ValueError("Invalid SurveyCTO server name format")
+        return v
+
+    @field_validator("user")
+    def validate_user(cls, v):
+        """Validate user email format."""
+        if not re.fullmatch(
+            r"^[A-Za-z0-9\._\-\+%]+@[A-Za-z0-9\.\-]+\.[A-Z|a-z]{2,7}$", v
+        ):
+            raise ValueError("Invalid email format for SurveyCTO user")
+        return v
+
+
+class FormConfig(BaseModel):
+    """Model for form configuration."""
+
+    alias: str = Field(..., min_length=1, max_length=64)
+    form_id: str = Field(..., min_length=1, max_length=64)
+    server: str = Field(..., min_length=2, max_length=64)
+    username: str | None = Field(None, min_length=4, max_length=128)
+    private_key: str | None = None
+    save_to: str | None = None
+    attachments: bool = False
+    refresh: bool = True
+
+
+# --- Exceptions --- #
+
+
+class SurveyCTOError(Exception):
+    """Base exception for SurveyCTO operations."""
+
+    pass
+
+
+class ConnectionError(SurveyCTOError):
+    """Exception for connection errors."""
+
+    pass
+
+
+class ValidationError(SurveyCTOError):
+    """Exception for validation errors."""
+
+    pass
+
 
 # --- SurveyCTO Server Connect Button Click Action --- #
 
@@ -86,110 +178,6 @@ def scto_server_connect(servername: str, username: str, password: str) -> str:
         st.stop()
 
 
-# --- Configuration and Models --- #
-
-
-class FormType(str, Enum):
-    """Enum for form types."""
-
-    REGULAR = "regular"
-    SERVER_DATASET = "server_dataset"
-
-
-class MediaType(str, Enum):
-    """Enum for media types."""
-
-    IMAGE = "image"
-    AUDIO = "audio"
-    VIDEO = "video"
-    FILE = "file"
-    COMMENTS = "comments"
-    TEXT_AUDIT = "text audit"
-    AUDIO_AUDIT = "audio audit"
-    SENSOR_STREAM = "sensor stream"
-
-
-@dataclass
-class SurveyCTOConfig:
-    """Configuration for SurveyCTO operations."""
-
-    max_retries: int = 3
-    timeout: int = 30
-    chunk_size: int = 1000
-    default_date: datetime = datetime(2024, 1, 1, 13, 40, 40)
-
-
-class ProjectID(BaseModel):
-    """Model for project ID with validation."""
-
-    project_id: str = Field(..., min_length=8, max_length=8)
-
-    @field_validator("project_id")
-    def validate_project_id(cls, v):
-        """Validate project ID format."""
-        if not re.fullmatch(r"^[a-z0-9]{8}$", v):
-            raise ValueError("Project ID must be alphanumeric and 8 characters long")
-        return v
-
-
-class ServerCredentials(BaseModel):
-    """Model for server credentials with validation."""
-
-    server: str = Field(..., min_length=2, max_length=64)
-    user: str = Field(..., min_length=4, max_length=128)
-    password: str = Field(..., min_length=1)
-
-    @field_validator("server")
-    def validate_server(cls, v):
-        """Validate server name format."""
-        if not re.fullmatch(r"^[a-z][a-z0-9]{1,63}", v):
-            raise ValueError("Invalid SurveyCTO server name format")
-        return v
-
-    @field_validator("user")
-    def validate_user(cls, v):
-        """Validate user email format."""
-        if not re.fullmatch(
-            r"^[A-Za-z0-9\._\-\+%]+@[A-Za-z0-9\.\-]+\.[A-Z|a-z]{2,7}$", v
-        ):
-            raise ValueError("Invalid email format for SurveyCTO user")
-        return v
-
-
-class FormConfig(BaseModel):
-    """Model for form configuration."""
-
-    alias: str = Field(..., min_length=1, max_length=64)
-    form_id: str = Field(..., min_length=1, max_length=64)
-    server: str = Field(..., min_length=2, max_length=64)
-    username: str | None = Field(None, min_length=4, max_length=128)
-    private_key: str | None = None
-    save_to: str | None = None
-    attachments: bool = False
-    refresh: bool = True
-
-
-# --- Exceptions --- #
-
-
-class SurveyCTOError(Exception):
-    """Base exception for SurveyCTO operations."""
-
-    pass
-
-
-class ConnectionError(SurveyCTOError):
-    """Exception for connection errors."""
-
-    pass
-
-
-class ValidationError(SurveyCTOError):
-    """Exception for validation errors."""
-
-    pass
-
-
 # --- Core Classes --- #
 
 
@@ -197,7 +185,7 @@ class CacheManager:
     """Manages caching operations for SurveyCTO data."""
 
     def __init__(self, project_id: str):
-        self.project_id = project_id
+        self.project_id = ProjectID(project_id=project_id)
         self.logger = logging.getLogger(__name__)
 
     def get_existing_data(self, file_path: str) -> tuple[pd.DataFrame, datetime]:
@@ -333,6 +321,9 @@ class MediaDownloader:
 
         for col in cols:
             media_data = data[data[col].notna()][["KEY", col]].reset_index()
+            if media_data.empty:
+                self.logger.info(f"No media files found for field '{col}'")
+                continue
             media_data = media_data[media_data[col].str.strip() != ""]
 
             if len(media_data) > 0:
@@ -375,7 +366,7 @@ class SurveyCTOClient:
     """Main client for SurveyCTO operations."""
 
     def __init__(self, project_id: str, config: SurveyCTOConfig | None = None):
-        self.project_id = project_id
+        self.project_id = ProjectID(project_id=project_id)
         self.config = config or SurveyCTOConfig()
         self.cache_manager = CacheManager(project_id)
         self.data_processor = DataProcessor()
@@ -678,7 +669,7 @@ class SurveyCTOUI:
     """Streamlit UI components for SurveyCTO integration."""
 
     def __init__(self, project_id: str):
-        self.project_id = project_id
+        self.project_id = ProjectID(project_id=project_id)
         self.client = SurveyCTOClient(project_id)
         self.logger = logging.getLogger(__name__)
 
@@ -1191,7 +1182,7 @@ class SurveyCTOUI:
 # --- Main Functions --- #
 
 
-def download_forms(project_id: str, form_configs: list[FormConfig]) -> None:
+def download_forms(project_id: ProjectID, form_configs: list[FormConfig]) -> None:
     """Download data for multiple forms with progress tracking."""
     if not form_configs:
         st.warning("No forms selected for download")
