@@ -69,8 +69,8 @@ class TestProjectIDRegex:
 
         for project_id in invalid_project_ids:
             with pytest.raises(
-                ValidationError,
-                match="Project ID must be alphanumeric and 8 characters long",
+                ValueError,
+                match="Project ID must be alphanumeric only and exactly 8 characters long",
             ):
                 ProjectID(project_id=project_id)
 
@@ -542,7 +542,7 @@ class TestRegressionPrevention:
         special_chars = r"\.[]{}()*+?^$|/"
 
         for char in special_chars:
-            test_project_id = "abc123" + char + "d"
+            test_project_id = "abc12345" + char + "d"
             test_server = "test" + char + "server"
             test_email = "user" + char + "@example.com"
 
@@ -635,7 +635,8 @@ class TestComprehensiveCoverage:
         """Test that error messages are consistent and informative."""
         # Test project ID error messages
         with pytest.raises(
-            ValueError, match="Project ID must be alphanumeric and 8 characters long"
+            ValueError,
+            match="Project ID must be alphanumeric only and exactly 8 characters long",
         ):
             ProjectID(project_id="invalid!")
 

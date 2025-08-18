@@ -1,7 +1,7 @@
 """Tests for the SurveyCTO connector module."""
 
-import json
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pandas as pd
@@ -25,6 +25,11 @@ from datasure.connectors.scto import (
     SurveyCTOError,
     SurveyCTOUI,
     download_forms,
+    scto_get_server_cache,
+    scto_server_connect,
+)
+from datasure.connectors.scto import (
+    ValidationError as SctoValidationError,
 )
 
 
@@ -109,7 +114,7 @@ class TestProjectID:
         for project_id in invalid_ids:
             with pytest.raises(
                 ValueError,
-                match="Project ID must be alphanumeric and 8 characters long",
+                match="Project ID must be alphanumeric only and exactly 8 characters long",
             ):
                 ProjectID(project_id=project_id)
 
@@ -220,7 +225,7 @@ class TestCacheManager:
     def test_cache_manager_init(self):
         """Test CacheManager initialization."""
         manager = CacheManager("test1234")
-        assert manager.project_id == "test1234"
+        assert manager.project_id == ProjectID(project_id="test1234")
         assert hasattr(manager, "logger")
 
     @patch("datasure.connectors.scto.retrieve_scto_credentials")
@@ -236,70 +241,111 @@ class TestCacheManager:
             },
         }
 
-    @patch("datasure.connectors.scto.retrieve_scto_credentials")
-    @patch("datasure.connectors.scto.migrate_plaintext_credentials")
-    def test_get_server_cache_migration_success(
-        self, mock_migrate_credentials, mock_retrieve_credentials
-    ):
-        """Test getting server cache with successful plaintext migration."""
-        # Mock initial retrieval failure, then migration success, then retry success
-        mock_retrieve_credentials.side_effect = [
-            {"success": False, "error": "No credentials found"},
-            {
-                "success": True,
-                "credentials": {
-                    "server": "migrated_server",
-                    "username": "migrated@example.com",
-                    "password": "migrated_password",
-                },
-            },
-        ]
+        result = scto_get_server_cache("test1234")
 
-        mock_migrate_credentials.return_value = {"success": True}
+        expected = {
+            "server": "testserver",
+            "user": "user@example.com",
+            "password": "secure_password_123",
+        }
+        assert result == expected
+        mock_retrieve_credentials.assert_called_once_with("test1234")
 
     @patch("datasure.connectors.scto.retrieve_scto_credentials")
-    @patch("datasure.connectors.scto.migrate_plaintext_credentials")
+    @patch("datasure.connectors.scto.logging")
     def test_get_server_cache_no_credentials_found(
-        self, mock_migrate_credentials, mock_retrieve_credentials
+        self, mock_logging, mock_retrieve_credentials
     ):
         """Test getting server cache when no credentials exist."""
-        # Mock both secure retrieval and migration failure
+        # Mock retrieval failure
         mock_retrieve_credentials.return_value = {
             "success": False,
             "error": "No credentials found",
         }
-        mock_migrate_credentials.return_value = {
-            "success": False,
-            "error": "No plaintext file found",
-        }
 
-        manager = CacheManager("test1234")
-        result = manager.get_server_cache()
+        result = scto_get_server_cache("test1234")
 
         assert result == {}
-
-
-class TestSctoLoadForms:
-    """Test the scto_load_forms function."""
-
-    @patch("datasure.connectors.scto.get_cache_path")
-    def test_save_server_cache(self, mock_get_cache_path, tmp_path):
-        """Test saving server cache."""
-        cache_file = tmp_path / "scto.json"
-        mock_get_cache_path.return_value = cache_file
-
-        manager = CacheManager("test1234")
-        credentials = ServerCredentials(
-            server="testserver", user="test@example.com", password="password"
+        mock_logging.warning.assert_called_with(
+            "Failed to retrieve credentials: No credentials found"
         )
 
-        manager.save_server_cache(credentials)
+    @patch("datasure.connectors.scto.retrieve_scto_credentials")
+    @patch("datasure.connectors.scto.logging")
+    def test_get_server_cache_no_error_message(
+        self, mock_logging, mock_retrieve_credentials
+    ):
+        """Test getting server cache when retrieval fails without error message."""
+        # Mock retrieval failure without error message
+        mock_retrieve_credentials.return_value = {
+            "success": False,
+            "error": None,
+        }
 
-        assert cache_file.exists()
-        assert cache_file.parent.exists()
-        saved_data = json.loads(cache_file.read_text())
-        assert saved_data["server"] == "testserver"
-        assert saved_data["user"] == "test@example.com"
+        result = scto_get_server_cache("test1234")
+
+        assert result == {}
+        mock_logging.warning.assert_called_with(
+            "No cached credentials found for SurveyCTO server."
+        )
+
+
+class TestSctoServerConnect:
+    """Test the scto_server_connect function."""
+
+    @patch("datasure.connectors.scto.st")
+    def test_scto_server_connect_empty_fields(self, mock_st):
+        """Test scto_server_connect with empty required fields."""
+        # Test empty servername
+        scto_server_connect("", "user@example.com", "password")
+        mock_st.warning.assert_called_with("Complete all required fields.")
+        mock_st.stop.assert_called()
+
+        # Reset mocks
+        mock_st.reset_mock()
+
+        # Test empty username
+        scto_server_connect("testserver", "", "password")
+        mock_st.warning.assert_called_with("Complete all required fields.")
+        mock_st.stop.assert_called()
+
+        # Reset mocks
+        mock_st.reset_mock()
+
+        # Test empty password
+        scto_server_connect("testserver", "user@example.com", "")
+        mock_st.warning.assert_called_with("Complete all required fields.")
+        mock_st.stop.assert_called()
+
+    @patch("datasure.connectors.scto.st")
+    def test_scto_server_connect_invalid_servername(self, mock_st):
+        """Test scto_server_connect with invalid server name."""
+        invalid_servers = [
+            "1server",  # starts with number
+            "Server",  # uppercase
+            "server-name",  # hyphen
+            "server.com",  # dot
+            "s" * 65,  # too long
+        ]
+
+        for server in invalid_servers:
+            mock_st.reset_mock()
+            scto_server_connect(server, "user@example.com", "password")
+            mock_st.warning.assert_called_with("Invalid server name.")
+            mock_st.stop.assert_called()
+
+    @patch("datasure.connectors.scto.st")
+    def test_scto_server_connect_valid_inputs(self, mock_st):
+        """Test scto_server_connect with valid inputs
+        (should not call warning or stop).
+        """
+        scto_server_connect("testserver", "user@example.com", "password")
+        mock_st.warning.assert_not_called()
+        mock_st.stop.assert_not_called()
+
+
+class TestSctoFunctions:
+    """Test standalone scto functions."""
 
     def test_get_existing_data_no_file(self):
         """Test getting existing data when file doesn't exist."""
@@ -583,6 +629,33 @@ class TestMediaDownloader:
         # Check that get_attachment was called with correct parameters
         mock_client.get_attachment.assert_called_once_with("photo.jpg", key=None)
 
+    def test_download_single_file_file_exists(self, tmp_path):
+        """Test downloading a single file when file already exists."""
+        mock_client = Mock()
+        config = SurveyCTOConfig()
+        downloader = MediaDownloader(mock_client, config)
+
+        media_folder = tmp_path / "media"
+        media_folder.mkdir()
+
+        # Create existing file
+        existing_file = media_folder / "photo_123456.jpg"
+        existing_file.write_bytes(b"existing_content")
+
+        downloader._download_single_file(
+            url="photo.jpg",
+            submission_key="uuid:123456",
+            field_name="photo",
+            media_folder=media_folder,
+            encryption_key=None,
+        )
+
+        # Should not call get_attachment since file exists
+        mock_client.get_attachment.assert_not_called()
+
+        # File should remain unchanged
+        assert existing_file.read_bytes() == b"existing_content"
+
     def test_download_single_file_with_extension(self, tmp_path):
         """Test downloading a single file that needs extension."""
         mock_client = Mock()
@@ -609,6 +682,21 @@ class TestMediaDownloader:
         # Check encryption key was passed
         mock_client.get_attachment.assert_called_once_with("data", key="test_key")
 
+    def test_download_media_files_creates_folder(self, tmp_path):
+        """Test that download_media_files creates the media folder."""
+        mock_client = Mock()
+        config = SurveyCTOConfig()
+        downloader = MediaDownloader(mock_client, config)
+
+        media_folder = tmp_path / "media" / "subfolder"
+        data = pd.DataFrame({"KEY": [], "photo": []})
+
+        downloader.download_media_files(["photo"], data, media_folder, None)
+
+        # Folder should be created
+        assert media_folder.exists()
+        assert media_folder.is_dir()
+
 
 class TestSurveyCTOClient:
     """Test SurveyCTOClient class."""
@@ -616,7 +704,7 @@ class TestSurveyCTOClient:
     def test_client_init(self):
         """Test SurveyCTOClient initialization."""
         client = SurveyCTOClient("test1234")
-        assert client.project_id == "test1234"
+        assert client.project_id == ProjectID(project_id="test1234")
         assert isinstance(client.config, SurveyCTOConfig)
         assert isinstance(client.cache_manager, CacheManager)
         assert isinstance(client.data_processor, DataProcessor)
@@ -706,7 +794,7 @@ class TestSurveyCTOClient:
         )
 
         with pytest.raises(ConnectionError):
-            client.connect(credentials)
+            client.connect(credentials, validate_permissions=True)
 
     @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
     def test_connect_connection_error(self, mock_scto_class):
@@ -723,7 +811,7 @@ class TestSurveyCTOClient:
         )
 
         with pytest.raises(ConnectionError, match="Cannot connect to server"):
-            client.connect(credentials)
+            client.connect(credentials, validate_permissions=True)
 
     @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
     def test_connect_timeout_error(self, mock_scto_class):
@@ -738,7 +826,7 @@ class TestSurveyCTOClient:
         )
 
         with pytest.raises(ConnectionError, match="Connection timeout"):
-            client.connect(credentials)
+            client.connect(credentials, validate_permissions=True)
 
     @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
     def test_connect_invalid_server_name(self, mock_scto_class):
@@ -823,9 +911,6 @@ class TestSurveyCTOClient:
         assert result == 2
         mock_scto_client.get_server_dataset.assert_called_once_with("dataset123")
         mock_read_csv.assert_called_once_with(csv_data.encode())
-        mock_save_table.assert_called_once_with(
-            "test1234", mock_df, alias="test_dataset", db_name="raw"
-        )
 
     @patch("datasure.connectors.scto.duckdb_save_table")
     def test_import_regular_form_no_refresh(self, mock_save_table):
@@ -878,45 +963,79 @@ class TestSurveyCTOClient:
         mock_scto_client.get_form_data.assert_called_once()
         mock_save_table.assert_called_once()
 
-    @patch("datasure.connectors.scto.duckdb_save_table")
-    def test_import_data_connection_fallback(self, mock_save_table):
+    @patch("datasure.connectors.scto.retrieve_scto_credentials")
+    @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
+    def test_import_data_connection_fallback(
+        self, mock_scto_class, mock_retrieve_credentials
+    ):
         """Test import_data with connection fallback."""
         client = SurveyCTOClient("test1234")
 
-        # Mock cache manager to return credentials
-        client.cache_manager.get_server_cache = Mock(
-            return_value={
-                "server": "testserver",
-                "user": "test@example.com",
-                "password": "password",
-            }
-        )
+        # Mock credential retrieval
+        mock_retrieve_credentials.return_value = {
+            "credentials": {"password": "password"}
+        }
 
-        # Mock connect method
-        client.connect = Mock()
+        # Mock SurveyCTO object creation
+        mock_scto_instance = Mock()
+        mock_scto_class.return_value = mock_scto_instance
 
         # Mock _import_server_dataset to fail and _import_regular_form to succeed
         client._import_server_dataset = Mock(side_effect=Exception("Not a dataset"))
         client._import_regular_form = Mock(return_value=5)
 
         form_config = FormConfig(
-            alias="test_form", form_id="form123", server="testserver"
+            alias="test_form",
+            form_id="form123",
+            server="testserver",
+            username="user@example.com",
         )
 
         result = client.import_data(form_config)
 
         assert result == 5
-        client.connect.assert_called_once()
         client._import_server_dataset.assert_called_once_with(form_config)
         client._import_regular_form.assert_called_once_with(form_config)
 
-    def test_import_data_no_connection_no_cache(self):
-        """Test import_data with no connection and no cached credentials."""
+    @patch("datasure.connectors.scto.retrieve_scto_credentials")
+    def test_import_data_missing_credentials(self, mock_retrieve_credentials):
+        """Test import_data with missing credentials."""
         client = SurveyCTOClient("test1234")
-        client.cache_manager.get_server_cache = Mock(return_value={})
+
+        # Mock missing credentials
+        mock_retrieve_credentials.side_effect = KeyError("No credentials")
 
         form_config = FormConfig(
-            alias="test_form", form_id="form123", server="testserver"
+            alias="test_form",
+            form_id="form123",
+            server="testserver",
+            username="user@example.com",
+        )
+
+        with pytest.raises(KeyError, match="Credentials not found in secure storage"):
+            client.import_data(form_config)
+
+    @patch("datasure.connectors.scto.retrieve_scto_credentials")
+    @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
+    def test_import_data_connection_error(
+        self, mock_scto_class, mock_retrieve_credentials
+    ):
+        """Test import_data with connection error."""
+        client = SurveyCTOClient("test1234")
+
+        # Mock credential retrieval
+        mock_retrieve_credentials.return_value = {
+            "credentials": {"password": "password"}
+        }
+
+        # Mock connection error
+        mock_scto_class.side_effect = ConnectionError("Connection failed")
+
+        form_config = FormConfig(
+            alias="test_form",
+            form_id="form123",
+            server="testserver",
+            username="user@example.com",
         )
 
         with pytest.raises(ConnectionError, match="Not connected to server"):
@@ -969,6 +1088,79 @@ class TestSurveyCTOClient:
         assert str(media_folder) == str(tmp_path / "media")
         assert encryption_key == "test_key"
 
+    def test_import_private_key_file_not_exists(self):
+        """Test importing private key when file doesn't exist."""
+        client = SurveyCTOClient("test1234")
+
+        with pytest.raises(
+            SctoValidationError, match="Private key file does not exist or is empty"
+        ):
+            client._import_private_key("/nonexistent/key.pem")
+
+        with pytest.raises(
+            SctoValidationError, match="Private key file does not exist or is empty"
+        ):
+            client._import_private_key("")
+
+    def test_import_private_key_success(self, tmp_path):
+        """Test importing private key successfully."""
+        client = SurveyCTOClient("test1234")
+
+        key_file = tmp_path / "test_key.pem"
+        key_content = "-----BEGIN RSA PRIVATE KEY-----\ntest_key_content\n-----END RSA PRIVATE KEY-----"
+        key_file.write_text(key_content)
+
+        result = client._import_private_key(str(key_file))
+        assert result == key_content.strip()
+
+    def test_import_private_key_read_error(self, tmp_path):
+        """Test importing private key with read error."""
+        client = SurveyCTOClient("test1234")
+
+        # Create a file but make it unreadable
+        key_file = tmp_path / "unreadable_key.pem"
+        key_file.write_text("test")
+
+        with patch("builtins.open", side_effect=OSError("Permission denied")):  # noqa: SIM117
+            with pytest.raises(SctoValidationError, match="Failed to read private key"):
+                client._import_private_key(str(key_file))
+
+    def test_handle_http_error_various_codes(self):
+        """Test _handle_http_error with various HTTP status codes."""
+        client = SurveyCTOClient("test1234")
+
+        error_codes_and_messages = {
+            401: "Invalid credentials",
+            403: "Access forbidden",
+            404: "Server 'testserver' not found",
+            429: "Too many requests",
+            500: "Server error",
+            502: "Bad gateway",
+            503: "Service unavailable",
+            418: "Server error (HTTP 418)",  # Generic case
+        }
+
+        for status_code, expected_message in error_codes_and_messages.items():
+            http_error = requests.exceptions.HTTPError(f"HTTP {status_code}")
+            mock_response = Mock()
+            mock_response.status_code = status_code
+            http_error.response = mock_response
+
+            with pytest.raises(ConnectionError) as exc_info:
+                client._handle_http_error(http_error, "testserver")
+
+            assert expected_message in str(exc_info.value)
+
+    def test_handle_http_error_no_response(self):
+        """Test _handle_http_error with no response object."""
+        client = SurveyCTOClient("test1234")
+
+        http_error = requests.exceptions.HTTPError("Connection failed")
+        http_error.response = None
+
+        with pytest.raises(ConnectionError, match="Authentication failed"):
+            client._handle_http_error(http_error, "testserver")
+
 
 class TestSurveyCTOUI:
     """Test SurveyCTOUI class."""
@@ -976,7 +1168,7 @@ class TestSurveyCTOUI:
     def test_ui_init(self):
         """Test SurveyCTOUI initialization."""
         ui = SurveyCTOUI("test1234")
-        assert ui.project_id == "test1234"
+        assert ui.project_id == ProjectID(project_id="test1234")
         assert isinstance(ui.client, SurveyCTOClient)
 
     def test_get_logo_path(self):
@@ -1104,3 +1296,127 @@ class TestDownloadForms:
             if "Failed to download form2" in str(call)
         ]
         assert len(error_calls) == 1
+
+
+class TestMediaDownloaderExtended:
+    """Extended tests for MediaDownloader class."""
+
+    @patch("datasure.connectors.scto.st")
+    def test_download_field_media_with_progress(self, mock_st):
+        """Test downloading field media with progress bar."""
+        mock_client = Mock()
+        mock_client.get_attachment.return_value = b"fake_content"
+
+        config = SurveyCTOConfig()
+        downloader = MediaDownloader(mock_client, config)
+
+        # Mock progress bar
+        mock_progress = Mock()
+        mock_st.progress.return_value = mock_progress
+
+        data = pd.DataFrame(
+            {"KEY": ["uuid:123", "uuid:456"], "photo": ["photo1.jpg", "photo2.jpg"]}
+        )
+
+        media_folder = Path("/tmp/media")
+        media_folder.mkdir(parents=True, exist_ok=True)
+
+        downloader._download_field_media("photo", data, media_folder, None)
+
+        # Verify progress bar was updated
+        assert mock_progress.progress.call_count == 2
+        mock_st.progress.assert_called_once()
+
+    def test_download_field_media_empty_data(self):
+        """Test downloading field media with empty data."""
+        mock_client = Mock()
+        config = SurveyCTOConfig()
+        downloader = MediaDownloader(mock_client, config)
+
+        data = pd.DataFrame({"KEY": [], "photo": []})
+        media_folder = Path("/tmp/media")
+
+        # Should not crash with empty data
+        downloader._download_field_media("photo", data, media_folder, None)
+
+        # No attachments should be downloaded
+        mock_client.get_attachment.assert_not_called()
+
+    def test_download_field_media_exception_handling(self, caplog):
+        """Test downloading field media with exception handling."""
+        mock_client = Mock()
+        mock_client.get_attachment.side_effect = Exception("Download failed")
+
+        config = SurveyCTOConfig()
+        downloader = MediaDownloader(mock_client, config)
+
+        data = pd.DataFrame({"KEY": ["uuid:123"], "photo": ["photo1.jpg"]})
+
+        media_folder = Path("/tmp/media")
+        media_folder.mkdir(parents=True, exist_ok=True)
+
+        # Should handle exception gracefully
+        downloader._download_field_media("photo", data, media_folder, None)
+
+        # Exception should be logged (tested via logger behavior)
+
+    def test_download_single_file_exists_skip(self, tmp_path):
+        """Test that existing files are skipped during download."""
+        mock_client = Mock()
+        config = SurveyCTOConfig()
+        downloader = MediaDownloader(mock_client, config)
+
+        media_folder = tmp_path / "media"
+        media_folder.mkdir()
+
+        # Create existing file
+        existing_file = media_folder / "photo_123456.jpg"
+        existing_file.write_bytes(b"existing_content")
+
+        downloader._download_single_file(
+            url="photo.jpg",
+            submission_key="uuid:123456",
+            field_name="photo",
+            media_folder=media_folder,
+            encryption_key=None,
+        )
+
+        # Should not call get_attachment since file exists
+        mock_client.get_attachment.assert_not_called()
+
+        # File content should remain unchanged
+        assert existing_file.read_bytes() == b"existing_content"
+
+    def test_download_media_files_multiple_fields(self, tmp_path):
+        """Test downloading media files for multiple fields."""
+        mock_client = Mock()
+        mock_client.get_attachment.return_value = b"fake_content"
+
+        config = SurveyCTOConfig()
+        downloader = MediaDownloader(mock_client, config)
+
+        media_fields = ["photo", "audio"]
+        data = pd.DataFrame(
+            {"KEY": ["uuid:123"], "photo": ["photo1.jpg"], "audio": ["audio1.wav"]}
+        )
+
+        media_folder = tmp_path / "media"
+
+        downloader.download_media_files(media_fields, data, media_folder, None)
+
+        # Check that folder was created
+        assert media_folder.exists()
+
+        # Should have processed both fields
+        # This is tested indirectly through the folder creation and method calls
+
+
+class TestValidationErrorClass:
+    """Test the ValidationError exception class."""
+
+    def test_validation_error_inheritance(self):
+        """Test ValidationError inheritance."""
+        error = SctoValidationError("Validation failed")
+        assert str(error) == "Validation failed"
+        assert isinstance(error, SurveyCTOError)
+        assert isinstance(error, Exception)

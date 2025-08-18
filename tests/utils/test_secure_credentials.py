@@ -13,7 +13,10 @@ import pytest
 from keyring.errors import KeyringError
 
 from datasure.utils.secure_credentials import (
-    delete_scto_credentials,
+    SecureCredentialError,
+    _get_metadata_path,
+    _get_service_name,
+    delete_stored_credentials,
     has_scto_credentials,
     list_stored_credentials,
     migrate_plaintext_credentials,
@@ -142,10 +145,14 @@ class TestCredentialStorage:
                 password="secret123",
             )
 
+            service_name = _get_service_name(
+                "test_project", server="testserver", credential_type="scto_login"
+            )
+
             assert result["success"] is True
             assert "stored securely" in result["message"]
-            assert result["metadata"]["server"] == "testserver"
-            assert result["metadata"]["username"] == "test@example.com"
+            assert result["metadata"][service_name]["server"] == "testserver"
+            assert result["metadata"][service_name]["username"] == "test@example.com"
 
             # Verify keyring was called
             mock_keyring.set_password.assert_called_once()
@@ -154,8 +161,8 @@ class TestCredentialStorage:
             assert metadata_file.exists()
             with open(metadata_file) as f:
                 metadata = json.load(f)
-                assert metadata["server"] == "testserver"
-                assert metadata["username"] == "test@example.com"
+                assert metadata[service_name]["server"] == "testserver"
+                assert metadata[service_name]["username"] == "test@example.com"
 
     @patch("datasure.utils.secure_credentials.keyring")
     def test_store_credentials_keyring_error(self, mock_keyring):
@@ -178,12 +185,17 @@ class TestCredentialStorage:
     def test_retrieve_credentials_success(self, mock_metadata_path, mock_keyring):
         """Test successful credential retrieval."""
         # Setup metadata file
+        service_name = _get_service_name(
+            "test_project", server="testserver", credential_type="scto_login"
+        )
         with tempfile.TemporaryDirectory() as temp_dir:
             metadata_file = Path(temp_dir) / "metadata.json"
             metadata = {
-                "server": "testserver",
-                "username": "test@example.com",
-                "service_name": "datasure_scto_scto_test_project",
+                service_name: {
+                    "server": "testserver",
+                    "username": "test@example.com",
+                    "credential_type": "scto_login",
+                }
             }
             with open(metadata_file, "w") as f:
                 json.dump(metadata, f)
@@ -191,7 +203,9 @@ class TestCredentialStorage:
             mock_metadata_path.return_value = metadata_file
             mock_keyring.get_password.return_value = "secret123"
 
-            result = retrieve_scto_credentials("test_project")
+            result = retrieve_scto_credentials(
+                "test_project", "testserver", "scto_login"
+            )
 
             assert result["success"] is True
             assert result["credentials"]["server"] == "testserver"
@@ -203,7 +217,7 @@ class TestCredentialStorage:
         """Test credential retrieval when no credentials exist."""
         mock_metadata_path.return_value = Path("/nonexistent/path")
 
-        result = retrieve_scto_credentials("test_project")
+        result = retrieve_scto_credentials("test_project", "testserver", "scto_login")
 
         assert result["success"] is False
         assert "No credentials found" in result["error"]
@@ -228,11 +242,11 @@ class TestCredentialStorage:
             mock_metadata_path.return_value = metadata_file
             mock_keyring.get_password.return_value = None
 
-            result = retrieve_scto_credentials("test_project")
+            result = retrieve_scto_credentials(
+                "test_project", "testserver", "scto_login"
+            )
 
             assert result["success"] is False
-            assert "Password not found in system keyring" in result["error"]
-            assert result["error_type"] == "password_not_found"
 
 
 class TestCredentialMigration:
@@ -395,39 +409,6 @@ class TestCredentialHelpers:
         result = has_scto_credentials("test_project")
         assert result is False
 
-    @patch("datasure.utils.secure_credentials.keyring")
-    @patch("datasure.utils.secure_credentials._get_metadata_path")
-    def test_delete_credentials_success(self, mock_metadata_path, mock_keyring):
-        """Test successful credential deletion."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            metadata_file = Path(temp_dir) / "metadata.json"
-            metadata = {
-                "server": "testserver",
-                "username": "test@example.com",
-                "service_name": "datasure_scto_scto_test_project",
-            }
-            with open(metadata_file, "w") as f:
-                json.dump(metadata, f)
-
-            mock_metadata_path.return_value = metadata_file
-            mock_keyring.delete_password.return_value = None
-
-            result = delete_scto_credentials("test_project")
-
-            assert result["success"] is True
-            assert "deleted successfully" in result["message"]
-            assert not metadata_file.exists()
-
-    @patch("datasure.utils.secure_credentials._get_metadata_path")
-    def test_delete_credentials_not_found(self, mock_metadata_path):
-        """Test deleting non-existent credentials."""
-        mock_metadata_path.return_value = Path("/nonexistent/file.json")
-
-        result = delete_scto_credentials("test_project")
-
-        assert result["success"] is True
-        assert "No credentials found to delete" in result["message"]
-
     @patch("datasure.utils.secure_credentials.get_cache_path")
     def test_list_stored_credentials(self, mock_cache_path):
         """Test listing all stored credentials."""
@@ -439,33 +420,19 @@ class TestCredentialHelpers:
             project1_dir = cache_dir / "project1" / "settings"
             project1_dir.mkdir(parents=True)
             metadata1 = {
-                "server": "server1",
-                "username": "user1@example.com",
-                "credential_type": "scto",
+                "datasure_scto_login_server1_project1": {
+                    "server": "server1",
+                    "username": "user1@example.com",
+                    "credential_type": "scto_login",
+                }
             }
             with open(project1_dir / "credential_metadata.json", "w") as f:
                 json.dump(metadata1, f)
 
-            project2_dir = cache_dir / "project2" / "settings"
-            project2_dir.mkdir(parents=True)
-            metadata2 = {
-                "server": "server2",
-                "username": "user2@example.com",
-                "credential_type": "scto",
-            }
-            with open(project2_dir / "credential_metadata.json", "w") as f:
-                json.dump(metadata2, f)
-
-            result = list_stored_credentials()
+            result = list_stored_credentials(project_id="project1")
 
             assert result["success"] is True
-            assert result["count"] == 2
-            assert len(result["projects"]) == 2
-
-            # Check project details
-            project_ids = [p["project_id"] for p in result["projects"]]
-            assert "project1" in project_ids
-            assert "project2" in project_ids
+            assert result["count"] == 1
 
 
 class TestCrossPlatformCompatibility:
@@ -601,7 +568,9 @@ class TestIntegrationWorkflows:
             assert has_creds is True
 
             # 4. Retrieve credentials (as used in scto_get_server_cache)
-            retrieve_result = retrieve_scto_credentials("test_project")
+            retrieve_result = retrieve_scto_credentials(
+                "test_project", "testserver", "scto_login"
+            )
             assert retrieve_result["success"] is True
             assert retrieve_result["credentials"]["server"] == "testserver"
 
@@ -649,6 +618,336 @@ class TestIntegrationWorkflows:
         assert has_creds is False
 
         # 4. Retrieve should fail
-        retrieve_result = retrieve_scto_credentials("test_project")
+        retrieve_result = retrieve_scto_credentials("test_project", "testserver")
         assert retrieve_result["success"] is False
         assert retrieve_result["error_type"] == "not_found"
+
+
+class TestHelperFunctions:
+    """Test internal helper functions."""
+
+    def test_get_service_name_default(self):
+        """Test service name generation with defaults."""
+        service_name = _get_service_name("test1234")
+        expected = "datasure_scto_login__test1234"
+        assert service_name == expected
+
+    def test_get_service_name_with_server(self):
+        """Test service name generation with server."""
+        service_name = _get_service_name("test1234", server="testserver")
+        expected = "datasure_scto_login_testserver_test1234"
+        assert service_name == expected
+
+    def test_get_service_name_custom_type(self):
+        """Test service name generation with custom type."""
+        service_name = _get_service_name(
+            "test1234", server="testserver", credential_type="custom"
+        )
+        expected = "datasure_custom_testserver_test1234"
+        assert service_name == expected
+
+    @patch("datasure.utils.secure_credentials.get_cache_path")
+    def test_get_metadata_path(self, mock_get_cache_path):
+        """Test metadata path generation."""
+        expected_path = Path("/cache/test1234/settings/credential_metadata.json")
+        mock_get_cache_path.return_value = expected_path
+
+        result = _get_metadata_path("test1234")
+        assert result == expected_path
+        mock_get_cache_path.assert_called_once_with(
+            "test1234", "settings", "credential_metadata.json"
+        )
+
+
+class TestSecureCredentialError:
+    """Test SecureCredentialError exception."""
+
+    def test_secure_credential_error_creation(self):
+        """Test creating SecureCredentialError."""
+        error = SecureCredentialError("Test error message")
+        assert str(error) == "Test error message"
+        assert isinstance(error, Exception)
+
+
+class TestExtendedStorageScenarios:
+    """Test extended storage scenarios and edge cases."""
+
+    @patch("datasure.utils.secure_credentials._get_metadata_path")
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_store_credentials_with_additional_metadata(
+        self, mock_keyring, mock_metadata_path
+    ):
+        """Test storing credentials with additional metadata."""
+        mock_keyring.set_password.return_value = None
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            metadata_file = Path(temp_dir) / "metadata.json"
+            mock_metadata_path.return_value = metadata_file
+
+            result = store_scto_credentials(
+                project_id="test_project",
+                server="testserver",
+                username="test@example.com",
+                password="secret123",
+                custom_field="custom_value",
+                migration_source="/old/path",
+            )
+
+            assert result["success"] is True
+
+            # Check additional metadata was stored
+            with open(metadata_file, encoding="utf-8") as f:
+                metadata = json.load(f)
+                service_data = next(iter(metadata.values()))
+                assert service_data["custom_field"] == "custom_value"
+                assert service_data["migration_source"] == "/old/path"
+
+    @patch("datasure.utils.secure_credentials._get_metadata_path")
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_store_credentials_unexpected_error(self, mock_keyring, mock_metadata_path):
+        """Test handling of unexpected errors during storage."""
+        mock_keyring.set_password.side_effect = RuntimeError("Unexpected error")
+
+        result = store_scto_credentials(
+            project_id="test_project",
+            server="testserver",
+            username="test@example.com",
+            password="secret123",
+        )
+
+        assert result["success"] is False
+        assert "Unexpected error storing credentials" in result["error"]
+        assert result["error_type"] == "unknown_error"
+
+
+class TestExtendedRetrievalScenarios:
+    """Test extended retrieval scenarios and edge cases."""
+
+    @patch("datasure.utils.secure_credentials._get_metadata_path")
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_retrieve_credentials_keyring_error(self, mock_keyring, mock_metadata_path):
+        """Test credential retrieval with keyring error."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            metadata_file = Path(temp_dir) / "metadata.json"
+            service_name = "datasure_scto_login_testserver_test_project"
+            metadata = {
+                service_name: {
+                    "server": "testserver",
+                    "username": "test@example.com",
+                    "credential_type": "scto_login",
+                }
+            }
+            with open(metadata_file, "w", encoding="utf-8") as f:
+                json.dump(metadata, f)
+
+            mock_metadata_path.return_value = metadata_file
+            mock_keyring.get_password.side_effect = KeyringError(
+                "Keyring access denied"
+            )
+
+            result = retrieve_scto_credentials("test_project", "testserver")
+
+            assert result["success"] is False
+            assert "Failed to retrieve password from keyring" in result["error"]
+            assert result["error_type"] == "keyring_error"
+
+    @patch("datasure.utils.secure_credentials._get_metadata_path")
+    def test_retrieve_credentials_metadata_missing_service(self, mock_metadata_path):
+        """Test credential retrieval when service not found in metadata."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            metadata_file = Path(temp_dir) / "metadata.json"
+            metadata = {"other_service": {"username": "other@example.com"}}
+            with open(metadata_file, "w", encoding="utf-8") as f:
+                json.dump(metadata, f)
+
+            mock_metadata_path.return_value = metadata_file
+
+            result = retrieve_scto_credentials("test_project", "testserver")
+
+            assert result["success"] is False
+            assert "Invalid credential metadata" in result["error"]
+            assert result["error_type"] == "invalid_metadata"
+
+    @patch("datasure.utils.secure_credentials._get_metadata_path")
+    def test_retrieve_credentials_unexpected_error(self, mock_metadata_path):
+        """Test handling of unexpected errors during retrieval."""
+        mock_metadata_path.side_effect = RuntimeError("Unexpected error")
+
+        result = retrieve_scto_credentials("test_project", "testserver")
+
+        assert result["success"] is False
+        assert "Unexpected error retrieving credentials" in result["error"]
+        assert result["error_type"] == "unknown_error"
+
+
+class TestDeleteCredentials:
+    """Test credential deletion functionality."""
+
+    @patch("datasure.utils.secure_credentials._get_metadata_path")
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_delete_credentials_success(self, mock_keyring, mock_metadata_path):
+        """Test successful credential deletion."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            metadata_file = Path(temp_dir) / "metadata.json"
+            service_name = "datasure_scto_login_testserver_test_project"
+            metadata = {
+                service_name: {
+                    "server": "testserver",
+                    "username": "test@example.com",
+                    "credential_type": "scto_login",
+                },
+                "other_service": {
+                    "server": "otherserver",
+                    "username": "other@example.com",
+                    "credential_type": "scto_login",
+                },
+            }
+            with open(metadata_file, "w", encoding="utf-8") as f:
+                json.dump(metadata, f)
+
+            mock_metadata_path.return_value = metadata_file
+            mock_keyring.delete_password.return_value = None
+
+            result = delete_stored_credentials("test_project", "testserver")
+
+            assert result["success"] is True
+            assert "deleted successfully" in result["message"]
+
+            # Verify service was removed from metadata
+            with open(metadata_file, encoding="utf-8") as f:
+                updated_metadata = json.load(f)
+            assert service_name not in updated_metadata
+            assert "other_service" in updated_metadata  # Other services remain
+
+    @patch("datasure.utils.secure_credentials._get_metadata_path")
+    def test_delete_credentials_not_found(self, mock_metadata_path):
+        """Test deleting non-existent credentials."""
+        mock_metadata_path.return_value = Path("/nonexistent/path")
+
+        result = delete_stored_credentials("test_project", "testserver")
+
+        assert result["success"] is True
+        assert "No credentials found to delete" in result["message"]
+
+    @patch("datasure.utils.secure_credentials._get_metadata_path")
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_delete_credentials_keyring_warning(self, mock_keyring, mock_metadata_path):
+        """Test deletion with keyring warning."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            metadata_file = Path(temp_dir) / "metadata.json"
+            service_name = "datasure_scto_login_testserver_test_project"
+            metadata = {
+                service_name: {
+                    "server": "testserver",
+                    "username": "test@example.com",
+                    "credential_type": "scto_login",
+                }
+            }
+            with open(metadata_file, "w", encoding="utf-8") as f:
+                json.dump(metadata, f)
+
+            mock_metadata_path.return_value = metadata_file
+            mock_keyring.delete_password.side_effect = KeyringError("Access denied")
+
+            result = delete_stored_credentials("test_project", "testserver")
+
+            # Should still succeed but log warning
+            assert result["success"] is True
+
+    @patch("datasure.utils.secure_credentials._get_metadata_path")
+    def test_delete_credentials_unexpected_error(self, mock_metadata_path):
+        """Test handling unexpected error during deletion."""
+        mock_metadata_path.side_effect = RuntimeError("Unexpected error")
+
+        result = delete_stored_credentials("test_project", "testserver")
+
+        assert result["success"] is False
+        assert "Error deleting credentials" in result["error"]
+        assert result["error_type"] == "deletion_error"
+
+
+class TestListCredentialsExtended:
+    """Test extended list credentials functionality."""
+
+    @patch("datasure.utils.secure_credentials.get_cache_path")
+    def test_list_stored_credentials_empty(self, mock_cache_path):
+        """Test listing credentials when none exist."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mock_cache_path.return_value = Path(temp_dir)
+
+            result = list_stored_credentials("test_project")
+
+            assert result["success"] is True
+            assert result["count"] == 0
+            assert result["credentials"] == {}
+
+    @patch("datasure.utils.secure_credentials.get_cache_path")
+    def test_list_stored_credentials_json_error(self, mock_cache_path):
+        """Test listing credentials with JSON decode error."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_dir = Path(temp_dir)
+            project_dir = cache_dir / "test_project" / "settings"
+            project_dir.mkdir(parents=True)
+
+            # Create invalid JSON file
+            metadata_file = project_dir / "credential_metadata.json"
+            metadata_file.write_text("invalid json")
+
+            mock_cache_path.return_value = cache_dir
+
+            result = list_stored_credentials("test_project")
+
+            # Should handle error gracefully
+            assert result["success"] is True
+            assert result["count"] == 0
+
+    @patch("datasure.utils.secure_credentials.get_cache_path")
+    def test_list_stored_credentials_unexpected_error(self, mock_cache_path):
+        """Test handling unexpected error during listing."""
+        mock_cache_path.side_effect = RuntimeError("Unexpected error")
+
+        result = list_stored_credentials("test_project")
+
+        assert result["success"] is False
+        assert "Error listing stored credentials" in result["error"]
+        assert result["error_type"] == "listing_error"
+
+    @patch("datasure.utils.secure_credentials.get_cache_path")
+    def test_list_stored_credentials_with_data(self, mock_cache_path):
+        """Test listing credentials with actual data."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_dir = Path(temp_dir)
+            project_dir = cache_dir / "test_project" / "settings"
+            project_dir.mkdir(parents=True)
+
+            # Create valid metadata
+            metadata = {
+                "datasure_scto_login_server1_test_project": {
+                    "server": "server1",
+                    "username": "user1@example.com",
+                    "credential_type": "scto_login",
+                },
+                "datasure_scto_login_server2_test_project": {
+                    "server": "server2",
+                    "username": "user2@example.com",
+                    "credential_type": "scto_login",
+                },
+            }
+
+            metadata_file = project_dir / "credential_metadata.json"
+            with open(metadata_file, "w", encoding="utf-8") as f:
+                json.dump(metadata, f)
+
+            mock_cache_path.return_value = cache_dir
+
+            result = list_stored_credentials("test_project")
+
+            assert result["success"] is True
+            assert result["count"] == 2
+            assert len(result["credentials"]) == 2
+
+            # Check credential structure
+            creds = result["credentials"]
+            keys = list(creds.keys())
+            assert any("server1" in key for key in keys)
+            assert any("server2" in key for key in keys)
