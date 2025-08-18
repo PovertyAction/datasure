@@ -1,11 +1,28 @@
 import hashlib
 import json
 import os
+import re
 from functools import lru_cache
 
 import streamlit as st
+from pydantic import BaseModel, Field, field_validator
 
 from .duckdb_utils import duckdb_get_table
+
+
+class ProjectID(BaseModel):
+    """Model for project ID with validation."""
+
+    project_id: str = Field(..., min_length=8, max_length=8)
+
+    @field_validator("project_id")
+    def validate_project_id(cls, v):
+        """Validate project ID format."""
+        if not re.fullmatch(r"^[a-z0-9]{8}$", v):
+            raise ValueError(
+                "Project ID must be alphanumeric only and exactly 8 characters long"
+            )
+        return v
 
 
 @st.cache_data
