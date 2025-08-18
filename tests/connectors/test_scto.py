@@ -25,7 +25,6 @@ from datasure.connectors.scto import (
     SurveyCTOError,
     SurveyCTOUI,
     download_forms,
-    scto_get_server_cache,
     scto_server_connect,
 )
 from datasure.connectors.scto import (
@@ -227,67 +226,6 @@ class TestCacheManager:
         manager = CacheManager("test1234")
         assert manager.project_id == ProjectID(project_id="test1234")
         assert hasattr(manager, "logger")
-
-    @patch("datasure.connectors.scto.retrieve_scto_credentials")
-    def test_get_server_cache_secure_credentials_exist(self, mock_retrieve_credentials):
-        """Test getting server cache from secure credential storage."""
-        # Mock successful credential retrieval from secure storage
-        mock_retrieve_credentials.return_value = {
-            "success": True,
-            "credentials": {
-                "server": "testserver",
-                "username": "user@example.com",
-                "password": "secure_password_123",
-            },
-        }
-
-        result = scto_get_server_cache("test1234")
-
-        expected = {
-            "server": "testserver",
-            "user": "user@example.com",
-            "password": "secure_password_123",
-        }
-        assert result == expected
-        mock_retrieve_credentials.assert_called_once_with("test1234")
-
-    @patch("datasure.connectors.scto.retrieve_scto_credentials")
-    @patch("datasure.connectors.scto.logging")
-    def test_get_server_cache_no_credentials_found(
-        self, mock_logging, mock_retrieve_credentials
-    ):
-        """Test getting server cache when no credentials exist."""
-        # Mock retrieval failure
-        mock_retrieve_credentials.return_value = {
-            "success": False,
-            "error": "No credentials found",
-        }
-
-        result = scto_get_server_cache("test1234")
-
-        assert result == {}
-        mock_logging.warning.assert_called_with(
-            "Failed to retrieve credentials: No credentials found"
-        )
-
-    @patch("datasure.connectors.scto.retrieve_scto_credentials")
-    @patch("datasure.connectors.scto.logging")
-    def test_get_server_cache_no_error_message(
-        self, mock_logging, mock_retrieve_credentials
-    ):
-        """Test getting server cache when retrieval fails without error message."""
-        # Mock retrieval failure without error message
-        mock_retrieve_credentials.return_value = {
-            "success": False,
-            "error": None,
-        }
-
-        result = scto_get_server_cache("test1234")
-
-        assert result == {}
-        mock_logging.warning.assert_called_with(
-            "No cached credentials found for SurveyCTO server."
-        )
 
 
 class TestSctoServerConnect:

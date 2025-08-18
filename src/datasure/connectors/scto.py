@@ -122,37 +122,6 @@ class ValidationError(SurveyCTOError):
 
 
 # --- Get cache data for SurveyCTO serves --- #
-def scto_get_server_cache(project_id: str) -> dict:
-    """Get cached SurveyCTO server credentials from secure storage.
-
-    PARAMS:
-    -------
-    project_id: Project ID
-
-    Return:
-    ------
-    Dictionary with server credentials or empty dict if not found
-
-    """
-    # Try secure credential storage first
-    result = retrieve_scto_credentials(project_id)
-
-    if result["success"]:
-        credentials = result["credentials"]
-        return {
-            "server": credentials["server"],
-            "user": credentials["username"],  # Legacy format uses "user"
-            "password": credentials["password"],
-        }
-    else:
-        # return error message if credentials not found
-        if result["error"]:
-            logging.warning(f"Failed to retrieve credentials: {result['error']}")
-        else:
-            logging.warning("No cached credentials found for SurveyCTO server.")
-    return {}
-
-
 def scto_server_connect(servername: str, username: str, password: str) -> str:
     """Validate SurveyCTO account details and load user data.
 
