@@ -781,15 +781,17 @@ def scto_login_form(project_id: str) -> None:
         st.image(str(image_path), width=200)
 
         # Add keyring status check
-        with st.expander("🔐 Secure Storage Status", expanded=False):
+        with st.expander(":material/lock: Secure Storage Status", expanded=False):
             keyring_status = test_keyring_availability()
 
             if keyring_status["success"] and keyring_status["available"]:
                 st.success(
-                    f"✅ Secure credential storage is working ({keyring_status['backend']})"
+                    f":material/check: Secure credential storage is working ({keyring_status['backend']})"
                 )
             else:
-                st.error(f"❌ Secure storage unavailable: {keyring_status['error']}")
+                st.error(
+                    f":material/close: Secure storage unavailable: {keyring_status['error']}"
+                )
                 st.warning(
                     "Credentials will be stored less securely. Consider enabling system keyring."
                 )
@@ -843,18 +845,20 @@ def scto_login_form(project_id: str) -> None:
             if result["success"]:
                 if keyring_test["success"]:
                     st.success(
-                        f"✅ SurveyCTO Connection for {scto_server_name} added successfully"
+                        f":material/check: SurveyCTO Connection for {scto_server_name} added successfully"
                     )
                     st.success(
-                        f"🔐 Credentials stored securely using {keyring_test['backend']}"
+                        f":material/lock: Credentials stored securely using {keyring_test['backend']}"
                     )
                 else:
                     st.success(
-                        f"✅ SurveyCTO Connection for {scto_server_name} added successfully"
+                        f":material/check: SurveyCTO Connection for {scto_server_name} added successfully"
                     )
-                    st.info("📝 Credentials stored (fallback mode)")
+                    st.info(":material/note_alt: Credentials stored (fallback mode)")
             else:
-                st.error(f"❌ Failed to store credentials: {result['error']}")
+                st.error(
+                    f":material/close: Failed to store credentials: {result['error']}"
+                )
                 # Offer diagnostic help
                 if st.button("🔧 Run Diagnostics"):
                     st.json(test_keyring_availability())

@@ -144,17 +144,21 @@ with st.container(border=True):
     with (
         lc2,
         st.popover(
-            "🔐 Check Security", use_container_width=True, icon=":material/security:"
+            ":material/lock: Check Security",
+            use_container_width=True,
+            icon=":material/security:",
         ),
     ):
         st.write("**Keyring Diagnostics**")
         if st.button("Test Keyring Availability", use_container_width=True):
             keyring_status = test_keyring_availability()
             if keyring_status["success"]:
-                st.success(f"✅ Keyring working: {keyring_status['backend']}")
+                st.success(
+                    f":material/check: Keyring working: {keyring_status['backend']}"
+                )
                 st.info(keyring_status["message"])
             else:
-                st.error(f"❌ Keyring issue: {keyring_status['error']}")
+                st.error(f":material/close: Keyring issue: {keyring_status['error']}")
                 st.info("**Troubleshooting Tips:**")
                 st.markdown("""
                 - **Windows**: Ensure Windows Credential Manager is accessible
@@ -167,14 +171,14 @@ with st.container(border=True):
         if legacy_file:
             legacy_path = get_cache_path(legacy_file, "settings", "scto.json")
             if legacy_path.exists():
-                st.warning("🔄 Legacy credentials detected")
+                st.warning(":material/refresh: Legacy credentials detected")
                 if st.button("Migrate Legacy Credentials", use_container_width=True):
                     if migrate_legacy_credentials(legacy_file):
-                        st.success("Migration completed!")
+                        st.success(":material/check: Migration completed!")
                     else:
-                        st.error("Migration failed")
+                        st.error(":material/close: Migration failed")
             else:
-                st.success("✅ No legacy credentials found")
+                st.success(":material/check: No legacy credentials found")
 
         st.write("**Raw Diagnostic Data:**")
         if st.button("Show Details", use_container_width=True):
