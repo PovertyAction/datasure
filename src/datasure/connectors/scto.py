@@ -22,7 +22,6 @@ from datasure.utils.secure_credentials import (
     retrieve_scto_credentials,
     store_scto_credentials,
 )
-from datasure.utils.settings_utils import ProjectID
 
 # --- Constants --- #
 SCTO_KEY_IMPORT_OPTIONS = ("Import from File", "Paste private key text")
@@ -154,7 +153,7 @@ class CacheManager:
     """Manages caching operations for SurveyCTO data."""
 
     def __init__(self, project_id: str):
-        self.project_id = ProjectID(project_id=project_id)
+        self.project_id = project_id
         self.logger = logging.getLogger(__name__)
 
     def get_existing_data(self, file_path: str) -> tuple[pd.DataFrame, datetime]:
@@ -335,7 +334,7 @@ class SurveyCTOClient:
     """Main client for SurveyCTO operations."""
 
     def __init__(self, project_id: str, config: SurveyCTOConfig | None = None):
-        self.project_id = ProjectID(project_id=project_id)
+        self.project_id = project_id
         self.config = config or SurveyCTOConfig()
         self.cache_manager = CacheManager(project_id)
         self.data_processor = DataProcessor()
@@ -638,7 +637,7 @@ class SurveyCTOUI:
     """Streamlit UI components for SurveyCTO integration."""
 
     def __init__(self, project_id: str):
-        self.project_id = ProjectID(project_id=project_id)
+        self.project_id = project_id
         self.client = SurveyCTOClient(project_id)
         self.logger = logging.getLogger(__name__)
 
@@ -648,24 +647,10 @@ class SurveyCTOUI:
         image_path = assets_dir / "SurveyCTO-Logo-CMYK.png"
         return str(image_path)
 
-    def _get_server_list(self) -> list[str]:
-        """Get list of available servers."""
-        cache = self.client.cache_manager.get_server_cache()
-        return (
-            cache.get("server", [])
-            if isinstance(cache.get("server"), list)
-            else [cache.get("server", "")]
-        )
-
-    def _get_forms_info(self) -> dict[str, any]:
+    def _get_forms_info(self, credentials: ServerCredentials) -> dict[str, any]:
         """Get connection info for the current server."""
-        cache = self.client.cache_manager.get_server_cache()
         connection_info = self.client.connect(
-            ServerCredentials(
-                server=cache.get("server", ""),
-                user=cache.get("user", ""),
-                password=cache.get("password", ""),
-            ),
+            credentials=credentials,
             validate_permissions=True,
         )
         return {
@@ -783,7 +768,9 @@ class SurveyCTOUI:
                 )
                 return
             # Form selection with dynamic loading
-            forms_info = self._get_forms_info()
+            forms_info = self._get_forms_info(
+                ServerCredentials(server=server, user=user, password=password)
+            )
             # concat form id and form names to create options
             form_options = [
                 form[0] + " (" + form[1] + ")" for form in forms_info["forms_list"]
@@ -947,10 +934,6 @@ class SurveyCTOUI:
             List of tuples (form_id, form_title) or None if connection failed
         """
         try:
-            # Check if we have a connection for this server
-            if not self._ensure_server_connection(server):
-                return None
-
             with st.spinner(f"Loading forms from {server}..."):
                 # Get list of forms
                 forms = self._scto_client.list_forms()
@@ -1027,56 +1010,6 @@ class SurveyCTOUI:
             self.logger.warning(f"Error extracting title for form {form_id}: {e}")
             return form_id
 
-    def _ensure_server_connection(self, server: str) -> bool:
-        """
-        Ensure we have a valid connection to the specified server.
-
-        Returns
-        -------
-            True if connection is valid, False otherwise
-        """
-        try:
-            # Check if we already have a connection
-            if self._scto_client is not None:
-                # Verify it's for the right server by testing a simple call
-                try:
-                    self._scto_client.list_forms()
-                    return True  # noqa: TRY300
-                except:
-                    # Connection is stale, clear it
-                    self._scto_client = None
-
-            # Try to reconnect using cached credentials
-            cached_credentials = self.cache_manager.get_server_cache()
-            if cached_credentials and cached_credentials.get("server") == server:
-                credentials = ServerCredentials(**cached_credentials)
-                self.connect(credentials)
-                return self._scto_client is not None
-            else:
-                return False
-
-        except Exception:
-            self.logger.exception(f"Failed to ensure connection to {server}")
-            return False
-
-    def _get_server_list(self) -> list[str]:
-        """Get list of available servers from cache."""
-        try:
-            cache = self.client.cache_manager.get_server_cache()
-
-            # Handle both single server and multiple servers
-            if isinstance(cache, dict):
-                server = cache.get("server", "")
-                if server:
-                    return [server]
-
-            else:
-                return []
-
-        except Exception as e:
-            self.logger.warning(f"Failed to get server list: {e}")
-            return []
-
     def _add_form_to_project(self, form_config: FormConfig) -> None:
         """Add form configuration to project."""
         # Check for duplicate alias
@@ -1151,7 +1084,7 @@ class SurveyCTOUI:
 # --- Main Functions --- #
 
 
-def download_forms(project_id: ProjectID, form_configs: list[FormConfig]) -> None:
+def download_forms(project_id: str, form_configs: list[FormConfig]) -> None:
     """Download data for multiple forms with progress tracking."""
     if not form_configs:
         st.warning("No forms selected for download")
