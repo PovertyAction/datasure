@@ -7,7 +7,8 @@ import time
 import pytest
 from pydantic_core import ValidationError
 
-from datasure.connectors.scto import ProjectID, ServerCredentials
+from datasure.connectors.scto import ServerCredentials
+from datasure.utils.settings_utils import ProjectID
 
 
 class TestProjectIDRegex:

@@ -18,7 +18,6 @@ from datasure.connectors.scto import (
     FormType,
     MediaDownloader,
     MediaType,
-    ProjectID,
     ServerCredentials,
     SurveyCTOClient,
     SurveyCTOConfig,
@@ -30,6 +29,7 @@ from datasure.connectors.scto import (
 from datasure.connectors.scto import (
     ValidationError as SctoValidationError,
 )
+from datasure.utils.settings_utils import ProjectID
 
 
 class TestFormType:
@@ -224,7 +224,7 @@ class TestCacheManager:
     def test_cache_manager_init(self):
         """Test CacheManager initialization."""
         manager = CacheManager("test1234")
-        assert manager.project_id == ProjectID(project_id="test1234")
+        assert manager.project_id == "test1234"
         assert hasattr(manager, "logger")
 
 
@@ -642,7 +642,7 @@ class TestSurveyCTOClient:
     def test_client_init(self):
         """Test SurveyCTOClient initialization."""
         client = SurveyCTOClient("test1234")
-        assert client.project_id == ProjectID(project_id="test1234")
+        assert client.project_id == "test1234"
         assert isinstance(client.config, SurveyCTOConfig)
         assert isinstance(client.cache_manager, CacheManager)
         assert isinstance(client.data_processor, DataProcessor)
@@ -1106,7 +1106,7 @@ class TestSurveyCTOUI:
     def test_ui_init(self):
         """Test SurveyCTOUI initialization."""
         ui = SurveyCTOUI("test1234")
-        assert ui.project_id == ProjectID(project_id="test1234")
+        assert ui.project_id == "test1234"
         assert isinstance(ui.client, SurveyCTOClient)
 
     def test_get_logo_path(self):
