@@ -357,13 +357,13 @@ def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
         mc1.metric(
             label="Today",
             value=f"{submissions_today:,}",
-            delta=submissions_today_delta,
+            delta=f"{submissions_today_delta:.2f}%",
             help="Number of submissions today. Delta is the percentage change from yesterday.",
         )
         mc2.metric(
             label="This week",
             value=f"{submissions_this_week:,}",
-            delta=submissions_this_week_delta,
+            delta=f"{submissions_this_week_delta:.2f}%",
             help="Number of submissions this week. Delta is the percentage change from last week.",
         )
         mc3.metric(
@@ -559,11 +559,7 @@ def compute_summary_progress_by_col(
     vmin_val = progress_data.min().min()
     vmax_val = progress_data.max().max()
 
-    progress_data["trend"] = progress_data.apply(
-        lambda col_val: ", ".join(map(str, col_val)), axis=1
-    )
-    format_cols = [col for col in progress_data.columns if col != "trend"]
-    progress_data = progress_data[["trend"] + format_cols]
+    format_cols = progress_data.columns
 
     return progress_data, vmin_val, vmax_val, format_cols
 
@@ -701,15 +697,6 @@ def summary_progress(
                 subset=format_cols, cmap=cmap, axis=1, vmin=vmin_val, vmax=vmax_val
             ),
             use_container_width=True,
-            column_config={
-                "trend": st.column_config.AreaChartColumn(
-                    "Trend of submissions",
-                    width="medium",
-                    help="Trend of submissions over time",
-                    y_min=vmin_val,
-                    y_max=vmax_val,
-                ),
-            },
         )
 
 
