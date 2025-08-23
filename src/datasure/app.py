@@ -18,7 +18,7 @@ _views_dir = _package_dir / "views"
 # start page
 start_page = st.Page(
     page=str(_views_dir / "start_view.py"),
-    title="start here",
+    title="Start Here",
     icon=":material/home:",
     default=True,
 )

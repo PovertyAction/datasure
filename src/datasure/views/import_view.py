@@ -215,10 +215,12 @@ with st.container(border=True):
         if st.button("Test Keyring Availability", use_container_width=True):
             keyring_status = test_keyring_availability()
             if keyring_status["success"]:
-                st.success(f"✅ Keyring working: {keyring_status['backend']}")
+                st.success(
+                    f":material/check: Keyring working: {keyring_status['backend']}"
+                )
                 st.info(keyring_status["message"])
             else:
-                st.error(f"❌ Keyring issue: {keyring_status['error']}")
+                st.error(f":material/close: Keyring issue: {keyring_status['error']}")
                 st.info("**Troubleshooting Tips:**")
                 st.markdown("""
                 - **Windows**: Ensure Windows Credential Manager is accessible
