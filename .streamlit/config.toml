@@ -4,13 +4,13 @@
 base = "light"
 
 # Primary accent color for interactive elements
-primaryColor = "#155240"
+primaryColor = "#f26529"
 
 # Background color for the main content area
 backgroundColor = "#F1F2F2"
 
 # Background color used for the sidebar and most interactive widgets
-secondaryBackgroundColor = "#c9c9c8"
+secondaryBackgroundColor = "#cbceceff"
 
 # Color used for almost all text
 textColor = "#414042"
@@ -37,7 +37,6 @@ chartCategoricalColors = [
 
 chartSequentialColors = [
     "#49ac57", # sequential-1 (ipa-green)
-    "#46a755", # interpolated
     "#3f9953", # sequential-2
     "#3c9051", # interpolated
     "#35874e", # sequential-3
