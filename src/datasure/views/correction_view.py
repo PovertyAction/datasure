@@ -9,6 +9,7 @@ from datasure.utils import (
     duckdb_save_table,
     get_check_config_settings,
 )
+from datasure.utils.navigations import page_navigation
 
 # DEFINE CONSTANTS FOR CORRECTION'
 
@@ -309,3 +310,10 @@ for i, tab in enumerate(corr_tabs):
                 data=corrected_data,
                 use_container_width=True,
             )
+
+page_navigation(
+    prev={
+        "page_name": st.session_state.st_output_page1,
+        "label": "← Back: Output Page 1",
+    },
+)

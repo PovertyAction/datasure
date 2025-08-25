@@ -9,6 +9,7 @@ from datasure.utils import (
     duckdb_save_table,
     get_df_info,
 )
+from datasure.utils.navigations import page_navigation
 
 # Get project id
 project_id: str = st.session_state.st_project_id
@@ -631,3 +632,14 @@ if show_prep_page_info:
                 )
 
                 st.dataframe(prep_data, use_container_width=True, hide_index=False)
+
+page_navigation(
+    prev={
+        "page_name": st.session_state.st_import_data_page,
+        "label": "← Back: Import Data",
+    },
+    next={
+        "page_name": st.session_state.st_config_checks_page,
+        "label": "Next: Configure Checks →",
+    },
+)
