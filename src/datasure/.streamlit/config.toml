@@ -1,0 +1,80 @@
+[theme]
+
+# use light theme as base
+base = "light"
+
+# Primary accent color for interactive elements
+primaryColor = "#f26529"
+
+# Background color for the main content area
+backgroundColor = "#F1F2F2"
+
+# Background color used for the sidebar and most interactive widgets
+secondaryBackgroundColor = "#cbceceff"
+
+# Color used for almost all text
+textColor = "#414042"
+
+# Radus of corners of buttons
+baseRadius = "medium"
+
+# The font family for all text - Inter (modern, highly readable)
+font = "Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif"
+
+# Use IPA brand colors
+chartCategoricalColors = [
+    "#84d0d4", # light-blue
+    "#2b4085", # dark-blue
+    "#f26529", # red-orange
+    "#be9ffa", # purple
+    "#f5cb57", # yellow
+    "#49ac57", # ipa-green
+    "#414042", # charcoal
+    "#5566b0", # divergent-2 (medium blue)
+    "#c8420a", # divergent-5 (dark orange)e
+    "#f1f2f2", # light-grey
+]
+
+chartSequentialColors = [
+    "#49ac57", # sequential-1 (ipa-green)
+    "#3f9953", # sequential-2
+    "#3c9051", # interpolated
+    "#35874e", # sequential-3
+    "#317e4c", # interpolated
+    "#2b754a", # sequential-4
+    "#266c48", # interpolated
+    "#216345", # sequential-5
+    "#1b5c43", # interpolated
+    "#155240", # sequential-6 (dark-green)
+]
+
+[theme.sidebar]
+showWidgetBorder = true
+
+[global]
+developmentMode = false
+
+[client]
+toolbarMode = "viewer"
+showErrorDetails = false
+
+[browser]
+gatherUsageStats = false
+serverAddress = "localhost"
+serverPort = 8501
+
+[logger]
+level = "error"
+
+
+[server]
+headless = false
+port = 8501
+address = "localhost"
+
+# maximum amount of data in MB that can be handled by streamlit, default is 200
+maxMessageSize = 1000
+maxUploadSize = 1000
+
+# Number of seconds of inactivity before session state is reset, default is 120
+disconnectedSessionTTL = 480
