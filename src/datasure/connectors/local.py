@@ -117,15 +117,7 @@ def load_data_efficiently(filename: str, sheet_name: str | None = None) -> pl.Da
             )
 
         elif file_ext in [".xlsx", ".xls"]:
-            return pl.read_excel(
-                filename,
-                sheet_name=sheet_name or 0,  # Default to first sheet if none provided
-                read_csv_options={
-                    "encoding": "utf8-lossy",
-                    "ignore_errors": True,
-                    "infer_schema_length": 10000,
-                },
-            )
+            return pl.read_excel(filename, sheet_name=sheet_name)
 
         elif file_ext == ".json":
             # Polars has efficient JSON reading
@@ -171,6 +163,10 @@ def render_local_file_form(
 
     # Form inputs with validation
     with st.form(key=f"local_file_form_{mode}"):
+        disable_submit = True
+        sheets = []
+        sheet_name = None
+        default_index = None
         alias = st.text_input(
             label="Alias*",
             value=defaults.get("alias", ""),
@@ -185,26 +181,36 @@ def render_local_file_form(
             help="Add full file name and path. e.g., C:/data/survey.dta",
         )
 
-        sheet_name = None
-
         # Dynamic sheet selection for Excel files
         if file_path:
-            try:
-                path_obj = Path(file_path)
-                if path_obj.suffix.lower() in [".xlsx", ".xls"] and path_obj.exists():
-                    sheets = get_excel_sheet_names(file_path)
-                    if sheets:
-                        default_index = 0
-                        if defaults.get("sheet_name") in sheets:
-                            default_index = sheets.index(defaults.get("sheet_name"))
+            path_obj = Path(file_path)
+            # validate file accessibility
+            if not validate_file_accessibility(file_path):
+                st.error(
+                    "File is not accessible. Please check the path and permissions."
+                )
+                st.stop()
 
-                        sheet_name = st.selectbox(
-                            label="Sheet Name",
-                            options=sheets,
-                            index=default_index,
-                        )
-            except Exception:
-                pass  # Handle invalid paths gracefully
+            if path_obj.suffix.lower() in [".xlsx", ".xls"]:
+                try:
+                    sheets = get_excel_sheet_names(file_path)
+                    if sheets and defaults.get("sheet_name") in sheets:
+                        default_index = sheets.index(defaults.get("sheet_name"))
+
+                    disable_submit = bool(not sheets)
+
+                except Exception:
+                    pass  # sheets will remain empty
+            else:
+                disable_submit = False  # Non-Excel files
+                sheets = []
+
+            if path_obj.suffix.lower() in [".xlsx", ".xls"]:
+                sheet_name = st.selectbox(
+                    label="Sheet Name",
+                    options=sheets,
+                    index=default_index,
+                )
 
         st.markdown("**required*")
 
@@ -213,6 +219,7 @@ def render_local_file_form(
             "Update File" if edit_mode else "Add File",
             type="primary",
             use_container_width=True,
+            disabled=disable_submit,
         )
 
         if submitted:
