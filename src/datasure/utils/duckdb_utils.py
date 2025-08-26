@@ -151,6 +151,37 @@ def duckdb_get_table(
                 return pl.DataFrame()
 
 
+def duckdb_delete_table(project_id: str, alias: str, db_name: str) -> None:
+    """Delete a table from a DuckDB database.
+
+    PARAMS:
+    -------
+    project_id: str : project ID
+    alias: str : alias for the data
+    db_name: str : name of the DuckDB database
+
+    Returns
+    -------
+    None
+    """
+    db_path = (
+        get_cache_path(project_id, "settings", "logs.duckdb")
+        if db_name == "logs"
+        else get_cache_path(project_id, "data", f"{db_name}.duckdb")
+    )
+    table_id = _validate_table_name(alias.lower().replace(" ", "_").replace("-", "_"))
+    with duckdb.connect(db_path) as conn:
+        # Check if the table exists
+        table_exists = (
+            conn.execute(
+                f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table_id}'"
+            ).fetchone()[0]
+            > 0
+        )
+        if table_exists:
+            conn.execute(f"DROP TABLE {table_id}")
+
+
 def duckdb_row_filter(
     project_id: str, alias: str, db_name: str, filter_condition: str
 ) -> pl.DataFrame:
