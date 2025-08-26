@@ -499,6 +499,7 @@ version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
+    { name = "fastexcel" },
     { name = "geopy" },
     { name = "keyring" },
     { name = "matplotlib" },
@@ -539,6 +540,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "duckdb", specifier = "==1.3.1" },
+    { name = "fastexcel", specifier = ">=0.14.0" },
     { name = "geopy", specifier = ">=2.4.1" },
     { name = "keyring", specifier = ">=25.6.0" },
     { name = "matplotlib", specifier = ">=3.10.0" },
@@ -693,6 +695,22 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/82/c6/6820408cdd87c11f1fbbd2349b05bbda28174d746e6d708ad0f0a934f9d7/faker-37.0.0.tar.gz", hash = "sha256:d2e4e2a30d459a8ec0ae52a552aa51c48973cb32cf51107dee90f58a8322a880", size = 1875487, upload-time = "2025-03-07T15:38:41.666Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c6/03/0ffcbc5ab352c266a648d029f79de54ca205c04661203d46a42e3f03492b/faker-37.0.0-py3-none-any.whl", hash = "sha256:2598f78b76710a4ed05e197dda5235be409b4c291ba5c9c7514989cfbc7a5144", size = 1918764, upload-time = "2025-03-07T15:38:39.328Z" },
+]
+
+[[package]]
+name = "fastexcel"
+version = "0.14.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyarrow" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b7/55/376bc213921232d18dc9287c7e4eddd892d29e6a988c3ab022ee96f3a7ae/fastexcel-0.14.0.tar.gz", hash = "sha256:c73460c2ce2a07cf1a21a27aae67af3bc6a855fb4aa191c20c6ddae3f0573215", size = 40892, upload-time = "2025-04-30T08:57:05.996Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b8/5a/e5612bb03f113e283cdd4e137a24e60d312230e55870a2879cc62ee256cd/fastexcel-0.14.0-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:8cf9fdff9df918cc2dfad66932cd238b6e1e5e1b7b0a079df713a35d2af1586e", size = 1281472, upload-time = "2025-04-30T08:57:00.658Z" },
+    { url = "https://files.pythonhosted.org/packages/12/97/204b0da0b1d94af752e5a7a515d4b68e8d957bc48a04d27a3087ea80e0c2/fastexcel-0.14.0-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:0764cb1232e5feb4a7953ee53e60a46f330fa32ef012d813fa491173c7578d3b", size = 1235392, upload-time = "2025-04-30T08:57:02.227Z" },
+    { url = "https://files.pythonhosted.org/packages/38/41/7a0b8c0421cbda0f6185bfeaf55d06cd12073f68abb31cc70f385350f1bc/fastexcel-0.14.0-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:fecc5927ef18eba36f360aec0994e2cef106f8d83f197734d460ae198e5c0b87", size = 1359282, upload-time = "2025-04-30T08:56:57.271Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/86/f00dae040b315505008c4e94ae59c5de0b5fdaefdb27c046bb11917628da/fastexcel-0.14.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c70f463b88d72205eb5069754b07edb9a877bab9991ca71f8db1cc4e1bb8d8a4", size = 1383225, upload-time = "2025-04-30T08:56:59.068Z" },
+    { url = "https://files.pythonhosted.org/packages/f2/5f/fdb54eab1fae9057fbcaca3b4b283cde717686c9e67e3cff2796a308b1e2/fastexcel-0.14.0-cp39-abi3-win_amd64.whl", hash = "sha256:856d061b254268302ee968d10fd446b83f4a1a932588149539be4fb9d34224d4", size = 1094572, upload-time = "2025-04-30T08:57:03.58Z" },
 ]
 
 [[package]]
