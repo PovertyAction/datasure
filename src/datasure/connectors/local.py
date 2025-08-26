@@ -1,254 +1,346 @@
 import os
 from pathlib import Path
 
-import pandas as pd
 import polars as pl
 import streamlit as st
 from openpyxl import load_workbook
+from polars_readstat import scan_readstat
+from pydantic import BaseModel, Field, field_validator
 
-from datasure.utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 
-# --- Get List of sheet from excel ---#
+# --- Pydantic Models for Validation ---
 
-
-def local_excel_sheet_names(file_path: str) -> list:
-    """Import an excel file and return the list of sheet names.
-
-    PARAMS:
-    -------
-    file_path: str : path to the excel file
-    """
-    excel_file = load_workbook(file_path, read_only=True)
-    sheet_names = excel_file.sheetnames
-
-    return sheet_names
+# VALID FILE TYPES
+VALID_FILE_TYPES = {".csv", ".xlsx", ".xls", ".json", ".dta"}
 
 
-def local_read_data(filename: str, sheet_name: str | None = None) -> pd.DataFrame:
-    """Import data from a file.
+class FileConfig(BaseModel):
+    """Configuration for file import with validation."""
 
-    PARAMS:
-    -------
-    filename: str : path to the file
-    sheet_name: str : name of the sheet to import (only for excel files)
+    alias: str = Field(
+        ..., min_length=1, max_length=20, description="Unique alias for the file"
+    )
+    filename: str = Field(..., description="Full path to the file")
+    sheet_name: str | None = Field(None, description="Sheet name for Excel files")
+    source: str = Field(default="local storage", description="Source of the file")
+
+    @field_validator("alias")
+    def validate_alias(cls, v):
+        """Validate alias to ensure it's non-empty and trimmed."""
+        if not v or not v.strip():
+            raise ValueError("Alias cannot be empty")
+        return v.strip()
+
+    @field_validator("filename")
+    def validate_filename(cls, v):
+        "Validate filename to ensure it exists and is of a supported type."
+        if not v or not v.strip():
+            raise ValueError("File path cannot be empty")
+
+        file_path = Path(v.strip())
+        if not file_path.exists():
+            raise ValueError("File not found. Please check the file path")
+
+        if not file_path.is_file():
+            raise ValueError("Path is not a file")
+
+        if file_path.suffix.lower() not in VALID_FILE_TYPES:
+            raise ValueError(
+                f"Invalid file type. Supported types: {', '.join(VALID_FILE_TYPES)}"
+            )
+
+        return str(file_path)
+
+
+class ImportLogEntry(BaseModel):
+    """Model for import log entries."""
+
+    refresh: bool = True
+    load: bool = True
+    alias: str
+    filename: str
+    sheet_name: str | None = None
+    source: str = "local storage"
+    server: str = ""
+    username: str = ""
+    form_id: str = ""
+    private_key: str = ""
+    save_to: str = ""
+    attachments: bool = False
+
+
+# --- Optimized File Operations ---
+
+
+def get_excel_sheet_names(file_path: str) -> list[str]:
+    """Get sheet names from Excel file efficiently.
+
+    Args:
+        file_path: Path to the Excel file
 
     Returns
     -------
-    data: pd.DataFrame : imported data
-
+        List of sheet names
     """
-    # get file extension
-    fileext = filename.split(".")[-1]
-
-    # import file depending on the file extension
-    if fileext == "csv":
-        data = pd.read_csv(filename, encoding="utf-8")
-    elif fileext in ["xlsx", "xls"]:
-        data = pd.read_excel(filename, sheet_name=sheet_name, engine="openpyxl")
-    elif fileext == "json":
-        data = pd.read_json(filename, encoding="utf-8")
-    elif fileext == "dta":
-        data = pd.read_stata(filename)
-
-    return data
+    try:
+        # Use read_only=True for better performance
+        workbook = load_workbook(file_path, read_only=True, data_only=True)
+        return workbook.sheetnames  # noqa: TRY300
+    except Exception as e:
+        st.error(f"Error reading Excel file: {e}")
+        return []
 
 
-# --- FORM for Adding file from local storage ---#
+def load_data_efficiently(filename: str, sheet_name: str | None = None) -> pl.DataFrame:
+    """Load data efficiently using Polars.
+
+    Args:
+        filename: Path to the file
+        sheet_name: Sheet name for Excel files
+
+    Returns
+    -------
+        Polars DataFrame with the loaded data
+    """
+    file_path = Path(filename)
+    file_ext = file_path.suffix.lower()
+
+    try:
+        if file_ext == ".csv":
+            # Polars CSV reader is much faster than pandas
+            return pl.read_csv(
+                filename,
+                encoding="utf8-lossy",  # More robust encoding handling
+                ignore_errors=True,  # Continue reading despite minor errors
+                infer_schema_length=10000,  # Better type inference
+            )
+
+        elif file_ext in [".xlsx", ".xls"]:
+            return pl.read_excel(
+                filename,
+                sheet_name=sheet_name or 0,  # Default to first sheet if none provided
+                read_csv_options={
+                    "encoding": "utf8-lossy",
+                    "ignore_errors": True,
+                    "infer_schema_length": 10000,
+                },
+            )
+
+        elif file_ext == ".json":
+            # Polars has efficient JSON reading
+            return pl.read_json(filename)
+
+        elif file_ext == ".dta":
+            return scan_readstat(filename).collect()
+
+        else:
+            raise ValueError(f"Unsupported file format: {file_ext}")  # noqa: TRY301
+
+    except Exception as e:
+        st.error(f"Error loading file {filename}: {e}")
+        return pl.DataFrame()
 
 
-def local_add_form(
+# --- Streamlit Form with Enhanced Validation ---
+
+
+def render_local_file_form(
     project_id: str, edit_mode: bool = False, defaults: dict | None = None
 ) -> None:
-    """Form for adding a file from local storage.
+    """Create form for adding files from local storage with enhanced validation.
 
-    PARAMS:
-    -------
-    None
-
-    Returns
-    -------
-    None
-
+    Args:
+        project_id: Project identifier
+        edit_mode: Whether in edit mode
+        defaults: Default values for form fields
     """
+    defaults = defaults or {}
     mode = "edit" if edit_mode else "add"
 
-    def valid_alias(alias: str) -> bool:
-        """Validate alias for uniqueness and length."""
-        if not alias:
-            st.error("Alias cannot be empty")
-            return False
-        if len(alias) > 20:
-            st.error("Alias must be a maximum of 20 characters")
-            return False
-        return True
-
-    def valid_file_path(file_path: str) -> bool:
-        """Validate file path for existence and type."""
-        if not file_path:
-            st.error("File path cannot be empty")
-            return False
-        if not os.path.isfile(file_path):
-            st.error("File not found. Please check the file path")
-            return False
-        valid_extensions = ["csv", "xlsx", "xls", "json", "dta"]
-        if file_path.split(".")[-1] not in valid_extensions:
-            st.error("Invalid file type. Please upload a valid file type")
-            return False
-        return True
-
-    # Get the path to the assets directory relative to the package
+    # UI Setup
     assets_dir = Path(__file__).parent.parent / "assets"
     image_path = assets_dir / "hard-disk.png"
-    st.image(str(image_path), width=100)
+    if image_path.exists():
+        st.image(str(image_path), width=100)
+
     st.subheader("Add File from Local Storage")
 
     if edit_mode:
         st.info("You are in edit mode. Please modify the file details below.")
-        # load the current file details from the defaults
-        default_local_file_alias = defaults.get("alias", "")
-        default_local_added_file = defaults.get("filename", "")
-        default_local_added_file_sheet_name = defaults.get("sheet_name", "")
-    else:
-        # set default values for the form inputs
-        default_local_file_alias = ""
-        default_local_added_file = ""
-        default_local_added_file_sheet_name = ""
 
-    local_file_alias = st.text_input(
-        label="alias*",
-        help="Enter a unique, short, descriptive name for the file",
-        placeholder=default_local_file_alias if edit_mode else "",
-        disabled=edit_mode,
-    )
-    if local_file_alias:
-        valid_alias(local_file_alias)
+    # Form inputs with validation
+    with st.form(key=f"local_file_form_{mode}"):
+        alias = st.text_input(
+            label="Alias*",
+            value=defaults.get("alias", ""),
+            help="Enter a unique, short, descriptive name for the file (max 20 characters)",
+            disabled=edit_mode,
+            max_chars=20,
+        )
 
-    # file uploader. Limit to 1 file and allow only file types selected
-    local_added_file = st.text_input(
-        label="file path*",
-        help="Add full file name and path. eg. C:/data/survey.dta",
-        placeholder=default_local_added_file if edit_mode else "",
-    )
+        file_path = st.text_input(
+            label="File Path*",
+            value=defaults.get("filename", ""),
+            help="Add full file name and path. e.g., C:/data/survey.dta",
+        )
 
-    if local_added_file and valid_file_path(local_added_file):
-        local_added_file_ext = local_added_file.split(".")[-1]
+        sheet_name = None
 
-        if local_added_file_ext in ["xlsx", "xls"]:
-            sheets = local_excel_sheet_names(local_added_file)
+        # Dynamic sheet selection for Excel files
+        if file_path:
+            try:
+                path_obj = Path(file_path)
+                if path_obj.suffix.lower() in [".xlsx", ".xls"] and path_obj.exists():
+                    sheets = get_excel_sheet_names(file_path)
+                    if sheets:
+                        default_index = 0
+                        if defaults.get("sheet_name") in sheets:
+                            default_index = sheets.index(defaults.get("sheet_name"))
 
-            # check if default sheetname exists in the list of sheets
-            if (
-                default_local_added_file_sheet_name
-                and default_local_added_file_sheet_name in sheets
-            ):
-                # get index of the default sheet name or set to first sheet
-                default_sheet_index = sheets.index(default_local_added_file_sheet_name)
-            else:
-                default_sheet_index = 0
+                        sheet_name = st.selectbox(
+                            label="Sheet Name",
+                            options=sheets,
+                            index=default_index,
+                        )
+            except Exception:
+                pass  # Handle invalid paths gracefully
 
-            local_added_file_sheet_name = st.selectbox(
-                label="Sheet Name",
-                options=sheets,
-                index=default_sheet_index,
+        st.markdown("**required*")
+
+        # Submit button
+        submitted = st.form_submit_button(
+            "Update File" if edit_mode else "Add File",
+            type="primary",
+            use_container_width=True,
+        )
+
+        if submitted:
+            _handle_form_submission(
+                project_id=project_id,
+                alias=alias,
+                file_path=file_path,
+                sheet_name=sheet_name or "",
+                edit_mode=edit_mode,
+                defaults=defaults,
             )
-        else:
-            local_added_file_sheet_name = ""
-    else:
-        local_added_file_sheet_name = ""
 
-    # add a submit button
-    local_add_btn = st.button(
-        "Add File",
-        type="primary",
-        use_container_width=True,
-        key=f"add_file_key{mode}",
-        disabled=not local_added_file and not local_file_alias,
-    )
 
-    st.markdown("**required*")
+def _handle_form_submission(
+    project_id: str,
+    alias: str,
+    file_path: str,
+    sheet_name: str,
+    edit_mode: bool,
+    defaults: dict,
+) -> None:
+    """Handle form submission with validation."""
+    try:
+        # Validate using Pydantic
+        file_config = FileConfig(alias=alias, filename=file_path, sheet_name=sheet_name)
 
-    # if submit (local_add_file) button is clicked
-    if local_add_btn:
+        # Get existing import log
         import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
 
-        # check that alias is unique
-        if not import_log.is_empty() and (
-            local_file_alias in import_log["alias"].to_list()
-        ):
-            st.error(
-                "Alias already exists. Please choose a different alias or edit the existing one."
-            )
-        else:
-            if edit_mode:
-                # update the row in the cache file
-                import_log = import_log.with_columns(
-                    pl.when(pl.col("alias") == default_local_file_alias)
-                    .then(pl.lit(local_added_file))
+        # Check alias uniqueness
+        if not import_log.is_empty():
+            existing_aliases = import_log.select("alias").to_series().to_list()
+            if not edit_mode and alias in existing_aliases:
+                st.error("Alias already exists. Please choose a different alias.")
+                return
+
+        if edit_mode:
+            # Update existing entry
+            import_log = import_log.with_columns(
+                [
+                    pl.when(pl.col("alias") == defaults.get("alias"))
+                    .then(pl.lit(file_config.filename))
                     .otherwise(pl.col("filename"))
                     .alias("filename"),
-                )
-
-            else:
-                # create a new row with the file details
-                new_row = {
-                    "refresh": True,
-                    "load": True,
-                    "alias": local_file_alias,
-                    "filename": local_added_file,
-                    "sheet_name": local_added_file_sheet_name,
-                    "source": "local storage",
-                    "server": "",
-                    "username": "",
-                    "form_id": "",
-                    "private_key": "",
-                    "save_to": "",
-                    "attachments": False,
-                }
-
-                if import_log.is_empty():
-                    import_log = pl.DataFrame([new_row])
-                else:
-                    # append the new row to the cache file
-                    import_log = pl.concat(
-                        [import_log, pl.DataFrame([new_row])], how="vertical"
-                    )
-
-            # save the updated cache file
-            duckdb_save_table(
-                project_id,
-                import_log,
-                alias="import_log",
-                db_name="logs",
+                    pl.when(pl.col("alias") == defaults.get("alias"))
+                    .then(pl.lit(file_config.sheet_name))
+                    .otherwise(pl.col("sheet_name"))
+                    .alias("sheet_name"),
+                ]
+            )
+        else:
+            # Create new entry
+            new_entry = ImportLogEntry(
+                alias=file_config.alias,
+                filename=file_config.filename,
+                sheet_name=file_config.sheet_name,
             )
 
+            new_row_df = pl.DataFrame([new_entry])
 
-# --- Load data from local storage ---#
+            if import_log.is_empty():
+                import_log = new_row_df
+            else:
+                import_log = pl.concat([import_log, new_row_df], how="vertical")
+
+        # Save updated log
+        duckdb_save_table(project_id, import_log, alias="import_log", db_name="logs")
+
+        st.success(f"File {'updated' if edit_mode else 'added'} successfully!")
+
+    except Exception as e:
+        st.error(f"Validation error: {e}")
 
 
-def local_load_action(
-    project_id: str, alias: str, filename: str, sheet_name: str | None
+# --- Optimized Data Loading ---
+
+
+def load_local_data(
+    project_id: str, alias: str, filename: str, sheet_name: str | None = None
 ) -> None:
-    """Load data from local storage.
+    """Load data from local storage with optimized performance.
 
-    PARAMS:
-    -------
-    project_id: str : project ID
-    data_index: int : index of the data to load
-    alias: str : alias for the data
-    filename: str : path to the file
-    sheet_name: str : name of the sheet to import (if applicable)
-
-    Returns
-    -------
-    None
+    Args:
+        project_id: Project identifier
+        alias: Alias for the data
+        filename: Path to the file
+        sheet_name: Sheet name for Excel files
     """
-    # read data from file
-    data: pl.DataFrame = local_read_data(filename, sheet_name)
+    try:
+        # Load data efficiently
+        data = load_data_efficiently(filename, sheet_name)
+        if data.is_empty():
+            st.warning(f"No data loaded from {filename}")
+            return
 
-    # save data to DuckDB
-    duckdb_save_table(
-        project_id,
-        data,
-        alias=alias,
-        db_name="raw",
-    )
+        # Save to DuckDB
+        duckdb_save_table(project_id, data, alias=alias, db_name="raw")
+
+        st.success(f"Data loaded successfully! Shape: {data.shape}")
+
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+
+
+# --- Utility Functions ---
+
+
+def validate_file_accessibility(file_path: str) -> bool:
+    """Check if file is accessible and readable."""
+    try:
+        path_obj = Path(file_path)
+        return (
+            path_obj.exists() and path_obj.is_file() and os.access(file_path, os.R_OK)
+        )
+    except Exception:
+        return False
+
+
+def get_file_info(file_path: str) -> dict:
+    """Get file information for display."""
+    try:
+        path_obj = Path(file_path)
+        stat = path_obj.stat()
+        return {
+            "size": stat.st_size,
+            "modified": stat.st_mtime,
+            "extension": path_obj.suffix.lower(),
+            "exists": path_obj.exists(),
+        }
+    except Exception:
+        return {"exists": False}
