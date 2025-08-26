@@ -1,27 +1,161 @@
 """Tests for the local connector module."""
 
 import json
+import os
 from unittest.mock import MagicMock, patch
 
-import pandas as pd
 import polars as pl
 import pytest
 from openpyxl import Workbook
+from pydantic import ValidationError
 
 from datasure.connectors.local import (
-    local_add_form,
-    local_excel_sheet_names,
-    local_load_action,
-    local_read_data,
+    VALID_FILE_TYPES,
+    FileConfig,
+    ImportLogEntry,
+    get_excel_sheet_names,
+    get_file_info,
+    load_data_efficiently,
+    load_local_data,
+    render_local_file_form,
+    validate_file_accessibility,
 )
 
 
-class TestLocalExcelSheetNames:
-    """Test the local_excel_sheet_names function."""
+class TestValidFileTypes:
+    """Test the VALID_FILE_TYPES constant."""
+
+    def test_valid_file_types_constant(self):
+        """Test that VALID_FILE_TYPES contains expected file extensions."""
+        expected_types = {".csv", ".xlsx", ".xls", ".json", ".dta"}
+        assert expected_types == VALID_FILE_TYPES
+
+
+class TestFileConfig:
+    """Test the FileConfig Pydantic model."""
+
+    def test_valid_file_config(self, tmp_path):
+        """Test creating a valid FileConfig."""
+        # Create a test file
+        test_file = tmp_path / "test.csv"
+        test_file.write_text("name,age\nJohn,25")
+
+        config = FileConfig(
+            alias="test_alias", filename=str(test_file), sheet_name="Sheet1"
+        )
+
+        assert config.alias == "test_alias"
+        assert config.filename == str(test_file)
+        assert config.sheet_name == "Sheet1"
+        assert config.source == "local storage"
+
+    def test_alias_validation_empty(self):
+        """Test alias validation with empty alias."""
+        with pytest.raises(ValidationError) as exc_info:
+            FileConfig(alias="", filename="/path/to/file.csv")
+
+        assert "String should have at least 1 character" in str(exc_info.value)
+
+    def test_alias_validation_whitespace_only(self):
+        """Test alias validation with whitespace-only alias."""
+        with pytest.raises(ValidationError) as exc_info:
+            FileConfig(alias="   ", filename="/path/to/file.csv")
+
+        assert "Alias cannot be empty" in str(exc_info.value)
+
+    def test_alias_validation_too_long(self):
+        """Test alias validation with too long alias."""
+        long_alias = "a" * 21  # 21 characters
+        with pytest.raises(ValidationError) as exc_info:
+            FileConfig(alias=long_alias, filename="/path/to/file.csv")
+
+        assert "at most 20 characters" in str(exc_info.value)
+
+    def test_alias_validation_strips_whitespace(self, tmp_path):
+        """Test that alias validation strips whitespace."""
+        test_file = tmp_path / "test.csv"
+        test_file.write_text("test")
+
+        config = FileConfig(alias="  test_alias  ", filename=str(test_file))
+        assert config.alias == "test_alias"
+
+    def test_filename_validation_empty(self):
+        """Test filename validation with empty filename."""
+        with pytest.raises(ValidationError) as exc_info:
+            FileConfig(alias="test", filename="")
+
+        assert "File path cannot be empty" in str(exc_info.value)
+
+    def test_filename_validation_nonexistent_file(self):
+        """Test filename validation with non-existent file."""
+        with pytest.raises(ValidationError) as exc_info:
+            FileConfig(alias="test", filename="/nonexistent/file.csv")
+
+        assert "File not found" in str(exc_info.value)
+
+    def test_filename_validation_directory(self, tmp_path):
+        """Test filename validation with directory path."""
+        with pytest.raises(ValidationError) as exc_info:
+            FileConfig(alias="test", filename=str(tmp_path))
+
+        assert "Path is not a file" in str(exc_info.value)
+
+    def test_filename_validation_invalid_extension(self, tmp_path):
+        """Test filename validation with invalid file extension."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("test")
+
+        with pytest.raises(ValidationError) as exc_info:
+            FileConfig(alias="test", filename=str(test_file))
+
+        assert "Invalid file type" in str(exc_info.value)
+        assert ".csv" in str(exc_info.value)
+
+
+class TestImportLogEntry:
+    """Test the ImportLogEntry Pydantic model."""
+
+    def test_import_log_entry_defaults(self):
+        """Test ImportLogEntry with minimal required fields."""
+        entry = ImportLogEntry(alias="test", filename="test.csv")
+
+        assert entry.refresh is True
+        assert entry.load is True
+        assert entry.alias == "test"
+        assert entry.filename == "test.csv"
+        assert entry.sheet_name is None
+        assert entry.source == "local storage"
+        assert entry.server == ""
+        assert entry.username == ""
+
+    def test_import_log_entry_all_fields(self):
+        """Test ImportLogEntry with all fields."""
+        entry = ImportLogEntry(
+            refresh=False,
+            load=False,
+            alias="test",
+            filename="test.csv",
+            sheet_name="Sheet1",
+            source="custom source",
+            server="test_server",
+            username="test_user",
+            form_id="form123",
+            private_key="key123",
+            save_to="location",
+            attachments=True,
+        )
+
+        assert entry.refresh is False
+        assert entry.load is False
+        assert entry.sheet_name == "Sheet1"
+        assert entry.source == "custom source"
+
+
+class TestGetExcelSheetNames:
+    """Test the get_excel_sheet_names function."""
 
     def test_excel_sheet_names_single_sheet(self, tmp_path):
         """Test getting sheet names from Excel file with single sheet."""
-        # Create a temporary Excel file with one sheet
         excel_file = tmp_path / "test.xlsx"
         wb = Workbook()
         ws = wb.active
@@ -29,8 +163,7 @@ class TestLocalExcelSheetNames:
         ws["A1"] = "test data"
         wb.save(excel_file)
 
-        result = local_excel_sheet_names(str(excel_file))
-
+        result = get_excel_sheet_names(str(excel_file))
         assert result == ["TestSheet"]
 
     def test_excel_sheet_names_multiple_sheets(self, tmp_path):
@@ -38,7 +171,6 @@ class TestLocalExcelSheetNames:
         excel_file = tmp_path / "test.xlsx"
         wb = Workbook()
 
-        # Create multiple sheets
         ws1 = wb.active
         ws1.title = "Sheet1"
         wb.create_sheet("Sheet2")
@@ -46,49 +178,42 @@ class TestLocalExcelSheetNames:
 
         wb.save(excel_file)
 
-        result = local_excel_sheet_names(str(excel_file))
-
+        result = get_excel_sheet_names(str(excel_file))
         assert result == ["Sheet1", "Sheet2", "Sheet3"]
 
+    @patch("datasure.connectors.local.st")
+    @patch("datasure.connectors.local.load_workbook")
+    def test_excel_sheet_names_error_handling(self, mock_load_workbook, mock_st):
+        """Test error handling in get_excel_sheet_names."""
+        mock_load_workbook.side_effect = Exception("Cannot read file")
 
-class TestLocalReadData:
-    """Test the local_read_data function."""
+        result = get_excel_sheet_names("invalid_file.xlsx")
 
-    def test_read_csv_file(self, tmp_path):
-        """Test reading CSV file."""
+        assert result == []
+        mock_st.error.assert_called_once()
+        assert "Error reading Excel file" in mock_st.error.call_args[0][0]
+
+
+class TestLoadDataEfficiently:
+    """Test the load_data_efficiently function."""
+
+    def test_load_csv_file(self, tmp_path):
+        """Test loading CSV file."""
         csv_file = tmp_path / "test.csv"
         test_data = "name,age,city\nJohn,25,NYC\nJane,30,LA"
         csv_file.write_text(test_data)
 
-        result = local_read_data(str(csv_file))
+        result = load_data_efficiently(str(csv_file))
 
-        # The function returns pandas DataFrame
-        assert isinstance(result, pd.DataFrame)
-        assert len(result) == 2
+        assert isinstance(result, pl.DataFrame)
+        assert result.shape[0] == 2
         assert list(result.columns) == ["name", "age", "city"]
-        assert result.iloc[0]["name"] == "John"
+        assert result.row(0) == ("John", 25, "NYC")
 
-    def test_read_json_file(self, tmp_path):
-        """Test reading JSON file."""
-        json_file = tmp_path / "test.json"
-        test_data = [
-            {"name": "John", "age": 25, "city": "NYC"},
-            {"name": "Jane", "age": 30, "city": "LA"},
-        ]
-        json_file.write_text(json.dumps(test_data))
-
-        result = local_read_data(str(json_file))
-
-        # The function returns pandas DataFrame
-        assert isinstance(result, pd.DataFrame)
-        assert len(result) == 2
-        assert "name" in result.columns
-
-    def test_read_excel_file_default_sheet(self, tmp_path):
-        """Test reading Excel file with default sheet."""
+    def test_load_excel_file_default_sheet(self, tmp_path):
+        """Test loading Excel file with default sheet."""
         excel_file = tmp_path / "test.xlsx"
 
-        # Create Excel file with data
         wb = Workbook()
         ws = wb.active
         ws.title = "TestSheet"
@@ -98,22 +223,17 @@ class TestLocalReadData:
         ws["B2"] = 25
         wb.save(excel_file)
 
-        result = local_read_data(str(excel_file))
+        result = load_data_efficiently(filename=excel_file, sheet_name="TestSheet")
 
-        # When sheet_name is None, pandas returns a dict of sheet_name: DataFrame
-        assert isinstance(result, dict)
-        assert "TestSheet" in result
-        df = result["TestSheet"]
-        assert isinstance(df, pd.DataFrame)
-        assert len(df) == 1
-        assert "name" in df.columns
-        assert "age" in df.columns
+        assert isinstance(result, pl.DataFrame)
+        assert result.shape[0] == 1
+        assert "name" in result.columns
+        assert "age" in result.columns
 
-    def test_read_excel_file_specific_sheet(self, tmp_path):
-        """Test reading Excel file with specific sheet name."""
+    def test_load_excel_file_specific_sheet(self, tmp_path):
+        """Test loading Excel file with specific sheet name."""
         excel_file = tmp_path / "test.xlsx"
 
-        # Create Excel file with multiple sheets
         wb = Workbook()
         ws1 = wb.active
         ws1.title = "Sheet1"
@@ -121,502 +241,347 @@ class TestLocalReadData:
 
         ws2 = wb.create_sheet("Sheet2")
         ws2["A1"] = "data2"
+        ws2["A2"] = "value2"
 
         wb.save(excel_file)
 
-        result = local_read_data(str(excel_file), sheet_name="Sheet2")
+        result = load_data_efficiently(str(excel_file), sheet_name="Sheet2")
 
-        # The function returns pandas DataFrame
-        assert isinstance(result, pd.DataFrame)
-        assert len(result) >= 0  # Should successfully read the sheet
+        assert isinstance(result, pl.DataFrame)
+        assert result.shape[0] >= 1
 
-    @patch("pandas.read_stata")
-    def test_read_stata_file(self, mock_read_stata, tmp_path):
-        """Test reading Stata file."""
+    def test_load_json_file(self, tmp_path):
+        """Test loading JSON file."""
+        json_file = tmp_path / "test.json"
+        test_data = [
+            {"name": "John", "age": 25, "city": "NYC"},
+            {"name": "Jane", "age": 30, "city": "LA"},
+        ]
+        json_file.write_text(json.dumps(test_data))
+
+        result = load_data_efficiently(str(json_file))
+
+        assert isinstance(result, pl.DataFrame)
+        assert result.shape[0] == 2
+        assert "name" in result.columns
+
+    @patch("datasure.connectors.local.scan_readstat")
+    def test_load_stata_file(self, mock_scan_readstat, tmp_path):
+        """Test loading Stata file."""
         stata_file = tmp_path / "test.dta"
-        stata_file.touch()  # Create empty file
+        stata_file.touch()
 
-        # Mock the pandas read_stata function
-        mock_df = pd.DataFrame({"var1": [1, 2, 3], "var2": ["a", "b", "c"]})
-        mock_read_stata.return_value = mock_df
+        mock_lazy_frame = MagicMock()
+        mock_df = pl.DataFrame({"var1": [1, 2, 3], "var2": ["a", "b", "c"]})
+        mock_lazy_frame.collect.return_value = mock_df
+        mock_scan_readstat.return_value = mock_lazy_frame
 
-        result = local_read_data(str(stata_file))
+        result = load_data_efficiently(str(stata_file))
 
-        mock_read_stata.assert_called_once_with(str(stata_file))
-        # Should return the mocked DataFrame
+        mock_scan_readstat.assert_called_once_with(str(stata_file))
         assert result.equals(mock_df)
 
+    def test_unsupported_file_format(self, tmp_path):
+        """Test loading unsupported file format."""
+        unsupported_file = tmp_path / "test.txt"
+        unsupported_file.write_text("test")
 
-class TestLocalAddForm:
-    """Test the local_add_form function."""
+        with patch("datasure.connectors.local.st") as mock_st:
+            result = load_data_efficiently(str(unsupported_file))
 
-    @patch("datasure.connectors.local.duckdb_get_table")
-    @patch("datasure.connectors.local.duckdb_save_table")
+            assert isinstance(result, pl.DataFrame)
+            assert result.is_empty()
+            mock_st.error.assert_called_once()
+            assert "Error loading file" in mock_st.error.call_args[0][0]
+
+    @patch("datasure.connectors.local.pl.read_csv")
     @patch("datasure.connectors.local.st")
-    def test_valid_alias_empty(self, mock_st, mock_save_table, mock_get_table):
-        """Test alias validation with empty alias."""
-        from datasure.connectors.local import local_add_form
+    def test_load_data_error_handling(self, mock_st, mock_read_csv, tmp_path):
+        """Test error handling in load_data_efficiently."""
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text("test")
 
-        # Mock streamlit components
-        mock_st.text_input.return_value = ""
-        mock_st.button.return_value = False
-        mock_st.image.return_value = None
-        mock_st.subheader.return_value = None
-        mock_st.markdown.return_value = None
+        mock_read_csv.side_effect = Exception("Read error")
 
-        # Call the function (it should run without error)
-        local_add_form("test_project_id")
+        result = load_data_efficiently(str(csv_file))
 
-        # Verify streamlit components were called
-        assert mock_st.text_input.call_count >= 1
+        assert isinstance(result, pl.DataFrame)
+        assert result.is_empty()
+        mock_st.error.assert_called_once()
+        assert "Error loading file" in mock_st.error.call_args[0][0]
 
-    @patch("datasure.connectors.local.duckdb_get_table")
-    @patch("datasure.connectors.local.duckdb_save_table")
+
+class TestRenderLocalFileForm:
+    """Test the render_local_file_form function."""
+
     @patch("datasure.connectors.local.st")
-    @patch("os.path.isfile")
-    def test_valid_file_path_nonexistent(
-        self, mock_isfile, mock_st, mock_save_table, mock_get_table
-    ):
-        """Test file path validation with non-existent file."""
-        from datasure.connectors.local import local_add_form
+    @patch("datasure.connectors.local.Path")
+    def test_render_form_basic(self, mock_path, mock_st):
+        """Test basic form rendering."""
+        # Mock Path and file system
+        mock_assets_dir = MagicMock()
+        mock_image_path = MagicMock()
+        mock_image_path.exists.return_value = True
+        mock_assets_dir.__truediv__.return_value = mock_image_path
+        mock_path.return_value.parent.parent.__truediv__.return_value = mock_assets_dir
 
-        # Mock file doesn't exist
-        mock_isfile.return_value = False
+        # Mock form context
+        mock_form = MagicMock()
+        mock_st.form.return_value.__enter__.return_value = mock_form
 
-        # Mock streamlit components
-        mock_st.text_input.side_effect = ["test_alias", "/nonexistent/file.csv"]
-        mock_st.button.return_value = False
-        mock_st.image.return_value = None
-        mock_st.subheader.return_value = None
-        mock_st.markdown.return_value = None
-        mock_st.error.return_value = None
+        # Mock form inputs
+        mock_st.text_input.side_effect = ["test_alias", "/path/to/file.csv"]
+        mock_st.form_submit_button.return_value = False
 
-        # Call the function
-        local_add_form("test_project_id")
+        render_local_file_form("test_project_id")
 
-        # Verify error was called for non-existent file
-        mock_st.error.assert_called()
+        # Verify UI elements were called
+        mock_st.image.assert_called_once()
+        mock_st.subheader.assert_called_with("Add File from Local Storage")
+        assert mock_st.text_input.call_count == 2
+        mock_st.form_submit_button.assert_called_once()
 
-    @patch("datasure.connectors.local.duckdb_get_table")
-    @patch("datasure.connectors.local.duckdb_save_table")
     @patch("datasure.connectors.local.st")
-    @patch("os.path.isfile")
-    def test_valid_file_path_invalid_extension(
-        self, mock_isfile, mock_st, mock_save_table, mock_get_table
-    ):
-        """Test file path validation with invalid file extension."""
-        from datasure.connectors.local import local_add_form
+    @patch("datasure.connectors.local.Path")
+    def test_render_form_edit_mode(self, mock_path, mock_st):
+        """Test form rendering in edit mode."""
+        # Mock Path setup
+        mock_assets_dir = MagicMock()
+        mock_image_path = MagicMock()
+        mock_image_path.exists.return_value = False
+        mock_assets_dir.__truediv__.return_value = mock_image_path
+        mock_path.return_value.parent.parent.__truediv__.return_value = mock_assets_dir
 
-        # Mock file exists but wrong extension
-        mock_isfile.return_value = True
+        # Mock form context
+        mock_form = MagicMock()
+        mock_st.form.return_value.__enter__.return_value = mock_form
 
-        # Mock streamlit components
-        mock_st.text_input.side_effect = ["test_alias", "/path/to/file.txt"]
-        mock_st.button.return_value = False
-        mock_st.image.return_value = None
-        mock_st.subheader.return_value = None
-        mock_st.markdown.return_value = None
-        mock_st.error.return_value = None
+        defaults = {"alias": "old_alias", "filename": "old_file.csv"}
+        mock_st.text_input.side_effect = ["old_alias", "old_file.csv"]
+        mock_st.form_submit_button.return_value = False
 
-        # Call the function
-        local_add_form("test_project_id")
+        render_local_file_form("test_project_id", edit_mode=True, defaults=defaults)
 
-        # Verify error was called for invalid extension
-        mock_st.error.assert_called()
-
-    @patch("datasure.connectors.local.local_excel_sheet_names")
-    @patch("datasure.connectors.local.duckdb_get_table")
-    @patch("datasure.connectors.local.duckdb_save_table")
-    @patch("datasure.connectors.local.st")
-    @patch("os.path.isfile")
-    def test_excel_sheet_selection(
-        self, mock_isfile, mock_st, mock_save_table, mock_get_table, mock_sheet_names
-    ):
-        """Test Excel sheet selection functionality."""
-        from datasure.connectors.local import local_add_form
-
-        # Mock file exists and is Excel
-        mock_isfile.return_value = True
-        mock_sheet_names.return_value = ["Sheet1", "Sheet2", "Sheet3"]
-
-        # Mock streamlit components
-        mock_st.text_input.side_effect = ["test_alias", "/path/to/file.xlsx"]
-        mock_st.selectbox.return_value = "Sheet2"
-        mock_st.button.return_value = False
-        mock_st.image.return_value = None
-        mock_st.subheader.return_value = None
-        mock_st.markdown.return_value = None
-
-        # Call the function
-        local_add_form("test_project_id")
-
-        # Verify sheet names function was called
-        mock_sheet_names.assert_called_once_with("/path/to/file.xlsx")
-        # Verify selectbox was called with sheet names
-        mock_st.selectbox.assert_called_once()
-
-    # Edge case tests for local_add_form as specified in TODO_UPDATE.md
-
-    @patch("datasure.connectors.local.duckdb_get_table")
-    @patch("datasure.connectors.local.duckdb_save_table")
-    @patch("datasure.connectors.local.st")
-    def test_button_enabled_with_valid_inputs(
-        self, mock_st, mock_save_table, mock_get_table
-    ):
-        """Test that button is enabled when both alias and file path are provided."""
-        # Mock streamlit components - simulate user entering valid inputs
-        mock_st.text_input.side_effect = [
-            "valid_alias",
-            "/valid/path.csv",
-        ]  # alias, filepath
-        mock_st.button.return_value = False
-        mock_st.image.return_value = None
-        mock_st.subheader.return_value = None
-        mock_st.markdown.return_value = None
-
-        # Call the function
-        local_add_form("test_project_id")
-
-        # Button should be enabled because both inputs are provided
-        button_call = mock_st.button.call_args
-        assert button_call[1]["disabled"] is False
-
-    @patch("datasure.connectors.local.duckdb_get_table")
-    @patch("datasure.connectors.local.duckdb_save_table")
-    @patch("datasure.connectors.local.st")
-    @patch("os.path.isfile")
-    def test_alias_validation_too_long(
-        self, mock_isfile, mock_st, mock_save_table, mock_get_table
-    ):
-        """Test alias validation with too long alias (>20 characters)."""
-        long_alias = "this_alias_is_way_too_long_for_validation"
-
-        # Mock file exists to avoid file validation errors
-        mock_isfile.return_value = True
-
-        # Mock streamlit components
-        mock_st.text_input.side_effect = [long_alias, "/valid/path.csv"]
-        mock_st.button.return_value = False
-        mock_st.image.return_value = None
-        mock_st.subheader.return_value = None
-        mock_st.markdown.return_value = None
-        mock_st.error.return_value = None
-
-        # Call the function
-        local_add_form("test_project_id")
-
-        # Should call st.error for alias too long
-        assert any(
-            call[0][0] == "Alias must be a maximum of 20 characters"
-            for call in mock_st.error.call_args_list
-        )
-
-    @patch("datasure.connectors.local.duckdb_get_table")
-    @patch("datasure.connectors.local.duckdb_save_table")
-    @patch("datasure.connectors.local.st")
-    @patch("os.path.isfile")
-    def test_alias_validation_duplicate_alias(
-        self, mock_isfile, mock_st, mock_save_table, mock_get_table
-    ):
-        """Test alias validation with duplicate alias in import log."""
-        # Mock existing import log with duplicate alias
-        mock_import_log = MagicMock()
-        mock_import_log.is_empty.return_value = False
-        mock_import_log.__getitem__.return_value.to_list.return_value = [
-            "existing_alias",
-            "another_alias",
-        ]
-        mock_get_table.return_value = mock_import_log
-
-        # Mock file exists
-        mock_isfile.return_value = True
-
-        # Mock streamlit components - user tries to use existing alias
-        mock_st.text_input.side_effect = ["existing_alias", "/valid/path.csv"]
-        mock_st.button.return_value = True  # User clicks submit
-        mock_st.image.return_value = None
-        mock_st.subheader.return_value = None
-        mock_st.markdown.return_value = None
-        mock_st.error.return_value = None
-
-        # Call the function
-        local_add_form("test_project_id")
-
-        # Should call st.error for duplicate alias
-        mock_st.error.assert_called_with(
-            "Alias already exists. Please choose a different alias or edit the existing one."
-        )
-
-    @patch("datasure.connectors.local.duckdb_get_table")
-    @patch("datasure.connectors.local.duckdb_save_table")
-    @patch("datasure.connectors.local.st")
-    def test_button_enabled_when_only_alias_provided(
-        self, mock_st, mock_save_table, mock_get_table
-    ):
-        """Test that button is enabled when alias is provided but file path is empty."""
-        # Mock streamlit components - alias provided, file path empty
-        mock_st.text_input.side_effect = ["valid_alias", ""]  # alias, filepath
-        mock_st.button.return_value = False
-        mock_st.image.return_value = None
-        mock_st.subheader.return_value = None
-        mock_st.markdown.return_value = None
-
-        # Call the function
-        local_add_form("test_project_id")
-
-        # Button logic: disabled = not file_path and not alias
-        # With alias="valid_alias" and file_path="", disabled = False
-        button_call = mock_st.button.call_args
-        assert button_call[1]["disabled"] is False
-
-    @patch("datasure.connectors.local.duckdb_get_table")
-    @patch("datasure.connectors.local.duckdb_save_table")
-    @patch("datasure.connectors.local.st")
-    @patch("os.path.isfile")
-    def test_file_path_validation_directory_path(
-        self, mock_isfile, mock_st, mock_save_table, mock_get_table
-    ):
-        """Test file path validation with directory path instead of file."""
-        # Mock isfile returns False for directory
-        mock_isfile.return_value = False
-
-        # Mock streamlit components - simulate directory path
-        mock_st.text_input.side_effect = ["valid_alias", "/path/to/directory/"]
-        mock_st.button.return_value = False
-        mock_st.image.return_value = None
-        mock_st.subheader.return_value = None
-        mock_st.markdown.return_value = None
-        mock_st.error.return_value = None
-
-        # Call the function
-        local_add_form("test_project_id")
-
-        # Should call st.error for file not found
-        assert any(
-            call[0][0] == "File not found. Please check the file path"
-            for call in mock_st.error.call_args_list
-        )
-
-    @patch("datasure.connectors.local.duckdb_get_table")
-    @patch("datasure.connectors.local.duckdb_save_table")
-    @patch("datasure.connectors.local.st")
-    @patch("os.path.isfile")
-    def test_file_path_validation_unsupported_extension(
-        self, mock_isfile, mock_st, mock_save_table, mock_get_table
-    ):
-        """Test file path validation with unsupported file extension."""
-        # Mock file exists but has unsupported extension
-        mock_isfile.return_value = True
-
-        # Mock streamlit components - simulate unsupported file type
-        mock_st.text_input.side_effect = ["valid_alias", "/path/to/file.pdf"]
-        mock_st.button.return_value = False
-        mock_st.image.return_value = None
-        mock_st.subheader.return_value = None
-        mock_st.markdown.return_value = None
-        mock_st.error.return_value = None
-
-        # Call the function
-        local_add_form("test_project_id")
-
-        # Should call st.error for invalid file type
-        assert any(
-            call[0][0] == "Invalid file type. Please upload a valid file type"
-            for call in mock_st.error.call_args_list
-        )
-
-    @patch("datasure.connectors.local.local_excel_sheet_names")
-    @patch("datasure.connectors.local.duckdb_get_table")
-    @patch("datasure.connectors.local.duckdb_save_table")
-    @patch("datasure.connectors.local.st")
-    @patch("os.path.isfile")
-    def test_excel_sheet_handling_error(
-        self, mock_isfile, mock_st, mock_save_table, mock_get_table, mock_sheet_names
-    ):
-        """Test Excel sheet handling when sheet names cannot be retrieved."""
-        # Mock file exists and is Excel
-        mock_isfile.return_value = True
-        # Mock sheet names function raises exception
-        mock_sheet_names.side_effect = Exception("Cannot read Excel file")
-
-        # Mock streamlit components
-        mock_st.text_input.side_effect = ["valid_alias", "/path/to/file.xlsx"]
-        mock_st.button.return_value = False
-        mock_st.image.return_value = None
-        mock_st.subheader.return_value = None
-        mock_st.markdown.return_value = None
-
-        # Call the function - expect exception since no error handling exists
-        with pytest.raises(Exception, match="Cannot read Excel file"):
-            local_add_form("test_project_id")
-
-        # Verify sheet names function was attempted
-        mock_sheet_names.assert_called_once_with("/path/to/file.xlsx")
-
-    @patch("datasure.connectors.local.local_excel_sheet_names")
-    @patch("datasure.connectors.local.duckdb_get_table")
-    @patch("datasure.connectors.local.duckdb_save_table")
-    @patch("datasure.connectors.local.st")
-    @patch("os.path.isfile")
-    def test_excel_default_sheet_selection(
-        self, mock_isfile, mock_st, mock_save_table, mock_get_table, mock_sheet_names
-    ):
-        """Test Excel default sheet selection when defaults don't match sheets."""
-        # Mock file exists and is Excel
-        mock_isfile.return_value = True
-        mock_sheet_names.return_value = ["Sheet1", "Data", "Summary"]
-
-        # Mock streamlit components
-        mock_st.text_input.side_effect = ["valid_alias", "/path/to/file.xlsx"]
-        mock_st.selectbox.return_value = "Data"
-        mock_st.button.return_value = False
-        mock_st.image.return_value = None
-        mock_st.subheader.return_value = None
-        mock_st.markdown.return_value = None
-
-        # Call function with defaults that don't exist in sheets
-        defaults = {
-            "alias": "old_alias",
-            "filename": "old_file.xlsx",
-            "sheet_name": "NonExistentSheet",
-        }
-        local_add_form("test_project_id", edit_mode=True, defaults=defaults)
-
-        # Should use index 0 (first sheet) when default doesn't exist
-        call_args = mock_st.selectbox.call_args
-        assert call_args[1]["index"] == 0  # Should default to first sheet
-
-    @patch("datasure.connectors.local.duckdb_get_table")
-    @patch("datasure.connectors.local.duckdb_save_table")
-    @patch("datasure.connectors.local.st")
-    def test_edit_mode_with_defaults(self, mock_st, mock_save_table, mock_get_table):
-        """Test edit mode functionality with default values."""
-        # Mock empty import log
-        mock_import_log = MagicMock()
-        mock_import_log.is_empty.return_value = True
-        mock_get_table.return_value = mock_import_log
-
-        # Mock streamlit components
-        mock_st.text_input.side_effect = ["updated_alias", "/updated/path.csv"]
-        mock_st.button.return_value = False
-        mock_st.image.return_value = None
-        mock_st.subheader.return_value = None
-        mock_st.markdown.return_value = None
-        mock_st.info.return_value = None
-
-        # Call function in edit mode with defaults
-        defaults = {"alias": "old_alias", "filename": "old_file.csv", "sheet_name": ""}
-        local_add_form("test_project_id", edit_mode=True, defaults=defaults)
-
-        # Verify info message for edit mode
+        # Verify edit mode info message
         mock_st.info.assert_called_with(
             "You are in edit mode. Please modify the file details below."
         )
 
-        # Verify text inputs use placeholders from defaults
-        text_input_calls = mock_st.text_input.call_args_list
-        # First call should have placeholder for alias
-        assert text_input_calls[0][1]["placeholder"] == "old_alias"
-        # Second call should have placeholder for filename
-        assert text_input_calls[1][1]["placeholder"] == "old_file.csv"
-
         # Verify alias input is disabled in edit mode
-        assert text_input_calls[0][1]["disabled"] is True
+        alias_call = mock_st.text_input.call_args_list[0]
+        assert alias_call[1]["disabled"] is True
+        assert alias_call[1]["value"] == "old_alias"
 
-    @patch("datasure.connectors.local.duckdb_get_table")
-    @patch("datasure.connectors.local.duckdb_save_table")
+    @patch("datasure.connectors.local._handle_form_submission")
+    @patch("datasure.connectors.local.get_excel_sheet_names")
     @patch("datasure.connectors.local.st")
-    @patch("os.path.isfile")
-    def test_button_disabled_when_missing_inputs(
-        self, mock_isfile, mock_st, mock_save_table, mock_get_table
+    @patch("datasure.connectors.local.Path")
+    def test_render_form_excel_sheet_selection(
+        self, mock_path, mock_st, mock_get_sheets, mock_handle_submission
     ):
-        """Test that submit button is disabled when required inputs are missing."""
-        # Mock streamlit components - missing both alias and file path
-        mock_st.text_input.side_effect = ["", ""]  # Empty alias and filepath
-        mock_st.button.return_value = False
-        mock_st.image.return_value = None
-        mock_st.subheader.return_value = None
-        mock_st.markdown.return_value = None
+        """Test Excel sheet selection in form."""
+        # Mock Path setup for Excel file
+        mock_path_obj = MagicMock()
+        mock_path_obj.suffix.lower.return_value = ".xlsx"
+        mock_path_obj.exists.return_value = True
+        mock_path.return_value = mock_path_obj
 
-        # Call the function
-        local_add_form("test_project_id")
+        # Mock assets path
+        mock_assets_dir = MagicMock()
+        mock_image_path = MagicMock()
+        mock_image_path.exists.return_value = True
+        mock_assets_dir.__truediv__.return_value = mock_image_path
+        mock_path.return_value.parent.parent.__truediv__.return_value = mock_assets_dir
 
-        # Verify button is called with disabled=True
-        button_call = mock_st.button.call_args
-        assert button_call[1]["disabled"] is True
+        # Mock form context
+        mock_form = MagicMock()
+        mock_st.form.return_value.__enter__.return_value = mock_form
 
+        # Mock Excel sheets
+        mock_get_sheets.return_value = ["Sheet1", "Sheet2", "Data"]
+
+        # Mock form inputs
+        mock_st.text_input.side_effect = ["test_alias", "/path/to/file.xlsx"]
+        mock_st.selectbox.return_value = "Sheet2"
+        mock_st.form_submit_button.return_value = True
+
+        render_local_file_form("test_project_id")
+
+        # Verify sheet selection was offered
+        mock_get_sheets.assert_called_once_with("/path/to/file.xlsx")
+        mock_st.selectbox.assert_called_once()
+        selectbox_call = mock_st.selectbox.call_args
+        assert selectbox_call[1]["options"] == ["Sheet1", "Sheet2", "Data"]
+
+        # Verify form submission was handled
+        mock_handle_submission.assert_called_once()
+
+
+class TestHandleFormSubmission:
+    """Test the _handle_form_submission function (indirectly through form rendering)."""
+
+    @patch("datasure.connectors.local.duckdb_save_table")
     @patch("datasure.connectors.local.duckdb_get_table")
-    @patch("datasure.connectors.local.duckdb_save_table")
     @patch("datasure.connectors.local.st")
-    @patch("os.path.isfile")
-    @patch("polars.concat")
-    def test_successful_file_addition(
-        self, mock_concat, mock_isfile, mock_st, mock_save_table, mock_get_table
+    @patch("datasure.connectors.local.Path")
+    def test_successful_form_submission(
+        self, mock_path, mock_st, mock_get_table, mock_save_table
     ):
-        """Test successful file addition to import log."""
-        # Mock empty import log
-        mock_import_log = MagicMock()
-        mock_import_log.is_empty.return_value = True
-        mock_import_log.__getitem__.return_value.to_list.return_value = []
-        mock_get_table.return_value = mock_import_log
+        """Test successful form submission."""
+        # Create a real temp file for validation
+        import tempfile
 
-        # Mock file exists
-        mock_isfile.return_value = True
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
+            tmp.write(b"test,data\n1,2")
+            temp_file_path = tmp.name
 
-        # Mock polars concat
-        mock_concat.return_value = mock_import_log
+        try:
+            # Mock Path for assets
+            mock_assets_dir = MagicMock()
+            mock_image_path = MagicMock()
+            mock_image_path.exists.return_value = True
+            mock_assets_dir.__truediv__.return_value = mock_image_path
+            mock_path.return_value.parent.parent.__truediv__.return_value = (
+                mock_assets_dir
+            )
 
-        # Mock streamlit components - valid inputs
-        mock_st.text_input.side_effect = ["valid_alias", "/valid/path.csv"]
-        mock_st.button.return_value = True  # User clicks submit
-        mock_st.image.return_value = None
-        mock_st.subheader.return_value = None
-        mock_st.markdown.return_value = None
+            # Mock form context
+            mock_form = MagicMock()
+            mock_st.form.return_value.__enter__.return_value = mock_form
 
-        # Call the function
-        local_add_form("test_project_id")
+            # Mock empty import log
+            mock_import_log = MagicMock()
+            mock_import_log.is_empty.return_value = True
+            mock_get_table.return_value = mock_import_log
 
-        # Verify that save_table was called to save the updated import log
-        mock_save_table.assert_called()
-        save_call = mock_save_table.call_args
-        assert save_call[0][0] == "test_project_id"  # project_id
-        assert save_call[1]["alias"] == "import_log"
-        assert save_call[1]["db_name"] == "logs"
+            # Mock form inputs - using real file path
+            mock_st.text_input.side_effect = ["test_alias", temp_file_path]
+            mock_st.form_submit_button.return_value = True
+
+        finally:
+            # Clean up temp file
+            os.unlink(temp_file_path)
 
 
-class TestLocalLoadAction:
-    """Test the local_load_action function."""
+class TestLoadLocalData:
+    """Test the load_local_data function."""
 
-    @patch("datasure.connectors.local.local_read_data")
     @patch("datasure.connectors.local.duckdb_save_table")
-    def test_load_action_success(self, mock_save_table, mock_read_data):
-        """Test successful data loading action."""
-        # Mock data reading
+    @patch("datasure.connectors.local.load_data_efficiently")
+    @patch("datasure.connectors.local.st")
+    def test_load_local_data_success(self, mock_st, mock_load_data, mock_save_table):
+        """Test successful data loading."""
+        # Mock data loading
         mock_df = pl.DataFrame({"col1": [1, 2, 3], "col2": ["a", "b", "c"]})
-        mock_read_data.return_value = mock_df
+        mock_load_data.return_value = mock_df
 
-        # Call the function
-        local_load_action("test_project", "test_alias", "/path/to/file.csv", None)
+        load_local_data("test_project", "test_alias", "/path/to/file.csv")
 
         # Verify functions were called correctly
-        mock_read_data.assert_called_once_with("/path/to/file.csv", None)
+        mock_load_data.assert_called_once_with("/path/to/file.csv", None)
         mock_save_table.assert_called_once_with(
             "test_project", mock_df, alias="test_alias", db_name="raw"
         )
+        mock_st.success.assert_called_once()
+        assert "Shape: (3, 2)" in mock_st.success.call_args[0][0]
 
-    @patch("datasure.connectors.local.local_read_data")
     @patch("datasure.connectors.local.duckdb_save_table")
-    def test_load_action_with_sheet(self, mock_save_table, mock_read_data):
-        """Test data loading action with Excel sheet name."""
-        # Mock data reading
-        mock_df = pl.DataFrame({"col1": [1, 2, 3], "col2": ["a", "b", "c"]})
-        mock_read_data.return_value = mock_df
+    @patch("datasure.connectors.local.load_data_efficiently")
+    @patch("datasure.connectors.local.st")
+    def test_load_local_data_with_sheet(self, mock_st, mock_load_data, mock_save_table):
+        """Test data loading with Excel sheet name."""
+        mock_df = pl.DataFrame({"col1": [1, 2], "col2": ["x", "y"]})
+        mock_load_data.return_value = mock_df
 
-        # Call the function
-        local_load_action("test_project", "test_alias", "/path/to/file.xlsx", "Sheet2")
+        load_local_data("test_project", "test_alias", "/path/to/file.xlsx", "Sheet2")
 
-        # Verify functions were called correctly
-        mock_read_data.assert_called_once_with("/path/to/file.xlsx", "Sheet2")
-        mock_save_table.assert_called_once_with(
-            "test_project", mock_df, alias="test_alias", db_name="raw"
-        )
+        mock_load_data.assert_called_once_with("/path/to/file.xlsx", "Sheet2")
+        mock_save_table.assert_called_once()
+
+    @patch("datasure.connectors.local.load_data_efficiently")
+    @patch("datasure.connectors.local.st")
+    def test_load_local_data_empty_result(self, mock_st, mock_load_data):
+        """Test data loading with empty result."""
+        mock_df = pl.DataFrame()
+        mock_load_data.return_value = mock_df
+
+        load_local_data("test_project", "test_alias", "/path/to/file.csv")
+
+        mock_st.warning.assert_called_once()
+        assert "No data loaded" in mock_st.warning.call_args[0][0]
+
+    @patch("datasure.connectors.local.load_data_efficiently")
+    @patch("datasure.connectors.local.st")
+    def test_load_local_data_error(self, mock_st, mock_load_data):
+        """Test data loading error handling."""
+        mock_load_data.side_effect = Exception("Load error")
+
+        load_local_data("test_project", "test_alias", "/path/to/file.csv")
+
+        mock_st.error.assert_called_once()
+        assert "Error loading data" in mock_st.error.call_args[0][0]
+
+
+class TestValidateFileAccessibility:
+    """Test the validate_file_accessibility function."""
+
+    def test_validate_accessible_file(self, tmp_path):
+        """Test validation of accessible file."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("test content")
+
+        result = validate_file_accessibility(str(test_file))
+        assert result is True
+
+    def test_validate_nonexistent_file(self):
+        """Test validation of non-existent file."""
+        result = validate_file_accessibility("/nonexistent/file.txt")
+        assert result is False
+
+    def test_validate_directory_path(self, tmp_path):
+        """Test validation of directory path."""
+        result = validate_file_accessibility(str(tmp_path))
+        assert result is False
+
+    @patch("datasure.connectors.local.os.access")
+    def test_validate_unreadable_file(self, mock_access, tmp_path):
+        """Test validation of unreadable file."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("test")
+
+        mock_access.return_value = False
+
+        result = validate_file_accessibility(str(test_file))
+        assert result is False
+
+
+class TestGetFileInfo:
+    """Test the get_file_info function."""
+
+    def test_get_info_existing_file(self, tmp_path):
+        """Test getting info for existing file."""
+        test_file = tmp_path / "test.csv"
+        test_file.write_text("name,age\nJohn,25")
+
+        info = get_file_info(str(test_file))
+
+        assert info["exists"] is True
+        assert info["size"] > 0
+        assert info["extension"] == ".csv"
+        assert "modified" in info
+
+    def test_get_info_nonexistent_file(self):
+        """Test getting info for non-existent file."""
+        info = get_file_info("/nonexistent/file.txt")
+
+        assert info["exists"] is False
+        assert len(info) == 1  # Only contains 'exists' key
+
+    @patch("datasure.connectors.local.Path")
+    def test_get_info_error_handling(self, mock_path):
+        """Test error handling in get_file_info."""
+        mock_path.side_effect = Exception("Path error")
+
+        info = get_file_info("some_path")
+
+        assert info["exists"] is False
