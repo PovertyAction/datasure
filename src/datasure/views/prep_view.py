@@ -1,8 +1,8 @@
 import pandas as pd
 import polars as pl
 import streamlit as st
-from processing import prep_apply_action
 
+from datasure.processing.prep import prep_apply_action
 from datasure.utils import (
     duckdb_get_aliases,
     duckdb_get_table,
@@ -459,6 +459,7 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, i: int):
         )
 
         if dp_prep_apply_btn:
+            st.write("Project ID: ", project_id, " Label: ", label, " Action: ", dp_action, " Description: ", description)
             prep_apply_action(
                 project_id,
                 label,
