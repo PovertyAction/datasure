@@ -1,12 +1,18 @@
 import os
 from pathlib import Path
 
-import pandas as pd
 import polars as pl
 import streamlit as st
 from openpyxl import load_workbook
 
 from datasure.utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.file_security import (
+    SecurityError,
+    VirusScanner,
+    get_file_info,
+    secure_read_data,
+    validate_file_security,
+)
 
 # --- Get List of sheet from excel ---#
 
@@ -25,7 +31,7 @@ def local_excel_sheet_names(file_path: str) -> list:
 
 
 def local_read_data(filename: str, sheet_name: str | None = None) -> pl.DataFrame:
-    """Import data from a file.
+    """Import data from a file with enhanced security validation.
 
     PARAMS:
     -------
@@ -34,23 +40,21 @@ def local_read_data(filename: str, sheet_name: str | None = None) -> pl.DataFram
 
     Returns
     -------
-    data: pd.DataFrame : imported data
+    data: pl.DataFrame : imported data
 
+    Raises
+    ------
+    SecurityError: If file fails security validation
     """
-    # get file extension
-    fileext = filename.split(".")[-1]
-
-    # import file depending on the file extension
-    if fileext == "csv":
-        data = pd.read_csv(filename, encoding="utf-8")
-    elif fileext in ["xlsx", "xls"]:
-        data = pd.read_excel(filename, sheet_name=sheet_name, engine="openpyxl")
-    elif fileext == "json":
-        data = pd.read_json(filename, encoding="utf-8")
-    elif fileext == "dta":
-        data = pd.read_stata(filename)
-
-    return data
+    try:
+        # Use secure reading function with comprehensive validation
+        return secure_read_data(filename, sheet_name)
+    except SecurityError:
+        # Re-raise security errors for UI handling
+        raise
+    except Exception as e:
+        # Convert other errors to security errors for consistent handling
+        raise SecurityError(f"File reading failed: {e!s}") from e
 
 
 # --- FORM for Adding file from local storage ---#
@@ -82,25 +86,50 @@ def local_add_form(
             return False
         return True
 
-    def valid_file_path(file_path: str) -> bool:
-        """Validate file path for existence and type."""
+    def enhanced_valid_file_path(file_path: str) -> tuple[bool, str]:
+        """Enhanced file path validation with comprehensive security checks.
+
+        Returns
+        -------
+            Tuple[bool, str]: (is_valid, message)
+        """
         if not file_path:
-            st.error("File path cannot be empty")
-            return False
+            return False, "File path cannot be empty"
+
         if not os.path.isfile(file_path):
-            st.error("File not found. Please check the file path")
-            return False
-        valid_extensions = ["csv", "xlsx", "xls", "json", "dta"]
-        if file_path.split(".")[-1] not in valid_extensions:
-            st.error("Invalid file type. Please upload a valid file type")
-            return False
-        return True
+            return False, "File not found. Please check the file path"
+
+        # Enhanced security validation
+        is_valid, error_msg = validate_file_security(file_path)
+        if not is_valid:
+            return False, error_msg
+
+        return True, "File validation successful"
 
     # Get the path to the assets directory relative to the package
     assets_dir = Path(__file__).parent.parent / "assets"
     image_path = assets_dir / "hard-disk.png"
     st.image(str(image_path), width=100)
     st.subheader("Add File from Local Storage")
+
+    # Security status indicator
+    with st.expander(":material/security: File Security Status", expanded=False):
+        st.markdown(":material/check: File size limits enforced")
+        st.markdown(":material/check: Content type validation enabled")
+        st.markdown(":material/check: Malicious content detection active")
+
+        # Virus scanning status
+        virus_scan_available = VirusScanner.is_available()
+        if virus_scan_available:
+            st.markdown(":material/verified: Virus scanning available")
+        else:
+            st.markdown(":material/info: Virus scanning not available")
+
+        st.markdown("**Maximum file sizes:**")
+        st.markdown("- CSV: 100MB")
+        st.markdown("- Excel: 50MB")
+        st.markdown("- JSON: 10MB")
+        st.markdown("- Stata: 100MB")
 
     if edit_mode:
         st.info("You are in edit mode. Please modify the file details below.")
@@ -130,29 +159,72 @@ def local_add_form(
         placeholder=default_local_added_file if edit_mode else "",
     )
 
-    if local_added_file and valid_file_path(local_added_file):
-        local_added_file_ext = local_added_file.split(".")[-1]
+    if local_added_file:
+        # Enhanced security validation with detailed feedback
+        is_valid, validation_msg = enhanced_valid_file_path(local_added_file)
 
-        if local_added_file_ext in ["xlsx", "xls"]:
-            sheets = local_excel_sheet_names(local_added_file)
-
-            # check if default sheetname exists in the list of sheets
-            if (
-                default_local_added_file_sheet_name
-                and default_local_added_file_sheet_name in sheets
-            ):
-                # get index of the default sheet name or set to first sheet
-                default_sheet_index = sheets.index(default_local_added_file_sheet_name)
-            else:
-                default_sheet_index = 0
-
-            local_added_file_sheet_name = st.selectbox(
-                label="Sheet Name",
-                options=sheets,
-                index=default_sheet_index,
-            )
-        else:
+        if not is_valid:
+            st.error(f":material/error: {validation_msg}")
             local_added_file_sheet_name = ""
+        else:
+            # Show file passed validation
+            st.success(f":material/check_circle: {validation_msg}")
+
+            # Display file information
+            file_info = get_file_info(local_added_file)
+
+            with st.expander(":material/info: File Information", expanded=False):
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.markdown(f"**Size:** {file_info['size_mb']} MB")
+                    st.markdown(f"**Type:** {file_info['extension']}")
+
+                with col2:
+                    st.markdown(f"**Hash:** `{file_info['hash_short']}...`")
+
+                    # Optional virus scan
+                    if VirusScanner.is_available() and st.button(
+                        ":material/scan_virus: Scan for viruses",
+                        key=f"virus_scan_{hash(local_added_file)}",
+                    ):
+                        with st.spinner("Scanning file..."):
+                            is_clean, scan_result = VirusScanner.scan_file(
+                                local_added_file
+                            )
+                            if is_clean:
+                                st.success(f":material/verified: {scan_result}")
+                            else:
+                                st.error(f":material/dangerous: {scan_result}")
+
+            # Handle Excel sheet selection
+            local_added_file_ext = local_added_file.split(".")[-1]
+            if local_added_file_ext in ["xlsx", "xls"]:
+                try:
+                    sheets = local_excel_sheet_names(local_added_file)
+
+                    # check if default sheetname exists in the list of sheets
+                    if (
+                        default_local_added_file_sheet_name
+                        and default_local_added_file_sheet_name in sheets
+                    ):
+                        # get index of the default sheet name or set to first sheet
+                        default_sheet_index = sheets.index(
+                            default_local_added_file_sheet_name
+                        )
+                    else:
+                        default_sheet_index = 0
+
+                    local_added_file_sheet_name = st.selectbox(
+                        label="Sheet Name",
+                        options=sheets,
+                        index=default_sheet_index,
+                    )
+                except Exception as e:
+                    st.warning(f":material/warning: Could not read Excel sheets: {e!s}")
+                    local_added_file_sheet_name = ""
+            else:
+                local_added_file_sheet_name = ""
     else:
         local_added_file_sheet_name = ""
 
@@ -242,12 +314,11 @@ def local_add_form(
 def local_load_action(
     project_id: str, alias: str, filename: str, sheet_name: str | None
 ) -> None:
-    """Load data from local storage.
+    """Load data from local storage with enhanced security validation.
 
     PARAMS:
     -------
     project_id: str : project ID
-    data_index: int : index of the data to load
     alias: str : alias for the data
     filename: str : path to the file
     sheet_name: str : name of the sheet to import (if applicable)
@@ -255,14 +326,34 @@ def local_load_action(
     Returns
     -------
     None
-    """
-    # read data from file
-    data: pl.DataFrame = local_read_data(filename, sheet_name)
 
-    # save data to DuckDB
-    duckdb_save_table(
-        project_id,
-        data,
-        alias=alias,
-        db_name="raw",
-    )
+    Raises
+    ------
+    SecurityError: If file fails security validation
+    """
+    try:
+        # Use enhanced secure data reading
+        with st.spinner(f"Loading {filename} with security validation..."):
+            data: pl.DataFrame = local_read_data(filename, sheet_name)
+
+        # Log successful load with file info
+        file_info = get_file_info(filename)
+        st.success(
+            f":material/check_circle: Successfully loaded {data.height:,} rows "
+            f"and {data.width} columns from {file_info['extension']} file"
+        )
+
+        # save data to DuckDB
+        duckdb_save_table(
+            project_id,
+            data,
+            alias=alias,
+            db_name="raw",
+        )
+
+    except SecurityError as e:
+        st.error(f":material/security: Security validation failed: {e!s}")
+        raise
+    except Exception as e:
+        st.error(f":material/error: Failed to load file: {e!s}")
+        raise

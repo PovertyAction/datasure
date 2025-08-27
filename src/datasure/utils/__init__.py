@@ -10,10 +10,14 @@ from .duckdb_utils import (
 )
 from .settings_utils import (
     get_check_config_settings,
+    get_file_size_limit,
     get_hash_id,
+    get_security_setting,
+    is_security_feature_enabled,
     load_check_settings,
     save_check_settings,
     trigger_save,
+    validate_security_settings,
 )
 
 __all__ = [
@@ -29,8 +33,12 @@ __all__ = [
     "get_cache_path",
     "get_check_config_settings",
     "get_df_info",
+    "get_file_size_limit",
     "get_hash_id",
+    "get_security_setting",
+    "is_security_feature_enabled",
     "load_check_settings",
     "save_check_settings",
     "trigger_save",
+    "validate_security_settings",
 ]

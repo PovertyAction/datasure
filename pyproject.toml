@@ -40,9 +40,12 @@ dependencies = [
     "matplotlib>=3.10.0",
     "polars>=1.30.0",
     # Pinning duckdb version that is know to work, unpin when duckdb 1.4.0 is released
-    "duckdb==1.4.0.dev2379",
+    "duckdb==1.4.0.dev2476",
     "pillow>=11.3.0",
     "keyring>=25.6.0",
+    # Enhanced file security dependencies
+    "python-magic>=0.4.27",
+    "python-magic-bin>=0.4.14; sys_platform == 'win32'",
 ]
 
 [project.urls]
