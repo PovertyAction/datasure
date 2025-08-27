@@ -162,7 +162,7 @@ def render_local_file_form(
         st.info("You are in edit mode. Please modify the file details below.")
 
     # Form inputs with validation
-    with st.form(key=f"local_file_form_{mode}"):
+    with st.container(border=True):
         disable_submit = True
         sheets = []
         sheet_name = None
@@ -173,56 +173,56 @@ def render_local_file_form(
             help="Enter a unique, short, descriptive name for the file (max 20 characters)",
             disabled=edit_mode,
             max_chars=20,
+            key=f"alias_input_{mode}",
         )
 
         file_path = st.text_input(
             label="File Path*",
-            value=defaults.get("filename", ""),
+            value=defaults.get("filename", None),
             help="Add full file name and path. e.g., C:/data/survey.dta",
+            key=f"file_path_input_{mode}",
         )
 
         # Dynamic sheet selection for Excel files
-        if file_path:
+        if file_path is not None:
             path_obj = Path(file_path)
             # validate file accessibility
-            if not validate_file_accessibility(file_path):
+            if not validate_file_accessibility(path_obj):
                 st.error(
-                    "File is not accessible. Please check the path and permissions."
+                    "File is not accessible. Please check the path, filename or permissions."
                 )
-                st.stop()
 
-            if path_obj.suffix.lower() in [".xlsx", ".xls"]:
-                try:
-                    sheets = get_excel_sheet_names(file_path)
-                    if sheets and defaults.get("sheet_name") in sheets:
-                        default_index = sheets.index(defaults.get("sheet_name"))
-
-                    disable_submit = bool(not sheets)
-
-                except Exception:
-                    pass  # sheets will remain empty
             else:
-                disable_submit = False  # Non-Excel files
-                sheets = []
+                if path_obj.suffix.lower() in [".xlsx", ".xls"]:
+                    try:
+                        sheets = get_excel_sheet_names(file_path)
+                        if sheets and defaults.get("sheet_name") in sheets:
+                            default_index = sheets.index(defaults.get("sheet_name"))
 
-            if path_obj.suffix.lower() in [".xlsx", ".xls"]:
-                sheet_name = st.selectbox(
-                    label="Sheet Name",
-                    options=sheets,
-                    index=default_index,
-                )
+                        disable_submit = bool(not sheets)
+
+                    except Exception:
+                        pass  # sheets will remain empty
+                else:
+                    disable_submit = False  # Non-Excel files
+                    sheets = []
+
+                if path_obj.suffix.lower() in [".xlsx", ".xls"]:
+                    sheet_name = st.selectbox(
+                        label="Sheet Name",
+                        options=sheets,
+                        index=default_index,
+                    )
 
         st.markdown("**required*")
 
         # Submit button
-        submitted = st.form_submit_button(
+        if st.button(
             "Update File" if edit_mode else "Add File",
             type="primary",
             use_container_width=True,
             disabled=disable_submit,
-        )
-
-        if submitted:
+        ):
             _handle_form_submission(
                 project_id=project_id,
                 alias=alias,
@@ -327,7 +327,7 @@ def load_local_data(
 # --- Utility Functions ---
 
 
-def validate_file_accessibility(file_path: str) -> bool:
+def validate_file_accessibility(file_path: Path) -> bool:
     """Check if file is accessible and readable."""
     try:
         path_obj = Path(file_path)
@@ -338,7 +338,7 @@ def validate_file_accessibility(file_path: str) -> bool:
         return False
 
 
-def get_file_info(file_path: str) -> dict:
+def get_file_info(file_path: Path) -> dict:
     """Get file information for display."""
     try:
         path_obj = Path(file_path)
