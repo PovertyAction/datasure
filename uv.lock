@@ -523,7 +523,7 @@ wheels = [
 
 [[package]]
 name = "datasure"
-version = "0.4.5a1"
+version = "0.4.6a1"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
