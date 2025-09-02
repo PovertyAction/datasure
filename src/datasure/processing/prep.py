@@ -544,7 +544,7 @@ class AddNewColumnOperation(PrepOperation):
             if method == "constant":
                 return self._add_constant_column(data, new_col_name, value_spec)
             elif method in ["index", "uuid", "random"]:
-                return self._add_special_column(data, new_col_name, value_spec)
+                return self._add_special_column(data, method, new_col_name, value_spec,)
             else:
                 return self._add_computed_column(data, new_col_name, method, source_columns)
 
@@ -565,13 +565,13 @@ class AddNewColumnOperation(PrepOperation):
         return data.with_columns(pl.lit(value).alias(col_name))
 
     def _add_special_column(
-        self, data: pl.DataFrame, col_name: str, value_spec: str
+        self, data: pl.DataFrame, method: str, col_name: str, value_spec: str
     ) -> pl.DataFrame:
         """Add special columns like index, uuid, or random."""
-        if value_spec == "index":
+        if method == "index":
             return data.with_row_count(col_name)
 
-        elif value_spec == "uuid":
+        elif method == "uuid":
             # Generate UUID-like hash based on project ID and row index
             project_id = st.session_state.st_project_id
 
@@ -590,7 +590,7 @@ class AddNewColumnOperation(PrepOperation):
                 .drop("__temp_idx__")
             )
 
-        elif value_spec == "random":
+        elif method == "random":
             import random
 
             n_rows = data.height
@@ -615,11 +615,16 @@ class AddNewColumnOperation(PrepOperation):
         agg_funcs = {
             "sum": lambda cols: pl.sum_horizontal(cols),
             "mean": lambda cols: pl.mean_horizontal(cols),
-            "median": lambda cols: pl.median_horizontal(cols),
+            "median": lambda cols: pl.concat_list(cols).list.median(),
             "max": lambda cols: pl.max_horizontal(cols),
             "min": lambda cols: pl.min_horizontal(cols),
-            "count": lambda cols: pl.count_horizontal(cols),
-            "std": lambda cols: pl.std_horizontal(cols),
+            "std": lambda cols: pl.concat_list(cols).list.std(),
+            "var": lambda cols: pl.concat_list(cols).list.var(),
+            "first": lambda cols: pl.concat_list(cols).list.first(),
+            "last": lambda cols: pl.concat_list(cols).list.last(),
+            "count": lambda cols: pl.concat_list(cols).list.len(),
+            "nunique": lambda cols: pl.concat_list(cols).list.unique().list.len(),
+            "product": lambda cols: pl.fold(acc=pl.lit(1), function=lambda acc, x: acc * x, exprs=cols),
         }
 
         if func_name in agg_funcs:

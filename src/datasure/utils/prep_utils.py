@@ -35,7 +35,6 @@ class PrepDescriptions:
         "sum": "Add a column containing the sum of values from selected columns",
         "mean": "Add a column containing the average of values from selected columns",
         "median": "Add a column containing the middle value from selected columns",
-        "mode": "Add a column containing the most frequently occurring value from selected columns",
         "min": "Add a column containing the smallest value from selected columns",
         "max": "Add a column containing the largest value from selected columns",
         "std": "Add a column containing the standard deviation of values from selected columns",

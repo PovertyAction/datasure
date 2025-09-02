@@ -634,8 +634,7 @@ if show_prep_page_info:
                     value=f"{miss_perc:.2f}%",
                     border=True,
                 )
-
-                st.dataframe(prep_data, width="stretch", hide_index=False)
+                st.dataframe(prep_data, width="stretch", hide_index=False,)
 
 page_navigation(
     prev={
