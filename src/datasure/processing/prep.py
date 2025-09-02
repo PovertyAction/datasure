@@ -6,6 +6,7 @@ transformations, and new column creation with comprehensive error handling.
 """
 
 import hashlib
+import logging
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -16,6 +17,10 @@ import polars as pl
 import streamlit as st
 
 from datasure.utils import duckdb_get_table, duckdb_save_table
+
+# Constants for validation
+MAX_RANGE_VALUES = 2
+MIN_PARTS_REQUIRED = 2
 
 
 class PrepError(Exception):
@@ -51,16 +56,17 @@ class PrepAction:
 
     action_type: ActionType
     description: str
+    prep_args: str = ""
 
     @classmethod
-    def from_strings(cls, action: str, description: str) -> "PrepAction":
+    def from_strings(cls, action: str, description: str, prep_args: str) -> "PrepAction":
         """Create PrepAction from string representations."""
         try:
             action_type = ActionType(action)
         except ValueError as e:
             raise ValidationError(f"Unknown action type: {action}") from e
 
-        return cls(action_type=action_type, description=description)
+        return cls(action_type=action_type, description=description, prep_args=prep_args)
 
 
 class DescriptionParser:
@@ -88,12 +94,12 @@ class DescriptionParser:
         return columns
 
     @staticmethod
-    def parse_quoted_content(text: str) -> str:
+    def parse_quoted_content(text: str) -> list:
         """Extract content between single quotes."""
-        match = re.search(r"'([^']+)'", text)
-        if not match:
+        matches = re.findall(r"'([^']+)'", text)
+        if not matches:
             raise ValidationError(f"No quoted content found in: {text}")
-        return match.group(1)
+        return matches
 
     @staticmethod
     def parse_numeric_value(text: str) -> int | float:
@@ -170,12 +176,16 @@ class RemoveRowsOperation(PrepOperation):
     def execute(self, data: pl.DataFrame, description: str) -> pl.DataFrame:
         """Remove rows based on condition specified in description."""
         try:
+
+            def _raise_unknown_removal_type():
+                raise ValidationError(f"Unknown row removal type: {description}")  # noqa: TRY301
+
             if "remove row(s) by index" in description:
                 return self._remove_by_index(data, description)
             elif "remove row(s) by condition" in description:
                 return self._remove_by_condition(data, description)
             else:
-                raise ValidationError(f"Unknown row removal type: {description}")  # noqa: TRY301
+                _raise_unknown_removal_type()
 
         except Exception as e:
             if isinstance(e, ValidationError | OperationError):
@@ -296,8 +306,10 @@ class RemoveRowsOperation(PrepOperation):
         values_text = value_match.group(1).replace("'", "").replace('"', "")
         values = values_text.split(" and ")
 
-        if len(values) != 2:
-            raise ValidationError(f"Expected two values for range, got: {values}")
+        if len(values) != MAX_RANGE_VALUES:
+            raise ValidationError(
+                f"Expected {MAX_RANGE_VALUES} values for range, got: {values}"
+            )
 
         val1 = DescriptionParser.parse_numeric_value(values[0])
         val2 = DescriptionParser.parse_numeric_value(values[1])
@@ -335,25 +347,51 @@ class TransformColumnsOperation(PrepOperation):
     def execute(self, data: pl.DataFrame, description: str) -> pl.DataFrame:
         """Transform columns based on description."""
         try:
-            # Parse column name and transformation function
-            quoted_content = DescriptionParser.parse_quoted_content(description)
-            parts = quoted_content.split(" to ", 1)
-
-            if len(parts) != 2:
-                raise ValidationError(  # noqa: TRY301
-                    f"Invalid transformation format: {quoted_content}"
-                )
-
-            column_name, func_name = parts
+            column_name, func_name = self._parse_transformation_params(description)
             self._validate_columns_exist(data, [column_name])
-
-            # Apply transformation based on function type
             return self._apply_transformation(data, column_name, func_name, description)
 
         except Exception as e:
             if isinstance(e, ValidationError | OperationError):
                 raise
             raise OperationError(f"Failed to transform columns: {e}") from e
+
+    def _parse_transformation_params(self, description: str) -> tuple[str, str]:
+        """Parse transformation parameters from description."""
+        quoted_content = DescriptionParser.parse_quoted_content(description)
+
+        if len(quoted_content) < MIN_PARTS_REQUIRED:
+            raise ValidationError(f"Invalid transformation format: {quoted_content}")
+
+        if len(quoted_content) > MIN_PARTS_REQUIRED:
+            column_name, func_name, *_ = quoted_content
+        else:
+            column_name, func_name = quoted_content
+
+        return column_name, func_name
+
+    @staticmethod
+    def _parse_flexible_datetime(col_name: str) -> pl.Expr:
+        """Try multiple datetime formats and return the first successful one"""
+        formats_to_try = [
+            "%d%b%Y %H:%M:%S",  # 18aug2025 19:49:00
+            "%d-%b-%Y %H:%M:%S",  # 18-aug-2025 19:49:00
+            "%Y-%m-%d %H:%M:%S",  # 2025-08-18 19:49:00
+            "%m/%d/%Y %H:%M:%S",  # 08/18/2025 19:49:00
+            "%d/%m/%Y %H:%M:%S",  # 18/08/2025 19:49:00
+            "%Y-%m-%d",  # 2025-08-18
+            "%m/%d/%Y",  # 08/18/2025
+            "%d-%m-%Y",  # 18-08-2025
+        ]
+
+        for fmt in formats_to_try:
+            try:
+                return pl.col(col_name).str.to_datetime(format=fmt, strict=False)
+            except Exception:
+                continue
+
+        # If all formats fail, all missing values
+        return pl.lit(None).cast(pl.Datetime)
 
     def _apply_transformation(
         self, data: pl.DataFrame, column_name: str, func_name: str, description: str
@@ -412,9 +450,7 @@ class TransformColumnsOperation(PrepOperation):
         # String to datetime
         if func_name in ["string to date", "string to datetime"]:
             return data.with_columns(
-                pl.col(column_name)
-                .str.strptime(pl.Datetime, strict=False)
-                .alias(column_name)
+                self._parse_flexible_datetime(column_name).alias(column_name)
             )
 
         # Get dummies (one-hot encoding)
@@ -473,12 +509,12 @@ class TransformColumnsOperation(PrepOperation):
         self, data: pl.DataFrame, column_name: str, description: str
     ) -> pl.DataFrame:
         """Apply substring extraction."""
-        range_match = re.search(r"from (\d+) to (\d+)", description)
+        range_match = re.findall(r"(\d+) to (\d+)", description)
         if not range_match:
             raise ValidationError("Invalid description format. Expected 'from X to Y'.")
 
-        start = int(range_match.group(1))
-        end = int(range_match.group(2))
+        start = int(range_match[0][0])
+        end = int(range_match[0][1])
 
         return data.with_columns(
             pl.col(column_name).str.slice(start, end - start).alias(column_name)
@@ -498,26 +534,19 @@ class TransformColumnsOperation(PrepOperation):
 class AddNewColumnOperation(PrepOperation):
     """Add new columns with computed values."""
 
-    def execute(self, data: pl.DataFrame, description: str) -> pl.DataFrame:
+    def execute(self, data: pl.DataFrame, prep_args: dict) -> pl.DataFrame:
         """Add new column based on description."""
         try:
-            # Parse new column name and value specification
-            quoted_content = DescriptionParser.parse_quoted_content(description)
-            parts = quoted_content.split(" with ", 1)
+            new_col_name, value_spec = prep_args.get("column_names"), prep_args.get("value")
+            method = prep_args.get("method")
+            source_columns = prep_args.get("source_columns", [])
 
-            if len(parts) != 2:
-                raise ValidationError(f"Invalid new column format: {quoted_content}")  # noqa: TRY301
-
-            new_col_name, value_spec = parts
-
-            if value_spec.startswith("constant value "):
+            if method == "constant":
                 return self._add_constant_column(data, new_col_name, value_spec)
-            elif value_spec in ["index", "uuid", "random"]:
+            elif method in ["index", "uuid", "random"]:
                 return self._add_special_column(data, new_col_name, value_spec)
             else:
-                return self._add_computed_column(
-                    data, new_col_name, value_spec, description
-                )
+                return self._add_computed_column(data, new_col_name, method, source_columns)
 
         except Exception as e:
             if isinstance(e, ValidationError | OperationError):
@@ -528,7 +557,11 @@ class AddNewColumnOperation(PrepOperation):
         self, data: pl.DataFrame, col_name: str, value_spec: str
     ) -> pl.DataFrame:
         """Add column with constant value."""
-        value = value_spec.replace("constant value ", "")
+        # check if value_spec can be converted to int or float
+        try:
+            value = float(value_spec) if "." in value_spec else int(value_spec)
+        except ValueError:
+            value = value_spec
         return data.with_columns(pl.lit(value).alias(col_name))
 
     def _add_special_column(
@@ -540,7 +573,7 @@ class AddNewColumnOperation(PrepOperation):
 
         elif value_spec == "uuid":
             # Generate UUID-like hash based on project ID and row index
-            project_id = getattr(st.session_state, "st_project_id", "default")
+            project_id = st.session_state.st_project_id
 
             return (
                 data.with_row_count("__temp_idx__")
@@ -567,16 +600,15 @@ class AddNewColumnOperation(PrepOperation):
         return data
 
     def _add_computed_column(
-        self, data: pl.DataFrame, col_name: str, value_spec: str, description: str
+        self, data: pl.DataFrame, col_name: str, method: str, source_columns: str
     ) -> pl.DataFrame:
         """Add column with computed values from other columns."""
-        # Extract function and columns
-        func_match = re.search(r"with ([a-z]+)", description)
-        if not func_match:
-            raise ValidationError(f"No function found in: {description}")
+        func_name = method.lower()
+        if isinstance(source_columns, str):
+            columns = [col.strip().strip("'\"") for col in source_columns.split(",")]
+        elif isinstance(source_columns, list):
+            columns = source_columns
 
-        func_name = func_match.group(1)
-        columns = DescriptionParser.parse_column_list(description)
         self._validate_columns_exist(data, columns)
 
         # Aggregation functions
@@ -622,13 +654,15 @@ class PrepProcessor:
             ActionType.ADD_NEW_COLUMN: AddNewColumnOperation(),
         }
 
-    def execute_single_action(self, data: pl.DataFrame, action: PrepAction) -> pl.DataFrame:
+    def execute_single_action(
+        self, data: pl.DataFrame, action: PrepAction
+    ) -> pl.DataFrame:
         """Execute a single preparation action."""
         handler = self.operation_handlers.get(action.action_type)
         if not handler:
             raise ValidationError(f"No handler for action type: {action.action_type}")
 
-        return handler.execute(data, action.description)
+        return handler.execute(data, action.prep_args)
 
     def execute_all_actions(
         self, data: pl.DataFrame, actions: list[PrepAction]
@@ -680,18 +714,28 @@ def prep_apply_action(
         existing_actions = []
         for row in prep_log_df.iter_rows(named=True):
             existing_actions.append(
-                PrepAction.from_strings(row["action"], row["description"])
+                PrepAction.from_strings(row["action"], row["description"], row["prep_args"])
             )
 
         # Add new action if provided
         if action and description:
             new_action = PrepAction.from_strings(action, description)
             existing_actions.append(new_action)
+            action_index_val = f"{len(existing_actions) - 1} - {action} - {description}"
 
             # Update log with new action
-            updated_log = prep_log_df.vstack(
-                pl.DataFrame({"action": [action], "description": [description]})
+            new_row = pl.DataFrame(
+                {
+                    "action": [action],
+                    "description": [description],
+                    "action_index": [action_index_val],
+                }
             )
+
+            if prep_log_df.is_empty():
+                updated_log = new_row
+            else:
+                updated_log = prep_log_df.vstack(new_row)
 
             duckdb_save_table(
                 project_id,
@@ -735,6 +779,7 @@ def prep_apply_action(
             raise
         else:
             # Log unexpected errors and show generic message
+            logging.error("Unexpected error in prep_apply_action: %s", e, exc_info=True)
             st.error("An unexpected error occurred during data preparation.")
             raise OperationError(f"Unexpected error in prep_apply_action: {e}") from e
 
