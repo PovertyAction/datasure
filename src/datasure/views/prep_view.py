@@ -179,7 +179,7 @@ class PrepStepHandler:
 
             # define custom message values
             value = dp_prep_add_val if dp_prep_add_col_med == "constant" else None
-            source_columns = dp_prep_add_col_select if dp_prep_add_col_med in COL_MEDTHODS_WITH_VALUES else None
+            source_columns = dp_prep_add_col_select if dp_prep_add_col_med in COL_MEDTHODS_WITH_VALUES else []
 
             return {
                 "action": "add new column",
@@ -303,7 +303,7 @@ class PrepStepHandler:
             "remaining_count": self.prep_data.shape[1] - len(dp_prep_del_cols) if dp_prep_del_cols else self.prep_data.shape[1],
             "value": None,
             "method": None,
-            "source_columns": dp_prep_del_cols,
+            "source_columns": dp_prep_del_cols if dp_prep_del_cols else [],
             "condition": None,
             "failed_count": None,
             "additional_info": None,
@@ -431,7 +431,7 @@ class PrepStepHandler:
 
 
         # get source columns
-        source_columns = dp_prep_del_rows_cond_cols if dp_prep_del_rows == "by condition" and dp_prep_del_rows_cond_cols else None
+        source_columns = dp_prep_del_rows_cond_cols if dp_prep_del_rows == "by condition" and dp_prep_del_rows_cond_cols else []
         condition = dp_prep_del_rows_cond if dp_prep_del_rows == "by condition" and dp_prep_del_rows_cond else None
 
         return {
