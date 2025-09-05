@@ -72,6 +72,11 @@ DEL_ROW_COND_NUM_ONLY = (
     "value is not between",
 )
 
+DEL_ROW_COND_STR_ONLY = (
+    "value is like",
+    "value is not like",
+)
+
 DEL_COND_USE_VALS = (
     "value is equal to",
     "value is not equal to",
@@ -342,8 +347,10 @@ class PrepStepHandler:
 
                 if dp_prep_del_rows_cond in DEL_ROW_COND_NUM_ONLY:
                     col_options = self.num_cols + self.date_cols
+                elif dp_prep_del_rows_cond in DEL_ROW_COND_STR_ONLY:
+                    col_options = self.string_cols
                 else:
-                    col_options = all_cols
+                    col_options = self.all_cols
 
                 dp_prep_del_rows_cond_cols = st.multiselect(
                     label="Select column to apply conditions to",
@@ -417,6 +424,8 @@ class PrepStepHandler:
                 value = dp_prep_del_rows_cond_val
             elif dp_prep_del_rows_cond in DEL_ROW_COND_SAME_TYPE:
                 value = [dp_prep_del_rows_cond_val_min, dp_prep_del_rows_cond_val_max]
+            elif dp_prep_del_rows_cond in ["value is like", "value is not like"]:
+                value = dp_prep_del_rows_cond_val
             else:
                 value = None
 
@@ -607,7 +616,7 @@ if show_prep_page_info:
             type="pd",
         )
 
-        if prep_data.empty:
+        if prep_data.empty and prep_log.empty:
             prep_data = duckdb_get_table(
                 project_id=project_id,
                 alias=label,

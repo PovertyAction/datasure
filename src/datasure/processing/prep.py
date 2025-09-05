@@ -259,14 +259,15 @@ class RemoveRowsOperation(PrepOperation):
     ) -> pl.DataFrame:
         """Filter by comparison conditions."""
         # Inverse logic - we keep rows that don't match the removal condition
+        value_use = float(value[0]) if isinstance(value[0], str) and "." in value else int(value[0])
         if condition == "value is greater than":
-            return data.filter(pl.col(columns) <= value)
+            return data.filter(pl.col(columns) <= value_use)
         elif condition == "value is greater than or equal to":
-            return data.filter(pl.col(columns) < value)
+            return data.filter(pl.col(columns) < value_use)
         elif condition == "value is less than":
-            return data.filter(pl.col(columns) >= value)
+            return data.filter(pl.col(columns) >= value_use)
         elif condition == "value is less than or equal to":
-            return data.filter(pl.col(columns) > value)
+            return data.filter(pl.col(columns) > value_use)
 
         return data
 
@@ -292,10 +293,14 @@ class RemoveRowsOperation(PrepOperation):
         """Filter by pattern matching."""
         if condition == "value is like":
             # Keep rows that don't match the pattern
-            return data.filter(~pl.col(columns).str.contains(value))
-        else:
+            filter_expr = pl.all_horizontal([~pl.col(col).str.contains(value) for col in columns])
+            return data.filter(filter_expr)
+        elif condition == "value is not like":
             # Keep rows that match the pattern
-            return data.filter(pl.col(columns).str.contains(value))
+            filter_expr = pl.any_horizontal([pl.col(col).str.contains(value) for col in columns])
+            return data.filter(filter_expr)
+        else:
+            raise ValidationError(f"Unknown pattern condition: {condition}")
 
 
 class TransformColumnsOperation(PrepOperation):
