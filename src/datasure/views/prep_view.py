@@ -174,11 +174,7 @@ class PrepStepHandler:
 
             # define custom message values
             value = dp_prep_add_val if dp_prep_add_col_med == "constant" else None
-            source_columns = (
-                dp_prep_add_col_select
-                if dp_prep_add_col_med in COL_MEDTHODS_WITH_VALUES
-                else None
-            )
+            source_columns = dp_prep_add_col_select if dp_prep_add_col_med in COL_MEDTHODS_WITH_VALUES else None
 
             return {
                 "action": "add new column",
@@ -288,15 +284,32 @@ class PrepStepHandler:
                     f"transform column(s) '{dp_prep_trf_col}' to '{dp_prep_trf_func}'"
                 )
 
-    def prep_remove_column(self) -> str:
+    def remove_column_handler(self) -> dict | None:
         dp_prep_del_cols = st.multiselect(
             label="Select columns to remove",
             options=self.string_cols,
             key=f"st_sb_del_cols{i}",
         )
-        return f"remove column(s) {dp_prep_del_cols}"
 
-    def prep_remove_row(self) -> str | None:
+        return {
+            "action": "remove column(s)",
+            "column_names": None,
+            "affected_count": len(dp_prep_del_cols) if dp_prep_del_cols else 0,
+            "remaining_count": self.prep_data.shape[1] - len(dp_prep_del_cols) if dp_prep_del_cols else self.prep_data.shape[1],
+            "value": None,
+            "method": None,
+            "source_columns": dp_prep_del_cols,
+            "condition": None,
+            "failed_count": None,
+            "additional_info": None,
+        }
+
+    def remove_rows_handler(self) -> dict | None:
+        """Handle remove rows UI and logic."""
+        indexes_to_remove = []
+        dp_prep_del_rows_cond = None
+        dp_prep_del_rows_cond_cols = None
+        value = None
         dp_prep_del_rows = st.selectbox(
             label="Select Method",
             options=config.DP_DEL_METHODS,
@@ -310,10 +323,9 @@ class PrepStepHandler:
                 key=f"st_sb_del_rows_idx{i}",
             )
             if dp_prep_del_rows_idx:
-                dp_prep_del_rows_idx_list = dp_prep_del_rows_idx.replace(" ", "").split(
+                indexes_to_remove = dp_prep_del_rows_idx.replace(" ", "").split(
                     ","
                 )
-                return f"remove row(s) by index {dp_prep_del_rows_idx_list}"
 
         if dp_prep_del_rows == "by condition":
             dp_prep_del_rows_cond = st.selectbox(
@@ -342,17 +354,17 @@ class PrepStepHandler:
                 )
 
                 if dp_prep_del_rows_cond in DEL_COND_USE_VALS and dp_prep_del_rows_cond_cols:
-                        # get a list of unique values in select column
-                        unique_vals = (
-                            prep_data[dp_prep_del_rows_cond_cols[0]].unique().tolist()
-                        )
-                        dp_prep_del_rows_cond_val = st.multiselect(
-                            label="Select value",
-                            options=sorted(unique_vals),
-                            help="Select value to compare",
-                            key=f"st_sb_del_rows_cond_val{i}",
-                        )
-                        return f"remove row(s) by condition '{dp_prep_del_rows_cond}' on columns {dp_prep_del_rows_cond_cols} with value {dp_prep_del_rows_cond_val}"
+                    # get a list of unique values in select column
+                    unique_vals = (
+                        prep_data[dp_prep_del_rows_cond_cols[0]].unique().tolist()
+                    )
+                    dp_prep_del_rows_cond_val = st.multiselect(
+                        label="Select value",
+                        options=sorted(unique_vals),
+                        help="Select value to compare",
+                        key=f"st_sb_del_rows_cond_val{i}",
+                    )
+
                 if dp_prep_del_rows_cond in DEL_ROW_COND_SAME_TYPE:
                     # check that all columns are of the same type
                     disable_inputs = True
@@ -385,7 +397,6 @@ class PrepStepHandler:
                         disabled=disable_inputs,
                     )
 
-                    return f"remove row(s) by condition '{dp_prep_del_rows_cond}' on columns {dp_prep_del_rows_cond_cols} with values {dp_prep_del_rows_cond_val_min} and {dp_prep_del_rows_cond_val_max}"
 
                 if dp_prep_del_rows_cond in [
                     "value is like",
@@ -396,8 +407,36 @@ class PrepStepHandler:
                         help="Enter pattern to match. You can use regular expressions",
                         key=f"st_sb_del_rows_cond_val{i}",
                     )
-                    return f"remove row(s) by condition '{dp_prep_del_rows_cond}' on columns {dp_prep_del_rows_cond_cols} with pattern '{dp_prep_del_rows_cond_val}'"
 
+        # get value
+        if indexes_to_remove and dp_prep_del_rows == "by row index":
+            value = indexes_to_remove
+            affected_count = len(indexes_to_remove)
+        elif dp_prep_del_rows_cond and dp_prep_del_rows_cond_cols and dp_prep_del_rows == "by condition":
+            if dp_prep_del_rows_cond in DEL_COND_USE_VALS:
+                value = dp_prep_del_rows_cond_val
+            elif dp_prep_del_rows_cond in DEL_ROW_COND_SAME_TYPE:
+                value = [dp_prep_del_rows_cond_val_min, dp_prep_del_rows_cond_val_max]
+            else:
+                value = None
+
+
+        # get source columns
+        source_columns = dp_prep_del_rows_cond_cols if dp_prep_del_rows == "by condition" and dp_prep_del_rows_cond_cols else None
+        condition = dp_prep_del_rows_cond if dp_prep_del_rows == "by condition" and dp_prep_del_rows_cond else None
+
+        return {
+            "action": "remove row(s)",
+            "column_names": None,
+            "affected_count": None,
+            "remaining_count": None,
+            "value": value,
+            "method": dp_prep_del_rows,
+            "source_columns": source_columns,
+            "condition": condition,
+            "failed_count": None,
+            "additional_info": None,
+        }
 
 # --- Add Preparation Step ---#
 def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
@@ -418,22 +457,32 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
 
         if dp_prep_action == "add new column":
             prep_args = prep_handler.add_column_handler()
+            if prep_args:
+                result = PrepActionResult(**prep_args)
+                prep_description = PrepConfirmationMessages().add_new_column(result)
 
         elif dp_prep_action == "transform column":
             prep_args = prep_handler.transform_column_handler()
+            if prep_args:
+                result = PrepActionResult(**prep_args)
+                prep_description = PrepConfirmationMessages().transform_column(result)
 
-        elif dp_prep_action == "remove column":
-            prep_args = prep_handler.prep_remove_column()
+        elif dp_prep_action == "remove column(s)":
+            prep_args = prep_handler.remove_column_handler()
+            if prep_args:
+                result = PrepActionResult(**prep_args)
+                prep_description = PrepConfirmationMessages().remove_columns(result)
 
-        elif dp_prep_action == "remove row":
-            prep_args = prep_handler.prep_remove_row()
+        elif dp_prep_action == "remove row(s)":
+            prep_args = prep_handler.remove_rows_handler()
+            if prep_args:
+                result = PrepActionResult(**prep_args)
+                prep_description = PrepConfirmationMessages().remove_rows(result)
 
         if prep_args is None:
             st.warning("Please complete the form to add a new preparation step.")
             return
 
-        result = PrepActionResult(**prep_args)
-        prep_description = PrepConfirmationMessages().add_new_column(result)
 
         if st.button(
             label="Add",

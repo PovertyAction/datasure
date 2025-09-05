@@ -10,7 +10,7 @@ class PrepActionResult:
     column_names: str | list[str] | None = None
     affected_count: int | None = None
     remaining_count: int | None = None
-    value: str | None = None
+    value: str | list | None = None
     method: str | None = None
     source_columns: str | list[str] | None = None
     condition: str | None = None
@@ -121,6 +121,7 @@ class PrepDescriptions:
         "value is like": "Select rows where the column value contains or matches a text pattern",
         "value is not like": "Select rows where the column value does not contain or match a text pattern",
     }
+
 
     @classmethod
     def get_description(cls, category: str, function: str) -> str | None:
@@ -239,11 +240,11 @@ class PrepConfirmationMessages:
     def remove_columns(cls, result: PrepActionResult) -> str:
         """Generate message for removing columns."""
         column_count = (
-            len(result.column_names) if isinstance(result.column_names, list) else 1
+            len(result.source_columns) if isinstance(result.source_columns, list) else 1
         )
         column_text = cls._pluralize(column_count, "column")
         remaining_text = cls._pluralize(result.remaining_count, "column")
-        column_display = cls._format_column_names(result.column_names)
+        column_display = cls._format_column_names(result.source_columns)
         return (
             f"✓ {column_count} {column_text} removed. {column_display} deleted from "
             f"your dataset. {result.remaining_count} {remaining_text} remaining."

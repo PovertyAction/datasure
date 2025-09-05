@@ -16,7 +16,8 @@ from typing import Any
 import polars as pl
 import streamlit as st
 
-from datasure.utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.prep_utils import PrepActionResult
 
 # Constants for validation
 MAX_RANGE_VALUES = 2
@@ -152,13 +153,12 @@ class PrepOperation(ABC):
 class RemoveColumnsOperation(PrepOperation):
     """Remove specified columns from DataFrame."""
 
-    def execute(self, data: pl.DataFrame, description: str) -> pl.DataFrame:
+    def execute(self, data: pl.DataFrame, prep_args: dict) -> pl.DataFrame:
         """Remove columns specified in description."""
+        st.write(prep_args)
         try:
             # Extract column names from description
-            columns_text = description.replace("remove column(s) ", "", 1)
-            columns = DescriptionParser.parse_column_list(columns_text)
-
+            columns = prep_args.get("source_columns", [])
             self._validate_columns_exist(data, columns)
 
             # Remove columns using Polars
@@ -173,30 +173,29 @@ class RemoveColumnsOperation(PrepOperation):
 class RemoveRowsOperation(PrepOperation):
     """Remove rows based on various conditions."""
 
-    def execute(self, data: pl.DataFrame, description: str) -> pl.DataFrame:
+    def execute(self, data: pl.DataFrame, prep_args: dict) -> pl.DataFrame:
         """Remove rows based on condition specified in description."""
         try:
 
-            def _raise_unknown_removal_type():
-                raise ValidationError(f"Unknown row removal type: {description}")  # noqa: TRY301
+            method = prep_args.get("method")
+            value = prep_args.get("value", "")
+            condition = prep_args.get("condition", "")
+            source_columns = prep_args.get("source_columns", [])
 
-            if "remove row(s) by index" in description:
-                return self._remove_by_index(data, description)
-            elif "remove row(s) by condition" in description:
-                return self._remove_by_condition(data, description)
+            if method == "by row index":
+                return self._remove_by_index(data, value)
+            elif method == "by condition":
+                return self._remove_by_condition(data, condition, source_columns, value)
             else:
-                _raise_unknown_removal_type()
+                raise ValidationError(f"Unknown removal method: {method}")  # noqa: TRY301
 
         except Exception as e:
             if isinstance(e, ValidationError | OperationError):
                 raise
             raise OperationError(f"Failed to remove rows: {e}") from e
 
-    def _remove_by_index(self, data: pl.DataFrame, description: str) -> pl.DataFrame:
+    def _remove_by_index(self, data: pl.DataFrame, index_values: list) -> pl.DataFrame:
         """Remove rows by index positions."""
-        index_text = description.replace("remove row(s) by index", "", 1).strip()
-        index_values = DescriptionParser.parse_value_list(index_text)
-
         rows_to_drop = []
         for item in index_values:
             if isinstance(item, str) and ":" in item:
@@ -212,18 +211,10 @@ class RemoveRowsOperation(PrepOperation):
         return filtered_data.drop("__row_idx__")
 
     def _remove_by_condition(
-        self, data: pl.DataFrame, description: str
+        self, data: pl.DataFrame, condition: str, columns: list[str], value: Any
     ) -> pl.DataFrame:
         """Remove rows based on conditions."""
-        # Parse condition type
-        condition_match = re.search(r"'([^']+)'", description)
-        if not condition_match:
-            raise ValidationError(f"No condition found in: {description}")
-
-        condition = condition_match.group(1)
-
         # Parse columns
-        columns = DescriptionParser.parse_column_list(description)
         self._validate_columns_exist(data, columns)
 
         if condition == "value is missing":
@@ -233,7 +224,7 @@ class RemoveRowsOperation(PrepOperation):
             return data.filter(pl.any_horizontal(pl.col(columns).is_null()))
 
         elif condition in ["value is equal to", "value is not equal to"]:
-            return self._filter_by_equality(data, description, condition, columns)
+            return self._filter_by_equality(data, condition, columns, value)
 
         elif condition in [
             "value is greater than",
@@ -241,104 +232,70 @@ class RemoveRowsOperation(PrepOperation):
             "value is less than",
             "value is less than or equal to",
         ]:
-            return self._filter_by_comparison(data, description, condition, columns)
+            return self._filter_by_comparison(data, condition, columns, value)
 
         elif condition in ["value is between", "value is not between"]:
-            return self._filter_by_range(data, description, condition, columns)
+            return self._filter_by_range(data, condition, columns, value)
 
         elif condition in ["value is like", "value is not like"]:
-            return self._filter_by_pattern(data, description, condition, columns)
+            return self._filter_by_pattern(data, condition, columns, value)
 
         else:
             raise ValidationError(f"Unknown condition: {condition}")
 
     def _filter_by_equality(
-        self, data: pl.DataFrame, description: str, condition: str, columns: list[str]
+        self, data: pl.DataFrame, condition: str, columns: list[str], value: Any
     ) -> pl.DataFrame:
         """Filter by equality conditions."""
-        # Extract values
-        value_match = re.search(r"with value\s+(.+)", description)
-        if not value_match:
-            raise ValidationError(f"No values found in: {description}")
-
-        values = DescriptionParser.parse_value_list(value_match.group(1))
-        col_name = columns[0]
-
         if condition == "value is equal to":
             # Keep rows where value is NOT in the list (remove matching rows)
-            return data.filter(~pl.col(col_name).is_in(values))
+            return data.filter(~pl.col(columns).is_in(value))
         else:
             # Keep rows where value IS in the list (remove non-matching rows)
-            return data.filter(pl.col(col_name).is_in(values))
+            return data.filter(pl.col(columns).is_in(value))
 
     def _filter_by_comparison(
-        self, data: pl.DataFrame, description: str, condition: str, columns: list[str]
+        self, data: pl.DataFrame, condition: str, columns: list[str], value: Any
     ) -> pl.DataFrame:
         """Filter by comparison conditions."""
-        value_match = re.search(r"with value\s+(.+)", description)
-        if not value_match:
-            raise ValidationError(f"No value found in: {description}")
-
-        value_text = value_match.group(1).strip("'\"[]")
-        value = DescriptionParser.parse_numeric_value(value_text)
-        col_name = columns[0]
-
         # Inverse logic - we keep rows that don't match the removal condition
         if condition == "value is greater than":
-            return data.filter(pl.col(col_name) <= value)
+            return data.filter(pl.col(columns) <= value)
         elif condition == "value is greater than or equal to":
-            return data.filter(pl.col(col_name) < value)
+            return data.filter(pl.col(columns) < value)
         elif condition == "value is less than":
-            return data.filter(pl.col(col_name) >= value)
+            return data.filter(pl.col(columns) >= value)
         elif condition == "value is less than or equal to":
-            return data.filter(pl.col(col_name) > value)
+            return data.filter(pl.col(columns) > value)
 
         return data
 
     def _filter_by_range(
-        self, data: pl.DataFrame, description: str, condition: str, columns: list[str]
+        self, data: pl.DataFrame, condition: str, columns: list[str], value: Any
     ) -> pl.DataFrame:
         """Filter by range conditions."""
-        value_match = re.search(r"with values\s+(.+)", description)
-        if not value_match:
-            raise ValidationError(f"No values found in: {description}")
-
-        values_text = value_match.group(1).replace("'", "").replace('"', "")
-        values = values_text.split(" and ")
-
-        if len(values) != MAX_RANGE_VALUES:
+        if len(value) != MAX_RANGE_VALUES:
             raise ValidationError(
-                f"Expected {MAX_RANGE_VALUES} values for range, got: {values}"
+                f"Expected {MAX_RANGE_VALUES} values for range, got: {value}"
             )
-
-        val1 = DescriptionParser.parse_numeric_value(values[0])
-        val2 = DescriptionParser.parse_numeric_value(values[1])
-        col_name = columns[0]
 
         if condition == "value is between":
             # Keep rows outside the range
-            return data.filter((pl.col(col_name) < val1) | (pl.col(col_name) > val2))
+            return data.filter((pl.col(columns) < value[0]) | (pl.col(columns) > value[1]))
         else:
             # Keep rows inside the range
-            return data.filter((pl.col(col_name) >= val1) & (pl.col(col_name) <= val2))
+            return data.filter((pl.col(columns) >= value[0]) & (pl.col(columns) <= value[1]))
 
     def _filter_by_pattern(
-        self, data: pl.DataFrame, description: str, condition: str, columns: list[str]
+        self, data: pl.DataFrame, condition: str, columns: list[str], value: str
     ) -> pl.DataFrame:
         """Filter by pattern matching."""
-        pattern_match = re.search(r"with pattern\s+(.+)", description)
-        if not pattern_match:
-            raise ValidationError(f"No pattern found in: {description}")
-
-        pattern = pattern_match.group(1).strip("'\"")
-        col_name = columns[0]
-
         if condition == "value is like":
             # Keep rows that don't match the pattern
-            return data.filter(~pl.col(col_name).str.contains(pattern))
+            return data.filter(~pl.col(columns).str.contains(value))
         else:
             # Keep rows that match the pattern
-            return data.filter(pl.col(col_name).str.contains(pattern))
+            return data.filter(pl.col(columns).str.contains(value))
 
 
 class TransformColumnsOperation(PrepOperation):
