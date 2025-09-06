@@ -5,13 +5,14 @@ high-performance DataFrame operations. It supports column removal, row filtering
 transformations, and new column creation with comprehensive error handling.
 """
 
+import ast
 import hashlib
 import logging
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Tuple
+from typing import Any
 
 import polars as pl
 import streamlit as st
@@ -20,7 +21,6 @@ from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.prep_utils import (
     PrepActionResult,
     PrepConfirmationMessages,
-    PrepDescriptions,
 )
 
 # Constants for validation
@@ -168,7 +168,7 @@ class RemoveColumnsOperation(PrepOperation):
             results = data.drop(columns)
 
             updated_prep_args = {
-                "action": "add new column",
+                "action": "remove column(s)",
                 "column_names": None,
                 "affected_count": len(columns),
                 "remaining_count": data.width,
@@ -212,7 +212,7 @@ class RemoveRowsOperation(PrepOperation):
                 "column_names": None,
                 "affected_count": data.height - results.height,
                 "remaining_count": results.height,
-                "value": None,
+                "value": value,
                 "method": method,
                 "source_columns": source_columns,
                 "condition": condition,
@@ -722,15 +722,15 @@ def prep_apply_action(
         db_name="logs",
     )
 
-    # Get current prepared data
-    prep_data = duckdb_get_table(
-        project_id,
-        alias,
-        db_name="prep",
-    )
-
     # run current action if prep_args is provided, else re-apply all actions from log
     if not prep_args:
+
+        # Get raw data if re-applying all actions
+        raw_data = duckdb_get_table(
+            project_id,
+            alias,
+            db_name="raw",
+        )
 
         if prep_log_df.is_empty():
             return None  # No actions to re-apply
@@ -739,13 +739,31 @@ def prep_apply_action(
         existing_actions = []
         for row in prep_log_df.iter_rows(named=True):
             args = row["prep_args"]
+            # check if args is a string (from JSON) and convert to dict
+            if isinstance(args, str):
+                args = ast.literal_eval(args)
+            prep_action = PrepActionResult(**args)
             existing_actions.append(
-                PrepAction.from_args(PrepActionResult(**args))
+                PrepAction.from_args(prep_action)
             )
 
         # apply all existing actions to current prepared data
-        processor.execute_all_actions(prep_data, existing_actions)
+        result_data = processor.execute_all_actions(raw_data, existing_actions)
+        # save new prep data
+        duckdb_save_table(
+            project_id,
+            result_data,
+            alias,
+            db_name="prep",
+        )
     else:
+
+        # Get current prepared data
+        prep_data = duckdb_get_table(
+            project_id,
+            alias,
+            db_name="prep",
+        )
 
         # Apply only the new action
         new_action = PrepAction.from_args(prep_args)

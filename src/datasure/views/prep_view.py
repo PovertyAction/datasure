@@ -635,7 +635,7 @@ if show_prep_page_info:
                     )
                 else:
                     prep_logs_mod = st.dataframe(
-                        prep_log["action", "description"],
+                        prep_log,
                         width="stretch",
                         key=label,
                         hide_index=False,
