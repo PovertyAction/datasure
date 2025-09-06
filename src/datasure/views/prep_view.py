@@ -12,7 +12,6 @@ from datasure.utils.duckdb_utils import (
 from datasure.utils.navigations import page_navigation
 from datasure.utils.prep_utils import (
     PrepActionResult,
-    PrepConfirmationMessages,
     PrepDescriptions,
 )
 
@@ -292,7 +291,7 @@ class PrepStepHandler:
     def remove_column_handler(self) -> dict | None:
         dp_prep_del_cols = st.multiselect(
             label="Select columns to remove",
-            options=self.string_cols,
+            options=self.all_cols,
             key=f"st_sb_del_cols{i}",
         )
 
@@ -466,32 +465,19 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
 
         if dp_prep_action == "add new column":
             prep_args = prep_handler.add_column_handler()
-            if prep_args:
-                result = PrepActionResult(**prep_args)
-                prep_description = PrepConfirmationMessages().add_new_column(result)
 
         elif dp_prep_action == "transform column":
             prep_args = prep_handler.transform_column_handler()
-            if prep_args:
-                result = PrepActionResult(**prep_args)
-                prep_description = PrepConfirmationMessages().transform_column(result)
 
         elif dp_prep_action == "remove column(s)":
             prep_args = prep_handler.remove_column_handler()
-            if prep_args:
-                result = PrepActionResult(**prep_args)
-                prep_description = PrepConfirmationMessages().remove_columns(result)
 
         elif dp_prep_action == "remove row(s)":
             prep_args = prep_handler.remove_rows_handler()
-            if prep_args:
-                result = PrepActionResult(**prep_args)
-                prep_description = PrepConfirmationMessages().remove_rows(result)
 
         if prep_args is None:
             st.warning("Please complete the form to add a new preparation step.")
             return
-
 
         if st.button(
             label="Add",
@@ -499,35 +485,12 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
             width="stretch",
             type="primary",
             help="Add the data preparation step to the log",
-            disabled=(not prep_description),
+            disabled=(not prep_args or not dp_prep_action),
         ):
 
-            # save action to log, save log to database, and re-run the entire
-            # prep log to reflect the changes
-            prep_log = duckdb_get_table(
-                project_id=project_id,
-                alias=f"prep_log_{label}",
-                db_name="logs",
-            ).to_pandas()
+            # apply action and re-run
+            prep_apply_action(project_id, label, PrepActionResult(**prep_args))
 
-            new_log_entry = pd.DataFrame(
-                {
-                    "action": [dp_prep_action],
-                    "description": [prep_description],
-                    "prep_args": [prep_args],
-                }
-            )
-
-            updated_log = pd.concat([prep_log, new_log_entry], ignore_index=True)
-
-            duckdb_save_table(
-                project_id,
-                updated_log,
-                alias=f"prep_log_{label}",
-                db_name="logs",
-            )
-
-            prep_apply_action(project_id, label)
             st.success("Preparation step added successfully!")
             st.rerun()
 

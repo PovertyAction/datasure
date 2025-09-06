@@ -11,13 +11,17 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, Tuple
 
 import polars as pl
 import streamlit as st
 
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
-from datasure.utils.prep_utils import PrepActionResult
+from datasure.utils.prep_utils import (
+    PrepActionResult,
+    PrepConfirmationMessages,
+    PrepDescriptions,
+)
 
 # Constants for validation
 MAX_RANGE_VALUES = 2
@@ -56,18 +60,18 @@ class PrepAction:
     """Represents a data preparation action."""
 
     action_type: ActionType
-    description: str
-    prep_args: str = ""
+    prep_args: PrepActionResult
 
     @classmethod
-    def from_strings(cls, action: str, description: str, prep_args: str) -> "PrepAction":
+    def from_args(cls, prep_args: PrepActionResult) -> "PrepAction":
         """Create PrepAction from string representations."""
+        action = prep_args.action
         try:
             action_type = ActionType(action)
         except ValueError as e:
             raise ValidationError(f"Unknown action type: {action}") from e
 
-        return cls(action_type=action_type, description=description, prep_args=prep_args)
+        return cls(action_type=action_type, prep_args=prep_args)
 
 
 class DescriptionParser:
@@ -153,16 +157,31 @@ class PrepOperation(ABC):
 class RemoveColumnsOperation(PrepOperation):
     """Remove specified columns from DataFrame."""
 
-    def execute(self, data: pl.DataFrame, prep_args: dict) -> pl.DataFrame:
+    def execute(self, data: pl.DataFrame, prep_args: PrepActionResult) -> tuple[pl.DataFrame, PrepActionResult]:
         """Remove columns specified in description."""
-        st.write(prep_args)
         try:
             # Extract column names from description
-            columns = prep_args.get("source_columns", [])
+            columns = prep_args.source_columns
             self._validate_columns_exist(data, columns)
 
+            # drop columns
+            results = data.drop(columns)
+
+            updated_prep_args = {
+                "action": "add new column",
+                "column_names": None,
+                "affected_count": len(columns),
+                "remaining_count": data.width,
+                "value": None,
+                "method": None,
+                "source_columns": columns,
+                "condition": prep_args.condition,
+                "failed_count": 0,
+                "additional_info": None,
+            }
+
             # Remove columns using Polars
-            return data.drop(columns)
+            return results, PrepActionResult(**updated_prep_args)
 
         except Exception as e:
             if isinstance(e, ValidationError | OperationError):
@@ -173,21 +192,35 @@ class RemoveColumnsOperation(PrepOperation):
 class RemoveRowsOperation(PrepOperation):
     """Remove rows based on various conditions."""
 
-    def execute(self, data: pl.DataFrame, prep_args: dict) -> pl.DataFrame:
+    def execute(self, data: pl.DataFrame, prep_args: PrepActionResult) -> tuple[pl.DataFrame, PrepActionResult]:
         """Remove rows based on condition specified in description."""
         try:
-
-            method = prep_args.get("method")
-            value = prep_args.get("value", "")
-            condition = prep_args.get("condition", "")
-            source_columns = prep_args.get("source_columns", [])
+            method = prep_args.method
+            value = prep_args.value
+            condition = prep_args.condition
+            source_columns = prep_args.source_columns or []
 
             if method == "by row index":
-                return self._remove_by_index(data, value)
+                results = self._remove_by_index(data, value)
             elif method == "by condition":
-                return self._remove_by_condition(data, condition, source_columns, value)
+                results = self._remove_by_condition(data, condition, source_columns, value)
             else:
                 raise ValidationError(f"Unknown removal method: {method}")  # noqa: TRY301
+
+            updated_prep_args = {
+                "action": "remove row(s)",
+                "column_names": None,
+                "affected_count": data.height - results.height,
+                "remaining_count": results.height,
+                "value": None,
+                "method": method,
+                "source_columns": source_columns,
+                "condition": condition,
+                "failed_count": 0,
+                "additional_info": None,
+            }
+
+            return results, PrepActionResult(**updated_prep_args)
 
         except Exception as e:
             if isinstance(e, ValidationError | OperationError):
@@ -496,19 +529,34 @@ class TransformColumnsOperation(PrepOperation):
 class AddNewColumnOperation(PrepOperation):
     """Add new columns with computed values."""
 
-    def execute(self, data: pl.DataFrame, prep_args: dict) -> pl.DataFrame:
+    def execute(self, data: pl.DataFrame, prep_args: PrepActionResult) -> pl.DataFrame:
         """Add new column based on description."""
         try:
-            new_col_name, value_spec = prep_args.get("column_names"), prep_args.get("value")
-            method = prep_args.get("method")
-            source_columns = prep_args.get("source_columns", [])
+            new_col_name, value_spec = prep_args.column_names, prep_args.value
+            method = prep_args.method
+            source_columns = prep_args.source_columns or [""]
 
             if method == "constant":
-                return self._add_constant_column(data, new_col_name, value_spec)
+                results = self._add_constant_column(data, new_col_name, value_spec)
             elif method in ["index", "uuid", "random"]:
-                return self._add_special_column(data, method, new_col_name, value_spec,)
+                results = self._add_special_column(data, method, new_col_name, value_spec,)
             else:
-                return self._add_computed_column(data, new_col_name, method, source_columns)
+                results = self._add_computed_column(data, new_col_name, method, source_columns)
+
+            updated_prep_args = {
+                "action": "add new column",
+                "column_names": new_col_name,
+                "affected_count": 1,
+                "remaining_count": results.width,
+                "value": value_spec,
+                "method": method,
+                "source_columns": source_columns,
+                "condition": None,
+                "failed_count": 0,
+                "additional_info": None,
+            }
+
+            return results, PrepActionResult(**updated_prep_args)
 
         except Exception as e:
             if isinstance(e, ValidationError | OperationError):
@@ -623,7 +671,7 @@ class PrepProcessor:
 
     def execute_single_action(
         self, data: pl.DataFrame, action: PrepAction
-    ) -> pl.DataFrame:
+    ) -> tuple[pl.DataFrame, PrepActionResult]:
         """Execute a single preparation action."""
         handler = self.operation_handlers.get(action.action_type)
         if not handler:
@@ -639,10 +687,10 @@ class PrepProcessor:
 
         for action in actions:
             try:
-                result_data = self.execute_single_action(result_data, action)
+                result_data, _ = self.execute_single_action(result_data, action)
             except Exception as e:
                 raise OperationError(
-                    f"Failed to execute action '{action.description}': {e}"
+                    f"Failed to execute action '{action}': {e}"
                 ) from e
 
         return result_data
@@ -651,8 +699,7 @@ class PrepProcessor:
 def prep_apply_action(
     project_id: str,
     alias: str,
-    action: str | None = None,
-    description: str | None = None,
+    prep_args: PrepActionResult | None = None,
 ) -> None:
     """Apply data preparation action to dataset.
 
@@ -667,89 +714,91 @@ def prep_apply_action(
         ValidationError: If action/description validation fails
         OperationError: If data operation fails
     """
-    try:
-        processor = PrepProcessor()
+    processor = PrepProcessor()
+    # Load existing preparation log
+    prep_log_df = duckdb_get_table(
+        project_id,
+        f"prep_log_{alias}",
+        db_name="logs",
+    )
 
-        # Load existing preparation log
-        prep_log_df = duckdb_get_table(
-            project_id,
-            f"prep_log_{alias}",
-            db_name="logs",
-        )
+    # Get current prepared data
+    prep_data = duckdb_get_table(
+        project_id,
+        alias,
+        db_name="prep",
+    )
+
+    # run current action if prep_args is provided, else re-apply all actions from log
+    if not prep_args:
+
+        if prep_log_df.is_empty():
+            return None  # No actions to re-apply
 
         # Convert to list of actions
         existing_actions = []
         for row in prep_log_df.iter_rows(named=True):
+            args = row["prep_args"]
             existing_actions.append(
-                PrepAction.from_strings(row["action"], row["description"], row["prep_args"])
+                PrepAction.from_args(PrepActionResult(**args))
             )
 
+        # apply all existing actions to current prepared data
+        processor.execute_all_actions(prep_data, existing_actions)
+    else:
+
+        # Apply only the new action
+        new_action = PrepAction.from_args(prep_args)
+        result_data, updated_prep_args = processor.execute_single_action(prep_data, new_action)
         # Add new action if provided
-        if action and description:
-            new_action = PrepAction.from_strings(action, description)
-            existing_actions.append(new_action)
-            action_index_val = f"{len(existing_actions) - 1} - {action} - {description}"
+        action = updated_prep_args.action
+        if action == "remove column(s)":
+            description = PrepConfirmationMessages.remove_columns(updated_prep_args)
+        elif action == "remove row(s)":
+            description = PrepConfirmationMessages.remove_rows(updated_prep_args)
+        elif action == "transform column(s)":
+            description = PrepConfirmationMessages.transform_columns(updated_prep_args)
+        elif action == "add new column":
+            description = PrepConfirmationMessages.add_new_column(updated_prep_args)
 
-            # Update log with new action
-            new_row = pl.DataFrame(
-                {
-                    "action": [action],
-                    "description": [description],
-                    "action_index": [action_index_val],
-                }
-            )
+        action_index_val = f"{prep_log_df.height} - {action} - {description}"
 
-            if prep_log_df.is_empty():
-                updated_log = new_row
-            else:
-                updated_log = prep_log_df.vstack(new_row)
+        # Update log with new action
+        new_row = pl.DataFrame(
+            {
+                "action": [action],
+                "description": [description],
+                "prep_args": [updated_prep_args],
+                "action_index": [action_index_val],
+            }
+        )
 
-            duckdb_save_table(
-                project_id,
-                updated_log,
-                f"prep_log_{alias}",
-                db_name="logs",
-            )
-
-            # Get current prepared data
-            prep_data = duckdb_get_table(
-                project_id,
-                alias,
-                db_name="prep",
-            )
-
-            # Apply only the new action
-            result_data = processor.execute_single_action(prep_data, new_action)
+        if prep_log_df.is_empty():
+            updated_log = new_row
         else:
-            # Re-apply all actions from raw data
-            raw_data = duckdb_get_table(
-                project_id,
-                alias,
-                db_name="raw",
+            # Convert struct columns to JSON strings for concatenation
+            prep_log_json = prep_log_df.with_columns(
+                pl.col("prep_args").map_elements(lambda x: str(x) if x is not None else None, return_dtype=pl.String)
             )
+            new_row_json = new_row.with_columns(
+                pl.col("prep_args").map_elements(lambda x: str(x) if x is not None else None, return_dtype=pl.String)
+            )
+            updated_log = pl.concat([prep_log_json, new_row_json])
 
-            # Apply all actions
-            result_data = processor.execute_all_actions(raw_data, existing_actions)
+        duckdb_save_table(
+            project_id,
+            updated_log,
+            f"prep_log_{alias}",
+            db_name="logs",
+        )
 
-        # Save prepared dataset
+        # Save updated prepared data
         duckdb_save_table(
             project_id,
             result_data,
             alias,
             db_name="prep",
         )
-
-    except Exception as e:
-        if isinstance(e, ValidationError | OperationError):
-            # Show user-friendly error in Streamlit
-            st.error(f"Data preparation failed: {e}")
-            raise
-        else:
-            # Log unexpected errors and show generic message
-            logging.error("Unexpected error in prep_apply_action: %s", e, exc_info=True)
-            st.error("An unexpected error occurred during data preparation.")
-            raise OperationError(f"Unexpected error in prep_apply_action: {e}") from e
-
 
 # Legacy function aliases for backward compatibility
 def prep_remove_columns(prep_data, description: str):
