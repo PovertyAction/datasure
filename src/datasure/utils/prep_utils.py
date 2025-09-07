@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from typing import ClassVar
-import streamlit as st
 
 
 @dataclass
@@ -122,7 +121,6 @@ class PrepDescriptions:
         "value is like": "Select rows where the column value contains or matches a text pattern",
         "value is not like": "Select rows where the column value does not contain or match a text pattern",
     }
-
 
     @classmethod
     def get_description(cls, category: str, function: str) -> str | None:

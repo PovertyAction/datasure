@@ -7,7 +7,6 @@ transformations, and new column creation with comprehensive error handling.
 
 import ast
 import hashlib
-import logging
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -463,7 +462,7 @@ class TransformColumnsOperation(PrepOperation):
 
         # Substring extraction
         if func_name == "substring":
-            return self._apply_substring(data, column_name)
+            return self._apply_substring(data, column_name, value)
 
         # Pattern extraction
         if func_name.startswith("extract pattern"):
@@ -818,50 +817,3 @@ def prep_apply_action(
             alias,
             db_name="prep",
         )
-
-# Legacy function aliases for backward compatibility
-def prep_remove_columns(prep_data, description: str):
-    """Legacy wrapper for column removal."""
-    operation = RemoveColumnsOperation()
-    # Convert pandas to polars if needed
-    if hasattr(prep_data, "to_pandas"):
-        # It's already a Polars DataFrame
-        polars_data = prep_data
-    else:
-        # Convert pandas to polars
-        polars_data = pl.from_pandas(prep_data)
-
-    return operation.execute(polars_data, description)
-
-
-def prep_remove_rows(prep_data, description: str):
-    """Legacy wrapper for row removal."""
-    operation = RemoveRowsOperation()
-    if hasattr(prep_data, "to_pandas"):
-        polars_data = prep_data
-    else:
-        polars_data = pl.from_pandas(prep_data)
-
-    return operation.execute(polars_data, description)
-
-
-def prep_transform_columns(prep_data, description: str):
-    """Legacy wrapper for column transformation."""
-    operation = TransformColumnsOperation()
-    if hasattr(prep_data, "to_pandas"):
-        polars_data = prep_data
-    else:
-        polars_data = pl.from_pandas(prep_data)
-
-    return operation.execute(polars_data, description)
-
-
-def prep_add_new_column(prep_data, description: str):
-    """Legacy wrapper for adding new columns."""
-    operation = AddNewColumnOperation()
-    if hasattr(prep_data, "to_pandas"):
-        polars_data = prep_data
-    else:
-        polars_data = pl.from_pandas(prep_data)
-
-    return operation.execute(polars_data, description)

@@ -39,18 +39,27 @@ if not show_prep_page_info:
 # --- COLUMN METHODS WITH VALUES ---#
 
 COL_MEDTHODS_WITH_VALUES = (
-    "sum", "diff",
-    "mean", "median",
+    "sum",
+    "diff",
+    "mean",
+    "median",
     "mode",
-    "min", "max",
-    "std", "var",
-    "first", "last",
-    "count", "nunique",
-    "product", "quotient",
+    "min",
+    "max",
+    "std",
+    "var",
+    "first",
+    "last",
+    "count",
+    "nunique",
+    "product",
+    "quotient",
 )
 
 COL_MEDTHODS_NO_VALUES = (
-    "index", "uuid", "random",
+    "index",
+    "uuid",
+    "random",
 )
 
 DEL_ROW_COND_MAX_1 = (
@@ -89,6 +98,7 @@ DEL_ROW_COND_SAME_TYPE = (
     "value is not between",
 )
 
+
 class PrepViewConfig:
     """Configuration constants for data preparation view."""
 
@@ -125,10 +135,13 @@ class PrepViewConfig:
 # Creates page for data preprocessing
 
 st.title("Get Your Data Ready")
-st.write("Prepare your dataset for Data Quality Checks. Use these tools to transform, add and remove columns and rows in your dataset.")
+st.write(
+    "Prepare your dataset for Data Quality Checks. Use these tools to transform, add and remove columns and rows in your dataset."
+)
 
 # Initialize configuration
 config = PrepViewConfig()
+
 
 class PrepStepHandler:
     """Handles data preparation step operations."""
@@ -137,7 +150,9 @@ class PrepStepHandler:
         self.prep_data = prep_data
         self.step_index = step_index
         self.config = PrepViewConfig()
-        self.all_cols, self.string_cols, self.num_cols, self.date_cols, _ = get_df_info(self.prep_data, cols_only=True)
+        self.all_cols, self.string_cols, self.num_cols, self.date_cols, _ = get_df_info(
+            self.prep_data, cols_only=True
+        )
 
     def add_column_handler(self) -> dict | None:
         """Handle adding new column UI and logic."""
@@ -178,7 +193,11 @@ class PrepStepHandler:
 
             # define custom message values
             value = dp_prep_add_val if dp_prep_add_col_med == "constant" else None
-            source_columns = dp_prep_add_col_select if dp_prep_add_col_med in COL_MEDTHODS_WITH_VALUES else []
+            source_columns = (
+                dp_prep_add_col_select
+                if dp_prep_add_col_med in COL_MEDTHODS_WITH_VALUES
+                else []
+            )
 
             return {
                 "action": "add new column",
@@ -206,7 +225,7 @@ class PrepStepHandler:
             # show functions based on column type
             col_type = self.prep_data[dp_prep_trf_col].dtype
             st.info(f"Column type: {col_type}")
-            
+
             # Initialize variables to avoid UnboundLocalError
             dp_prep_trf_func = None
             dp_prep_trf_old_val = None
@@ -215,7 +234,7 @@ class PrepStepHandler:
             dp_prep_trf_start = None
             dp_prep_trf_end = None
             dp_prep_trf_val = None
-            
+
             if col_type in ["object", "string"]:
                 dp_prep_trf_func = st.selectbox(
                     label="Select Function",
@@ -296,26 +315,31 @@ class PrepStepHandler:
                 value = [dp_prep_trf_pattern]
             elif dp_prep_trf_func and dp_prep_trf_func in ["substring"]:
                 value = [dp_prep_trf_start, dp_prep_trf_end]
-            elif dp_prep_trf_func and dp_prep_trf_func in ["add", "multiply", "subtract", "divide"]:
+            elif dp_prep_trf_func and dp_prep_trf_func in [
+                "add",
+                "multiply",
+                "subtract",
+                "divide",
+            ]:
                 value = [dp_prep_trf_val]
             else:
                 value = []
 
-
             return {
-                    "action": "transform column(s)",
-                    "column_names": None,
-                    "affected_count": 0,
-                    "remaining_count": None,
-                    "value": value,
-                    "method": dp_prep_trf_func,
-                    "source_columns": source_columns,
-                    "condition": None,
-                    "failed_count": 0,
-                    "additional_info": None,
-                }
+                "action": "transform column(s)",
+                "column_names": None,
+                "affected_count": 0,
+                "remaining_count": None,
+                "value": value,
+                "method": dp_prep_trf_func,
+                "source_columns": source_columns,
+                "condition": None,
+                "failed_count": 0,
+                "additional_info": None,
+            }
 
     def remove_column_handler(self) -> dict | None:
+        """Handle remove column UI and logic."""
         dp_prep_del_cols = st.multiselect(
             label="Select columns to remove",
             options=self.all_cols,
@@ -326,7 +350,9 @@ class PrepStepHandler:
             "action": "remove column(s)",
             "column_names": None,
             "affected_count": len(dp_prep_del_cols) if dp_prep_del_cols else 0,
-            "remaining_count": self.prep_data.shape[1] - len(dp_prep_del_cols) if dp_prep_del_cols else self.prep_data.shape[1],
+            "remaining_count": self.prep_data.shape[1] - len(dp_prep_del_cols)
+            if dp_prep_del_cols
+            else self.prep_data.shape[1],
             "value": None,
             "method": None,
             "source_columns": dp_prep_del_cols if dp_prep_del_cols else [],
@@ -354,9 +380,7 @@ class PrepStepHandler:
                 key=f"st_sb_del_rows_idx{i}",
             )
             if dp_prep_del_rows_idx:
-                indexes_to_remove = dp_prep_del_rows_idx.replace(" ", "").split(
-                    ","
-                )
+                indexes_to_remove = dp_prep_del_rows_idx.replace(" ", "").split(",")
 
         if dp_prep_del_rows == "by condition":
             dp_prep_del_rows_cond = st.selectbox(
@@ -386,7 +410,10 @@ class PrepStepHandler:
                     max_selections=max_selections,
                 )
 
-                if dp_prep_del_rows_cond in DEL_COND_USE_VALS and dp_prep_del_rows_cond_cols:
+                if (
+                    dp_prep_del_rows_cond in DEL_COND_USE_VALS
+                    and dp_prep_del_rows_cond_cols
+                ):
                     # get a list of unique values in select column
                     unique_vals = (
                         prep_data[dp_prep_del_rows_cond_cols[0]].unique().tolist()
@@ -430,7 +457,6 @@ class PrepStepHandler:
                         disabled=disable_inputs,
                     )
 
-
                 if dp_prep_del_rows_cond in [
                     "value is like",
                     "value is not like",
@@ -445,7 +471,11 @@ class PrepStepHandler:
         if indexes_to_remove and dp_prep_del_rows == "by row index":
             value = indexes_to_remove
             affected_count = len(indexes_to_remove)
-        elif dp_prep_del_rows_cond and dp_prep_del_rows_cond_cols and dp_prep_del_rows == "by condition":
+        elif (
+            dp_prep_del_rows_cond
+            and dp_prep_del_rows_cond_cols
+            and dp_prep_del_rows == "by condition"
+        ):
             if dp_prep_del_rows_cond in DEL_COND_USE_VALS:
                 value = dp_prep_del_rows_cond_val
             elif dp_prep_del_rows_cond in DEL_ROW_COND_SAME_TYPE:
@@ -455,15 +485,22 @@ class PrepStepHandler:
             else:
                 value = None
 
-
         # get source columns
-        source_columns = dp_prep_del_rows_cond_cols if dp_prep_del_rows == "by condition" and dp_prep_del_rows_cond_cols else []
-        condition = dp_prep_del_rows_cond if dp_prep_del_rows == "by condition" and dp_prep_del_rows_cond else None
+        source_columns = (
+            dp_prep_del_rows_cond_cols
+            if dp_prep_del_rows == "by condition" and dp_prep_del_rows_cond_cols
+            else []
+        )
+        condition = (
+            dp_prep_del_rows_cond
+            if dp_prep_del_rows == "by condition" and dp_prep_del_rows_cond
+            else None
+        )
 
         return {
             "action": "remove row(s)",
             "column_names": None,
-            "affected_count": None,
+            "affected_count": affected_count or 0,
             "remaining_count": None,
             "value": value,
             "method": dp_prep_del_rows,
@@ -472,6 +509,7 @@ class PrepStepHandler:
             "failed_count": None,
             "additional_info": None,
         }
+
 
 # --- Add Preparation Step ---#
 def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
@@ -514,7 +552,6 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
             help="Add the data preparation step to the log",
             disabled=(not prep_args or not dp_prep_action),
         ):
-
             # apply action and re-run
             prep_apply_action(project_id, label, PrepActionResult(**prep_args))
 
@@ -525,9 +562,7 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
 # --- Remove Preparation Step ---#
 def prep_remove_step():
     """Remove a data preparation step."""
-    with st.popover(
-        ":material/delete: Remove data prep step", width="stretch"
-    ):
+    with st.popover(":material/delete: Remove data prep step", width="stretch"):
         prep_log = duckdb_get_table(
             project_id=project_id,
             alias=f"prep_log_{label}",
@@ -685,7 +720,11 @@ if show_prep_page_info:
                     value=f"{miss_perc:.2f}%",
                     border=True,
                 )
-                st.dataframe(prep_data, width="stretch", hide_index=False,)
+                st.dataframe(
+                    prep_data,
+                    width="stretch",
+                    hide_index=False,
+                )
 
 page_navigation(
     prev={
