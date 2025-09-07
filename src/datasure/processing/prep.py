@@ -236,6 +236,8 @@ class RemoveRowsOperation(PrepOperation):
         """Remove rows by index positions."""
         rows_to_drop = []
         for item in index_values:
+            if item in [",", None]:
+                continue
             if isinstance(item, str) and ":" in item:
                 # Handle range like "1:3"
                 start, end = item.split(":")
