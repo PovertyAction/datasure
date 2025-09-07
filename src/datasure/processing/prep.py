@@ -156,7 +156,9 @@ class PrepOperation(ABC):
 class RemoveColumnsOperation(PrepOperation):
     """Remove specified columns from DataFrame."""
 
-    def execute(self, data: pl.DataFrame, prep_args: PrepActionResult) -> tuple[pl.DataFrame, PrepActionResult]:
+    def execute(
+        self, data: pl.DataFrame, prep_args: PrepActionResult
+    ) -> tuple[pl.DataFrame, PrepActionResult]:
         """Remove columns specified in description."""
         try:
             # Extract column names from description
@@ -191,7 +193,9 @@ class RemoveColumnsOperation(PrepOperation):
 class RemoveRowsOperation(PrepOperation):
     """Remove rows based on various conditions."""
 
-    def execute(self, data: pl.DataFrame, prep_args: PrepActionResult) -> tuple[pl.DataFrame, PrepActionResult]:
+    def execute(
+        self, data: pl.DataFrame, prep_args: PrepActionResult
+    ) -> tuple[pl.DataFrame, PrepActionResult]:
         """Remove rows based on condition specified in description."""
         try:
             method = prep_args.method
@@ -202,7 +206,9 @@ class RemoveRowsOperation(PrepOperation):
             if method == "by row index":
                 results = self._remove_by_index(data, value)
             elif method == "by condition":
-                results = self._remove_by_condition(data, condition, source_columns, value)
+                results = self._remove_by_condition(
+                    data, condition, source_columns, value
+                )
             else:
                 raise ValidationError(f"Unknown removal method: {method}")  # noqa: TRY301
 
@@ -291,7 +297,11 @@ class RemoveRowsOperation(PrepOperation):
     ) -> pl.DataFrame:
         """Filter by comparison conditions."""
         # Inverse logic - we keep rows that don't match the removal condition
-        value_use = float(value[0]) if isinstance(value[0], str) and "." in value else int(value[0])
+        value_use = (
+            float(value[0])
+            if isinstance(value[0], str) and "." in value
+            else int(value[0])
+        )
         if condition == "value is greater than":
             return data.filter(pl.col(columns) <= value_use)
         elif condition == "value is greater than or equal to":
@@ -314,10 +324,14 @@ class RemoveRowsOperation(PrepOperation):
 
         if condition == "value is between":
             # Keep rows outside the range
-            return data.filter((pl.col(columns) < value[0]) | (pl.col(columns) > value[1]))
+            return data.filter(
+                (pl.col(columns) < value[0]) | (pl.col(columns) > value[1])
+            )
         else:
             # Keep rows inside the range
-            return data.filter((pl.col(columns) >= value[0]) & (pl.col(columns) <= value[1]))
+            return data.filter(
+                (pl.col(columns) >= value[0]) & (pl.col(columns) <= value[1])
+            )
 
     def _filter_by_pattern(
         self, data: pl.DataFrame, condition: str, columns: list[str], value: str
@@ -325,11 +339,15 @@ class RemoveRowsOperation(PrepOperation):
         """Filter by pattern matching."""
         if condition == "value is like":
             # Keep rows that don't match the pattern
-            filter_expr = pl.all_horizontal([~pl.col(col).str.contains(value) for col in columns])
+            filter_expr = pl.all_horizontal(
+                [~pl.col(col).str.contains(value) for col in columns]
+            )
             return data.filter(filter_expr)
         elif condition == "value is not like":
             # Keep rows that match the pattern
-            filter_expr = pl.any_horizontal([pl.col(col).str.contains(value) for col in columns])
+            filter_expr = pl.any_horizontal(
+                [pl.col(col).str.contains(value) for col in columns]
+            )
             return data.filter(filter_expr)
         else:
             raise ValidationError(f"Unknown pattern condition: {condition}")
@@ -338,16 +356,22 @@ class RemoveRowsOperation(PrepOperation):
 class TransformColumnsOperation(PrepOperation):
     """Transform column values using various operations."""
 
-    def execute(self, data: pl.DataFrame, prep_args: PrepActionResult) -> tuple[pl.DataFrame, PrepActionResult]:
+    def execute(
+        self, data: pl.DataFrame, prep_args: PrepActionResult
+    ) -> tuple[pl.DataFrame, PrepActionResult]:
         """Transform columns based on description."""
         try:
             source_columns, func_name = prep_args.source_columns, prep_args.method
             self._validate_columns_exist(data, source_columns)
             value = prep_args.value or []
-            result_data = self._apply_transformation(data, source_columns[0], func_name, value)
+            result_data = self._apply_transformation(
+                data, source_columns[0], func_name, value
+            )
 
             # count the number of non-missing values in the transformed columns
-            null_count = result_data.select(pl.col(source_columns[0]).null_count()).item()
+            null_count = result_data.select(
+                pl.col(source_columns[0]).null_count()
+            ).item()
             affected_count = data.height - null_count
             prep_args = {
                 "action": "transform column(s)",
@@ -393,7 +417,11 @@ class TransformColumnsOperation(PrepOperation):
         return pl.lit(None).cast(pl.Datetime)
 
     def _apply_transformation(
-        self, data: pl.DataFrame, column_name: str, func_name: str, value: list[Any],
+        self,
+        data: pl.DataFrame,
+        column_name: str,
+        func_name: str,
+        value: list[Any],
     ) -> pl.DataFrame:
         """Apply specific transformation to column."""
         # DateTime extractions
@@ -471,7 +499,12 @@ class TransformColumnsOperation(PrepOperation):
         raise ValidationError(f"Unknown transformation function: {func_name}")
 
     def _apply_arithmetic(
-        self, data: pl.DataFrame, column_name: str, operation: str, value: list[int | float]) -> pl.DataFrame:
+        self,
+        data: pl.DataFrame,
+        column_name: str,
+        operation: str,
+        value: list[int | float],
+    ) -> pl.DataFrame:
         """Apply arithmetic operations."""
         ops = {
             "add": lambda col, val: col + val,
@@ -485,7 +518,10 @@ class TransformColumnsOperation(PrepOperation):
         )
 
     def _apply_string_replace(
-        self, data: pl.DataFrame, column_name: str, value: list[str],
+        self,
+        data: pl.DataFrame,
+        column_name: str,
+        value: list[str],
     ) -> pl.DataFrame:
         """Apply string replacement."""
         if len(value) != 2:
@@ -499,7 +535,10 @@ class TransformColumnsOperation(PrepOperation):
         )
 
     def _apply_substring(
-        self, data: pl.DataFrame, column_name: str, value: list[int],
+        self,
+        data: pl.DataFrame,
+        column_name: str,
+        value: list[int],
     ) -> pl.DataFrame:
         """Apply substring extraction."""
         if not value or len(value) != 2:
@@ -512,7 +551,10 @@ class TransformColumnsOperation(PrepOperation):
         )
 
     def _apply_pattern_extract(
-        self, data: pl.DataFrame, column_name: str, value: list[str],
+        self,
+        data: pl.DataFrame,
+        column_name: str,
+        value: list[str],
     ) -> pl.DataFrame:
         """Apply pattern extraction."""
         pattern_text = value[0]
@@ -541,7 +583,9 @@ class AddNewColumnOperation(PrepOperation):
             elif method in ["index", "uuid", "random"]:
                 results = self._add_special_column(data, method, new_col_name)
             else:
-                results = self._add_computed_column(data, new_col_name, method, source_columns)
+                results = self._add_computed_column(
+                    data, new_col_name, method, source_columns
+                )
 
             updated_prep_args = {
                 "action": "add new column",
@@ -575,7 +619,10 @@ class AddNewColumnOperation(PrepOperation):
         return data.with_columns(pl.lit(value).alias(col_name))
 
     def _add_special_column(
-        self, data: pl.DataFrame, method: str, col_name: str,
+        self,
+        data: pl.DataFrame,
+        method: str,
+        col_name: str,
     ) -> pl.DataFrame:
         """Add special columns like index, uuid, or random."""
         if method == "index":
@@ -634,7 +681,9 @@ class AddNewColumnOperation(PrepOperation):
             "last": lambda cols: pl.concat_list(cols).list.last(),
             "count": lambda cols: pl.concat_list(cols).list.len(),
             "nunique": lambda cols: pl.concat_list(cols).list.unique().list.len(),
-            "product": lambda cols: pl.fold(acc=pl.lit(1), function=lambda acc, x: acc * x, exprs=cols),
+            "product": lambda cols: pl.fold(
+                acc=pl.lit(1), function=lambda acc, x: acc * x, exprs=cols
+            ),
         }
 
         if func_name in agg_funcs:
@@ -689,9 +738,7 @@ class PrepProcessor:
             try:
                 result_data, _ = self.execute_single_action(result_data, action)
             except Exception as e:
-                raise OperationError(
-                    f"Failed to execute action '{action}': {e}"
-                ) from e
+                raise OperationError(f"Failed to execute action '{action}': {e}") from e
 
         return result_data
 
@@ -724,7 +771,6 @@ def prep_apply_action(
 
     # run current action if prep_args is provided, else re-apply all actions from log
     if not prep_args:
-
         # Get raw data if re-applying all actions
         raw_data = duckdb_get_table(
             project_id,
@@ -743,9 +789,7 @@ def prep_apply_action(
             if isinstance(args, str):
                 args = ast.literal_eval(args)
             prep_action = PrepActionResult(**args)
-            existing_actions.append(
-                PrepAction.from_args(prep_action)
-            )
+            existing_actions.append(PrepAction.from_args(prep_action))
 
         # apply all existing actions to current prepared data
         result_data = processor.execute_all_actions(raw_data, existing_actions)
@@ -757,7 +801,6 @@ def prep_apply_action(
             db_name="prep",
         )
     else:
-
         # Get current prepared data
         prep_data = duckdb_get_table(
             project_id,
@@ -767,7 +810,9 @@ def prep_apply_action(
 
         # Apply only the new action
         new_action = PrepAction.from_args(prep_args)
-        result_data, updated_prep_args = processor.execute_single_action(prep_data, new_action)
+        result_data, updated_prep_args = processor.execute_single_action(
+            prep_data, new_action
+        )
         # Add new action if provided
         action = updated_prep_args.action
         if action == "remove column(s)":
@@ -796,10 +841,14 @@ def prep_apply_action(
         else:
             # Convert struct columns to JSON strings for concatenation
             prep_log_json = prep_log_df.with_columns(
-                pl.col("prep_args").map_elements(lambda x: str(x) if x is not None else None, return_dtype=pl.String)
+                pl.col("prep_args").map_elements(
+                    lambda x: str(x) if x is not None else None, return_dtype=pl.String
+                )
             )
             new_row_json = new_row.with_columns(
-                pl.col("prep_args").map_elements(lambda x: str(x) if x is not None else None, return_dtype=pl.String)
+                pl.col("prep_args").map_elements(
+                    lambda x: str(x) if x is not None else None, return_dtype=pl.String
+                )
             )
             updated_log = pl.concat([prep_log_json, new_row_json])
 
