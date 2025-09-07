@@ -206,6 +206,16 @@ class PrepStepHandler:
             # show functions based on column type
             col_type = self.prep_data[dp_prep_trf_col].dtype
             st.info(f"Column type: {col_type}")
+            
+            # Initialize variables to avoid UnboundLocalError
+            dp_prep_trf_func = None
+            dp_prep_trf_old_val = None
+            dp_prep_trf_new_val = None
+            dp_prep_trf_pattern = None
+            dp_prep_trf_start = None
+            dp_prep_trf_end = None
+            dp_prep_trf_val = None
+            
             if col_type in ["object", "string"]:
                 dp_prep_trf_func = st.selectbox(
                     label="Select Function",
@@ -280,13 +290,13 @@ class PrepStepHandler:
                 )
 
             source_columns = [dp_prep_trf_col] if dp_prep_trf_col else []
-            if dp_prep_trf_func in ["replace"]:
+            if dp_prep_trf_func and dp_prep_trf_func in ["replace"]:
                 value = [dp_prep_trf_old_val, dp_prep_trf_new_val]
-            elif dp_prep_trf_func in ["extract pattern"]:
+            elif dp_prep_trf_func and dp_prep_trf_func in ["extract pattern"]:
                 value = [dp_prep_trf_pattern]
-            elif dp_prep_trf_func in ["substring"]:
+            elif dp_prep_trf_func and dp_prep_trf_func in ["substring"]:
                 value = [dp_prep_trf_start, dp_prep_trf_end]
-            elif dp_prep_trf_func in ["add", "multiply", "subtract", "divide"]:
+            elif dp_prep_trf_func and dp_prep_trf_func in ["add", "multiply", "subtract", "divide"]:
                 value = [dp_prep_trf_val]
             else:
                 value = []
@@ -577,6 +587,9 @@ def prep_remove_step():
                 st.success(
                     f"Action '{dp_prep_remove_action_desc}' removed successfully!"
                 )
+
+                # rerun to refresh page
+                st.rerun()
 
 
 if show_prep_page_info:

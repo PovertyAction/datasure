@@ -214,7 +214,6 @@ class PrepConfirmationMessages:
     def transform_columns(cls, result: PrepActionResult) -> str:
         """Generate message for column transformation."""
         column_display = cls._format_column_names(result.source_columns)
-        st.write(f"/TEST/* Count: {result.affected_count}")
         row_text = cls._pluralize(result.affected_count, "row")
         method = result.method or "unknown method"
         affected_count = result.affected_count or 0
