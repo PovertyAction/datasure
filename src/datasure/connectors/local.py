@@ -1,11 +1,11 @@
 import os
 from pathlib import Path
 
+import pandas as pd
 import polars as pl
 import streamlit as st
-from openpyxl import load_workbook
-from polars_readstat import scan_readstat
 from pydantic import BaseModel, Field, field_validator
+from python_calamine import CalamineWorkbook
 
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 
@@ -85,8 +85,8 @@ def get_excel_sheet_names(file_path: str) -> list[str]:
     """
     try:
         # Use read_only=True for better performance
-        workbook = load_workbook(file_path, read_only=True, data_only=True)
-        return workbook.sheetnames  # noqa: TRY300
+        workbook = CalamineWorkbook.from_path(file_path)
+        return workbook.sheet_names  # noqa: TRY300
     except Exception as e:
         st.error(f"Error reading Excel file: {e}")
         return []
@@ -117,14 +117,20 @@ def load_data_efficiently(filename: str, sheet_name: str | None = None) -> pl.Da
             )
 
         elif file_ext in [".xlsx", ".xls"]:
-            return pl.read_excel(filename, sheet_name=sheet_name)
+            return pl.read_excel(filename, sheet_name=sheet_name, engine="calamine")
 
         elif file_ext == ".json":
             # Polars has efficient JSON reading
             return pl.read_json(filename)
 
         elif file_ext == ".dta":
-            return scan_readstat(filename).collect()
+            return pl.from_pandas(
+                pd.read_stata(
+                    filename,
+                    convert_categoricals=False,  # Better for Polars conversion
+                    preserve_dtypes=False,  # Let Polars handle types
+                )
+            )
 
         else:
             raise ValueError(f"Unsupported file format: {file_ext}")  # noqa: TRY301
@@ -162,7 +168,7 @@ def render_local_file_form(
         st.info("You are in edit mode. Please modify the file details below.")
 
     # Form inputs with validation
-    with st.form(key=f"local_file_form_{mode}"):
+    with st.container(border=True):
         disable_submit = True
         sheets = []
         sheet_name = None
@@ -173,56 +179,56 @@ def render_local_file_form(
             help="Enter a unique, short, descriptive name for the file (max 20 characters)",
             disabled=edit_mode,
             max_chars=20,
+            key=f"alias_input_{mode}",
         )
 
         file_path = st.text_input(
             label="File Path*",
-            value=defaults.get("filename", ""),
+            value=defaults.get("filename", None),
             help="Add full file name and path. e.g., C:/data/survey.dta",
+            key=f"file_path_input_{mode}",
         )
 
         # Dynamic sheet selection for Excel files
-        if file_path:
+        if file_path is not None:
             path_obj = Path(file_path)
             # validate file accessibility
-            if not validate_file_accessibility(file_path):
+            if not validate_file_accessibility(path_obj):
                 st.error(
-                    "File is not accessible. Please check the path and permissions."
+                    "File is not accessible. Please check the path, filename or permissions."
                 )
-                st.stop()
 
-            if path_obj.suffix.lower() in [".xlsx", ".xls"]:
-                try:
-                    sheets = get_excel_sheet_names(file_path)
-                    if sheets and defaults.get("sheet_name") in sheets:
-                        default_index = sheets.index(defaults.get("sheet_name"))
-
-                    disable_submit = bool(not sheets)
-
-                except Exception:
-                    pass  # sheets will remain empty
             else:
-                disable_submit = False  # Non-Excel files
-                sheets = []
+                if path_obj.suffix.lower() in [".xlsx", ".xls"]:
+                    try:
+                        sheets = get_excel_sheet_names(file_path)
+                        if sheets and defaults.get("sheet_name") in sheets:
+                            default_index = sheets.index(defaults.get("sheet_name"))
 
-            if path_obj.suffix.lower() in [".xlsx", ".xls"]:
-                sheet_name = st.selectbox(
-                    label="Sheet Name",
-                    options=sheets,
-                    index=default_index,
-                )
+                        disable_submit = bool(not sheets)
+
+                    except Exception:
+                        pass  # sheets will remain empty
+                else:
+                    disable_submit = False  # Non-Excel files
+                    sheets = []
+
+                if path_obj.suffix.lower() in [".xlsx", ".xls"]:
+                    sheet_name = st.selectbox(
+                        label="Sheet Name",
+                        options=sheets,
+                        index=default_index,
+                    )
 
         st.markdown("**required*")
 
         # Submit button
-        submitted = st.form_submit_button(
+        if st.button(
             "Update File" if edit_mode else "Add File",
             type="primary",
             use_container_width=True,
             disabled=disable_submit,
-        )
-
-        if submitted:
+        ):
             _handle_form_submission(
                 project_id=project_id,
                 alias=alias,
