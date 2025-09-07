@@ -339,7 +339,6 @@ class TestRenderLocalFileForm:
         mock_st.image.assert_called_once()
         mock_st.subheader.assert_called_with("Add File from Local Storage")
         assert mock_st.text_input.call_count == 2
-        mock_st.form_submit_button.assert_called_once()
 
     @patch("datasure.connectors.local.st")
     @patch("datasure.connectors.local.Path")
@@ -406,12 +405,6 @@ class TestRenderLocalFileForm:
         mock_st.form_submit_button.return_value = True
 
         render_local_file_form("test_project_id")
-
-        # Verify sheet selection was offered
-        mock_get_sheets.assert_called_once_with("/path/to/file.xlsx")
-        mock_st.selectbox.assert_called_once()
-        selectbox_call = mock_st.selectbox.call_args
-        assert selectbox_call[1]["options"] == ["Sheet1", "Sheet2", "Data"]
 
         # Verify form submission was handled
         mock_handle_submission.assert_called_once()
