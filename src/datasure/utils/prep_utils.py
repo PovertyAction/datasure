@@ -348,7 +348,7 @@ class PrepConfirmationMessages:
     @classmethod
     def string_function_extract(cls, result: PrepActionResult) -> str:
         """Generate message for pattern extraction."""
-        match_text = cls._pluralize(result.affected_count, "match")
+        match_text = cls._pluralize(result.affected_count, "match", "matches")
         value_text = (
             cls._pluralize(result.remaining_count, "value")
             if result.remaining_count
