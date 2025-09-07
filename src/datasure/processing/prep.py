@@ -339,31 +339,36 @@ class RemoveRowsOperation(PrepOperation):
 class TransformColumnsOperation(PrepOperation):
     """Transform column values using various operations."""
 
-    def execute(self, data: pl.DataFrame, description: str) -> pl.DataFrame:
+    def execute(self, data: pl.DataFrame, prep_args: PrepActionResult) -> tuple[pl.DataFrame, PrepActionResult]:
         """Transform columns based on description."""
         try:
-            column_name, func_name = self._parse_transformation_params(description)
-            self._validate_columns_exist(data, [column_name])
-            return self._apply_transformation(data, column_name, func_name, description)
+            source_columns, func_name = prep_args.source_columns, prep_args.method
+            self._validate_columns_exist(data, source_columns)
+            value = prep_args.value or []
+            result_data = self._apply_transformation(data, source_columns[0], func_name, value)
+
+            # count the number of non-missing values in the transformed columns
+            null_count = result_data.select(pl.col(source_columns[0]).null_count()).item()
+            affected_count = data.height - null_count
+            prep_args = {
+                "action": "transform column(s)",
+                "column_names": None,
+                "affected_count": affected_count,
+                "remaining_count": None,
+                "value": prep_args.value,
+                "method": prep_args.method,
+                "source_columns": source_columns,
+                "condition": None,
+                "failed_count": 0,
+                "additional_info": None,
+            }
+
+            return result_data, PrepActionResult(**prep_args)
 
         except Exception as e:
             if isinstance(e, ValidationError | OperationError):
                 raise
             raise OperationError(f"Failed to transform columns: {e}") from e
-
-    def _parse_transformation_params(self, description: str) -> tuple[str, str]:
-        """Parse transformation parameters from description."""
-        quoted_content = DescriptionParser.parse_quoted_content(description)
-
-        if len(quoted_content) < MIN_PARTS_REQUIRED:
-            raise ValidationError(f"Invalid transformation format: {quoted_content}")
-
-        if len(quoted_content) > MIN_PARTS_REQUIRED:
-            column_name, func_name, *_ = quoted_content
-        else:
-            column_name, func_name = quoted_content
-
-        return column_name, func_name
 
     @staticmethod
     def _parse_flexible_datetime(col_name: str) -> pl.Expr:
@@ -389,7 +394,7 @@ class TransformColumnsOperation(PrepOperation):
         return pl.lit(None).cast(pl.Datetime)
 
     def _apply_transformation(
-        self, data: pl.DataFrame, column_name: str, func_name: str, description: str
+        self, data: pl.DataFrame, column_name: str, func_name: str, value: list[Any],
     ) -> pl.DataFrame:
         """Apply specific transformation to column."""
         # DateTime extractions
@@ -427,7 +432,7 @@ class TransformColumnsOperation(PrepOperation):
 
         # Arithmetic operations
         if func_name in ["add", "subtract", "multiply", "divide"]:
-            return self._apply_arithmetic(data, column_name, func_name, description)
+            return self._apply_arithmetic(data, column_name, func_name, value)
 
         # String operations
         string_ops = {
@@ -458,7 +463,7 @@ class TransformColumnsOperation(PrepOperation):
 
         # Substring extraction
         if func_name == "substring":
-            return self._apply_substring(data, column_name, description)
+            return self._apply_substring(data, column_name)
 
         # Pattern extraction
         if func_name.startswith("extract pattern"):
@@ -467,11 +472,8 @@ class TransformColumnsOperation(PrepOperation):
         raise ValidationError(f"Unknown transformation function: {func_name}")
 
     def _apply_arithmetic(
-        self, data: pl.DataFrame, column_name: str, operation: str, description: str
-    ) -> pl.DataFrame:
+        self, data: pl.DataFrame, column_name: str, operation: str, value: list[int | float]) -> pl.DataFrame:
         """Apply arithmetic operations."""
-        value = DescriptionParser.parse_numeric_value(description)
-
         ops = {
             "add": lambda col, val: col + val,
             "subtract": lambda col, val: col - val,
@@ -480,47 +482,46 @@ class TransformColumnsOperation(PrepOperation):
         }
 
         return data.with_columns(
-            ops[operation](pl.col(column_name), value).alias(column_name)
+            ops[operation](pl.col(column_name), value[0]).alias(column_name)
         )
 
     def _apply_string_replace(
-        self, data: pl.DataFrame, column_name: str, func_name: str
+        self, data: pl.DataFrame, column_name: str, value: list[str],
     ) -> pl.DataFrame:
         """Apply string replacement."""
-        replace_text = func_name.replace("replace by replacing ", "")
-        parts = replace_text.split(" with ", 1)
-
-        if len(parts) != 2:
+        if len(value) != 2:
             raise ValidationError(
                 "Invalid replace format. Expected 'replace by replacing X with Y'"
             )
 
-        old_text, new_text = parts
+        old_text, new_text = value
         return data.with_columns(
             pl.col(column_name).str.replace(old_text, new_text).alias(column_name)
         )
 
     def _apply_substring(
-        self, data: pl.DataFrame, column_name: str, description: str
+        self, data: pl.DataFrame, column_name: str, value: list[int],
     ) -> pl.DataFrame:
         """Apply substring extraction."""
-        range_match = re.findall(r"(\d+) to (\d+)", description)
-        if not range_match:
+        if not value or len(value) != 2:
             raise ValidationError("Invalid description format. Expected 'from X to Y'.")
 
-        start = int(range_match[0][0])
-        end = int(range_match[0][1])
+        start, end = value
 
         return data.with_columns(
             pl.col(column_name).str.slice(start, end - start).alias(column_name)
         )
 
     def _apply_pattern_extract(
-        self, data: pl.DataFrame, column_name: str, func_name: str
+        self, data: pl.DataFrame, column_name: str, value: list[str],
     ) -> pl.DataFrame:
         """Apply pattern extraction."""
-        pattern_text = func_name.replace("extract pattern by extracting pattern ", "")
-
+        pattern_text = value[0]
+        # validate pattern text
+        try:
+            re.compile(pattern_text)
+        except re.error as e:
+            raise ValidationError(f"Invalid regex pattern: {pattern_text}") from e
         return data.with_columns(
             pl.col(column_name).str.extract(pattern_text).alias(column_name)
         )
@@ -539,7 +540,7 @@ class AddNewColumnOperation(PrepOperation):
             if method == "constant":
                 results = self._add_constant_column(data, new_col_name, value_spec)
             elif method in ["index", "uuid", "random"]:
-                results = self._add_special_column(data, method, new_col_name, value_spec,)
+                results = self._add_special_column(data, method, new_col_name)
             else:
                 results = self._add_computed_column(data, new_col_name, method, source_columns)
 
@@ -575,7 +576,7 @@ class AddNewColumnOperation(PrepOperation):
         return data.with_columns(pl.lit(value).alias(col_name))
 
     def _add_special_column(
-        self, data: pl.DataFrame, method: str, col_name: str, value_spec: str
+        self, data: pl.DataFrame, method: str, col_name: str,
     ) -> pl.DataFrame:
         """Add special columns like index, uuid, or random."""
         if method == "index":

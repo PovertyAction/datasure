@@ -195,7 +195,7 @@ class PrepStepHandler:
 
         return None
 
-    def transform_column_handler(self) -> str | None:
+    def transform_column_handler(self) -> dict | None:
         """Handle transform column UI and logic."""
         dp_prep_trf_col = st.selectbox(
             label="Select column to transform",
@@ -223,7 +223,6 @@ class PrepStepHandler:
                         help="Enter new value to replace with",
                         key=f"st_sb_trf_new_val{i}",
                     )
-                    return f"transform column(s) '{dp_prep_trf_col}' to '{dp_prep_trf_func}' by replacing '{dp_prep_trf_old_val}' with '{dp_prep_trf_new_val}'"
                 elif dp_prep_trf_func == "substring":
                     start_col, end_col = st.columns(2)
                     with start_col:
@@ -247,17 +246,14 @@ class PrepStepHandler:
                             st.error("Start index cannot be greater than end index")
                         elif dp_prep_trf_start == dp_prep_trf_end:
                             st.error("Start index cannot be equal to end index")
-                        else:
-                            return f"transform column(s) '{dp_prep_trf_col}' to '{dp_prep_trf_func}' by taking substring from index {dp_prep_trf_start} to {dp_prep_trf_end}"
+
                 elif dp_prep_trf_func == "extract pattern":
                     dp_prep_trf_pattern = st.text_input(
                         label="Enter pattern",
                         help="Enter pattern to extract from column",
                         key=f"st_sb_trf_pattern{i}",
                     )
-                    return f"transform column(s) '{dp_prep_trf_col}' to '{dp_prep_trf_func}' by extracting pattern '{dp_prep_trf_pattern}'"
-                else:
-                    return f"transform column(s) '{dp_prep_trf_col}' to '{dp_prep_trf_func}'"
+
             elif col_type == "int64" or col_type == "float64":
                 dp_prep_trf_func = st.selectbox(
                     label="Select Function",
@@ -275,18 +271,39 @@ class PrepStepHandler:
                         help="Enter value to perform operation on column",
                         key=f"st_sb_trf_val{i}",
                     )
-                    return f"transform column(s) '{dp_prep_trf_col}' to '{dp_prep_trf_func}' by {dp_prep_trf_val}"
-                else:
-                    return f"transform column(s) '{dp_prep_trf_col}' to '{dp_prep_trf_func}'"
+
             elif col_type == "datetime64[ns]":
                 dp_prep_trf_func = st.selectbox(
                     label="Select Function",
                     options=config.DP_DATETIME_FUNCS,
                     key=f"st_sb_trf_func{i}",
                 )
-                return (
-                    f"transform column(s) '{dp_prep_trf_col}' to '{dp_prep_trf_func}'"
-                )
+
+            source_columns = [dp_prep_trf_col] if dp_prep_trf_col else []
+            if dp_prep_trf_func in ["replace"]:
+                value = [dp_prep_trf_old_val, dp_prep_trf_new_val]
+            elif dp_prep_trf_func in ["extract pattern"]:
+                value = [dp_prep_trf_pattern]
+            elif dp_prep_trf_func in ["substring"]:
+                value = [dp_prep_trf_start, dp_prep_trf_end]
+            elif dp_prep_trf_func in ["add", "multiply", "subtract", "divide"]:
+                value = [dp_prep_trf_val]
+            else:
+                value = []
+
+
+            return {
+                    "action": "transform column(s)",
+                    "column_names": None,
+                    "affected_count": 0,
+                    "remaining_count": None,
+                    "value": value,
+                    "method": dp_prep_trf_func,
+                    "source_columns": source_columns,
+                    "condition": None,
+                    "failed_count": 0,
+                    "additional_info": None,
+                }
 
     def remove_column_handler(self) -> dict | None:
         dp_prep_del_cols = st.multiselect(
@@ -466,7 +483,7 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
         if dp_prep_action == "add new column":
             prep_args = prep_handler.add_column_handler()
 
-        elif dp_prep_action == "transform column":
+        elif dp_prep_action == "transform column(s)":
             prep_args = prep_handler.transform_column_handler()
 
         elif dp_prep_action == "remove column(s)":
