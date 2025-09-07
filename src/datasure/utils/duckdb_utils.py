@@ -1,10 +1,15 @@
+import logging
 import re
 
-import duckdb
+import duckdb  # type: ignore
 import pandas as pd
 import polars as pl
 
 from .cache_utils import get_cache_path
+
+# Set up logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 def _validate_table_name(table_name: str) -> str:
@@ -56,7 +61,7 @@ def _validate_table_name(table_name: str) -> str:
 
 
 def duckdb_save_table(
-    project_id: str, table_data: pl.DataFrame | pd.DataFrame, alias: str, db_name: str
+    project_id: str, table_data, alias: str, db_name: str = "raw"
 ) -> None:
     """Save a DataFrame to a DuckDB database.
 
@@ -67,6 +72,18 @@ def duckdb_save_table(
     alias: str : alias for the data
     db_name: str : name of the DuckDB database
     """
+    # Add validation for empty DataFrames
+    if hasattr(table_data, "empty") and table_data.empty:
+        logger.warning(
+            f"Attempted to save empty DataFrame for alias '{alias}'. Skipping save operation."
+        )
+        return
+    # For Polars DataFrames
+    if hasattr(table_data, "is_empty") and table_data.is_empty():
+        logger.warning(
+            f"Attempted to save empty DataFrame for alias '{alias}'. Skipping save operation."
+        )
+        return
     db_path = (
         get_cache_path(project_id, "settings", "logs.duckdb")
         if db_name == "logs"
