@@ -24,6 +24,7 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
+    "python-calamine>=0.5.2",
     "streamlit>=1.47.0",
     "pandas>=2.2.2",
     "plotly>=6.2.0",
@@ -44,7 +45,6 @@ dependencies = [
     "pydantic>=2.11.7",
     "keyring>=25.6.0",
     "polars-readstat>=0.5.1",
-    "fastexcel>=0.14.0",
 ]
 
 [project.urls]
