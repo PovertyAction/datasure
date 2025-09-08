@@ -40,7 +40,16 @@ page_data_index = page_number - 1
 # define project ID
 project_id = st.session_state.st_project_id
 
-st.title(f"DQA Report {page_number}")
+# if no configured checks, stop
+check_log = duckdb_get_table(
+    project_id=project_id, alias="check_config", db_name="logs"
+)
+if check_log.is_empty():
+    page_title = f"Data Quality Checks - page {page_number}"
+else:
+    page_title = f"Data Quality Checks - {check_log[page_data_index, 'page_name']}"
+
+st.title(page_title)
 
 if not project_id:
     st.info(
@@ -48,10 +57,6 @@ if not project_id:
     )
     st.stop()
 
-# if no configured checks, stop
-check_log = duckdb_get_table(
-    project_id=project_id, alias="check_config", db_name="logs"
-)
 
 if check_log.is_empty():
     st.info(

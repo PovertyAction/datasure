@@ -1,14 +1,14 @@
 import polars as pl
 import streamlit as st
 
-from datasure.connectors import (
+from datasure.connectors.local import load_local_data, render_local_file_form
+from datasure.connectors.scto import (
     FormConfig,
     SurveyCTOUI,
     download_forms,
-    local_add_form,
-    local_load_action,
 )
-from datasure.utils import (
+from datasure.utils.duckdb_utils import (
+    duckdb_delete_table,
     duckdb_get_aliases,
     duckdb_get_imported_datasets,
     duckdb_get_table,
@@ -74,7 +74,7 @@ def load_raw_datasets(project_id: str) -> None:
         with st.status("Loading datasets ...", expanded=True) as status:
             for row in import_log.iter_rows(named=True):
                 if row["source"] == "local storage" and row["refresh"] is True:
-                    local_load_action(
+                    load_local_data(
                         project_id=project_id,
                         alias=row["alias"],
                         filename=row["filename"],
@@ -244,7 +244,7 @@ with (
         "Import Type", options=["local storage", "SurveyCTO"], index=None
     )
     if import_type == "local storage":
-        local_add_form(project_id)
+        render_local_file_form(project_id)
     elif import_type == "SurveyCTO":
         SurveyCTOUI(project_id).render_form_config()
 with (
@@ -267,9 +267,14 @@ with (
         selected_config = import_log.filter(pl.col("alias") == edit_config).to_dicts()[
             0
         ]
-        SurveyCTOUI(project_id).render_form_config(
-            edit_mode=True, defaults=selected_config
-        )
+        if selected_config["source"] == "local storage":
+            render_local_file_form(project_id, edit_mode=True, defaults=selected_config)
+        elif selected_config["source"] == "SurveyCTO":
+            SurveyCTOUI(project_id).render_form_config(
+                edit_mode=True, defaults=selected_config
+            )
+        else:
+            st.error("Invalid import source.")
 with (
     ac3,
     st.popover(
@@ -290,6 +295,11 @@ with (
             alias="import_log",
             db_name="logs",
             filter_condition=f"alias != '{remove_data}'",
+        )
+        duckdb_delete_table(
+            project_id=project_id,
+            alias=remove_data,
+            db_name="raw",
         )
         st.session_state.st_raw_dataset_list = duckdb_get_aliases(project_id)
 
