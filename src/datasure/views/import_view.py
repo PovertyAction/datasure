@@ -16,6 +16,7 @@ from datasure.utils.duckdb_utils import (
     duckdb_save_table,
     duckdb_table_exists,
 )
+from datasure.utils.navigations import page_navigation
 from datasure.utils.secure_credentials import (
     delete_stored_credentials,
     list_stored_credentials,
@@ -381,3 +382,8 @@ if not import_log.is_empty():
 
 else:
     st.info("No import data found. Please add import configurations.")
+
+
+page_navigation(
+    next={"page_name": st.session_state.st_prep_data_page, "label": "Next: Prep Data →"}
+)

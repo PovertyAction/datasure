@@ -7,6 +7,7 @@ from datasure.utils import (
     duckdb_save_table,
     get_df_info,
 )
+from datasure.utils.navigations import page_navigation
 
 st.title("Configure Checks")
 st.markdown("Add a page for each dataset you want to check")
@@ -267,4 +268,15 @@ else:
 
 check_page_names = (
     check_config_log["page_name"].to_list() if not check_config_log.is_empty() else []
+)
+
+page_navigation(
+    prev={
+        "page_name": st.session_state.st_prep_data_page,
+        "label": "← Back: Prepare Data",
+    },
+    next={
+        "page_name": st.session_state.st_output_page1,
+        "label": "Next: Output Page 1 →",
+    },
 )

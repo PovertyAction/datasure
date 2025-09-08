@@ -108,6 +108,20 @@ test-cov:
     @echo "Note: Suppressing internal pytest errors (INTERNALERROR>) on Windows"
     -uv run python -m pytest -p no:cacheprovider 2>&1 | Select-String -Pattern "^(?!INTERNALERROR)" | Select-String -Pattern "^(?!.*NotImplementedError.*PosixPath)" | Out-String -Stream
 
+[linux]
+test-verbose:
+    uv run python -m pytest -v
+
+[macos]
+test-verbose:
+    uv run python -m pytest -v
+
+[windows]
+test-verbose:
+    @echo "Running tests on Windows (coverage disabled due to pytest-cov compatibility issue)"
+    @echo "Note: Suppressing internal pytest errors (INTERNALERROR>) on Windows"
+    -uv run python -m pytest -v -p no:cacheprovider 2>&1 | Select-String -Pattern "^(?!INTERNALERROR)" | Select-String -Pattern "^(?!.*NotImplementedError.*PosixPath)" | Out-String -Stream
+
 # Run tests with HTML coverage report
 [linux]
 test-cov-html:
