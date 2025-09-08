@@ -167,6 +167,7 @@ def duckdb_get_table(
             else:
                 return pl.DataFrame()
 
+
 def duckdb_remove_table(project_id: str, alias: str, db_name: str) -> bool:
     """Remove a table from a DuckDB database.
 
@@ -203,6 +204,7 @@ def duckdb_remove_table(project_id: str, alias: str, db_name: str) -> bool:
             return True
         else:
             return False
+
 
 def duckdb_row_filter(
     project_id: str, alias: str, db_name: str, filter_condition: str
@@ -307,6 +309,7 @@ def duckdb_get_imported_datasets(project_id: str) -> list[str]:
         table_names = {name[0] for name in table_names}
     table_list = [x for x in aliases if x.lower().replace(" ", "_") in table_names]
     return table_list
+
 
 def duckdb_table_exists(project_id: str, alias: str, db_name: str) -> bool:
     """Check if a table exists in a DuckDB database.
