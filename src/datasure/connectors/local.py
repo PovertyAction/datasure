@@ -24,7 +24,7 @@ def local_excel_sheet_names(file_path: str) -> list:
     return sheet_names
 
 
-def local_read_data(filename: str, sheet_name: str | None = None) -> pl.DataFrame:
+def local_read_data(filename: str, sheet_name: str | None = None) -> pd.DataFrame:
     """Import data from a file.
 
     PARAMS:
@@ -187,45 +187,31 @@ def local_add_form(
                     .otherwise(pl.col("filename"))
                     .alias("filename"),
                 )
-        import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
-
-        # check that alias is unique
-        if not import_log.is_empty() and (
-            local_file_alias in import_log["alias"].to_list()
-        ):
-            st.error(
-                "Alias already exists. Please choose a different alias or edit the existing one."
-            )
-        else:
-            if edit_mode:
-                # update the row in the cache file
-                import_log = import_log.with_columns(
-                    pl.when(pl.col("alias") == default_local_file_alias)
-                    .then(pl.lit(local_added_file))
-                    .otherwise(pl.col("filename"))
-                    .alias("filename"),
-                )
 
             else:
                 # create a new row with the file details
                 new_row = {
                     "refresh": True,
                     "load": True,
-                    "source": "local storage",
                     "alias": local_file_alias,
                     "filename": local_added_file,
                     "sheet_name": local_added_file_sheet_name,
+                    "source": "local storage",
                     "server": "",
+                    "username": "",
                     "form_id": "",
                     "private_key": "",
                     "save_to": "",
                     "attachments": False,
                 }
 
-                # append the new row to the cache file
-                import_log = pl.concat(
-                    [import_log, pl.DataFrame([new_row])], how="vertical"
-                )
+                if import_log.is_empty():
+                    import_log = pl.DataFrame([new_row])
+                else:
+                    # append the new row to the cache file
+                    import_log = pl.concat(
+                        [import_log, pl.DataFrame([new_row])], how="vertical"
+                    )
 
             # save the updated cache file
             duckdb_save_table(

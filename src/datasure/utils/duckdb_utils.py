@@ -1,10 +1,15 @@
+import logging
 import re
 
-import duckdb
+import duckdb  # type: ignore
 import pandas as pd
 import polars as pl
 
 from .cache_utils import get_cache_path
+
+# Set up logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 def _validate_table_name(table_name: str) -> str:
@@ -56,7 +61,7 @@ def _validate_table_name(table_name: str) -> str:
 
 
 def duckdb_save_table(
-    project_id: str, table_data: pl.DataFrame | pd.DataFrame, alias: str, db_name: str
+    project_id: str, table_data, alias: str, db_name: str = "raw"
 ) -> None:
     """Save a DataFrame to a DuckDB database.
 
@@ -67,6 +72,18 @@ def duckdb_save_table(
     alias: str : alias for the data
     db_name: str : name of the DuckDB database
     """
+    # Add validation for empty DataFrames
+    if hasattr(table_data, "empty") and table_data.empty:
+        logger.warning(
+            f"Attempted to save empty DataFrame for alias '{alias}'. Skipping save operation."
+        )
+        return
+    # For Polars DataFrames
+    if hasattr(table_data, "is_empty") and table_data.is_empty():
+        logger.warning(
+            f"Attempted to save empty DataFrame for alias '{alias}'. Skipping save operation."
+        )
+        return
     db_path = (
         get_cache_path(project_id, "settings", "logs.duckdb")
         if db_name == "logs"
@@ -149,6 +166,44 @@ def duckdb_get_table(
                 return pd.DataFrame()
             else:
                 return pl.DataFrame()
+
+
+def duckdb_remove_table(project_id: str, alias: str, db_name: str) -> bool:
+    """Remove a table from a DuckDB database.
+
+    PARAMS:
+    -------
+    project_id: str : project ID
+    alias: str : alias for the data
+    db_name: str : name of the DuckDB database
+
+    Returns
+    -------
+    bool : True if table was removed successfully, False if table didn't exist
+    """
+    db_path = (
+        get_cache_path(project_id, "settings", "logs.duckdb")
+        if db_name == "logs"
+        else get_cache_path(project_id, "data", f"{db_name}.duckdb")
+    )
+
+    table_id = _validate_table_name(alias.lower().replace(" ", "_").replace("-", "_"))
+
+    with duckdb.connect(db_path) as conn:
+        # Check if the table exists
+        table_exists = (
+            conn.execute(
+                f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table_id}'"
+            ).fetchone()[0]
+            > 0
+        )
+
+        if table_exists:
+            # Drop the table
+            conn.execute(f"DROP TABLE {table_id}")
+            return True
+        else:
+            return False
 
 
 def duckdb_row_filter(
@@ -254,3 +309,35 @@ def duckdb_get_imported_datasets(project_id: str) -> list[str]:
         table_names = {name[0] for name in table_names}
     table_list = [x for x in aliases if x.lower().replace(" ", "_") in table_names]
     return table_list
+
+
+def duckdb_table_exists(project_id: str, alias: str, db_name: str) -> bool:
+    """Check if a table exists in a DuckDB database.
+
+    PARAMS:
+    -------
+    project_id: str : project ID
+    alias: str : alias for the data
+    db_name: str : name of the DuckDB database
+
+    Returns
+    -------
+    bool : True if table exists, False otherwise
+    """
+    db_path = (
+        get_cache_path(project_id, "settings", "logs.duckdb")
+        if db_name == "logs"
+        else get_cache_path(project_id, "data", f"{db_name}.duckdb")
+    )
+
+    table_id = _validate_table_name(alias.lower().replace(" ", "_").replace("-", "_"))
+
+    with duckdb.connect(db_path) as conn:
+        # Check if the table exists
+        table_exists = (
+            conn.execute(
+                f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table_id}'"
+            ).fetchone()[0]
+            > 0
+        )
+        return table_exists

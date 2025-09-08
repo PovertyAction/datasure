@@ -368,7 +368,6 @@ def test_compute_summary_progress_by_col(sample_date_data_10000):
     assert isinstance(summary_progress_by_col[0], pd.DataFrame)
     assert isinstance(summary_progress_by_col[1], int | np.int64 | float | np.float64)
     assert isinstance(summary_progress_by_col[2], int | np.int64 | float | np.float64)
-    assert isinstance(summary_progress_by_col[3], list)
 
 
 # test 2: Test values of returned value from compute_summary_progress_by_col

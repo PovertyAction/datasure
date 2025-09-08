@@ -1,23 +1,31 @@
 import polars as pl
 import streamlit as st
 
-from datasure.connectors import (
-    local_add_form,
-    local_load_action,
-    scto_add_form,
-    scto_import_data,
-    scto_login_form,
+from datasure.connectors.local import local_add_form, local_load_action
+from datasure.connectors.scto import (
+    FormConfig,
+    SurveyCTOUI,
+    download_forms,
 )
-from datasure.connectors.scto import migrate_legacy_credentials
-from datasure.utils import (
+from datasure.utils.duckdb_utils import (
     duckdb_get_aliases,
     duckdb_get_imported_datasets,
     duckdb_get_table,
+    duckdb_remove_table,
     duckdb_row_filter,
     duckdb_save_table,
+    duckdb_table_exists,
 )
-from datasure.utils.cache_utils import get_cache_path
-from datasure.utils.secure_credentials import test_keyring_availability
+from datasure.utils.navigations import page_navigation
+from datasure.utils.secure_credentials import (
+    delete_stored_credentials,
+    list_stored_credentials,
+    test_keyring_availability,
+)
+from datasure.utils.settings_utils import trigger_save
+
+# --- Constants --- #
+CREDENTIAL_TYPE = ("SurveyCTO Login", "SurveyCTO Private Key")
 
 # --- CONFIGURE PAGE --- #
 
@@ -41,43 +49,6 @@ if "st_raw_dataset_list" not in st.session_state:
 
 if "st_prep_dataset_list" not in st.session_state:
     st.session_state.st_prep_dataset_list = None
-
-
-def edit_import_configuration(project_id: str, alias: str) -> None:
-    """Edit import configuration in the cache file.
-
-    PARAMS:
-    -------
-    project_id: str : project ID
-
-    Returns
-    -------
-    None
-    """
-    import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
-
-    source = import_log.filter(pl.col("alias") == alias).select("source").to_series()[0]
-    if source == "local storage":
-        current_filename = (
-            import_log.filter(pl.col("alias") == alias)
-            .select("filename")
-            .to_series()[0]
-        )
-        current_sheet_name = (
-            import_log.filter(pl.col("alias") == alias)
-            .select("sheet_name")
-            .to_series()[0]
-        )
-        defaults = {
-            "alias": alias,
-            "filename": current_filename,
-            "sheet_name": current_sheet_name,
-        }
-        local_add_form(
-            project_id=project_id,
-            defaults=defaults,
-            edit_mode=True,
-        )
 
 
 # --- Load raw dataset list from import configurations --- #
@@ -111,50 +82,147 @@ def load_raw_datasets(project_id: str) -> None:
                         sheet_name=row["sheet_name"] if row["sheet_name"] else None,
                     )
                 elif row["source"] == "SurveyCTO" and row["refresh"] is True:
-                    scto_import_data(
-                        project_id=project_id,
+                    # if private_key or save_to is Null, set to ""
+                    form_configs = FormConfig(
                         alias=row["alias"],
                         form_id=row["form_id"],
-                        refresh=row["refresh"],
-                        key=row["private_key"],
-                        saveas=row["save_to"],
+                        server=row["server"],
+                        username=row["username"] if row["username"] else None,
+                        private_key=row["private_key"] if row["private_key"] else None,
+                        save_to=row["save_to"] if row["save_to"] else None,
                         attachments=row["attachments"],
+                        refresh=row["refresh"],
+                    )
+                    download_forms(
+                        project_id=project_id,
+                        form_configs=[form_configs],
                     )
 
                 if row["alias"] not in st.session_state.st_raw_dataset_list:
                     st.session_state.st_raw_dataset_list.append(row["alias"])
             status.update(
-                label="Data loaded successfully!", state="complete", expanded=False
+                label="Data loaded successfully!", state="complete", expanded=True
             )
 
 
-# --- add login configuration ---#
-lc1, lc2, _ = st.columns(3)
+# --- Update import log in the cache file --- #
+def update_import_log(import_log: pl.DataFrame) -> None:
+    """Update the import log in the cache file."""
+    # reaarnge columns to match the import log structure
+    import_log = import_log.select(
+        [
+            "refresh",
+            "load",
+            "alias",
+            "filename",
+            "sheet_name",
+            "source",
+            "server",
+            "username",
+            "form_id",
+            "private_key",
+            "save_to",
+            "attachments",
+        ]
+    )
+    edited_import_log = st.data_editor(
+        data=import_log,
+        key="import_data_editor",
+        use_container_width=True,
+        column_config={
+            "refresh": st.column_config.CheckboxColumn("Refresh?"),
+            "load": st.column_config.CheckboxColumn("Load?"),
+            "alias": st.column_config.TextColumn("Alias", disabled=True),
+            "filename": st.column_config.TextColumn("Filename", disabled=True),
+            "sheet_name": st.column_config.TextColumn("Sheet Name", disabled=True),
+            "source": st.column_config.TextColumn("Source", disabled=True),
+            "server": st.column_config.TextColumn("Server", disabled=True),
+            "username": st.column_config.TextColumn("Username", disabled=True),
+            "form_id": st.column_config.TextColumn("Form ID", disabled=True),
+            "private_key": st.column_config.TextColumn("Private Key", disabled=True),
+            "save_to": st.column_config.TextColumn("Save To", disabled=True),
+            "attachments": st.column_config.CheckboxColumn("Download Media?"),
+        },
+        on_change=trigger_save,
+        kwargs={"state_name": "refresh_import_log"},
+    )
+    if "refresh_import_log" in st.session_state and st.session_state.refresh_import_log:
+        # Save the edited import log to the database
+        duckdb_save_table(
+            project_id=project_id,
+            table_data=edited_import_log,
+            alias="import_log",
+            db_name="logs",
+        )
+        st.session_state.refresh_import_log = False
+
+
+# --- Credential Manager --- #
 with st.container(border=True):
-    st.subheader("Import Configuration")
-    st.write("Configure the import connections for your project.")
-    with (
-        lc1,
-        st.popover(
-            "Add SurveyCTO Server", use_container_width=True, icon=":material/login:"
-        ),
-    ):
-        st.session_state.st_scto = scto_login_form(project_id)
+    st.subheader(":material/key: Manage Credentials")
+    st.write("Import and manage your credentials for data import.")
+
+    kc1, kc2, kc3 = st.columns([0.4, 0.3, 0.3])
 
     with (
-        lc2,
+        kc1,
+        st.popover("Add Credentials", use_container_width=True, icon=":material/add:"),
+    ):
+        st.write("Add your credentials for data import.")
+        select_cred_type = st.selectbox(
+            "Select Credential Type",
+            options=CREDENTIAL_TYPE,
+            index=0,
+            key="cred_type_select",
+            disabled=True,
+        )
+        if select_cred_type == "SurveyCTO Login":
+            SurveyCTOUI(project_id).render_login_form()
+
+    with (
+        kc2,
         st.popover(
-            "🔐 Check Security", use_container_width=True, icon=":material/security:"
+            "Remove Credentials", use_container_width=True, icon=":material/delete:"
+        ),
+    ):
+        st.write("**Remove Credentials**")
+        saved_credentials = list_stored_credentials(project_id).get("credentials", {})
+        select_credentials = st.selectbox(
+            "Select Crendetials to Deleted",
+            options=saved_credentials.keys(),
+            index=None,
+        )
+        if st.button(
+            "Delete Credentials",
+            type="primary",
+            use_container_width=True,
+            disabled=not select_credentials,
+        ):
+            selected_server = saved_credentials[select_credentials].get("server", "")
+            selected_type = saved_credentials[select_credentials].get("type", "")
+            delete_stored_credentials(
+                project_id=project_id,
+                server=selected_type,
+                credential_type=selected_type,
+            )
+            st.success(f"Credentials for {select_credentials} deleted successfully.")
+
+    with (
+        kc3,
+        st.popover(
+            "Keyring Diagnostics", use_container_width=True, icon=":material/build:"
         ),
     ):
         st.write("**Keyring Diagnostics**")
         if st.button("Test Keyring Availability", use_container_width=True):
             keyring_status = test_keyring_availability()
             if keyring_status["success"]:
-                st.success(f"✅ Keyring working: {keyring_status['backend']}")
+                st.success(
+                    f":material/check: Keyring working: {keyring_status['backend']}"
+                )
                 st.info(keyring_status["message"])
             else:
-                st.error(f"❌ Keyring issue: {keyring_status['error']}")
+                st.error(f":material/close: Keyring issue: {keyring_status['error']}")
                 st.info("**Troubleshooting Tips:**")
                 st.markdown("""
                 - **Windows**: Ensure Windows Credential Manager is accessible
@@ -162,28 +230,11 @@ with st.container(border=True):
                 - **Linux**: Install and configure a keyring backend (gnome-keyring, kwallet)
                 """)
 
-        st.write("**Migration Status:**")
-        legacy_file = st.session_state.get("st_project_id")
-        if legacy_file:
-            legacy_path = get_cache_path(legacy_file, "settings", "scto.json")
-            if legacy_path.exists():
-                st.warning("🔄 Legacy credentials detected")
-                if st.button("Migrate Legacy Credentials", use_container_width=True):
-                    if migrate_legacy_credentials(legacy_file):
-                        st.success("Migration completed!")
-                    else:
-                        st.error("Migration failed")
-            else:
-                st.success("✅ No legacy credentials found")
-
-        st.write("**Raw Diagnostic Data:**")
-        if st.button("Show Details", use_container_width=True):
-            st.json(test_keyring_availability())
-
 st.subheader("Import data from multiple sources")
 
 # -- Add configurations for import data -- #
 ac1, ac2, ac3 = st.columns([0.4, 0.4, 0.2])
+aliases = duckdb_get_aliases(project_id, to_load=False)
 with (
     ac1,
     st.popover(
@@ -196,27 +247,37 @@ with (
     if import_type == "local storage":
         local_add_form(project_id)
     elif import_type == "SurveyCTO":
-        scto_add_form(project_id)
+        SurveyCTOUI(project_id).render_form_config()
 with (
     ac2,
     st.popover(
-        "Edit Import Configuration", use_container_width=True, icon=":material/edit:"
+        "Edit Import Configuration",
+        use_container_width=True,
+        icon=":material/edit:",
+        disabled=not aliases,
     ),
 ):
-    if st.session_state.st_raw_dataset_list:
-        edit_config = st.selectbox(
-            "Select Data to Edit",
-            options=st.session_state.st_raw_dataset_list,
-            index=None,
+    edit_config = st.selectbox(
+        "Select Data to Edit",
+        options=aliases,
+        index=None,
+    )
+    if edit_config:
+        import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
+        # -- Get the selected import configuration details -- #
+        selected_config = import_log.filter(pl.col("alias") == edit_config).to_dicts()[
+            0
+        ]
+        SurveyCTOUI(project_id).render_form_config(
+            edit_mode=True, defaults=selected_config
         )
-        if edit_config:
-            edit_import_configuration(project_id, edit_config)
-    else:
-        st.info("No import configurations found. Please add import configurations.")
 with (
     ac3,
     st.popover(
-        "Remove Import Configuration", use_container_width=True, icon=":material/clear:"
+        "Remove Import Configuration",
+        use_container_width=True,
+        icon=":material/clear:",
+        disabled=not aliases,
     ),
 ):
     st.warning("This will remove the import configuration.")
@@ -231,41 +292,19 @@ with (
             db_name="logs",
             filter_condition=f"alias != '{remove_data}'",
         )
+        duckdb_remove_table(project_id, alias=remove_data, db_name="raw")
+        # check if the table exist in prep, if yes remove it
+        if duckdb_table_exists(project_id, alias=remove_data, db_name="prep"):
+            duckdb_remove_table(project_id, alias=remove_data, db_name="prep")
+        # check if the table exist in corrected db, if yes remove it
+        if duckdb_table_exists(project_id, alias=remove_data, db_name="corrected"):
+            duckdb_remove_table(project_id, alias=remove_data, db_name="corrected")
         st.session_state.st_raw_dataset_list = duckdb_get_aliases(project_id)
 
 import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
 if not import_log.is_empty():
     # -- Update import log in the DB on change -- #
-    def update_import_log():
-        """Update the import log in the cache file."""
-        duckdb_save_table(
-            project_id,
-            edited_import_log,
-            alias="import_log",
-            db_name="logs",
-        )
-
-    edited_import_log = st.data_editor(
-        data=import_log,
-        key="import_data_editor",
-        use_container_width=True,
-        column_config={
-            "refresh": st.column_config.CheckboxColumn("Refresh"),
-            "load": st.column_config.CheckboxColumn("Load"),
-            "alias": st.column_config.TextColumn("Alias", disabled=True),
-            "filename": st.column_config.TextColumn("Filename", disabled=True),
-            "sheet_name": st.column_config.TextColumn("Sheet Name", disabled=True),
-            "source": st.column_config.TextColumn("Source", disabled=True),
-            "server": st.column_config.TextColumn("Server", disabled=True),
-            "form_id": st.column_config.TextColumn("Form ID", disabled=True),
-            "private_key": st.column_config.TextColumn("Private Key", disabled=True),
-            "save_to": st.column_config.TextColumn("Save To", disabled=True),
-            "attachments": st.column_config.CheckboxColumn(
-                "Download Attachments?", disabled=True
-            ),
-        },
-        on_change=update_import_log,
-    )
+    update_import_log(import_log)
 
     # -- Load data from import configurations -- #
     ld1, ld2 = st.columns([0.3, 0.7])
@@ -343,3 +382,8 @@ if not import_log.is_empty():
 
 else:
     st.info("No import data found. Please add import configurations.")
+
+
+page_navigation(
+    next={"page_name": st.session_state.st_prep_data_page, "label": "Next: Prep Data →"}
+)

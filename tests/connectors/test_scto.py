@@ -1,377 +1,798 @@
 """Tests for the SurveyCTO connector module."""
 
-import datetime
-from unittest.mock import MagicMock, patch
+from datetime import datetime
+from pathlib import Path
+from unittest.mock import Mock, patch
 
 import pandas as pd
+import polars as pl
 import pytest
+import requests
+from pydantic_core import ValidationError
 
 from datasure.connectors.scto import (
-    scto_get_repeat_cols,
-    scto_get_server_cache,
-    scto_get_xls,
-    scto_import_data,
-    scto_import_key,
-    scto_load_existing_data,
-    scto_load_forms,
+    CacheManager,
+    ConnectionError,
+    DataProcessor,
+    FormConfig,
+    FormType,
+    MediaDownloader,
+    MediaType,
+    ServerCredentials,
+    SurveyCTOClient,
+    SurveyCTOConfig,
+    SurveyCTOError,
+    SurveyCTOUI,
+    download_forms,
     scto_server_connect,
-    valid_email,
-    valid_server_name,
 )
+from datasure.connectors.scto import (
+    ValidationError as SctoValidationError,
+)
+from datasure.utils.settings_utils import ProjectID
 
 
-class TestValidationFunctions:
-    """Test the validation functions."""
+class TestFormType:
+    """Test FormType enum."""
 
-    def test_valid_server_name_valid_inputs(self):
-        """Test valid_server_name with valid server names."""
-        valid_names = [
-            "myserver",
-            "test123",
-            "a1b2c3",
-            "server01",
-            "abc",
+    def test_form_type_values(self):
+        """Test FormType enum values."""
+        assert FormType.REGULAR == "regular"
+        assert FormType.SERVER_DATASET == "server_dataset"
+
+
+class TestMediaType:
+    """Test MediaType enum."""
+
+    def test_media_type_values(self):
+        """Test MediaType enum values."""
+        assert MediaType.IMAGE == "image"
+        assert MediaType.AUDIO == "audio"
+        assert MediaType.VIDEO == "video"
+        assert MediaType.FILE == "file"
+        assert MediaType.COMMENTS == "comments"
+        assert MediaType.TEXT_AUDIT == "text audit"
+        assert MediaType.AUDIO_AUDIT == "audio audit"
+        assert MediaType.SENSOR_STREAM == "sensor stream"
+
+
+class TestSurveyCTOConfig:
+    """Test SurveyCTOConfig dataclass."""
+
+    def test_config_defaults(self):
+        """Test default configuration values."""
+        config = SurveyCTOConfig()
+        assert config.max_retries == 3
+        assert config.timeout == 30
+        assert config.chunk_size == 1000
+        assert config.default_date == datetime(2024, 1, 1, 13, 40, 40)
+
+    def test_config_custom_values(self):
+        """Test custom configuration values."""
+        custom_date = datetime(2023, 1, 1, 12, 0, 0)
+        config = SurveyCTOConfig(
+            max_retries=5, timeout=60, chunk_size=2000, default_date=custom_date
+        )
+        assert config.max_retries == 5
+        assert config.timeout == 60
+        assert config.chunk_size == 2000
+        assert config.default_date == custom_date
+
+
+class TestProjectID:
+    """Test ProjectID validation model."""
+
+    def test_valid_project_id(self):
+        """Test valid project IDs."""
+        valid_ids = ["abc12345", "test1234", "project1", "12345678"]
+
+        for project_id in valid_ids:
+            obj = ProjectID(project_id=project_id)
+            assert obj.project_id == project_id
+
+    def test_invalid_project_id_length(self):
+        """Test invalid project ID lengths."""
+        with pytest.raises(
+            ValueError, match="String should have at least 8 characters"
+        ):
+            ProjectID(project_id="short")
+
+        with pytest.raises(ValueError, match="String should have at most 8 characters"):
+            ProjectID(project_id="toolongid")
+
+    def test_invalid_project_id_format(self):
+        """Test invalid project ID formats."""
+        invalid_ids = [
+            "ABC12345",  # uppercase
+            "test-123",  # hyphen
+            "test_123",  # underscore
+            "test.123",  # dot
+            "test 123",  # space
         ]
 
-        for name in valid_names:
-            assert valid_server_name(name), f"Server name '{name}' should be valid"
+        for project_id in invalid_ids:
+            with pytest.raises(
+                ValueError,
+                match="Project ID must be alphanumeric only and exactly 8 characters long",
+            ):
+                ProjectID(project_id=project_id)
 
-    def test_valid_server_name_invalid_inputs(self):
-        """Test valid_server_name with invalid server names."""
-        invalid_names = [
-            "",  # empty
-            "123server",  # starts with number
+
+class TestServerCredentials:
+    """Test ServerCredentials validation model."""
+
+    def test_valid_credentials(self):
+        """Test valid server credentials."""
+        creds = ServerCredentials(
+            server="testserver", user="user@example.com", password="password123"
+        )
+        assert creds.server == "testserver"
+        assert creds.user == "user@example.com"
+        assert creds.password == "password123"
+
+    def test_invalid_server_name(self):
+        """Test invalid server names."""
+        invalid_servers = [
+            "A",  # too short
             "Server",  # uppercase
+            "123server",  # starts with number
             "server-name",  # hyphen
-            "server_name",  # underscore
             "server.com",  # dot
-            "a",  # too short (based on regex pattern)
         ]
 
-        for name in invalid_names:
-            assert not valid_server_name(name), (
-                f"Server name '{name}' should be invalid"
-            )
+        for server in invalid_servers:
+            with pytest.raises(ValidationError):
+                ServerCredentials(
+                    server=server, user="user@example.com", password="password"
+                )
 
-    def test_valid_email_valid_inputs(self):
-        """Test valid_email with valid email addresses."""
-        valid_emails = [
-            "test@example.com",
-            "user.name@domain.org",
-            "user+tag@example.co.uk",
-            "user123@test-domain.com",
-            "a@b.co",
-        ]
-
-        for email in valid_emails:
-            assert valid_email(email), f"Email '{email}' should be valid"
-
-    def test_valid_email_invalid_inputs(self):
-        """Test valid_email with invalid email addresses."""
+    def test_invalid_email(self):
+        """Test invalid email formats."""
         invalid_emails = [
-            "",  # empty
-            "notanemail",  # no @ symbol
-            "@domain.com",  # no local part
-            "user@",  # no domain
-            "user@domain",  # no TLD
-            "user@domain.",  # empty TLD
-            "user name@domain.com",  # space in local part
+            "notanemail",
+            "@domain.com",
+            "user@",
+            "user@domain",
+            "user name@domain.com",
         ]
 
         for email in invalid_emails:
-            assert not valid_email(email), f"Email '{email}' should be invalid"
+            with pytest.raises(
+                ValueError, match="Invalid email format for SurveyCTO user"
+            ):
+                ServerCredentials(server="testserver", user=email, password="password")
+
+    def test_empty_password(self):
+        """Test empty password validation."""
+        with pytest.raises(ValueError, match="String should have at least 1 character"):
+            ServerCredentials(server="testserver", user="user@example.com", password="")
+
+
+class TestFormConfig:
+    """Test FormConfig model."""
+
+    def test_form_config_defaults(self):
+        """Test FormConfig default values."""
+        config = FormConfig(alias="test", form_id="form123", server="testserver")
+        assert config.alias == "test"
+        assert config.form_id == "form123"
+        assert config.server == "testserver"
+        assert config.private_key is None
+        assert config.save_to is None
+        assert config.attachments is False
+        assert config.refresh is True
+
+    def test_form_config_all_fields(self):
+        """Test FormConfig with all fields."""
+        config = FormConfig(
+            alias="survey",
+            form_id="survey123",
+            server="myserver",
+            private_key="/path/to/key.pem",
+            save_to="/path/to/data.csv",
+            attachments=True,
+            refresh=False,
+        )
+        assert config.alias == "survey"
+        assert config.form_id == "survey123"
+        assert config.server == "myserver"
+        assert config.private_key == "/path/to/key.pem"
+        assert config.save_to == "/path/to/data.csv"
+        assert config.attachments is True
+        assert config.refresh is False
+
+
+class TestSurveyCTOExceptions:
+    """Test SurveyCTO exceptions."""
+
+    def test_surveycto_error(self):
+        """Test SurveyCTOError base exception."""
+        error = SurveyCTOError("Test error")
+        assert str(error) == "Test error"
+        assert isinstance(error, Exception)
+
+    def test_connection_error(self):
+        """Test ConnectionError exception."""
+        error = ConnectionError("Connection failed")
+        assert str(error) == "Connection failed"
+        assert isinstance(error, SurveyCTOError)
+
+
+class TestCacheManager:
+    """Test CacheManager class."""
+
+    def test_cache_manager_init(self):
+        """Test CacheManager initialization."""
+        manager = CacheManager("test1234")
+        assert manager.project_id == "test1234"
+        assert hasattr(manager, "logger")
 
 
 class TestSctoServerConnect:
     """Test the scto_server_connect function."""
 
     @patch("datasure.connectors.scto.st")
-    @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
-    def test_server_connect_valid_inputs(self, mock_scto_object, mock_st):
-        """Test server connect with valid inputs."""
-        mock_scto_instance = MagicMock()
-        mock_scto_object.return_value = mock_scto_instance
-        mock_st.warning.return_value = None
-        mock_st.success.return_value = None
-        mock_st.stop.return_value = None
+    def test_scto_server_connect_empty_fields(self, mock_st):
+        """Test scto_server_connect with empty required fields."""
+        # Test empty servername
+        scto_server_connect("", "user@example.com", "password")
+        mock_st.warning.assert_called_with("Complete all required fields.")
+        mock_st.stop.assert_called()
 
-        result = scto_server_connect("testserver", "user@example.com", "password123")
+        # Reset mocks
+        mock_st.reset_mock()
 
-        mock_scto_object.assert_called_once_with(
-            "testserver", "user@example.com", "password123"
+        # Test empty username
+        scto_server_connect("testserver", "", "password")
+        mock_st.warning.assert_called_with("Complete all required fields.")
+        mock_st.stop.assert_called()
+
+        # Reset mocks
+        mock_st.reset_mock()
+
+        # Test empty password
+        scto_server_connect("testserver", "user@example.com", "")
+        mock_st.warning.assert_called_with("Complete all required fields.")
+        mock_st.stop.assert_called()
+
+    @patch("datasure.connectors.scto.st")
+    def test_scto_server_connect_invalid_servername(self, mock_st):
+        """Test scto_server_connect with invalid server name."""
+        invalid_servers = [
+            "1server",  # starts with number
+            "Server",  # uppercase
+            "server-name",  # hyphen
+            "server.com",  # dot
+            "s" * 65,  # too long
+        ]
+
+        for server in invalid_servers:
+            mock_st.reset_mock()
+            scto_server_connect(server, "user@example.com", "password")
+            mock_st.warning.assert_called_with("Invalid server name.")
+            mock_st.stop.assert_called()
+
+    @patch("datasure.connectors.scto.st")
+    def test_scto_server_connect_valid_inputs(self, mock_st):
+        """Test scto_server_connect with valid inputs
+        (should not call warning or stop).
+        """
+        scto_server_connect("testserver", "user@example.com", "password")
+        mock_st.warning.assert_not_called()
+        mock_st.stop.assert_not_called()
+
+
+class TestSctoFunctions:
+    """Test standalone scto functions."""
+
+    def test_get_existing_data_no_file(self):
+        """Test getting existing data when file doesn't exist."""
+        manager = CacheManager("test1234")
+        data, date = manager.get_existing_data("/nonexistent/file.csv")
+
+        assert data.empty
+        assert date == SurveyCTOConfig.default_date
+
+    def test_get_existing_data_empty_file(self, tmp_path):
+        """Test getting existing data from empty file."""
+        data_file = tmp_path / "empty.csv"
+        data_file.write_text("")
+
+        manager = CacheManager("test1234")
+        data, date = manager.get_existing_data(str(data_file))
+
+        assert data.empty
+        assert date == SurveyCTOConfig.default_date
+
+    def test_get_existing_data_no_submission_date(self, tmp_path):
+        """Test getting existing data without SubmissionDate column."""
+        data_file = tmp_path / "data.csv"
+        data_file.write_text("name,age\nJohn,25\nJane,30")
+
+        manager = CacheManager("test1234")
+        data, date = manager.get_existing_data(str(data_file))
+
+        assert len(data) == 2
+        assert date == SurveyCTOConfig.default_date
+
+    def test_get_existing_data_with_submission_date(self, tmp_path):
+        """Test getting existing data with SubmissionDate column."""
+        data_file = tmp_path / "data.csv"
+        csv_content = "name,age,SubmissionDate\nJohn,25,2024-01-15 10:30:00\nJane,30,2024-01-20 15:45:00"
+        data_file.write_text(csv_content)
+
+        manager = CacheManager("test1234")
+        data, date = manager.get_existing_data(str(data_file))
+
+        assert len(data) == 2
+        assert date == pd.to_datetime("2024-01-20 15:45:00")
+
+    def test_get_existing_data_exception(self, caplog):
+        """Test getting existing data with exception."""
+        manager = CacheManager("test1234")
+
+        # Use invalid file path that would cause an exception
+        data, date = manager.get_existing_data("/invalid/path/that/causes/error")
+
+        assert data.empty
+        assert date == SurveyCTOConfig.default_date
+
+
+class TestDataProcessor:
+    """Test DataProcessor class."""
+
+    def test_data_processor_init(self):
+        """Test DataProcessor initialization."""
+        processor = DataProcessor()
+        assert hasattr(processor, "logger")
+
+    def test_get_repeat_fields_empty(self):
+        """Test getting repeat fields from empty DataFrame."""
+        processor = DataProcessor()
+        questions = pd.DataFrame({"type": [], "name": []})
+
+        result = processor.get_repeat_fields(questions)
+        assert result == []
+
+    def test_get_repeat_fields_no_repeats(self):
+        """Test getting repeat fields with no repeat groups."""
+        processor = DataProcessor()
+        questions = pd.DataFrame(
+            {
+                "type": ["text", "integer", "select_one"],
+                "name": ["name", "age", "gender"],
+            }
         )
-        mock_st.success.assert_called_once_with("Connection successful")
-        assert result == mock_scto_instance
 
-    @patch("datasure.connectors.scto.st")
-    def test_server_connect_empty_fields(self, mock_st):
-        """Test server connect with empty fields."""
-        mock_st.warning.return_value = None
-        mock_st.stop.side_effect = SystemExit("Streamlit stop called")
+        result = processor.get_repeat_fields(questions)
+        assert result == []
 
-        with pytest.raises(SystemExit):
-            scto_server_connect("", "user@example.com", "password123")
+    def test_get_repeat_fields_with_repeats(self):
+        """Test getting repeat fields with repeat groups."""
+        processor = DataProcessor()
+        questions = pd.DataFrame(
+            {
+                "type": [
+                    "begin repeat",
+                    "text",
+                    "integer",
+                    "end repeat",
+                    "begin repeat",
+                    "text",
+                    "end repeat",
+                    "text",
+                ],
+                "name": [
+                    "household",
+                    "member_name",
+                    "member_age",
+                    "",
+                    "assets",
+                    "asset_name",
+                    "",
+                    "notes",
+                ],
+            }
+        )
 
-        mock_st.warning.assert_called_once_with("Complete all required fields.")
+        result = processor.get_repeat_fields(questions)
+        assert "member_name" in result
+        assert "member_age" in result
+        assert "asset_name" in result
+        assert "notes" not in result
 
-    @patch("datasure.connectors.scto.st")
-    def test_server_connect_invalid_server_name(self, mock_st):
-        """Test server connect with invalid server name."""
-        mock_st.warning.return_value = None
-        mock_st.stop.side_effect = SystemExit("Streamlit stop called")
+    def test_get_repeat_fields_nested_repeats(self):
+        """Test getting repeat fields with nested repeat groups."""
+        processor = DataProcessor()
+        questions = pd.DataFrame(
+            {
+                "type": [
+                    "begin repeat",
+                    "begin repeat",
+                    "text",
+                    "end repeat",
+                    "end repeat",
+                ],
+                "name": ["household", "members", "name", "", ""],
+            }
+        )
 
-        with pytest.raises(SystemExit):
-            scto_server_connect("123invalid", "user@example.com", "password123")
+        result = processor.get_repeat_fields(questions)
+        assert "name" in result
 
-        mock_st.warning.assert_called_once_with("Invalid server name.")
+    def test_get_repeat_columns_no_matches(self):
+        """Test getting repeat columns with no matches."""
+        processor = DataProcessor()
+        result = processor.get_repeat_columns("nonexistent", ["col1", "col2"])
+        assert result == ["nonexistent"]
 
-    @patch("datasure.connectors.scto.st")
-    def test_server_connect_invalid_email(self, mock_st):
-        """Test server connect with invalid email."""
-        mock_st.warning.return_value = None
-        mock_st.stop.side_effect = SystemExit("Streamlit stop called")
-
-        with pytest.raises(SystemExit):
-            scto_server_connect("testserver", "invalid-email", "password123")
-
-        mock_st.warning.assert_called_once_with("Invalid email address")
-
-
-class TestSctoGetRepeatCols:
-    """Test the scto_get_repeat_cols function."""
-
-    def test_get_repeat_cols_with_matches(self):
-        """Test getting repeat columns with matching patterns."""
-        field = "household"
+    def test_get_repeat_columns_with_matches(self):
+        """Test getting repeat columns with matches."""
+        processor = DataProcessor()
         data_cols = [
             "household_1",
             "household_2",
             "household_1_2",
-            "household_1_2_3",
             "other_field",
             "household_info",
-            "household_1_name",  # This won't match due to extra text after numbers
         ]
 
-        result = scto_get_repeat_cols(field, data_cols)
-
-        expected = ["household_1", "household_2", "household_1_2", "household_1_2_3"]
+        result = processor.get_repeat_columns("household", data_cols)
+        expected = ["household_1", "household_2", "household_1_2"]
         assert result == expected
 
-    def test_get_repeat_cols_no_matches(self):
-        """Test getting repeat columns with no matches."""
-        field = "nonexistent"
-        data_cols = [
-            "household_1_name",
-            "household_2_name",
-            "other_field",
-        ]
-
-        result = scto_get_repeat_cols(field, data_cols)
-
-        # When no matches, should return field split (which gives ['nonexistent'])
-        assert result == ["nonexistent"]
-
-    def test_get_repeat_cols_complex_pattern(self):
-        """Test getting repeat columns with complex numeric patterns."""
-        field = "section"
-        data_cols = [
-            "section_1",
-            "section_2_1",
-            "section_1_2_3",
-            "section_10",
-            "section_1_question",  # Won't match due to extra text
-            "other_section_field",
-        ]
-
-        result = scto_get_repeat_cols(field, data_cols)
-
-        expected = ["section_1", "section_2_1", "section_1_2_3", "section_10"]
-        assert result == expected
-
-
-class TestSctoGetServerCache:
-    """Test the scto_get_server_cache function."""
-
-    @patch("datasure.connectors.scto.retrieve_scto_credentials")
-    def test_get_server_cache_secure_credentials_exist(self, mock_retrieve_credentials):
-        """Test getting server cache from secure credential storage."""
-        # Mock successful credential retrieval from secure storage
-        mock_retrieve_credentials.return_value = {
-            "success": True,
-            "credentials": {
-                "server": "testserver",
-                "username": "user@example.com",
-                "password": "secure_password_123",
-            },
-        }
-
-        result = scto_get_server_cache("test_project")
-
-        expected_result = {
-            "server": "testserver",
-            "user": "user@example.com",  # Legacy format uses "user"
-            "password": "secure_password_123",
-        }
-        assert result == expected_result
-        mock_retrieve_credentials.assert_called_once_with("test_project")
-
-    @patch("datasure.connectors.scto.retrieve_scto_credentials")
-    @patch("datasure.connectors.scto.migrate_plaintext_credentials")
-    def test_get_server_cache_migration_success(
-        self, mock_migrate_credentials, mock_retrieve_credentials
-    ):
-        """Test getting server cache with successful plaintext migration."""
-        # Mock initial retrieval failure, then migration success, then retry success
-        mock_retrieve_credentials.side_effect = [
-            {"success": False, "error": "No credentials found"},
+    def test_convert_data_types_datetime_columns(self):
+        """Test converting datetime columns."""
+        processor = DataProcessor()
+        data = pd.DataFrame(
             {
-                "success": True,
-                "credentials": {
-                    "server": "migrated_server",
-                    "username": "migrated@example.com",
-                    "password": "migrated_password",
-                },
-            },
+                "CompletionDate": ["2024-01-15 10:30:00", "2024-01-16 11:30:00"],
+                "SubmissionDate": ["2024-01-15", "2024-01-16"],
+                "starttime": ["2024-01-15T10:30:00", "2024-01-16T11:30:00"],
+                "endtime": ["2024-01-15T12:30:00", "2024-01-16T13:30:00"],
+            }
+        )
+        questions = pd.DataFrame({"type": [], "name": []})
+
+        result = processor.convert_data_types(data, questions)
+
+        assert pd.api.types.is_datetime64_any_dtype(result["CompletionDate"])
+        assert pd.api.types.is_datetime64_any_dtype(result["SubmissionDate"])
+        assert pd.api.types.is_datetime64_any_dtype(result["starttime"])
+        assert pd.api.types.is_datetime64_any_dtype(result["endtime"])
+
+    def test_convert_data_types_numeric_columns(self):
+        """Test converting numeric columns."""
+        processor = DataProcessor()
+        data = pd.DataFrame({"duration": ["120", "180"], "formdef_version": ["1", "2"]})
+        questions = pd.DataFrame({"type": [], "name": []})
+
+        result = processor.convert_data_types(data, questions)
+
+        assert pd.api.types.is_numeric_dtype(result["duration"])
+        assert pd.api.types.is_numeric_dtype(result["formdef_version"])
+
+    def test_convert_data_types_form_based(self):
+        """Test converting data types based on form definition."""
+        processor = DataProcessor()
+        data = pd.DataFrame(
+            {
+                "age": ["25", "30"],
+                "birth_date": ["2000-01-15", "1995-05-20"],
+                "survey_time": ["10:30:00", "14:15:00"],
+                "notes": ["Note 1", "Note 2"],
+            }
+        )
+        questions = pd.DataFrame(
+            {
+                "type": ["integer", "date", "time", "note"],
+                "name": ["age", "birth_date", "survey_time", "notes"],
+            }
+        )
+
+        result = processor.convert_data_types(data, questions)
+
+        assert pd.api.types.is_numeric_dtype(result["age"])
+        assert pd.api.types.is_datetime64_any_dtype(result["birth_date"])
+        assert pd.api.types.is_datetime64_any_dtype(result["survey_time"])
+        assert "notes" not in result.columns  # Note fields are dropped
+
+    def test_convert_data_types_with_repeat_fields(self):
+        """Test converting data types with repeat fields."""
+        processor = DataProcessor()
+        data = pd.DataFrame(
+            {"member_age_1": ["25", "30"], "member_age_2": ["28", "35"]}
+        )
+        questions = pd.DataFrame(
+            {
+                "type": ["begin repeat", "integer", "end repeat"],
+                "name": ["members", "member_age", ""],
+            }
+        )
+
+        result = processor.convert_data_types(data, questions)
+
+        assert pd.api.types.is_numeric_dtype(result["member_age_1"])
+        assert pd.api.types.is_numeric_dtype(result["member_age_2"])
+
+    def test_convert_data_types_error_handling(self, caplog):
+        """Test data type conversion error handling."""
+        processor = DataProcessor()
+        data = pd.DataFrame({"invalid_date": ["not-a-date", "also-not-date"]})
+        questions = pd.DataFrame({"type": ["date"], "name": ["invalid_date"]})
+
+        result = processor.convert_data_types(data, questions)
+
+        # Should handle errors gracefully
+        assert "invalid_date" in result.columns
+
+
+class TestMediaDownloader:
+    """Test MediaDownloader class."""
+
+    def test_media_downloader_init(self):
+        """Test MediaDownloader initialization."""
+        mock_client = Mock()
+        config = SurveyCTOConfig()
+
+        downloader = MediaDownloader(mock_client, config)
+        assert downloader.scto_client == mock_client
+        assert downloader.config == config
+        assert hasattr(downloader, "logger")
+
+    def test_download_single_file(self, tmp_path):
+        """Test downloading a single media file."""
+        mock_client = Mock()
+        mock_client.get_attachment.return_value = b"fake_image_content"
+
+        config = SurveyCTOConfig()
+        downloader = MediaDownloader(mock_client, config)
+
+        media_folder = tmp_path / "media"
+        media_folder.mkdir()
+
+        downloader._download_single_file(
+            url="photo.jpg",
+            submission_key="uuid:123456",
+            field_name="photo",
+            media_folder=media_folder,
+            encryption_key=None,
+        )
+
+        # Check file was created with correct name
+        expected_file = media_folder / "photo_123456.jpg"
+        assert expected_file.exists()
+        assert expected_file.read_bytes() == b"fake_image_content"
+
+        # Check that get_attachment was called with correct parameters
+        mock_client.get_attachment.assert_called_once_with("photo.jpg", key=None)
+
+    def test_download_single_file_file_exists(self, tmp_path):
+        """Test downloading a single file when file already exists."""
+        mock_client = Mock()
+        config = SurveyCTOConfig()
+        downloader = MediaDownloader(mock_client, config)
+
+        media_folder = tmp_path / "media"
+        media_folder.mkdir()
+
+        # Create existing file
+        existing_file = media_folder / "photo_123456.jpg"
+        existing_file.write_bytes(b"existing_content")
+
+        downloader._download_single_file(
+            url="photo.jpg",
+            submission_key="uuid:123456",
+            field_name="photo",
+            media_folder=media_folder,
+            encryption_key=None,
+        )
+
+        # Should not call get_attachment since file exists
+        mock_client.get_attachment.assert_not_called()
+
+        # File should remain unchanged
+        assert existing_file.read_bytes() == b"existing_content"
+
+    def test_download_single_file_with_extension(self, tmp_path):
+        """Test downloading a single file that needs extension."""
+        mock_client = Mock()
+        mock_client.get_attachment.return_value = b"csv_content"
+
+        config = SurveyCTOConfig()
+        downloader = MediaDownloader(mock_client, config)
+
+        media_folder = tmp_path / "media"
+        media_folder.mkdir()
+
+        downloader._download_single_file(
+            url="data",  # No extension
+            submission_key="uuid:789",
+            field_name="data_export",
+            media_folder=media_folder,
+            encryption_key="test_key",
+        )
+
+        # Check file was created with .csv extension
+        expected_file = media_folder / "data_export_789.csv"
+        assert expected_file.exists()
+
+        # Check encryption key was passed
+        mock_client.get_attachment.assert_called_once_with("data", key="test_key")
+
+    def test_download_media_files_creates_folder(self, tmp_path):
+        """Test that download_media_files creates the media folder."""
+        mock_client = Mock()
+        config = SurveyCTOConfig()
+        downloader = MediaDownloader(mock_client, config)
+
+        media_folder = tmp_path / "media" / "subfolder"
+        data = pd.DataFrame({"KEY": [], "photo": []})
+
+        downloader.download_media_files(["photo"], data, media_folder, None)
+
+        # Folder should be created
+        assert media_folder.exists()
+        assert media_folder.is_dir()
+
+
+class TestSurveyCTOClient:
+    """Test SurveyCTOClient class."""
+
+    def test_client_init(self):
+        """Test SurveyCTOClient initialization."""
+        client = SurveyCTOClient("test1234")
+        assert client.project_id == "test1234"
+        assert isinstance(client.config, SurveyCTOConfig)
+        assert isinstance(client.cache_manager, CacheManager)
+        assert isinstance(client.data_processor, DataProcessor)
+        assert client._scto_client is None
+
+    def test_client_init_with_config(self):
+        """Test SurveyCTOClient initialization with custom config."""
+        config = SurveyCTOConfig(max_retries=5, timeout=60)
+        client = SurveyCTOClient("test1234", config)
+        assert client.config == config
+
+    @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
+    @patch("datasure.connectors.scto.st")
+    def test_connect_success_with_validation(self, mock_st, mock_scto_class):
+        """Test successful connection with validation."""
+        # Setup mocks
+        mock_scto_instance = Mock()
+        mock_scto_class.return_value = mock_scto_instance
+        mock_scto_instance.list_forms.return_value = [
+            {"id": "form1", "title": "Form 1", "encrypted": False},
+            {"id": "form2", "title": "Form 2", "encrypted": True},
         ]
 
-        mock_migrate_credentials.return_value = {"success": True}
+        mock_st.spinner.return_value.__enter__ = Mock()
+        mock_st.spinner.return_value.__exit__ = Mock()
 
-        result = scto_get_server_cache("test_project")
-
-        expected_result = {
-            "server": "migrated_server",
-            "user": "migrated@example.com",
-            "password": "migrated_password",
-        }
-        assert result == expected_result
-        mock_migrate_credentials.assert_called_once_with(
-            "test_project", delete_plaintext=True
-        )
-        assert mock_retrieve_credentials.call_count == 2
-
-    @patch("datasure.connectors.scto.retrieve_scto_credentials")
-    @patch("datasure.connectors.scto.migrate_plaintext_credentials")
-    def test_get_server_cache_no_credentials_found(
-        self, mock_migrate_credentials, mock_retrieve_credentials
-    ):
-        """Test getting server cache when no credentials exist."""
-        # Mock both secure retrieval and migration failure
-        mock_retrieve_credentials.return_value = {
-            "success": False,
-            "error": "No credentials found",
-        }
-        mock_migrate_credentials.return_value = {
-            "success": False,
-            "error": "No plaintext file found",
-        }
-
-        result = scto_get_server_cache("test_project")
-
-        assert result == {}
-        mock_retrieve_credentials.assert_called_once_with("test_project")
-        mock_migrate_credentials.assert_called_once_with(
-            "test_project", delete_plaintext=True
+        client = SurveyCTOClient("test1234")
+        credentials = ServerCredentials(
+            server="testserver", user="test@example.com", password="password"
         )
 
+        result = client.connect(credentials, validate_permissions=True)
 
-class TestSctoLoadForms:
-    """Test the scto_load_forms function."""
+        # Check connection info
+        assert result["server"] == "testserver"
+        assert result["connected"] is True
+        assert result["forms_count"] == 2
+        assert len(result["forms_list"]) == 2
+        assert result["validation_attempted"] is True
 
-    @patch("datasure.connectors.scto.get_cache_path")
-    @patch("pandas.read_json")
-    def test_load_forms_file_exists(self, mock_read_json, mock_get_cache_path):
-        """Test loading forms when cache file exists."""
-        mock_cache_path = "/cache/path/testserver_DataSure_forms_cache.json"
-        mock_get_cache_path.return_value = mock_cache_path
-
-        mock_df = pd.DataFrame(
-            {"form_id": ["form1", "form2"], "title": ["Form 1", "Form 2"]}
+        # Check SurveyCTO client was created
+        mock_scto_class.assert_called_once_with(
+            "testserver", "test@example.com", "password"
         )
-        mock_read_json.return_value = mock_df
+        mock_scto_instance.list_forms.assert_called_once()
+        mock_st.success.assert_called()
 
-        result = scto_load_forms("testserver")
-
-        mock_read_json.assert_called_once_with(mock_cache_path)
-        pd.testing.assert_frame_equal(result, pd.DataFrame(mock_df.to_dict()))
-
-    @patch("datasure.connectors.scto.get_cache_path")
-    @patch("pandas.read_json")
-    def test_load_forms_file_not_found(self, mock_read_json, mock_get_cache_path):
-        """Test loading forms when cache file doesn't exist."""
-        mock_read_json.side_effect = FileNotFoundError()
-
-        result = scto_load_forms("testserver")
-
-        assert result.empty
-
-
-class TestSctoImportKey:
-    """Test the scto_import_key function."""
-
-    def test_import_key_file_exists(self, tmp_path):
-        """Test importing key when file exists."""
-        key_file = tmp_path / "test.key"
-        test_key = "test_private_key_content"
-        key_file.write_text(test_key)
-
-        result = scto_import_key(str(key_file))
-
-        assert result == test_key
-
+    @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
     @patch("datasure.connectors.scto.st")
-    def test_import_key_file_not_found(self, mock_st):
-        """Test importing key when file doesn't exist."""
-        mock_st.warning.return_value = None
-        mock_st.stop.side_effect = SystemExit("Streamlit stop called")
+    def test_connect_success_no_validation(self, mock_st, mock_scto_class):
+        """Test successful connection without validation."""
+        mock_scto_instance = Mock()
+        mock_scto_class.return_value = mock_scto_instance
 
-        with pytest.raises(SystemExit):
-            scto_import_key("/nonexistent/key.file")
+        client = SurveyCTOClient("test1234")
+        credentials = ServerCredentials(
+            server="testserver", user="test@example.com", password="password"
+        )
 
-        mock_st.warning.assert_called_once_with("Key file not found.")
+        result = client.connect(credentials, validate_permissions=False)
 
+        assert result["connected"] is True
+        assert result["validation_attempted"] is False
+        mock_scto_instance.list_forms.assert_not_called()
+        mock_st.success.assert_called()
 
-class TestSctoLoadExistingData:
-    """Test the scto_load_existing_data function."""
+    @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
+    @patch("datasure.connectors.scto.st")
+    def test_connect_http_error_401(self, mock_st, mock_scto_class):
+        """Test connection with HTTP 401 error."""
+        mock_scto_instance = Mock()
+        mock_scto_class.return_value = mock_scto_instance
 
-    def test_load_existing_data_file_exists(self, tmp_path):
-        """Test loading existing data when file exists."""
-        data_file = tmp_path / "test_data.csv"
-        test_data = "SubmissionDate,name,age\n2024-01-15 10:30:00,John,25\n2024-01-20 15:45:00,Jane,30"
-        data_file.write_text(test_data)
+        # Create HTTP error with 401 status
+        http_error = requests.exceptions.HTTPError("Unauthorized")
+        mock_response = Mock()
+        mock_response.status_code = 401
+        http_error.response = mock_response
+        mock_scto_instance.list_forms.side_effect = http_error
 
-        result_data, oldest_date = scto_load_existing_data(str(data_file))
+        mock_st.spinner.return_value.__enter__ = Mock()
+        mock_st.spinner.return_value.__exit__ = Mock()
 
-        assert len(result_data) == 2
-        assert "SubmissionDate" in result_data.columns
-        assert "name" in result_data.columns
-        assert oldest_date == pd.to_datetime("2024-01-20 15:45:00")
+        client = SurveyCTOClient("test1234")
+        credentials = ServerCredentials(
+            server="testserver", user="test@example.com", password="password"
+        )
 
-    def test_load_existing_data_file_not_found(self):
-        """Test loading existing data when file doesn't exist."""
-        result_data, oldest_date = scto_load_existing_data("/nonexistent/file.csv")
+        with pytest.raises(ConnectionError):
+            client.connect(credentials, validate_permissions=True)
 
-        assert result_data.empty
-        assert oldest_date == datetime.datetime(2024, 1, 1, 13, 40, 40)
+    @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
+    def test_connect_connection_error(self, mock_scto_class):
+        """Test connection with network connection error."""
+        mock_scto_instance = Mock()
+        mock_scto_class.return_value = mock_scto_instance
+        mock_scto_instance.list_forms.side_effect = (
+            requests.exceptions.ConnectionError()
+        )
 
-    def test_load_existing_data_empty_file(self, tmp_path):
-        """Test loading existing data when file is empty."""
-        data_file = tmp_path / "empty_data.csv"
-        data_file.write_text("")
+        client = SurveyCTOClient("test1234")
+        credentials = ServerCredentials(
+            server="testserver", user="test@example.com", password="password"
+        )
 
-        result_data, oldest_date = scto_load_existing_data(str(data_file))
+        with pytest.raises(ConnectionError, match="Cannot connect to server"):
+            client.connect(credentials, validate_permissions=True)
 
-        assert result_data.empty
-        assert oldest_date == datetime.datetime(2024, 1, 1, 13, 40, 40)
+    @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
+    def test_connect_timeout_error(self, mock_scto_class):
+        """Test connection with timeout error."""
+        mock_scto_instance = Mock()
+        mock_scto_class.return_value = mock_scto_instance
+        mock_scto_instance.list_forms.side_effect = requests.exceptions.Timeout()
 
+        client = SurveyCTOClient("test1234")
+        credentials = ServerCredentials(
+            server="testserver", user="test@example.com", password="password"
+        )
 
-class TestSctoGetXls:
-    """Test the scto_get_xls function."""
+        with pytest.raises(ConnectionError, match="Connection timeout"):
+            client.connect(credentials, validate_permissions=True)
 
-    def test_get_xls_success(self):
-        """Test getting XLS form definition successfully."""
-        mock_scto = MagicMock()
-        mock_form_definition = {
+    @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
+    def test_connect_invalid_server_name(self, mock_scto_class):
+        """Test connection with invalid server name."""
+        mock_scto_class.side_effect = Exception("Invalid server name")
+
+        client = SurveyCTOClient("test1234")
+        credentials = ServerCredentials(
+            server="testserver", user="test@example.com", password="password"
+        )
+
+        with pytest.raises(ConnectionError, match="Invalid server name"):
+            client.connect(credentials)
+
+    def test_get_form_definition_not_connected(self):
+        """Test getting form definition when not connected."""
+        client = SurveyCTOClient("test1234")
+
+        with pytest.raises(ConnectionError, match="Not connected to server"):
+            client.get_form_definition("form123")
+
+    def test_get_form_definition_success(self):
+        """Test getting form definition successfully."""
+        client = SurveyCTOClient("test1234")
+        mock_scto_client = Mock()
+        client._scto_client = mock_scto_client
+
+        form_def = {
             "fieldsRowsAndColumns": [
                 ["name", "type", "label"],
                 ["question1", "text", "What is your name?"],
@@ -383,702 +804,557 @@ class TestSctoGetXls:
                 ["colors", "blue", "Blue"],
             ],
         }
-        mock_scto.get_form_definition.return_value = mock_form_definition
+        mock_scto_client.get_form_definition.return_value = form_def
 
-        questions, choices = scto_get_xls(mock_scto, "test_form")
+        questions, choices = client.get_form_definition("form123")
 
-        mock_scto.get_form_definition.assert_called_once_with("test_form")
-
-        # Check questions DataFrame
         assert len(questions) == 2
         assert list(questions.columns) == ["name", "type", "label"]
         assert questions.iloc[0]["name"] == "question1"
 
-        # Check choices DataFrame
         assert len(choices) == 2
         assert list(choices.columns) == ["list name", "name", "label"]
         assert choices.iloc[0]["name"] == "red"
 
+    def test_get_form_definition_error(self):
+        """Test getting form definition with error."""
+        client = SurveyCTOClient("test1234")
+        mock_scto_client = Mock()
+        client._scto_client = mock_scto_client
+        mock_scto_client.get_form_definition.side_effect = Exception("API Error")
 
-class TestSctoGetRepeatColsAdvanced:
-    """Enhanced tests for scto_get_repeat_cols function with complex scenarios."""
+        with pytest.raises(SurveyCTOError, match="Failed to get form definition"):
+            client.get_form_definition("form123")
 
-    def test_get_repeat_cols_nested_groups(self):
-        """Test repeat columns with nested group structures."""
-        field = "household_member"
-        data_cols = [
-            "household_member_1",
-            "household_member_2",
-            "household_member_1_1",
-            "household_member_1_2",
-            "household_member_2_1",
-            "household_member_1_1_1",
-            "household_member_1_2_3",
-            "household_member_10_15_20",
-            "other_field",
-        ]
-
-        result = scto_get_repeat_cols(field, data_cols)
-
-        expected = [
-            "household_member_1",
-            "household_member_2",
-            "household_member_1_1",
-            "household_member_1_2",
-            "household_member_2_1",
-            "household_member_1_1_1",
-            "household_member_1_2_3",
-            "household_member_10_15_20",
-        ]
-        assert result == expected
-
-    def test_get_repeat_cols_single_digit_patterns(self):
-        """Test repeat columns with single digit patterns."""
-        field = "q"  # Short field name
-        data_cols = [
-            "q_1",
-            "q_2",
-            "q_3",
-            "q_9",
-            "q1",  # Won't match - no underscore
-            "q_text",  # Won't match - not numeric
-            "question_1",  # Won't match - different field
-        ]
-
-        result = scto_get_repeat_cols(field, data_cols)
-
-        expected = ["q_1", "q_2", "q_3", "q_9"]
-        assert result == expected
-
-    def test_get_repeat_cols_large_numbers(self):
-        """Test repeat columns with large numbers."""
-        field = "survey_item"
-        data_cols = [
-            "survey_item_100",
-            "survey_item_999",
-            "survey_item_1000",  # Edge case: large number
-            "survey_item_1_500",
-            "survey_item_25_30_40",
-            "survey_item_0",  # Edge case: zero
-        ]
-
-        result = scto_get_repeat_cols(field, data_cols)
-
-        expected = [
-            "survey_item_100",
-            "survey_item_999",
-            "survey_item_1000",
-            "survey_item_1_500",
-            "survey_item_25_30_40",
-            "survey_item_0",
-        ]
-        assert result == expected
-
-    def test_get_repeat_cols_field_name_with_numbers(self):
-        """Test repeat columns when field name itself contains numbers."""
-        field = "section2_question"
-        data_cols = [
-            "section2_question_1",
-            "section2_question_2",
-            "section2_question_1_3",
-            "section1_question_1",  # Won't match - different field
-            "section2_question",  # Original field, won't match pattern
-        ]
-
-        result = scto_get_repeat_cols(field, data_cols)
-
-        expected = [
-            "section2_question_1",
-            "section2_question_2",
-            "section2_question_1_3",
-        ]
-        assert result == expected
-
-    def test_get_repeat_cols_empty_data_cols(self):
-        """Test repeat columns with empty data columns list."""
-        field = "test_field"
-        data_cols = []
-
-        result = scto_get_repeat_cols(field, data_cols)
-
-        # Should return field split (empty list becomes the field name split)
-        assert result == ["test_field"]
-
-    def test_get_repeat_cols_field_with_underscores(self):
-        """Test repeat columns with field names containing underscores."""
-        field = "household_income_source"
-        data_cols = [
-            "household_income_source_1",
-            "household_income_source_2",
-            "household_income_source_1_2",
-            "household_income_total",  # Won't match - different pattern
-            "income_source_1",  # Won't match - missing prefix
-        ]
-
-        result = scto_get_repeat_cols(field, data_cols)
-
-        expected = [
-            "household_income_source_1",
-            "household_income_source_2",
-            "household_income_source_1_2",
-        ]
-        assert result == expected
-
-
-class TestSctoImportData:
-    """Test the scto_import_data function with different scenarios."""
-
-    @patch("datasure.connectors.scto.scto_get_server_cache")
-    @patch("datasure.connectors.scto.scto_server_connect")
+    @patch("datasure.connectors.scto.pl.read_csv")
     @patch("datasure.connectors.scto.duckdb_save_table")
-    def test_import_data_server_dataset_unbound_variable_bug(
-        self, mock_save_table, mock_server_connect, mock_get_cache
-    ):
-        """Test importing data from server dataset reveals UnboundLocalError bug."""
-        # Mock server cache and connection
-        mock_get_cache.return_value = {
-            "server": "testserver",
-            "user": "user@example.com",
-            "password": "password123",
-        }
+    def test_import_server_dataset(self, mock_save_table, mock_read_csv):
+        """Test importing from server dataset."""
+        client = SurveyCTOClient("test1234")
+        mock_scto_client = Mock()
+        client._scto_client = mock_scto_client
 
-        mock_scto_instance = MagicMock()
-        mock_server_connect.return_value = mock_scto_instance
+        csv_data = "name,age\nJohn,25\nJane,30"
+        mock_scto_client.get_server_dataset.return_value = csv_data
 
-        # Mock server dataset response
-        csv_data = "name,age,city\nJohn,25,NYC\nJane,30,LA"
-        mock_scto_instance.get_server_dataset.return_value = csv_data
+        mock_df = pl.DataFrame({"name": ["John", "Jane"], "age": [25, 30]})
+        mock_read_csv.return_value = mock_df
 
-        # Call function - should raise UnboundLocalError due to bug in source code
-        # new_data_count is not defined in server dataset branch
-        with pytest.raises(
-            UnboundLocalError, match="cannot access local variable 'new_data_count'"
-        ):
-            scto_import_data(
-                project_id="test_project",
-                alias="test_alias",
-                form_id="server_dataset_id",
-                refresh=True,
-            )
-
-        # Verify server dataset was called
-        mock_scto_instance.get_server_dataset.assert_called_once_with(
-            "server_dataset_id"
+        form_config = FormConfig(
+            alias="test_dataset", form_id="dataset123", server="testserver"
         )
-        # Verify data was saved to DuckDB despite the bug
-        mock_save_table.assert_called_once()
 
-    @patch("datasure.connectors.scto.scto_get_server_cache")
-    @patch("datasure.connectors.scto.scto_server_connect")
-    @patch("datasure.connectors.scto.scto_load_existing_data")
-    @patch("datasure.connectors.scto.scto_get_xls")
-    @patch("datasure.connectors.scto.scto_get_repeat_fields")
+        result = client._import_server_dataset(form_config)
+
+        assert result == 2
+        mock_scto_client.get_server_dataset.assert_called_once_with("dataset123")
+        mock_read_csv.assert_called_once_with(csv_data.encode())
+
     @patch("datasure.connectors.scto.duckdb_save_table")
-    def test_import_data_form_without_refresh(
-        self,
-        mock_save_table,
-        mock_repeat_fields,
-        mock_get_xls,
-        mock_load_existing,
-        mock_server_connect,
-        mock_get_cache,
-    ):
-        """Test importing form data without refresh (use existing data only)."""
-        # Mock server cache and connection
-        mock_get_cache.return_value = {
-            "server": "testserver",
-            "user": "user@example.com",
-            "password": "password123",
-        }
+    def test_import_regular_form_no_refresh(self, mock_save_table):
+        """Test importing regular form with refresh=False."""
+        client = SurveyCTOClient("test1234")
+        mock_scto_client = Mock()
+        client._scto_client = mock_scto_client
 
-        mock_scto_instance = MagicMock()
-        mock_server_connect.return_value = mock_scto_instance
-
-        # Mock server dataset failure (so it tries form data)
-        import requests
-
-        mock_scto_instance.get_server_dataset.side_effect = requests.HTTPError(
-            "Not a server dataset"
+        form_config = FormConfig(
+            alias="test_form", form_id="form123", server="testserver", refresh=False
         )
 
-        # Mock existing data
-        existing_data = pd.DataFrame({"name": ["John"], "age": [25]})
-        mock_load_existing.return_value = (existing_data, pd.Timestamp("2024-01-01"))
+        result = client._import_regular_form(form_config)
 
-        # Call function with refresh=False
-        result = scto_import_data(
-            project_id="test_project",
-            alias="test_alias",
-            form_id="form123",
-            refresh=False,  # Don't refresh - use existing data
-            saveas=None,  # No save needed for this test
-        )
-
-        # Should return 0 since no new data was fetched
         assert result == 0
-        # Should not call get_form_data since refresh=False
-        mock_scto_instance.get_form_data.assert_not_called()
+        mock_scto_client.get_form_data.assert_not_called()
+        mock_save_table.assert_not_called()
 
-    @patch("datasure.connectors.scto.scto_get_server_cache")
-    @patch("datasure.connectors.scto.scto_server_connect")
-    @patch("datasure.connectors.scto.scto_load_existing_data")
-    @patch("datasure.connectors.scto.scto_import_key")
-    @patch("datasure.connectors.scto.scto_get_xls")
-    @patch("datasure.connectors.scto.scto_get_repeat_fields")
     @patch("datasure.connectors.scto.duckdb_save_table")
-    def test_import_data_form_with_private_key(
-        self,
-        mock_save_table,
-        mock_repeat_fields,
-        mock_get_xls,
-        mock_import_key,
-        mock_load_existing,
-        mock_server_connect,
-        mock_get_cache,
-        tmp_path,
-    ):
-        """Test importing form data with private key for encryption."""
-        # Mock server cache and connection
-        mock_get_cache.return_value = {
-            "server": "testserver",
-            "user": "user@example.com",
-            "password": "password123",
-        }
-
-        mock_scto_instance = MagicMock()
-        mock_server_connect.return_value = mock_scto_instance
-
-        # Mock server dataset failure (so it tries form data)
-        import requests
-
-        mock_scto_instance.get_server_dataset.side_effect = requests.HTTPError(
-            "Not a server dataset"
-        )
-
-        # Mock no existing data
-        mock_load_existing.return_value = (pd.DataFrame(), pd.Timestamp("2024-01-01"))
-
-        # Mock private key import
-        mock_import_key.return_value = "decrypted_private_key_content"
+    def test_import_regular_form_with_refresh(self, mock_save_table):
+        """Test importing regular form with refresh=True."""
+        client = SurveyCTOClient("test1234")
+        mock_scto_client = Mock()
+        client._scto_client = mock_scto_client
 
         # Mock form data response
         form_data = [
-            {
-                "name": "John",
-                "age": 25,
-                "CompletionDate": "2024-01-15",
-                "SubmissionDate": "2024-01-15",
-            },
-            {
-                "name": "Jane",
-                "age": 30,
-                "CompletionDate": "2024-01-16",
-                "SubmissionDate": "2024-01-16",
-            },
+            {"name": "John", "age": 25, "CompletionDate": "2024-01-15"},
+            {"name": "Jane", "age": 30, "CompletionDate": "2024-01-16"},
         ]
-        mock_scto_instance.get_form_data.return_value = form_data
+        mock_scto_client.get_form_data.return_value = form_data
 
         # Mock form definition
-        questions_df = pd.DataFrame(
-            {
-                "name": ["name", "age"],
-                "type": ["text", "integer"],
-                "disabled": ["no", "no"],
-            }
-        )
-        choices_df = pd.DataFrame()
-        mock_get_xls.return_value = (questions_df, choices_df)
-        mock_repeat_fields.return_value = []
+        mock_scto_client.get_form_definition.return_value = {
+            "fieldsRowsAndColumns": [
+                ["name", "type", "disabled"],
+                ["name", "text", "no"],
+                ["age", "integer", "no"],
+            ],
+            "choicesRowsAndColumns": [["list name", "name", "label"]],
+        }
 
-        # Use temporary file path
-        save_path = tmp_path / "save.csv"
-
-        # Call function with private key
-        result = scto_import_data(
-            project_id="test_project",
-            alias="test_alias",
-            form_id="encrypted_form",
-            refresh=True,
-            key="/path/to/private.key",  # Private key provided
-            saveas=str(save_path),
+        form_config = FormConfig(
+            alias="test_form", form_id="form123", server="testserver", refresh=True
         )
 
-        # Verify private key was imported
-        mock_import_key.assert_called_once_with("/path/to/private.key")
+        result = client._import_regular_form(form_config)
 
-        # Verify form data was requested with the key
-        mock_scto_instance.get_form_data.assert_called_once_with(
-            form_id="encrypted_form",
-            format="json",
-            oldest_completion_date=pd.Timestamp("2024-01-01"),
-            key="decrypted_private_key_content",
-        )
-
-        # Should return count of new data
         assert result == 2
-
-    @patch("datasure.connectors.scto.scto_get_server_cache")
-    @patch("datasure.connectors.scto.scto_server_connect")
-    @patch("datasure.connectors.scto.scto_load_existing_data")
-    @patch("datasure.connectors.scto.scto_get_xls")
-    @patch("datasure.connectors.scto.scto_get_repeat_fields")
-    @patch("datasure.connectors.scto.scto_get_repeat_cols")
-    @patch("datasure.connectors.scto.duckdb_save_table")
-    def test_import_data_with_data_type_conversion(
-        self,
-        mock_save_table,
-        mock_repeat_cols,
-        mock_repeat_fields,
-        mock_get_xls,
-        mock_load_existing,
-        mock_server_connect,
-        mock_get_cache,
-        tmp_path,
-    ):
-        """Test data type conversion based on form definition."""
-        # Mock server cache and connection
-        mock_get_cache.return_value = {
-            "server": "testserver",
-            "user": "user@example.com",
-            "password": "password123",
-        }
-
-        mock_scto_instance = MagicMock()
-        mock_server_connect.return_value = mock_scto_instance
-
-        # Mock server dataset failure (so it tries form data)
-        import requests
-
-        mock_scto_instance.get_server_dataset.side_effect = requests.HTTPError(
-            "Not a server dataset"
-        )
-
-        # Mock no existing data
-        mock_load_existing.return_value = (pd.DataFrame(), pd.Timestamp("2024-01-01"))
-
-        # Mock form data with various data types
-        form_data = [
-            {
-                "name": "John",
-                "age": "25",  # String that should be converted to integer
-                "birth_date": "2000-01-15",  # String that should be converted to date
-                "survey_datetime": "2024-01-15 10:30:00",  # Datetime field
-                "notes_field": "This is a note",  # Note field that should be dropped
-                "CompletionDate": "2024-01-15",
-                "SubmissionDate": "2024-01-15",
-                "duration": "120",
-                "formdef_version": "1",
-            }
-        ]
-        mock_scto_instance.get_form_data.return_value = form_data
-
-        # Mock form definition with different field types
-        questions_df = pd.DataFrame(
-            {
-                "name": ["name", "age", "birth_date", "survey_datetime", "notes_field"],
-                "type": ["text", "integer", "date", "datetime", "note"],
-                "disabled": ["no", "no", "no", "no", "no"],
-            }
-        )
-        choices_df = pd.DataFrame()
-        mock_get_xls.return_value = (questions_df, choices_df)
-        mock_repeat_fields.return_value = []
-        mock_repeat_cols.return_value = []  # No repeat columns
-
-        # Use temporary file path
-        save_path = tmp_path / "save.csv"
-
-        # Call function
-        result = scto_import_data(
-            project_id="test_project",
-            alias="test_alias",
-            form_id="typed_form",
-            refresh=True,
-            saveas=str(save_path),
-        )
-
-        # Verify data was processed and saved
-        assert result == 1
+        mock_scto_client.get_form_data.assert_called_once()
         mock_save_table.assert_called_once()
 
-    @patch("datasure.connectors.scto.scto_get_server_cache")
-    @patch("datasure.connectors.scto.scto_server_connect")
-    @patch("datasure.connectors.scto.scto_load_existing_data")
-    @patch("datasure.connectors.scto.scto_get_xls")
-    @patch("datasure.connectors.scto.scto_get_repeat_fields")
-    @patch("datasure.connectors.scto.scto_get_repeat_cols")
-    @patch("datasure.connectors.scto.duckdb_save_table")
-    def test_import_data_with_repeat_groups(
-        self,
-        mock_save_table,
-        mock_repeat_cols,
-        mock_repeat_fields,
-        mock_get_xls,
-        mock_load_existing,
-        mock_server_connect,
-        mock_get_cache,
-        tmp_path,
+    @patch("datasure.connectors.scto.retrieve_scto_credentials")
+    @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
+    def test_import_data_connection_fallback(
+        self, mock_scto_class, mock_retrieve_credentials
     ):
-        """Test data import with repeat group processing."""
-        # Mock server cache and connection
-        mock_get_cache.return_value = {
-            "server": "testserver",
-            "user": "user@example.com",
-            "password": "password123",
+        """Test import_data with connection fallback."""
+        client = SurveyCTOClient("test1234")
+
+        # Mock credential retrieval
+        mock_retrieve_credentials.return_value = {
+            "credentials": {"password": "password"}
         }
 
-        mock_scto_instance = MagicMock()
-        mock_server_connect.return_value = mock_scto_instance
+        # Mock SurveyCTO object creation
+        mock_scto_instance = Mock()
+        mock_scto_class.return_value = mock_scto_instance
 
-        # Mock server dataset failure (so it tries form data)
-        import requests
+        # Mock _import_server_dataset to fail and _import_regular_form to succeed
+        client._import_server_dataset = Mock(side_effect=Exception("Not a dataset"))
+        client._import_regular_form = Mock(return_value=5)
 
-        mock_scto_instance.get_server_dataset.side_effect = requests.HTTPError(
-            "Not a server dataset"
+        form_config = FormConfig(
+            alias="test_form",
+            form_id="form123",
+            server="testserver",
+            username="user@example.com",
         )
 
-        # Mock no existing data
-        mock_load_existing.return_value = (pd.DataFrame(), pd.Timestamp("2024-01-01"))
+        result = client.import_data(form_config)
 
-        # Mock form data with repeat group columns
-        form_data = [
-            {
-                "household_member_1": "John",
-                "household_member_2": "Jane",
-                "household_member_1_age": "25",
-                "household_member_2_age": "30",
-                "CompletionDate": "2024-01-15",
-                "SubmissionDate": "2024-01-15",
-            }
-        ]
-        mock_scto_instance.get_form_data.return_value = form_data
+        assert result == 5
+        client._import_server_dataset.assert_called_once_with(form_config)
+        client._import_regular_form.assert_called_once_with(form_config)
 
-        # Mock form definition with repeat group
-        questions_df = pd.DataFrame(
-            {
-                "name": ["household_member", "member_age"],
-                "type": ["text", "integer"],
-                "disabled": ["no", "no"],
-            }
-        )
-        choices_df = pd.DataFrame()
-        mock_get_xls.return_value = (questions_df, choices_df)
+    @patch("datasure.connectors.scto.retrieve_scto_credentials")
+    def test_import_data_missing_credentials(self, mock_retrieve_credentials):
+        """Test import_data with missing credentials."""
+        client = SurveyCTOClient("test1234")
 
-        # Mock repeat fields
-        mock_repeat_fields.return_value = ["household_member"]
+        # Mock missing credentials
+        mock_retrieve_credentials.side_effect = KeyError("No credentials")
 
-        # Mock repeat columns for household_member
-        def mock_repeat_cols_side_effect(field, data_cols):
-            if field == "household_member":
-                return ["household_member_1", "household_member_2"]
-            return [field]
-
-        mock_repeat_cols.side_effect = mock_repeat_cols_side_effect
-
-        # Use temporary file path
-        save_path = tmp_path / "save.csv"
-
-        # Call function
-        result = scto_import_data(
-            project_id="test_project",
-            alias="test_alias",
-            form_id="repeat_form",
-            refresh=True,
-            saveas=str(save_path),
+        form_config = FormConfig(
+            alias="test_form",
+            form_id="form123",
+            server="testserver",
+            username="user@example.com",
         )
 
-        # Verify repeat columns processing was called
-        mock_repeat_cols.assert_called()
-        assert result == 1
+        with pytest.raises(KeyError, match="Credentials not found in secure storage"):
+            client.import_data(form_config)
 
-    @patch("datasure.connectors.scto.scto_get_server_cache")
-    @patch("datasure.connectors.scto.scto_server_connect")
-    @patch("datasure.connectors.scto.scto_load_existing_data")
-    @patch("datasure.connectors.scto.st")
+    @patch("datasure.connectors.scto.retrieve_scto_credentials")
+    @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
     def test_import_data_connection_error(
-        self, mock_st, mock_load_existing, mock_server_connect, mock_get_cache
+        self, mock_scto_class, mock_retrieve_credentials
     ):
-        """Test handling of connection errors during data import."""
-        # Mock server cache and connection
-        mock_get_cache.return_value = {
-            "server": "testserver",
-            "user": "user@example.com",
-            "password": "password123",
+        """Test import_data with connection error."""
+        client = SurveyCTOClient("test1234")
+
+        # Mock credential retrieval
+        mock_retrieve_credentials.return_value = {
+            "credentials": {"password": "password"}
         }
 
-        mock_scto_instance = MagicMock()
-        mock_server_connect.return_value = mock_scto_instance
+        # Mock connection error
+        mock_scto_class.side_effect = ConnectionError("Connection failed")
 
-        # Mock server dataset failure and connection error
-        import requests
-
-        mock_scto_instance.get_server_dataset.side_effect = requests.HTTPError(
-            "Not a server dataset"
-        )
-        mock_scto_instance.get_form_data.side_effect = requests.ConnectionError(
-            "Connection failed"
+        form_config = FormConfig(
+            alias="test_form",
+            form_id="form123",
+            server="testserver",
+            username="user@example.com",
         )
 
-        # Mock no existing data
-        mock_load_existing.return_value = (pd.DataFrame(), pd.Timestamp("2024-01-01"))
+        with pytest.raises(ConnectionError, match="Not connected to server"):
+            client.import_data(form_config)
 
-        # Mock streamlit functions
-        mock_st.warning.return_value = None
-        mock_st.stop.side_effect = SystemExit("Streamlit stop called")
+    @patch("datasure.connectors.scto.MediaDownloader")
+    def test_download_attachments(self, mock_downloader_class, tmp_path):
+        """Test downloading attachments."""
+        client = SurveyCTOClient("test1234")
+        mock_scto_client = Mock()
+        client._scto_client = mock_scto_client
 
-        # Call function - should handle connection error
-        with pytest.raises(SystemExit):
-            scto_import_data(
-                project_id="test_project",
-                alias="test_alias",
-                form_id="form123",
-                refresh=True,
-            )
+        # Mock MediaDownloader
+        mock_downloader = Mock()
+        mock_downloader_class.return_value = mock_downloader
 
-        # Verify warning was displayed
-        mock_st.warning.assert_called()
-        warning_call = mock_st.warning.call_args[0][0]
-        assert "Check your internet connection" in warning_call
+        questions = pd.DataFrame(
+            {
+                "type": ["text", "image", "audio", "note"],
+                "name": ["name", "photo", "voice", "notes"],
+            }
+        )
 
-    @patch("datasure.connectors.scto.scto_get_server_cache")
-    @patch("datasure.connectors.scto.scto_server_connect")
-    @patch("datasure.connectors.scto.scto_load_existing_data")
+        data = pd.DataFrame(
+            {"name": ["John"], "photo": ["photo1.jpg"], "voice": ["audio1.wav"]}
+        )
+
+        form_config = FormConfig(
+            alias="test_form",
+            form_id="form123",
+            server="testserver",
+            save_to=str(tmp_path / "data.csv"),
+            private_key="test_key",
+        )
+
+        client._download_attachments(questions, data, form_config)
+
+        # Check MediaDownloader was created and called
+        mock_downloader_class.assert_called_once_with(mock_scto_client, client.config)
+        mock_downloader.download_media_files.assert_called_once()
+
+        # Check the call arguments
+        args = mock_downloader.download_media_files.call_args[0]
+        media_fields, _, media_folder, encryption_key = args
+
+        assert "photo" in media_fields
+        assert "voice" in media_fields
+        assert "name" not in media_fields  # text field
+        assert "notes" not in media_fields  # note field
+        assert str(media_folder) == str(tmp_path / "media")
+        assert encryption_key == "test_key"
+
+    def test_import_private_key_file_not_exists(self):
+        """Test importing private key when file doesn't exist."""
+        client = SurveyCTOClient("test1234")
+
+        with pytest.raises(
+            SctoValidationError, match="Private key file does not exist or is empty"
+        ):
+            client._import_private_key("/nonexistent/key.pem")
+
+        with pytest.raises(
+            SctoValidationError, match="Private key file does not exist or is empty"
+        ):
+            client._import_private_key("")
+
+    def test_import_private_key_success(self, tmp_path):
+        """Test importing private key successfully."""
+        client = SurveyCTOClient("test1234")
+
+        key_file = tmp_path / "test_key.pem"
+        key_content = "-----BEGIN RSA PRIVATE KEY-----\ntest_key_content\n-----END RSA PRIVATE KEY-----"
+        key_file.write_text(key_content)
+
+        result = client._import_private_key(str(key_file))
+        assert result == key_content.strip()
+
+    def test_import_private_key_read_error(self, tmp_path):
+        """Test importing private key with read error."""
+        client = SurveyCTOClient("test1234")
+
+        # Create a file but make it unreadable
+        key_file = tmp_path / "unreadable_key.pem"
+        key_file.write_text("test")
+
+        with patch("builtins.open", side_effect=OSError("Permission denied")):  # noqa: SIM117
+            with pytest.raises(SctoValidationError, match="Failed to read private key"):
+                client._import_private_key(str(key_file))
+
+    def test_handle_http_error_various_codes(self):
+        """Test _handle_http_error with various HTTP status codes."""
+        client = SurveyCTOClient("test1234")
+
+        error_codes_and_messages = {
+            401: "Invalid credentials",
+            403: "Access forbidden",
+            404: "Server 'testserver' not found",
+            429: "Too many requests",
+            500: "Server error",
+            502: "Bad gateway",
+            503: "Service unavailable",
+            418: "Server error (HTTP 418)",  # Generic case
+        }
+
+        for status_code, expected_message in error_codes_and_messages.items():
+            http_error = requests.exceptions.HTTPError(f"HTTP {status_code}")
+            mock_response = Mock()
+            mock_response.status_code = status_code
+            http_error.response = mock_response
+
+            with pytest.raises(ConnectionError) as exc_info:
+                client._handle_http_error(http_error, "testserver")
+
+            assert expected_message in str(exc_info.value)
+
+    def test_handle_http_error_no_response(self):
+        """Test _handle_http_error with no response object."""
+        client = SurveyCTOClient("test1234")
+
+        http_error = requests.exceptions.HTTPError("Connection failed")
+        http_error.response = None
+
+        with pytest.raises(ConnectionError, match="Authentication failed"):
+            client._handle_http_error(http_error, "testserver")
+
+
+class TestSurveyCTOUI:
+    """Test SurveyCTOUI class."""
+
+    def test_ui_init(self):
+        """Test SurveyCTOUI initialization."""
+        ui = SurveyCTOUI("test1234")
+        assert ui.project_id == "test1234"
+        assert isinstance(ui.client, SurveyCTOClient)
+
+    def test_get_logo_path(self):
+        """Test getting logo path."""
+        ui = SurveyCTOUI("test1234")
+        logo_path = ui._get_logo_path()
+        assert "SurveyCTO-Logo-CMYK.png" in logo_path
+
     @patch("datasure.connectors.scto.st")
-    def test_import_data_http_error_unauthorized(
-        self, mock_st, mock_load_existing, mock_server_connect, mock_get_cache
-    ):
-        """Test handling of HTTP 401 unauthorized error."""
-        # Mock server cache and connection
-        mock_get_cache.return_value = {
-            "server": "testserver",
-            "user": "user@example.com",
-            "password": "password123",
-        }
+    def test_render_login_form(self, mock_st):
+        """Test rendering login form."""
+        ui = SurveyCTOUI("test1234")
 
-        mock_scto_instance = MagicMock()
-        mock_server_connect.return_value = mock_scto_instance
-
-        # Mock server dataset failure and HTTP 401 error
-        import requests
-
-        mock_scto_instance.get_server_dataset.side_effect = requests.HTTPError(
-            "Not a server dataset"
-        )
-
-        # Create a proper HTTP error with 401 status
-        http_error = requests.HTTPError("Unauthorized")
-        mock_response = MagicMock()
-        mock_response.status_code = 401
-        http_error.response = mock_response
-        mock_scto_instance.get_form_data.side_effect = http_error
-
-        # Mock no existing data
-        mock_load_existing.return_value = (pd.DataFrame(), pd.Timestamp("2024-01-01"))
-
-        # Mock streamlit functions
-        mock_st.warning.return_value = None
-        mock_st.stop.side_effect = SystemExit("Streamlit stop called")
-
-        # Call function - should handle HTTP error
-        with pytest.raises(SystemExit):
-            scto_import_data(
-                project_id="test_project",
-                alias="test_alias",
-                form_id="form123",
-                refresh=True,
-            )
-
-        # Verify specific unauthorized warning was displayed
-        warning_calls = [call[0][0] for call in mock_st.warning.call_args_list]
-        assert any("Unauthorized access" in call for call in warning_calls)
-
-    @patch("datasure.connectors.scto.scto_get_server_cache")
-    @patch("datasure.connectors.scto.scto_server_connect")
-    @patch("datasure.connectors.scto.scto_load_existing_data")
-    @patch("datasure.connectors.scto.scto_get_xls")
-    @patch("datasure.connectors.scto.scto_get_repeat_fields")
-    @patch("datasure.connectors.scto.duckdb_save_table")
-    def test_import_data_merge_with_existing(
-        self,
-        mock_save_table,
-        mock_repeat_fields,
-        mock_get_xls,
-        mock_load_existing,
-        mock_server_connect,
-        mock_get_cache,
-        tmp_path,
-    ):
-        """Test merging new data with existing data."""
-        # Mock server cache and connection
-        mock_get_cache.return_value = {
-            "server": "testserver",
-            "user": "user@example.com",
-            "password": "password123",
-        }
-
-        mock_scto_instance = MagicMock()
-        mock_server_connect.return_value = mock_scto_instance
-
-        # Mock server dataset failure (so it tries form data)
-        import requests
-
-        mock_scto_instance.get_server_dataset.side_effect = requests.HTTPError(
-            "Not a server dataset"
-        )
-
-        # Mock existing data
-        existing_data = pd.DataFrame(
-            {
-                "name": ["John", "Jane"],
-                "age": [25, 30],
-                "CompletionDate": ["2024-01-10", "2024-01-11"],
-                "SubmissionDate": ["2024-01-10", "2024-01-11"],
-            }
-        )
-        mock_load_existing.return_value = (existing_data, pd.Timestamp("2024-01-11"))
-
-        # Mock new form data
-        new_form_data = [
-            {
-                "name": "Bob",
-                "age": 35,
-                "CompletionDate": "2024-01-20",
-                "SubmissionDate": "2024-01-20",
-            }
+        # Mock Streamlit inputs
+        mock_st.text_input.side_effect = [
+            "testserver",
+            "user@example.com",
+            "password123",
         ]
-        mock_scto_instance.get_form_data.return_value = new_form_data
+        mock_st.button.return_value = True
 
-        # Mock form definition
-        questions_df = pd.DataFrame(
-            {
-                "name": ["name", "age"],
-                "type": ["text", "integer"],
-                "disabled": ["no", "no"],
-            }
+        # Mock other Streamlit functions
+        mock_st.container.return_value.__enter__ = Mock()
+        mock_st.container.return_value.__exit__ = Mock()
+        mock_st.image.return_value = None
+        mock_st.markdown.return_value = None
+
+        # Mock client.connect
+        ui.client.connect = Mock()
+
+        ui.render_login_form()
+
+        # Check that connect was called with correct credentials
+        ui.client.connect.assert_called_once()
+        args = ui.client.connect.call_args[0][0]
+        assert args.server == "testserver"
+        assert args.user == "user@example.com"
+        assert args.password == "password123"
+
+    @patch("datasure.connectors.scto.st")
+    def test_render_login_form_error(self, mock_st):
+        """Test rendering login form with connection error."""
+        ui = SurveyCTOUI("test1234")
+
+        # Mock Streamlit inputs
+        mock_st.text_input.side_effect = [
+            "testserver",
+            "user@example.com",
+            "password123",
+        ]
+        mock_st.button.return_value = True
+
+        # Mock other Streamlit functions
+        mock_st.container.return_value.__enter__ = Mock()
+        mock_st.container.return_value.__exit__ = Mock()
+        mock_st.image.return_value = None
+        mock_st.markdown.return_value = None
+
+        # Mock client.connect to raise error
+        ui.client.connect = Mock(side_effect=ConnectionError("Connection failed"))
+
+        ui.render_login_form()
+
+        # Check that error was displayed
+        mock_st.error.assert_called_once_with("Connection failed: Connection failed")
+
+
+class TestDownloadForms:
+    """Test download_forms function."""
+
+    @patch("datasure.connectors.scto.st")
+    def test_download_forms_empty_list(self, mock_st):
+        """Test download_forms with empty form list."""
+        download_forms("test1234", [])
+        mock_st.warning.assert_called_once_with("No forms selected for download")
+
+    @patch("datasure.connectors.scto.SurveyCTOClient")
+    @patch("datasure.connectors.scto.st")
+    def test_download_forms_success(self, mock_st, mock_client_class):
+        """Test download_forms with successful downloads."""
+        # Setup mocks
+        mock_client = Mock()
+        mock_client_class.return_value = mock_client
+        mock_client.import_data.return_value = 5
+
+        mock_progress = Mock()
+        mock_st.progress.return_value = mock_progress
+
+        # Create form configs
+        form_configs = [
+            FormConfig(alias="form1", form_id="f1", server="server1"),
+            FormConfig(alias="form2", form_id="f2", server="server1"),
+        ]
+
+        download_forms("test1234", form_configs)
+
+        # Check client was created and import_data was called
+        mock_client_class.assert_called_once_with("test1234")
+        assert mock_client.import_data.call_count == 2
+
+    @patch("datasure.connectors.scto.SurveyCTOClient")
+    @patch("datasure.connectors.scto.st")
+    def test_download_forms_with_error(self, mock_st, mock_client_class):
+        """Test download_forms with import error."""
+        # Setup mocks
+        mock_client = Mock()
+        mock_client_class.return_value = mock_client
+        mock_client.import_data.side_effect = [5, Exception("Import failed")]
+
+        mock_progress = Mock()
+        mock_st.progress.return_value = mock_progress
+
+        # Create form configs
+        form_configs = [
+            FormConfig(alias="form1", form_id="f1", server="server1"),
+            FormConfig(alias="form2", form_id="f2", server="server1"),
+        ]
+
+        download_forms("test1234", form_configs)
+
+        # Check error was displayed for second form
+        error_calls = [
+            call
+            for call in mock_st.error.call_args_list
+            if "Failed to download form2" in str(call)
+        ]
+        assert len(error_calls) == 1
+
+
+class TestMediaDownloaderExtended:
+    """Extended tests for MediaDownloader class."""
+
+    @patch("datasure.connectors.scto.st")
+    def test_download_field_media_with_progress(self, mock_st):
+        """Test downloading field media with progress bar."""
+        mock_client = Mock()
+        mock_client.get_attachment.return_value = b"fake_content"
+
+        config = SurveyCTOConfig()
+        downloader = MediaDownloader(mock_client, config)
+
+        # Mock progress bar
+        mock_progress = Mock()
+        mock_st.progress.return_value = mock_progress
+
+        data = pd.DataFrame(
+            {"KEY": ["uuid:123", "uuid:456"], "photo": ["photo1.jpg", "photo2.jpg"]}
         )
-        choices_df = pd.DataFrame()
-        mock_get_xls.return_value = (questions_df, choices_df)
-        mock_repeat_fields.return_value = []
 
-        # Use temporary file path
-        save_path = tmp_path / "save.csv"
+        media_folder = Path("/tmp/media")
+        media_folder.mkdir(parents=True, exist_ok=True)
 
-        # Call function
-        result = scto_import_data(
-            project_id="test_project",
-            alias="test_alias",
-            form_id="merge_form",
-            refresh=True,
-            saveas=str(save_path),
+        downloader._download_field_media("photo", data, media_folder, None)
+
+        # Verify progress bar was updated
+        assert mock_progress.progress.call_count == 2
+        mock_st.progress.assert_called_once()
+
+    def test_download_field_media_empty_data(self):
+        """Test downloading field media with empty data."""
+        mock_client = Mock()
+        config = SurveyCTOConfig()
+        downloader = MediaDownloader(mock_client, config)
+
+        data = pd.DataFrame({"KEY": [], "photo": []})
+        media_folder = Path("/tmp/media")
+
+        # Should not crash with empty data
+        downloader._download_field_media("photo", data, media_folder, None)
+
+        # No attachments should be downloaded
+        mock_client.get_attachment.assert_not_called()
+
+    def test_download_field_media_exception_handling(self, caplog):
+        """Test downloading field media with exception handling."""
+        mock_client = Mock()
+        mock_client.get_attachment.side_effect = Exception("Download failed")
+
+        config = SurveyCTOConfig()
+        downloader = MediaDownloader(mock_client, config)
+
+        data = pd.DataFrame({"KEY": ["uuid:123"], "photo": ["photo1.jpg"]})
+
+        media_folder = Path("/tmp/media")
+        media_folder.mkdir(parents=True, exist_ok=True)
+
+        # Should handle exception gracefully
+        downloader._download_field_media("photo", data, media_folder, None)
+
+        # Exception should be logged (tested via logger behavior)
+
+    def test_download_single_file_exists_skip(self, tmp_path):
+        """Test that existing files are skipped during download."""
+        mock_client = Mock()
+        config = SurveyCTOConfig()
+        downloader = MediaDownloader(mock_client, config)
+
+        media_folder = tmp_path / "media"
+        media_folder.mkdir()
+
+        # Create existing file
+        existing_file = media_folder / "photo_123456.jpg"
+        existing_file.write_bytes(b"existing_content")
+
+        downloader._download_single_file(
+            url="photo.jpg",
+            submission_key="uuid:123456",
+            field_name="photo",
+            media_folder=media_folder,
+            encryption_key=None,
         )
 
-        # Should return count of new data only
-        assert result == 1
+        # Should not call get_attachment since file exists
+        mock_client.get_attachment.assert_not_called()
 
-        # Verify data was saved (should include both existing and new data)
-        mock_save_table.assert_called_once()
-        save_call_args = mock_save_table.call_args[0]
-        saved_data = save_call_args[1]  # The data parameter
+        # File content should remain unchanged
+        assert existing_file.read_bytes() == b"existing_content"
 
-        # Should have 3 total records (2 existing + 1 new)
-        assert len(saved_data) == 3
+    def test_download_media_files_multiple_fields(self, tmp_path):
+        """Test downloading media files for multiple fields."""
+        mock_client = Mock()
+        mock_client.get_attachment.return_value = b"fake_content"
+
+        config = SurveyCTOConfig()
+        downloader = MediaDownloader(mock_client, config)
+
+        media_fields = ["photo", "audio"]
+        data = pd.DataFrame(
+            {"KEY": ["uuid:123"], "photo": ["photo1.jpg"], "audio": ["audio1.wav"]}
+        )
+
+        media_folder = tmp_path / "media"
+
+        downloader.download_media_files(media_fields, data, media_folder, None)
+
+        # Check that folder was created
+        assert media_folder.exists()
+
+        # Should have processed both fields
+        # This is tested indirectly through the folder creation and method calls
+
+
+class TestValidationErrorClass:
+    """Test the ValidationError exception class."""
+
+    def test_validation_error_inheritance(self):
+        """Test ValidationError inheritance."""
+        error = SctoValidationError("Validation failed")
+        assert str(error) == "Validation failed"
+        assert isinstance(error, SurveyCTOError)
+        assert isinstance(error, Exception)

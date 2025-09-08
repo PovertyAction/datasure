@@ -7,6 +7,7 @@ from datasure.utils import (
     duckdb_save_table,
     get_df_info,
 )
+from datasure.utils.navigations import page_navigation
 
 st.title("Configure Checks")
 st.markdown("Add a page for each dataset you want to check")
@@ -78,7 +79,10 @@ def add_check_configuration(project_id: str) -> None:
 
             if survey_data_name:
                 survey_df = duckdb_get_table(
-                    project_id=project_id, alias=survey_data_name, db_name="prep"
+                    project_id=project_id,
+                    alias=survey_data_name,
+                    db_name="prep",
+                    type="pd",
                 )
 
                 _, string_columns, numeric_columns, datetime_columns, _ = get_df_info(
@@ -172,9 +176,12 @@ def add_check_configuration(project_id: str) -> None:
                         alias="check_config",
                         db_name="logs",
                     )
-                    config_log = pl.concat(
-                        [current_log, pl.DataFrame([new_config])], how="vertical"
-                    )
+                    if current_log.is_empty():
+                        config_log = pl.DataFrame([new_config])
+                    else:
+                        config_log = pl.concat(
+                            [current_log, pl.DataFrame([new_config])], how="vertical"
+                        )
                     duckdb_save_table(
                         project_id,
                         config_log,
@@ -261,4 +268,15 @@ else:
 
 check_page_names = (
     check_config_log["page_name"].to_list() if not check_config_log.is_empty() else []
+)
+
+page_navigation(
+    prev={
+        "page_name": st.session_state.st_prep_data_page,
+        "label": "← Back: Prepare Data",
+    },
+    next={
+        "page_name": st.session_state.st_output_page1,
+        "label": "Next: Output Page 1 →",
+    },
 )

@@ -11,6 +11,18 @@ if "st_project_id" not in st.session_state:
 if "st_import_data_page" not in st.session_state:
     st.session_state.st_import_data_page = None
 
+if "st_prep_data_page" not in st.session_state:
+    st.session_state.st_prep_data_page = None
+
+if "st_config_checks_page" not in st.session_state:
+    st.session_state.st_config_checks_page = None
+
+if "st_output_page1" not in st.session_state:
+    st.session_state.st_output_page1 = None
+
+if "st_corr_page" not in st.session_state:
+    st.session_state.st_corr_page = None
+
 # Get the directory where this module is located
 _package_dir = Path(__file__).parent
 _views_dir = _package_dir / "views"
@@ -18,7 +30,7 @@ _views_dir = _package_dir / "views"
 # start page
 start_page = st.Page(
     page=str(_views_dir / "start_view.py"),
-    title="start here",
+    title="Start Here",
     icon=":material/home:",
     default=True,
 )
@@ -39,6 +51,8 @@ prep_data_page = st.Page(
     icon=":material/rule_settings:",
 )
 
+st.session_state.st_prep_data_page = prep_data_page
+
 # config data checks config page
 config_checks_page = st.Page(
     page=str(_views_dir / "config_view.py"),
@@ -46,17 +60,23 @@ config_checks_page = st.Page(
     icon=":material/manufacturing:",
 )
 
+st.session_state.st_config_checks_page = config_checks_page
+
 output_page_1 = st.Page(
     page=str(_views_dir / "output_view_1.py"),
     title="Report 1",
     icon=":material/counter_1:",
 )
 
+st.session_state.st_output_page1 = output_page_1
+
 corr_page = st.Page(
     page=str(_views_dir / "correction_view.py"),
     title="Correct Data",
     icon=":material/cleaning_services:",
 )
+
+st.session_state.st_corr_page = corr_page
 
 
 # --- NAVIGATION MENU --- #
