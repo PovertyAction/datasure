@@ -14,6 +14,7 @@ import requests
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
 
+from datasure.utils.dataframe_utils import standardize_missing_values
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 
 # Import secure credential storage
@@ -560,6 +561,9 @@ class SurveyCTOClient:
         data_csv = self._scto_client.get_server_dataset(form_config.form_id)
         data = pl.read_csv(data_csv.encode())
 
+        # standardize missing values
+        data = standardize_missing_values(data)
+
         # Save to DuckDB
         duckdb_save_table(self.project_id, data, alias=form_config.alias, db_name="raw")
 
@@ -619,6 +623,9 @@ class SurveyCTOClient:
         # Save data
         if form_config.save_to:
             combined_data.to_csv(form_config.save_to, index=False)
+
+        # standardize missing values
+        combined_data = standardize_missing_values(combined_data)
 
         # Save to DuckDB
         duckdb_save_table(
