@@ -1,19 +1,20 @@
 import polars as pl
 import streamlit as st
 
-from datasure.connectors import (
+from datasure.connectors.local import local_add_form, local_load_action
+from datasure.connectors.scto import (
     FormConfig,
     SurveyCTOUI,
     download_forms,
-    local_add_form,
-    local_load_action,
 )
-from datasure.utils import (
+from datasure.utils.duckdb_utils import (
     duckdb_get_aliases,
     duckdb_get_imported_datasets,
     duckdb_get_table,
+    duckdb_remove_table,
     duckdb_row_filter,
     duckdb_save_table,
+    duckdb_table_exists,
 )
 from datasure.utils.secure_credentials import (
     delete_stored_credentials,
@@ -290,6 +291,13 @@ with (
             db_name="logs",
             filter_condition=f"alias != '{remove_data}'",
         )
+        duckdb_remove_table(project_id, alias=remove_data, db_name="raw")
+        # check if the table exist in prep, if yes remove it
+        if duckdb_table_exists(project_id, alias=remove_data, db_name="prep"):
+            duckdb_remove_table(project_id, alias=remove_data, db_name="prep")
+        # check if the table exist in corrected db, if yes remove it
+        if duckdb_table_exists(project_id, alias=remove_data, db_name="corrected"):
+            duckdb_remove_table(project_id, alias=remove_data, db_name="corrected")
         st.session_state.st_raw_dataset_list = duckdb_get_aliases(project_id)
 
 import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
