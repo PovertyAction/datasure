@@ -11,7 +11,7 @@ class CorrectionProcessor:
 
     def __init__(self, project_id: str) -> None:
         """Initialize the correction processor.
-        
+
         Parameters
         ----------
         project_id : str
@@ -21,14 +21,14 @@ class CorrectionProcessor:
 
     def get_corrected_data(self, alias: str) -> pl.DataFrame:
         """Get corrected data for a given alias.
-        
+
         If no corrected data exists, initializes from prepped data.
-        
+
         Parameters
         ----------
         alias : str
             The data alias/table name
-            
+
         Returns
         -------
         pl.DataFrame
@@ -39,7 +39,7 @@ class CorrectionProcessor:
             alias=alias,
             db_name="corrected",
         )
-        
+
         if corrected_data.is_empty():
             # Initialize from prepped data
             prepped_data = duckdb_get_table(
@@ -50,12 +50,12 @@ class CorrectionProcessor:
             if not prepped_data.is_empty():
                 self.save_corrected_data(alias, prepped_data)
                 return prepped_data
-            
+
         return corrected_data
 
     def save_corrected_data(self, alias: str, data: pl.DataFrame) -> None:
         """Save corrected data to storage.
-        
+
         Parameters
         ----------
         alias : str
@@ -72,12 +72,12 @@ class CorrectionProcessor:
 
     def get_correction_log(self, alias: str) -> pl.DataFrame:
         """Get correction log for a given alias.
-        
+
         Parameters
         ----------
         alias : str
             The data alias/table name
-            
+
         Returns
         -------
         pl.DataFrame
@@ -101,7 +101,7 @@ class CorrectionProcessor:
         reason: str,
     ) -> None:
         """Add a new correction entry to the log.
-        
+
         Parameters
         ----------
         alias : str
@@ -131,10 +131,10 @@ class CorrectionProcessor:
             "new_value": new_value,
             "reason": reason,
         }
-        
+
         current_log = self.get_correction_log(alias)
         updated_log = pl.concat([current_log, pl.DataFrame([new_log_entry])])
-        
+
         duckdb_save_table(
             project_id=self.project_id,
             table_data=updated_log,
@@ -154,7 +154,7 @@ class CorrectionProcessor:
         reason: str | None = None,
     ) -> pl.DataFrame:
         """Apply a single correction to the data.
-        
+
         Parameters
         ----------
         alias : str
@@ -173,14 +173,14 @@ class CorrectionProcessor:
             The new value
         reason : str | None
             The reason for correction
-            
+
         Returns
         -------
         pl.DataFrame
             The corrected data
         """
         corrected_data = self.get_corrected_data(alias)
-        
+
         if action == "modify value" and column and new_value is not None:
             corrected_data = self._apply_modify_value(
                 corrected_data, key_col, key_value, column, new_value
@@ -191,9 +191,9 @@ class CorrectionProcessor:
             )
         elif action == "remove row":
             corrected_data = self._apply_remove_row(corrected_data, key_col, key_value)
-        
+
         self.save_corrected_data(alias, corrected_data)
-        
+
         # Add to correction log if reason is provided
         if reason:
             self.add_correction_entry(
@@ -206,7 +206,7 @@ class CorrectionProcessor:
                 new_value=new_value,
                 reason=reason,
             )
-        
+
         return corrected_data
 
     def _apply_modify_value(
@@ -218,7 +218,7 @@ class CorrectionProcessor:
         new_value: Any,
     ) -> pl.DataFrame:
         """Apply modify value correction.
-        
+
         Parameters
         ----------
         data : pl.DataFrame
@@ -231,7 +231,7 @@ class CorrectionProcessor:
             The column to modify
         new_value : Any
             The new value
-            
+
         Returns
         -------
         pl.DataFrame
@@ -251,7 +251,7 @@ class CorrectionProcessor:
                     typed_value = pl.lit(new_value).cast(data[column].dtype)
                 else:
                     typed_value = pl.lit(new_value)
-                
+
                 return data.with_columns(
                     pl.when(pl.col(key_col) == key_value)
                     .then(typed_value)
@@ -275,7 +275,7 @@ class CorrectionProcessor:
         column: str,
     ) -> pl.DataFrame:
         """Apply remove value correction.
-        
+
         Parameters
         ----------
         data : pl.DataFrame
@@ -286,7 +286,7 @@ class CorrectionProcessor:
             The key value to match
         column : str
             The column to modify
-            
+
         Returns
         -------
         pl.DataFrame
@@ -306,7 +306,7 @@ class CorrectionProcessor:
         key_value: str,
     ) -> pl.DataFrame:
         """Apply remove row correction.
-        
+
         Parameters
         ----------
         data : pl.DataFrame
@@ -315,7 +315,7 @@ class CorrectionProcessor:
             The key column name
         key_value : str
             The key value to match
-            
+
         Returns
         -------
         pl.DataFrame
@@ -325,12 +325,12 @@ class CorrectionProcessor:
 
     def get_data_summary(self, data: pl.DataFrame) -> dict[str, Any]:
         """Get summary statistics for the data.
-        
+
         Parameters
         ----------
         data : pl.DataFrame
             The data to summarize
-            
+
         Returns
         -------
         dict[str, Any]
@@ -338,19 +338,21 @@ class CorrectionProcessor:
         """
         if data.is_empty():
             return {"rows": 0, "columns": 0, "missing_percentage": 0.0}
-        
+
         rows, columns = data.shape
-        
+
         # Calculate missing values percentage
         missing_count = data.select(pl.all().is_null().sum())
         total_missing = missing_count.select(
             pl.sum_horizontal(pl.all()).alias("total")
         )[0, "total"]
-        
-        missing_percentage = round(
-            (total_missing / (rows * columns)) * 100, 2
-        ) if rows > 0 and columns > 0 else 0.0
-        
+
+        missing_percentage = (
+            round((total_missing / (rows * columns)) * 100, 2)
+            if rows > 0 and columns > 0
+            else 0.0
+        )
+
         return {
             "rows": rows,
             "columns": columns,
@@ -367,7 +369,7 @@ class CorrectionProcessor:
         new_value: Any | None = None,
     ) -> tuple[bool, str]:
         """Validate correction input parameters.
-        
+
         Parameters
         ----------
         data : pl.DataFrame
@@ -382,7 +384,7 @@ class CorrectionProcessor:
             The column to modify
         new_value : Any | None
             The new value
-            
+
         Returns
         -------
         tuple[bool, str]
@@ -390,17 +392,174 @@ class CorrectionProcessor:
         """
         if key_col not in data.columns:
             return False, f"Key column '{key_col}' not found in data"
-        
+
         if key_value not in data[key_col].to_list():
             return False, f"Key value '{key_value}' not found in data"
-        
+
         if action in ["modify value", "remove value"]:
             if not column:
                 return False, "Column must be specified for modify/remove value actions"
             if column not in data.columns:
                 return False, f"Column '{column}' not found in data"
-        
+
         if action == "modify value" and new_value is None:
             return False, "New value must be provided for modify value action"
-        
+
         return True, ""
+
+    def remove_correction_entry(
+        self,
+        alias: str,
+        correction_index: int,
+    ) -> None:
+        """Remove a correction entry from the log and reapply corrections.
+
+        Parameters
+        ----------
+        alias : str
+            The data alias/table name
+        correction_index : int
+            The index of the correction entry to remove
+        """
+        correction_log = self.get_correction_log(alias)
+
+        if correction_log.is_empty():
+            raise ValueError("No corrections to remove")
+
+        if correction_index < 0 or correction_index >= len(correction_log):
+            raise ValueError(f"Invalid correction index: {correction_index}")
+
+        # Remove the correction entry at the specified index
+        updated_log = pl.concat(
+            [correction_log[:correction_index], correction_log[correction_index + 1 :]]
+        )
+
+        # Save the updated log
+        duckdb_save_table(
+            project_id=self.project_id,
+            table_data=updated_log,
+            alias=f"corr_log_{alias}",
+            db_name="logs",
+        )
+
+        # Reapply all remaining corrections
+        self._reapply_all_corrections(alias)
+
+    def _reapply_all_corrections(self, alias: str) -> None:
+        """Reapply all corrections from the log to fresh data.
+
+        Parameters
+        ----------
+        alias : str
+            The data alias/table name
+        """
+        # Get fresh data from prep database
+        fresh_data = duckdb_get_table(
+            project_id=self.project_id,
+            alias=alias,
+            db_name="prep",
+        )
+
+        if fresh_data.is_empty():
+            # If no prep data, nothing to correct
+            return
+
+        # Get updated correction log
+        correction_log = self.get_correction_log(alias)
+
+        if correction_log.is_empty():
+            # No corrections to apply, save fresh data as corrected
+            self.save_corrected_data(alias, fresh_data)
+            return
+
+        # Apply all corrections in sequence
+        corrected_data = fresh_data
+
+        for row in correction_log.iter_rows(named=True):
+            action = row["action"]
+            key_col = None  # We need to get this from the first non-null column
+            key_value = row["KEY"]
+            column = row["column"]
+            new_value = row["new_value"]
+
+            # Find key column by looking for a column that contains the key value
+            for col in corrected_data.columns:
+                if key_value in corrected_data[col].to_list():
+                    key_col = col
+                    break
+
+            if not key_col:
+                continue  # Skip if key column not found
+
+            try:
+                if action == "modify value" and column and new_value is not None:
+                    corrected_data = self._apply_modify_value(
+                        corrected_data, key_col, key_value, column, new_value
+                    )
+                elif action == "remove value" and column:
+                    corrected_data = self._apply_remove_value(
+                        corrected_data, key_col, key_value, column
+                    )
+                elif action == "remove row":
+                    corrected_data = self._apply_remove_row(
+                        corrected_data, key_col, key_value
+                    )
+            except Exception:
+                # Skip corrections that fail (data may have changed)
+                continue
+
+        # Save the reapplied corrections
+        self.save_corrected_data(alias, corrected_data)
+
+    def get_correction_summary(self, alias: str) -> list[dict[str, Any]]:
+        """Get a summary of all correction entries for display.
+
+        Parameters
+        ----------
+        alias : str
+            The data alias/table name
+
+        Returns
+        -------
+        list[dict[str, Any]]
+            List of correction summaries with index, description, and details
+        """
+        correction_log = self.get_correction_log(alias)
+
+        if correction_log.is_empty():
+            return []
+
+        summaries = []
+        for index, row in enumerate(correction_log.iter_rows(named=True)):
+            action = row["action"]
+            key_value = row["KEY"]
+            column = row["column"]
+            new_value = row["new_value"]
+            reason = row["reason"]
+            date = row["date"]
+
+            # Create description based on action type
+            if action == "modify value":
+                description = f"Modify {column} for key {key_value} to '{new_value}'"
+            elif action == "remove value":
+                description = f"Remove {column} value for key {key_value}"
+            elif action == "remove row":
+                description = f"Remove entire row for key {key_value}"
+            else:
+                description = f"{action} for key {key_value}"
+
+            summaries.append(
+                {
+                    "index": index,
+                    "action_index": f"{index} - {action} - {description}",
+                    "action": action,
+                    "description": description,
+                    "key_value": key_value,
+                    "column": column,
+                    "new_value": new_value,
+                    "reason": reason,
+                    "date": date,
+                }
+            )
+
+        return summaries

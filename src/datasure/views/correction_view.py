@@ -43,13 +43,13 @@ if not hfc_pages:
     st.stop()
 
 
-def render_correction_input_form(
+def render_add_correction_form(
     correction_processor: CorrectionProcessor,
     key_col: str,
     alias: str,
     tab_index: int,
 ) -> None:
-    """Render input form for corrections.
+    """Render the add correction step form.
 
     Parameters
     ----------
@@ -61,33 +61,30 @@ def render_correction_input_form(
         The data alias/table name
     tab_index : int
         The tab index for unique widget keys
-
-    Returns
-    -------
-    None
     """
     # Get corrected data
     corrected_data = correction_processor.get_corrected_data(alias)
-    
+
     if corrected_data.is_empty():
         st.warning("No data available for correction.")
         return
 
-    fc1, _ = st.columns([0.4, 0.6])
-    with (
-        fc1,
-        st.popover(":material/add: Add correction step", width="stretch"),
-    ):
+    with st.popover(":material/add: Add correction step", width="stretch"):
         st.markdown("*Add new correction step*")
-        
+
         # Get unique key values for selection
-        key_options = corrected_data.select(key_col).unique(maintain_order=True).to_series().to_list()
+        key_options = (
+            corrected_data.select(key_col)
+            .unique(maintain_order=True)
+            .to_series()
+            .to_list()
+        )
         corr_key_val = st.selectbox(
             label="Select KEY",
             options=key_options,
             key=f"correction_key_value_{tab_index}",
         )
-        
+
         if corr_key_val:
             corr_action = st.selectbox(
                 label="Select Action",
@@ -125,20 +122,23 @@ def render_correction_input_form(
                     if corr_action == "modify value":
                         # Handle different input types based on column type
                         col_dtype = corrected_data.schema[col_to_modify]
-                        
+
                         if col_dtype == pl.Datetime:
                             if current_value:
                                 try:
                                     from datetime import datetime
+
                                     if isinstance(current_value, str):
-                                        current_date = datetime.fromisoformat(current_value).date()
+                                        current_date = datetime.fromisoformat(
+                                            current_value
+                                        ).date()
                                     else:
                                         current_date = current_value.date()
                                 except Exception:
                                     current_date = None
                             else:
                                 current_date = None
-                                
+
                             new_value = st.date_input(
                                 label="New Value",
                                 key=f"correction_new_value_{tab_index}",
@@ -151,15 +151,20 @@ def render_correction_input_form(
                                 key=f"correction_new_value_{tab_index}",
                                 placeholder="Enter new value",
                             )
-                            
+
                             # Validate numeric input
-                            if new_value and col_dtype in [pl.Int64, pl.Int32, pl.Float64, pl.Float32]:
+                            if new_value and col_dtype in [
+                                pl.Int64,
+                                pl.Int32,
+                                pl.Float64,
+                                pl.Float32,
+                            ]:
                                 try:
                                     float(new_value)
                                 except ValueError:
                                     st.error("New value must be a number.")
                                     new_value = None
-            
+
             elif corr_action == "remove row":
                 st.warning(
                     "This will remove the row with the selected key value from the dataset."
@@ -173,10 +178,11 @@ def render_correction_input_form(
 
             # Determine if apply button should be enabled
             apply_button_enabled = bool(
-                reason and (
-                    (corr_action == "modify value" and new_value) or
-                    (corr_action == "remove value") or
-                    (corr_action == "remove row")
+                reason
+                and (
+                    (corr_action == "modify value" and new_value)
+                    or (corr_action == "remove value")
+                    or (corr_action == "remove row")
                 )
             )
 
@@ -191,10 +197,17 @@ def render_correction_input_form(
             if apply_correction_btn:
                 try:
                     # Validate input before applying
-                    is_valid, error_msg = correction_processor.validate_correction_input(
-                        corrected_data, key_col, corr_key_val, corr_action, col_to_modify, new_value
+                    is_valid, error_msg = (
+                        correction_processor.validate_correction_input(
+                            corrected_data,
+                            key_col,
+                            corr_key_val,
+                            corr_action,
+                            col_to_modify,
+                            new_value,
+                        )
                     )
-                    
+
                     if not is_valid:
                         st.error(f"Validation error: {error_msg}")
                         return
@@ -210,42 +223,178 @@ def render_correction_input_form(
                         new_value=new_value,
                         reason=reason,
                     )
-                    
+
                     st.success("Correction applied successfully!")
                     st.rerun()  # Refresh the page to show updated data
-                    
+
                 except Exception as e:
-                    st.error(f"Error applying correction: {str(e)}")
+                    st.error(f"Error applying correction: {e!s}")
 
 
-def render_correction_log(correction_processor: CorrectionProcessor, alias: str) -> None:
-    """Render the correction log display.
-    
+def render_correction_input_form(
+    correction_processor: CorrectionProcessor,
+    key_col: str,
+    alias: str,
+    tab_index: int,
+) -> None:
+    """Render input form for corrections with add and remove functionality.
+
+    Parameters
+    ----------
+    correction_processor : CorrectionProcessor
+        The correction processor instance
+    key_col : str
+        The name of the Survey KEY column in the DataFrame
+    alias : str
+        The data alias/table name
+    tab_index : int
+        The tab index for unique widget keys
+
+    Returns
+    -------
+    None
+    """
+    # Get corrected data
+    corrected_data = correction_processor.get_corrected_data(alias)
+
+    if corrected_data.is_empty():
+        st.warning("No data available for correction.")
+        return
+
+    fc1, fc2, _ = st.columns([0.4, 0.3, 0.3])
+
+    with fc1:
+        render_add_correction_form(
+            correction_processor=correction_processor,
+            key_col=key_col,
+            alias=alias,
+            tab_index=tab_index,
+        )
+
+    with fc2:
+        render_remove_correction_form(
+            correction_processor=correction_processor,
+            alias=alias,
+            tab_index=tab_index,
+        )
+
+
+def render_remove_correction_form(
+    correction_processor: CorrectionProcessor,
+    alias: str,
+    tab_index: int,
+) -> None:
+    """Render the remove correction step form.
+
     Parameters
     ----------
     correction_processor : CorrectionProcessor
         The correction processor instance
     alias : str
         The data alias/table name
+    tab_index : int
+        The tab index for unique widget keys
+    """
+    correction_summaries = correction_processor.get_correction_summary(alias)
+
+    if not correction_summaries:
+        st.info("No corrections to remove.")
+        return
+
+    with st.popover(":material/delete: Remove correction step", width="stretch"):
+        st.warning(
+            "This will remove a correction step from the log and reapply remaining corrections."
+        )
+
+        # Create selectbox with action descriptions
+        action_options = [summary["action_index"] for summary in correction_summaries]
+        selected_action = st.selectbox(
+            label="Select Correction to Remove",
+            options=action_options,
+            key=f"remove_correction_{tab_index}",
+            index=None,
+            help="Select the correction you want to remove from the log",
+        )
+
+        # Show details of selected correction
+        if selected_action:
+            selected_summary = next(
+                s for s in correction_summaries if s["action_index"] == selected_action
+            )
+            st.write(f"**Action:** {selected_summary['action']}")
+            st.write(f"**Key:** {selected_summary['key_value']}")
+            if selected_summary["column"]:
+                st.write(f"**Column:** {selected_summary['column']}")
+            if selected_summary["new_value"]:
+                st.write(f"**New Value:** {selected_summary['new_value']}")
+            st.write(f"**Reason:** {selected_summary['reason']}")
+
+        # Confirm removal button
+        remove_button = st.button(
+            label="Remove",
+            key=f"confirm_remove_correction_{tab_index}",
+            width="stretch",
+            type="primary",
+            help="Remove the selected correction step from the log",
+            disabled=not selected_action,
+        )
+
+        if remove_button and selected_action:
+            try:
+                # Find the index of the selected correction
+                correction_index = next(
+                    s["index"]
+                    for s in correction_summaries
+                    if s["action_index"] == selected_action
+                )
+
+                # Remove the correction
+                correction_processor.remove_correction_entry(alias, correction_index)
+
+                st.success(f"Correction '{selected_action}' removed successfully!")
+                st.rerun()  # Refresh the page to show updated data
+
+            except Exception as e:
+                st.error(f"Error removing correction: {e!s}")
+
+
+def render_correction_log(
+    correction_processor: CorrectionProcessor, alias: str, tab_index: int
+) -> None:
+    """Render the correction log display with remove functionality.
+
+    Parameters
+    ----------
+    correction_processor : CorrectionProcessor
+        The correction processor instance
+    alias : str
+        The data alias/table name
+    tab_index : int
+        The tab index for unique widget keys
     """
     correction_log = correction_processor.get_correction_log(alias)
-    
+
     with st.container(border=True):
         if correction_log.is_empty():
             st.info(
                 "No corrections have been made yet. You can add corrections using the form above."
             )
         else:
-            st.subheader("Correction Log")
-            st.dataframe(
-                data=correction_log,
-                width="stretch",
-            )
+            with st.container(border=True):
+                st.subheader("Correction Log")
+
+                # Display the correction log
+                st.dataframe(
+                    data=correction_log,
+                    width="stretch",
+                )
 
 
-def render_data_summary(correction_processor: CorrectionProcessor, data: pl.DataFrame) -> None:
+def render_data_summary(
+    correction_processor: CorrectionProcessor, data: pl.DataFrame
+) -> None:
     """Render data summary metrics.
-    
+
     Parameters
     ----------
     correction_processor : CorrectionProcessor
@@ -254,7 +403,7 @@ def render_data_summary(correction_processor: CorrectionProcessor, data: pl.Data
         The data to summarize
     """
     summary = correction_processor.get_data_summary(data)
-    
+
     with st.container(border=True):
         st.subheader("Preview Corrected Data")
         st.write("---")
@@ -293,7 +442,7 @@ for tab_index, tab in enumerate(corr_tabs):
                 page_row_index=tab_index,
             )
         except Exception as e:
-            st.error(f"Error loading configuration for tab {tab_index}: {str(e)}")
+            st.error(f"Error loading configuration for tab {tab_index}: {e!s}")
             continue
 
         st.subheader(f"{page_name}")
@@ -301,7 +450,7 @@ for tab_index, tab in enumerate(corr_tabs):
 
         # Ensure corrected data exists (initialize from prepped data if needed)
         corrected_data = correction_processor.get_corrected_data(survey_data_name)
-        
+
         if corrected_data.is_empty():
             st.warning(f"No data available for {survey_data_name}")
             continue
@@ -318,6 +467,7 @@ for tab_index, tab in enumerate(corr_tabs):
         render_correction_log(
             correction_processor=correction_processor,
             alias=survey_data_name,
+            tab_index=tab_index,
         )
 
         # Render data summary and preview
