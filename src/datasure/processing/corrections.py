@@ -456,11 +456,11 @@ class CorrectionProcessor:
         if correction_log.is_empty():
             raise ValueError("No corrections to remove")
 
-        if correction_index < 0 or correction_index >= len(correction_log):
+        if correction_index < 0 or correction_index >= correction_log.height:
             raise ValueError(f"Invalid correction index: {correction_index}")
 
         # Remove the correction entry at the specified index
-        if correction_index == 0 and len(correction_log) == 1:
+        if correction_index == 0 and correction_log.height == 1:
             # If removing the only entry, create an empty DataFrame with proper schema
             updated_log = pl.DataFrame(
                 {
@@ -474,7 +474,7 @@ class CorrectionProcessor:
                     "reason": pl.Series([], dtype=pl.String),
                 }
             )
-        elif len(correction_log) > 1:
+        else:
             # Build list of parts to concatenate
             parts = []
             if correction_index > 0:
@@ -498,20 +498,6 @@ class CorrectionProcessor:
                         "reason": pl.Series([], dtype=pl.String),
                     }
                 )
-        else:
-            # Shouldn't reach here but handle edge case
-            updated_log = pl.DataFrame(
-                {
-                    "date": pl.Series([], dtype=pl.Datetime("us")),
-                    "KEY": pl.Series([], dtype=pl.String),
-                    "ID": pl.Series([], dtype=pl.String),
-                    "action": pl.Series([], dtype=pl.String),
-                    "column": pl.Series([], dtype=pl.String),
-                    "current_value": pl.Series([], dtype=pl.String),
-                    "new_value": pl.Series([], dtype=pl.String),
-                    "reason": pl.Series([], dtype=pl.String),
-                }
-            )
 
         # Save the updated log
         duckdb_save_table(
