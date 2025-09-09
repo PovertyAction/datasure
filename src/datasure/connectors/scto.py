@@ -14,6 +14,7 @@ import requests
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
 
+from datasure.utils.dataframe_utils import standardize_missing_values
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 
 # Import secure credential storage
@@ -160,6 +161,13 @@ class CacheManager:
         """Load existing data and return with latest submission date."""
         try:
             if not Path(file_path).exists():
+                self.logger.info(f"No existing data file found at {file_path}")
+                return pd.DataFrame(), SurveyCTOConfig.default_date
+
+            # Check file permissions before reading
+            if not os.access(file_path, os.R_OK):
+                self.logger.error(f"Permission denied reading file: {file_path}")
+                st.error(f"Cannot access file: {file_path}. Please check permissions.")
                 return pd.DataFrame(), SurveyCTOConfig.default_date
 
             data = pd.read_csv(file_path)
@@ -169,8 +177,14 @@ class CacheManager:
             data["SubmissionDate"] = pd.to_datetime(data["SubmissionDate"])
             return data, data["SubmissionDate"].max()
 
+        except PermissionError as e:
+            self.logger.exception("Permission error loading data:")
+            st.error(f"Permission denied: {e}")
+            return pd.DataFrame(), SurveyCTOConfig.default_date
+
         except Exception as e:
             self.logger.warning(f"Failed to load existing data: {e}")
+            st.error(f"Failed to load existing data: {e}")
             return pd.DataFrame(), SurveyCTOConfig.default_date
 
 
@@ -547,6 +561,9 @@ class SurveyCTOClient:
         data_csv = self._scto_client.get_server_dataset(form_config.form_id)
         data = pl.read_csv(data_csv.encode())
 
+        # standardize missing values
+        data = standardize_missing_values(data)
+
         # Save to DuckDB
         duckdb_save_table(self.project_id, data, alias=form_config.alias, db_name="raw")
 
@@ -606,6 +623,9 @@ class SurveyCTOClient:
         # Save data
         if form_config.save_to:
             combined_data.to_csv(form_config.save_to, index=False)
+
+        # standardize missing values
+        combined_data = standardize_missing_values(combined_data)
 
         # Save to DuckDB
         duckdb_save_table(

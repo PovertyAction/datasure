@@ -470,7 +470,6 @@ class PrepStepHandler:
         # get value
         if indexes_to_remove and dp_prep_del_rows == "by row index":
             value = indexes_to_remove
-            affected_count = len(indexes_to_remove)
         elif (
             dp_prep_del_rows_cond
             and dp_prep_del_rows_cond_cols
@@ -500,7 +499,7 @@ class PrepStepHandler:
         return {
             "action": "remove row(s)",
             "column_names": None,
-            "affected_count": affected_count or 0,
+            "affected_count": 0,
             "remaining_count": None,
             "value": value,
             "method": dp_prep_del_rows,
