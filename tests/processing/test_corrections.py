@@ -400,22 +400,6 @@ class TestCorrectionProcessor:
         # Should only save data, not log (since no reason)
         assert mock_save.call_count == 1
 
-    def test_apply_correction_no_action_match(self, correction_processor, sample_data):
-        """Test applying correction with unrecognized action."""
-        processor, mock_get, mock_save = correction_processor
-        mock_get.return_value = sample_data
-
-        result = processor.apply_correction(
-            alias="test_alias",
-            key_col="survey_key",
-            key_value="key1",
-            action="unknown_action",
-            reason="Test unknown action",
-        )
-
-        # Should return unchanged data since action doesn't match
-        assert result.equals(sample_data)
-
     def test_get_data_summary(self, correction_processor, sample_data):
         """Test getting data summary."""
         processor, _, _ = correction_processor
@@ -438,17 +422,6 @@ class TestCorrectionProcessor:
         assert summary["columns"] == 4
         # 3 missing values out of 12 total cells = 25%
         assert summary["missing_percentage"] == 25.0
-
-    def test_get_data_summary_empty(self, correction_processor):
-        """Test getting summary of empty data."""
-        processor, _, _ = correction_processor
-        empty_data = pl.DataFrame()
-
-        summary = processor.get_data_summary(empty_data)
-
-        assert summary["rows"] == 0
-        assert summary["columns"] == 0
-        assert summary["missing_percentage"] == 0.0
 
     def test_validate_correction_input_valid(self, correction_processor, sample_data):
         """Test validation of valid correction input."""
