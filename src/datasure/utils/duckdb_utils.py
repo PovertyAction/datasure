@@ -168,7 +168,7 @@ def duckdb_get_table(
                 return pl.DataFrame()
 
 
-def duckdb_delete_table(project_id: str, alias: str, db_name: str) -> None:
+def duckdb_remove_table(project_id: str, alias: str, db_name: str) -> None:
     """Delete a table from a DuckDB database.
 
     PARAMS:
