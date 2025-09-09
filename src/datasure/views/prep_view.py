@@ -500,7 +500,7 @@ class PrepStepHandler:
         return {
             "action": "remove row(s)",
             "column_names": None,
-            "affected_count": affected_count or 0,
+            "affected_count": 0,
             "remaining_count": None,
             "value": value,
             "method": dp_prep_del_rows,
