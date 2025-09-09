@@ -127,19 +127,42 @@ class CorrectionProcessor:
         reason : str
             The reason for correction
         """
-        new_log_entry = {
-            "date": datetime.now(),
-            "KEY": key_value,
-            "ID": current_id,
-            "action": action,
-            "column": column,
-            "current_value": current_value,
-            "new_value": new_value,
-            "reason": reason,
-        }
-
         current_log = self.get_correction_log(alias)
-        updated_log = pl.concat([current_log, pl.DataFrame([new_log_entry])])
+
+        # Create new entry DataFrame with proper schema
+        new_entry_data = {
+            "date": [datetime.now()],
+            "KEY": [str(key_value)],
+            "ID": [str(current_id) if current_id is not None else None],
+            "action": [str(action)],
+            "column": [str(column) if column is not None else None],
+            "current_value": [
+                str(current_value) if current_value is not None else None
+            ],
+            "new_value": [str(new_value) if new_value is not None else None],
+            "reason": [str(reason)],
+        }
+        new_entry_df = pl.DataFrame(new_entry_data)
+
+        if current_log.is_empty():
+            # If no existing log, use the new entry schema
+            updated_log = new_entry_df
+        else:
+            # Ensure schema compatibility before concatenating
+            # Cast columns to match the new entry schema
+            aligned_current_log = current_log.with_columns(
+                [
+                    pl.col("date").cast(pl.Datetime("us")),
+                    pl.col("KEY").cast(pl.String),
+                    pl.col("ID").cast(pl.String),
+                    pl.col("action").cast(pl.String),
+                    pl.col("column").cast(pl.String),
+                    pl.col("current_value").cast(pl.String),
+                    pl.col("new_value").cast(pl.String),
+                    pl.col("reason").cast(pl.String),
+                ]
+            )
+            updated_log = pl.concat([aligned_current_log, new_entry_df])
 
         duckdb_save_table(
             project_id=self.project_id,
@@ -437,9 +460,58 @@ class CorrectionProcessor:
             raise ValueError(f"Invalid correction index: {correction_index}")
 
         # Remove the correction entry at the specified index
-        updated_log = pl.concat(
-            [correction_log[:correction_index], correction_log[correction_index + 1 :]]
-        )
+        if correction_index == 0 and len(correction_log) == 1:
+            # If removing the only entry, create an empty DataFrame with proper schema
+            updated_log = pl.DataFrame(
+                {
+                    "date": pl.Series([], dtype=pl.Datetime("us")),
+                    "KEY": pl.Series([], dtype=pl.String),
+                    "ID": pl.Series([], dtype=pl.String),
+                    "action": pl.Series([], dtype=pl.String),
+                    "column": pl.Series([], dtype=pl.String),
+                    "current_value": pl.Series([], dtype=pl.String),
+                    "new_value": pl.Series([], dtype=pl.String),
+                    "reason": pl.Series([], dtype=pl.String),
+                }
+            )
+        elif len(correction_log) > 1:
+            # Build list of parts to concatenate
+            parts = []
+            if correction_index > 0:
+                parts.append(correction_log[:correction_index])
+            if correction_index < len(correction_log) - 1:
+                parts.append(correction_log[correction_index + 1 :])
+
+            if parts:
+                updated_log = pl.concat(parts)
+            else:
+                # Should not happen given the conditions above, but handle it
+                updated_log = pl.DataFrame(
+                    {
+                        "date": pl.Series([], dtype=pl.Datetime("us")),
+                        "KEY": pl.Series([], dtype=pl.String),
+                        "ID": pl.Series([], dtype=pl.String),
+                        "action": pl.Series([], dtype=pl.String),
+                        "column": pl.Series([], dtype=pl.String),
+                        "current_value": pl.Series([], dtype=pl.String),
+                        "new_value": pl.Series([], dtype=pl.String),
+                        "reason": pl.Series([], dtype=pl.String),
+                    }
+                )
+        else:
+            # Shouldn't reach here but handle edge case
+            updated_log = pl.DataFrame(
+                {
+                    "date": pl.Series([], dtype=pl.Datetime("us")),
+                    "KEY": pl.Series([], dtype=pl.String),
+                    "ID": pl.Series([], dtype=pl.String),
+                    "action": pl.Series([], dtype=pl.String),
+                    "column": pl.Series([], dtype=pl.String),
+                    "current_value": pl.Series([], dtype=pl.String),
+                    "new_value": pl.Series([], dtype=pl.String),
+                    "reason": pl.Series([], dtype=pl.String),
+                }
+            )
 
         # Save the updated log
         duckdb_save_table(
