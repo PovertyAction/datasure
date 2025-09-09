@@ -1,12 +1,12 @@
 import polars as pl
 import streamlit as st
 
+from datasure.connectors.local import load_local_data, render_local_file_form
 from datasure.connectors.scto import (
     FormConfig,
     SurveyCTOUI,
     download_forms,
 )
-from datasure.processing.local import load_local_data, render_local_file_form
 from datasure.utils.duckdb_utils import (
     duckdb_get_aliases,
     duckdb_get_imported_datasets,
