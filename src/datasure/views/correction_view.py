@@ -23,18 +23,26 @@ if not project_id:
 # Initialize correction processor
 correction_processor = CorrectionProcessor(project_id)
 
-# Get configuration data
-hfc_config_logs = duckdb_get_table(
-    project_id=project_id, alias="check_config", db_name="logs"
-)
+
+# Cache configuration data loading
+@st.cache_data(ttl=120, show_spinner=False)
+def get_hfc_config(project_id: str) -> tuple[pl.DataFrame, list[str]]:
+    """Get HFC configuration data and page list."""
+    hfc_config_logs = duckdb_get_table(
+        project_id=project_id, alias="check_config", db_name="logs"
+    )
+    if hfc_config_logs.is_empty():
+        return hfc_config_logs, []
+    return hfc_config_logs, hfc_config_logs["page_name"].to_list()
+
+
+hfc_config_logs, hfc_pages = get_hfc_config(project_id)
+
 if hfc_config_logs.is_empty():
     st.info(
         "No checks configured. Please configure checks on the Configure Checks page."
     )
     st.stop()
-
-# Get list of HFC pages from check config logs
-hfc_pages = hfc_config_logs["page_name"].to_list()
 
 if not hfc_pages:
     st.info(
@@ -43,6 +51,7 @@ if not hfc_pages:
     st.stop()
 
 
+@st.fragment
 def render_add_correction_form(
     correction_processor: CorrectionProcessor,
     key_col: str,
@@ -72,13 +81,14 @@ def render_add_correction_form(
     with st.popover(":material/add: Add correction step", width="stretch"):
         st.markdown("*Add new correction step*")
 
-        # Get unique key values for selection
-        key_options = (
-            corrected_data.select(key_col)
-            .unique(maintain_order=True)
-            .to_series()
-            .to_list()
-        )
+        # Cache key options for better performance
+        @st.cache_data(ttl=60, show_spinner=False)
+        def get_key_options(data: pl.DataFrame, key_col: str) -> list:
+            return (
+                data.select(key_col).unique(maintain_order=True).to_series().to_list()
+            )
+
+        key_options = get_key_options(corrected_data, key_col)
         corr_key_val = st.selectbox(
             label="Select KEY",
             options=key_options,
@@ -279,6 +289,7 @@ def render_correction_input_form(
         )
 
 
+@st.fragment
 def render_remove_correction_form(
     correction_processor: CorrectionProcessor,
     alias: str,
@@ -358,6 +369,7 @@ def render_remove_correction_form(
                 st.error(f"Error removing correction: {e!s}")
 
 
+@st.fragment
 def render_correction_log(
     correction_processor: CorrectionProcessor, alias: str, tab_index: int
 ) -> None:
@@ -390,6 +402,7 @@ def render_correction_log(
                 )
 
 
+@st.fragment
 def render_data_summary(
     correction_processor: CorrectionProcessor, data: pl.DataFrame
 ) -> None:
@@ -421,60 +434,78 @@ def render_data_summary(
         )
 
 
+# Cache tab configuration data
+@st.cache_data(ttl=120, show_spinner=False)
+def get_tab_config(project_id: str, tab_index: int) -> tuple[str, str, str]:
+    """Get tab configuration data for rendering."""
+    try:
+        (
+            page_name,
+            survey_data_name,
+            survey_key,
+            survey_id,
+            survey_date,
+            enumerator,
+            backcheck_data_name,
+            tracking_data_name,
+        ) = get_check_config_settings(
+            project_id=project_id,
+            page_row_index=tab_index,
+        )
+        return page_name, survey_data_name, survey_key  # noqa: TRY300
+    except Exception:
+        return "", "", ""
+
+
+@st.fragment
+def render_correction_tab(
+    correction_processor: CorrectionProcessor, project_id: str, tab_index: int
+) -> None:
+    """Render a single correction tab."""
+    page_name, survey_data_name, survey_key = get_tab_config(project_id, tab_index)
+
+    if not page_name:
+        st.error(f"Error loading configuration for tab {tab_index}")
+        return
+
+    st.subheader(f"{page_name}")
+    st.write("Add corrections to the data based on issues identified in checks.")
+
+    # Ensure corrected data exists (initialize from prepped data if needed)
+    corrected_data = correction_processor.get_corrected_data(survey_data_name)
+
+    if corrected_data.is_empty():
+        st.warning(f"No data available for {survey_data_name}")
+        return
+
+    # Render correction input form
+    render_correction_input_form(
+        correction_processor=correction_processor,
+        key_col=survey_key,
+        alias=survey_data_name,
+        tab_index=tab_index,
+    )
+
+    # Render correction log
+    render_correction_log(
+        correction_processor=correction_processor,
+        alias=survey_data_name,
+        tab_index=tab_index,
+    )
+
+    # Render data summary and preview
+    render_data_summary(
+        correction_processor=correction_processor,
+        data=corrected_data,
+    )
+
+
 # Create tabs for each HFC page
 corr_tabs = st.tabs(hfc_pages)
 
 for tab_index, tab in enumerate(corr_tabs):
     with tab:
-        # Get page configuration for current tab
-        try:
-            (
-                page_name,
-                survey_data_name,
-                survey_key,
-                survey_id,
-                survey_date,
-                enumerator,
-                backcheck_data_name,
-                tracking_data_name,
-            ) = get_check_config_settings(
-                project_id=project_id,
-                page_row_index=tab_index,
-            )
-        except Exception as e:
-            st.error(f"Error loading configuration for tab {tab_index}: {e!s}")
-            continue
-
-        st.subheader(f"{page_name}")
-        st.write("Add corrections to the data based on issues identified in checks.")
-
-        # Ensure corrected data exists (initialize from prepped data if needed)
-        corrected_data = correction_processor.get_corrected_data(survey_data_name)
-
-        if corrected_data.is_empty():
-            st.warning(f"No data available for {survey_data_name}")
-            continue
-
-        # Render correction input form
-        render_correction_input_form(
-            correction_processor=correction_processor,
-            key_col=survey_key,
-            alias=survey_data_name,
-            tab_index=tab_index,
-        )
-
-        # Render correction log
-        render_correction_log(
-            correction_processor=correction_processor,
-            alias=survey_data_name,
-            tab_index=tab_index,
-        )
-
-        # Render data summary and preview
-        render_data_summary(
-            correction_processor=correction_processor,
-            data=corrected_data,
-        )
+        render_correction_tab(correction_processor, project_id, tab_index)
 
 # Navigation
 page_navigation(

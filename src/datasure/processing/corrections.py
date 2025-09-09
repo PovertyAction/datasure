@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Any
 
 import polars as pl
+import streamlit as st
 
 from datasure.utils import duckdb_get_table, duckdb_save_table
 
@@ -19,7 +20,8 @@ class CorrectionProcessor:
         """
         self.project_id = project_id
 
-    def get_corrected_data(self, alias: str) -> pl.DataFrame:
+    @st.cache_data(ttl=60, show_spinner=False)
+    def get_corrected_data(_self, alias: str) -> pl.DataFrame:
         """Get corrected data for a given alias.
 
         If no corrected data exists, initializes from prepped data.
@@ -35,7 +37,7 @@ class CorrectionProcessor:
             The corrected data
         """
         corrected_data = duckdb_get_table(
-            project_id=self.project_id,
+            project_id=_self.project_id,
             alias=alias,
             db_name="corrected",
         )
@@ -43,12 +45,12 @@ class CorrectionProcessor:
         if corrected_data.is_empty():
             # Initialize from prepped data
             prepped_data = duckdb_get_table(
-                project_id=self.project_id,
+                project_id=_self.project_id,
                 alias=alias,
                 db_name="prep",
             )
             if not prepped_data.is_empty():
-                self.save_corrected_data(alias, prepped_data)
+                _self.save_corrected_data(alias, prepped_data)
                 return prepped_data
 
         return corrected_data
@@ -69,8 +71,12 @@ class CorrectionProcessor:
             alias=alias,
             db_name="corrected",
         )
+        # Clear cache after saving to ensure fresh data
+        self.get_corrected_data.clear()
+        self.get_data_summary.clear()
 
-    def get_correction_log(self, alias: str) -> pl.DataFrame:
+    @st.cache_data(ttl=30, show_spinner=False)
+    def get_correction_log(_self, alias: str) -> pl.DataFrame:
         """Get correction log for a given alias.
 
         Parameters
@@ -84,7 +90,7 @@ class CorrectionProcessor:
             The correction log
         """
         return duckdb_get_table(
-            project_id=self.project_id,
+            project_id=_self.project_id,
             alias=f"corr_log_{alias}",
             db_name="logs",
         )
@@ -323,7 +329,8 @@ class CorrectionProcessor:
         """
         return data.filter(pl.col(key_col) != key_value)
 
-    def get_data_summary(self, data: pl.DataFrame) -> dict[str, Any]:
+    @st.cache_data(ttl=60, show_spinner=False)
+    def get_data_summary(_self, data: pl.DataFrame) -> dict[str, Any]:
         """Get summary statistics for the data.
 
         Parameters
@@ -441,6 +448,9 @@ class CorrectionProcessor:
             alias=f"corr_log_{alias}",
             db_name="logs",
         )
+        # Clear correction log cache
+        self.get_correction_log.clear()
+        self.get_correction_summary.clear()
 
         # Reapply all remaining corrections
         self._reapply_all_corrections(alias)
@@ -511,7 +521,8 @@ class CorrectionProcessor:
         # Save the reapplied corrections
         self.save_corrected_data(alias, corrected_data)
 
-    def get_correction_summary(self, alias: str) -> list[dict[str, Any]]:
+    @st.cache_data(ttl=30, show_spinner=False)
+    def get_correction_summary(_self, alias: str) -> list[dict[str, Any]]:
         """Get a summary of all correction entries for display.
 
         Parameters
@@ -524,7 +535,7 @@ class CorrectionProcessor:
         list[dict[str, Any]]
             List of correction summaries with index, description, and details
         """
-        correction_log = self.get_correction_log(alias)
+        correction_log = _self.get_correction_log(alias)
 
         if correction_log.is_empty():
             return []
