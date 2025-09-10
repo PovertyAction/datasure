@@ -860,6 +860,8 @@ def display_enumerator_summary(
     cmap = sns.light_palette("pink", as_cmap=True)
 
     perc_cols = [col for col in summary_df.columns if col.startswith("%")]
+    styler_limit = summary_df.shape[0] * summary_df.shape[1]
+    pd.set_option("styler.render.max_elements", styler_limit)
     summary_df = summary_df.style.format(subset=perc_cols, formatter="{:.2%}")
     num_cols = [col for col in summary_df.columns if col.startswith("#")]
     summary_df = summary_df.format(
@@ -1046,6 +1048,8 @@ def display_enumerator_productivity(
     )
     cmap = sns.light_palette("pink", as_cmap=True)
     format_cols = [col for col in productivity_df.columns if col not in [enumerator]]
+    styler_limit = productivity_df.shape[0] * productivity_df.shape[1]
+    pd.set_option("styler.render.max_elements", styler_limit)
     productivity_df = productivity_df.style.format(
         subset=format_cols,
         formatter="{:,.0f}",
@@ -1190,6 +1194,8 @@ def display_enumerator_statistics(
         )
         cmap = sns.light_palette("pink", as_cmap=True)
         # apply formatting to the statistics DataFrame
+        styler_limit = stats_df.shape[0] * stats_df.shape[1]
+        pd.set_option("styler.render.max_elements", styler_limit)
         stats_df = stats_df.style.format(
             subset=statscols,
             formatter="{:,.2f}",
@@ -1433,6 +1439,8 @@ def display_enumerator_statistics_overtime(
             col for col in stats_overtime_df.columns if col not in [enumerator]
         ]
         format = "{:,.2%}" if stat == "missing" else "{:,.2f}"
+        styler_limit = stats_overtime_df.shape[0] * stats_overtime_df.shape[1]
+        pd.set_option("styler.render.max_elements", styler_limit)
         stats_overtime_df = stats_overtime_df.style.format(
             subset=format_cols,
             formatter=format,
