@@ -295,6 +295,8 @@ def missing_columns(data: pd.DataFrame, missing_codes, setting_file) -> None:
     )
 
     cmap = sns.light_palette("pink", as_cmap=True)
+    styler_limit = mv_data_filtered.shape[0] * mv_data_filtered.shape[1]
+    pd.set_option("styler.render.max_elements", styler_limit)
     st.dataframe(
         mv_data_filtered.style.format(
             subset=perc_cols, precision=2
@@ -539,6 +541,8 @@ def missing_compare(data: pd.DataFrame, setting_file: str) -> None:
             st.dataframe(group_by_data, use_container_width=True, hide_index=True)
         else:
             cmap = sns.light_palette("pink", as_cmap=True)
+            styler_limit = group_by_data.shape[0] * group_by_data.shape[1]
+            pd.set_option("styler.render.max_elements", styler_limit)
             st.dataframe(
                 group_by_data.style.format(subset=compare_col, precision=2)
                 .format(subset=["values (count)"], thousands=",")

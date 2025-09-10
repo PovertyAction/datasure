@@ -792,6 +792,8 @@ def display_attempted_interviews(
         st.plotly_chart(fig, use_container_width=True)
 
     with ai2:
+        styler_limit = attempted_interviews.shape[0] * attempted_interviews.shape[1]
+        pd.set_option("styler.render.max_elements", styler_limit)
         st.dataframe(
             data=attempted_interviews.style.background_gradient(
                 subset=["num_interviews"],

@@ -689,7 +689,8 @@ def summary_progress(
         )
 
         cmap = sns.light_palette("pink", as_cmap=True)
-
+        styler_limit = progress_data.shape[0] * progress_data.shape[1]
+        pd.set_option("styler.render.max_elements", styler_limit)
         st.dataframe(
             progress_data.style.format(
                 subset=format_cols, precision=0
