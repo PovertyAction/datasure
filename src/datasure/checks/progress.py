@@ -255,8 +255,9 @@ def display_progress_summary(data: pd.DataFrame, target: int) -> None:
                 "Target number of interviews is not set. Got to :material/settings: settings to set it."
             )
         else:
-            sp1.progress(value=percentage_completed / 100)
-            sp2.write(f"{percentage_completed:.2f}%")
+            progress_val = percentage_completed/100 if percentage_completed <= 1 else 1
+            sp1.progress(value=progress_val)
+            sp2.write(f"{percentage_completed/100:.2f}%")
     if not target:
         with mc2:
             st.write("Target Interviews")

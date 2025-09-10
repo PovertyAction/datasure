@@ -611,7 +611,8 @@ def summary_progress(
             st.info("Target not set. Progress cannot be computed.")
         else:
             sp1, sp2 = st.columns([0.80, 0.20])
-            sp1.progress(value=int(progress))
+            progress_val = progress if progress <= 100 else 100
+            sp1.progress(value=int(progress_val))
             sp2.write(f"{progress:.2f}%")
     mc2.metric(
         label="Average submissions per day",
