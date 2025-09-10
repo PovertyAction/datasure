@@ -283,7 +283,7 @@ class PrepStepHandler:
                         key=f"st_sb_trf_pattern{i}",
                     )
 
-            elif col_type == "int64" or col_type == "float64":
+            elif col_type in ["Int64", "Float64"]:
                 dp_prep_trf_func = st.selectbox(
                     label="Select Function",
                     options=config.DP_NUM_FUNCS,
