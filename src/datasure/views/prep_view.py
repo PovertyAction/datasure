@@ -9,7 +9,15 @@ from datasure.utils import (
     duckdb_save_table,
     get_df_info,
 )
-from datasure.utils.navigations import page_navigation
+from datasure.utils.navigations import (
+    add_demo_navigation,
+    demo_callout,
+    demo_expander,
+    demo_sidebar_help,
+    page_navigation,
+    show_demo_next_action,
+)
+from datasure.utils.onboarding_utils import is_demo_project
 
 # Get project id
 project_id: str = st.session_state.st_project_id
@@ -124,8 +132,38 @@ DP_ROW_CONDITIONS: tuple = (
 # -- DATA PREP PAGE --#
 # Creates page for data preprocessing
 
+# Add demo navigation and guidance
+add_demo_navigation("prep_view.py", step=3)
+demo_sidebar_help()
+
 st.title("Prepare Data")
 st.markdown("Make necessary adjustments to data before check")
+
+# Demo guidance
+if is_demo_project():
+    demo_callout(
+        "Now let's prepare your demo data for quality analysis! "
+        "Data preparation helps clean and standardize your data before running quality checks."
+    )
+
+    demo_expander(
+        "What is Data Preparation?",
+        """
+        **Data preparation is a crucial step that:**
+        - Cleans and standardizes your survey data
+        - Handles missing values and inconsistencies
+        - Creates new variables for analysis
+        - Removes problematic rows or columns
+
+        **For this demo, you can:**
+        1. **Explore your data**: Look at the preview tables below to see your survey data
+        2. **Try optional transformations**: Add data preparation steps if you want to experiment
+        3. **Skip to next step**: Your demo data is already clean enough for quality checks!
+
+        **Ready to continue?** You can move directly to "Configure Checks" or try adding some preparation steps first.
+        """,
+        expanded=True,
+    )
 
 
 # --- Add prep step ---#
@@ -586,6 +624,12 @@ if show_prep_page_info:
         with tab:
             st.subheader("Apply Changes:")
 
+            # Demo guidance for apply changes section
+            if is_demo_project():
+                demo_callout(
+                    "Optional: Use these tools to transform your data. info",
+                )
+
             # create for text and form
             pt1, pt2, _ = st.columns((0.4, 0.3, 0.3))
 
@@ -619,6 +663,15 @@ if show_prep_page_info:
             # display preview of peppered data
             with st.container(border=True):
                 st.subheader("Preview Downloaded Data")
+
+                # Demo guidance for data preview
+                if is_demo_project():
+                    demo_callout(
+                        f"Here's your {label} data! Notice the data quality issues like missing values ({miss_perc:.1f}% missing) "
+                        "that we'll identify in the next step.",
+                        "info",
+                    )
+
                 st.write("---")
 
                 mc1, mc2, mc3 = st.columns((0.3, 0.3, 0.4))
@@ -633,13 +686,44 @@ if show_prep_page_info:
 
                 st.dataframe(prep_data, use_container_width=True, hide_index=False)
 
-page_navigation(
-    prev={
-        "page_name": st.session_state.st_import_data_page,
-        "label": "← Back: Import Data",
-    },
-    next={
-        "page_name": st.session_state.st_config_checks_page,
-        "label": "Next: Configure Checks →",
-    },
-)
+# Demo next action or regular navigation
+if is_demo_project():
+    st.write("---")
+
+    demo_expander(
+        "Optional: Try Data Preparation Features",
+        """
+        **Want to experiment with data preparation?** Try these features:
+
+        **Transform columns:**
+        - Convert text to uppercase/lowercase
+        - Extract patterns from text fields
+        - Perform mathematical operations on numeric data
+
+        **Add new columns:**
+        - Create calculated fields
+        - Add unique identifiers
+        - Generate summary statistics
+
+        **Remove problematic data:**
+        - Delete unnecessary columns
+        - Remove rows with missing critical data
+        - Filter out outliers
+
+        Your demo data is already prepared for quality checks, so these steps are optional in the demo.
+        """,
+        expanded=False,
+    )
+
+    show_demo_next_action(3, "st_config_checks_page", "Configure Quality Checks")
+else:
+    page_navigation(
+        prev={
+            "page_name": st.session_state.st_import_data_page,
+            "label": "← Back: Import Data",
+        },
+        next={
+            "page_name": st.session_state.st_config_checks_page,
+            "label": "Next: Configure Checks →",
+        },
+    )

@@ -16,7 +16,15 @@ from datasure.utils.duckdb_utils import (
     duckdb_save_table,
     duckdb_table_exists,
 )
-from datasure.utils.navigations import page_navigation
+from datasure.utils.navigations import (
+    add_demo_navigation,
+    demo_callout,
+    demo_expander,
+    demo_sidebar_help,
+    page_navigation,
+    show_demo_next_action,
+)
+from datasure.utils.onboarding_utils import DEMO_PROJECT_ID, is_demo_project
 from datasure.utils.secure_credentials import (
     delete_stored_credentials,
     list_stored_credentials,
@@ -30,6 +38,11 @@ CREDENTIAL_TYPE = ("SurveyCTO Login", "SurveyCTO Private Key")
 # --- CONFIGURE PAGE --- #
 
 st.set_page_config("Import Data", page_icon=":sync:", layout="wide")
+
+# Add demo navigation and guidance
+add_demo_navigation("import_view.py", step=2)
+demo_sidebar_help()
+
 st.title("Import Data")
 st.write("---")
 
@@ -46,6 +59,15 @@ if not project_id:
 # add session state for raw dataset list
 if "st_raw_dataset_list" not in st.session_state:
     st.session_state.st_raw_dataset_list = duckdb_get_aliases(project_id, to_load=True)
+
+# Demo-specific setup
+if (
+    is_demo_project()
+    and project_id == DEMO_PROJECT_ID
+    and "demo_survey" not in st.session_state.st_raw_dataset_list
+):
+    # Ensure demo datasets are in the list
+    st.session_state.st_raw_dataset_list.extend(["demo_survey", "demo_backcheck"])
 
 if "st_prep_dataset_list" not in st.session_state:
     st.session_state.st_prep_dataset_list = None
@@ -103,6 +125,14 @@ def load_raw_datasets(project_id: str) -> None:
             status.update(
                 label="Data loaded successfully!", state="complete", expanded=True
             )
+
+            # Demo success message
+            if is_demo_project():
+                demo_callout(
+                    "Great! You've successfully loaded your demo survey data. "
+                    "You can see the survey data and backcheck data are now available for analysis.",
+                    "success",
+                )
 
 
 # --- Update import log in the cache file --- #
@@ -335,6 +365,14 @@ if not import_log.is_empty():
         # activate prep section
 
         st.subheader("Preview Imported Data")
+
+        # Demo guidance
+        if is_demo_project():
+            demo_callout(
+                "Data import complete! Your demo datasets are loaded and ready for quality analysis. "
+                "In a real project, this is what you would see after importing from SurveyCTO or uploading CSV files.",
+                "success",
+            )
         sb, _, mb1, mb2, mb3 = st.columns([0.3, 0.25, 0.15, 0.15, 0.15])
         with sb:
             selected_dataset = st.selectbox(
@@ -380,10 +418,42 @@ if not import_log.is_empty():
 
         st.dataframe(preview_data, use_container_width=True)
 
+        # Demo expander with educational content
+        if is_demo_project():
+            demo_expander(
+                "About Your Pre-loaded Demo Data",
+                """
+                **Demo Status: Data Import Complete!**
+
+                Your survey data has been successfully imported and is ready for analysis.
+
+                **What you're seeing:**
+                - **Survey Data**: 12 household surveys from rural communities in India
+                - **Backcheck Data**: 8 quality control validation records
+                - **Data Quality Issues**: Intentionally included to demonstrate DataSure's capabilities
+
+                **In a real project, you would have:**
+                1. **Connected to SurveyCTO**: Automatic sync with your survey forms
+                2. **Uploaded local files**: CSV/Excel files from your computer
+                3. **Used custom scripts**: Python scripts for other data sources
+
+                **Next:** Let's move to data preparation where we'll clean and prepare this data for comprehensive quality checks!
+                """,
+                expanded=True,
+            )
+
+            # Demo next action
+            st.write("---")
+            show_demo_next_action(2, "st_prep_data_page", "Prepare Your Data")
+
 else:
     st.info("No import data found. Please add import configurations.")
 
-
-page_navigation(
-    next={"page_name": st.session_state.st_prep_data_page, "label": "Next: Prep Data →"}
-)
+# Previous and next pages (import, prep) - only for non-demo projects
+if not is_demo_project():
+    page_navigation(
+        next={
+            "page_name": st.session_state.st_prep_data_page,
+            "label": "Next: Prepare Data →",
+        }
+    )

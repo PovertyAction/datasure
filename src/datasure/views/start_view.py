@@ -8,6 +8,15 @@ from pathlib import Path
 import streamlit as st
 
 from datasure.utils.cache_utils import get_cache_path
+from datasure.utils.onboarding_utils import (
+    DEMO_PROJECT_ID,
+    create_demo_project,
+    load_demo_data,
+    set_onboarding_step,
+    show_demo_banner,
+    show_progress_indicator,
+    show_step_guidance,
+)
 
 
 def _validate_project_id(project_id: str) -> bool:
@@ -29,8 +38,12 @@ def get_project_names() -> list[str]:
     if projects_file.exists():
         with open(projects_file) as f:
             projects = json.load(f)
-        project_names = [project["name"] for project in projects.values()]
-    return project_names + ["Create New Project"]
+        project_names = [
+            project["name"]
+            for project in projects.values()
+            if not project.get("is_demo", False)
+        ]
+    return ["DataSure Demo"] + project_names + ["Create New Project"]
 
 
 def valid_project_name(project_name: str) -> bool:
@@ -188,6 +201,11 @@ with page_canvas:
 
     st.write("---")
 
+    # Show demo banner and progress if in demo mode
+    show_demo_banner()
+    show_progress_indicator()
+    show_step_guidance(1)
+
     st.header("Select Your Project")
     _, pc1, _ = st.columns([0.25, 0.5, 0.25])
     project_list = get_project_names()
@@ -201,7 +219,35 @@ with page_canvas:
             index=None,
             key="project_select_key",
         )
-        if project == "Create New Project":
+        if project == "DataSure Demo":
+            st.markdown("""
+            **Start here, if you are new to DataSure.**
+
+            This guided demo will walk you through:
+            - Importing survey data
+            - Running data quality checks
+            - Identifying and understanding data issues
+            - Generating quality reports
+
+            **Demo data:** Household survey data from rural communities with realistic data quality challenges.
+            """)
+
+            if st.button("Start Demo", type="primary", use_container_width=True):
+                # Create and load demo project
+                demo_project_id = create_demo_project()
+                st.session_state.st_project_id = demo_project_id
+                set_onboarding_step(1)
+
+                with st.spinner("Loading demo data..."):
+                    if load_demo_data():
+                        st.success("Demo data loaded successfully!")
+                        st.session_state.st_project_id = demo_project_id
+                        set_onboarding_step(2)
+                        st.switch_page(st.session_state.st_import_data_page)
+                    else:
+                        st.error("Failed to load demo data. Please try again.")
+
+        elif project == "Create New Project":
             project_name = st.text_input(
                 "Enter Project Name", placeholder="My New Project"
             )
@@ -229,13 +275,15 @@ with page_canvas:
                 st.write(f"Loading project '{project}'...")
                 st.session_state.st_project_id = project_id
                 st.switch_page(st.session_state.st_import_data_page)
-            with st.expander(":material/delete: delete project"):
-                if (
-                    st.button("Confirm delete", use_container_width=True)
-                    and project_id in projects
-                ):
-                    delete_project(project_id)
-                    st.success(f"Project '{project}' deleted successfully!")
-                    if "st_project_id" in st.session_state:
-                        st.session_state.st_project_id = ""
-                    st.rerun()
+            # Only show delete option for non-demo projects
+            if project_id != DEMO_PROJECT_ID:
+                with st.expander(":material/delete: delete project"):
+                    if (
+                        st.button("Confirm delete", use_container_width=True)
+                        and project_id in projects
+                    ):
+                        delete_project(project_id)
+                        st.success(f"Project '{project}' deleted successfully!")
+                        if "st_project_id" in st.session_state:
+                            st.session_state.st_project_id = ""
+                        st.rerun()
