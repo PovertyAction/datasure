@@ -1,0 +1,9 @@
+state_id,state,district_id,district,village_id,village_name,hhid,age,household_count,minc_farm,minc_labor,finc_farm,finc_labor,own_land,land_hectare,rooms,starttime,duration,endtime,submissiondate,KEY,team_id,bcer_id,bcer_name,minc_count
+AN,Anantapur,AN050,Singanamala,AN050,Vidavalur,AN050-010,30,10,1,,1,,No,,2,09aug2025 16:53:05,600,09aug2025 17:03:04,09aug2025 18:30:28,uuid:3xd8ak09-175g-970n-88i2-x03883su825f,1,16,Priya Sharma,1
+AN,Anantapur,AN036,Rayadurg,AN036,Bommanahal,AN036-017,,0,1,,,,No,,,20jul2025 14:59:33,418,20jul2025 15:06:24,20jul2025 19:33:00,uuid:4qr1mm51-608y-705j-67v2-x54560fg488d,1,16,Priya Sharma,0
+UP,Uttar Pradesh,UP018,Allahabad,UP018,Holagarh,UP018-031,45,7,1,1,1,1,Yes,2,5,02aug2025 14:35:11,316,02aug2025 14:41:38,02aug2025 16:11:59,uuid:5ie5pi85-130i-372i-12o5-y02612su143k,4,46,Rohit Kumar,1
+UP,Uttar Pradesh,UP007,Kanpur,UP007,Bilhaur,UP007-042,40,6,1,1,,1,No,,4,21jul2025 13:22:27,780,21jul2025 13:36:27,21jul2025 17:53:00,uuid:2ul9qr31-673i-517y-36w5-x61729yj610s,4,46,Rohit Kumar,2
+UP,Uttar Pradesh,UP006,Kanpur,UP006,Akbarpur,UP006-049,38,9,,1,1,1,No,,3,12aug2025 16:23:10,375,12aug2025 16:31:19,12aug2025 21:10:22,uuid:3vh7kz51-525e-192k-93p2-v45722vq477e,4,46,Rohit Kumar,1
+UP,Uttar Pradesh,UP013,Varanasi,UP013,Pindra,UP013-001,28,5,1,,,1,No,,2,10aug2025 12:43:27,441,10aug2025 12:51:27,10aug2025 14:09:22,uuid:8wo9fg78-268e-040t-70o4-e79630jo678m,4,46,Rohit Kumar,0
+GJ,Gujarat,GJ047,Banaskantha,GJ047,Deesa,GJ047-006,61,6,1,1,1,1,Yes,,4,13aug2025 11:01:03,937,13aug2025 11:16:21,13aug2025 14:07:38,uuid:8tp6pf85-928c-834t-16f0-g13614ux693g,2,26,Arjun Patel,3
+AN,Anantapur,AN010,Dharmavaram,AN010,Ramagiri,AN010-056,28,5,1,,,1,No,9,2,12sep2025 12:10:01,296,12sep2025 12:16:39,12sep2025 16:02:01,uuid:0rb4mf99-348c-101s-93i7-d48842yi992v,1,16,Priya Sharma,0
