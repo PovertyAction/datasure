@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "DataSure"
-version = "0.4.0"
+version = "0.4.2a1"
 description = "IPA Data Management System Dashboard"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -24,7 +24,7 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "streamlit>=1.47.0",
+    "streamlit>=1.49.0",
     "pandas>=2.2.2",
     "plotly>=6.2.0",
     "numpy>=2.2.3",
@@ -43,6 +43,8 @@ dependencies = [
     "pillow>=11.3.0",
     "pydantic>=2.11.7",
     "keyring>=25.6.0",
+    "polars-readstat>=0.5.1",
+    "fastexcel>=0.14.0",
 ]
 
 [project.urls]
