@@ -22,6 +22,7 @@ class SurveyCTOAPIConfig:
         """Get base URL for API requests."""
         return f"https://{self.server_name}.surveycto.com/api/v2"
 
+
 class SurveyCTOAPIError(Exception):
     """Base exception for SurveyCTO API errors."""
 
@@ -126,7 +127,6 @@ class SurveyCTOAPIClient:
         response = self._make_request("GET", "/datasets")
         return response.json()
 
-
     def get_dataset_info(self, dataset_id: str) -> dict[str, Any]:
         """Get information about a specific dataset.
 
@@ -173,7 +173,10 @@ class SurveyCTOAPIClient:
         return response.json()
 
     def download_form_data_json(
-        self, form_id: str, params: dict[str, Any] | None = None
+        self,
+        form_id: str,
+        params: dict[str, Any] | None = None,
+        private_key: bytes | str | None = None,
     ) -> dict[str, Any]:
         """Download form data in JSON wide format.
 
@@ -181,37 +184,121 @@ class SurveyCTOAPIClient:
         ----------
             form_id: Form identifier
             params: Optional query parameters (e.g., date filters)
+            private_key: Private key for decrypting encrypted form data.
+                Can be provided as bytes or string. Only supported for JSON format.
 
         Returns
         -------
             Form data in JSON wide format
+
+        Raises
+        ------
+            SurveyCTOAPIError: If the request fails
+
+        Notes
+        -----
+            When downloading encrypted forms, the private_key parameter must be
+            provided. The private key is uploaded as a file to the server
+            for decryption.
         """
-        response = self._make_request("GET", f"/forms/data/wide/json/{form_id}", params=params)
-        return response.json()
+        endpoint = f"/forms/data/wide/json/{form_id}"
+        url = f"{self.config.base_url}{endpoint}"
+
+        try:
+            if private_key is None:
+                # Standard GET request for unencrypted data
+                response = self._make_request("GET", endpoint, params=params)
+                return response.json()
+            # POST request with private key file for encrypted data
+            files = {"private_key": private_key}
+            response = self.session.post(
+                url,
+                files=files,
+                params=params,
+                timeout=self.config.timeout,
+            )
+            response.raise_for_status()
+            return response.json()
+
+        except requests.exceptions.HTTPError as e:
+            self.logger.exception(f"HTTP error downloading form data from {url}")
+            raise SurveyCTOAPIError(f"Failed to download form data: {e}") from e
+
+        except requests.exceptions.ConnectionError as e:
+            self.logger.exception(f"Connection error downloading form data from {url}")
+            raise SurveyCTOAPIError(f"Connection failed: {e}") from e
+
+        except requests.exceptions.Timeout as e:
+            self.logger.exception(f"Timeout downloading form data from {url}")
+            raise SurveyCTOAPIError(f"Request timeout: {e}") from e
+
+        except Exception as e:
+            self.logger.exception(f"Unexpected error downloading form data from {url}")
+            raise SurveyCTOAPIError(f"Unexpected error: {e}") from e
 
     # --- Submissions Endpoints --- #
 
-    def download_attachment(
-        self, form_id: str, submission_id: str, attachment_name: str
+    def download_attachment_from_url(
+        self, url: str, private_key: bytes | str | None = None
     ) -> bytes:
-        """Download a submission attachment file.
+        """Download an attachment file from a SurveyCTO URL.
 
         Parameters
         ----------
-            form_id: Form identifier
-            submission_id: Submission identifier
-            attachment_name: Name of the attachment file
+            url: The complete URL of the attachment to download
+            private_key: Private key for decrypting encrypted attachments.
+                Can be provided as bytes or string.
 
         Returns
         -------
             Attachment file content as bytes
+
+        Raises
+        ------
+            SurveyCTOAPIError: If the request fails
+
+        Notes
+        -----
+            This method is useful when you have the complete attachment URL
+            from form data or API responses. For encrypted attachments,
+            the private_key parameter must be provided.
         """
-        response = self._make_request(
-            "GET",
-            f"/forms/{form_id}/submissions/{submission_id}/attachments/{attachment_name}",
-            stream=True,
-        )
-        return response.content
+        try:
+            if private_key is None:
+                # Standard GET request for unencrypted attachments
+                response = self.session.get(
+                    url,
+                    timeout=self.config.timeout,
+                    stream=True,
+                )
+                response.raise_for_status()
+                return response.content
+            # POST request with private key file for encrypted attachments
+            files = {"private_key": private_key}
+            response = self.session.post(
+                url,
+                files=files,
+                timeout=self.config.timeout,
+                stream=True,
+            )
+            response.raise_for_status()
+            return response.content  # noqa: TRY300
+
+        except requests.exceptions.HTTPError as e:
+            self.logger.exception(f"HTTP error downloading from {url}")
+            raise SurveyCTOAPIError(f"Failed to download from URL: {e}") from e
+
+        except requests.exceptions.ConnectionError as e:
+            self.logger.exception(f"Connection error downloading from {url}")
+            raise SurveyCTOAPIError(f"Connection failed: {e}") from e
+
+        except requests.exceptions.Timeout as e:
+            self.logger.exception(f"Timeout downloading from {url}")
+            raise SurveyCTOAPIError(f"Request timeout: {e}") from e
+
+        except Exception as e:
+            self.logger.exception(f"Unexpected error downloading from {url}")
+            raise SurveyCTOAPIError(f"Unexpected error: {e}") from e
 
     def close(self) -> None:
         """Close the session and clean up resources."""
