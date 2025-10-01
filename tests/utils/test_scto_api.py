@@ -326,7 +326,9 @@ class TestFormEndpoints:
                 "form1", params={"date": "2024-01-01"}, private_key=private_key
             )
 
-            expected_url = "https://testserver.surveycto.com/api/v2/forms/data/wide/json/form1"
+            expected_url = (
+                "https://testserver.surveycto.com/api/v2/forms/data/wide/json/form1"
+            )
             mock_post.assert_called_once_with(
                 expected_url,
                 files={"private_key": private_key},
@@ -345,9 +347,7 @@ class TestFormEndpoints:
             mock_post.return_value = mock_response
 
             with pytest.raises(SurveyCTOAPIError, match="Failed to download form data"):
-                api_client.download_form_data_json(
-                    "form1", private_key=b"test_key"
-                )
+                api_client.download_form_data_json("form1", private_key=b"test_key")
 
     def test_download_form_data_json_encrypted_connection_error(self, api_client):
         """Test downloading encrypted form data with connection error."""
@@ -357,9 +357,7 @@ class TestFormEndpoints:
             side_effect=requests.exceptions.ConnectionError("Connection error"),
         ):
             with pytest.raises(SurveyCTOAPIError, match="Connection failed"):
-                api_client.download_form_data_json(
-                    "form1", private_key=b"test_key"
-                )
+                api_client.download_form_data_json("form1", private_key=b"test_key")
 
     def test_download_form_data_json_encrypted_timeout_error(self, api_client):
         """Test downloading encrypted form data with timeout error."""
@@ -369,9 +367,7 @@ class TestFormEndpoints:
             side_effect=requests.exceptions.Timeout("Timeout"),
         ):
             with pytest.raises(SurveyCTOAPIError, match="Request timeout"):
-                api_client.download_form_data_json(
-                    "form1", private_key=b"test_key"
-                )
+                api_client.download_form_data_json("form1", private_key=b"test_key")
 
     def test_download_form_data_json_encrypted_unexpected_error(self, api_client):
         """Test downloading encrypted form data with unexpected error."""
@@ -379,9 +375,7 @@ class TestFormEndpoints:
             api_client.session, "post", side_effect=RuntimeError("Unexpected")
         ):
             with pytest.raises(SurveyCTOAPIError, match="Unexpected error"):
-                api_client.download_form_data_json(
-                    "form1", private_key=b"test_key"
-                )
+                api_client.download_form_data_json("form1", private_key=b"test_key")
 
 
 class TestSubmissionEndpoints:
@@ -413,7 +407,9 @@ class TestSubmissionEndpoints:
             mock_response.content = attachment_content
             mock_post.return_value = mock_response
 
-            result = api_client.download_attachment_from_url(url, private_key=private_key)
+            result = api_client.download_attachment_from_url(
+                url, private_key=private_key
+            )
 
             mock_post.assert_called_once_with(
                 url,
