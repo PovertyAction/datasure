@@ -1155,7 +1155,8 @@ def display_outlier_column_summary(outlier_summary: pd.DataFrame) -> None:
         )
 
     cmap = sns.light_palette("pink", as_cmap=True)
-
+    styler_limit = outlier_summary.shape[0] * outlier_summary.shape[1]
+    pd.set_option("styler.render.max_elements", styler_limit)
     outlier_summary = outlier_summary.style.background_gradient(
         subset=["outlier count"], cmap=cmap
     )

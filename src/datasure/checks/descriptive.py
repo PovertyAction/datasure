@@ -292,6 +292,8 @@ def plot_date_distribution(data: pd.DataFrame, date_col: str) -> None:
         """Display the distribution of a date column in a table."""
         st.write("### Date Distribution Table")
         cmap = sns.light_palette("pink", as_cmap=True)
+        styler_limit = prepped_date_data.shape[0] * prepped_date_data.shape[1]
+        pd.set_option("styler.render.max_elements", styler_limit)
         st.dataframe(
             prepped_date_data.style.format(
                 {
@@ -478,6 +480,8 @@ def plot_categorical_distribution(data: pd.DataFrame, categorical_col: str) -> N
 
         st.write("### One-way Table")
         cmap = sns.light_palette("pink", as_cmap=True)
+        styler_limit = one_way_table.shape[0] * one_way_table.shape[1]
+        pd.set_option("styler.render.max_elements", styler_limit)
         st.dataframe(
             one_way_table.style.format(
                 {
@@ -512,6 +516,8 @@ def plot_categorical_distribution(data: pd.DataFrame, categorical_col: str) -> N
 
         st.write("### Two-way Table")
         cmap = sns.light_palette("pink", as_cmap=True)
+        styler_limit = two_way_table.shape[0] * two_way_table.shape[1]
+        pd.set_option("styler.render.max_elements", styler_limit)
         st.dataframe(
             two_way_table.style.background_gradient(subset=format_cols, cmap=cmap),
             use_container_width=True,
@@ -547,6 +553,8 @@ def plot_categorical_distribution(data: pd.DataFrame, categorical_col: str) -> N
                 col for col in summary_statistics.columns if col != categorical_col
             ]
             cmap = sns.light_palette("pink", as_cmap=True)
+            styler_limit = summary_statistics.shape[0] * summary_statistics.shape[1]
+            pd.set_option("styler.render.max_elements", styler_limit)
             st.dataframe(
                 summary_statistics.style.format(
                     {c: "{:,.2f}" for c in format_cols},

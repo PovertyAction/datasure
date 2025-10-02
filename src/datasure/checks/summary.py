@@ -611,7 +611,8 @@ def summary_progress(
             st.info("Target not set. Progress cannot be computed.")
         else:
             sp1, sp2 = st.columns([0.80, 0.20])
-            sp1.progress(value=int(progress))
+            progress_val = progress if progress <= 100 else 100
+            sp1.progress(value=int(progress_val))
             sp2.write(f"{progress:.2f}%")
     mc2.metric(
         label="Average submissions per day",
@@ -689,7 +690,8 @@ def summary_progress(
         )
 
         cmap = sns.light_palette("pink", as_cmap=True)
-
+        styler_limit = progress_data.shape[0] * progress_data.shape[1]
+        pd.set_option("styler.render.max_elements", styler_limit)
         st.dataframe(
             progress_data.style.format(
                 subset=format_cols, precision=0
