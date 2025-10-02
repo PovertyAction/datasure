@@ -513,7 +513,6 @@ dependencies = [
     { name = "polars-readstat" },
     { name = "pyarrow" },
     { name = "pydantic" },
-    { name = "pysurveycto" },
     { name = "requests" },
     { name = "scikit-learn" },
     { name = "seaborn" },
@@ -554,7 +553,6 @@ requires-dist = [
     { name = "polars-readstat", specifier = ">=0.5.1" },
     { name = "pyarrow", specifier = ">=16.0.0" },
     { name = "pydantic", specifier = ">=2.11.7" },
-    { name = "pysurveycto", specifier = ">=0.0.15" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
     { name = "requests", specifier = ">=2.32.3" },
@@ -2246,19 +2244,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/8c/d5/e5aeee5387091148a19e1145f63606619cb5f20b83fccb63efae6474e7b2/pyparsing-3.2.0.tar.gz", hash = "sha256:cbf74e27246d595d9a74b186b810f6fbb86726dbf3b9532efb343f6d7294fe9c", size = 920984, upload-time = "2024-10-13T10:01:16.046Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/be/ec/2eb3cd785efd67806c46c13a17339708ddc346cbb684eade7a6e6f79536a/pyparsing-3.2.0-py3-none-any.whl", hash = "sha256:93d9577b88da0bbea8cc8334ee8b918ed014968fd2ec383e868fb8afb1ccef84", size = 106921, upload-time = "2024-10-13T10:01:13.682Z" },
-]
-
-[[package]]
-name = "pysurveycto"
-version = "0.0.15"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "requests" },
-    { name = "urllib3" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/4f/05/410fa2652a9056895657993585f6c483e7473d41fb6a8f79c13825f876df/pysurveycto-0.0.15.tar.gz", hash = "sha256:496b24abe1a881bdd81aa8dce504692d1a192de7a233294c6db17d842def642a", size = 11273, upload-time = "2025-02-01T03:22:40.207Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3b/da/eef9f801296d1881064fe1fe5a068b659f908fa7d31677a82e1c39115f0f/pysurveycto-0.0.15-py3-none-any.whl", hash = "sha256:c9067b852542384d9212291129c379f6684cb470515887677f99c8dd70060a20", size = 9858, upload-time = "2025-02-01T03:22:36.501Z" },
 ]
 
 [[package]]

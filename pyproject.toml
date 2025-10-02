@@ -32,7 +32,6 @@ dependencies = [
     "seaborn>=0.13.2",
     "scikit-learn>=1.5.2",
     "geopy>=2.4.1",
-    "pysurveycto>=0.0.15",
     "requests>=2.32.3",
     "streamlit-extras>=0.5.5",
     "pyarrow>=16.0.0",
