@@ -7,7 +7,6 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
-import pandas as pd
 import polars as pl
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
@@ -160,35 +159,37 @@ class CacheManager:
         self.project_id = project_id
         self.logger = logging.getLogger(__name__)
 
-    def get_existing_data(self, file_path: str) -> tuple[pd.DataFrame, datetime]:
+    def get_existing_data(self, file_path: str) -> tuple[pl.DataFrame, datetime]:
         """Load existing data and return with latest submission date."""
         try:
             if not Path(file_path).exists():
                 self.logger.info(f"No existing data file found at {file_path}")
-                return pd.DataFrame(), SurveyCTOConfig.default_date
+                return pl.DataFrame(), SurveyCTOConfig.default_date
 
             # Check file permissions before reading
             if not os.access(file_path, os.R_OK):
                 self.logger.error(f"Permission denied reading file: {file_path}")
                 st.error(f"Cannot access file: {file_path}. Please check permissions.")
-                return pd.DataFrame(), SurveyCTOConfig.default_date
+                return pl.DataFrame(), SurveyCTOConfig.default_date
 
-            data = pd.read_csv(file_path)
-            if data.empty or "SubmissionDate" not in data.columns:
+            data = pl.read_csv(file_path)
+            if data.is_empty() or "SubmissionDate" not in data.columns:
                 return data, SurveyCTOConfig.default_date
 
-            data["SubmissionDate"] = pd.to_datetime(data["SubmissionDate"])
+            data = data.with_columns(
+                pl.col("SubmissionDate").str.strptime(pl.Datetime, format="%+")
+            )
             return data, data["SubmissionDate"].max()
 
         except PermissionError as e:
             self.logger.exception("Permission error loading data:")
             st.error(f"Permission denied: {e}")
-            return pd.DataFrame(), SurveyCTOConfig.default_date
+            return pl.DataFrame(), SurveyCTOConfig.default_date
 
         except Exception as e:
             self.logger.warning(f"Failed to load existing data: {e}")
             st.error(f"Failed to load existing data: {e}")
-            return pd.DataFrame(), SurveyCTOConfig.default_date
+            return pl.DataFrame(), SurveyCTOConfig.default_date
 
 
 class DataProcessor:
@@ -197,14 +198,14 @@ class DataProcessor:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
 
-    def get_repeat_fields(self, questions: pd.DataFrame) -> list[str]:
+    def get_repeat_fields(self, questions: pl.DataFrame) -> list[str]:
         """Extract repeat field names from form definition."""
-        fields = questions[["type", "name"]].copy()
+        fields = questions.select(["type", "name"])
         repeat_fields = []
         begin_count = 0
         end_count = 0
 
-        for _, row in fields.iterrows():
+        for row in fields.iter_rows(named=True):
             if row["type"] == "begin repeat":
                 begin_count += 1
             elif row["type"] == "end repeat":
@@ -223,52 +224,84 @@ class DataProcessor:
         pattern = rf"\b{re.escape(field)}_[0-9]+_{{,1}}[0-9]*_{{,1}}[0-9]*\b"
         return [col for col in data_cols if re.fullmatch(pattern, col)] or [field]
 
-    def convert_data_types(
-        self, data: pd.DataFrame, questions: pd.DataFrame
-    ) -> pd.DataFrame:
-        """Convert data types based on form definition."""
-        # Convert standard datetime columns
+    def _convert_standard_datetime_columns(self, data: pl.DataFrame) -> pl.DataFrame:
+        """Convert standard datetime columns to datetime type."""
         datetime_cols = ["CompletionDate", "SubmissionDate", "starttime", "endtime"]
+        date_format = (
+            "%b %-d, %Y %-I:%M:%S %p" if os.name != "nt" else "%b %#d, %Y %#I:%M:%S %p"
+        )
         for col in datetime_cols:
             if col in data.columns:
-                with contextlib.suppress(ValueError, TypeError):
-                    data[col] = pd.to_datetime(data[col], format="mixed")
+                with contextlib.suppress(Exception):
+                    data = data.with_columns(
+                        pl.col(col).str.strptime(
+                            pl.Datetime, format=date_format, strict=False
+                        )
+                    )
+        return data
 
-        # Convert standard numeric columns
+    def _convert_standard_numeric_columns(self, data: pl.DataFrame) -> pl.DataFrame:
+        """Convert standard numeric columns to float type."""
         numeric_cols = ["duration", "formdef_version"]
         for col in numeric_cols:
             if col in data.columns:
-                with contextlib.suppress(ValueError, TypeError):
-                    data[col] = pd.to_numeric(data[col])
+                with contextlib.suppress(Exception):
+                    data = data.with_columns(pl.col(col).cast(pl.Float64, strict=False))
+        return data
 
-        # Process fields based on form definition
+    def _get_field_columns(
+        self, field_name: str, repeat_fields: list[str], data_cols: list[str]
+    ) -> list[str]:
+        """Get all columns for a field, including repeat columns."""
+        if field_name in repeat_fields:
+            cols = self.get_repeat_columns(field_name, data_cols)
+        else:
+            cols = [field_name]
+        return [col for col in cols if col in data_cols]
+
+    def _convert_column_by_type(
+        self, data: pl.DataFrame, col: str, field_type: str
+    ) -> pl.DataFrame:
+        """Convert a single column based on its field type."""
+        try:
+            if field_type in ["date", "datetime", "time"]:
+                return data.with_columns(
+                    pl.col(col).str.strptime(pl.Datetime, format="%+", strict=False)
+                )
+            elif field_type in ["integer", "decimal"]:
+                return data.with_columns(pl.col(col).cast(pl.Float64, strict=False))
+            elif field_type == "note":
+                return data.drop(col)
+            return data  # noqa: TRY300
+        except Exception as e:
+            self.logger.warning(f"Failed to convert column {col}: {e}")
+            return data
+
+    def _convert_form_definition_fields(
+        self, data: pl.DataFrame, questions: pl.DataFrame
+    ) -> pl.DataFrame:
+        """Convert fields based on form definition."""
         repeat_fields = self.get_repeat_fields(questions)
-        data_cols = list(data.columns)
+        data_cols = data.columns
 
-        for _, row in questions[["type", "name"]].iterrows():
+        for row in questions.select(["type", "name"]).iter_rows(named=True):
             field_name = row["name"]
             field_type = row["type"]
 
-            # Get columns for this field (including repeat columns)
-            if field_name in repeat_fields:
-                cols = self.get_repeat_columns(field_name, data_cols)
-            else:
-                cols = [field_name]
+            cols = self._get_field_columns(field_name, repeat_fields, data_cols)
 
-            cols = [col for col in cols if col in data.columns]
-
-            # Apply type conversions
             for col in cols:
-                try:
-                    if field_type in ["date", "datetime", "time"]:
-                        data[col] = pd.to_datetime(data[col], errors="coerce")
-                    elif field_type in ["integer", "decimal"]:
-                        data[col] = pd.to_numeric(data[col], errors="coerce")
-                    elif field_type == "note":
-                        data.drop(columns=[col], inplace=True)
-                except Exception as e:
-                    self.logger.warning(f"Failed to convert column {col}: {e}")
+                data = self._convert_column_by_type(data, col, field_type)
 
+        return data
+
+    def convert_data_types(
+        self, data: pl.DataFrame, questions: pl.DataFrame
+    ) -> pl.DataFrame:
+        """Convert data types based on form definition."""
+        data = self._convert_standard_datetime_columns(data)
+        data = self._convert_standard_numeric_columns(data)
+        data = self._convert_form_definition_fields(data, questions)
         return data
 
 
@@ -283,7 +316,7 @@ class MediaDownloader:
     def download_media_files(
         self,
         media_fields: list[str],
-        data: pd.DataFrame,
+        data: pl.DataFrame,
         media_folder: Path,
         encryption_key: str | None = None,
     ) -> None:
@@ -296,25 +329,29 @@ class MediaDownloader:
     def _download_field_media(
         self,
         field: str,
-        data: pd.DataFrame,
+        data: pl.DataFrame,
         media_folder: Path,
         encryption_key: str | None,
     ) -> None:
         """Download media files for a specific field."""
         processor = DataProcessor()
-        cols = processor.get_repeat_columns(field, list(data.columns))
+        cols = processor.get_repeat_columns(field, data.columns)
 
         for col in cols:
-            media_data = data[data[col].notna()][["KEY", col]].reset_index()
-            if media_data.empty:
+            media_data = (
+                data.filter(pl.col(col).is_not_null())
+                .select(["KEY", col])
+                .filter(pl.col(col).str.strip_chars() != "")
+            )
+
+            if media_data.is_empty():
                 self.logger.info(f"No media files found for field '{col}'")
                 continue
-            media_data = media_data[media_data[col].str.strip() != ""]
 
             if len(media_data) > 0:
                 progress_bar = st.progress(0, text=f"Downloading {col} media files...")
 
-                for idx, row in media_data.iterrows():
+                for idx, row in enumerate(media_data.iter_rows(named=True)):
                     try:
                         self._download_single_file(
                             row[col], row["KEY"], col, media_folder, encryption_key
@@ -498,7 +535,7 @@ class SurveyCTOClient:
 
         return connection_info
 
-    def get_form_definition(self, form_id: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def get_form_definition(self, form_id: str) -> tuple[pl.DataFrame, pl.DataFrame]:
         """Get form definition (questions and choices)."""
         if not self._scto_client:
             raise ConnectionError("Not connected to server")
@@ -509,14 +546,14 @@ class SurveyCTOClient:
         except SurveyCTOAPIError as e:
             raise SurveyCTOError(f"Failed to get form definition: {e}") from e
 
-        questions = pd.DataFrame(
+        questions = pl.DataFrame(
             form_def["fieldsRowsAndColumns"][1:],
-            columns=form_def["fieldsRowsAndColumns"][0],
+            schema=form_def["fieldsRowsAndColumns"][0],
         )
 
-        choices = pd.DataFrame(
+        choices = pl.DataFrame(
             form_def["choicesRowsAndColumns"][1:],
-            columns=form_def["choicesRowsAndColumns"][0],
+            schema=form_def["choicesRowsAndColumns"][0],
         )
 
         return questions, choices
@@ -584,16 +621,14 @@ class SurveyCTOClient:
         existing_data, last_date = (
             self.cache_manager.get_existing_data(form_config.save_to)
             if form_config.save_to
-            else (pd.DataFrame(), self.config.default_date)
+            else (pl.DataFrame(), self.config.default_date)
         )
 
         if not form_config.refresh:
             return 0
 
         # Prepare parameters for API request
-        params = (
-            {"date": int(last_date.timestamp())} if last_date else None
-        )
+        params = {"date": int(last_date.timestamp())} if last_date else None
 
         # Prepare private key if provided
         private_key = None
@@ -607,18 +642,19 @@ class SurveyCTOClient:
             private_key=private_key,
         )
 
-        new_data = pd.DataFrame(new_data_json)
+        new_data = pl.DataFrame(new_data_json)
         new_count = len(new_data)
 
         # Combine data
-        if not existing_data.empty:
-            combined_data = pd.concat([existing_data, new_data], ignore_index=True)
+        if not existing_data.is_empty():
+            combined_data = pl.concat([existing_data, new_data], how="diagonal")
         else:
             combined_data = new_data
 
         # Process data types
         questions, _ = self.get_form_definition(form_config.form_id)
-        questions = questions[questions.get("disabled", "") != "yes"]
+        if "disabled" in questions.columns:
+            questions = questions.filter(pl.col("disabled") != "yes")
         combined_data = self.data_processor.convert_data_types(combined_data, questions)
 
         # Download media if requested
@@ -627,7 +663,7 @@ class SurveyCTOClient:
 
         # Save data
         if form_config.save_to:
-            combined_data.to_csv(form_config.save_to, index=False)
+            combined_data.write_csv(form_config.save_to)
 
         # standardize missing values
         combined_data = standardize_missing_values(combined_data)
@@ -640,11 +676,16 @@ class SurveyCTOClient:
         return new_count
 
     def _download_attachments(
-        self, questions: pd.DataFrame, data: pd.DataFrame, form_config: FormConfig
+        self, questions: pl.DataFrame, data: pl.DataFrame, form_config: FormConfig
     ) -> None:
         """Download media attachments."""
         media_types = {e.value for e in MediaType}
-        media_fields = questions[questions["type"].isin(media_types)]["name"].tolist()
+        media_fields = (
+            questions.filter(pl.col("type").is_in(media_types))
+            .select("name")
+            .to_series()
+            .to_list()
+        )
 
         if media_fields:
             media_folder = Path(form_config.save_to).parent / "media"
