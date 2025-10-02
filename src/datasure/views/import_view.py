@@ -128,7 +128,7 @@ def update_import_log(import_log: pl.DataFrame) -> None:
     edited_import_log = st.data_editor(
         data=import_log,
         key="import_data_editor",
-        use_container_width=True,
+        width="stretch",
         column_config={
             "refresh": st.column_config.CheckboxColumn("Refresh?"),
             "load": st.column_config.CheckboxColumn("Load?"),
@@ -166,7 +166,7 @@ with st.container(border=True):
 
     with (
         kc1,
-        st.popover("Add Credentials", use_container_width=True, icon=":material/add:"),
+        st.popover("Add Credentials", width="stretch", icon=":material/add:"),
     ):
         st.write("Add your credentials for data import.")
         select_cred_type = st.selectbox(
@@ -182,7 +182,7 @@ with st.container(border=True):
     with (
         kc2,
         st.popover(
-            "Remove Credentials", use_container_width=True, icon=":material/delete:"
+            "Remove Credentials", width="stretch", icon=":material/delete:"
         ),
     ):
         st.write("**Remove Credentials**")
@@ -195,7 +195,7 @@ with st.container(border=True):
         if st.button(
             "Delete Credentials",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             disabled=not select_credentials,
         ):
             selected_server = saved_credentials[select_credentials].get("server", "")
@@ -210,11 +210,11 @@ with st.container(border=True):
     with (
         kc3,
         st.popover(
-            "Keyring Diagnostics", use_container_width=True, icon=":material/build:"
+            "Keyring Diagnostics", width="stretch", icon=":material/build:"
         ),
     ):
         st.write("**Keyring Diagnostics**")
-        if st.button("Test Keyring Availability", use_container_width=True):
+        if st.button("Test Keyring Availability", width="stretch"):
             keyring_status = test_keyring_availability()
             if keyring_status["success"]:
                 st.success(
@@ -238,7 +238,7 @@ aliases = duckdb_get_aliases(project_id, to_load=False)
 with (
     ac1,
     st.popover(
-        "Add Import Configuration", use_container_width=True, icon=":material/add:"
+        "Add Import Configuration", width="stretch", icon=":material/add:"
     ),
 ):
     import_type = st.selectbox(
@@ -252,7 +252,7 @@ with (
     ac2,
     st.popover(
         "Edit Import Configuration",
-        use_container_width=True,
+        width="stretch",
         icon=":material/edit:",
         disabled=not aliases,
     ),
@@ -280,7 +280,7 @@ with (
     ac3,
     st.popover(
         "Remove Import Configuration",
-        use_container_width=True,
+        width="stretch",
         icon=":material/clear:",
         disabled=not aliases,
     ),
@@ -290,7 +290,7 @@ with (
     remove_data = st.selectbox(
         "Select Data to Remove", options=remove_column_options, index=None
     )
-    if st.button("Remove Data", type="primary", use_container_width=True):
+    if st.button("Remove Data", type="primary", width="stretch"):
         duckdb_row_filter(
             project_id=project_id,
             alias="import_log",
@@ -317,7 +317,7 @@ if not import_log.is_empty():
         load_btn = st.button(
             "Load Data",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             key="load_data_key",
         )
 
@@ -383,7 +383,7 @@ if not import_log.is_empty():
             border=True,
         )
 
-        st.dataframe(preview_data, use_container_width=True)
+        st.dataframe(preview_data, width="stretch")
 
 else:
     st.info("No import data found. Please add import configurations.")
