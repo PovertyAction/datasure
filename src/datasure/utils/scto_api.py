@@ -172,6 +172,179 @@ class SurveyCTOAPIClient:
         response = self._make_request("GET", "/forms/ids")
         return response.json()
 
+    def list_forms(self) -> list[dict[str, Any]]:
+        """List all live forms on the server with their metadata.
+
+        Returns
+        -------
+            List of dictionaries, each containing information for a form.
+            Includes only the most recent versions of forms.
+
+        Raises
+        ------
+            SurveyCTOAPIError: If the request fails
+
+        Notes
+        -----
+            This uses the /console/forms-groups-datasets/get endpoint
+            and requires CSRF token authentication.
+        """
+        headers = self._get_csrf_auth_headers()
+        url = (
+            f"https://{self.config.server_name}.surveycto.com/"
+            "console/forms-groups-datasets/get"
+        )
+
+        try:
+            response = self.session.get(
+                url,
+                cookies=self.session.cookies,
+                headers=headers,
+                timeout=self.config.timeout,
+            )
+            response.raise_for_status()
+            return response.json()["forms"]
+
+        except requests.exceptions.HTTPError as e:
+            self.logger.exception(f"HTTP error listing forms from {url}")
+            raise SurveyCTOAPIError(f"Failed to list forms: {e}") from e
+
+        except requests.exceptions.ConnectionError as e:
+            self.logger.exception(f"Connection error listing forms from {url}")
+            raise SurveyCTOAPIError(f"Connection failed: {e}") from e
+
+        except requests.exceptions.Timeout as e:
+            self.logger.exception(f"Timeout listing forms from {url}")
+            raise SurveyCTOAPIError(f"Request timeout: {e}") from e
+
+        except KeyError as e:
+            self.logger.exception("'forms' key not found in response")
+            raise SurveyCTOAPIError(f"Invalid response format: {e}") from e
+
+        except Exception as e:
+            self.logger.exception(f"Unexpected error listing forms from {url}")
+            raise SurveyCTOAPIError(f"Unexpected error: {e}") from e
+
+    def _get_csrf_auth_headers(self) -> dict[str, str]:
+        """Authenticate and get CSRF token headers for form design endpoints.
+
+        Returns
+        -------
+            Dictionary containing X-csrf-token and X-OpenRosa-Version headers
+
+        Raises
+        ------
+            SurveyCTOAPIError: If authentication fails
+        """
+        base_url = f"https://{self.config.server_name}.surveycto.com"
+
+        try:
+            # Get initial CSRF token with OpenRosa header
+            initial_headers = {"X-OpenRosa-Version": "1.0"}
+            response = self.session.head(
+                base_url, headers=initial_headers, timeout=self.config.timeout
+            )
+            response.raise_for_status()
+
+            headers = {
+                "X-csrf-token": response.headers["X-csrf-token"],
+                "X-OpenRosa-Version": "1.0",
+            }
+
+            # Authenticate and get new CSRF token
+            auth_response = self.session.post(
+                f"{base_url}/login",
+                cookies=self.session.cookies,
+                headers=headers,
+                timeout=self.config.timeout,
+            )
+            auth_response.raise_for_status()
+
+            # Update headers with new CSRF token
+            headers["X-csrf-token"] = auth_response.headers["X-csrf-token"]
+
+            return headers  # noqa: TRY300
+
+        except requests.exceptions.HTTPError as e:
+            self.logger.exception(
+                f"HTTP error during CSRF authentication to {base_url}"
+            )
+            raise SurveyCTOAPIError(f"CSRF authentication failed: {e}") from e
+
+        except requests.exceptions.ConnectionError as e:
+            self.logger.exception(
+                f"Connection error during CSRF authentication to {base_url}"
+            )
+            raise SurveyCTOAPIError(f"Connection failed: {e}") from e
+
+        except requests.exceptions.Timeout as e:
+            self.logger.exception(f"Timeout during CSRF authentication to {base_url}")
+            raise SurveyCTOAPIError(f"Request timeout: {e}") from e
+
+        except KeyError as e:
+            self.logger.exception("X-csrf-token header not found in response")
+            raise SurveyCTOAPIError(f"CSRF token not found: {e}") from e
+
+        except Exception as e:
+            self.logger.exception(
+                f"Unexpected error during CSRF authentication to {base_url}"
+            )
+            raise SurveyCTOAPIError(f"Unexpected error: {e}") from e
+
+    def download_form_definition(self, form_id: str) -> dict[str, Any]:
+        """Download form definition (design) from SurveyCTO.
+
+        Parameters
+        ----------
+            form_id: Form identifier
+
+        Returns
+        -------
+            Form definition data as dictionary
+
+        Raises
+        ------
+            SurveyCTOAPIError: If the request fails
+
+        Notes
+        -----
+            This uses the /forms/{form_id}/design/ endpoint to retrieve
+            form structure, questions, and metadata. Requires CSRF token
+            authentication.
+        """
+        headers = self._get_csrf_auth_headers()
+        url = f"https://{self.config.server_name}.surveycto.com/forms/{form_id}/design/"
+
+        try:
+            response = self.session.get(
+                url,
+                cookies=self.session.cookies,
+                headers=headers,
+                timeout=self.config.timeout,
+            )
+            response.raise_for_status()
+            return response.json()
+
+        except requests.exceptions.HTTPError as e:
+            self.logger.exception(f"HTTP error downloading form definition from {url}")
+            raise SurveyCTOAPIError(f"Failed to download form definition: {e}") from e
+
+        except requests.exceptions.ConnectionError as e:
+            self.logger.exception(
+                f"Connection error downloading form definition from {url}"
+            )
+            raise SurveyCTOAPIError(f"Connection failed: {e}") from e
+
+        except requests.exceptions.Timeout as e:
+            self.logger.exception(f"Timeout downloading form definition from {url}")
+            raise SurveyCTOAPIError(f"Request timeout: {e}") from e
+
+        except Exception as e:
+            self.logger.exception(
+                f"Unexpected error downloading form definition from {url}"
+            )
+            raise SurveyCTOAPIError(f"Unexpected error: {e}") from e
+
     def download_form_data_json(
         self,
         form_id: str,
