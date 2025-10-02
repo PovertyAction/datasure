@@ -221,9 +221,7 @@ with page_canvas:
         elif project:
             project_id = get_project_id(project)
             projects = load_projects()
-            select_project = st.button(
-                "Load Project", type="primary", width="stretch"
-            )
+            select_project = st.button("Load Project", type="primary", width="stretch")
             if select_project:
                 views_dir = Path(__file__).parent
                 st.write(f"Loading project '{project}'...")

@@ -181,9 +181,7 @@ with st.container(border=True):
 
     with (
         kc2,
-        st.popover(
-            "Remove Credentials", width="stretch", icon=":material/delete:"
-        ),
+        st.popover("Remove Credentials", width="stretch", icon=":material/delete:"),
     ):
         st.write("**Remove Credentials**")
         saved_credentials = list_stored_credentials(project_id).get("credentials", {})
@@ -209,9 +207,7 @@ with st.container(border=True):
 
     with (
         kc3,
-        st.popover(
-            "Keyring Diagnostics", width="stretch", icon=":material/build:"
-        ),
+        st.popover("Keyring Diagnostics", width="stretch", icon=":material/build:"),
     ):
         st.write("**Keyring Diagnostics**")
         if st.button("Test Keyring Availability", width="stretch"):
@@ -237,9 +233,7 @@ ac1, ac2, ac3 = st.columns([0.4, 0.4, 0.2])
 aliases = duckdb_get_aliases(project_id, to_load=False)
 with (
     ac1,
-    st.popover(
-        "Add Import Configuration", width="stretch", icon=":material/add:"
-    ),
+    st.popover("Add Import Configuration", width="stretch", icon=":material/add:"),
 ):
     import_type = st.selectbox(
         "Import Type", options=["local storage", "SurveyCTO"], index=None
