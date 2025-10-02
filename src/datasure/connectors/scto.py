@@ -9,13 +9,16 @@ from pathlib import Path
 
 import pandas as pd
 import polars as pl
-import pysurveycto
-import requests
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
 
 from datasure.utils.dataframe_utils import standardize_missing_values
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.scto_api import (
+    SurveyCTOAPIClient,
+    SurveyCTOAPIConfig,
+    SurveyCTOAPIError,
+)
 
 # Import secure credential storage
 from datasure.utils.secure_credentials import (
@@ -272,7 +275,7 @@ class DataProcessor:
 class MediaDownloader:
     """Handles media file downloads."""
 
-    def __init__(self, scto_client, config: SurveyCTOConfig):
+    def __init__(self, scto_client: SurveyCTOAPIClient, config: SurveyCTOConfig):
         self.scto_client = scto_client
         self.config = config
         self.logger = logging.getLogger(__name__)
@@ -340,7 +343,11 @@ class MediaDownloader:
 
         # if file exists, skip download
         if not (media_folder / filename).exists():
-            media_content = self.scto_client.get_attachment(url, key=encryption_key)
+            # Convert encryption key to bytes if provided
+            private_key = encryption_key.encode() if encryption_key else None
+            media_content = self.scto_client.download_attachment_from_url(
+                url, private_key=private_key
+            )
             (media_folder / filename).write_bytes(media_content)
 
 
@@ -353,7 +360,7 @@ class SurveyCTOClient:
         self.cache_manager = CacheManager(project_id)
         self.data_processor = DataProcessor()
         self.logger = logging.getLogger(__name__)
-        self._scto_client = None
+        self._scto_client: SurveyCTOAPIClient | None = None
 
     def connect(
         self, credentials: ServerCredentials, validate_permissions: bool = False
@@ -382,10 +389,15 @@ class SurveyCTOClient:
         }
 
         try:
-            # Create SurveyCTO client object
-            self._scto_client = pysurveycto.SurveyCTOObject(
-                credentials.server, credentials.user, credentials.password
+            # Create SurveyCTO API client
+            api_config = SurveyCTOAPIConfig(
+                server_name=credentials.server,
+                username=credentials.user,
+                password=credentials.password,
+                timeout=self.config.timeout,
+                max_retries=self.config.max_retries,
             )
+            self._scto_client = SurveyCTOAPIClient(api_config)
 
             if validate_permissions:
                 # Validate credentials by making an API call
@@ -429,22 +441,34 @@ class SurveyCTOClient:
                             f"⚠️ Connection successful, but no forms found on server '{credentials.server}'."
                         )
 
-                except requests.exceptions.HTTPError as http_err:
-                    self._handle_http_error(http_err, credentials.server)
-
-                except requests.exceptions.ConnectionError:
+                except SurveyCTOAPIError as api_err:
                     self._scto_client = None
-                    raise ConnectionError(  # noqa: B904
-                        f"🔌 Cannot connect to server '{credentials.server}'. "
-                        f"Please check your internet connection and verify the server name."
-                    )
+                    error_msg = str(api_err)
 
-                except requests.exceptions.Timeout:
-                    self._scto_client = None
-                    raise ConnectionError(  # noqa: B904
-                        f"⏱️ Connection timeout to server '{credentials.server}'. "
-                        f"The server may be slow or unavailable. Please try again."
-                    )
+                    if "401" in error_msg or "Invalid credentials" in error_msg:
+                        raise ConnectionError(
+                            "🔐 Invalid credentials. Please check your username and password."
+                        ) from api_err
+                    elif "403" in error_msg or "forbidden" in error_msg.lower():
+                        raise ConnectionError(
+                            "🚫 Access forbidden. Your account may not have permission to access this server."
+                        ) from api_err
+                    elif "404" in error_msg:
+                        raise ConnectionError(
+                            f"🔍 Server '{credentials.server}' not found. Please verify the server name."
+                        ) from api_err
+                    elif "timeout" in error_msg.lower():
+                        raise ConnectionError(
+                            f"⏱️ Connection timeout to server '{credentials.server}'. "
+                            f"The server may be slow or unavailable. Please try again."
+                        ) from api_err
+                    elif "connection" in error_msg.lower():
+                        raise ConnectionError(
+                            f"🔌 Cannot connect to server '{credentials.server}'. "
+                            f"Please check your internet connection and verify the server name."
+                        ) from api_err
+                    else:
+                        raise ConnectionError(f"❌ API error: {api_err}") from api_err
 
                 except Exception as validation_err:
                     self._scto_client = None
@@ -474,47 +498,16 @@ class SurveyCTOClient:
 
         return connection_info
 
-    def _handle_http_error(
-        self, http_err: requests.exceptions.HTTPError, server_name: str
-    ) -> None:
-        """Handle specific HTTP errors with user-friendly messages."""
-        self._scto_client = None
-
-        if hasattr(http_err, "response") and http_err.response is not None:
-            status_code = http_err.response.status_code
-
-            error_messages = {
-                401: "🔐 Invalid credentials. Please check your username and password.",
-                403: "🚫 Access forbidden. Your account may not have permission to access this server.",
-                404: f"🔍 Server '{server_name}' not found. Please verify the server name.",
-                429: "⏱️ Too many requests. Please wait a moment and try again.",
-                500: "🔧 Server error. The SurveyCTO server is experiencing issues. Please try again later.",
-                502: "🌐 Bad gateway. There may be a network issue. Please try again.",
-                503: "⚠️ Service unavailable. The server is temporarily down. Please try again later.",
-            }
-
-            error_msg = error_messages.get(
-                status_code,
-                f"❌ Server error (HTTP {status_code}). Please try again later.",
-            )
-
-            self.logger.error(
-                f"HTTP {status_code} error for server {server_name}: {http_err}"
-            )
-            raise ConnectionError(error_msg)
-        else:
-            raise ConnectionError(f"❌ Authentication failed: {http_err}")
-
     def get_form_definition(self, form_id: str) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Get form definition (questions and choices)."""
         if not self._scto_client:
             raise ConnectionError("Not connected to server")
 
         try:
-            form_def = self._scto_client.get_form_definition(form_id)
+            form_def = self._scto_client.download_form_definition(form_id)
 
-        except Exception as e:
-            raise SurveyCTOError(f"Failed to get form definition: {e}")  # noqa: B904
+        except SurveyCTOAPIError as e:
+            raise SurveyCTOError(f"Failed to get form definition: {e}") from e
 
         questions = pd.DataFrame(
             form_def["fieldsRowsAndColumns"][1:],
@@ -545,21 +538,26 @@ class SurveyCTOClient:
 
             credentials = ServerCredentials(server=server, user=user, password=password)
             try:
-                self._scto_client = self._scto_client = pysurveycto.SurveyCTOObject(
-                    credentials.server, credentials.user, credentials.password
+                api_config = SurveyCTOAPIConfig(
+                    server_name=credentials.server,
+                    username=credentials.user,
+                    password=credentials.password,
+                    timeout=self.config.timeout,
+                    max_retries=self.config.max_retries,
                 )
-            except ConnectionError:
-                raise ConnectionError("Not connected to server") from None
+                self._scto_client = SurveyCTOAPIClient(api_config)
+            except SurveyCTOAPIError as e:
+                raise ConnectionError(f"Not connected to server: {e}") from e
         try:
             # Try server dataset first
             return self._import_server_dataset(form_config)
-        except:
+        except Exception:
             return self._import_regular_form(form_config)
 
     def _import_server_dataset(self, form_config: FormConfig) -> int:
         """Import from server dataset."""
-        data_csv = self._scto_client.get_server_dataset(form_config.form_id)
-        data = pl.read_csv(data_csv.encode())
+        data_csv = self._scto_client.download_dataset_csv(form_config.form_id)
+        data = pl.read_csv(data_csv)
 
         # standardize missing values
         data = standardize_missing_values(data)
@@ -592,14 +590,21 @@ class SurveyCTOClient:
         if not form_config.refresh:
             return 0
 
+        # Prepare parameters for API request
+        params = (
+            {"date": int(last_date.timestamp())} if last_date else None
+        )
+
+        # Prepare private key if provided
+        private_key = None
+        if form_config.private_key:
+            private_key = self._import_private_key(form_config.private_key)
+
         # Get new data
-        new_data_json = self._scto_client.get_form_data(
+        new_data_json = self._scto_client.download_form_data_json(
             form_id=form_config.form_id,
-            format="json",
-            oldest_completion_date=last_date,
-            key=self._import_private_key(form_config.private_key)
-            if form_config.private_key
-            else False,
+            params=params,
+            private_key=private_key,
         )
 
         new_data = pd.DataFrame(new_data_json)
@@ -955,29 +960,26 @@ class SurveyCTOUI:
         """
         try:
             with st.spinner(f"Loading forms from {server}..."):
-                # Get list of forms
-                forms = self._scto_client.list_forms()
+                # Get list of forms with metadata
+                forms = self.client._scto_client.list_forms()
 
                 form_options = []
                 for form in forms:
                     try:
-                        # Get form definition to extract title
-                        form_def = self._scto_client.get_form_definition(form)
-
-                        # Extract title from form definition
-                        title = self._extract_form_title(form_def, form)
-                        form_options.append((form, title))
+                        form_id = form.get("id", "unknown")
+                        title = form.get("title", "Title unavailable")
+                        form_options.append((form_id, title))
 
                     except Exception as e:
                         # If we can't get the title, just use the form ID
                         self.logger.warning(f"Could not get title for form {form}: {e}")
-                        form_options.append((form, "Title unavailable"))
+                        form_options.append((str(form), "Title unavailable"))
 
                 # Sort by form ID for consistency
                 form_options.sort(key=lambda x: x[0])
                 return form_options
 
-        except Exception as e:
+        except SurveyCTOAPIError as e:
             self.logger.exception(f"Failed to load forms for server {server}")
             st.error(f"Failed to load forms: {e}")
             return None
