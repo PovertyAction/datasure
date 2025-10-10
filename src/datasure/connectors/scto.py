@@ -819,210 +819,285 @@ class SurveyCTOUI:
         defaults = defaults or {}
 
         with st.container(border=True):
-            logo_path = self._get_logo_path()
-            if logo_path and Path(logo_path).exists():
-                st.image(logo_path, width=200)
-            else:
-                st.markdown("### SurveyCTO Form Configuration")
+            self._render_logo()
 
-            # Credential selection
-            login_credentials = list_stored_credentials(self.project_id).get(
-                "credentials", {}
-            )
-            if not login_credentials:
-                st.warning(
-                    "No SurveyCTO servers configured. Please connect to a server using the credential manager."
-                )
+            # Get and validate credentials
+            credentials = self._get_server_credentials()
+            if not credentials:
                 return
 
-            select_cred = st.selectbox(
-                "Select Server Credentials*",
-                options=list(login_credentials.keys()),
-                index=None,
-                help="Select the server credentials to use for this form",
-                key="scto_select_cred",
+            # Get form selection
+            form_data = self._render_form_selection(credentials, defaults)
+            if not form_data:
+                return
+
+            # Render form configuration fields
+            config_data = self._render_config_fields(form_data, defaults, edit_mode)
+            if config_data is None:
+                return
+
+            # Handle form submission
+            self._handle_form_submission(edit_mode, credentials, form_data, config_data)
+
+    def _render_logo(self) -> None:
+        """Render logo or header."""
+        logo_path = self._get_logo_path()
+        if logo_path and Path(logo_path).exists():
+            st.image(logo_path, width=200)
+        else:
+            st.markdown("### SurveyCTO Form Configuration")
+
+    def _get_server_credentials(self) -> ServerCredentials | None:
+        """Get and validate server credentials."""
+        login_credentials = list_stored_credentials(self.project_id).get(
+            "credentials", {}
+        )
+        if not login_credentials:
+            st.warning(
+                "No SurveyCTO servers configured. Please connect to a server using the credential manager."
+            )
+            return None
+
+        select_cred = st.selectbox(
+            "Select Server Credentials*",
+            options=list(login_credentials.keys()),
+            index=None,
+            help="Select the server credentials to use for this form",
+            key="scto_select_cred",
+        )
+
+        try:
+            server = login_credentials[select_cred]["server"]
+            user = login_credentials[select_cred]["username"]
+            scto_cred = retrieve_scto_credentials(
+                self.project_id, type="scto_login", server=server
+            )
+            password = (
+                scto_cred.get("credentials", {}).get("password", "")
+                if scto_cred
+                else ""
             )
 
+            credentials = ServerCredentials(server=server, user=user, password=password)
+
+            # Validate credentials
             try:
-                server = login_credentials[select_cred]["server"]
-                user = login_credentials[select_cred]["username"]
-                scto_cred = retrieve_scto_credentials(
-                    self.project_id, type="scto_login", server=server
-                )
-                if scto_cred:
-                    password = scto_cred.get("credentials", "").get("password", "")
+                self.client.connect(credentials, validate_permissions=False)
+            except ConnectionError as e:
+                st.error(f"Connection failed: {e}")
+                return None
 
-                # Validate credentials
-                try:
-                    self.client.connect(
-                        ServerCredentials(server=server, user=user, password=password),
-                        validate_permissions=False,
-                    )
-                except ConnectionError as e:
-                    st.error(f"Connection failed: {e}")
-                    return
-            except KeyError:
+            return credentials  # noqa: TRY300
+
+        except KeyError:
+            st.error(
+                "Invalid credentials selected. Please check your credential manager."
+            )
+            return None
+
+    def _render_form_selection(
+        self, credentials: ServerCredentials, defaults: dict
+    ) -> dict | None:
+        """Render form selection dropdown and return form data."""
+        forms_info = self._get_forms_info(credentials)
+
+        form_options = [f"{form[0]} ({form[1]})" for form in forms_info["forms_list"]]
+        form_ids_only = [form[0] for form in forms_info["forms_list"]]
+
+        default_index = self._get_default_form_index(defaults, form_ids_only)
+
+        selected_form = st.selectbox(
+            "Select Form ID*",
+            options=form_options,
+            index=default_index,
+            help="Select a form from the available forms on the server",
+        )
+
+        if not selected_form:
+            return None
+
+        return self._parse_selected_form(selected_form, form_options, forms_info)
+
+    def _get_default_form_index(
+        self, defaults: dict, form_ids_only: list
+    ) -> int | None:
+        """Get default index for form selection."""
+        if defaults and defaults.get("form_id", "") in form_ids_only:
+            return form_ids_only.index(defaults.get("form_id", ""))
+        return None
+
+    def _parse_selected_form(
+        self, selected_form: str, form_options: list, forms_info: dict
+    ) -> dict:
+        """Parse selected form and return form data."""
+        selected_form_split = re.match(r"^(.*?) \((.*)\)$", selected_form)
+        form_id = selected_form_split.group(1) if selected_form_split else selected_form
+        form_title = selected_form_split.group(2) if selected_form_split else "No title"
+
+        form_index = form_options.index(selected_form)
+        encrypted = (
+            forms_info["forms_list"][form_index][2]
+            if len(forms_info["forms_list"]) > form_index
+            else False
+        )
+
+        with st.expander("📋 Form Details", expanded=False):
+            st.write(f"**Form ID:** {form_id}")
+            st.write(f"**Title:** {form_title}")
+            st.write(f"**Encrypted:** {'Yes' if encrypted else 'No'}")
+
+        return {
+            "form_id": form_id,
+            "form_title": form_title,
+            "encrypted": encrypted,
+        }
+
+    def _render_config_fields(
+        self, form_data: dict, defaults: dict, edit_mode: bool
+    ) -> dict | None:
+        """Render configuration fields and return values."""
+        alias = self._render_alias_field(form_data, defaults, edit_mode)
+
+        private_key_file = self._render_private_key_field(
+            form_data["encrypted"], defaults, edit_mode
+        )
+        if private_key_file is None:
+            return None
+
+        save_file = self._render_save_file_field(defaults)
+        if save_file is None:
+            return None
+
+        attachments = st.checkbox(
+            "Download attachments",
+            value=defaults.get("attachments", False),
+            disabled=False,
+            help="Download media files (images, audio, etc.)",
+        )
+
+        st.markdown("**required*")
+
+        return {
+            "alias": alias,
+            "private_key_file": private_key_file,
+            "save_file": save_file,
+            "attachments": attachments,
+        }
+
+    def _render_alias_field(
+        self, form_data: dict, defaults: dict, edit_mode: bool
+    ) -> str:
+        """Render alias input field."""
+        alias_default = re.sub(r"[^\w]", "_", form_data["form_title"])
+        return st.text_input(
+            "Alias*",
+            help="Unique identifier for this form",
+            value=defaults.get("alias", alias_default),
+            key=f"surveyctoui_alias{edit_mode}",
+            disabled=edit_mode,
+        )
+
+    def _render_private_key_field(
+        self, encrypted: bool, defaults: dict, edit_mode: bool
+    ) -> str | None:
+        """Render and validate private key field."""
+        private_key_file = st.text_input(
+            "File path for Private Key",
+            value=defaults.get("private_key", ""),
+            disabled=not encrypted,
+            key=f"surveyctoui_private_key{edit_mode}",
+            help="Enter encryption key if the form is encrypted (optional) eg. C/Users/documents/Surevy_PRIVATEKEY.pem",
+        )
+
+        if not encrypted:
+            return ""
+
+        if not private_key_file:
+            st.warning(
+                "Encryption key is required for encrypted forms. Only published fields will be downloaded."
+            )
+            return ""
+
+        if not self._validate_private_key_path(private_key_file):
+            return None
+
+        return private_key_file
+
+    def _validate_private_key_path(self, private_key_file: str) -> bool:
+        """Validate private key file path."""
+        if not os.path.exists(str(private_key_file)):
+            st.error("Encryption key must be a valid file path to a key file.")
+            return False
+
+        if not private_key_file.endswith(".pem"):
+            st.error("Encryption key file must have a .pem extension.")
+            return False
+
+        return True
+
+    def _render_save_file_field(self, defaults: dict) -> str | None:
+        """Render and validate save file field."""
+        save_file = st.text_input(
+            "File path to save data",
+            value=defaults.get("save_to", ""),
+            disabled=False,
+            help="File path to save the data (e.g., C:/Users/documents/data/survey.csv)",
+        )
+
+        if save_file and os.path.exists(str(save_file)):
+            save_path = Path(str(save_file)).parent
+            if not save_path.exists():
                 st.error(
-                    "Invalid credentials selected. Please check your credential manager."
+                    f"Save directory '{save_path}' does not exist. Please create it first."
                 )
-                return
-            # Form selection with dynamic loading
-            forms_info = self._get_forms_info(
-                ServerCredentials(server=server, user=user, password=password)
-            )
-            # concat form id and form names to create options
-            form_options = [
-                form[0] + " (" + form[1] + ")" for form in forms_info["forms_list"]
-            ]
+                return None
 
-            form_ids_only = [form[0] for form in forms_info["forms_list"]]
+        return save_file
 
-            # Show form selection dropdown
-            default_index = (
-                form_ids_only.index(defaults.get("form_id", ""))
-                if defaults and defaults.get("form_id", "") in form_ids_only
-                else None
-            )
+    def _handle_form_submission(
+        self,
+        edit_mode: bool,
+        credentials: ServerCredentials,
+        form_data: dict,
+        config_data: dict,
+    ) -> None:
+        """Handle form submission button click."""
+        if not st.button(
+            "Add Form" if not edit_mode else "Update Form",
+            type="primary",
+            use_container_width=True,
+        ):
+            return
 
-            selected_form = st.selectbox(
-                "Select Form ID*",
-                options=form_options,
-                index=default_index,
-                help="Select a form from the available forms on the server",
-            )
+        if not config_data["alias"]:
+            st.error("Please enter an alias for the form.")
+            return
 
-            # Show form details in an expander
-            if selected_form:
-                # split selected form into id and title
-                selected_form_split = re.match(r"^(.*?) \((.*)\)$", selected_form)
-                form_id = (
-                    selected_form_split.group(1)
-                    if selected_form_split
-                    else selected_form
-                )
-                form_title = (
-                    selected_form_split.group(2) if selected_form_split else "No title"
-                )
+        if not form_data["form_id"]:
+            st.error("Please select or enter a form ID.")
+            return
 
-                # get selected form index from form_options
-                form_index = form_options.index(selected_form)
-                encrypted = (
-                    forms_info["forms_list"][form_index][2]
-                    if len(forms_info["forms_list"]) > form_index
-                    else False
-                )
+        form_config = FormConfig(
+            alias=config_data["alias"],
+            form_id=form_data["form_id"],
+            server=credentials.server,
+            username=credentials.user,
+            private_key=str(config_data["private_key_file"]) or None,
+            save_to=str(config_data["save_file"]) or None,
+            attachments=config_data["attachments"],
+        )
 
-                with st.expander("📋 Form Details", expanded=False):
-                    st.write(f"**Form ID:** {form_id}")
-                    st.write(f"**Title:** {form_title}")
-                    st.write(f"**Encrypted:** {'Yes' if encrypted else 'No'}")
+        try:
+            if edit_mode:
+                self._update_form_on_project(form_config)
+                st.success("Form updated successfully")
             else:
-                encrypted = False
-                form_title = ""
+                self._add_form_to_project(form_config)
+                st.success("Form added successfully")
 
-            # remove symbols from form tile to create alias
-            alias_default = re.sub(r"[^\w]", "_", form_title)
-            alias = st.text_input(
-                "Alias*",
-                help="Unique identifier for this form",
-                value=defaults.get("alias", alias_default),
-                key=f"surveyctoui_alias{edit_mode}",
-                disabled=edit_mode or not selected_form,
-            )
-
-            # Rest of the form fields
-            private_key_file = st.text_input(
-                "File path for Private Key",
-                value=defaults.get("private_key", ""),
-                disabled=not encrypted,
-                key=f"surveyctoui_private_key{edit_mode}",
-                help="Enter encryption key if the form is encrypted (optional) eg. C/Users/documents/Surevy_PRIVATEKEY.pem",
-            )
-
-            if not encrypted:
-                private_key_file = ""
-
-            if encrypted and not private_key_file:
-                st.warning(
-                    "Encryption key is required for encrypted forms. Only published fields will be downloaded."
-                )
-
-            # validate encryption key is a valid file path
-            if private_key_file and not os.path.exists(str(private_key_file)):
-                st.error("Encryption key must be a valid file path to a key file.")
-                return
-
-            # validate file has extension.pem
-            if private_key_file and not private_key_file.endswith(".pem"):
-                st.error("Encryption key file must have a .pem extension.")
-                return
-
-            save_file = st.text_input(
-                "File path to save data",
-                value=defaults.get("save_to", ""),
-                disabled=not selected_form,
-                help="File path to save the data (e.g., C:/Users/documents/data/survey.csv)",
-            )
-
-            # check that save file is a valid file path
-            if save_file and os.path.exists(str(save_file)):
-                save_path = Path(str(save_file)).parent
-                if not save_path.exists():
-                    st.error(
-                        f"Save directory '{save_path}' does not exist. Please create it first."
-                    )
-                    return
-
-            attachments = st.checkbox(
-                "Download attachments",
-                value=defaults.get("attachments", False),
-                disabled=not selected_form,
-                help="Download media files (images, audio, etc.)",
-            )
-
-            st.markdown("**required*")
-
-            if st.button(
-                "Add Form" if not edit_mode else "Update Form",
-                type="primary",
-                use_container_width=True,
-                disabled=not selected_form,
-            ):
-                if not alias:
-                    st.error("Please enter an alias for the form.")
-                    return
-
-                if not form_id:
-                    st.error("Please select or enter a form ID.")
-                    return
-
-                form_config = FormConfig(
-                    alias=alias,
-                    form_id=form_id,
-                    server=server,
-                    username=user,
-                    private_key=str(private_key_file) or None,
-                    save_to=str(save_file) or None,
-                    attachments=attachments,
-                )
-
-                if not edit_mode:
-                    try:
-                        self._add_form_to_project(form_config)
-                        st.success("Form added successfully")
-                    except Exception as e:
-                        st.error(f"Failed to add form: {e}")
-                        return
-                else:
-                    # Update existing form configuration
-                    try:
-                        self._update_form_on_project(form_config)
-                        st.success("Form updated successfully")
-                    except Exception as e:
-                        st.error(f"Failed to update form: {e}")
-                        return
-
-                st.rerun()
+            st.rerun()
+        except Exception as e:
+            st.error(f"Failed to {'update' if edit_mode else 'add'} form: {e}")
 
     def _get_form_options(self, server: str) -> list[tuple[str, str]] | None:
         """
@@ -1071,40 +1146,65 @@ class SurveyCTOUI:
             Form title or form_id if title not found
         """
         try:
-            # Try to get title from settings
-            if "settings" in form_def:
-                settings = form_def["settings"]
-                if isinstance(settings, list) and len(settings) > 1:
-                    # Settings is usually a list where first row is headers
-                    headers = settings[0] if settings else []
-                    data = settings[1] if len(settings) > 1 else []
+            # Try settings first
+            title = self._extract_title_from_settings(form_def)
+            if title:
+                return title
 
-                    # Look for title in common field names
-                    title_fields = ["form_title", "title", "form_name", "name"]
-                    for field in title_fields:
-                        if field in headers:
-                            index = headers.index(field)
-                            if index < len(data) and data[index]:
-                                return str(data[index])
+            # Try survey sheet as fallback
+            title = self._extract_title_from_fields(form_def)
+            if title:
+                return title
 
-            # Try to get title from survey sheet
-            if "fieldsRowsAndColumns" in form_def:
-                fields = form_def["fieldsRowsAndColumns"]
-                if len(fields) > 1:
-                    headers = fields[0]
-                    # Look for a title field in the first few rows
-                    for i in range(1, min(5, len(fields))):
-                        row = fields[i]
-                        if len(row) > 1 and "title" in str(row).lower():
-                            # This is a heuristic - might need adjustment
-                            continue
-            else:
-                # If no title found, return form_id
-                return form_id
+            return form_id  # noqa: TRY300
 
         except Exception as e:
             self.logger.warning(f"Error extracting title for form {form_id}: {e}")
             return form_id
+
+    def _extract_title_from_settings(self, form_def: dict) -> str | None:
+        """Extract title from form settings."""
+        if "settings" not in form_def:
+            return None
+
+        settings = form_def["settings"]
+        if not isinstance(settings, list) or len(settings) <= 1:
+            return None
+
+        headers = settings[0] if settings else []
+        data = settings[1] if len(settings) > 1 else []
+
+        return self._find_title_in_headers(headers, data)
+
+    def _find_title_in_headers(self, headers: list, data: list) -> str | None:
+        """Find title value from headers and data rows."""
+        title_fields = ["form_title", "title", "form_name", "name"]
+
+        for field in title_fields:
+            if field in headers:
+                index = headers.index(field)
+                if index < len(data) and data[index]:
+                    return str(data[index])
+
+        return None
+
+    def _extract_title_from_fields(self, form_def: dict) -> str | None:
+        """Extract title from survey fields (fieldsRowsAndColumns)."""
+        if "fieldsRowsAndColumns" not in form_def:
+            return None
+
+        fields = form_def["fieldsRowsAndColumns"]
+        if len(fields) <= 1:
+            return None
+
+        # Look for a title field in the first few rows
+        for i in range(1, min(5, len(fields))):
+            row = fields[i]
+            if len(row) > 1 and "title" in str(row).lower():
+                # This is a heuristic - might need adjustment
+                continue
+
+        return None
 
     def _add_form_to_project(self, form_config: FormConfig) -> None:
         """Add form configuration to project."""
