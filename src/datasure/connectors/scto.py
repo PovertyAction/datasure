@@ -417,123 +417,156 @@ class SurveyCTOClient:
         ------
             ConnectionError: If connection or validation fails
         """
-        connection_info = {
-            "server": credentials.server,
+        connection_info = self._initialize_connection_info(
+            credentials.server, validate_permissions
+        )
+
+        try:
+            self._create_api_client(credentials)
+
+            if validate_permissions:
+                self._validate_connection(credentials, connection_info)
+            else:
+                self._skip_validation(credentials.server, connection_info)
+
+        except Exception as e:
+            self._handle_connection_error(e, credentials.server)
+
+        return connection_info
+
+    def _initialize_connection_info(
+        self, server: str, validate_permissions: bool
+    ) -> dict[str, any]:
+        """Initialize connection info dictionary."""
+        return {
+            "server": server,
             "connected": False,
             "forms_count": 0,
             "forms_list": [],
             "validation_attempted": validate_permissions,
         }
 
+    def _create_api_client(self, credentials: ServerCredentials) -> None:
+        """Create SurveyCTO API client."""
+        api_config = SurveyCTOAPIConfig(
+            server_name=credentials.server,
+            username=credentials.user,
+            password=credentials.password,
+            timeout=self.config.timeout,
+            max_retries=self.config.max_retries,
+        )
+        self._scto_client = SurveyCTOAPIClient(api_config)
+
+    def _validate_connection(
+        self, credentials: ServerCredentials, connection_info: dict[str, any]
+    ) -> None:
+        """Validate connection by listing forms."""
         try:
-            # Create SurveyCTO API client
-            api_config = SurveyCTOAPIConfig(
-                server_name=credentials.server,
-                username=credentials.user,
-                password=credentials.password,
-                timeout=self.config.timeout,
-                max_retries=self.config.max_retries,
+            forms_list = self._fetch_forms_list(credentials.server)
+            self._update_connection_info(
+                connection_info, forms_list, credentials.server
             )
-            self._scto_client = SurveyCTOAPIClient(api_config)
+        except SurveyCTOAPIError as api_err:
+            self._handle_api_error(api_err, credentials.server)
+        except Exception as validation_err:
+            self._handle_validation_error(validation_err)
 
-            if validate_permissions:
-                # Validate credentials by making an API call
-                try:
-                    with st.spinner(
-                        f"Validating connection to {credentials.server}..."
-                    ):
-                        server_response = self._scto_client.list_forms()
-                        # extract form list with titles
-                        forms_list = [
-                            (
-                                form.get("id", "no id"),
-                                form.get("title", "No title"),
-                                form.get("encrypted", False),
-                            )
-                            for form in server_response
-                        ]
-
-                        server_forms_count = len(forms_list)
-
-                    connection_info.update(
-                        {
-                            "connected": True,
-                            "forms_count": server_forms_count,
-                            "forms_list": forms_list,
-                        }
-                    )
-
-                    self.logger.info(
-                        f"Successfully connected to {credentials.server}. Found {server_forms_count} forms."
-                    )
-
-                    # Show success message with details
-                    if len(forms_list) > 0:
-                        st.success(
-                            f"✅ Connection to server '{credentials.server}' successful!."
-                        )
-
-                    else:
-                        st.warning(
-                            f"⚠️ Connection successful, but no forms found on server '{credentials.server}'."
-                        )
-
-                except SurveyCTOAPIError as api_err:
-                    self._scto_client = None
-                    error_msg = str(api_err)
-
-                    if "401" in error_msg or "Invalid credentials" in error_msg:
-                        raise ConnectionError(
-                            "🔐 Invalid credentials. Please check your username and password."
-                        ) from api_err
-                    elif "403" in error_msg or "forbidden" in error_msg.lower():
-                        raise ConnectionError(
-                            "🚫 Access forbidden. Your account may not have permission to access this server."
-                        ) from api_err
-                    elif "404" in error_msg:
-                        raise ConnectionError(
-                            f"🔍 Server '{credentials.server}' not found. Please verify the server name."
-                        ) from api_err
-                    elif "timeout" in error_msg.lower():
-                        raise ConnectionError(
-                            f"⏱️ Connection timeout to server '{credentials.server}'. "
-                            f"The server may be slow or unavailable. Please try again."
-                        ) from api_err
-                    elif "connection" in error_msg.lower():
-                        raise ConnectionError(
-                            f"🔌 Cannot connect to server '{credentials.server}'. "
-                            f"Please check your internet connection and verify the server name."
-                        ) from api_err
-                    else:
-                        raise ConnectionError(f"❌ API error: {api_err}") from api_err
-
-                except Exception as validation_err:
-                    self._scto_client = None
-                    self.logger.exception(f"Validation error: {validation_err}")  # noqa: TRY401
-                    raise ConnectionError(
-                        f"❌ Failed to validate credentials: {validation_err}"
-                    ) from validation_err
-            else:
-                # Skip validation, just create connection
-                connection_info["connected"] = True
-                st.success(
-                    f"✅ Connection created for server '{credentials.server}' (validation skipped)."
+    def _fetch_forms_list(self, server: str) -> list[tuple[str, str, bool]]:
+        """Fetch forms list from server."""
+        with st.spinner(f"Validating connection to {server}..."):
+            server_response = self._scto_client.list_forms()
+            return [
+                (
+                    form.get("id", "no id"),
+                    form.get("title", "No title"),
+                    form.get("encrypted", False),
                 )
+                for form in server_response
+            ]
 
-        except Exception as e:
-            # Handle SurveyCTO object creation errors
-            self._scto_client = None
-            self.logger.exception("Connection creation error")
+    def _update_connection_info(
+        self, connection_info: dict[str, any], forms_list: list, server: str
+    ) -> None:
+        """Update connection info with forms data."""
+        connection_info.update(
+            {
+                "connected": True,
+                "forms_count": len(forms_list),
+                "forms_list": forms_list,
+            }
+        )
 
-            if "Invalid server name" in str(e):
-                raise ConnectionError(  # noqa: B904
-                    f"🏷️ Invalid server name '{credentials.server}'. "
-                    f"Server names should contain only lowercase letters and numbers."
-                )
-            else:
-                raise ConnectionError(f"❌ Failed to create connection: {e}")  # noqa: B904
+        self.logger.info(
+            f"Successfully connected to {server}. Found {len(forms_list)} forms."
+        )
 
-        return connection_info
+        self._show_connection_status(forms_list, server)
+
+    def _show_connection_status(self, forms_list: list, server: str) -> None:
+        """Display connection status message."""
+        if len(forms_list) > 0:
+            st.success(f"✅ Connection to server '{server}' successful!.")
+        else:
+            st.warning(
+                f"⚠️ Connection successful, but no forms found on server '{server}'."
+            )
+
+    def _handle_api_error(self, api_err: SurveyCTOAPIError, server: str) -> None:
+        """Handle API errors with user-friendly messages."""
+        self._scto_client = None
+        error_msg = str(api_err)
+
+        error_mapping = {
+            (
+                "401",
+                "Invalid credentials",
+            ): "🔐 Invalid credentials. Please check your username and password.",
+            (
+                "403",
+                "forbidden",
+            ): "🚫 Access forbidden. Your account may not have permission to access this server.",
+            ("404",): f"🔍 Server '{server}' not found. Please verify the server name.",
+            (
+                "timeout",
+            ): f"⏱️ Connection timeout to server '{server}'. The server may be slow or unavailable. Please try again.",
+            (
+                "connection",
+            ): f"🔌 Cannot connect to server '{server}'. Please check your internet connection and verify the server name.",
+        }
+
+        for keywords, message in error_mapping.items():
+            if any(
+                keyword in error_msg or keyword in error_msg.lower()
+                for keyword in keywords
+            ):
+                raise ConnectionError(message) from api_err
+
+        raise ConnectionError(f"❌ API error: {api_err}") from api_err
+
+    def _handle_validation_error(self, validation_err: Exception) -> None:
+        """Handle validation errors."""
+        self._scto_client = None
+        self.logger.exception(f"Validation error: {validation_err}")
+        raise ConnectionError(
+            f"❌ Failed to validate credentials: {validation_err}"
+        ) from validation_err
+
+    def _skip_validation(self, server: str, connection_info: dict[str, any]) -> None:
+        """Skip validation and mark connection as successful."""
+        connection_info["connected"] = True
+        st.success(f"✅ Connection created for server '{server}' (validation skipped).")
+
+    def _handle_connection_error(self, error: Exception, server: str) -> None:
+        """Handle connection creation errors."""
+        self._scto_client = None
+        self.logger.exception("Connection creation error")
+
+        if "Invalid server name" in str(error):
+            raise ConnectionError(
+                f"🏷️ Invalid server name '{server}'. "
+                f"Server names should contain only lowercase letters and numbers."
+            )
+        raise ConnectionError(f"❌ Failed to create connection: {error}")
 
     def get_form_definition(self, form_id: str) -> tuple[pl.DataFrame, pl.DataFrame]:
         """Get form definition (questions and choices)."""
