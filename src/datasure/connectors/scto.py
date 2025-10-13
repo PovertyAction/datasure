@@ -60,6 +60,7 @@ class SurveyCTOConfig:
     timeout: int = 30
     chunk_size: int = 1000
     default_date: datetime = datetime(2024, 1, 1, 13, 40, 40)
+    date_format: str = "%b %d, %Y %I:%M:%S %p"
 
 
 class ServerCredentials(BaseModel):
@@ -157,45 +158,51 @@ class CacheManager:
 
     def __init__(self, project_id: str):
         self.project_id = project_id
+        self.default_date = SurveyCTOConfig().default_date
         self.logger = logging.getLogger(__name__)
 
-    def get_existing_data(self, file_path: str) -> tuple[pl.DataFrame, datetime]:
-        """Load existing data and return with latest submission date."""
-        try:
-            if not Path(file_path).exists():
-                self.logger.info(f"No existing data file found at {file_path}")
-                return pl.DataFrame(), SurveyCTOConfig.default_date
-
-            # Check file permissions before reading
-            if not os.access(file_path, os.R_OK):
-                self.logger.error(f"Permission denied reading file: {file_path}")
-                st.error(f"Cannot access file: {file_path}. Please check permissions.")
-                return pl.DataFrame(), SurveyCTOConfig.default_date
-
-            data = pl.read_csv(file_path)
-            if data.is_empty() or "SubmissionDate" not in data.columns:
-                return data, SurveyCTOConfig.default_date
-
-            data = data.with_columns(
-                pl.col("SubmissionDate").str.strptime(pl.Datetime, format="%+")
-            )
-            return data, data["SubmissionDate"].max()
-
-        except PermissionError as e:
-            self.logger.exception("Permission error loading data:")
-            st.error(f"Permission denied: {e}")
-            return pl.DataFrame(), SurveyCTOConfig.default_date
-
-        except Exception as e:
-            self.logger.warning(f"Failed to load existing data: {e}")
-            st.error(f"Failed to load existing data: {e}")
-            return pl.DataFrame(), SurveyCTOConfig.default_date
+    def get_existing_data(self, alias) -> tuple[pl.DataFrame, datetime]:
+        """Load existing data from duckdb and return with latest submission date."""
+        existing_data = duckdb_get_table(
+            self.project_id,
+            db_name="raw",
+            alias=alias,
+        )
+        if existing_data.is_empty():
+            return existing_data, self.default_date
+        else:
+            if "SubmissionDate" in existing_data.columns:
+                latest_date = (
+                    existing_data.select(pl.col("SubmissionDate").max()).to_dicts()[0]
+                ).get("SubmissionDate", self.default_date)
+                if isinstance(latest_date, datetime):
+                    return existing_data, latest_date
+                elif isinstance(latest_date, str):
+                    try:
+                        parsed_date = datetime.fromisoformat(latest_date)
+                        return existing_data, parsed_date  # noqa: TRY300
+                    except ValueError:
+                        self.logger.warning(
+                            f"Failed to parse SubmissionDate '{latest_date}' as ISO format. Using default date."
+                        )
+                        return existing_data, self.default_date
+                else:
+                    self.logger.warning(
+                        f"Unexpected type for SubmissionDate: {type(latest_date)}. Using default date."
+                    )
+                    return existing_data, self.default_date
+            else:
+                self.logger.warning(
+                    "SubmissionDate column not found in existing data. Using default date."
+                )
+                return existing_data, self.default_date
 
 
 class DataProcessor:
     """Handles data processing and type conversion."""
 
     def __init__(self):
+        self.date_format = SurveyCTOConfig().date_format
         self.logger = logging.getLogger(__name__)
 
     def get_repeat_fields(self, questions: pl.DataFrame) -> list[str]:
@@ -227,15 +234,12 @@ class DataProcessor:
     def _convert_standard_datetime_columns(self, data: pl.DataFrame) -> pl.DataFrame:
         """Convert standard datetime columns to datetime type."""
         datetime_cols = ["CompletionDate", "SubmissionDate", "starttime", "endtime"]
-        date_format = (
-            "%b %-d, %Y %-I:%M:%S %p" if os.name != "nt" else "%b %#d, %Y %#I:%M:%S %p"
-        )
         for col in datetime_cols:
             if col in data.columns:
                 with contextlib.suppress(Exception):
                     data = data.with_columns(
                         pl.col(col).str.strptime(
-                            pl.Datetime, format=date_format, strict=False
+                            pl.Datetime, format=self.date_format, strict=False
                         )
                     )
         return data
@@ -582,11 +586,13 @@ class SurveyCTOClient:
         questions = pl.DataFrame(
             form_def["fieldsRowsAndColumns"][1:],
             schema=form_def["fieldsRowsAndColumns"][0],
+            orient="row",
         )
 
         choices = pl.DataFrame(
             form_def["choicesRowsAndColumns"][1:],
             schema=form_def["choicesRowsAndColumns"][0],
+            orient="row",
         )
 
         return questions, choices
@@ -684,6 +690,9 @@ class SurveyCTOClient:
         else:
             combined_data = new_data
 
+        # Standardize missing values BEFORE type conversion
+        combined_data = standardize_missing_values(combined_data)
+
         # Process data types
         questions, _ = self.get_form_definition(form_config.form_id)
         if "disabled" in questions.columns:
@@ -693,13 +702,6 @@ class SurveyCTOClient:
         # Download media if requested
         if form_config.attachments and form_config.save_to:
             self._download_attachments(questions, new_data, form_config)
-
-        # Save data
-        if form_config.save_to:
-            combined_data.write_csv(form_config.save_to)
-
-        # standardize missing values
-        combined_data = standardize_missing_values(combined_data)
 
         # Save to DuckDB
         duckdb_save_table(
