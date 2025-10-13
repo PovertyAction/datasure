@@ -217,7 +217,7 @@ def retrieve_scto_credentials(
                 "error_type": "password_not_found",
             }
         else:
-            logger.info(f"Retrieved SCTO credentials for project {project_id}")
+            logger.debug(f"Retrieved SCTO credentials for project {project_id}")
             return {
                 "success": True,
                 "credentials": {
