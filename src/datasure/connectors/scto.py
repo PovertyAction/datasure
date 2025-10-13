@@ -824,7 +824,7 @@ class SurveyCTOUI:
             self._render_logo()
 
             # Get and validate credentials
-            credentials = self._get_server_credentials()
+            credentials = self._get_server_credentials(edit_mode)
             if not credentials:
                 return
 
@@ -849,7 +849,9 @@ class SurveyCTOUI:
         else:
             st.markdown("### SurveyCTO Form Configuration")
 
-    def _get_server_credentials(self) -> ServerCredentials | None:
+    def _get_server_credentials(
+        self, edit_mode: bool = False
+    ) -> ServerCredentials | None:
         """Get and validate server credentials."""
         login_credentials = list_stored_credentials(self.project_id).get(
             "credentials", {}
@@ -865,7 +867,7 @@ class SurveyCTOUI:
             options=list(login_credentials.keys()),
             index=None,
             help="Select the server credentials to use for this form",
-            key="scto_select_cred",
+            key=f"scto_select_cred{edit_mode}",
         )
 
         try:
