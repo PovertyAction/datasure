@@ -63,46 +63,88 @@ def load_raw_datasets(project_id: str) -> None:
     -------
     None
     """
+    import_log = _get_filtered_import_log(project_id)
+
+    if import_log.is_empty():
+        st.error("No import configurations found. Please add import configurations.")
+        return
+
+    _process_import_log(project_id, import_log)
+
+
+def _get_filtered_import_log(project_id: str) -> pl.DataFrame:
+    """Get import log filtered by load flag."""
     import_log = duckdb_get_table(
         project_id=project_id,
         alias="import_log",
         db_name="logs",
     )
-    import_log = import_log.filter(pl.col("load"))
-    if import_log.is_empty():
-        st.error("No import configurations found. Please add import configurations.")
-    else:
-        with st.status("Loading datasets ...", expanded=True) as status:
-            for row in import_log.iter_rows(named=True):
-                if row["source"] == "local storage" and row["refresh"] is True:
-                    load_local_data(
-                        project_id=project_id,
-                        alias=row["alias"],
-                        filename=row["filename"],
-                        sheet_name=row["sheet_name"] if row["sheet_name"] else None,
-                    )
-                elif row["source"] == "SurveyCTO" and row["refresh"] is True:
-                    # if private_key or save_to is Null, set to ""
-                    form_configs = FormConfig(
-                        alias=row["alias"],
-                        form_id=row["form_id"],
-                        server=row["server"],
-                        username=row["username"] if row["username"] else None,
-                        private_key=row["private_key"] if row["private_key"] else None,
-                        save_to=row["save_to"] if row["save_to"] else None,
-                        attachments=row["attachments"],
-                        refresh=row["refresh"],
-                    )
-                    download_forms(
-                        project_id=project_id,
-                        form_configs=[form_configs],
-                    )
+    return import_log.filter(pl.col("load"))
 
-                if row["alias"] not in st.session_state.st_raw_dataset_list:
-                    st.session_state.st_raw_dataset_list.append(row["alias"])
-            status.update(
-                label="Data loaded successfully!", state="complete", expanded=True
-            )
+
+def _process_import_log(project_id: str, import_log: pl.DataFrame) -> None:
+    """Process all rows in import log with status updates."""
+    with st.status("Loading datasets ...", expanded=True) as status:
+        for row in import_log.iter_rows(named=True):
+            _process_single_import(project_id, row)
+        status.update(
+            label="Data loaded successfully!", state="complete", expanded=True
+        )
+
+
+def _process_single_import(project_id: str, row: dict) -> None:
+    """Process a single import configuration row."""
+    if row["refresh"]:
+        _load_dataset_by_source(project_id, row)
+
+    _add_to_session_state(row["alias"])
+
+
+def _load_dataset_by_source(project_id: str, row: dict) -> None:
+    """Load dataset based on source type."""
+    if row["source"] == "local storage":
+        _load_from_local_storage(project_id, row)
+    elif row["source"] == "SurveyCTO":
+        _load_from_surveycto(project_id, row)
+
+
+def _load_from_local_storage(project_id: str, row: dict) -> None:
+    """Load dataset from local storage."""
+    load_local_data(
+        project_id=project_id,
+        alias=row["alias"],
+        filename=row["filename"],
+        sheet_name=row["sheet_name"] if row["sheet_name"] else None,
+    )
+
+
+def _load_from_surveycto(project_id: str, row: dict) -> None:
+    """Load dataset from SurveyCTO."""
+    form_configs = _create_form_config(row)
+    download_forms(
+        project_id=project_id,
+        form_configs=[form_configs],
+    )
+
+
+def _create_form_config(row: dict) -> FormConfig:
+    """Create FormConfig from import log row."""
+    return FormConfig(
+        alias=row["alias"],
+        form_id=row["form_id"],
+        server=row["server"],
+        username=row["username"] if row["username"] else None,
+        private_key=row["private_key"] if row["private_key"] else None,
+        save_to=row["save_to"] if row["save_to"] else None,
+        attachments=row["attachments"],
+        refresh=row["refresh"],
+    )
+
+
+def _add_to_session_state(alias: str) -> None:
+    """Add alias to session state if not already present."""
+    if alias not in st.session_state.st_raw_dataset_list:
+        st.session_state.st_raw_dataset_list.append(alias)
 
 
 # --- Update import log in the cache file --- #
