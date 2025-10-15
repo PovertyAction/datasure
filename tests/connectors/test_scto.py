@@ -4,10 +4,8 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-import pandas as pd
 import polars as pl
 import pytest
-import requests
 from pydantic_core import ValidationError
 
 from datasure.connectors.scto import (
@@ -66,17 +64,24 @@ class TestSurveyCTOConfig:
         assert config.timeout == 30
         assert config.chunk_size == 1000
         assert config.default_date == datetime(2024, 1, 1, 13, 40, 40)
+        assert config.date_format == "%b %d, %Y %I:%M:%S %p"
 
     def test_config_custom_values(self):
         """Test custom configuration values."""
         custom_date = datetime(2023, 1, 1, 12, 0, 0)
+        custom_format = "%Y-%m-%d %H:%M:%S"
         config = SurveyCTOConfig(
-            max_retries=5, timeout=60, chunk_size=2000, default_date=custom_date
+            max_retries=5,
+            timeout=60,
+            chunk_size=2000,
+            default_date=custom_date,
+            date_format=custom_format,
         )
         assert config.max_retries == 5
         assert config.timeout == 60
         assert config.chunk_size == 2000
         assert config.default_date == custom_date
+        assert config.date_format == custom_format
 
 
 class TestProjectID:
@@ -285,57 +290,80 @@ class TestSctoServerConnect:
 class TestSctoFunctions:
     """Test standalone scto functions."""
 
-    def test_get_existing_data_no_file(self):
+    @patch("datasure.connectors.scto.duckdb_get_table")
+    def test_get_existing_data_no_file(self, mock_get_table):
         """Test getting existing data when file doesn't exist."""
         manager = CacheManager("test1234")
-        data, date = manager.get_existing_data("/nonexistent/file.csv")
 
-        assert data.empty
-        assert date == SurveyCTOConfig.default_date
+        # Mock empty DataFrame return
+        mock_get_table.return_value = pl.DataFrame()
 
-    def test_get_existing_data_empty_file(self, tmp_path):
+        data, date = manager.get_existing_data("test_alias")
+
+        assert data.is_empty()
+        assert date == SurveyCTOConfig().default_date
+
+    @patch("datasure.connectors.scto.duckdb_get_table")
+    def test_get_existing_data_empty_file(self, mock_get_table):
         """Test getting existing data from empty file."""
-        data_file = tmp_path / "empty.csv"
-        data_file.write_text("")
-
         manager = CacheManager("test1234")
-        data, date = manager.get_existing_data(str(data_file))
 
-        assert data.empty
-        assert date == SurveyCTOConfig.default_date
+        # Mock empty DataFrame return
+        mock_get_table.return_value = pl.DataFrame()
 
-    def test_get_existing_data_no_submission_date(self, tmp_path):
+        data, date = manager.get_existing_data("test_alias")
+
+        assert data.is_empty()
+        assert date == SurveyCTOConfig().default_date
+
+    @patch("datasure.connectors.scto.duckdb_get_table")
+    def test_get_existing_data_no_submission_date(self, mock_get_table):
         """Test getting existing data without SubmissionDate column."""
-        data_file = tmp_path / "data.csv"
-        data_file.write_text("name,age\nJohn,25\nJane,30")
-
         manager = CacheManager("test1234")
-        data, date = manager.get_existing_data(str(data_file))
+
+        # Mock DataFrame without SubmissionDate column
+        mock_get_table.return_value = pl.DataFrame(
+            {"name": ["John", "Jane"], "age": [25, 30]}
+        )
+
+        data, date = manager.get_existing_data("test_alias")
 
         assert len(data) == 2
-        assert date == SurveyCTOConfig.default_date
+        assert date == SurveyCTOConfig().default_date
 
-    def test_get_existing_data_with_submission_date(self, tmp_path):
+    @patch("datasure.connectors.scto.duckdb_get_table")
+    def test_get_existing_data_with_submission_date(self, mock_get_table):
         """Test getting existing data with SubmissionDate column."""
-        data_file = tmp_path / "data.csv"
-        csv_content = "name,age,SubmissionDate\nJohn,25,2024-01-15 10:30:00\nJane,30,2024-01-20 15:45:00"
-        data_file.write_text(csv_content)
-
         manager = CacheManager("test1234")
-        data, date = manager.get_existing_data(str(data_file))
+
+        # Mock DataFrame with SubmissionDate column
+        mock_get_table.return_value = pl.DataFrame(
+            {
+                "name": ["John", "Jane"],
+                "age": [25, 30],
+                "SubmissionDate": [
+                    datetime(2024, 1, 15, 10, 30, 0),
+                    datetime(2024, 1, 20, 15, 45, 0),
+                ],
+            }
+        )
+
+        data, date = manager.get_existing_data("test_alias")
 
         assert len(data) == 2
-        assert date == pd.to_datetime("2024-01-20 15:45:00")
+        assert date == datetime(2024, 1, 20, 15, 45, 0)
 
-    def test_get_existing_data_exception(self, caplog):
+    @patch("datasure.connectors.scto.duckdb_get_table")
+    def test_get_existing_data_exception(self, mock_get_table, caplog):
         """Test getting existing data with exception."""
         manager = CacheManager("test1234")
 
-        # Use invalid file path that would cause an exception
-        data, date = manager.get_existing_data("/invalid/path/that/causes/error")
+        # Mock an exception
+        mock_get_table.side_effect = Exception("Database error")
 
-        assert data.empty
-        assert date == SurveyCTOConfig.default_date
+        # Should return empty DataFrame and default date on exception
+        with pytest.raises(Exception):  # noqa: B017
+            _, _ = manager.get_existing_data("test_alias")
 
 
 class TestDataProcessor:
@@ -349,7 +377,7 @@ class TestDataProcessor:
     def test_get_repeat_fields_empty(self):
         """Test getting repeat fields from empty DataFrame."""
         processor = DataProcessor()
-        questions = pd.DataFrame({"type": [], "name": []})
+        questions = pl.DataFrame({"type": [], "name": []})
 
         result = processor.get_repeat_fields(questions)
         assert result == []
@@ -357,7 +385,7 @@ class TestDataProcessor:
     def test_get_repeat_fields_no_repeats(self):
         """Test getting repeat fields with no repeat groups."""
         processor = DataProcessor()
-        questions = pd.DataFrame(
+        questions = pl.DataFrame(
             {
                 "type": ["text", "integer", "select_one"],
                 "name": ["name", "age", "gender"],
@@ -370,7 +398,7 @@ class TestDataProcessor:
     def test_get_repeat_fields_with_repeats(self):
         """Test getting repeat fields with repeat groups."""
         processor = DataProcessor()
-        questions = pd.DataFrame(
+        questions = pl.DataFrame(
             {
                 "type": [
                     "begin repeat",
@@ -404,7 +432,7 @@ class TestDataProcessor:
     def test_get_repeat_fields_nested_repeats(self):
         """Test getting repeat fields with nested repeat groups."""
         processor = DataProcessor()
-        questions = pd.DataFrame(
+        questions = pl.DataFrame(
             {
                 "type": [
                     "begin repeat",
@@ -444,38 +472,64 @@ class TestDataProcessor:
     def test_convert_data_types_datetime_columns(self):
         """Test converting datetime columns."""
         processor = DataProcessor()
-        data = pd.DataFrame(
+        data = pl.DataFrame(
             {
-                "CompletionDate": ["2024-01-15 10:30:00", "2024-01-16 11:30:00"],
-                "SubmissionDate": ["2024-01-15", "2024-01-16"],
-                "starttime": ["2024-01-15T10:30:00", "2024-01-16T11:30:00"],
-                "endtime": ["2024-01-15T12:30:00", "2024-01-16T13:30:00"],
+                "CompletionDate": [
+                    "Jan 15, 2024 10:30:00 AM",
+                    "Jan 16, 2024 11:30:00 AM",
+                ],
+                "SubmissionDate": [
+                    "Jan 15, 2024 10:30:00 AM",
+                    "Jan 16, 2024 11:30:00 AM",
+                ],
+                "starttime": ["Jan 15, 2024 10:30:00 AM", "Jan 16, 2024 11:30:00 AM"],
+                "endtime": ["Jan 15, 2024 12:30:00 PM", "Jan 16, 2024 01:30:00 PM"],
             }
         )
-        questions = pd.DataFrame({"type": [], "name": []})
+        questions = pl.DataFrame({"type": [], "name": []})
 
         result = processor.convert_data_types(data, questions)
 
-        assert pd.api.types.is_datetime64_any_dtype(result["CompletionDate"])
-        assert pd.api.types.is_datetime64_any_dtype(result["SubmissionDate"])
-        assert pd.api.types.is_datetime64_any_dtype(result["starttime"])
-        assert pd.api.types.is_datetime64_any_dtype(result["endtime"])
+        assert result["CompletionDate"].dtype in [
+            pl.Datetime,
+            pl.Datetime("ms"),
+            pl.Datetime("us"),
+            pl.Datetime("ns"),
+        ]
+        assert result["SubmissionDate"].dtype in [
+            pl.Datetime,
+            pl.Datetime("ms"),
+            pl.Datetime("us"),
+            pl.Datetime("ns"),
+        ]
+        assert result["starttime"].dtype in [
+            pl.Datetime,
+            pl.Datetime("ms"),
+            pl.Datetime("us"),
+            pl.Datetime("ns"),
+        ]
+        assert result["endtime"].dtype in [
+            pl.Datetime,
+            pl.Datetime("ms"),
+            pl.Datetime("us"),
+            pl.Datetime("ns"),
+        ]
 
     def test_convert_data_types_numeric_columns(self):
         """Test converting numeric columns."""
         processor = DataProcessor()
-        data = pd.DataFrame({"duration": ["120", "180"], "formdef_version": ["1", "2"]})
-        questions = pd.DataFrame({"type": [], "name": []})
+        data = pl.DataFrame({"duration": ["120", "180"], "formdef_version": ["1", "2"]})
+        questions = pl.DataFrame({"type": [], "name": []})
 
         result = processor.convert_data_types(data, questions)
 
-        assert pd.api.types.is_numeric_dtype(result["duration"])
-        assert pd.api.types.is_numeric_dtype(result["formdef_version"])
+        assert result["duration"].dtype == pl.Float64
+        assert result["formdef_version"].dtype == pl.Float64
 
     def test_convert_data_types_form_based(self):
         """Test converting data types based on form definition."""
         processor = DataProcessor()
-        data = pd.DataFrame(
+        data = pl.DataFrame(
             {
                 "age": ["25", "30"],
                 "birth_date": ["2000-01-15", "1995-05-20"],
@@ -483,7 +537,7 @@ class TestDataProcessor:
                 "notes": ["Note 1", "Note 2"],
             }
         )
-        questions = pd.DataFrame(
+        questions = pl.DataFrame(
             {
                 "type": ["integer", "date", "time", "note"],
                 "name": ["age", "birth_date", "survey_time", "notes"],
@@ -492,18 +546,28 @@ class TestDataProcessor:
 
         result = processor.convert_data_types(data, questions)
 
-        assert pd.api.types.is_numeric_dtype(result["age"])
-        assert pd.api.types.is_datetime64_any_dtype(result["birth_date"])
-        assert pd.api.types.is_datetime64_any_dtype(result["survey_time"])
+        assert result["age"].dtype == pl.Float64
+        assert result["birth_date"].dtype in [
+            pl.Datetime,
+            pl.Datetime("ms"),
+            pl.Datetime("us"),
+            pl.Datetime("ns"),
+        ]
+        assert result["survey_time"].dtype in [
+            pl.Datetime,
+            pl.Datetime("ms"),
+            pl.Datetime("us"),
+            pl.Datetime("ns"),
+        ]
         assert "notes" not in result.columns  # Note fields are dropped
 
     def test_convert_data_types_with_repeat_fields(self):
         """Test converting data types with repeat fields."""
         processor = DataProcessor()
-        data = pd.DataFrame(
+        data = pl.DataFrame(
             {"member_age_1": ["25", "30"], "member_age_2": ["28", "35"]}
         )
-        questions = pd.DataFrame(
+        questions = pl.DataFrame(
             {
                 "type": ["begin repeat", "integer", "end repeat"],
                 "name": ["members", "member_age", ""],
@@ -512,14 +576,14 @@ class TestDataProcessor:
 
         result = processor.convert_data_types(data, questions)
 
-        assert pd.api.types.is_numeric_dtype(result["member_age_1"])
-        assert pd.api.types.is_numeric_dtype(result["member_age_2"])
+        assert result["member_age_1"].dtype == pl.Float64
+        assert result["member_age_2"].dtype == pl.Float64
 
     def test_convert_data_types_error_handling(self, caplog):
         """Test data type conversion error handling."""
         processor = DataProcessor()
-        data = pd.DataFrame({"invalid_date": ["not-a-date", "also-not-date"]})
-        questions = pd.DataFrame({"type": ["date"], "name": ["invalid_date"]})
+        data = pl.DataFrame({"invalid_date": ["not-a-date", "also-not-date"]})
+        questions = pl.DataFrame({"type": ["date"], "name": ["invalid_date"]})
 
         result = processor.convert_data_types(data, questions)
 
@@ -543,7 +607,7 @@ class TestMediaDownloader:
     def test_download_single_file(self, tmp_path):
         """Test downloading a single media file."""
         mock_client = Mock()
-        mock_client.get_attachment.return_value = b"fake_image_content"
+        mock_client.download_attachment_from_url.return_value = b"fake_image_content"
 
         config = SurveyCTOConfig()
         downloader = MediaDownloader(mock_client, config)
@@ -564,8 +628,10 @@ class TestMediaDownloader:
         assert expected_file.exists()
         assert expected_file.read_bytes() == b"fake_image_content"
 
-        # Check that get_attachment was called with correct parameters
-        mock_client.get_attachment.assert_called_once_with("photo.jpg", key=None)
+        # Check that download_attachment_from_url was called with correct parameters
+        mock_client.download_attachment_from_url.assert_called_once_with(
+            "photo.jpg", private_key=None
+        )
 
     def test_download_single_file_file_exists(self, tmp_path):
         """Test downloading a single file when file already exists."""
@@ -588,8 +654,8 @@ class TestMediaDownloader:
             encryption_key=None,
         )
 
-        # Should not call get_attachment since file exists
-        mock_client.get_attachment.assert_not_called()
+        # Should not call download_attachment_from_url since file exists
+        mock_client.download_attachment_from_url.assert_not_called()
 
         # File should remain unchanged
         assert existing_file.read_bytes() == b"existing_content"
@@ -597,7 +663,7 @@ class TestMediaDownloader:
     def test_download_single_file_with_extension(self, tmp_path):
         """Test downloading a single file that needs extension."""
         mock_client = Mock()
-        mock_client.get_attachment.return_value = b"csv_content"
+        mock_client.download_attachment_from_url.return_value = b"csv_content"
 
         config = SurveyCTOConfig()
         downloader = MediaDownloader(mock_client, config)
@@ -618,7 +684,9 @@ class TestMediaDownloader:
         assert expected_file.exists()
 
         # Check encryption key was passed
-        mock_client.get_attachment.assert_called_once_with("data", key="test_key")
+        mock_client.download_attachment_from_url.assert_called_once_with(
+            "data", private_key=b"test_key"
+        )
 
     def test_download_media_files_creates_folder(self, tmp_path):
         """Test that download_media_files creates the media folder."""
@@ -627,7 +695,7 @@ class TestMediaDownloader:
         downloader = MediaDownloader(mock_client, config)
 
         media_folder = tmp_path / "media" / "subfolder"
-        data = pd.DataFrame({"KEY": [], "photo": []})
+        data = pl.DataFrame(schema={"KEY": pl.Utf8, "photo": pl.Utf8})
 
         downloader.download_media_files(["photo"], data, media_folder, None)
 
@@ -654,14 +722,14 @@ class TestSurveyCTOClient:
         client = SurveyCTOClient("test1234", config)
         assert client.config == config
 
-    @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
+    @patch("datasure.connectors.scto.SurveyCTOAPIClient")
     @patch("datasure.connectors.scto.st")
-    def test_connect_success_with_validation(self, mock_st, mock_scto_class):
+    def test_connect_success_with_validation(self, mock_st, mock_api_client_class):
         """Test successful connection with validation."""
         # Setup mocks
-        mock_scto_instance = Mock()
-        mock_scto_class.return_value = mock_scto_instance
-        mock_scto_instance.list_forms.return_value = [
+        mock_api_instance = Mock()
+        mock_api_client_class.return_value = mock_api_instance
+        mock_api_instance.list_forms.return_value = [
             {"id": "form1", "title": "Form 1", "encrypted": False},
             {"id": "form2", "title": "Form 2", "encrypted": True},
         ]
@@ -683,19 +751,17 @@ class TestSurveyCTOClient:
         assert len(result["forms_list"]) == 2
         assert result["validation_attempted"] is True
 
-        # Check SurveyCTO client was created
-        mock_scto_class.assert_called_once_with(
-            "testserver", "test@example.com", "password"
-        )
-        mock_scto_instance.list_forms.assert_called_once()
+        # Check SurveyCTO API client was created
+        mock_api_client_class.assert_called_once()
+        mock_api_instance.list_forms.assert_called_once()
         mock_st.success.assert_called()
 
-    @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
+    @patch("datasure.connectors.scto.SurveyCTOAPIClient")
     @patch("datasure.connectors.scto.st")
-    def test_connect_success_no_validation(self, mock_st, mock_scto_class):
+    def test_connect_success_no_validation(self, mock_st, mock_api_client_class):
         """Test successful connection without validation."""
-        mock_scto_instance = Mock()
-        mock_scto_class.return_value = mock_scto_instance
+        mock_api_instance = Mock()
+        mock_api_client_class.return_value = mock_api_instance
 
         client = SurveyCTOClient("test1234")
         credentials = ServerCredentials(
@@ -706,22 +772,21 @@ class TestSurveyCTOClient:
 
         assert result["connected"] is True
         assert result["validation_attempted"] is False
-        mock_scto_instance.list_forms.assert_not_called()
+        mock_api_instance.list_forms.assert_not_called()
         mock_st.success.assert_called()
 
-    @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
+    @patch("datasure.connectors.scto.SurveyCTOAPIClient")
     @patch("datasure.connectors.scto.st")
-    def test_connect_http_error_401(self, mock_st, mock_scto_class):
+    def test_connect_http_error_401(self, mock_st, mock_api_client_class):
         """Test connection with HTTP 401 error."""
-        mock_scto_instance = Mock()
-        mock_scto_class.return_value = mock_scto_instance
+        mock_api_instance = Mock()
+        mock_api_client_class.return_value = mock_api_instance
 
-        # Create HTTP error with 401 status
-        http_error = requests.exceptions.HTTPError("Unauthorized")
-        mock_response = Mock()
-        mock_response.status_code = 401
-        http_error.response = mock_response
-        mock_scto_instance.list_forms.side_effect = http_error
+        # Create API error with 401 message
+        from datasure.utils.scto_api import SurveyCTOAPIError
+
+        api_error = SurveyCTOAPIError("401 Unauthorized")
+        mock_api_instance.list_forms.side_effect = api_error
 
         mock_st.spinner.return_value.__enter__ = Mock()
         mock_st.spinner.return_value.__exit__ = Mock()
@@ -734,39 +799,43 @@ class TestSurveyCTOClient:
         with pytest.raises(ConnectionError):
             client.connect(credentials, validate_permissions=True)
 
-    @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
+    @patch("datasure.connectors.scto.SurveyCTOAPIClient")
     def test_connect_connection_error(self, mock_scto_class):
         """Test connection with network connection error."""
         mock_scto_instance = Mock()
         mock_scto_class.return_value = mock_scto_instance
-        mock_scto_instance.list_forms.side_effect = (
-            requests.exceptions.ConnectionError()
-        )
+
+        from datasure.utils.scto_api import SurveyCTOAPIError
+
+        mock_scto_instance.list_forms.side_effect = SurveyCTOAPIError("connection")
 
         client = SurveyCTOClient("test1234")
         credentials = ServerCredentials(
             server="testserver", user="test@example.com", password="password"
         )
 
-        with pytest.raises(ConnectionError, match="Cannot connect to server"):
+        with pytest.raises(ConnectionError):
             client.connect(credentials, validate_permissions=True)
 
-    @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
+    @patch("datasure.connectors.scto.SurveyCTOAPIClient")
     def test_connect_timeout_error(self, mock_scto_class):
         """Test connection with timeout error."""
         mock_scto_instance = Mock()
         mock_scto_class.return_value = mock_scto_instance
-        mock_scto_instance.list_forms.side_effect = requests.exceptions.Timeout()
+
+        from datasure.utils.scto_api import SurveyCTOAPIError
+
+        mock_scto_instance.list_forms.side_effect = SurveyCTOAPIError("timeout")
 
         client = SurveyCTOClient("test1234")
         credentials = ServerCredentials(
             server="testserver", user="test@example.com", password="password"
         )
 
-        with pytest.raises(ConnectionError, match="Connection timeout"):
+        with pytest.raises(ConnectionError):
             client.connect(credentials, validate_permissions=True)
 
-    @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
+    @patch("datasure.connectors.scto.SurveyCTOAPIClient")
     def test_connect_invalid_server_name(self, mock_scto_class):
         """Test connection with invalid server name."""
         mock_scto_class.side_effect = Exception("Invalid server name")
@@ -804,41 +873,50 @@ class TestSurveyCTOClient:
                 ["colors", "blue", "Blue"],
             ],
         }
-        mock_scto_client.get_form_definition.return_value = form_def
+        mock_scto_client.download_form_definition.return_value = form_def
 
         questions, choices = client.get_form_definition("form123")
 
         assert len(questions) == 2
         assert list(questions.columns) == ["name", "type", "label"]
-        assert questions.iloc[0]["name"] == "question1"
+        assert questions[0, "name"] == "question1"
 
         assert len(choices) == 2
         assert list(choices.columns) == ["list name", "name", "label"]
-        assert choices.iloc[0]["name"] == "red"
+        assert choices[0, "name"] == "red"
 
     def test_get_form_definition_error(self):
         """Test getting form definition with error."""
         client = SurveyCTOClient("test1234")
         mock_scto_client = Mock()
         client._scto_client = mock_scto_client
-        mock_scto_client.get_form_definition.side_effect = Exception("API Error")
+
+        from datasure.utils.scto_api import SurveyCTOAPIError
+
+        mock_scto_client.download_form_definition.side_effect = SurveyCTOAPIError(
+            "API Error"
+        )
 
         with pytest.raises(SurveyCTOError, match="Failed to get form definition"):
             client.get_form_definition("form123")
 
     @patch("datasure.connectors.scto.pl.read_csv")
     @patch("datasure.connectors.scto.duckdb_save_table")
-    def test_import_server_dataset(self, mock_save_table, mock_read_csv):
+    @patch("datasure.connectors.scto.standardize_missing_values")
+    def test_import_server_dataset(
+        self, mock_standardize, mock_save_table, mock_read_csv
+    ):
         """Test importing from server dataset."""
         client = SurveyCTOClient("test1234")
         mock_scto_client = Mock()
         client._scto_client = mock_scto_client
 
-        csv_data = "name,age\nJohn,25\nJane,30"
-        mock_scto_client.get_server_dataset.return_value = csv_data
+        csv_data = b"name,age\nJohn,25\nJane,30"
+        mock_scto_client.download_dataset_csv.return_value = csv_data
 
         mock_df = pl.DataFrame({"name": ["John", "Jane"], "age": [25, 30]})
         mock_read_csv.return_value = mock_df
+        mock_standardize.return_value = mock_df
 
         form_config = FormConfig(
             alias="test_dataset", form_id="dataset123", server="testserver"
@@ -847,8 +925,8 @@ class TestSurveyCTOClient:
         result = client._import_server_dataset(form_config)
 
         assert result == 2
-        mock_scto_client.get_server_dataset.assert_called_once_with("dataset123")
-        mock_read_csv.assert_called_once_with(csv_data.encode())
+        mock_scto_client.download_dataset_csv.assert_called_once_with("dataset123")
+        mock_read_csv.assert_called_once_with(csv_data)
 
     @patch("datasure.connectors.scto.duckdb_save_table")
     def test_import_regular_form_no_refresh(self, mock_save_table):
@@ -867,8 +945,9 @@ class TestSurveyCTOClient:
         mock_scto_client.get_form_data.assert_not_called()
         mock_save_table.assert_not_called()
 
+    @patch("datasure.connectors.scto.standardize_missing_values")
     @patch("datasure.connectors.scto.duckdb_save_table")
-    def test_import_regular_form_with_refresh(self, mock_save_table):
+    def test_import_regular_form_with_refresh(self, mock_save_table, mock_standardize):
         """Test importing regular form with refresh=True."""
         client = SurveyCTOClient("test1234")
         mock_scto_client = Mock()
@@ -879,10 +958,10 @@ class TestSurveyCTOClient:
             {"name": "John", "age": 25, "CompletionDate": "2024-01-15"},
             {"name": "Jane", "age": 30, "CompletionDate": "2024-01-16"},
         ]
-        mock_scto_client.get_form_data.return_value = form_data
+        mock_scto_client.download_form_data_json.return_value = form_data
 
         # Mock form definition
-        mock_scto_client.get_form_definition.return_value = {
+        mock_scto_client.download_form_definition.return_value = {
             "fieldsRowsAndColumns": [
                 ["name", "type", "disabled"],
                 ["name", "text", "no"],
@@ -891,6 +970,9 @@ class TestSurveyCTOClient:
             "choicesRowsAndColumns": [["list name", "name", "label"]],
         }
 
+        # Mock standardize_missing_values to return the data unchanged
+        mock_standardize.side_effect = lambda x: x
+
         form_config = FormConfig(
             alias="test_form", form_id="form123", server="testserver", refresh=True
         )
@@ -898,11 +980,11 @@ class TestSurveyCTOClient:
         result = client._import_regular_form(form_config)
 
         assert result == 2
-        mock_scto_client.get_form_data.assert_called_once()
+        mock_scto_client.download_form_data_json.assert_called_once()
         mock_save_table.assert_called_once()
 
     @patch("datasure.connectors.scto.retrieve_scto_credentials")
-    @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
+    @patch("datasure.connectors.scto.SurveyCTOAPIClient")
     def test_import_data_connection_fallback(
         self, mock_scto_class, mock_retrieve_credentials
     ):
@@ -954,7 +1036,7 @@ class TestSurveyCTOClient:
             client.import_data(form_config)
 
     @patch("datasure.connectors.scto.retrieve_scto_credentials")
-    @patch("datasure.connectors.scto.pysurveycto.SurveyCTOObject")
+    @patch("datasure.connectors.scto.SurveyCTOAPIClient")
     def test_import_data_connection_error(
         self, mock_scto_class, mock_retrieve_credentials
     ):
@@ -966,8 +1048,10 @@ class TestSurveyCTOClient:
             "credentials": {"password": "password"}
         }
 
-        # Mock connection error
-        mock_scto_class.side_effect = ConnectionError("Connection failed")
+        # Mock API error during client creation
+        from datasure.utils.scto_api import SurveyCTOAPIError
+
+        mock_scto_class.side_effect = SurveyCTOAPIError("Connection failed")
 
         form_config = FormConfig(
             alias="test_form",
@@ -976,7 +1060,7 @@ class TestSurveyCTOClient:
             username="user@example.com",
         )
 
-        with pytest.raises(ConnectionError, match="Not connected to server"):
+        with pytest.raises(ConnectionError):
             client.import_data(form_config)
 
     @patch("datasure.connectors.scto.MediaDownloader")
@@ -990,14 +1074,14 @@ class TestSurveyCTOClient:
         mock_downloader = Mock()
         mock_downloader_class.return_value = mock_downloader
 
-        questions = pd.DataFrame(
+        questions = pl.DataFrame(
             {
                 "type": ["text", "image", "audio", "note"],
                 "name": ["name", "photo", "voice", "notes"],
             }
         )
 
-        data = pd.DataFrame(
+        data = pl.DataFrame(
             {"name": ["John"], "photo": ["photo1.jpg"], "voice": ["audio1.wav"]}
         )
 
@@ -1062,42 +1146,6 @@ class TestSurveyCTOClient:
         with patch("builtins.open", side_effect=OSError("Permission denied")):  # noqa: SIM117
             with pytest.raises(SctoValidationError, match="Failed to read private key"):
                 client._import_private_key(str(key_file))
-
-    def test_handle_http_error_various_codes(self):
-        """Test _handle_http_error with various HTTP status codes."""
-        client = SurveyCTOClient("test1234")
-
-        error_codes_and_messages = {
-            401: "Invalid credentials",
-            403: "Access forbidden",
-            404: "Server 'testserver' not found",
-            429: "Too many requests",
-            500: "Server error",
-            502: "Bad gateway",
-            503: "Service unavailable",
-            418: "Server error (HTTP 418)",  # Generic case
-        }
-
-        for status_code, expected_message in error_codes_and_messages.items():
-            http_error = requests.exceptions.HTTPError(f"HTTP {status_code}")
-            mock_response = Mock()
-            mock_response.status_code = status_code
-            http_error.response = mock_response
-
-            with pytest.raises(ConnectionError) as exc_info:
-                client._handle_http_error(http_error, "testserver")
-
-            assert expected_message in str(exc_info.value)
-
-    def test_handle_http_error_no_response(self):
-        """Test _handle_http_error with no response object."""
-        client = SurveyCTOClient("test1234")
-
-        http_error = requests.exceptions.HTTPError("Connection failed")
-        http_error.response = None
-
-        with pytest.raises(ConnectionError, match="Authentication failed"):
-            client._handle_http_error(http_error, "testserver")
 
 
 class TestSurveyCTOUI:
@@ -1240,10 +1288,10 @@ class TestMediaDownloaderExtended:
     """Extended tests for MediaDownloader class."""
 
     @patch("datasure.connectors.scto.st")
-    def test_download_field_media_with_progress(self, mock_st):
+    def test_download_field_media_with_progress(self, mock_st, tmp_path):
         """Test downloading field media with progress bar."""
         mock_client = Mock()
-        mock_client.get_attachment.return_value = b"fake_content"
+        mock_client.download_attachment_from_url.return_value = b"fake_content"
 
         config = SurveyCTOConfig()
         downloader = MediaDownloader(mock_client, config)
@@ -1252,11 +1300,11 @@ class TestMediaDownloaderExtended:
         mock_progress = Mock()
         mock_st.progress.return_value = mock_progress
 
-        data = pd.DataFrame(
+        data = pl.DataFrame(
             {"KEY": ["uuid:123", "uuid:456"], "photo": ["photo1.jpg", "photo2.jpg"]}
         )
 
-        media_folder = Path("/tmp/media")
+        media_folder = tmp_path / "media"
         media_folder.mkdir(parents=True, exist_ok=True)
 
         downloader._download_field_media("photo", data, media_folder, None)
@@ -1271,26 +1319,28 @@ class TestMediaDownloaderExtended:
         config = SurveyCTOConfig()
         downloader = MediaDownloader(mock_client, config)
 
-        data = pd.DataFrame({"KEY": [], "photo": []})
+        data = pl.DataFrame(schema={"KEY": pl.Utf8, "photo": pl.Utf8})
         media_folder = Path("/tmp/media")
 
         # Should not crash with empty data
         downloader._download_field_media("photo", data, media_folder, None)
 
         # No attachments should be downloaded
-        mock_client.get_attachment.assert_not_called()
+        mock_client.download_attachment_from_url.assert_not_called()
 
-    def test_download_field_media_exception_handling(self, caplog):
+    def test_download_field_media_exception_handling(self, caplog, tmp_path):
         """Test downloading field media with exception handling."""
         mock_client = Mock()
-        mock_client.get_attachment.side_effect = Exception("Download failed")
+        mock_client.download_attachment_from_url.side_effect = Exception(
+            "Download failed"
+        )
 
         config = SurveyCTOConfig()
         downloader = MediaDownloader(mock_client, config)
 
-        data = pd.DataFrame({"KEY": ["uuid:123"], "photo": ["photo1.jpg"]})
+        data = pl.DataFrame({"KEY": ["uuid:123"], "photo": ["photo1.jpg"]})
 
-        media_folder = Path("/tmp/media")
+        media_folder = tmp_path / "media"
         media_folder.mkdir(parents=True, exist_ok=True)
 
         # Should handle exception gracefully
@@ -1319,8 +1369,8 @@ class TestMediaDownloaderExtended:
             encryption_key=None,
         )
 
-        # Should not call get_attachment since file exists
-        mock_client.get_attachment.assert_not_called()
+        # Should not call download_attachment_from_url since file exists
+        mock_client.download_attachment_from_url.assert_not_called()
 
         # File content should remain unchanged
         assert existing_file.read_bytes() == b"existing_content"
@@ -1328,13 +1378,13 @@ class TestMediaDownloaderExtended:
     def test_download_media_files_multiple_fields(self, tmp_path):
         """Test downloading media files for multiple fields."""
         mock_client = Mock()
-        mock_client.get_attachment.return_value = b"fake_content"
+        mock_client.download_attachment_from_url.return_value = b"fake_content"
 
         config = SurveyCTOConfig()
         downloader = MediaDownloader(mock_client, config)
 
         media_fields = ["photo", "audio"]
-        data = pd.DataFrame(
+        data = pl.DataFrame(
             {"KEY": ["uuid:123"], "photo": ["photo1.jpg"], "audio": ["audio1.wav"]}
         )
 

@@ -285,6 +285,193 @@ class TestFormEndpoints:
             mock_request.assert_called_once_with("GET", "/forms/ids")
             assert result == expected_ids
 
+    def test_list_forms(self, api_client):
+        """Test listing all forms with metadata."""
+        expected_forms = [
+            {"id": "form1", "title": "Form 1", "version": 1},
+            {"id": "form2", "title": "Form 2", "version": 2},
+        ]
+
+        with patch.object(api_client, "_get_csrf_auth_headers") as mock_auth:  # noqa: SIM117
+            with patch.object(api_client.session, "get") as mock_get:
+                mock_auth.return_value = {
+                    "X-csrf-token": "test_token",
+                    "X-OpenRosa-Version": "1.0",
+                }
+                mock_response = Mock()
+                mock_response.json.return_value = {"forms": expected_forms}
+                mock_get.return_value = mock_response
+
+                result = api_client.list_forms()
+
+                expected_url = (
+                    "https://testserver.surveycto.com/console/forms-groups-datasets/get"
+                )
+                mock_get.assert_called_once_with(
+                    expected_url,
+                    cookies=api_client.session.cookies,
+                    headers={
+                        "X-csrf-token": "test_token",
+                        "X-OpenRosa-Version": "1.0",
+                    },
+                    timeout=30,
+                )
+                assert result == expected_forms
+
+    def test_list_forms_http_error(self, api_client):
+        """Test list_forms with HTTP error."""
+        with patch.object(api_client, "_get_csrf_auth_headers") as mock_auth:  # noqa: SIM117
+            with patch.object(api_client.session, "get") as mock_get:
+                mock_auth.return_value = {"X-csrf-token": "test_token"}
+                mock_response = Mock()
+                mock_response.raise_for_status.side_effect = (
+                    requests.exceptions.HTTPError("403")
+                )
+                mock_get.return_value = mock_response
+
+                with pytest.raises(SurveyCTOAPIError, match="Failed to list forms"):
+                    api_client.list_forms()
+
+    def test_list_forms_key_error(self, api_client):
+        """Test list_forms with missing 'forms' key in response."""
+        with patch.object(api_client, "_get_csrf_auth_headers") as mock_auth:  # noqa: SIM117
+            with patch.object(api_client.session, "get") as mock_get:
+                mock_auth.return_value = {"X-csrf-token": "test_token"}
+                mock_response = Mock()
+                mock_response.json.return_value = {"data": "no forms key"}
+                mock_get.return_value = mock_response
+
+                with pytest.raises(SurveyCTOAPIError, match="Invalid response format"):
+                    api_client.list_forms()
+
+    def test_download_form_definition(self, api_client):
+        """Test downloading form definition."""
+        expected_definition = {
+            "title": "Test Form",
+            "fields": [{"name": "field1", "type": "text"}],
+        }
+
+        with patch.object(api_client, "_get_csrf_auth_headers") as mock_auth:  # noqa: SIM117
+            with patch.object(api_client.session, "get") as mock_get:
+                mock_auth.return_value = {
+                    "X-csrf-token": "test_token",
+                    "X-OpenRosa-Version": "1.0",
+                }
+                mock_response = Mock()
+                mock_response.json.return_value = expected_definition
+                mock_get.return_value = mock_response
+
+                result = api_client.download_form_definition("test_form")
+
+                expected_url = (
+                    "https://testserver.surveycto.com/forms/test_form/design/"
+                )
+                mock_get.assert_called_once_with(
+                    expected_url,
+                    cookies=api_client.session.cookies,
+                    headers={
+                        "X-csrf-token": "test_token",
+                        "X-OpenRosa-Version": "1.0",
+                    },
+                    timeout=30,
+                )
+                assert result == expected_definition
+
+    def test_download_form_definition_http_error(self, api_client):
+        """Test download_form_definition with HTTP error."""
+        with patch.object(api_client, "_get_csrf_auth_headers") as mock_auth:  # noqa: SIM117
+            with patch.object(api_client.session, "get") as mock_get:
+                mock_auth.return_value = {"X-csrf-token": "test_token"}
+                mock_response = Mock()
+                mock_response.raise_for_status.side_effect = (
+                    requests.exceptions.HTTPError("403")
+                )
+                mock_get.return_value = mock_response
+
+                with pytest.raises(
+                    SurveyCTOAPIError, match="Failed to download form definition"
+                ):
+                    api_client.download_form_definition("test_form")
+
+    def test_get_csrf_auth_headers_success(self, api_client):
+        """Test successful CSRF authentication."""
+        with patch.object(api_client.session, "head") as mock_head:  # noqa: SIM117
+            with patch.object(api_client.session, "post") as mock_post:
+                # Mock HEAD response
+                mock_head_response = Mock()
+                mock_head_response.headers = {"X-csrf-token": "initial_token"}
+                mock_head.return_value = mock_head_response
+
+                # Mock POST response
+                mock_post_response = Mock()
+                mock_post_response.headers = {"X-csrf-token": "auth_token"}
+                mock_post.return_value = mock_post_response
+
+                result = api_client._get_csrf_auth_headers()
+
+                expected_url = "https://testserver.surveycto.com"
+                mock_head.assert_called_once_with(
+                    expected_url,
+                    headers={"X-OpenRosa-Version": "1.0"},
+                    timeout=30,
+                )
+
+                # Check POST was called once (headers dict is modified in place)
+                assert mock_post.call_count == 1
+                call_args = mock_post.call_args
+                assert call_args[0][0] == f"{expected_url}/login"
+                assert call_args[1]["cookies"] == api_client.session.cookies
+                assert call_args[1]["timeout"] == 30
+                assert "X-csrf-token" in call_args[1]["headers"]
+                assert call_args[1]["headers"]["X-OpenRosa-Version"] == "1.0"
+
+                assert result == {
+                    "X-csrf-token": "auth_token",
+                    "X-OpenRosa-Version": "1.0",
+                }
+
+    def test_get_csrf_auth_headers_http_error(self, api_client):
+        """Test CSRF authentication with HTTP error."""
+        with patch.object(api_client.session, "head") as mock_head:
+            mock_response = Mock()
+            mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(
+                "401"
+            )
+            mock_head.return_value = mock_response
+
+            with pytest.raises(SurveyCTOAPIError, match="CSRF authentication failed"):
+                api_client._get_csrf_auth_headers()
+
+    def test_get_csrf_auth_headers_missing_token(self, api_client):
+        """Test CSRF authentication with missing CSRF token."""
+        with patch.object(api_client.session, "head") as mock_head:
+            mock_response = Mock()
+            mock_response.headers = {}  # No X-csrf-token
+            mock_head.return_value = mock_response
+
+            with pytest.raises(SurveyCTOAPIError, match="CSRF token not found"):
+                api_client._get_csrf_auth_headers()
+
+    def test_get_csrf_auth_headers_connection_error(self, api_client):
+        """Test CSRF authentication with connection error."""
+        with patch.object(  # noqa: SIM117
+            api_client.session,
+            "head",
+            side_effect=requests.exceptions.ConnectionError("Connection failed"),
+        ):
+            with pytest.raises(SurveyCTOAPIError, match="Connection failed"):
+                api_client._get_csrf_auth_headers()
+
+    def test_get_csrf_auth_headers_timeout_error(self, api_client):
+        """Test CSRF authentication with timeout error."""
+        with patch.object(  # noqa: SIM117
+            api_client.session,
+            "head",
+            side_effect=requests.exceptions.Timeout("Timeout"),
+        ):
+            with pytest.raises(SurveyCTOAPIError, match="Request timeout"):
+                api_client._get_csrf_auth_headers()
+
     def test_download_form_data_json_unencrypted(self, api_client):
         """Test downloading unencrypted form data in JSON format."""
         expected_data = {
