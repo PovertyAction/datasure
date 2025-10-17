@@ -495,10 +495,11 @@ wheels = [
 
 [[package]]
 name = "datasure"
-version = "0.4.0"
+version = "0.5.6"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
+    { name = "fastexcel" },
     { name = "geopy" },
     { name = "keyring" },
     { name = "matplotlib" },
@@ -509,9 +510,9 @@ dependencies = [
     { name = "pillow" },
     { name = "plotly" },
     { name = "polars" },
+    { name = "polars-readstat" },
     { name = "pyarrow" },
     { name = "pydantic" },
-    { name = "pysurveycto" },
     { name = "requests" },
     { name = "scikit-learn" },
     { name = "seaborn" },
@@ -537,7 +538,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "duckdb", specifier = "==1.3.1" },
+    { name = "duckdb", specifier = ">=1.3.1" },
+    { name = "fastexcel", specifier = ">=0.14.0" },
     { name = "geopy", specifier = ">=2.4.1" },
     { name = "keyring", specifier = ">=25.6.0" },
     { name = "matplotlib", specifier = ">=3.10.0" },
@@ -548,16 +550,16 @@ requires-dist = [
     { name = "pillow", specifier = ">=11.3.0" },
     { name = "plotly", specifier = ">=6.2.0" },
     { name = "polars", specifier = ">=1.30.0" },
+    { name = "polars-readstat", specifier = ">=0.5.1" },
     { name = "pyarrow", specifier = ">=16.0.0" },
     { name = "pydantic", specifier = ">=2.11.7" },
-    { name = "pysurveycto", specifier = ">=0.0.15" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
     { name = "requests", specifier = ">=2.32.3" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.4" },
     { name = "scikit-learn", specifier = ">=1.5.2" },
     { name = "seaborn", specifier = ">=0.13.2" },
-    { name = "streamlit", specifier = ">=1.47.0" },
+    { name = "streamlit", specifier = ">=1.49.0" },
     { name = "streamlit-extras", specifier = ">=0.5.5" },
 ]
 provides-extras = ["dev"]
@@ -691,6 +693,22 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/82/c6/6820408cdd87c11f1fbbd2349b05bbda28174d746e6d708ad0f0a934f9d7/faker-37.0.0.tar.gz", hash = "sha256:d2e4e2a30d459a8ec0ae52a552aa51c48973cb32cf51107dee90f58a8322a880", size = 1875487, upload-time = "2025-03-07T15:38:41.666Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c6/03/0ffcbc5ab352c266a648d029f79de54ca205c04661203d46a42e3f03492b/faker-37.0.0-py3-none-any.whl", hash = "sha256:2598f78b76710a4ed05e197dda5235be409b4c291ba5c9c7514989cfbc7a5144", size = 1918764, upload-time = "2025-03-07T15:38:39.328Z" },
+]
+
+[[package]]
+name = "fastexcel"
+version = "0.14.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyarrow" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b7/55/376bc213921232d18dc9287c7e4eddd892d29e6a988c3ab022ee96f3a7ae/fastexcel-0.14.0.tar.gz", hash = "sha256:c73460c2ce2a07cf1a21a27aae67af3bc6a855fb4aa191c20c6ddae3f0573215", size = 40892, upload-time = "2025-04-30T08:57:05.996Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b8/5a/e5612bb03f113e283cdd4e137a24e60d312230e55870a2879cc62ee256cd/fastexcel-0.14.0-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:8cf9fdff9df918cc2dfad66932cd238b6e1e5e1b7b0a079df713a35d2af1586e", size = 1281472, upload-time = "2025-04-30T08:57:00.658Z" },
+    { url = "https://files.pythonhosted.org/packages/12/97/204b0da0b1d94af752e5a7a515d4b68e8d957bc48a04d27a3087ea80e0c2/fastexcel-0.14.0-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:0764cb1232e5feb4a7953ee53e60a46f330fa32ef012d813fa491173c7578d3b", size = 1235392, upload-time = "2025-04-30T08:57:02.227Z" },
+    { url = "https://files.pythonhosted.org/packages/38/41/7a0b8c0421cbda0f6185bfeaf55d06cd12073f68abb31cc70f385350f1bc/fastexcel-0.14.0-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:fecc5927ef18eba36f360aec0994e2cef106f8d83f197734d460ae198e5c0b87", size = 1359282, upload-time = "2025-04-30T08:56:57.271Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/86/f00dae040b315505008c4e94ae59c5de0b5fdaefdb27c046bb11917628da/fastexcel-0.14.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c70f463b88d72205eb5069754b07edb9a877bab9991ca71f8db1cc4e1bb8d8a4", size = 1383225, upload-time = "2025-04-30T08:56:59.068Z" },
+    { url = "https://files.pythonhosted.org/packages/f2/5f/fdb54eab1fae9057fbcaca3b4b283cde717686c9e67e3cff2796a308b1e2/fastexcel-0.14.0-cp39-abi3-win_amd64.whl", hash = "sha256:856d061b254268302ee968d10fd446b83f4a1a932588149539be4fb9d34224d4", size = 1094572, upload-time = "2025-04-30T08:57:03.58Z" },
 ]
 
 [[package]]
@@ -1970,6 +1988,20 @@ wheels = [
 ]
 
 [[package]]
+name = "polars-readstat"
+version = "0.5.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "polars" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/98/36/bd07eede4ab47aa5e2129649de6c05d23795ce481c72f5adb23c7883e919/polars_readstat-0.5.1-cp39-abi3-macosx_10_15_x86_64.whl", hash = "sha256:aa49e952cc884bd984edd88be02d2bae6546646fb7ad9574d01e83fab0c5f963", size = 6293014, upload-time = "2025-07-27T12:19:34.903Z" },
+    { url = "https://files.pythonhosted.org/packages/43/23/df5819aa81f933de70c27ee099c97919d2dba537933386572355aa112be6/polars_readstat-0.5.1-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:fa586378ea1c416e798e4be1f34dc2cbac6f1eb1125261cbe3a3dbae5dcebd6d", size = 5753903, upload-time = "2025-07-27T12:19:36.76Z" },
+    { url = "https://files.pythonhosted.org/packages/99/83/cbdd94ad735e0d2bb474f532fe26807dcc68d5e557261202986da05d3a27/polars_readstat-0.5.1-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:456aa987e2b4100113713f852c298982dc668915019290ccee0b26515cb512f0", size = 7743486, upload-time = "2025-07-27T12:19:38.022Z" },
+    { url = "https://files.pythonhosted.org/packages/3a/20/2856aebbe1f9301fefdd9b12131f5722a74be8463e6d63ba489ec7867f28/polars_readstat-0.5.1-cp39-abi3-win_amd64.whl", hash = "sha256:b5e17ebc78cd05908efa7414316ab1d4a66baa4962a6d7bd5405cfa0523ba5e7", size = 7669605, upload-time = "2025-07-27T12:19:39.877Z" },
+]
+
+[[package]]
 name = "prometheus-client"
 version = "0.21.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2212,19 +2244,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/8c/d5/e5aeee5387091148a19e1145f63606619cb5f20b83fccb63efae6474e7b2/pyparsing-3.2.0.tar.gz", hash = "sha256:cbf74e27246d595d9a74b186b810f6fbb86726dbf3b9532efb343f6d7294fe9c", size = 920984, upload-time = "2024-10-13T10:01:16.046Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/be/ec/2eb3cd785efd67806c46c13a17339708ddc346cbb684eade7a6e6f79536a/pyparsing-3.2.0-py3-none-any.whl", hash = "sha256:93d9577b88da0bbea8cc8334ee8b918ed014968fd2ec383e868fb8afb1ccef84", size = 106921, upload-time = "2024-10-13T10:01:13.682Z" },
-]
-
-[[package]]
-name = "pysurveycto"
-version = "0.0.15"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "requests" },
-    { name = "urllib3" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/4f/05/410fa2652a9056895657993585f6c483e7473d41fb6a8f79c13825f876df/pysurveycto-0.0.15.tar.gz", hash = "sha256:496b24abe1a881bdd81aa8dce504692d1a192de7a233294c6db17d842def642a", size = 11273, upload-time = "2025-02-01T03:22:40.207Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3b/da/eef9f801296d1881064fe1fe5a068b659f908fa7d31677a82e1c39115f0f/pysurveycto-0.0.15-py3-none-any.whl", hash = "sha256:c9067b852542384d9212291129c379f6684cb470515887677f99c8dd70060a20", size = 9858, upload-time = "2025-02-01T03:22:36.501Z" },
 ]
 
 [[package]]
@@ -2811,7 +2830,7 @@ wheels = [
 
 [[package]]
 name = "streamlit"
-version = "1.47.1"
+version = "1.49.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "altair" },
@@ -2833,9 +2852,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "watchdog", marker = "sys_platform != 'darwin'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/19/da/cef67ed4614f04932a00068fe6291455deb884a04fd94f7ad78492b0e91a/streamlit-1.47.1.tar.gz", hash = "sha256:daed79763d1cafeb03cdd800b91aa9c7adc3688c6b2cbf4ecc2ca899aab82a2a", size = 9544057, upload-time = "2025-07-25T15:37:08.482Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/24/17/c8024e4ef311dc7833987c603a7d0ebe82f8aa352aaca53b27be3f6b7f01/streamlit-1.49.1.tar.gz", hash = "sha256:6f213f1e43f035143a56f58ad50068d8a09482f0a2dad1050d7e7e99a9689818", size = 9640116, upload-time = "2025-08-29T18:35:45.055Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c0/4d/701f5fcf9c0d388dad9d94ba272d333c7efa6231ddee1babc59d26dc14d2/streamlit-1.47.1-py3-none-any.whl", hash = "sha256:c7881549e3ba1daecfb5541f32ee6ff70e549f1c3400c92d045897cb7a29772a", size = 9944872, upload-time = "2025-07-25T15:37:05.758Z" },
+    { url = "https://files.pythonhosted.org/packages/85/9e/146cdef515ad07e56c3aa942d087562498592d441aa3bae845ef0cd8fca3/streamlit-1.49.1-py3-none-any.whl", hash = "sha256:ad7b6d0dc35db168587acf96f80378249467fc057ed739a41c511f6bf5aa173b", size = 10044388, upload-time = "2025-08-29T18:35:42.239Z" },
 ]
 
 [[package]]

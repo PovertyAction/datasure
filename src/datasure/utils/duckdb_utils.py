@@ -168,8 +168,8 @@ def duckdb_get_table(
                 return pl.DataFrame()
 
 
-def duckdb_remove_table(project_id: str, alias: str, db_name: str) -> bool:
-    """Remove a table from a DuckDB database.
+def duckdb_remove_table(project_id: str, alias: str, db_name: str) -> None:
+    """Delete a table from a DuckDB database.
 
     PARAMS:
     -------
@@ -179,16 +179,14 @@ def duckdb_remove_table(project_id: str, alias: str, db_name: str) -> bool:
 
     Returns
     -------
-    bool : True if table was removed successfully, False if table didn't exist
+    None
     """
     db_path = (
         get_cache_path(project_id, "settings", "logs.duckdb")
         if db_name == "logs"
         else get_cache_path(project_id, "data", f"{db_name}.duckdb")
     )
-
     table_id = _validate_table_name(alias.lower().replace(" ", "_").replace("-", "_"))
-
     with duckdb.connect(db_path) as conn:
         # Check if the table exists
         table_exists = (
@@ -197,13 +195,8 @@ def duckdb_remove_table(project_id: str, alias: str, db_name: str) -> bool:
             ).fetchone()[0]
             > 0
         )
-
         if table_exists:
-            # Drop the table
             conn.execute(f"DROP TABLE {table_id}")
-            return True
-        else:
-            return False
 
 
 def duckdb_row_filter(

@@ -1,7 +1,7 @@
 import polars as pl
 import streamlit as st
 
-from datasure.connectors.local import local_add_form, local_load_action
+from datasure.connectors.local import load_local_data, render_local_file_form
 from datasure.connectors.scto import (
     FormConfig,
     SurveyCTOUI,
@@ -85,46 +85,88 @@ def load_raw_datasets(project_id: str) -> None:
     -------
     None
     """
+    import_log = _get_filtered_import_log(project_id)
+
+    if import_log.is_empty():
+        st.error("No import configurations found. Please add import configurations.")
+        return
+
+    _process_import_log(project_id, import_log)
+
+
+def _get_filtered_import_log(project_id: str) -> pl.DataFrame:
+    """Get import log filtered by load flag."""
     import_log = duckdb_get_table(
         project_id=project_id,
         alias="import_log",
         db_name="logs",
     )
-    import_log = import_log.filter(pl.col("load"))
-    if import_log.is_empty():
-        st.error("No import configurations found. Please add import configurations.")
-    else:
-        with st.status("Loading datasets ...", expanded=True) as status:
-            for row in import_log.iter_rows(named=True):
-                if row["source"] == "local storage" and row["refresh"] is True:
-                    local_load_action(
-                        project_id=project_id,
-                        alias=row["alias"],
-                        filename=row["filename"],
-                        sheet_name=row["sheet_name"] if row["sheet_name"] else None,
-                    )
-                elif row["source"] == "SurveyCTO" and row["refresh"] is True:
-                    # if private_key or save_to is Null, set to ""
-                    form_configs = FormConfig(
-                        alias=row["alias"],
-                        form_id=row["form_id"],
-                        server=row["server"],
-                        username=row["username"] if row["username"] else None,
-                        private_key=row["private_key"] if row["private_key"] else None,
-                        save_to=row["save_to"] if row["save_to"] else None,
-                        attachments=row["attachments"],
-                        refresh=row["refresh"],
-                    )
-                    download_forms(
-                        project_id=project_id,
-                        form_configs=[form_configs],
-                    )
+    return import_log.filter(pl.col("load"))
 
-                if row["alias"] not in st.session_state.st_raw_dataset_list:
-                    st.session_state.st_raw_dataset_list.append(row["alias"])
-            status.update(
-                label="Data loaded successfully!", state="complete", expanded=True
-            )
+
+def _process_import_log(project_id: str, import_log: pl.DataFrame) -> None:
+    """Process all rows in import log with status updates."""
+    with st.status("Loading datasets ...", expanded=True) as status:
+        for row in import_log.iter_rows(named=True):
+            _process_single_import(project_id, row)
+        status.update(
+            label="Data loaded successfully!", state="complete", expanded=True
+        )
+
+
+def _process_single_import(project_id: str, row: dict) -> None:
+    """Process a single import configuration row."""
+    if row["refresh"]:
+        _load_dataset_by_source(project_id, row)
+
+    _add_to_session_state(row["alias"])
+
+
+def _load_dataset_by_source(project_id: str, row: dict) -> None:
+    """Load dataset based on source type."""
+    if row["source"] == "local storage":
+        _load_from_local_storage(project_id, row)
+    elif row["source"] == "SurveyCTO":
+        _load_from_surveycto(project_id, row)
+
+
+def _load_from_local_storage(project_id: str, row: dict) -> None:
+    """Load dataset from local storage."""
+    load_local_data(
+        project_id=project_id,
+        alias=row["alias"],
+        filename=row["filename"],
+        sheet_name=row["sheet_name"] if row["sheet_name"] else None,
+    )
+
+
+def _load_from_surveycto(project_id: str, row: dict) -> None:
+    """Load dataset from SurveyCTO."""
+    form_configs = _create_form_config(row)
+    download_forms(
+        project_id=project_id,
+        form_configs=[form_configs],
+    )
+
+
+def _create_form_config(row: dict) -> FormConfig:
+    """Create FormConfig from import log row."""
+    return FormConfig(
+        alias=row["alias"],
+        form_id=row["form_id"],
+        server=row["server"],
+        username=row["username"] if row["username"] else None,
+        private_key=row["private_key"] if row["private_key"] else None,
+        save_to=row["save_to"] if row["save_to"] else None,
+        attachments=row["attachments"],
+        refresh=row["refresh"],
+    )
+
+
+def _add_to_session_state(alias: str) -> None:
+    """Add alias to session state if not already present."""
+    if alias not in st.session_state.st_raw_dataset_list:
+        st.session_state.st_raw_dataset_list.append(alias)
 
             # Demo success message
             if is_demo_project():
@@ -158,7 +200,7 @@ def update_import_log(import_log: pl.DataFrame) -> None:
     edited_import_log = st.data_editor(
         data=import_log,
         key="import_data_editor",
-        use_container_width=True,
+        width="stretch",
         column_config={
             "refresh": st.column_config.CheckboxColumn("Refresh?"),
             "load": st.column_config.CheckboxColumn("Load?"),
@@ -196,7 +238,7 @@ with st.container(border=True):
 
     with (
         kc1,
-        st.popover("Add Credentials", use_container_width=True, icon=":material/add:"),
+        st.popover("Add Credentials", width="stretch", icon=":material/add:"),
     ):
         st.write("Add your credentials for data import.")
         select_cred_type = st.selectbox(
@@ -211,9 +253,7 @@ with st.container(border=True):
 
     with (
         kc2,
-        st.popover(
-            "Remove Credentials", use_container_width=True, icon=":material/delete:"
-        ),
+        st.popover("Remove Credentials", width="stretch", icon=":material/delete:"),
     ):
         st.write("**Remove Credentials**")
         saved_credentials = list_stored_credentials(project_id).get("credentials", {})
@@ -225,7 +265,7 @@ with st.container(border=True):
         if st.button(
             "Delete Credentials",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             disabled=not select_credentials,
         ):
             selected_server = saved_credentials[select_credentials].get("server", "")
@@ -239,12 +279,10 @@ with st.container(border=True):
 
     with (
         kc3,
-        st.popover(
-            "Keyring Diagnostics", use_container_width=True, icon=":material/build:"
-        ),
+        st.popover("Keyring Diagnostics", width="stretch", icon=":material/build:"),
     ):
         st.write("**Keyring Diagnostics**")
-        if st.button("Test Keyring Availability", use_container_width=True):
+        if st.button("Test Keyring Availability", width="stretch"):
             keyring_status = test_keyring_availability()
             if keyring_status["success"]:
                 st.success(
@@ -267,22 +305,20 @@ ac1, ac2, ac3 = st.columns([0.4, 0.4, 0.2])
 aliases = duckdb_get_aliases(project_id, to_load=False)
 with (
     ac1,
-    st.popover(
-        "Add Import Configuration", use_container_width=True, icon=":material/add:"
-    ),
+    st.popover("Add Import Configuration", width="stretch", icon=":material/add:"),
 ):
     import_type = st.selectbox(
         "Import Type", options=["local storage", "SurveyCTO"], index=None
     )
     if import_type == "local storage":
-        local_add_form(project_id)
+        render_local_file_form(project_id)
     elif import_type == "SurveyCTO":
         SurveyCTOUI(project_id).render_form_config()
 with (
     ac2,
     st.popover(
         "Edit Import Configuration",
-        use_container_width=True,
+        width="stretch",
         icon=":material/edit:",
         disabled=not aliases,
     ),
@@ -298,14 +334,19 @@ with (
         selected_config = import_log.filter(pl.col("alias") == edit_config).to_dicts()[
             0
         ]
-        SurveyCTOUI(project_id).render_form_config(
-            edit_mode=True, defaults=selected_config
-        )
+        if selected_config["source"] == "local storage":
+            render_local_file_form(project_id, edit_mode=True, defaults=selected_config)
+        elif selected_config["source"] == "SurveyCTO":
+            SurveyCTOUI(project_id).render_form_config(
+                edit_mode=True, defaults=selected_config
+            )
+        else:
+            st.error("Invalid import source.")
 with (
     ac3,
     st.popover(
         "Remove Import Configuration",
-        use_container_width=True,
+        width="stretch",
         icon=":material/clear:",
         disabled=not aliases,
     ),
@@ -315,7 +356,7 @@ with (
     remove_data = st.selectbox(
         "Select Data to Remove", options=remove_column_options, index=None
     )
-    if st.button("Remove Data", type="primary", use_container_width=True):
+    if st.button("Remove Data", type="primary", width="stretch"):
         duckdb_row_filter(
             project_id=project_id,
             alias="import_log",
@@ -342,7 +383,7 @@ if not import_log.is_empty():
         load_btn = st.button(
             "Load Data",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             key="load_data_key",
         )
 
@@ -416,7 +457,7 @@ if not import_log.is_empty():
             border=True,
         )
 
-        st.dataframe(preview_data, use_container_width=True)
+        st.dataframe(preview_data, width="stretch")
 
         # Demo expander with educational content
         if is_demo_project():

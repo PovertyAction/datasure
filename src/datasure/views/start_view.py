@@ -147,7 +147,7 @@ with page_canvas:
     # Get the path to the assets directory relative to the package
     assets_dir = Path(__file__).parent.parent / "assets"
     image_path = assets_dir / "LinkedIn Cover IPA20.png"
-    st.image(str(image_path), use_container_width=True)
+    st.image(str(image_path), width="stretch")
 
     st.title("Welcome to DataSure")
 
@@ -267,9 +267,7 @@ with page_canvas:
         elif project:
             project_id = get_project_id(project)
             projects = load_projects()
-            select_project = st.button(
-                "Load Project", type="primary", use_container_width=True
-            )
+            select_project = st.button("Load Project", type="primary", width="stretch")
             if select_project:
                 views_dir = Path(__file__).parent
                 st.write(f"Loading project '{project}'...")
@@ -279,7 +277,7 @@ with page_canvas:
             if project_id != DEMO_PROJECT_ID:
                 with st.expander(":material/delete: delete project"):
                     if (
-                        st.button("Confirm delete", use_container_width=True)
+                        st.button("Confirm delete", width="stretch")
                         and project_id in projects
                     ):
                         delete_project(project_id)
