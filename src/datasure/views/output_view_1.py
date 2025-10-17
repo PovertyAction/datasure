@@ -1,7 +1,6 @@
 import re
 
 import streamlit as st
-from utils import duckdb_get_table, get_cache_path, get_check_config_settings
 
 from datasure.checks import (
     backchecks_report,
@@ -13,6 +12,11 @@ from datasure.checks import (
     outliers_report,
     progress_report,
     summary_report,
+)
+from datasure.utils import (
+    duckdb_get_table,
+    get_cache_path,
+    get_check_config_settings,
 )
 
 
