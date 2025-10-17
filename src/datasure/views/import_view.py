@@ -168,14 +168,13 @@ def _add_to_session_state(alias: str) -> None:
     if alias not in st.session_state.st_raw_dataset_list:
         st.session_state.st_raw_dataset_list.append(alias)
 
-            # Demo success message
-            if is_demo_project():
-                demo_callout(
-                    "Great! You've successfully loaded your demo survey data. "
-                    "You can see the survey data and backcheck data are now available for analysis.",
-                    "success",
-                )
-
+        # Demo success message
+        if is_demo_project():
+            demo_callout(
+                "Great! You've successfully loaded your demo survey data. "
+                "You can see the survey data and backcheck data are now available for analysis.",
+                "success",
+            )
 
 # --- Update import log in the cache file --- #
 def update_import_log(import_log: pl.DataFrame) -> None:
