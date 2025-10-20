@@ -3,7 +3,7 @@
 import streamlit as st
 
 from datasure.utils.onboarding_utils import (
-    ONBOARDING_STEPS,
+    OnboardingSteps,
     get_onboarding_step,
     is_demo_project,
     set_onboarding_step,
@@ -12,6 +12,8 @@ from datasure.utils.onboarding_utils import (
     show_progress_indicator,
     show_step_guidance,
 )
+
+ONBOARDING_STEPS = OnboardingSteps.get_all_steps()  # List of onboarding steps
 
 
 def page_navigation(prev=None, next=None):
@@ -97,14 +99,14 @@ def demo_callout(message: str, type: str = "info"):
     if not is_demo_project():
         return
 
-    if type == "info":
-        st.info(f"**Demo Tip:** {message}")
-    elif type == "success":
-        st.success(f"**Demo Success:** {message}")
-    elif type == "warning":
-        st.warning(f"**Demo Note:** {message}")
-    elif type == "error":
-        st.error(f"**Demo Issue:** {message}")
+    messages = {
+        "info": f"**Demo Tip:** {message}",
+        "success": f"**Demo Success:** {message}",
+        "warning": f"**Demo Note:** {message}",
+        "error": f"**Demo Issue:** {message}",
+    }
+
+    return messages.get(type, messages["info"])
 
 
 def demo_expander(title: str, content: str, expanded: bool = False):
