@@ -14,6 +14,7 @@ from datasure.utils.onboarding_utils import (
     load_demo_data,
     set_onboarding_step,
     show_demo_banner,
+    show_demo_intro,
     show_progress_indicator,
     show_step_guidance,
 )
@@ -210,8 +211,10 @@ with page_canvas:
     _, pc1, _ = st.columns([0.25, 0.5, 0.25])
     project_list = get_project_names()
     with pc1, st.container(border=True):
-        st.write(
-            "Select a DataSure project to get started. If you don't have a project yet, you can create a new project by selection the 'Create New Project' option."
+        st.markdown(
+            "Select a DataSure project to get started. If you don't have a project yet, you can create a new project "
+            "by selection the **'Create New Project'** option. If you are new to DataSure, try the **'DataSure Demo'** "
+            "project for a guided experience."
         )
         project = st.selectbox(
             label="Select Project",
@@ -220,17 +223,7 @@ with page_canvas:
             key="project_select_key",
         )
         if project == "DataSure Demo":
-            st.markdown("""
-            **Start here, if you are new to DataSure.**
-
-            This guided demo will walk you through:
-            - Importing survey data
-            - Running data quality checks
-            - Identifying and understanding data issues
-            - Generating quality reports
-
-            **Demo data:** Household survey data from rural communities with realistic data quality challenges.
-            """)
+            show_demo_intro()
 
             if st.button("Start Demo", type="primary", use_container_width=True):
                 # Create and load demo project
