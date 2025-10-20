@@ -773,7 +773,7 @@ if show_prep_page_info:
                     border=True,
                 )
 
-                st.dataframe(prep_data,width="stretch", hide_index=False)
+                st.dataframe(prep_data, width="stretch", hide_index=False)
 
 # Demo next action or regular navigation
 if is_demo_project():

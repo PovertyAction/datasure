@@ -24,7 +24,11 @@ from datasure.utils.navigations import (
     page_navigation,
     show_demo_next_action,
 )
-from datasure.utils.onboarding_utils import DEMO_PROJECT_ID, is_demo_project
+from datasure.utils.onboarding_utils import (
+    DEMO_PROJECT_ID,
+    ImportDemoInfo,
+    is_demo_project,
+)
 from datasure.utils.secure_credentials import (
     delete_stored_credentials,
     list_stored_credentials,
@@ -170,11 +174,8 @@ def _add_to_session_state(alias: str) -> None:
 
         # Demo success message
         if is_demo_project():
-            demo_callout(
-                "Great! You've successfully loaded your demo survey data. "
-                "You can see the survey data and backcheck data are now available for analysis.",
-                "success",
-            )
+            demo_callout(ImportDemoInfo.get_info_message("add_to_session_info"))
+
 
 # --- Update import log in the cache file --- #
 def update_import_log(import_log: pl.DataFrame) -> None:
@@ -408,11 +409,7 @@ if not import_log.is_empty():
 
         # Demo guidance
         if is_demo_project():
-            demo_callout(
-                "Data import complete! Your demo datasets are loaded and ready for quality analysis. "
-                "In a real project, this is what you would see after importing from SurveyCTO or uploading CSV files.",
-                "success",
-            )
+            demo_callout(ImportDemoInfo.get_info_message("preview_data_info"))
         sb, _, mb1, mb2, mb3 = st.columns([0.3, 0.25, 0.15, 0.15, 0.15])
         with sb:
             selected_dataset = st.selectbox(
@@ -462,23 +459,7 @@ if not import_log.is_empty():
         if is_demo_project():
             demo_expander(
                 "About Your Pre-loaded Demo Data",
-                """
-                **Demo Status: Data Import Complete!**
-
-                Your survey data has been successfully imported and is ready for analysis.
-
-                **What you're seeing:**
-                - **Survey Data**: 12 household surveys from rural communities in India
-                - **Backcheck Data**: 8 quality control validation records
-                - **Data Quality Issues**: Intentionally included to demonstrate DataSure's capabilities
-
-                **In a real project, you would have:**
-                1. **Connected to SurveyCTO**: Automatic sync with your survey forms
-                2. **Uploaded local files**: CSV/Excel files from your computer
-                3. **Used custom scripts**: Python scripts for other data sources
-
-                **Next:** Let's move to data preparation where we'll clean and prepare this data for comprehensive quality checks!
-                """,
+                ImportDemoInfo.get_info_message("demo_data_info"),
                 expanded=True,
             )
 
