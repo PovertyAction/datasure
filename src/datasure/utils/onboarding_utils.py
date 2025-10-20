@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import ClassVar
 
 import polars as pl
 import streamlit as st
@@ -10,57 +11,77 @@ from datasure.utils.duckdb_utils import duckdb_save_table
 DEMO_PROJECT_NAME = "DataSure Demo"
 DEMO_PROJECT_ID = "demoproject"
 
-ONBOARDING_STEPS = [
-    {
+
+class OnboardingSteps:
+    """Class to define onboarding steps."""
+
+    START: ClassVar[dict] = {
         "step": 1,
         "title": "Start Here",
         "description": "Welcome to DataSure! Learn how to manage survey data quality.",
         "icon": "🏠",
         "page": "start_view.py",
-    },
-    {
+    }
+
+    IMPORT: ClassVar[dict] = {
         "step": 2,
         "title": "Import Data",
         "description": "Import your survey data from various sources.",
         "icon": "📥",
         "page": "import_view.py",
-    },
-    {
+    }
+
+    PREPARE: ClassVar[dict] = {
         "step": 3,
         "title": "Prepare Data",
         "description": "Clean and prepare your data for quality checks.",
         "icon": "🛠️",
         "page": "prep_view.py",
-    },
-    {
+    }
+
+    CONFIGURE: ClassVar[dict] = {
         "step": 4,
         "title": "Configure Checks",
         "description": "Set up data quality checks and validation rules.",
         "icon": "⚙️",
         "page": "config_view.py",
-    },
-    {
+    }
+
+    REVIEW: ClassVar[dict] = {
         "step": 5,
         "title": "Review Reports",
         "description": "Analyze data quality results and insights.",
         "icon": "📊",
         "page": "output_view_1.py",
-    },
-]
+    }
+
+    @classmethod
+    def get_step_info(cls, step: str) -> dict:
+        """Retrieve step information based on step name."""
+        steps = {
+            "start": cls.START,
+            "import": cls.IMPORT,
+            "prepare": cls.PREPARE,
+            "configure": cls.CONFIGURE,
+            "review": cls.REVIEW,
+        }
+        return steps.get(step, {})
+
+    @classmethod
+    def get_all_steps(cls) -> list[dict]:
+        """Retrieve all onboarding steps in order."""
+        return [
+            cls.START,
+            cls.IMPORT,
+            cls.PREPARE,
+            cls.CONFIGURE,
+            cls.REVIEW,
+        ]
 
 
 def is_demo_project() -> bool:
     """Check if the current session is using the demo project."""
     return st.session_state.get("st_project_id") == DEMO_PROJECT_ID
-
-
-def get_current_step() -> int:
-    """Get the current onboarding step based on the active page."""
-    current_page = st.session_state.get("current_page", "start_view.py")
-    for step_info in ONBOARDING_STEPS:
-        if step_info["page"] == current_page:
-            return step_info["step"]
-    return 1
 
 
 def set_onboarding_step(step: int):
@@ -70,7 +91,7 @@ def set_onboarding_step(step: int):
 
 def get_onboarding_step() -> int:
     """Get the current onboarding step."""
-    return st.session_state.get("onboarding_step", 1)
+    return st.session_state["onboarding_step"] or 1
 
 
 def show_progress_indicator():
@@ -82,19 +103,25 @@ def show_progress_indicator():
 
     st.markdown("### Demo Progress")
 
-    cols = st.columns(len(ONBOARDING_STEPS))
+    onboarding_steps = OnboardingSteps.get_all_steps()
 
-    for i, step_info in enumerate(ONBOARDING_STEPS):
+    cols = st.columns(len(onboarding_steps))
+
+    for i, step_info in enumerate(onboarding_steps):
+        step = step_info["step"]
+        step_icon = step_info["icon"]
+        step_title = step_info["title"]
         with cols[i]:
-            if step_info["step"] <= current_step:
+            if step <= current_step:
                 # Completed or current step
-                if step_info["step"] == current_step:
+
+                if step == current_step:
                     st.markdown(
                         f"""
                     <div style="text-align: center; padding: 10px; border: 2px solid #1f77b4; border-radius: 10px; background-color: #e6f3ff;">
-                        <div style="font-size: 24px;">{step_info["icon"]}</div>
-                        <div style="font-size: 12px; font-weight: bold; color: #1f77b4;">Step {step_info["step"]}</div>
-                        <div style="font-size: 10px;">{step_info["title"]}</div>
+                        <div style="font-size: 24px;">{step_icon}</div>
+                        <div style="font-size: 12px; font-weight: bold; color: #1f77b4;">Step {step}</div>
+                        <div style="font-size: 10px;">{step_title}</div>
                     </div>
                     """,
                         unsafe_allow_html=True,
@@ -104,8 +131,8 @@ def show_progress_indicator():
                         f"""
                     <div style="text-align: center; padding: 10px; border: 1px solid #28a745; border-radius: 10px; background-color: #d4edda;">
                         <div style="font-size: 20px; color: #28a745;">✓</div>
-                        <div style="font-size: 12px; color: #28a745;">Step {step_info["step"]}</div>
-                        <div style="font-size: 10px;">{step_info["title"]}</div>
+                        <div style="font-size: 12px; color: #28a745;">Step {step}</div>
+                        <div style="font-size: 10px;">{step_title}</div>
                     </div>
                     """,
                         unsafe_allow_html=True,
@@ -115,15 +142,30 @@ def show_progress_indicator():
                 st.markdown(
                     f"""
                 <div style="text-align: center; padding: 10px; border: 1px solid #dee2e6; border-radius: 10px; background-color: #f8f9fa;">
-                    <div style="font-size: 20px; color: #6c757d;">{step_info["icon"]}</div>
-                    <div style="font-size: 12px; color: #6c757d;">Step {step_info["step"]}</div>
-                    <div style="font-size: 10px; color: #6c757d;">{step_info["title"]}</div>
+                    <div style="font-size: 20px; color: #6c757d;">{step_icon}</div>
+                    <div style="font-size: 12px; color: #6c757d;">Step {step}</div>
+                    <div style="font-size: 10px; color: #6c757d;">{step_title}</div>
                 </div>
                 """,
                     unsafe_allow_html=True,
                 )
 
     st.markdown("---")
+
+
+def show_demo_intro():
+    """Display the demo introduction message."""
+    st.markdown("""
+        **Start here, if you are new to DataSure.**
+
+        This guided demo will walk you through:
+        - Importing survey data
+        - Running data quality checks
+        - Identifying and understanding data issues
+        - Generating quality reports
+
+        **Demo data:** Household survey data from rural communities with realistic data quality challenges.
+    """)
 
 
 def show_demo_banner():
@@ -259,8 +301,10 @@ def show_next_steps(current_step: int):
     if not is_demo_project():
         return
 
-    if current_step < len(ONBOARDING_STEPS):
-        next_step = ONBOARDING_STEPS[current_step]  # next_step is 0-indexed
+    onboarding_steps = OnboardingSteps.get_all_steps()
+
+    if current_step < len(onboarding_steps):
+        next_step = onboarding_steps[current_step]  # next_step is 0-indexed
 
         st.markdown("### What's Next?")
         st.info(f"""
@@ -289,6 +333,50 @@ def show_next_steps(current_step: int):
             st.session_state.st_project_id = ""
             st.session_state.pop("onboarding_step", None)
             st.rerun()
+
+
+class ImportDemoInfo:
+    """Class to provide demo messages for import scenarios."""
+
+    ADD_TO_SESSION_INFO: ClassVar[str] = """
+        Great! You've successfully loaded your demo survey data.
+        You can see the survey data and backcheck data are now available for analysis.
+        success
+    """
+
+    PREVIEW_DATA_INFO: ClassVar[str] = """
+        Data import complete! Your demo datasets are loaded and ready for quality analysis. "
+        In a real project, this is what you would see after importing from SurveyCTO or uploading CSV files."
+        success
+    """
+
+    DEMO_DATA_INFO: ClassVar[str] = """
+        **Demo Status: Data Import Complete!**
+
+        Your survey data has been successfully imported and is ready for analysis.
+
+        **What you're seeing:**
+        - **Survey Data**: 12 household surveys from rural communities in India
+        - **Backcheck Data**: 8 quality control validation records
+        - **Data Quality Issues**: Intentionally included to demonstrate DataSure's capabilities
+
+        **In a real project, you would have:**
+        1. **Connected to SurveyCTO**: Automatic sync with your survey forms
+        2. **Uploaded local files**: CSV/Excel files from your computer
+        3. **Used custom scripts**: Python scripts for other data sources
+
+        **Next:** Let's move to data preparation where we'll clean and prepare this data for comprehensive quality checks!
+    """
+
+    @classmethod
+    def get_info_message(cls, message_id: str) -> str:
+        """Retrieve demo messages based on type."""
+        demo_messages = {
+            "add_to_session_info": cls.ADD_TO_SESSION_INFO,
+            "preview_data_info": cls.PREVIEW_DATA_INFO,
+            "demo_data_info": cls.DEMO_DATA_INFO,
+        }
+        return demo_messages.get(message_id, "Invalid message ID.")
 
 
 def create_demo_project():
@@ -457,7 +545,8 @@ def load_demo_data():
 
 def is_demo_complete() -> bool:
     """Check if the demo has been completed."""
-    return get_onboarding_step() >= len(ONBOARDING_STEPS)
+    onboarding_steps = OnboardingSteps.get_all_steps()
+    return get_onboarding_step() >= len(onboarding_steps)
 
 
 def show_demo_completion_message():
