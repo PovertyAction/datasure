@@ -4,6 +4,7 @@ import streamlit as st
 
 from datasure.utils.onboarding_utils import (
     OnboardingSteps,
+    demo_container,
     get_onboarding_step,
     is_demo_project,
     set_onboarding_step,
@@ -114,7 +115,7 @@ def demo_expander(title: str, content: str, expanded: bool = False):
         return
 
     with st.expander(f"**Learn More: {title}**", expanded=expanded):
-        st.markdown(content)
+        demo_container(content)
 
 
 def demo_sidebar_help():
