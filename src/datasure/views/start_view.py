@@ -13,10 +13,7 @@ from datasure.utils.onboarding_utils import (
     create_demo_project,
     load_demo_data,
     set_onboarding_step,
-    show_demo_banner,
     show_demo_intro,
-    show_progress_indicator,
-    show_step_guidance,
 )
 
 
@@ -201,11 +198,6 @@ with page_canvas:
         """)
 
     st.write("---")
-
-    # Show demo banner and progress if in demo mode
-    show_demo_banner()
-    show_progress_indicator()
-    show_step_guidance(1)
 
     st.header("Select Your Project")
     _, pc1, _ = st.columns([0.25, 0.5, 0.25])
