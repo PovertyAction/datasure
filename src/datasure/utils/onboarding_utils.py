@@ -1,4 +1,6 @@
 import json
+import random
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import ClassVar
 
@@ -12,6 +14,50 @@ DEMO_PROJECT_NAME = "DataSure Demo"
 DEMO_PROJECT_ID = "demoproject"
 
 
+class ImportDemoInfo:
+    """Class to provide demo messages for import scenarios."""
+
+    ADD_TO_SESSION_INFO: ClassVar[str] = """
+        Great! You've successfully loaded your demo survey data.
+        You can see the survey data and backcheck data are now available for analysis.
+        success
+    """
+
+    PREVIEW_DATA_INFO: ClassVar[str] = """
+        Data import complete! Your demo datasets are loaded and ready for quality analysis. "
+        In a real project, this is what you would see after importing from SurveyCTO or uploading CSV files."
+        success
+    """
+
+    DEMO_DATA_INFO: ClassVar[str] = """
+        **Demo Status: Data Import Complete!**
+
+        Your survey data has been successfully imported and is ready for analysis.
+
+        **What you're seeing:**
+        - **Survey Data**: 12 household surveys from rural communities in India
+        - **Backcheck Data**: 8 quality control validation records
+        - **Data Quality Issues**: Intentionally included to demonstrate DataSure's capabilities
+
+        **In a real project, you would have:**
+        1. **Connected to SurveyCTO**: Automatic sync with your survey forms
+        2. **Uploaded local files**: CSV/Excel files from your computer
+        3. **Used custom scripts**: Python scripts for other data sources
+
+        **Next:** Let's move to data preparation where we'll clean and prepare this data for comprehensive quality checks!
+    """
+
+    @classmethod
+    def get_info_message(cls, message_id: str) -> str:
+        """Retrieve demo messages based on type."""
+        demo_messages = {
+            "add_to_session_info": cls.ADD_TO_SESSION_INFO,
+            "preview_data_info": cls.PREVIEW_DATA_INFO,
+            "demo_data_info": cls.DEMO_DATA_INFO,
+        }
+        return demo_messages.get(message_id, "Invalid message ID.")
+
+
 class OnboardingSteps:
     """Class to define onboarding steps."""
 
@@ -21,6 +67,17 @@ class OnboardingSteps:
         "description": "Welcome to DataSure! Learn how to manage survey data quality.",
         "icon": "🏠",
         "page": "start_view.py",
+        "guidance_title": "Welcome to DataSure!",
+        "guidance_content": """
+        **What you'll learn in this demo:**
+        - How to import survey data from different sources
+        - How to run data quality checks
+        - How to identify and fix data issues
+        - How to generate quality reports
+
+        **Demo scenario:** You're working with household survey data from rural communities in India.
+        The data includes information about demographics, income, land ownership, and living conditions.
+        """,
     }
 
     IMPORT: ClassVar[dict] = {
@@ -29,6 +86,27 @@ class OnboardingSteps:
         "description": "Import your survey data from various sources.",
         "icon": "📥",
         "page": "import_view.py",
+        "guidance_title": "Data Successfully Imported!",
+        "guidance_content": """
+        **✅ Your demo data is already loaded and ready!**
+
+        In a real project, you would have just:
+        - Connected to your SurveyCTO server, OR
+        - Uploaded CSV/Excel files from your computer, OR
+        - Run custom Python scripts to import data
+
+        **What's been imported for you:**
+        - **Survey Data**: 12 household survey responses from rural communities
+        - **Backcheck Data**: 8 quality control validation records
+
+        **Both datasets contain realistic data quality issues** including:
+        - Missing GPS coordinates
+        - Duplicate household IDs
+        - Inconsistent income reporting
+        - Missing demographic information
+
+        **👉 Ready for the next step:** Now let's prepare this data for quality analysis!
+        """,
     }
 
     PREPARE: ClassVar[dict] = {
@@ -37,6 +115,28 @@ class OnboardingSteps:
         "description": "Clean and prepare your data for quality checks.",
         "icon": "🛠️",
         "page": "prep_view.py",
+        "guidance_title": "Data Preparation (Optional)",
+        "guidance_content": """
+        **✅ Your demo data is ready for analysis!**
+
+        **What you're seeing:**
+        - Your imported survey data displayed in tabs
+        - Data metrics showing rows, columns, and missing values
+        - Tools to transform, clean, and modify your data
+
+        **This step is optional for the demo** because:
+        - Your demo data is already properly formatted
+        - Quality issues are intentionally preserved for learning
+        - You can skip directly to "Configure Checks"
+
+        **💡 Feel free to explore the data preparation tools:**
+        - Transform columns (text manipulation, calculations)
+        - Add new columns (calculations, constants, IDs)
+        - Remove problematic rows or columns
+        - View the change log to track modifications
+
+        **👉 Ready to find data quality issues?** Continue to "Configure Quality Checks"!
+        """,
     }
 
     CONFIGURE: ClassVar[dict] = {
@@ -45,6 +145,35 @@ class OnboardingSteps:
         "description": "Set up data quality checks and validation rules.",
         "icon": "⚙️",
         "page": "config_view.py",
+        "guidance_title": "Configure Quality Checks",
+        "guidance_content": """
+        **🔧 Set up your data quality analysis!**
+
+        **What you're doing in this step:**
+        - Creating a "check configuration" that tells DataSure how to analyze your data
+        - Mapping your data columns to specific quality checks
+        - Connecting your survey data with backcheck data for validation
+
+        **Demo Instructions:**
+        1. **Click "Add new check configuration"**
+        2. **Name it**: "Household Survey Checks" or similar
+        3. **Select Survey Dataset**: Choose "demo_survey"
+        4. **Configure Key Columns**:
+            - **Key Column**: "hhid" (Household ID - uniquely identifies each survey)
+            - **ID Column**: "hhid" (same as key column)
+            - **Enumerator Column**: "enum_name" (tracks data collector performance)
+            - **Date Column**: Leave blank (demo data format issue)
+        5. **Add Backcheck Dataset**: Choose "demo_backcheck"
+        6. **Click "Add Check Configuration"**
+
+        **What DataSure will analyze:**
+        - Duplicate household records and missing data patterns
+        - Enumerator performance and data collection quality
+        - Statistical outliers and data inconsistencies
+        - Backcheck validation comparing survey responses to quality control visits
+
+        **🎆 Next step:** View comprehensive quality analysis reports!
+        """,
     }
 
     REVIEW: ClassVar[dict] = {
@@ -53,6 +182,16 @@ class OnboardingSteps:
         "description": "Analyze data quality results and insights.",
         "icon": "📊",
         "page": "output_view_1.py",
+        "guidance_title": "Review Quality Reports",
+        "guidance_content": """
+        **In this step you'll:**
+        - Analyze data quality results
+        - Understand quality metrics
+        - Learn how to act on findings
+
+        **Final step:** Discover insights about your data quality and learn how to improve
+        data collection processes based on the findings.
+        """,
     }
 
     @classmethod
@@ -77,6 +216,22 @@ class OnboardingSteps:
             cls.CONFIGURE,
             cls.REVIEW,
         ]
+
+    @classmethod
+    def get_guidance(cls, step: int) -> None:
+        """Retrieve guidance for a specific step."""
+        steps = {
+            1: cls.START,
+            2: cls.IMPORT,
+            3: cls.PREPARE,
+            4: cls.CONFIGURE,
+            5: cls.REVIEW,
+        }
+        guidance = steps.get(step, {})
+        if not guidance:
+            raise ValueError(f"Invalid step: {step}")
+        with st.expander(f"📖 **{guidance['guidance_title']}**", expanded=True):
+            st.markdown(guidance["guidance_content"])
 
 
 def is_demo_project() -> bool:
@@ -179,123 +334,6 @@ def show_demo_banner():
     """)
 
 
-def show_step_guidance(step: int):
-    """Show guidance for the current step."""
-    if not is_demo_project():
-        return
-
-    guidance_map = {
-        1: {
-            "title": "Welcome to DataSure!",
-            "content": """
-            **What you'll learn in this demo:**
-            - How to import survey data from different sources
-            - How to run data quality checks
-            - How to identify and fix data issues
-            - How to generate quality reports
-
-            **Demo scenario:** You're working with household survey data from rural communities in India.
-            The data includes information about demographics, income, land ownership, and living conditions.
-            """,
-        },
-        2: {
-            "title": "Data Successfully Imported!",
-            "content": """
-            **✅ Your demo data is already loaded and ready!**
-
-            In a real project, you would have just:
-            - Connected to your SurveyCTO server, OR
-            - Uploaded CSV/Excel files from your computer, OR
-            - Run custom Python scripts to import data
-
-            **What's been imported for you:**
-            - **Survey Data**: 12 household survey responses from rural communities
-            - **Backcheck Data**: 8 quality control validation records
-
-            **Both datasets contain realistic data quality issues** including:
-            - Missing GPS coordinates
-            - Duplicate household IDs
-            - Inconsistent income reporting
-            - Missing demographic information
-
-            **👉 Ready for the next step:** Now let's prepare this data for quality analysis!
-            """,
-        },
-        3: {
-            "title": "Data Preparation (Optional)",
-            "content": """
-            **✅ Your demo data is ready for analysis!**
-
-            **What you're seeing:**
-            - Your imported survey data displayed in tabs
-            - Data metrics showing rows, columns, and missing values
-            - Tools to transform, clean, and modify your data
-
-            **This step is optional for the demo** because:
-            - Your demo data is already properly formatted
-            - Quality issues are intentionally preserved for learning
-            - You can skip directly to "Configure Checks"
-
-            **💡 Feel free to explore the data preparation tools:**
-            - Transform columns (text manipulation, calculations)
-            - Add new columns (calculations, constants, IDs)
-            - Remove problematic rows or columns
-            - View the change log to track modifications
-
-            **👉 Ready to find data quality issues?** Continue to "Configure Quality Checks"!
-            """,
-        },
-        4: {
-            "title": "Configure Quality Checks",
-            "content": """
-            **🔧 Set up your data quality analysis!**
-
-            **What you're doing in this step:**
-            - Creating a "check configuration" that tells DataSure how to analyze your data
-            - Mapping your data columns to specific quality checks
-            - Connecting your survey data with backcheck data for validation
-
-            **Demo Instructions:**
-            1. **Click "Add new check configuration"**
-            2. **Name it**: "Household Survey Checks" or similar
-            3. **Select Survey Dataset**: Choose "demo_survey"
-            4. **Configure Key Columns**:
-               - **Key Column**: "hhid" (Household ID - uniquely identifies each survey)
-               - **ID Column**: "hhid" (same as key column)
-               - **Enumerator Column**: "enum_name" (tracks data collector performance)
-               - **Date Column**: Leave blank (demo data format issue)
-            5. **Add Backcheck Dataset**: Choose "demo_backcheck"
-            6. **Click "Add Check Configuration"**
-
-            **What DataSure will analyze:**
-            - Duplicate household records and missing data patterns
-            - Enumerator performance and data collection quality
-            - Statistical outliers and data inconsistencies
-            - Backcheck validation comparing survey responses to quality control visits
-
-            **🎆 Next step:** View comprehensive quality analysis reports!
-            """,
-        },
-        5: {
-            "title": "Review Quality Reports",
-            "content": """
-            **In this step you'll:**
-            - Analyze data quality results
-            - Understand quality metrics
-            - Learn how to act on findings
-
-            **Final step:** Discover insights about your data quality and learn how to improve
-            data collection processes based on the findings.
-            """,
-        },
-    }
-
-    if step in guidance_map:
-        guidance = guidance_map[step]
-        with st.expander(f"📖 **{guidance['title']}**", expanded=True):
-            st.markdown(guidance["content"])
-
-
 def show_next_steps(current_step: int):
     """Show next steps and navigation options."""
     if not is_demo_project():
@@ -335,50 +373,6 @@ def show_next_steps(current_step: int):
             st.rerun()
 
 
-class ImportDemoInfo:
-    """Class to provide demo messages for import scenarios."""
-
-    ADD_TO_SESSION_INFO: ClassVar[str] = """
-        Great! You've successfully loaded your demo survey data.
-        You can see the survey data and backcheck data are now available for analysis.
-        success
-    """
-
-    PREVIEW_DATA_INFO: ClassVar[str] = """
-        Data import complete! Your demo datasets are loaded and ready for quality analysis. "
-        In a real project, this is what you would see after importing from SurveyCTO or uploading CSV files."
-        success
-    """
-
-    DEMO_DATA_INFO: ClassVar[str] = """
-        **Demo Status: Data Import Complete!**
-
-        Your survey data has been successfully imported and is ready for analysis.
-
-        **What you're seeing:**
-        - **Survey Data**: 12 household surveys from rural communities in India
-        - **Backcheck Data**: 8 quality control validation records
-        - **Data Quality Issues**: Intentionally included to demonstrate DataSure's capabilities
-
-        **In a real project, you would have:**
-        1. **Connected to SurveyCTO**: Automatic sync with your survey forms
-        2. **Uploaded local files**: CSV/Excel files from your computer
-        3. **Used custom scripts**: Python scripts for other data sources
-
-        **Next:** Let's move to data preparation where we'll clean and prepare this data for comprehensive quality checks!
-    """
-
-    @classmethod
-    def get_info_message(cls, message_id: str) -> str:
-        """Retrieve demo messages based on type."""
-        demo_messages = {
-            "add_to_session_info": cls.ADD_TO_SESSION_INFO,
-            "preview_data_info": cls.PREVIEW_DATA_INFO,
-            "demo_data_info": cls.DEMO_DATA_INFO,
-        }
-        return demo_messages.get(message_id, "Invalid message ID.")
-
-
 def create_demo_project():
     """Create and initialize the demo project."""
     # Save demo project
@@ -408,6 +402,105 @@ def create_demo_project():
     return DEMO_PROJECT_ID
 
 
+class DemoDataGenerator:
+    """Class to generate demo data with realistic date fields."""
+
+    def __init__(self, df: pl.DataFrame):
+        self.df = df
+
+    def gen_starttime(self) -> pl.DataFrame:
+        """Generate starttime column with random dates within the last 60 days."""
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=60)
+        random_dates = [
+            start_date
+            + timedelta(
+                days=random.randint(0, 60),
+                hours=random.randint(0, 23),
+                minutes=random.randint(0, 59),
+            )
+            for _ in range(self.df.height)
+        ]
+
+        self.df = self.df.with_columns(
+            [
+                pl.Series("starttime", random_dates),
+            ]
+        )
+
+        return self.df
+
+    def gen_endtime(self) -> pl.DataFrame:
+        """Generate endtime to be starttime + random minutes between 15 and
+        136 minutes.
+        """
+        end_times = [
+            start + timedelta(minutes=random.randint(15, 136))
+            for start in self.df["starttime"]
+        ]
+
+        self.df = self.df.with_columns(
+            [
+                pl.Series("endtime", end_times),
+            ]
+        )
+        return self.df
+
+    def gen_submissiondate(self) -> pl.DataFrame:
+        """Generate submissiondate to be endtime + random minutes between 1
+        and 30 minutes.
+        """
+        submission_dates = [
+            end + timedelta(minutes=random.randint(1, 30)) for end in self.df["endtime"]
+        ]
+
+        self.df = self.df.with_columns(
+            [
+                pl.Series("submissiondate", submission_dates),
+            ]
+        )
+        return self.df
+
+    def gen_dates(self) -> pl.DataFrame:
+        """Generate all date columns."""
+        self.gen_starttime()
+        self.gen_endtime()
+        self.gen_submissiondate()
+
+        # convert datetime columns to string
+        self.df = self.df.with_columns(
+            [
+                pl.col("starttime").cast(pl.Utf8),
+                pl.col("endtime").cast(pl.Utf8),
+                pl.col("submissiondate").cast(pl.Utf8),
+            ]
+        )
+
+        # remove milliseconds from the datetime strings
+        self.df = self.df.with_columns(
+            [
+                pl.col("starttime").str.replace(r"\.\d{3}", "", literal=False),
+                pl.col("endtime").str.replace(r"\.\d{3}", "", literal=False),
+                pl.col("submissiondate").str.replace(r"\.\d{3}", "", literal=False),
+            ]
+        )
+
+        # convert seconds from 5 digits to 2 digits
+        self.df = self.df.with_columns(
+            [
+                pl.col("starttime").str.replace(
+                    r":(\d{2})\d{3}", r":00", literal=False
+                ),
+                pl.col("endtime").str.replace(r":(\d{2})\d{3}", r":00", literal=False),
+                pl.col("submissiondate").str.replace(
+                    r":(\d{2})\d{3}", r":00", literal=False
+                ),
+            ]
+        )
+
+        return self.df
+
+
 def load_demo_data():
     """Load demo data files into the demo project."""
     # Get asset paths
@@ -424,6 +517,9 @@ def load_demo_data():
         survey_df = pl.read_csv(
             str(survey_path), truncate_ragged_lines=True, ignore_errors=True
         )
+
+        survey_df = DemoDataGenerator(survey_df).gen_dates()
+
         # Save to raw database (for import system)
         duckdb_save_table(DEMO_PROJECT_ID, survey_df, "demo_survey", "raw")
 
@@ -431,6 +527,9 @@ def load_demo_data():
         backcheck_df = pl.read_csv(
             str(backcheck_path), truncate_ragged_lines=True, ignore_errors=True
         )
+
+        backcheck_df = DemoDataGenerator(backcheck_df).gen_dates()
+
         # Save to raw database (for import system)
         duckdb_save_table(DEMO_PROJECT_ID, backcheck_df, "demo_backcheck", "raw")
 
