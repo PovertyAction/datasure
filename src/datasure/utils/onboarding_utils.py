@@ -14,20 +14,24 @@ DEMO_PROJECT_NAME = "DataSure Demo"
 DEMO_PROJECT_ID = "demoproject"
 
 
-
 # create a coloured container
+
 
 def demo_container(text: str = ""):
     """Create a colored container for demo messages."""
     with st.container():
         st.markdown(
             f"""
-        <div style="text-align: center; padding: 10px; border: 1px solid #28a745; border-radius: 10px; background-color: #F0EBE3;border-left: 5px solid #7B1FA2;">
+        <div style="padding: 10px; background-color: #F0EBE3;border-radius: 10px; border: 1px solid #D4C5A9;">
             {text}
         </div>
         """,
             unsafe_allow_html=True,
         )
+
+    # add some spacing after the container
+    st.markdown("<br>", unsafe_allow_html=True)
+
 
 class ImportDemoInfo:
     """Class to provide demo messages for import scenarios."""
@@ -84,7 +88,7 @@ class OnboardingSteps:
         "page": "start_view.py",
         "guidance_title": "Welcome to DataSure!",
         "guidance_content": """
-        **What you'll learn in this demo:**
+        ##### What you'll learn in this demo:
         - How to import survey data from different sources
         - How to run data quality checks
         - How to identify and fix data issues
@@ -103,19 +107,20 @@ class OnboardingSteps:
         "page": "import_view.py",
         "guidance_title": "Data Successfully Imported!",
         "guidance_content": """
-        **✅ Your demo data is already loaded and ready!**
+        ##### ✅ Your demo data is already loaded and ready!
 
         In a real project, you would have just:
         - Connected to your SurveyCTO server, OR
         - Uploaded CSV/Excel files from your computer, OR
-        - Run custom Python scripts to import data
 
-        **What's been imported for you:**
-        - **Survey Data**: 12 household survey responses from rural communities
-        - **Backcheck Data**: 8 quality control validation records
+        ##### What's been imported for you:
+        - **Survey Data**: 132 household survey responses from rural communities
+        - **Backcheck Data**: 30 quality control validation records
 
-        **Both datasets contain realistic data quality issues** including:
-        - Missing GPS coordinates
+        ##### Both datasets contain realistic data quality issues
+
+        **including**:
+        - Missing data
         - Duplicate household IDs
         - Inconsistent income reporting
         - Missing demographic information
@@ -132,19 +137,22 @@ class OnboardingSteps:
         "page": "prep_view.py",
         "guidance_title": "Data Preparation (Optional)",
         "guidance_content": """
-        **✅ Your demo data is ready for analysis!**
+        ##### ✅ Your demo data is ready for analysis!
 
-        **What you're seeing:**
+        ##### What you're seeing:
         - Your imported survey data displayed in tabs
         - Data metrics showing rows, columns, and missing values
         - Tools to transform, clean, and modify your data
 
-        **This step is optional for the demo** because:
-        - Your demo data is already properly formatted
-        - Quality issues are intentionally preserved for learning
-        - You can skip directly to "Configure Checks"
+        ##### What to prepare:
+        - Although the demo data has date fields, these are formatted as text strings.
+        - For this demo, you will only need to convert the submissiondate column to a date format.
+        - In a real project, you might also want to:
+            - Remove duplicates
+            - Handle missing values
+            - Create new calculated fields
 
-        **💡 Feel free to explore the data preparation tools:**
+        #####💡 Feel free to explore the data preparation tools (Optional):
         - Transform columns (text manipulation, calculations)
         - Add new columns (calculations, constants, IDs)
         - Remove problematic rows or columns
@@ -162,14 +170,14 @@ class OnboardingSteps:
         "page": "config_view.py",
         "guidance_title": "Configure Quality Checks",
         "guidance_content": """
-        **🔧 Set up your data quality analysis!**
+        ##### 🔧 Set up your data quality analysis!
 
-        **What you're doing in this step:**
+        ##### What you're doing in this step:
         - Creating a "check configuration" that tells DataSure how to analyze your data
         - Mapping your data columns to specific quality checks
         - Connecting your survey data with backcheck data for validation
 
-        **Demo Instructions:**
+        ##### Demo Instructions:
         1. **Click "Add new check configuration"**
         2. **Name it**: "Household Survey Checks" or similar
         3. **Select Survey Dataset**: Choose "demo_survey"
@@ -181,7 +189,7 @@ class OnboardingSteps:
         5. **Add Backcheck Dataset**: Choose "demo_backcheck"
         6. **Click "Add Check Configuration"**
 
-        **What DataSure will analyze:**
+        ##### What DataSure will analyze:
         - Duplicate household records and missing data patterns
         - Enumerator performance and data collection quality
         - Statistical outliers and data inconsistencies
@@ -199,7 +207,7 @@ class OnboardingSteps:
         "page": "output_view_1.py",
         "guidance_title": "Review Quality Reports",
         "guidance_content": """
-        **In this step you'll:**
+        ##### In this step you'll:
         - Analyze data quality results
         - Understand quality metrics
         - Learn how to act on findings
@@ -246,7 +254,7 @@ class OnboardingSteps:
         if not guidance:
             raise ValueError(f"Invalid step: {step}")
         with st.expander(f"📖 **{guidance['guidance_title']}**", expanded=True):
-            st.markdown(guidance["guidance_content"])
+            demo_container(guidance["guidance_content"])
 
 
 def is_demo_project() -> bool:
@@ -325,7 +333,7 @@ def show_progress_indicator():
 
 def show_demo_intro():
     """Display the demo introduction message."""
-    st.markdown("""
+    demo_container("""
         **Start here, if you are new to DataSure.**
 
         This guided demo will walk you through:
