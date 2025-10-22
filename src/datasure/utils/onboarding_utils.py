@@ -14,6 +14,21 @@ DEMO_PROJECT_NAME = "DataSure Demo"
 DEMO_PROJECT_ID = "demoproject"
 
 
+
+# create a coloured container
+
+def demo_container(text: str = ""):
+    """Create a colored container for demo messages."""
+    with st.container():
+        st.markdown(
+            f"""
+        <div style="text-align: center; padding: 10px; border: 1px solid #28a745; border-radius: 10px; background-color: #F0EBE3;border-left: 5px solid #7B1FA2;">
+            {text}
+        </div>
+        """,
+            unsafe_allow_html=True,
+        )
+
 class ImportDemoInfo:
     """Class to provide demo messages for import scenarios."""
 
