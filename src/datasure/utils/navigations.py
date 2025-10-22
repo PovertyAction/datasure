@@ -10,7 +10,6 @@ from datasure.utils.onboarding_utils import (
     show_demo_banner,
     show_next_steps,
     show_progress_indicator,
-    show_step_guidance,
 )
 
 ONBOARDING_STEPS = OnboardingSteps.get_all_steps()  # List of onboarding steps
@@ -66,7 +65,7 @@ def add_demo_navigation(page_name: str, step: int | None = None):
         # Show demo-specific UI elements
         show_demo_banner()
         show_progress_indicator()
-        show_step_guidance(step or get_onboarding_step())
+        OnboardingSteps.get_guidance(step or get_onboarding_step())
 
 
 def show_demo_next_action(
