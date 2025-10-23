@@ -17,7 +17,7 @@ from datasure.utils.navigations import (
     page_navigation,
     show_demo_next_action,
 )
-from datasure.utils.onboarding_utils import is_demo_project
+from datasure.utils.onboarding_utils import ImportDemoInfo, is_demo_project
 from datasure.utils.prep_utils import (
     PrepActionResult,
     PrepDescriptions,
@@ -153,27 +153,9 @@ st.write(
 
 # Demo guidance
 if is_demo_project():
-    demo_callout(
-        "Now let's prepare your demo data for quality analysis! "
-        "Data preparation helps clean and standardize your data before running quality checks."
-    )
-
     demo_expander(
-        "What is Data Preparation?",
-        """
-        **Data preparation is a crucial step that:**
-        - Cleans and standardizes your survey data
-        - Handles missing values and inconsistencies
-        - Creates new variables for analysis
-        - Removes problematic rows or columns
-
-        **For this demo, you can:**
-        1. **Explore your data**: Look at the preview tables below to see your survey data
-        2. **Try optional transformations**: Add data preparation steps if you want to experiment
-        3. **Skip to next step**: Your demo data is already clean enough for quality checks!
-
-        **Ready to continue?** You can move directly to "Configure Checks" or try adding some preparation steps first.
-        """,
+        "Prepare Your Data for Quality Checks",
+        ImportDemoInfo.get_info_message("prepare_data_info"),
         expanded=True,
     )
 
@@ -781,26 +763,8 @@ if is_demo_project():
 
     demo_expander(
         "Optional: Try Data Preparation Features",
-        """
-        **Want to experiment with data preparation?** Try these features:
-
-        **Transform columns:**
-        - Convert text to uppercase/lowercase
-        - Extract patterns from text fields
-        - Perform mathematical operations on numeric data
-
-        **Add new columns:**
-        - Create calculated fields
-        - Add unique identifiers
-        - Generate summary statistics
-
-        **Remove problematic data:**
-        - Delete unnecessary columns
-        - Remove rows with missing critical data
-        - Filter out outliers
-
-        Your demo data is already prepared for quality checks, so these steps are optional in the demo.
-        """,
+        ImportDemoInfo.get_info_message("proceed_to_config_info")
+        ,
         expanded=False,
     )
 
