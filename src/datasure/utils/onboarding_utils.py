@@ -8,7 +8,7 @@ import polars as pl
 import streamlit as st
 
 from datasure.utils.cache_utils import get_cache_path
-from datasure.utils.duckdb_utils import duckdb_save_table
+from datasure.utils.duckdb_utils import duckdb_remove_table, duckdb_save_table
 
 DEMO_PROJECT_NAME = "DataSure Demo"
 DEMO_PROJECT_ID = "demoproject"
@@ -48,20 +48,60 @@ class ImportDemoInfo:
         success
     """
 
+    PREPARE_DATA_INFO: ClassVar[str] ="""
+        What is Data Preparation?
+
+        ##### Data preparation is a crucial step that:
+        - Cleans and standardizes your survey data for data quality analysis
+        - Handles missing values and inconsistencies
+        - Creates new variables for analysis
+        - Removes problematic rows or columns
+
+        ##### For this demo, you can:
+        1. **Explore your data**: Alternate between the **demo_survey** and **demo_backcheck**
+        tabs below to see your survey data and backcheck data.
+        2. **Transform date column**: Add data preparation steps if you want to experiment.
+        Do the following:
+            - Select the **demo_survey** tab
+            - Click on the "Add Preparation Step" button
+            - Under "Select Action", choose "Transform Column"
+            - For "Select Column to Transform", choose "submissiondate"
+            - For "select function", choose "string to datetime". Note that the functions
+              available depend on the type of column selected.
+            - Click on "Add" to save the preparation step.
+            - Review the "submissiondate" column to see the changes.
+        3. **Apply same step to backcheck data**: Select the **demo_backcheck** tab and repeat
+        the same steps to transform the "submissiondate" column there as well.,
+
+
+        **Ready to continue?** Preview and data and additional transformations.
+    """
+
+    PROCEED_TO_CONFIG_INFO: ClassVar[str] = """
+        ##### Want to experiment with data preparation?** Try these features:
+
+        ##### Transform columns:
+        - Convert text to uppercase/lowercase
+        - Extract patterns from text fields
+        - Perform mathematical operations on numeric data
+
+        ##### Add new columns:
+        - Create calculated fields
+        - Add unique identifiers
+        - Generate summary statistics
+
+        ##### Remove problematic data:
+        - Delete unnecessary columns
+        - Remove rows with missing critical data
+        - Filter out outliers
+
+        Your demo data is already prepared for quality checks, so these steps are optional in the demo.
+    """
+
     DEMO_DATA_INFO: ClassVar[str] = """
         **Demo Status: Data Import Complete!**
 
         Your survey data has been successfully imported and is ready for analysis.
-
-        **What you're seeing:**
-        - **Survey Data**: 12 household surveys from rural communities in India
-        - **Backcheck Data**: 8 quality control validation records
-        - **Data Quality Issues**: Intentionally included to demonstrate DataSure's capabilities
-
-        **In a real project, you would have:**
-        1. **Connected to SurveyCTO**: Automatic sync with your survey forms
-        2. **Uploaded local files**: CSV/Excel files from your computer
-        3. **Used custom scripts**: Python scripts for other data sources
 
         **Next:** Let's move to data preparation where we'll clean and prepare this data for comprehensive quality checks!
     """
@@ -71,7 +111,9 @@ class ImportDemoInfo:
         """Retrieve demo messages based on type."""
         demo_messages = {
             "add_to_session_info": cls.ADD_TO_SESSION_INFO,
+            "prepare_data_info": cls.PREPARE_DATA_INFO,
             "preview_data_info": cls.PREVIEW_DATA_INFO,
+            "proceed_to_config_info": cls.PROCEED_TO_CONFIG_INFO,
             "demo_data_info": cls.DEMO_DATA_INFO,
         }
         return demo_messages.get(message_id, "Invalid message ID.")
@@ -125,7 +167,8 @@ class OnboardingSteps:
         - Inconsistent income reporting
         - Missing demographic information
 
-        **👉 Ready for the next step:** Now let's prepare this data for quality analysis!
+        **👉 Ready for the next step:** Explore your data in the **Preview Imported Data** section.
+        Switch between the **demo_backcheck** and **demo_survey** datasets to see what's inside!
         """,
     }
 
@@ -137,28 +180,22 @@ class OnboardingSteps:
         "page": "prep_view.py",
         "guidance_title": "Data Preparation (Optional)",
         "guidance_content": """
-        ##### ✅ Your demo data is ready for analysis!
+        ##### ✅ Your demo data is ALMOST ready for analysis!
 
         ##### What you're seeing:
+        - Tools to transform, clean, and modify your data
         - Your imported survey data displayed in tabs
         - Data metrics showing rows, columns, and missing values
-        - Tools to transform, clean, and modify your data
 
         ##### What to prepare:
-        - Although the demo data has date fields, these are formatted as text strings.
-        - For this demo, you will only need to convert the submissiondate column to a date format.
         - In a real project, you might also want to:
-            - Remove duplicates
+            - Transform additional columns
+            - Remove unwanted rows or columns
+            - Create new columns
             - Handle missing values
-            - Create new calculated fields
+        - For this demo, you will only need to convert the submissiondate column to a date format.
 
-        #####💡 Feel free to explore the data preparation tools (Optional):
-        - Transform columns (text manipulation, calculations)
-        - Add new columns (calculations, constants, IDs)
-        - Remove problematic rows or columns
-        - View the change log to track modifications
-
-        **👉 Ready to find data quality issues?** Continue to "Configure Quality Checks"!
+        **👉 Ready to prepare your data?** Go to the "Get your data ready" section!
         """,
     }
 
@@ -543,8 +580,9 @@ def load_demo_data():
 
         survey_df = DemoDataGenerator(survey_df).gen_dates()
 
-        # Save to raw database (for import system)
+        # Save to raw/prep database (for import system)
         duckdb_save_table(DEMO_PROJECT_ID, survey_df, "demo_survey", "raw")
+        duckdb_save_table(DEMO_PROJECT_ID, survey_df, "demo_survey", "prep")
 
         # Load backcheck data with flexible CSV parsing
         backcheck_df = pl.read_csv(
@@ -553,8 +591,13 @@ def load_demo_data():
 
         backcheck_df = DemoDataGenerator(backcheck_df).gen_dates()
 
-        # Save to raw database (for import system)
+        # Save to raw/prep database (for import system)
         duckdb_save_table(DEMO_PROJECT_ID, backcheck_df, "demo_backcheck", "raw")
+        duckdb_save_table(DEMO_PROJECT_ID, backcheck_df, "demo_backcheck", "prep")
+
+        # clean log entries
+        duckdb_remove_table(DEMO_PROJECT_ID, "prep_log_demo_survey", "logs")
+        duckdb_remove_table(DEMO_PROJECT_ID, "prep_log_demo_backcheck", "logs")
 
         # Create import log entries to register the data as imported
         import_log_data = [
