@@ -18,6 +18,7 @@ from datasure.utils.onboarding_utils import (
 
 PROJECTS_FILE: str = "projects.json"
 
+
 def _validate_project_id(project_id: str) -> bool:
     """Validate project ID to prevent path traversal attacks."""
     # Project ID should only contain alphanumeric characters
@@ -138,7 +139,7 @@ def _handle_demo_project():
     """Handle demo project selection and initialization."""
     show_demo_intro()
 
-    if st.button("Start Demo", type="primary", width='stretch'):
+    if st.button("Start Demo", type="primary", width="stretch"):
         demo_project_id = create_demo_project()
         st.session_state.st_project_id = demo_project_id
         set_onboarding_step(1)
@@ -155,9 +156,7 @@ def _handle_demo_project():
 
 def _handle_create_new_project():
     """Handle new project creation workflow."""
-    project_name = st.text_input(
-        "Enter Project Name", placeholder="My New Project"
-    )
+    project_name = st.text_input("Enter Project Name", placeholder="My New Project")
     if st.button(
         "Create Project", type="primary", disabled=not project_name
     ) and valid_project_name(project_name):
@@ -192,10 +191,7 @@ def _handle_existing_project_selection(project: str):
 def _show_delete_project_option(project: str, project_id: str, projects: dict):
     """Show delete project option for non-demo projects."""
     with st.expander(":material/delete: delete project"):
-        if (
-            st.button("Confirm delete", width="stretch")
-            and project_id in projects
-        ):
+        if st.button("Confirm delete", width="stretch") and project_id in projects:
             delete_project(project_id)
             st.success(f"Project '{project}' deleted successfully!")
             if "st_project_id" in st.session_state:
@@ -326,7 +322,9 @@ def _render_learn_more_section():
         st.divider()
 
         # Simple CTA
-        st.success("Ready to improve your data workflow? Start with our quick setup guide →")
+        st.success(
+            "Ready to improve your data workflow? Start with our quick setup guide →"
+        )
 
 
 st.set_page_config(

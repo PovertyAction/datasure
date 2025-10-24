@@ -399,24 +399,64 @@ class TransformColumnsOperation(PrepOperation):
     def _parse_flexible_datetime(data: pl.DataFrame, col_name: str) -> pl.Expr:
         """Try multiple datetime formats and return the first successful one"""
         formats_to_try = [
-            {"format": "%d%b%Y %H:%M:%S", "validator": r"^\d{1,2}[a-zA-Z]{3}\d{4} \d{2}:\d{2}:\d{2}$", "example": "18aug2025 19:49:00"},
-            {"format": "%d-%b-%Y %H:%M:%S", "validator": r"^\d{1,2}-[a-zA-Z]{3}-\d{4} \d{2}:\d{2}:\d{2}$", "example": "18-aug-2025 19:49:00"},
-            {"format": "%Y-%m-%d %H:%M:%S", "validator": r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", "example": "2025-08-18 19:49:00"},
-            {"format": "%m/%d/%Y %H:%M:%S", "validator": r"^\d{1,2}/\d{1,2}/\d{4} \d{2}:\d{2}:\d{2}$", "example": "08/18/2025 19:49:00"},
-            {"format": "%d/%m/%Y %H:%M:%S", "validator": r"^\d{1,2}/\d{1,2}/\d{4} \d{2}:\d{2}:\d{2}$", "example": "18/08/2025 19:49:00"},
-            {"format": "%Y-%m-%d", "validator": r"^\d{4}-\d{2}-\d{2}$", "example": "2025-08-18"},
-            {"format": "%m/%d/%Y", "validator": r"^\d{1,2}/\d{1,2}/\d{4}$", "example": "08/18/2025"},
-            {"format": "%d-%m-%Y", "validator": r"^\d{1,2}-\d{1,2}-\d{4}$", "example": "18-08-2025"},
+            {
+                "format": "%d%b%Y %H:%M:%S",
+                "validator": r"^\d{1,2}[a-zA-Z]{3}\d{4} \d{2}:\d{2}:\d{2}$",
+                "example": "18aug2025 19:49:00",
+            },
+            {
+                "format": "%d-%b-%Y %H:%M:%S",
+                "validator": r"^\d{1,2}-[a-zA-Z]{3}-\d{4} \d{2}:\d{2}:\d{2}$",
+                "example": "18-aug-2025 19:49:00",
+            },
+            {
+                "format": "%Y-%m-%d %H:%M:%S",
+                "validator": r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$",
+                "example": "2025-08-18 19:49:00",
+            },
+            {
+                "format": "%m/%d/%Y %H:%M:%S",
+                "validator": r"^\d{1,2}/\d{1,2}/\d{4} \d{2}:\d{2}:\d{2}$",
+                "example": "08/18/2025 19:49:00",
+            },
+            {
+                "format": "%d/%m/%Y %H:%M:%S",
+                "validator": r"^\d{1,2}/\d{1,2}/\d{4} \d{2}:\d{2}:\d{2}$",
+                "example": "18/08/2025 19:49:00",
+            },
+            {
+                "format": "%Y-%m-%d",
+                "validator": r"^\d{4}-\d{2}-\d{2}$",
+                "example": "2025-08-18",
+            },
+            {
+                "format": "%m/%d/%Y",
+                "validator": r"^\d{1,2}/\d{1,2}/\d{4}$",
+                "example": "08/18/2025",
+            },
+            {
+                "format": "%d-%m-%Y",
+                "validator": r"^\d{1,2}-\d{1,2}-\d{4}$",
+                "example": "18-08-2025",
+            },
         ]
 
         for fmt in formats_to_try:
             # check that all non-missing values match the format using regex
             validator = fmt["validator"]
-            validate_col = data.filter(pl.col(col_name).is_not_null()).select(pl.col(col_name).str.contains(f"^{validator.strip('^$')}$").all()).item()
+            validate_col = (
+                data.filter(pl.col(col_name).is_not_null())
+                .select(
+                    pl.col(col_name).str.contains(f"^{validator.strip('^$')}$").all()
+                )
+                .item()
+            )
             if not validate_col:
                 continue
             else:
-                return pl.col(col_name).str.to_datetime(format=fmt["format"], strict=False)
+                return pl.col(col_name).str.to_datetime(
+                    format=fmt["format"], strict=False
+                )
 
         # If all formats fail, all missing values, return Exception
         supported_formats = ", ".join([f["example"] for f in formats_to_try])
@@ -484,8 +524,6 @@ class TransformColumnsOperation(PrepOperation):
 
         # String to datetime
         if func_name in ["string to date", "string to datetime"]:
-            st.write("Parsing date time for column: ", column_name)
-            st.write("Date time format: ", self._parse_flexible_datetime(data, column_name).alias(column_name))
             return data.with_columns(
                 self._parse_flexible_datetime(data, column_name).alias(column_name)
             )

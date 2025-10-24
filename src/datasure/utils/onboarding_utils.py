@@ -48,7 +48,7 @@ class ImportDemoInfo:
         success
     """
 
-    PREPARE_DATA_INFO: ClassVar[str] ="""
+    PREPARE_DATA_INFO: ClassVar[str] = """
         What is Data Preparation?
 
         ##### Data preparation is a crucial step that:

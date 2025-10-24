@@ -763,8 +763,7 @@ if is_demo_project():
 
     demo_expander(
         "Optional: Try Data Preparation Features",
-        ImportDemoInfo.get_info_message("proceed_to_config_info")
-        ,
+        ImportDemoInfo.get_info_message("proceed_to_config_info"),
         expanded=False,
     )
 
