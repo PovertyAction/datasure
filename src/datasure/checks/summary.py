@@ -14,6 +14,12 @@ from datasure.utils import (
     save_check_settings,
     trigger_save,
 )
+from datasure.utils.navigations import demo_expander
+from datasure.utils.onboarding_utils import (
+    CheckPage,
+    OutputOnboardingInfo,
+    is_demo_project,
+)
 
 
 def load_default_settings(project_id: str, setting_file: str, page_num: int) -> tuple:
@@ -80,6 +86,12 @@ def summary_settings(
 
         st.write("---")
         st.markdown("### Select columns to include in summary report")
+
+        if is_demo_project():
+            demo_expander(
+                "Summary Settings",
+                OutputOnboardingInfo.get_onboarding_message("summary", "settings"),
+            )
 
         default_date, default_target, default_survey_id = load_default_settings(
             project_id=project_id, setting_file=setting_file, page_num=page_num
@@ -326,6 +338,15 @@ def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
     None
     """
     st.markdown("## Submission details")
+
+    if is_demo_project():
+        demo_expander(
+            "Submission Details",
+            OutputOnboardingInfo.get_onboarding_message(
+                "summary", "submission_details"
+            ),
+        )
+
     if date:
         (
             first_submission_date,
@@ -387,7 +408,7 @@ def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
         )
         fig.update_layout(width=1000, height=500)
         fig.update_yaxes(tick0=0)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     else:
         st.info(
             "Submission details report requires a date column to be selected. Go to the :material/settings: settings section above."
@@ -587,6 +608,12 @@ def summary_progress(
     """
     st.write("---")
     st.markdown("## Progress")
+
+    if is_demo_project():
+        demo_expander(
+            "Progress",
+            OutputOnboardingInfo.get_onboarding_message("summary", "progress"),
+        )
     if not date:
         st.info(
             "Progress section requires a date column to be selected. go to the :material/settings: settings section above."
@@ -698,7 +725,7 @@ def summary_progress(
             ).background_gradient(
                 subset=format_cols, cmap=cmap, axis=1, vmin=vmin_val, vmax=vmax_val
             ),
-            use_container_width=True,
+            width="stretch",
         )
 
 
@@ -741,6 +768,12 @@ def summary_data_summary(data: pd.DataFrame) -> None:
     """
     st.write("---")
     st.markdown("## Data Summary")
+
+    if is_demo_project():
+        demo_expander(
+            "Data Summary",
+            OutputOnboardingInfo.get_onboarding_message("summary", "data_summary"),
+        )
 
     num_str_cols, num_num_cols, num_date_cols, col_count = compute_summary_data_summary(
         data=data
@@ -813,6 +846,12 @@ def summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> None:
     st.write("---")
     st.markdown("## Data Quality")
 
+    if is_demo_project():
+        demo_expander(
+            "Data Quality",
+            OutputOnboardingInfo.get_onboarding_message("summary", "data_quality"),
+        )
+
     perc_duplicates, perc_outliers, perc_missing, perc_back_check_error_rate = (
         compute_summary_data_quality(
             data=data,
@@ -876,6 +915,12 @@ def summary_report(
     -------
     None
     """
+    if is_demo_project():
+        demo_expander(
+            CheckPage.SUMMARY.value,
+            OutputOnboardingInfo.get_onboarding_message("summary", "main"),
+        )
+
     date, target, survey_id = summary_settings(project_id, data, setting_file, page_num)
     summary_data_summary(data=data)
     summary_submissions(

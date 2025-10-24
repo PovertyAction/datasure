@@ -18,9 +18,13 @@ from datasure.utils import (
     get_cache_path,
     get_check_config_settings,
 )
-from datasure.utils.navigations import demo_sidebar_help
+from datasure.utils.navigations import (
+    add_demo_navigation,
+    demo_sidebar_help,
+)
 
 demo_sidebar_help()
+add_demo_navigation("output_view_1", step=5)
 
 
 def get_page_number() -> int | None:
