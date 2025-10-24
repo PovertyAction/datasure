@@ -106,6 +106,42 @@ class ImportDemoInfo:
         **Next:** Let's move to data preparation where we'll clean and prepare this data for comprehensive quality checks!
     """
 
+    PROCEED_TO_HFCS_INFO: ClassVar[str] = """
+        **You are ready to view your HFC reports:**
+        Your demo data is now prepared for quality analysis. In a real project, this is what you would see after preparing your data for quality checks.
+
+        **Next:** Click on the "View Quality Reports" button to explore comprehensive data quality insights and reports!
+    """
+
+    ADD_CHECK_CONFIG_INFO: ClassVar[str] = """
+        ##### Follow these steps to set up data quality checks:
+
+        ##### Step 1: Click "Add new check configuration"
+        - Give it a name like "Household Survey Checks"
+
+        ##### Step 2: Select your survey dataset
+        - Choose "demo_survey" (your main household survey data)
+
+        ##### Step 3: Configure key columns:
+        - **Key Column**: Choose "hhid" (Household ID) - this uniquely identifies each survey
+        - **ID Column**: Choose "hhid" as well
+        - **Enumerator Column**: Choose "enum_name" (shows who collected the data)
+        - **Date Column**: Leave blank (demo data doesn't have proper date format)
+
+        ##### Step 4: Add backcheck dataset
+        - **Backcheck Dataset**: Choose "demo_backcheck" (quality control data)
+
+        ##### Step 5: Click "Add Check Configuration"
+
+        **🎆 What happens next:** DataSure will create a comprehensive quality analysis page!
+    """
+
+    ADD_PREP_STEPS_INFO: ClassVar[str] = """
+        You will need to add a data preparation step to convert the submissiondate
+        column to a date format for both the survey and backcheck surveys. This is a
+        crucial step to ensure accurate date handling in your analysis.
+    """
+
     @classmethod
     def get_info_message(cls, message_id: str) -> str:
         """Retrieve demo messages based on type."""
@@ -115,6 +151,9 @@ class ImportDemoInfo:
             "preview_data_info": cls.PREVIEW_DATA_INFO,
             "proceed_to_config_info": cls.PROCEED_TO_CONFIG_INFO,
             "demo_data_info": cls.DEMO_DATA_INFO,
+            "proceed_to_hfcs_info": cls.PROCEED_TO_HFCS_INFO,
+            "add_check_config_info": cls.ADD_CHECK_CONFIG_INFO,
+            "add_prep_steps_info": cls.ADD_PREP_STEPS_INFO,
         }
         return demo_messages.get(message_id, "Invalid message ID.")
 
@@ -207,7 +246,7 @@ class OnboardingSteps:
         "page": "config_view.py",
         "guidance_title": "Configure Quality Checks",
         "guidance_content": """
-        ##### 🔧 Set up your data quality analysis!
+        ##### 🔧 Set up your data quality checks!
 
         ##### What you're doing in this step:
         - Creating a "check configuration" that tells DataSure how to analyze your data
@@ -216,13 +255,13 @@ class OnboardingSteps:
 
         ##### Demo Instructions:
         1. **Click "Add new check configuration"**
-        2. **Name it**: "Household Survey Checks" or similar
+        2. **Name it**: "Household HFCs" or similar
         3. **Select Survey Dataset**: Choose "demo_survey"
         4. **Configure Key Columns**:
-            - **Key Column**: "hhid" (Household ID - uniquely identifies each survey)
-            - **ID Column**: "hhid" (same as key column)
-            - **Enumerator Column**: "enum_name" (tracks data collector performance)
-            - **Date Column**: Leave blank (demo data format issue)
+            - **Key Column**: "KEY" (unique row identifier for your dataset. If none exists, you can create one during data preparation)
+            - **ID Column**: "hhid" (Unique household identifier)
+            - **Enumerator Column**: "enum_name" (Column indicating who collected the data)
+            - **Date Column**: "submissiondate" (Date when the survey was submitted). If there is no date column, you have to go back and convert the submissiondate column to date format in the data preparation step.
         5. **Add Backcheck Dataset**: Choose "demo_backcheck"
         6. **Click "Add Check Configuration"**
 
@@ -254,6 +293,20 @@ class OnboardingSteps:
         """,
     }
 
+    CORRECT: ClassVar[dict] = {
+        "step": 6,
+        "title": "Correct Data",
+        "description": "Make corrections to your data based on quality findings.",
+        "icon": "🧹",
+        "page": "correction_view.py",
+        "guidance_title": "Correct Data Issues",
+        "guidance_content": """
+        ##### In this step you'll:
+        - Learn how to make corrections to your datasets after analyzing Data Quality Reports
+
+        """,
+    }
+
     @classmethod
     def get_step_info(cls, step: str) -> dict:
         """Retrieve step information based on step name."""
@@ -263,6 +316,7 @@ class OnboardingSteps:
             "prepare": cls.PREPARE,
             "configure": cls.CONFIGURE,
             "review": cls.REVIEW,
+            "correct": cls.CORRECT,
         }
         return steps.get(step, {})
 
@@ -275,6 +329,7 @@ class OnboardingSteps:
             cls.PREPARE,
             cls.CONFIGURE,
             cls.REVIEW,
+            cls.CORRECT,
         ]
 
     @classmethod
@@ -286,6 +341,7 @@ class OnboardingSteps:
             3: cls.PREPARE,
             4: cls.CONFIGURE,
             5: cls.REVIEW,
+            6: cls.CORRECT,
         }
         guidance = steps.get(step, {})
         if not guidance:

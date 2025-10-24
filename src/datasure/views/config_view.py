@@ -9,13 +9,12 @@ from datasure.utils import (
 )
 from datasure.utils.navigations import (
     add_demo_navigation,
-    demo_callout,
     demo_expander,
     demo_sidebar_help,
     page_navigation,
     show_demo_next_action,
 )
-from datasure.utils.onboarding_utils import is_demo_project
+from datasure.utils.onboarding_utils import ImportDemoInfo, is_demo_project
 
 # Add demo navigation and guidance
 add_demo_navigation("config_view.py", step=4)
@@ -23,33 +22,6 @@ demo_sidebar_help()
 
 st.title("Configure Checks")
 st.markdown("Add a page for each dataset you want to check")
-
-# Demo guidance
-if is_demo_project():
-    demo_callout(
-        "Time to configure your data quality checks! "
-        "This step sets up which data quality issues DataSure will look for in your survey data."
-    )
-
-    demo_expander(
-        "What are Data Quality Checks?",
-        """
-        **Data quality checks help you identify:**
-        - **Duplicates**: Records that appear more than once
-        - **Missing data**: Required fields that are empty
-        - **GPS issues**: Invalid coordinates or locations
-        - **Outliers**: Values that are unusually high or low
-        - **Inconsistencies**: Data that doesn't match expected patterns
-        - **Progress tracking**: Survey completion rates
-        - **Backcheck validation**: Quality control comparisons
-
-        **For your demo:**
-        1. **Create a configuration** for your survey data below
-        2. **Map your data columns** to tell DataSure what to check
-        3. **Include backcheck data** for validation comparisons
-        """,
-        expanded=True,
-    )
 
 # get project ID
 project_id: str = st.session_state.st_project_id
@@ -274,10 +246,10 @@ st.subheader("Check Configurations")
 
 # Demo guidance for check configurations
 if is_demo_project():
-    demo_callout(
-        "📋 Create your first check configuration below! "
-        "This tells DataSure which datasets to analyze and how to analyze them.",
-        "info",
+    demo_expander(
+        "Demo Instructions: Create Your First Configuration",
+        ImportDemoInfo.get_info_message("add_check_config_info"),
+        expanded=True,
     )
 
 cc1, cc2, _ = st.columns([0.4, 0.3, 0.3])
@@ -294,37 +266,9 @@ check_config_log = duckdb_get_table(
 )
 
 if check_config_log.is_empty():
-    if is_demo_project():
-        demo_expander(
-            "Demo Instructions: Create Your First Configuration",
-            """
-            **Follow these steps to set up data quality checks:**
-
-            **Step 1: Click "Add new check configuration"**
-            - Give it a name like "Household Survey Checks"
-
-            **Step 2: Select your survey dataset**
-            - Choose "demo_survey" (your main household survey data)
-
-            **Step 3: Configure key columns:**
-            - **Key Column**: Choose "hhid" (Household ID) - this uniquely identifies each survey
-            - **ID Column**: Choose "hhid" as well
-            - **Enumerator Column**: Choose "enum_name" (shows who collected the data)
-            - **Date Column**: Leave blank (demo data doesn't have proper date format)
-
-            **Step 4: Add backcheck dataset**
-            - **Backcheck Dataset**: Choose "demo_backcheck" (quality control data)
-
-            **Step 5: Click "Add Check Configuration"**
-
-            **🎆 What happens next:** DataSure will create a comprehensive quality analysis page!
-            """,
-            expanded=True,
-        )
-    else:
-        st.info(
-            "No check configurations found. Please add a check configuration to start."
-        )
+    st.info(
+        "No check configurations found. Please add a check configuration to start."
+    )
 else:
     st.dataframe(
         check_config_log,
@@ -352,17 +296,13 @@ if is_demo_project():
     st.write("---")
 
     if not check_config_log.is_empty():
-        demo_callout(
-            "Great! Your check configuration is ready. "
-            "Now let's see the data quality analysis results!",
-            "success",
+        demo_expander(
+            "Learn More: Proceed to Data QUality Checks",
+            ImportDemoInfo.get_info_message("proceed_to_hfcs_info")
+            ,
+            expanded=True,
         )
         show_demo_next_action(4, "st_output_page1", "View Quality Reports")
-    else:
-        demo_callout(
-            "Please create a check configuration above to continue with the demo.",
-            "warning",
-        )
 else:
     page_navigation(
         prev={
