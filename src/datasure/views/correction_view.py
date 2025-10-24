@@ -3,7 +3,10 @@ import streamlit as st
 
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.utils import duckdb_get_table, get_check_config_settings
-from datasure.utils.navigations import page_navigation
+from datasure.utils.navigations import demo_sidebar_help, page_navigation
+
+demo_sidebar_help()
+
 
 # DEFINE CONSTANTS FOR CORRECTION
 CORRECTION_ACTIONS = ("modify value", "remove value", "remove row")

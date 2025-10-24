@@ -35,6 +35,8 @@ start_page = st.Page(
     default=True,
 )
 
+st.session_state.st_start_page = start_page
+
 # config data import page
 import_data_page = st.Page(
     page=str(_views_dir / "import_view.py"),
