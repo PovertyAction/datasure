@@ -266,9 +266,7 @@ check_config_log = duckdb_get_table(
 )
 
 if check_config_log.is_empty():
-    st.info(
-        "No check configurations found. Please add a check configuration to start."
-    )
+    st.info("No check configurations found. Please add a check configuration to start.")
 else:
     st.dataframe(
         check_config_log,
@@ -298,8 +296,7 @@ if is_demo_project():
     if not check_config_log.is_empty():
         demo_expander(
             "Learn More: Proceed to Data QUality Checks",
-            ImportDemoInfo.get_info_message("proceed_to_hfcs_info")
-            ,
+            ImportDemoInfo.get_info_message("proceed_to_hfcs_info"),
             expanded=True,
         )
         show_demo_next_action(4, "st_output_page1", "View Quality Reports")

@@ -39,7 +39,7 @@ def page_navigation(prev=None, next=None):
             if st.button(
                 prev["label"],
                 key=f"prev_button_{prev['label']}",
-                width='stretch',
+                width="stretch",
             ):
                 st.switch_page(prev["page_name"])
     if next:
@@ -47,7 +47,7 @@ def page_navigation(prev=None, next=None):
             if st.button(
                 next["label"],
                 key=f"next_button_{next['label']}",
-                width='stretch',
+                width="stretch",
                 type="primary",
             ):
                 st.switch_page(next["page_name"])
@@ -85,7 +85,7 @@ def show_demo_next_action(
 
         message = custom_message or f"Continue to {next_step['title']}"
 
-        if st.button(f"{message}", type="primary", width='stretch', disabled=disabled):
+        if st.button(f"{message}", type="primary", width="stretch", disabled=disabled):
             if next_page_session_key and next_page_session_key in st.session_state:
                 set_onboarding_step(current_step + 1)
                 st.switch_page(st.session_state[next_page_session_key])
