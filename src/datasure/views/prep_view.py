@@ -778,14 +778,10 @@ if is_demo_project():
     if not prep_log_survey.is_empty() and not prep_log_backcheck.is_empty():
         # check that the correct prep steps have been added
         pattern = r'"submissiondate"\s+updated\s+using\s+string\s+to\s+datetime'
-        if prep_log_survey["description"].str.contains(
-            pattern
-        ).any():
+        if prep_log_survey["description"].str.contains(pattern).any():
             enable_next_count += 1
 
-        if prep_log_backcheck["description"].str.contains(
-            pattern
-        ).any():
+        if prep_log_backcheck["description"].str.contains(pattern).any():
             enable_next_count += 1
 
     if prep_log_survey.is_empty() or prep_log_backcheck.is_empty():
@@ -797,12 +793,16 @@ if is_demo_project():
     else:
         demo_expander(
             "Optional: Try Data Preparation Features",
-            ImportDemoInfo.get_info_message("proceed_to_config_info")
-            ,
+            ImportDemoInfo.get_info_message("proceed_to_config_info"),
             expanded=False,
         )
 
-    show_demo_next_action(3, "st_config_checks_page", "Configure Quality Checks", disabled=enable_next_count < 2)
+    show_demo_next_action(
+        3,
+        "st_config_checks_page",
+        "Configure Quality Checks",
+        disabled=enable_next_count < 2,
+    )
 else:
     page_navigation(
         prev={
