@@ -781,7 +781,15 @@ def prep_apply_action(
         )
 
         if prep_log_df.is_empty():
-            return None  # No actions to re-apply
+            # set result data to raw data if no actions in log
+            # return none
+            duckdb_save_table(
+                project_id,
+                raw_data,
+                alias,
+                db_name="prep",
+            )
+            return None
 
         # Convert to list of actions
         existing_actions = []
