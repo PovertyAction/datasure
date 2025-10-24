@@ -7,6 +7,7 @@ from datasure.utils.onboarding_utils import (
     demo_container,
     get_onboarding_step,
     is_demo_project,
+    load_demo_data,
     set_onboarding_step,
     show_demo_banner,
     show_next_steps,
@@ -38,7 +39,7 @@ def page_navigation(prev=None, next=None):
             if st.button(
                 prev["label"],
                 key=f"prev_button_{prev['label']}",
-                use_container_width=True,
+                width='stretch',
             ):
                 st.switch_page(prev["page_name"])
     if next:
@@ -46,7 +47,7 @@ def page_navigation(prev=None, next=None):
             if st.button(
                 next["label"],
                 key=f"next_button_{next['label']}",
-                use_container_width=True,
+                width='stretch',
                 type="primary",
             ):
                 st.switch_page(next["page_name"])
@@ -73,6 +74,7 @@ def show_demo_next_action(
     current_step: int,
     next_page_session_key: str | None = None,
     custom_message: str | None = None,
+    disabled: bool = False,
 ):
     """Show next action button for demo users."""
     if not is_demo_project():
@@ -83,7 +85,7 @@ def show_demo_next_action(
 
         message = custom_message or f"Continue to {next_step['title']}"
 
-        if st.button(f"{message}", type="primary", use_container_width=True):
+        if st.button(f"{message}", type="primary", width='stretch', disabled=disabled):
             if next_page_session_key and next_page_session_key in st.session_state:
                 set_onboarding_step(current_step + 1)
                 st.switch_page(st.session_state[next_page_session_key])
@@ -139,10 +141,11 @@ def demo_sidebar_help():
 
         st.markdown("---")
 
-        if st.button("Return to Start", use_container_width=True):
-            st.switch_page("pages/start_view.py")
+        if st.button("Restart Demo", use_container_width=True):
+            st.switch_page(st.session_state.st_import_data_page)
+            load_demo_data()
 
         if st.button("Exit Demo", use_container_width=True):
             st.session_state.st_project_id = ""
             st.session_state.pop("onboarding_step", None)
-            st.switch_page("pages/start_view.py")
+            st.switch_page(st.session_state.st_start_page)
