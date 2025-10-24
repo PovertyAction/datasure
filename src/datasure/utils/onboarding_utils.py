@@ -1,6 +1,7 @@
 import json
 import random
 from datetime import datetime, timedelta
+from enum import Enum
 from pathlib import Path
 from typing import ClassVar
 
@@ -12,6 +13,20 @@ from datasure.utils.duckdb_utils import duckdb_remove_table, duckdb_save_table
 
 DEMO_PROJECT_NAME = "DataSure Demo"
 DEMO_PROJECT_ID = "demoproject"
+
+
+class CheckPage(Enum):
+    """Enum for different check output pages."""
+
+    SUMMARY = "Summary"
+    SURVEY_PROGRESS = "Survey Progress"
+    DUPLICATES = "Duplicates"
+    MISSING_DATA = "Missing Data"
+    OUTLIERS = "Outliers"
+    ENUMERATOR_STATS = "Enumerator Stats"
+    DESCRIPTIVE_STATS = "Descriptive Stats"
+    BACK_CHECKS = "Back Checks"
+    GPS_CHECKS = "GPS Checks"
 
 
 # create a coloured container
@@ -275,7 +290,7 @@ class OnboardingSteps:
         """,
     }
 
-    REVIEW: ClassVar[dict] = {
+    OUTPUTS: ClassVar[dict] = {
         "step": 5,
         "title": "Review Reports",
         "description": "Analyze data quality results and insights.",
@@ -315,7 +330,7 @@ class OnboardingSteps:
             "import": cls.IMPORT,
             "prepare": cls.PREPARE,
             "configure": cls.CONFIGURE,
-            "review": cls.REVIEW,
+            "reports": cls.OUTPUTS,
             "correct": cls.CORRECT,
         }
         return steps.get(step, {})
@@ -328,7 +343,7 @@ class OnboardingSteps:
             cls.IMPORT,
             cls.PREPARE,
             cls.CONFIGURE,
-            cls.REVIEW,
+            cls.OUTPUTS,
             cls.CORRECT,
         ]
 
@@ -340,7 +355,7 @@ class OnboardingSteps:
             2: cls.IMPORT,
             3: cls.PREPARE,
             4: cls.CONFIGURE,
-            5: cls.REVIEW,
+            5: cls.OUTPUTS,
             6: cls.CORRECT,
         }
         guidance = steps.get(step, {})
@@ -348,6 +363,94 @@ class OnboardingSteps:
             raise ValueError(f"Invalid step: {step}")
         with st.expander(f"📖 **{guidance['guidance_title']}**", expanded=True):
             demo_container(guidance["guidance_content"])
+
+
+class OutputOnboardingInfo:
+    """Class to provide onboarding messages for check output pages."""
+
+    SUMMARY: ClassVar[str] = {
+        "main": """
+        ##### Summary of Data Quality Checks
+
+        This tab provides an overview of the data quality checks performed on your survey data.
+        It summarizes key metrics such as the number of checks run, issues identified,
+        and overall data quality score.
+
+        **Next**: Click on the settings icon (⚙️) to configure global settings for the summary tab.
+        """,
+        "settings": """
+        ##### Setup for Summary Tab
+        In this section, you can configure global settings for the summary tab, you will notice that some settings are pre-filled based on your check configuration.
+        This tab contains the following settings:
+        - Survey ID: The main identifier for your survey respondents (e.g., household ID, Respondent ID).
+        - Survey Date: The date when the survey was conducted or submitted. (e.g., submissiondate, starttime).
+        - Total Expected Interviews: The total number of survey interviews you expect to have in your dataset (e.g., 1000).
+
+        ##### Instructions for Demo:
+        For the demo data, you will need to indicate a total of **200** expected interviews,
+
+        **Next**: Explore the data summary section below.
+        """,
+        "data_summary": """
+        ##### Data Summary
+        This section provides a quick overview of your survey dataset, including:
+        - String columns: Number of text-based columns in your dataset.
+        - Numeric columns: Number of numeric columns in your dataset (includes int, float)
+        - Date columns: Number of date/time columns in your dataset.
+        - Total rows: Total number of rows (records) in your dataset.
+
+        **Next**: Explore the Submission Details section below.
+        """,
+        "submission_details": """
+        ##### Submission Details
+        This section provides insights into the submission patterns of your survey data, including:
+        - Today: Number of submissions received today.
+        - This Week: Number of submissions received in the current week.
+        - This Month: Number of submissions received in the current month.
+        - Total Submissions: Total number of submissions received to date.
+
+        This section also includes a submission trend chart that visualizes the number of submissions over time, helping you identify patterns and peaks in data collection.
+
+        **Next**: Explore the Progress section below.
+        """,
+        "progress": """
+        ##### Progress
+        This section provides an overview of the progress of your survey data collection, including:
+        - Submission Progress: A progress bar showing the percentage of completed submissions against the total expected interviews.
+        - Average Submissions per Day: The average number of submissions received per day.
+        - Average Submissions Per Week: The average number of submissions received per week.
+        - Average Submissions Per Month: The average number of submissions received per month.
+
+        **Next**: Explore the progress by sub sections below.
+
+        ##### Instructions for Demo:
+        For the demo, you will explore how to create a table showing progress by subgroups such as enumerator or region.
+        - AT "Progress by" dropdown, select "state" to see submission progress by state.
+
+        **Optionally**,
+        - you can also explore by selecting other categorical columns.
+        - on the right side of the table, you can switch between, "Auto", "Daily", "Weekly", and "Monthly" views to see how submission progress varies over different time intervals.
+        The "Auto" view automatically adjusts the time interval based on the data density while the other options allow you to manually select the desired time frame for analysis.
+        """,
+        "data_quality": """
+        ##### Data Quality
+        This section provides an overview of the overall data quality of your survey dataset, including:
+        - % of duplicate values on ID column: Percentage of duplicate entries found in the ID column.
+        - % of values flagged as outliers: Percentage of data points identified as outliers based on statistical analysis.
+        - % of missing values in survey dataset: Percentage of missing or null values in the survey dataset.
+        - Backcheck error rate: Percentage of discrepancies found between survey data and backcheck data.
+
+        **Next**: Explore the "Survey Progress" tab.
+        """,
+    }
+
+    @classmethod
+    def get_onboarding_message(cls, tab: CheckPage, message_id: str) -> str:
+        """Retrieve onboarding messages based on type."""
+        messages = {
+            "summary": cls.SUMMARY,
+        }
+        return messages.get(tab, "Invalid tab.").get(message_id, "Invalid message ID.")
 
 
 def is_demo_project() -> bool:
@@ -792,12 +895,12 @@ def show_demo_completion_message():
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("Restart Demo", use_container_width=True):
+        if st.button("Restart Demo", width="stretch"):
             set_onboarding_step(1)
             st.rerun()
 
     with col2:
-        if st.button("Create Real Project", type="primary", use_container_width=True):
+        if st.button("Create Real Project", type="primary", width="stretch"):
             st.session_state.st_project_id = ""
             st.session_state.pop("onboarding_step", None)
             st.switch_page("pages/start_view.py")
