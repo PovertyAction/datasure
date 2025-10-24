@@ -580,9 +580,12 @@ def load_demo_data():
 
         survey_df = DemoDataGenerator(survey_df).gen_dates()
 
-        # Save to raw/prep database (for import system)
+        # Save to raw database (for import system)
         duckdb_save_table(DEMO_PROJECT_ID, survey_df, "demo_survey", "raw")
-        duckdb_save_table(DEMO_PROJECT_ID, survey_df, "demo_survey", "prep")
+
+        # clean prep/corrected entries
+        duckdb_remove_table(DEMO_PROJECT_ID, "demo_survey", "prep")
+        duckdb_remove_table(DEMO_PROJECT_ID, "demo_survey", "corrected")
 
         # Load backcheck data with flexible CSV parsing
         backcheck_df = pl.read_csv(
@@ -591,9 +594,12 @@ def load_demo_data():
 
         backcheck_df = DemoDataGenerator(backcheck_df).gen_dates()
 
-        # Save to raw/prep database (for import system)
+        # Save to raw database (for import system)
         duckdb_save_table(DEMO_PROJECT_ID, backcheck_df, "demo_backcheck", "raw")
-        duckdb_save_table(DEMO_PROJECT_ID, backcheck_df, "demo_backcheck", "prep")
+
+        # clean prep/corrected entries
+        duckdb_remove_table(DEMO_PROJECT_ID, "demo_backcheck", "prep")
+        duckdb_remove_table(DEMO_PROJECT_ID, "demo_backcheck", "corrected")
 
         # clean log entries
         duckdb_remove_table(DEMO_PROJECT_ID, "prep_log_demo_survey", "logs")
