@@ -4,7 +4,6 @@ import streamlit as st
 
 from datasure.utils.onboarding_utils import (
     OnboardingSteps,
-    demo_container,
     get_onboarding_step,
     is_demo_project,
     load_demo_data,
@@ -109,15 +108,6 @@ def demo_callout(message: str, type: str = "info"):
     }
 
     return messages.get(type, messages["info"])
-
-
-def demo_expander(title: str, content: str, expanded: bool = False):
-    """Create a demo-specific expander with helpful information."""
-    if not is_demo_project():
-        return
-
-    with st.expander(f"**Learn More: {title}**", expanded=expanded):
-        demo_container(content)
 
 
 def demo_sidebar_help():
