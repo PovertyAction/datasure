@@ -9,15 +9,18 @@ from datasure.utils.duckdb_utils import (
     duckdb_get_table,
     duckdb_save_table,
 )
-from datasure.utils.navigations import (
+from datasure.utils.navigations_utils import (
     add_demo_navigation,
     demo_callout,
-    demo_expander,
     demo_sidebar_help,
     page_navigation,
     show_demo_next_action,
 )
-from datasure.utils.onboarding_utils import ImportDemoInfo, is_demo_project
+from datasure.utils.onboarding_utils import (
+    ImportDemoInfo,
+    demo_expander,
+    is_demo_project,
+)
 from datasure.utils.prep_utils import (
     PrepActionResult,
     PrepDescriptions,

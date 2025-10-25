@@ -18,7 +18,7 @@ from datasure.utils import (
     get_cache_path,
     get_check_config_settings,
 )
-from datasure.utils.navigations import (
+from datasure.utils.navigations_utils import (
     add_demo_navigation,
     demo_sidebar_help,
 )

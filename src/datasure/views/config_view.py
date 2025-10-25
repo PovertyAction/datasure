@@ -7,14 +7,17 @@ from datasure.utils import (
     duckdb_save_table,
     get_df_info,
 )
-from datasure.utils.navigations import (
+from datasure.utils.navigations_utils import (
     add_demo_navigation,
-    demo_expander,
     demo_sidebar_help,
     page_navigation,
     show_demo_next_action,
 )
-from datasure.utils.onboarding_utils import ImportDemoInfo, is_demo_project
+from datasure.utils.onboarding_utils import (
+    ImportDemoInfo,
+    demo_expander,
+    is_demo_project,
+)
 
 # Add demo navigation and guidance
 add_demo_navigation("config_view.py", step=4)
