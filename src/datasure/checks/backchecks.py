@@ -332,7 +332,7 @@ def _handle_column_configuration(common_cols: list[str]) -> pd.DataFrame:
 
     # Display the table and allow user interaction
     with st.popover(
-        "Add a backcheck column", icon=":material/add:", use_container_width=True
+        "Add a backcheck column", icon=":material/add:", width = 'stretch'
     ):
         column_name = st.selectbox(
             "column",
@@ -383,7 +383,7 @@ def _handle_column_configuration(common_cols: list[str]) -> pd.DataFrame:
     return st.data_editor(
         st.session_state.column_config_data,
         num_rows="dynamic",
-        use_container_width=True,
+        width = 'stretch',
     )
 
 
@@ -1707,7 +1707,7 @@ def display_error_trends(
             yaxis_title="Error Rate (%)",
             hovermode="x unified",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width = 'stretch')
 
 
 def _display_filtered_statistics(
@@ -1742,7 +1742,7 @@ def _display_filtered_statistics(
     else:
         filtered_stats = stats_df
 
-    st.dataframe(filtered_stats, use_container_width=True, hide_index=True)
+    st.dataframe(filtered_stats, width = 'stretch', hide_index=True)
 
 
 def display_statistics_tables(
@@ -1880,7 +1880,7 @@ def backchecks_report(
         st.info(NO_BACKCHECK_COLUMNS_SET)
     else:
         st.subheader("Column Statistics")
-        st.dataframe(column_category_summary, use_container_width=True, hide_index=True)
+        st.dataframe(column_category_summary, width = 'stretch', hide_index=True)
 
     st.write("")
 

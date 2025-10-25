@@ -220,7 +220,7 @@ def render_local_file_form(
         if st.button(
             "Update File" if edit_mode else "Add File",
             type="primary",
-            use_container_width=True,
+            width = 'stretch',
             disabled=disable_submit,
         ):
             _handle_form_submission(

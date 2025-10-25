@@ -99,7 +99,7 @@ def missing_settings(missing_setting_file: str) -> pd.DataFrame:
                 data=missing_settings_df,
                 key="missing_codes_labels",
                 num_rows="dynamic",
-                use_container_width=True,
+                width = 'stretch',
                 on_change=trigger_save,
                 kwargs={"state_name": "missing_code_save"},
             )
@@ -303,7 +303,7 @@ def missing_columns(data: pd.DataFrame, missing_codes, setting_file) -> None:
         ).background_gradient(
             subset=perc_cols, cmap=cmap, axis=1, vmin=vmin_val, vmax=vmax_val
         ),
-        use_container_width=True,
+        width = 'stretch',
         hide_index=True,
         column_config={
             "Column": st.column_config.Column(pinned=True),
@@ -417,7 +417,7 @@ def missing_over_time(data: pd.DataFrame, setting_file) -> None:
     )
     fig.update_layout(width=1000, height=500)
     fig.update_layout(yaxis_range=[0, 100])
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width = 'stretch')
 
 
 @st.cache_data
@@ -538,7 +538,7 @@ def missing_compare(data: pd.DataFrame, setting_file: str) -> None:
         )
 
         if not compare_col:
-            st.dataframe(group_by_data, use_container_width=True, hide_index=True)
+            st.dataframe(group_by_data, width = 'stretch', hide_index=True)
         else:
             cmap = sns.light_palette("pink", as_cmap=True)
             styler_limit = group_by_data.shape[0] * group_by_data.shape[1]
@@ -550,7 +550,7 @@ def missing_compare(data: pd.DataFrame, setting_file: str) -> None:
                 .background_gradient(
                     subset=compare_col, cmap=cmap, axis=1, vmin=vmin_val, vmax=vmax_val
                 ),
-                use_container_width=True,
+                width = 'stretch',
                 column_config={
                     "values (count)": st.column_config.Column(pinned=True),
                     "values (%)": st.column_config.Column(pinned=True),
@@ -654,7 +654,7 @@ def missing_correlation(data: pd.DataFrame, color_map: str, setting_file: str) -
 
         fig = px.imshow(nullity_corr, color_continuous_scale=color_map)
         fig.update_layout(width=1000, height=1000)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width = 'stretch')
 
     else:
         st.warning("Select at least two columns to calculate nullity correlation.")
@@ -741,7 +741,7 @@ def missing_matrix(data: pd.DataFrame, color_map: str, setting_file: str) -> Non
     fig1 = px.imshow(nullity_matrix, color_continuous_scale=color_map)
     fig1.layout.coloraxis.showscale = False
     fig1.update_layout(width=1000, height=1000)
-    st.plotly_chart(fig1, use_container_width=True)
+    st.plotly_chart(fig1, width = 'stretch')
 
 
 # define function to create summary report

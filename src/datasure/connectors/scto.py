@@ -775,7 +775,7 @@ class SurveyCTOUI:
             if st.button(
                 ":material/key_vertical: Connect & Save Credentials",
                 type="primary",
-                use_container_width=True,
+                width = 'stretch',
             ):
                 try:
                     credentials = ServerCredentials(
@@ -1069,7 +1069,7 @@ class SurveyCTOUI:
         if not st.button(
             "Add Form" if not edit_mode else "Update Form",
             type="primary",
-            use_container_width=True,
+            width = 'stretch',
         ):
             return
 

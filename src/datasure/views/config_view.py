@@ -76,7 +76,7 @@ def add_check_configuration(project_id: str) -> None:
     with st.popover(
         label="Add new check configuration",
         icon=":material/add:",
-        use_container_width=True,
+        width = 'stretch',
     ):
         page_name = st.text_input(
             "Page Name",
@@ -164,7 +164,7 @@ def add_check_configuration(project_id: str) -> None:
             add_new_config_btn = st.button(
                 "Add Check Configuration",
                 type="primary",
-                use_container_width=True,
+                width = 'stretch',
                 key="add_check_config_btn",
             )
 
@@ -211,7 +211,7 @@ def remove_check_configuration(project_id: str) -> None:
     with st.popover(
         label="Remove Check Configuration",
         icon=":material/delete:",
-        use_container_width=True,
+        width = 'stretch',
     ):
         st.warning("This will remove the check configuration.")
         check_config_log = duckdb_get_table(
@@ -230,7 +230,7 @@ def remove_check_configuration(project_id: str) -> None:
         if st.button(
             "Remove Check Configuration",
             type="primary",
-            use_container_width=True,
+            width = 'stretch',
             disabled=not remove_data,
         ):
             # Filter out the selected configuration
@@ -273,7 +273,7 @@ if check_config_log.is_empty():
 else:
     st.dataframe(
         check_config_log,
-        use_container_width=True,
+        width = 'stretch',
         hide_index=True,
         key="check_config_log",
         column_config={

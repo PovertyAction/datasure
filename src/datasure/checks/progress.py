@@ -465,12 +465,12 @@ def display_progress_chart(data: pd.DataFrame, setting_file: str) -> None:
     with cc1:
         if consent and consent_vals:
             st.markdown("**% consent**")
-            st.pyplot(perc_consent_chart, use_container_width=True)
+            st.pyplot(perc_consent_chart, width = 'stretch')
 
     with cc2:
         if outcome and outcome_vals:
             st.markdown("**% completion**")
-            st.pyplot(perc_completion_chart, use_container_width=True)
+            st.pyplot(perc_completion_chart, width = 'stretch')
 
 
 @st.cache_data
@@ -613,7 +613,7 @@ def display_progress_overtime(data: pd.DataFrame, date: str, setting_file: str) 
         ),
     )
 
-    st.plotly_chart(fig, theme=None, use_container_width=True)
+    st.plotly_chart(fig, theme=None, width = 'stretch')
 
 
 @st.cache_data
@@ -792,7 +792,7 @@ def display_attempted_interviews(
             hovertemplate="<b>Attempts: %{y}</b><br>"
             + "Frequency: %{x}<extra></extra>",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width = 'stretch')
 
     with ai2:
         styler_limit = attempted_interviews.shape[0] * attempted_interviews.shape[1]
@@ -804,7 +804,7 @@ def display_attempted_interviews(
                 vmin=vmin,
                 vmax=vmax,
             ),
-            use_container_width=True,
+            width = 'stretch',
             column_config={
                 survey_id: st.column_config.Column(pinned=True),
                 "num_interviews": st.column_config.Column(
