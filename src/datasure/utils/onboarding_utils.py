@@ -369,7 +369,9 @@ class OutputOnboardingInfo:
     """Class to provide onboarding messages for check output pages."""
 
     SUMMARY: ClassVar[str] = {
-        "main": """
+        "summary_report": {
+            "title": "Data Quality Summary",
+            "content": """
         ##### Summary of Data Quality Checks
 
         This tab provides an overview of the data quality checks performed on your survey data.
@@ -378,7 +380,10 @@ class OutputOnboardingInfo:
 
         **Next**: Click on the settings icon (⚙️) to configure global settings for the summary tab.
         """,
-        "settings": """
+        },
+        "summary_settings": {
+            "title": "Summary Settings",
+            "content": """
         ##### Setup for Summary Tab
         In this section, you can configure global settings for the summary tab, you will notice that some settings are pre-filled based on your check configuration.
         This tab contains the following settings:
@@ -391,7 +396,10 @@ class OutputOnboardingInfo:
 
         **Next**: Explore the data summary section below.
         """,
-        "data_summary": """
+        },
+        "summary_data_summary": {
+            "title": "Data Summary",
+            "content": """
         ##### Data Summary
         This section provides a quick overview of your survey dataset, including:
         - String columns: Number of text-based columns in your dataset.
@@ -401,7 +409,10 @@ class OutputOnboardingInfo:
 
         **Next**: Explore the Submission Details section below.
         """,
-        "submission_details": """
+        },
+        "summary_submissions": {
+            "title": "Submission Details",
+            "content": """
         ##### Submission Details
         This section provides insights into the submission patterns of your survey data, including:
         - Today: Number of submissions received today.
@@ -413,7 +424,10 @@ class OutputOnboardingInfo:
 
         **Next**: Explore the Progress section below.
         """,
-        "progress": """
+        },
+        "summary_progress": {
+            "title": "Progress",
+            "content": """
         ##### Progress
         This section provides an overview of the progress of your survey data collection, including:
         - Submission Progress: A progress bar showing the percentage of completed submissions against the total expected interviews.
@@ -432,7 +446,10 @@ class OutputOnboardingInfo:
         - on the right side of the table, you can switch between, "Auto", "Daily", "Weekly", and "Monthly" views to see how submission progress varies over different time intervals.
         The "Auto" view automatically adjusts the time interval based on the data density while the other options allow you to manually select the desired time frame for analysis.
         """,
-        "data_quality": """
+        },
+        "summary_data_quality": {
+            "title": "Data Quality",
+            "content": """
         ##### Data Quality
         This section provides an overview of the overall data quality of your survey dataset, including:
         - % of duplicate values on ID column: Percentage of duplicate entries found in the ID column.
@@ -442,6 +459,7 @@ class OutputOnboardingInfo:
 
         **Next**: Explore the "Survey Progress" tab.
         """,
+        },
     }
 
     @classmethod
@@ -450,7 +468,29 @@ class OutputOnboardingInfo:
         messages = {
             "summary": cls.SUMMARY,
         }
-        return messages.get(tab, "Invalid tab.").get(message_id, "Invalid message ID.")
+        return messages.get(tab, {"invalid": "Invalid Message"}).get(
+            message_id, "Invalid Message"
+        )
+
+
+def demo_output_onboarding(tab: str):
+    """Decorator to display onboarding messages for demo functions."""
+
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            message_id = func.__name__
+            message = OutputOnboardingInfo.get_onboarding_message(tab, message_id)
+            title, content = message.get("title"), message.get("content")
+            if is_demo_project():
+                demo_expander(
+                    title,
+                    content,
+                )
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 def is_demo_project() -> bool:
@@ -904,3 +944,12 @@ def show_demo_completion_message():
             st.session_state.st_project_id = ""
             st.session_state.pop("onboarding_step", None)
             st.switch_page("pages/start_view.py")
+
+
+def demo_expander(title: str, content: str, expanded: bool = True):
+    """Create a demo-specific expander with helpful information."""
+    if not is_demo_project():
+        return
+
+    with st.expander(f"**Learn More: {title}**", expanded=expanded):
+        demo_container(content)

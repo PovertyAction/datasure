@@ -14,12 +14,9 @@ from datasure.utils import (
     save_check_settings,
     trigger_save,
 )
-from datasure.utils.navigations import demo_expander
-from datasure.utils.onboarding_utils import (
-    CheckPage,
-    OutputOnboardingInfo,
-    is_demo_project,
-)
+from datasure.utils.onboarding_utils import demo_output_onboarding
+
+TAB_NAME: str = "summary"
 
 
 def load_default_settings(project_id: str, setting_file: str, page_num: int) -> tuple:
@@ -64,6 +61,7 @@ def load_default_settings(project_id: str, setting_file: str, page_num: int) -> 
 
 
 # define function to create summary report
+@demo_output_onboarding(TAB_NAME)
 def summary_settings(
     project_id: str, data: pd.DataFrame, setting_file: str, page_num
 ) -> tuple:
@@ -86,12 +84,6 @@ def summary_settings(
 
         st.write("---")
         st.markdown("### Select columns to include in summary report")
-
-        if is_demo_project():
-            demo_expander(
-                "Summary Settings",
-                OutputOnboardingInfo.get_onboarding_message("summary", "settings"),
-            )
 
         default_date, default_target, default_survey_id = load_default_settings(
             project_id=project_id, setting_file=setting_file, page_num=page_num
@@ -321,6 +313,7 @@ def compute_summary_submissions(data: pd.DataFrame, date: str) -> tuple:
     )
 
 
+@demo_output_onboarding(TAB_NAME)
 def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
     """
     Generates a summary report for the survey data
@@ -337,16 +330,6 @@ def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
     -------
     None
     """
-    st.markdown("## Submission details")
-
-    if is_demo_project():
-        demo_expander(
-            "Submission Details",
-            OutputOnboardingInfo.get_onboarding_message(
-                "summary", "submission_details"
-            ),
-        )
-
     if date:
         (
             first_submission_date,
@@ -585,6 +568,7 @@ def compute_summary_progress_by_col(
     return progress_data, vmin_val, vmax_val, format_cols
 
 
+@demo_output_onboarding(TAB_NAME)
 def summary_progress(
     data: pd.DataFrame,
     date: str,
@@ -606,14 +590,6 @@ def summary_progress(
     -------
     None
     """
-    st.write("---")
-    st.markdown("## Progress")
-
-    if is_demo_project():
-        demo_expander(
-            "Progress",
-            OutputOnboardingInfo.get_onboarding_message("summary", "progress"),
-        )
     if not date:
         st.info(
             "Progress section requires a date column to be selected. go to the :material/settings: settings section above."
@@ -753,6 +729,7 @@ def compute_summary_data_summary(data: pd.DataFrame) -> tuple:
     return num_str_cols, num_num_cols, num_date_cols, col_count
 
 
+@demo_output_onboarding(TAB_NAME)
 def summary_data_summary(data: pd.DataFrame) -> None:
     """
     Generates summary details of for the survey data
@@ -766,15 +743,6 @@ def summary_data_summary(data: pd.DataFrame) -> None:
     -------
     None
     """
-    st.write("---")
-    st.markdown("## Data Summary")
-
-    if is_demo_project():
-        demo_expander(
-            "Data Summary",
-            OutputOnboardingInfo.get_onboarding_message("summary", "data_summary"),
-        )
-
     num_str_cols, num_num_cols, num_date_cols, col_count = compute_summary_data_summary(
         data=data
     )
@@ -830,6 +798,7 @@ def compute_summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> t
     return perc_duplicates, perc_outliers, perc_missing, perc_back_check_error_rate
 
 
+@demo_output_onboarding(TAB_NAME)
 def summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> None:
     """
     Generates a summary report for the survey data
@@ -843,15 +812,6 @@ def summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> None:
     -------
     None
     """
-    st.write("---")
-    st.markdown("## Data Quality")
-
-    if is_demo_project():
-        demo_expander(
-            "Data Quality",
-            OutputOnboardingInfo.get_onboarding_message("summary", "data_quality"),
-        )
-
     perc_duplicates, perc_outliers, perc_missing, perc_back_check_error_rate = (
         compute_summary_data_quality(
             data=data,
@@ -897,6 +857,7 @@ def summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> None:
         st.pyplot(perc_back_check_error_rate_chart)
 
 
+@demo_output_onboarding(TAB_NAME)
 def summary_report(
     project_id: str, data: pd.DataFrame, setting_file: str, page_num: int
 ) -> None:
@@ -915,17 +876,22 @@ def summary_report(
     -------
     None
     """
-    if is_demo_project():
-        demo_expander(
-            CheckPage.SUMMARY.value,
-            OutputOnboardingInfo.get_onboarding_message("summary", "main"),
-        )
-
     date, target, survey_id = summary_settings(project_id, data, setting_file, page_num)
+
+    st.write("---")
+    st.markdown("## Data Summary")
     summary_data_summary(data=data)
+
+    st.markdown("## Submission details")
     summary_submissions(
         data=data,
         date=date,
     )
+
+    st.write("---")
+    st.markdown("## Progress")
     summary_progress(data=data, date=date, target=target, setting_file=setting_file)
+
+    st.write("---")
+    st.markdown("## Data Quality")
     summary_data_quality(data=data, survey_id=survey_id)
