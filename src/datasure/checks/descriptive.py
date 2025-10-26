@@ -305,7 +305,7 @@ def plot_date_distribution(data: pd.DataFrame, date_col: str) -> None:
                 cmap=cmap,
                 gmap=prepped_date_data["Frequency"],
             ),
-            width = 'stretch',
+            width="stretch",
             hide_index=True,
         )
 
@@ -317,7 +317,7 @@ def plot_date_distribution(data: pd.DataFrame, date_col: str) -> None:
         st.bar_chart(
             prepped_date_data.set_index("Start Date"),
             y="Frequency",
-            width = 'stretch',
+            width="stretch",
             height=300,
             color="#FF8000",
         )
@@ -493,7 +493,7 @@ def plot_categorical_distribution(data: pd.DataFrame, categorical_col: str) -> N
                 cmap=cmap,
                 gmap=one_way_table["Frequency"],
             ),
-            width = 'stretch',
+            width="stretch",
             hide_index=True,
         )
 
@@ -520,7 +520,7 @@ def plot_categorical_distribution(data: pd.DataFrame, categorical_col: str) -> N
         pd.set_option("styler.render.max_elements", styler_limit)
         st.dataframe(
             two_way_table.style.background_gradient(subset=format_cols, cmap=cmap),
-            width = 'stretch',
+            width="stretch",
             hide_index=True,
         )
 
@@ -529,7 +529,7 @@ def plot_categorical_distribution(data: pd.DataFrame, categorical_col: str) -> N
         st.write("### Basic Statistics")
         st.dataframe(
             basic_statistics,
-            width = 'stretch',
+            width="stretch",
             hide_index=True,
         )
 
@@ -559,7 +559,7 @@ def plot_categorical_distribution(data: pd.DataFrame, categorical_col: str) -> N
                 summary_statistics.style.format(
                     {c: "{:,.2f}" for c in format_cols},
                 ).background_gradient(subset=format_cols, cmap=cmap),
-                width = 'stretch',
+                width="stretch",
                 hide_index=True,
             )
         else:

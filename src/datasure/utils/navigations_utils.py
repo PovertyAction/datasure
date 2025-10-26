@@ -131,11 +131,11 @@ def demo_sidebar_help():
 
         st.markdown("---")
 
-        if st.button("Restart Demo", width = 'stretch'):
+        if st.button("Restart Demo", width="stretch"):
             st.switch_page(st.session_state.st_import_data_page)
             load_demo_data()
 
-        if st.button("Exit Demo", width = 'stretch'):
+        if st.button("Exit Demo", width="stretch"):
             st.session_state.st_project_id = ""
             st.session_state.pop("onboarding_step", None)
             st.switch_page(st.session_state.st_start_page)

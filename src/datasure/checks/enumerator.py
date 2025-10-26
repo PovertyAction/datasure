@@ -884,7 +884,7 @@ def display_enumerator_summary(
         subset=num_cols,
         cmap=cmap,
     )
-    st.dataframe(summary_df, hide_index=True, width = 'stretch')
+    st.dataframe(summary_df, hide_index=True, width="stretch")
 
 
 @st.cache_data
@@ -1057,7 +1057,7 @@ def display_enumerator_productivity(
         subset=format_cols,
         cmap=cmap,
     )
-    st.dataframe(productivity_df, hide_index=True, width = 'stretch')
+    st.dataframe(productivity_df, hide_index=True, width="stretch")
 
 
 @st.cache_data
@@ -1204,7 +1204,7 @@ def display_enumerator_statistics(
             cmap=cmap,
         )
 
-        st.dataframe(stats_df, hide_index=True, width = 'stretch')
+        st.dataframe(stats_df, hide_index=True, width="stretch")
     else:
         st.info(
             "No columns selected for statistics calculation.", icon=":material/info:"
@@ -1449,7 +1449,7 @@ def display_enumerator_statistics_overtime(
             cmap=cmap,
         )
 
-        st.dataframe(stats_overtime_df, hide_index=True, width = 'stretch')
+        st.dataframe(stats_overtime_df, hide_index=True, width="stretch")
     else:
         st.info(
             "No columns selected for statistics calculation.", icon=":material/info:"

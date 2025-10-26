@@ -590,7 +590,7 @@ def plot_gps_coordinates(
         map_style="mapbox://styles/mapbox/streets-v11",
     )
 
-    st.pydeck_chart(deck, height=450, width = 'stretch')
+    st.pydeck_chart(deck, height=450, width="stretch")
 
 
 # detect outliers using a clustering column
@@ -866,7 +866,7 @@ def plot_clusters_on_map(
         map_style="mapbox://styles/mapbox/streets-v11",
     )
 
-    st.pydeck_chart(deck, height=450, width = 'stretch')
+    st.pydeck_chart(deck, height=450, width="stretch")
 
 
 # gps checks report
@@ -1124,9 +1124,7 @@ def gpschecks_report(
 
                 st.write("Below is a list of potential GPS outliers:")
 
-                st.dataframe(
-                    gps_outliers_df[outliers_df_cols], width = 'stretch'
-                )
+                st.dataframe(gps_outliers_df[outliers_df_cols], width="stretch")
 
                 st.session_state.gps_outlier_rate = (
                     gps_outliers_df.shape[0] / flag_outliers_df.shape[0]
@@ -1173,7 +1171,7 @@ def gpschecks_report(
                     gps_accuracy_statistics = calculate_gps_accuracy_statistics(
                         data, gps_accuracy, accuracy_cluster_col, accuracy_stats_list
                     )
-                    st.dataframe(gps_accuracy_statistics, width = 'stretch')
+                    st.dataframe(gps_accuracy_statistics, width="stretch")
             else:
                 st.warning(
                     "No GPS accuracy column selected. Please select a GPS accuracy column to display statistics."

@@ -422,7 +422,7 @@ def display_id_duplicates(
         st.dataframe(
             id_dups_data,
             hide_index=True,
-            width = 'stretch',
+            width="stretch",
             column_config={
                 "id_dup_count": st.column_config.Column(
                     label=f"# of {survey_id} duplicates"
@@ -612,7 +612,7 @@ def display_column_duplicates(
             st.dataframe(
                 col_dups_data,
                 hide_index=True,
-                width = 'stretch',
+                width="stretch",
                 column_config={
                     f"{dup_col}_dup_count": st.column_config.Column(
                         label="# duplicates"

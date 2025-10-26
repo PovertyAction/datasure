@@ -420,9 +420,7 @@ def outliers_report_settings(
         oc1, oc2, _ = st.columns([0.4, 0.3, 0.3])
         with (
             oc1,
-            st.popover(
-                label=":material/add: Add outlier column", width = 'stretch'
-            ),
+            st.popover(label=":material/add: Add outlier column", width="stretch"),
         ):
             search_type = st.selectbox(
                 label="Search type",
@@ -576,7 +574,7 @@ def outliers_report_settings(
             st.button(
                 label="Add outlier column",
                 type="primary",
-                width = 'stretch',
+                width="stretch",
                 on_click=update_outlier_settings,
                 kwargs={
                     "project_id": project_id,
@@ -598,7 +596,7 @@ def outliers_report_settings(
             oc2,
             st.popover(
                 label=":material/delete: Delete outlier column",
-                width = 'stretch',
+                width="stretch",
             ),
         ):
             st.markdown("### Remove outlier columns")
@@ -637,7 +635,7 @@ def outliers_report_settings(
                     confirm_delete = st.button(
                         label="Confirm deletion",
                         type="primary",
-                        width = 'stretch',
+                        width="stretch",
                     )
                     if confirm_delete:
                         # remove the selected index from the logs
@@ -668,7 +666,7 @@ def outliers_report_settings(
         else:
             st.dataframe(
                 outlier_logs,
-                width = 'stretch',
+                width="stretch",
                 hide_index=False,
                 column_config={
                     "search_type": st.column_config.Column("Search Type"),
@@ -1007,7 +1005,7 @@ def display_outlier_output(outlier_data: pd.DataFrame) -> None:
 
     st.dataframe(
         outlier_data_disp,
-        width = 'stretch',
+        width="stretch",
         hide_index=True,
         column_config={
             "column name": st.column_config.Column("Column Name"),
@@ -1163,7 +1161,7 @@ def display_outlier_column_summary(outlier_summary: pd.DataFrame) -> None:
 
     st.dataframe(
         outlier_summary,
-        width = 'stretch',
+        width="stretch",
         hide_index=True,
         column_config={
             "column name": st.column_config.Column("Column Name"),
@@ -1523,7 +1521,7 @@ def inspect_outliers_columns(
         fig = plot_col_distribution(
             data=col_outlier_details[[selected_col]], col_name=selected_col
         )
-        st.plotly_chart(fig, width = 'stretch')
+        st.plotly_chart(fig, width="stretch")
 
     with dc2:
         st.subheader(f"Violin plot of {selected_col} values")
@@ -1532,11 +1530,11 @@ def inspect_outliers_columns(
             data=col_outlier_details[selected_col],
             title=selected_col,
         )
-        st.plotly_chart(violin_fig, width = 'stretch')
+        st.plotly_chart(violin_fig, width="stretch")
 
     st.dataframe(
         col_outlier_details,
-        width = 'stretch',
+        width="stretch",
         hide_index=False,
     )
 
