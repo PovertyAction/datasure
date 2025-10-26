@@ -368,7 +368,7 @@ class OnboardingSteps:
 class OutputOnboardingInfo:
     """Class to provide onboarding messages for check output pages."""
 
-    SUMMARY: ClassVar[str] = {
+    SUMMARY: ClassVar[dict] = {
         "summary_report": {
             "title": "Data Quality Summary",
             "content": """
@@ -462,11 +462,94 @@ class OutputOnboardingInfo:
         },
     }
 
+    PROGRESS: ClassVar[dict] = {
+        "progress_report": {
+            "title": "Progress Report",
+            "content": """
+        ### Survey Progress Report
+        This tab provides detailed insights into the progress of your survey data collection.
+        It includes metrics such as submission counts over time, progress by enumerator or selected categories, and overall submission trends.
+        **Next**: Go to the settings icon (⚙️) to configure global settings for the survey progress tab.
+        """,
+        },
+        "progress_report_settings": {
+            "title": "Progress Settings",
+            "content": """
+        ##### Setup for Survey Progress Tab
+        In this section, you can configure global settings for the survey progress tab, you will notice that some settings are pre-filled based on your check configuration.
+        This tab contains the following settings:
+        - Survey ID: The main identifier for your survey respondents (e.g., household ID, Respondent ID).
+        - Date: The date when the survey was conducted or submitted. (e.g., submissiondate, starttime).\
+        - Enumerator: The column indicating who collected the data (e.g., enumerator name or ID).
+        - Target Number of Interviews: The total number of survey interviews you expect to have in your dataset (e.g., 1000).
+        ##### Instructions for Demo:
+        For the demo data, you will need to indicate a total of **200** expected interviews,
+        **Next**: Explore the **Progress Summary** section below.
+        """,
+        },
+        "display_progress_summary": {
+            "title": "Progress Summary",
+            "content": """
+        ##### Progress Summary
+        This section provides a quick overview of your survey data collection progress, including:
+        - Submission Progress: Percentage of completed submissions against the total expected interviews.
+        - Target Interviews: Total number of interviews you aim to collect.
+        - Total Submitted Interviews: Total number of submissions received to date.
+        **Next**: Explore the **Submission Trend** section below.
+        """,
+        },
+        "display_progress_overtime": {
+            "title": "Progress Over Time",
+            "content": """
+        ##### Submission Trends
+        This section visualizes the submission trends of your survey data over time, helping you identify patterns and peaks in data collection.
+
+        ##### Instructions for Demo:
+        For the demo, toggle between different time intervals to see how submission trends vary:
+        - At the top left of the chart, switch between "Day", "Week", and "Month" views to see submission trends over different time intervals.
+        The "Day" view shows daily submission counts, the "Week" view aggregates submissions by week, and the "Month" view summarizes submissions on a monthly basis.
+        **Next**: Explore the **Attempted Interviews** section below.
+        """,
+        },
+        "display_attempted_interviews": {
+            "title": "Attempted Interviews",
+            "content": """
+        ##### Attempted Interviews
+        This section provides insights into the number of attempted interviews in your survey data, including:
+        - Total Submitted Interviews: Total number of submissions received to date.
+        - Number of Unique IDs: Count of unique respondents based on the ID column.
+        - Min Attempts: Minimum number of attempts made by any respondent.
+        - Max Attempts: Maximum number of attempts made by any respondent.
+
+        It also includes the following visualizations:
+        - A bar chart visualizing the count of attempted interviews over time.
+        - A data table summarizing attempted interviews by respondent ID (eg. household ID).
+        **Next**: Explore the **Consent and Completion Progress Chart** section below.
+        """,
+        },
+        "display_progress_chart": {
+            "title": "Consent and Completion Progress",
+            "content": """
+        ##### Consent and Completion Progress
+        This section helps you monitor the consent and completion rates of your survey data collection, including:
+        - Consent Rate: Percentage of respondents who provided consent.
+        - Completion Rate: Percentage of respondents who completed the survey.
+
+        ##### Instructions for Demo:
+        For the demo, you will setup the consent and completion criteria as follows:
+        - Consent Criteria: Select the "consent" column and set the value to "yes".
+        - Completion Criteria: Select the "completion_status" column and set the value to "complete".
+        **Next**: Explore other tabs for more data quality insights.
+        """,
+        },
+    }
+
     @classmethod
     def get_onboarding_message(cls, tab: CheckPage, message_id: str) -> str:
         """Retrieve onboarding messages based on type."""
         messages = {
             "summary": cls.SUMMARY,
+            "progress": cls.PROGRESS,
         }
         return messages.get(tab, {"invalid": "Invalid Message"}).get(
             message_id, "Invalid Message"

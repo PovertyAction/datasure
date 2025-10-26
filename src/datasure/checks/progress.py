@@ -14,6 +14,9 @@ from datasure.utils import (
     save_check_settings,
     trigger_save,
 )
+from datasure.utils.onboarding_utils import demo_output_onboarding
+
+PAGE_NAME = "progress"
 
 
 #### Survey Progress ###
@@ -69,6 +72,7 @@ def load_default_progress_settings(
     )
 
 
+@demo_output_onboarding(PAGE_NAME)
 def progress_report_settings(
     project_id: str,
     data: pd.DataFrame,
@@ -230,6 +234,7 @@ def compute_progress_summary(data: pd.DataFrame, target: int) -> tuple:
     return total_submitted, target, percentage_completed
 
 
+@demo_output_onboarding(PAGE_NAME)
 def display_progress_summary(data: pd.DataFrame, target: int) -> None:
     """Display summary statistics for progress report
 
@@ -322,6 +327,7 @@ def compute_progress_chart(
     return consent_percentage, completion_percentage
 
 
+@demo_output_onboarding(PAGE_NAME)
 def display_progress_chart(data: pd.DataFrame, setting_file: str) -> None:
     """Display progress chart
 
@@ -334,8 +340,6 @@ def display_progress_chart(data: pd.DataFrame, setting_file: str) -> None:
     None
     """
     survey_cols = data.columns
-    st.write("---")
-    st.write("## Consent and Completion Progress Chart")
     _, cc1, _, cc2, _ = st.columns([0.1, 0.35, 0.1, 0.35, 0.1])
     default_settings = (
         load_check_settings(settings_file=setting_file, check_name="progress") or {}
@@ -465,12 +469,12 @@ def display_progress_chart(data: pd.DataFrame, setting_file: str) -> None:
     with cc1:
         if consent and consent_vals:
             st.markdown("**% consent**")
-            st.pyplot(perc_consent_chart, width = 'stretch')
+            st.pyplot(perc_consent_chart, width="stretch")
 
     with cc2:
         if outcome and outcome_vals:
             st.markdown("**% completion**")
-            st.pyplot(perc_completion_chart, width = 'stretch')
+            st.pyplot(perc_completion_chart, width="stretch")
 
 
 @st.cache_data
@@ -517,6 +521,7 @@ def compute_progress_overtime(
     return period_stats, average_interviews
 
 
+@demo_output_onboarding(PAGE_NAME)
 def display_progress_overtime(data: pd.DataFrame, date: str, setting_file: str) -> None:
     """Display progress over time
 
@@ -530,8 +535,6 @@ def display_progress_overtime(data: pd.DataFrame, date: str, setting_file: str) 
     -------
     None
     """
-    st.write("---")
-    st.write("## Progress Over Time")
     if not date:
         st.info(
             "Progress over time report requires a date column to be selected. To add a date column, go the :material/settings: settings section above."
@@ -613,7 +616,7 @@ def display_progress_overtime(data: pd.DataFrame, date: str, setting_file: str) 
         ),
     )
 
-    st.plotly_chart(fig, theme=None, width = 'stretch')
+    st.plotly_chart(fig, theme=None, width="stretch")
 
 
 @st.cache_data
@@ -692,6 +695,7 @@ def compute_attempted_interviews(
     )
 
 
+@demo_output_onboarding(PAGE_NAME)
 def display_attempted_interviews(
     data: pd.DataFrame, survey_id: str, date: str, setting_file: str
 ) -> None:
@@ -707,8 +711,6 @@ def display_attempted_interviews(
     -------
     None
     """
-    st.write("---")
-    st.write("## Attempted Interviews")
     if not (all([survey_id, date])):
         st.info(
             "Attempted interviews report requires survey ID and date columns to be selected. To add these columns, go to the :material/settings: settings section above."
@@ -792,7 +794,7 @@ def display_attempted_interviews(
             hovertemplate="<b>Attempts: %{y}</b><br>"
             + "Frequency: %{x}<extra></extra>",
         )
-        st.plotly_chart(fig, width = 'stretch')
+        st.plotly_chart(fig, width="stretch")
 
     with ai2:
         styler_limit = attempted_interviews.shape[0] * attempted_interviews.shape[1]
@@ -804,7 +806,7 @@ def display_attempted_interviews(
                 vmin=vmin,
                 vmax=vmax,
             ),
-            width = 'stretch',
+            width="stretch",
             column_config={
                 survey_id: st.column_config.Column(pinned=True),
                 "num_interviews": st.column_config.Column(
@@ -818,6 +820,7 @@ def display_attempted_interviews(
         )
 
 
+@demo_output_onboarding(PAGE_NAME)
 def progress_report(
     project_id: str, data: pd.DataFrame, setting_file: str, page_num: int
 ) -> None:
@@ -835,19 +838,27 @@ def progress_report(
     survey_id, date, enumerator, target = progress_report_settings(
         project_id, data, setting_file, page_num
     )
+    st.write("---")
+    st.write("## Progress Summary")
     display_progress_summary(
         data=data,
         target=target,
     )
+    st.write("---")
+    st.write("## Progress Over Time")
     display_progress_overtime(
         data=data,
         date=date,
         setting_file=setting_file,
     )
+    st.write("---")
+    st.write("## Attempted Interviews")
     display_attempted_interviews(
         data=data,
         survey_id=survey_id,
         date=date,
         setting_file=setting_file,
     )
+    st.write("---")
+    st.write("## Consent and Completion Progress Chart")
     display_progress_chart(data=data, setting_file=setting_file)
