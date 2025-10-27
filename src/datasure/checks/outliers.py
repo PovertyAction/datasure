@@ -16,6 +16,9 @@ from datasure.utils import (
     save_check_settings,
     trigger_save,
 )
+from datasure.utils.onboarding_utils import demo_output_onboarding
+
+TAB_NAME: str = "outliers"
 
 
 def load_default_settings(project_id: str, settings_file: str, page_num: int) -> tuple:
@@ -237,6 +240,7 @@ def update_outlier_settings(
 
 
 # outliers check settings
+@demo_output_onboarding(TAB_NAME)
 def outliers_report_settings(
     project_id: str, data: pd.DataFrame, settings_file: str, page_num: int, label: str
 ) -> tuple:
@@ -990,12 +994,10 @@ def compute_outlier_output(
     return merged_results
 
 
+@demo_output_onboarding(TAB_NAME)
 def display_outlier_output(outlier_data: pd.DataFrame) -> None:
     """Display the outlier output in a Streamlit app."""
     # Get the outlier settings from the database
-
-    st.write("---")
-    st.title("Outliers")
 
     outlier_data_disp = outlier_data[outlier_data["outlier reason"] != "no outlier"]
 
@@ -1142,11 +1144,9 @@ def compute_column_outlier_summary(
     return outlier_summary
 
 
+@demo_output_onboarding(TAB_NAME)
 def display_outlier_column_summary(outlier_summary: pd.DataFrame) -> None:
     """Display the outlier summary in a Streamlit app."""
-    st.write("---")
-    st.title("Outlier Column Summary")
-
     if outlier_summary.empty:
         raise ValueError(
             "No outlier summary data available. Please check the outlier settings and data."
@@ -1344,6 +1344,7 @@ def display_outlier_metrics(
             )
 
 
+@demo_output_onboarding(TAB_NAME)
 def inspect_outliers_columns(
     data: pd.DataFrame,
     outlier_data: pd.DataFrame,
@@ -1364,7 +1365,6 @@ def inspect_outliers_columns(
     -------
         None
     """
-    st.title("Inspect Columns")
     if outlier_data.empty:
         st.info(
             "No outlier columns selected. Please select outlier columns to inspect."
@@ -1620,12 +1620,18 @@ def outliers_report(
     )
 
     # display outlier summary
+    st.write("---")
+    st.title("Outlier Column Summary")
     display_outlier_column_summary(outlier_summary)
 
     # display outlier output
+    st.write("---")
+    st.title("Outliers")
     display_outlier_output(outlier_data)
 
     # inspect outlier columns
+    st.write("---")
+    st.title("Inspect Columns")
     inspect_outliers_columns(
         data=data,
         outlier_data=outlier_data,

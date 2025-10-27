@@ -727,6 +727,123 @@ class OutputOnboardingInfo:
         """,
         },
     }
+    OUTLIERS: ClassVar[dict] = {
+        "outlier_report": {
+            "title": "Outliers Report",
+            "content": """
+        ### Outliers Report
+        This tab provides detailed insights into outliers in your survey dataset.
+        It includes reports on outlier values by column as well as patterns of outliers across records.
+        **Next**: Go to the settings icon (⚙️) to configure global settings for the outliers tab.
+        """,
+        },
+        "outliers_report_settings": {
+            "title": "Outliers Settings",
+            "content": """
+        ##### Setup for Outliers Tab
+        In this section, you can configure global settings for the outliers tab, you will notice that some settings are pre-filled with default values.
+        This tab contains the following settings:
+        - Admin Settings:
+            - Survey ID: The main identifier for your survey respondents (e.g., household ID, Respondent ID).
+            - Survey Key: The unique key column for your survey dataset (e.g., KEY). This is different from the Survey ID which identifies unique respondents.
+            - Enumrator ID: The column indicating who collected the data (e.g., enumerator name or ID).
+        - Display Settings:
+            - Display Columns: Select the columns you want to display in the outliers report table.
+            - Minimum Threshold: Set the minimum number of non-missing values required for a column to be included in the outliers analysis.
+            The default is set to 30 when using the IQR method and 20 when using the standard deviation method.
+        - Outlier Columns:
+            - ":material/add: Add Outlier Column": Click this button to add columns for outlier analysis. You can select one or more numeric columns from your dataset to check for outliers.
+            This includes the following options:
+                - Search Type: This specifies how to search for outliers in the selected columns. You can choose between "exact" if you want to find outliers based on specific name of
+                any of the other options to search for column name based on partial matches. eg. using the option "contains" with the search text "land" will return columns such as "land_acre" and "land_rent".
+                - Select Columns to Check for Outliers: Choose one or more numeric columns from your dataset to check for outliers. This will be a text input that allows you to search for column names.
+                - Select Outlier Detection Method: Select the method for identifying outliers (e.g., IQR, Standard Deviation).
+                - Select Multiplier for Outlier Detection: Set the multiplier value for the selected outlier detection method. This value determines the sensitivity of the outlier detection. The default is 1.5 for IQR and 3 for Standard Deviation.
+                - (Optional) Soft Minimum: Set a soft minimum threshold for outlier detection. Values below this threshold will automatically be considered as outliers.
+                - (Optional) Soft Maximum: Set a soft maximum threshold for outlier detection. Values above this threshold will automatically be considered as outliers.
+            - ":material/delete: Button: Click this button to remove an outlier column from the analysis.
+
+        ##### Instructions for Demo:
+        For the demo data, add the following outlier columns:
+        - Click on the ":material/add: Add Outlier Column"
+        - For **search type** select "exact"
+        - For **select columns to check for outliers** select "land_acre" and "household_count"
+        - Leave the default settings for the rest of the options.
+        - Click on the "Add Outlier Column" button to add the selected columns to the outliers analysis.
+
+        (OPTIONALLY) You can add more outlier columns by repeating the steps above.
+
+        **Next**: Explore the **Outliers Summary** section below.
+        """,
+        },
+        "display_outlier_metrics": {
+            "title": "Outliers Statistics",
+            "content": """
+        ##### Outliers Statistics
+        This section provides insights into outliers in your survey dataset, including:
+        - Variables Checked: Number of numeric columns checked for outliers. If a column has less than the minimum threshold of non-missing values, it will not be included in the outliers analysis.
+        - Outlier Variables: Number of columns that contain at least 1 outlier value.
+        - Number of Outliers: Total number of outlier values identified across all checked columns.
+        """,
+        },
+        "display_outlier_column_summary": {
+            "title": "Outlier Summaries",
+            "content": """
+        ##### Outlier Summaries
+        This section provides a detailed view of outlier data by column, including:
+            - A table showing each outlier column in the dataset with the following details:
+            - Column Name: Name of the outlier column.
+            - # of values: Total number of non-missing values in the column.
+            - # of outliers: Total number of outlier values identified in the column.
+            - Minimum Value: Minimum value in the column.
+            - Maximum Value: Maximum value in the column.
+            - Mean: Mean (average) value of the column.
+            - Median: Median (middle) value of the column.
+            - Standard Deviation: Standard deviation of the column.
+            - Interquartile Range: Interquartile range of the column.
+            - Lower Bound: Lower bound for outlier detection based on the selected method and multiplier.
+            - Upper Bound: Upper bound for outlier detection based on the selected method and multiplier.
+        **Next**: Explore the **Outlier Details Table** section below.
+        """,
+        },
+        "display_outlier_output": {
+            "title": "Outlier Details Table",
+            "content": """
+        ##### Outlier Details Table
+        This section provides detailed information about the outlier values identified in your dataset, including:
+        - A table showing each outlier record with the following details:
+        - Key column: Unique key for the record.
+        - Survey ID: Identifier for the survey respondent.
+        - Enumerator ID: Identifier for the enumerator who collected the data.
+        - Column Name: Name of the outlier column.
+        - Outlier Value: The actual outlier value identified in the column.
+        - *Column Statistics: Minimum, Maximum, Mean, Median, Standard Deviation, Interquartile Range, Lower Bound, Upper Bound for the outlier column.
+        - *Other Display Columns: Any additional columns selected in the settings section to be displayed in the outliers report table.
+        - Outlier Reason: Explanation of why the value was identified as an outlier (e.g., "Above Upper Bound", "Below Lower Bound").
+        - Outlier Multiplier: The multiplier value used for outlier detection.
+        - Soft Minimum: The soft minimum threshold set for outlier detection.
+        - Soft Maximum: The soft maximum threshold set for outlier detection.
+        """,
+        },
+        "inspect_outliers_columns": {
+            "title": "Inspect Outlier Columns",
+            "content": """
+        ##### Inspect Outlier Columns
+        This section allows you to visually inspect the distribution of outlier values in your dataset, including:
+        - A dropdown to select an outlier column to visualize.
+        - A dropdown to select the selct columns to display
+        - Statistics for the selected outlier column, including Minimum, Maximum, Mean, Median, Standard Deviation, Interquartile Range, Lower Bound, Upper Bound.
+        - A histogram visualizing the distribution of values in the selected outlier column, with outlier values highlighted.
+        - A violin plot showing the distribution of values in the selected outlier column, with outlier values highlighted.
+        - A table showing all records for the selected outlier column, including key column, survey ID, enumerator ID, outlier value, and other display columns and an indication of whether the value is an outlier.
+
+        ##### Instructions for Demo:
+        For inspect each of the outlier columns.
+
+        **Next**: Explore the **Enumerator Stats** tab.
+        """,
+        },
+    }
 
     @classmethod
     def get_onboarding_message(cls, tab: CheckPage, message_id: str) -> str:
@@ -736,6 +853,7 @@ class OutputOnboardingInfo:
             "progress": cls.PROGRESS,
             "duplicates": cls.DUPLICATES,
             "missing": cls.MISSING,
+            "outliers": cls.OUTLIERS,
         }
         return messages.get(tab, {"invalid": "Invalid Message"}).get(
             message_id, "Invalid Message"
