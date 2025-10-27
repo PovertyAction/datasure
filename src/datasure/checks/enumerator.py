@@ -12,6 +12,9 @@ from datasure.utils import (
     save_check_settings,
     trigger_save,
 )
+from datasure.utils.onboarding_utils import demo_output_onboarding
+
+TAB_NAME: str = "enumerators"
 
 ##### Enumerator Statistics #####
 
@@ -95,7 +98,7 @@ def load_default_enumerator_settings(
         outcome_vals,
     )
 
-
+@demo_output_onboarding(TAB_NAME)
 def enumerator_report_settings(
     project_id: str, data: str, setting_file: str, page_num: str
 ) -> tuple:
@@ -343,7 +346,7 @@ def enumerator_report_settings(
                     st.session_state.consent_val_enumerator_save = False
         with bc2, st.container(border=True):
             default_outcome_index = (
-                string_numeric_cols.get_loc(outcome)
+                string_numeric_cols.index(outcome)
                 if outcome in string_numeric_cols
                 else None
             )
@@ -467,7 +470,7 @@ def compute_enumerator_overview(
         pct_active_enumerators,
     )
 
-
+@demo_output_onboarding(TAB_NAME)
 def display_enumerator_overview(
     data: pd.DataFrame, date: str, enumerator: str, team: str
 ) -> None:
@@ -488,8 +491,6 @@ def display_enumerator_overview(
     -------
         None
     """
-    st.write("---")
-    st.markdown("## Enumerator Overview")
     if not (all([enumerator, date])):
         st.info(
             "Enumerator overview requires a date and enumerator column to be selected. Go to the :material/settings: settings section above to select them.",
@@ -942,7 +943,7 @@ def compute_enumerator_productivity(
 
     return prod_res
 
-
+@demo_output_onboarding(TAB_NAME)
 def display_enumerator_productivity(
     data: pd.DataFrame,
     date: str,
@@ -964,8 +965,6 @@ def display_enumerator_productivity(
     -------
         None
     """
-    st.write("---")
-    st.markdown("## Enumerator Productivity")
     if not (all([enumerator, date])):
         st.info(
             "Enumerator productivity requires a date and enumerator column to be selected. Go to the :material/settings: settings section above to select them.",
@@ -1096,7 +1095,7 @@ def compute_enumerator_statistics(
 
     return stats_res
 
-
+@demo_output_onboarding(TAB_NAME)
 def display_enumerator_statistics(
     data: pd.DataFrame,
     date: str,
@@ -1122,8 +1121,6 @@ def display_enumerator_statistics(
     -------
         None
     """
-    st.write("---")
-    st.markdown("## Enumerator Statistics")
     if not enumerator:
         st.info(
             "Enumerator statistics requires an enumerator column to be selected. Go to the :material/settings: settings section above to select it.",
@@ -1179,7 +1176,7 @@ def display_enumerator_statistics(
             "statistics_options_enumerator_save" in st.session_state
         ) and st.session_state.statistics_options_enumerator_save:
             save_check_settings(
-                settings_file=st.session_state["settings_file"],
+                settings_file=setting_file,
                 check_name="enumerator",
                 check_settings={"stats": stats},
             )
@@ -1276,7 +1273,7 @@ def compute_enumerator_statistics_overtime(
 
     return stats_overtime_res
 
-
+@demo_output_onboarding(TAB_NAME)
 def display_enumerator_statistics_overtime(
     data: pd.DataFrame,
     date: str,
@@ -1298,8 +1295,6 @@ def display_enumerator_statistics_overtime(
     -------
         None
     """
-    st.write("---")
-    st.markdown("## Enumerator Statistics Over Time")
     if not (all([enumerator, date])):
         st.info(
             "Enumerator statistics over time requires a date and enumerator column to be selected. Go to the :material/settings: settings section above to select them.",
@@ -1497,6 +1492,8 @@ def enumerator_report(
         team,
     )
 
+    st.write("---")
+    st.title("Enumerator Overview")
     display_enumerator_summary(
         data,
         missing_setting_file,
@@ -1509,18 +1506,27 @@ def enumerator_report(
         outcome,
         outcome_vals,
     )
+
+    st.write("---")
+    st.markdown("## Enumerator Productivity")
     display_enumerator_productivity(
         data,
         date,
         enumerator,
         setting_file,
     )
+
+    st.write("---")
+    st.markdown("## Enumerator Statistics")
     display_enumerator_statistics(
         data,
         date,
         enumerator,
         setting_file,
     )
+
+    st.write("---")
+    st.markdown("## Enumerator Statistics Over Time")
     display_enumerator_statistics_overtime(
         data,
         date,

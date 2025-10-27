@@ -5,6 +5,9 @@ import seaborn as sns
 import streamlit as st
 
 from datasure.utils import load_check_settings, save_check_settings, trigger_save
+from datasure.utils.onboarding_utils import demo_output_onboarding
+
+TAB_NAME: str = "descriptive_stats"
 
 
 def load_default_summary_settings(setting_file: str, page_num: int) -> tuple:
@@ -61,7 +64,7 @@ def datetime_check(col: pd.Series) -> bool:
 
     return False
 
-
+@demo_output_onboarding(TAB_NAME)
 def descriptive_report_settings(
     data: pd.DataFrame, setting_file: str, page_num: int
 ) -> tuple:
@@ -573,6 +576,7 @@ def plot_categorical_distribution(data: pd.DataFrame, categorical_col: str) -> N
 
 
 # define function to create summary report
+@demo_output_onboarding(TAB_NAME)
 def descriptive_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:  # noqa: D417, RUF100
     """
     Visualize the distribution of categorical and numeric variables in the dataframe.
