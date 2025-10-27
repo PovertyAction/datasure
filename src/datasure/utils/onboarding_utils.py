@@ -544,12 +544,75 @@ class OutputOnboardingInfo:
         },
     }
 
+    DUPLICATES: ClassVar[dict] = {
+        "duplicate_report": {
+            "title": "Duplicate Records Report",
+            "content": """
+        ### Duplicates Report
+        This tab provides detailed insights into duplicate records in your survey data.
+        It includes reports for duplicates on your ID column as well as other columns in your dataset.
+        **Next**: Go to the settings icon (⚙️) to configure global settings for the duplicates tab.
+        """,
+        },
+        "duplicates_settings": {
+            "title": "Duplicates Settings",
+            "content": """
+        ##### Setup for Duplicates Tab
+        In this section, you can configure global settings for the duplicates tab, you will notice that some settings are pre-filled based on your check configuration.
+        This tab contains the following settings:
+        - Survey ID: The main identifier for your survey respondents (e.g., household ID, Respondent ID).
+        - Survey Key: The unique key column for your survey dataset (e.g., KEY). This is different from the Survey ID which identifies unique respondents.
+                                If your dataset does not have a unique key column, you can create one during data preparation.
+        - Date: The date when the survey was conducted or submitted. (e.g., submissiondate, starttime).
+        - Columns: Select the columns you want to check for duplicates. You can choose one or more columns from your dataset. Note that the ID column is always included in the duplicate checks.
+        **Next**: Explore the **Duplicate Records on ID Column** section below.
+        """,
+        },
+        "display_duplicates_statistics": {
+            "title": "Duplicate Records on ID Column",
+            "content": """
+        ##### Duplicate Records on ID Column
+        This section provides insights into duplicate records based on your ID column and other duplicate columns added, including:
+        - Total Duplicate: Total number of duplicate records found in the dataset.
+        - Resolved Duplicates: Number of duplicate records that have been resolved.
+        - Columns Checked: Number of columns selected for duplicate checks.
+        - Columns With No Duplicates: Number of columns checked that have no duplicate records.
+        - Columns With Duplicates: Number of columns checked that have duplicate records.
+        - Survey ID Duplicates: Number of unique survey IDs that have duplicate records.
+        **Next**: Explore the **Duplicate Records Table** section below.
+        """,
+        },
+        "display_id_duplicates": {
+            "title": "Duplicate Records Table",
+            "content": """
+        - Table of duplicate records showing details such as survey ID, duplicate column values, count of duplicates, and resolution status.
+        ##### Instructions for Demo:
+        For the demo, explore the duplicate records found on the "hhid" column. At the **Select columns to display in the report** dropdown, choose "enum_name" and "state" to see additional context about the duplicates.
+        You may also select other columns to see how duplicates vary across different attributes.
+        **Next**: Look at the instructions for the **Duplictate Entries for columns** section below.
+        """,
+        },
+        "display_column_duplicates": {
+            "title": "Duplicate Entries for Other Columns",
+            "content": """
+        ##### Duplicate Entries for Other Columns
+        This section provides insights into duplicate records based on other columns in your dataset that were selected in the settings section, including:
+        - Table of duplicate records for each selected column showing details such as column name, duplicate values, count of duplicates, and resolution status.
+        ##### Instructions for Demo:
+        The dataset for the demo does not contain other columns for which we want to check duplicates. However, in a real project, you can select multiple columns in the settings section to identify duplicates across different attributes.
+        These could include columns like "address", "phone number", "ID number", etc.
+        **Next**: Explore the **Missing Data** tab.
+        """,
+        },
+    }
+
     @classmethod
     def get_onboarding_message(cls, tab: CheckPage, message_id: str) -> str:
         """Retrieve onboarding messages based on type."""
         messages = {
             "summary": cls.SUMMARY,
             "progress": cls.PROGRESS,
+            "duplicates": cls.DUPLICATES,
         }
         return messages.get(tab, {"invalid": "Invalid Message"}).get(
             message_id, "Invalid Message"

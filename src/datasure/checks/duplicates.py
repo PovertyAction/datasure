@@ -10,6 +10,9 @@ from datasure.utils import (
     save_check_settings,
     trigger_save,
 )
+from datasure.utils.onboarding_utils import demo_output_onboarding
+
+TAB_NAME = "duplicates"
 
 
 # @st.cache_data
@@ -58,6 +61,7 @@ def load_default_duplicates_settings(
     )
 
 
+@demo_output_onboarding(TAB_NAME)
 def duplicates_settings(
     project_id: str, data: pd.DataFrame, settings_file: str, page_num: int
 ) -> tuple:
@@ -219,6 +223,7 @@ def compute_duplicates_statistics(
     )
 
 
+@demo_output_onboarding(TAB_NAME)
 def display_duplicates_statistics(
     data: pd.DataFrame, survey_id: str, dup_cols: list
 ) -> None:
@@ -236,7 +241,6 @@ def display_duplicates_statistics(
     -------
         None
     """
-    st.markdown("## Duplicates Statistics Overview")
     if not (any([survey_id, dup_cols])):
         st.info(
             "Duplicates statistics requires a survey ID column or at least one column to check for duplicates. Go to :material/settings: settings to select a survey ID column and columns to check for duplicates."
@@ -354,6 +358,7 @@ def compute_id_duplicates(
     )
 
 
+@demo_output_onboarding(TAB_NAME)
 def display_id_duplicates(
     data: pd.DataFrame,
     survey_id: str | None,
@@ -376,7 +381,6 @@ def display_id_duplicates(
 
     """
     if not survey_id:
-        st.markdown("## Duplicate Entries Survey ID")
         st.info(
             "Duplicate entries for survey ID requires a survey ID column to be selected. Go to :material/settings: settings to select a survey ID column."
         )
@@ -503,6 +507,7 @@ def compute_column_duplicates(
     )
 
 
+@demo_output_onboarding(TAB_NAME)
 def display_column_duplicates(
     data: pd.DataFrame,
     survey_id: str | None,
@@ -526,7 +531,6 @@ def display_column_duplicates(
         None
 
     """
-    st.markdown("## Duplicate Entries for columns")
     if not dup_cols:
         st.info(
             "Duplicate entries for columns requires at least one column to be selected. Go to :material/settings: settings to select columns to check for duplicates."
@@ -656,7 +660,7 @@ def duplicates_report(
     )
 
     # ---- Show report --- #
-
+    st.markdown("## Duplicates Statistics Overview")
     display_duplicates_statistics(
         data=data,
         survey_id=survey_id,
@@ -664,6 +668,7 @@ def duplicates_report(
     )
 
     st.write("---")
+    st.markdown("## Duplicate Entries Survey ID")
     display_id_duplicates(
         data=data,
         survey_id=survey_id,
@@ -673,6 +678,7 @@ def duplicates_report(
     )
 
     st.write("---")
+    st.markdown("## Duplicate Entries for columns")
     display_column_duplicates(
         data=data,
         survey_id=survey_id,
