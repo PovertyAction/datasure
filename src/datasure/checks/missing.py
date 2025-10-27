@@ -12,6 +12,9 @@ from datasure.utils import (
     save_check_settings,
     trigger_save,
 )
+from datasure.utils.onboarding_utils import demo_output_onboarding
+
+TAB_NAME = "missing"
 
 
 def load_missing_settings(missing_setting_file: str) -> pd.DataFrame:
@@ -66,6 +69,7 @@ def save_missing_settings(missing_settings_df: pd.DataFrame, setting_file: str) 
         json.dump(missing_settings_df.to_dict(), f)
 
 
+@demo_output_onboarding(TAB_NAME)
 def missing_settings(missing_setting_file: str) -> pd.DataFrame:
     """Generate the settings for the missing data report.
 
@@ -141,10 +145,9 @@ def compute_missing_summary(data: pd.DataFrame) -> tuple:
     return missing_values, all_missing, any_missing, no_missing
 
 
+@demo_output_onboarding(TAB_NAME)
 def missing_summary(data: pd.DataFrame) -> None:
     """Generate a summary of missing data in the dataset."""
-    st.markdown("## Missing data")
-
     with st.container():
         missing_values, all_missing, any_missing, no_missing = compute_missing_summary(
             data=data
@@ -255,12 +258,10 @@ def compute_filtered_missing_columns(data: pd.DataFrame, mv_threshold: int) -> t
     return mv_data_filtered, perc_cols, vmin_val, vmax_val
 
 
+@demo_output_onboarding(TAB_NAME)
 def missing_columns(data: pd.DataFrame, missing_codes, setting_file) -> None:
     """Generate a table showing the percentage of missing values in each column."""
     # display the table
-    st.write("---")
-    st.markdown("## Missingness by column")
-
     _, _, _, slider_col = st.columns(4)
 
     default_settings = (
@@ -354,12 +355,10 @@ def compute_missing_over_time(data: pd.DataFrame, select_date_col: str) -> pd.Da
     return missingness_over_time
 
 
+@demo_output_onboarding(TAB_NAME)
 def missing_over_time(data: pd.DataFrame, setting_file) -> None:
     """Generate a report on missing data over time."""
     # missingness over time
-    st.write("---")
-    st.markdown("## Missingness over time")
-
     # get the date columns from dataset
     date_cols = data.select_dtypes(include=["datetime64"]).columns
 
@@ -466,11 +465,10 @@ def compute_missing_compare(
     return group_by_data, vmin_val, vmax_val
 
 
+@demo_output_onboarding(TAB_NAME)
 def missing_compare(data: pd.DataFrame, setting_file: str) -> None:
     """Generate a report comparing missing data in the dataset."""
     # missing data comparison
-    st.write("---")
-    st.markdown("## Compare missing data within groups")
 
     mc_1, mc_2 = st.columns([0.3, 0.7])
 
@@ -598,11 +596,10 @@ def get_null_list(data: pd.DataFrame, all_cols: bool) -> list:
     return col_options
 
 
+@demo_output_onboarding(TAB_NAME)
 def missing_correlation(data: pd.DataFrame, color_map: str, setting_file: str) -> None:
     """Generate a report on missing data correlation."""
     ## nullity correlation
-    st.write("---")
-    st.markdown("## Nullity correlation")
 
     mc1, mc2 = st.columns([0.1, 0.9])
     with mc1:
@@ -687,6 +684,7 @@ def compute_missing_matrix(data: pd.DataFrame, sort_by_col: str) -> pd.DataFrame
     return nullity_matrix
 
 
+@demo_output_onboarding(TAB_NAME)
 def missing_matrix(data: pd.DataFrame, color_map: str, setting_file: str) -> None:
     """Generate a report on missing data matrix.
 
@@ -704,9 +702,6 @@ def missing_matrix(data: pd.DataFrame, color_map: str, setting_file: str) -> Non
     -------
         None
     """
-    st.write("---")
-    st.markdown("## Nullity matrix")
-
     default_settings = (
         load_check_settings(settings_file=setting_file, check_name="missing") or {}
     )
@@ -745,6 +740,7 @@ def missing_matrix(data: pd.DataFrame, color_map: str, setting_file: str) -> Non
 
 
 # define function to create summary report
+@demo_output_onboarding(TAB_NAME)
 def missing_report(
     project_id: str, data: pd.DataFrame, setting_file: str, page_name: str
 ) -> None:  # noqa: D417, RUF100
@@ -782,9 +778,26 @@ def missing_report(
     )
 
     missing_codes = missing_settings(missing_setting_file=missing_setting_file)
+
+    st.markdown("## Missing data")
     missing_summary(data=data)
+
+    st.write("---")
+    st.markdown("## Missingness by column")
     missing_columns(data=data, missing_codes=missing_codes, setting_file=setting_file)
+
+    st.write("---")
+    st.markdown("## Compare missing data within groups")
     missing_compare(data=data, setting_file=setting_file)
+
+    st.write("---")
+    st.markdown("## Missingness over time")
     missing_over_time(data=data, setting_file=setting_file)
+
+    st.write("---")
+    st.markdown("## Nullity correlation")
     missing_correlation(data=data, color_map=sns_colormap, setting_file=setting_file)
+
+    st.write("---")
+    st.markdown("## Nullity matrix")
     missing_matrix(data=data, color_map=sns_colormap, setting_file=setting_file)

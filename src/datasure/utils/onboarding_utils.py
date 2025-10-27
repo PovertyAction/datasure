@@ -605,6 +605,128 @@ class OutputOnboardingInfo:
         """,
         },
     }
+    MISSING: ClassVar[dict] = {
+        "missing_report": {
+            "title": "Missing Data Report",
+            "content": """
+        ### Missing Data Report
+        This tab provides detailed insights into missing data in your survey dataset.
+        It includes reports on missing values by column as well as patterns of missing data across records.
+        **Next**: Go to the settings icon (⚙️) to configure global settings for the missing data tab.
+        """,
+        },
+        "missing_settings": {
+            "title": "Missing Data Settings",
+            "content": """
+        ##### Setup for Missing Data Tab
+        In this section, you can configure global settings for the missing data tab, you will notice that some settings are pre-filled with default values.
+        This tab contains the following settings:
+        - Each row indicates a type of missing data value to check for (e.g., Dont know, No response, N/A, etc.)
+        - The **Missing Labels** column allows you to specify custom labels that represent missing data in your dataset. This label will be used in the reports
+        to show counts of missing values based on this category.
+        - The **Missing Codes** column allows you to specify value that represent missing data in your dataset. This value will be used calculate the counts of missing values based on this category.
+        Multiple codes can be separated by commas. eg "99,999"
+
+        ##### Instructions for Demo:
+        In a real project, you will want to programme your survey instrument to prevent unintended missing data values specified such as .999 instead of -999.
+        For this demo, .999 was not used as a missing data code. Edit each row to the decimal missing codes.
+        - use the codes -99 for the "Don't Know" row.
+        - use the code -88 for the "Refused to Answer" row.
+        - use the code -77 for the "Not Applicable" row.
+        **Next**: Explore the **Missing Data Statistics** section below.
+        """,
+        },
+        "missing_summary": {
+            "title": "Missing Data Statistics",
+            "content": """
+        ##### Missing Data Statistics
+        This section provides insights into missing data in your survey dataset, including:
+        - Percentage of missing values: Overall percentage of missing values in the dataset.
+        - % of columns with missing values: Percentage of columns that contain missing values.
+        - % of columns with at least one missing value: Percentage of columns that have at least one missing value.
+        - % of columns with no missing values: Percentage of columns that do not contain any missing values.
+        **Next**: Explore the **Missingness by Column** section below.
+        """,
+        },
+        "missing_columns": {
+            "title": "Missingness by Column",
+            "content": """
+        ##### Missingness by Column
+        This section provides a detailed view of missing data by column, including:
+        - A table showing each column in the dataset with the following details:
+            - Column Name: Name of the column.
+            - Total Missing: Total number of missing values in the column.
+            - % Total Missing: Percentage of missing values in the column.
+            - Null Values: Count of null or NaN values in the column.
+            - % Null Values: Percentage of null or NaN values in the column.
+            - Don't KNow: Count of values marked as "Don't Know".
+            - % Don't Know: Percentage of values marked as "Don't Know".
+            - Refused to Answer: Count of values marked as "Refused to Answer".
+            - % Refused to Answer: Percentage of values marked as "Refused to Answer".
+            - Not Applicable: Count of values marked as "Not Applicable".
+            - % Not Applicable: Percentage of values marked as "Not Applicable".
+        - The table can be sorted by any of the columns to help identify which columns have the highest or lowest missing data.
+        - The table also includes a "Filter Report by % missing" slider at the top left to allow you to filter the report based on a minimum percentage of missing data.
+
+        ##### Instructions for Demo:
+        For the demo, use the "% missing" slider to filter the report to only show columns with 100% missing values.
+        **Next**: Explore the **Compare missing data within groups** section below.
+        """,
+        },
+        "missing_compare": {
+            "title": "Compare Missing Data Within Groups",
+            "content": """
+        ##### Compare Missing Data Within Groups
+        This section allows you to compare missing data patterns within different groups in your dataset, including:
+        - A dropdown to select a categorical column (e.g., enumerator, region, etc.) to group the data by.
+        - A dropdow to select columns to compare. By default, all columns will be used but an aggregate view will be shown.
+        - A table showing the percentage of missing values for each selected column within each group.
+
+        ##### Instructions for Demo:
+        For the demo:
+         - **first** - at the **Select column to group by** dropdown, choose "state" to see how missing data varies across different states in the dataset.
+         - **then** - at the **Select columns to compare** dropdown, choose "land_acre", "child_loan" and "pvt_sch" to see how missing data varies for these specific columns across different states.
+        **Next**: Explore the **Missingness over time** section below.
+        """,
+        },
+        "missing_over_time": {
+            "title": "Missingness Over Time",
+            "content": """
+        ##### Missingness Over Time
+        This section visualizes missing data patterns over time, helping you identify trends and changes in data quality during the survey period, including:
+        - A line chart showing the percentage of missing values over time.
+        - A dropdown to select a specific date column to use for analysis.
+        ##### Instructions for Demo:
+        For the demo, at the **Select column to analyze missingness over time** dropdown, choose "submissiondate" to see how missing data varies over the survey period.
+        **Next**: Explore the **Nullity COrrection** section below.
+        """,
+        },
+        "missing_correlation": {
+            "title": "Nullity Correlation",
+            "content": """
+        ##### Nullity Correlation
+        This section provides insights into the correlation of missing data between different columns in your dataset, helping you identify patterns and relationships in missingness, including:
+        - A heatmap visualizing the correlation of missing values between columns.
+
+        ##### Instructions for Demo:
+        For the demo,
+        - at the **Select columns to include in nullity correlation** dropdown, choose "min_dist" and "travel_sch" to see how missing data in these specific columns correlates with each other.
+        - You will notice that whenever "min_dist" is missing, "travel_sch" is also missing. Which makes sense since if the distance to school is not recorded, the mode of travel to school is also likely not recorded.
+
+        This insight can help identify potential data collection issues or patterns in missingness that may require further investigation.
+        **Next**: Explore the **Nullity Matrix** section.
+        """,
+        },
+        "missing_matrix": {
+            "title": "Nullity Matrix",
+            "content": """
+        ##### Nullity Matrix
+        This section provides a visual representation of the missing data patterns in your dataset, helping you quickly identify areas with high or low missingness, including:
+        - A matrix visualization showing the presence or absence of data for each column in the dataset. The red blocks represent missing values, while the blue blocks represent non-missing values.
+        **Next**: Explore **outliers** tab.
+        """,
+        },
+    }
 
     @classmethod
     def get_onboarding_message(cls, tab: CheckPage, message_id: str) -> str:
@@ -613,6 +735,7 @@ class OutputOnboardingInfo:
             "summary": cls.SUMMARY,
             "progress": cls.PROGRESS,
             "duplicates": cls.DUPLICATES,
+            "missing": cls.MISSING,
         }
         return messages.get(tab, {"invalid": "Invalid Message"}).get(
             message_id, "Invalid Message"
