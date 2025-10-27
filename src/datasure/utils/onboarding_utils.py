@@ -750,7 +750,7 @@ class DemoDataGenerator:
     def __init__(self, df: pl.DataFrame):
         self.df = df
 
-    def gen_starttime(self) -> pl.DataFrame:
+    def _gen_starttime(self) -> pl.DataFrame:
         """Generate starttime column with random dates within the last 60 days."""
         end_date = datetime.now()
         start_date = end_date - timedelta(days=60)
@@ -772,7 +772,7 @@ class DemoDataGenerator:
 
         return self.df
 
-    def gen_endtime(self) -> pl.DataFrame:
+    def _gen_endtime(self) -> pl.DataFrame:
         """Generate endtime to be starttime + random minutes between 15 and
         136 minutes.
         """
@@ -788,7 +788,7 @@ class DemoDataGenerator:
         )
         return self.df
 
-    def gen_submissiondate(self) -> pl.DataFrame:
+    def _gen_submissiondate(self) -> pl.DataFrame:
         """Generate submissiondate to be endtime + random minutes between 1
         and 30 minutes.
         """
@@ -803,11 +803,11 @@ class DemoDataGenerator:
         )
         return self.df
 
-    def gen_dates(self) -> pl.DataFrame:
+    def _gen_dates(self) -> pl.DataFrame:
         """Generate all date columns."""
-        self.gen_starttime()
-        self.gen_endtime()
-        self.gen_submissiondate()
+        self._gen_starttime()
+        self._gen_endtime()
+        self._gen_submissiondate()
 
         # convert datetime columns to string
         self.df = self.df.with_columns(
@@ -842,6 +842,46 @@ class DemoDataGenerator:
 
         return self.df
 
+    def _gen_consent_status(self):
+        """Generate consent column with 'yes' or 'no' values."""
+        consent_values = ["yes", "no"]
+        random_consents = [
+            random.choices(consent_values, weights=[0.98, 0.02])[0]
+            for _ in range(self.df.height)
+        ]
+
+        self.df = self.df.with_columns(
+            [
+                pl.Series("consent", random_consents),
+            ]
+        )
+
+        return self.df
+
+    def _gen_completion_status(self):
+        """Generate completion_status column with 'complete' or 'incomplete' values."""
+        status_values = ["complete", "incomplete"]
+        random_statuses = [
+            random.choices(status_values, weights=[0.95, 0.05])[0]
+            for _ in range(self.df.height)
+        ]
+
+        self.df = self.df.with_columns(
+            [
+                pl.Series("completion_status", random_statuses),
+            ]
+        )
+
+        return self.df
+
+    def add_demo_fields(self, datatype: str = "survey") -> pl.DataFrame:
+        """Add all demo fields."""
+        self._gen_dates()
+        if datatype == "survey":
+            self._gen_consent_status()
+            self._gen_completion_status()
+        return self.df
+
 
 def load_demo_data():
     """Load demo data files into the demo project."""
@@ -860,7 +900,7 @@ def load_demo_data():
             str(survey_path), truncate_ragged_lines=True, ignore_errors=True
         )
 
-        survey_df = DemoDataGenerator(survey_df).gen_dates()
+        survey_df = DemoDataGenerator(survey_df).add_demo_fields()
 
         # Save to raw database (for import system)
         duckdb_save_table(DEMO_PROJECT_ID, survey_df, "demo_survey", "raw")
@@ -874,7 +914,7 @@ def load_demo_data():
             str(backcheck_path), truncate_ragged_lines=True, ignore_errors=True
         )
 
-        backcheck_df = DemoDataGenerator(backcheck_df).gen_dates()
+        backcheck_df = DemoDataGenerator(backcheck_df).add_demo_fields("backcheck")
 
         # Save to raw database (for import system)
         duckdb_save_table(DEMO_PROJECT_ID, backcheck_df, "demo_backcheck", "raw")
@@ -886,6 +926,7 @@ def load_demo_data():
         # clean log entries
         duckdb_remove_table(DEMO_PROJECT_ID, "prep_log_demo_survey", "logs")
         duckdb_remove_table(DEMO_PROJECT_ID, "prep_log_demo_backcheck", "logs")
+        duckdb_remove_table(DEMO_PROJECT_ID, "check_config", "logs")
 
         # Create import log entries to register the data as imported
         import_log_data = [
