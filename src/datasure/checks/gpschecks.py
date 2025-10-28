@@ -15,6 +15,9 @@ from datasure.utils import (
     save_check_settings,
     trigger_save,
 )
+from datasure.utils.onboarding_utils import demo_output_onboarding
+
+TAB_NAME: str = "gpschecks"
 
 
 def load_default_settings(project_id: str, setting_file: str, page_num: int) -> tuple:
@@ -96,6 +99,7 @@ def load_default_settings(project_id: str, setting_file: str, page_num: int) -> 
 
 
 #  gps check settings
+@demo_output_onboarding(TAB_NAME)
 def gps_check_settings(
     project_id: str, data: pd.DataFrame, setting_file: str, page_num
 ) -> tuple:
@@ -590,7 +594,7 @@ def plot_gps_coordinates(
         map_style="mapbox://styles/mapbox/streets-v11",
     )
 
-    st.pydeck_chart(deck, height=450, width="stretch")
+    st.pydeck_chart(deck, height=450, use_container_width=True)
 
 
 # detect outliers using a clustering column
@@ -866,9 +870,10 @@ def plot_clusters_on_map(
         map_style="mapbox://styles/mapbox/streets-v11",
     )
 
-    st.pydeck_chart(deck, height=450, width="stretch")
+    st.pydeck_chart(deck, height=450, use_container_width=True)
 
 
+@demo_output_onboarding(TAB_NAME)
 # gps checks report
 def gpschecks_report(
     project_id: str, data: pd.DataFrame, setting_file: str, page_num: int

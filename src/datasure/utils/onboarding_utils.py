@@ -1118,6 +1118,45 @@ class OutputOnboardingInfo:
         },
     }
 
+    GPSCHECKS: ClassVar[dict] = {
+        "gpschecks_report": {
+            "title": "GPS Checks Report",
+            "content": """
+        ### GPS Checks Report
+        This tab provides detailed insights into GPS data quality in your survey dataset.
+        It includes reports on GPS accuracy, completeness, and overall GPS data quality.
+
+        **Next**: Go to the settings icon (⚙️) to configure global settings for the GPS checks tab.
+        """,
+        },
+        "gps_check_settings": {
+            "title": "GPS Checks Settings",
+            "content": """
+        ##### Setup for GPS Checks Tab
+        In this section, you can configure global settings for the GPS checks tab, you will notice that some settings are pre-filled with default values.
+        This tab contains the following settings:
+        - **Date**: The date when the survey was conducted or submitted. (e.g., submissiondate, starttime).
+        - **Survey Key**: The unique key column for your survey dataset (e.g., KEY).
+        - **Survey ID**: The main identifier for your survey respondents (e.g., household ID, Respondent ID).
+        - **Enumerator**: The column indicating who collected the data (e.g., enumerator name or ID).
+
+        ##### Adding GPS Columns:
+        - On the right side of the settings page, you will see a toggle button labeled "Data contains GPS columns(s)"
+        - Switch this toggle to "ON" to enable GPS column configuration.
+        - The "GPS has latitude and longitude columns" toggle allows you to specify whether your dataset includes separate latitude and longitude columns for GPS data.
+        When this toggle is enabled, you can add latitude and longitude columns directly, else you will need to add a single GPS column that contains both latitude and longitude information.
+
+        ##### Instructions for Demo:
+        For the demo, enable "GPS has latitude and longitude columns" toggle and add the following GPS columns:
+        - Latitude Column: Select "household_latitude"
+        - Longitude Column: Select "household_longitude"
+        - Accuracy Column: Select "household_gps_accuracy"
+
+        **Next**: Explore the **GPS Overview** section below.
+        """,
+        },
+    }
+
     @classmethod
     def get_onboarding_message(cls, tab: CheckPage, message_id: str) -> str:
         """Retrieve onboarding messages based on type."""
@@ -1130,6 +1169,7 @@ class OutputOnboardingInfo:
             "enumerators": cls.ENUMERATORS,
             "descriptive_stats": cls.DESCRIPTIVE_STATS,
             "backchecks": cls.BACKCHECKS,
+            "gpschecks": cls.GPSCHECKS,
         }
         return messages.get(tab, {"invalid": "Invalid Message"}).get(
             message_id, "Invalid Message"
