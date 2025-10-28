@@ -98,6 +98,7 @@ def load_default_enumerator_settings(
         outcome_vals,
     )
 
+
 @demo_output_onboarding(TAB_NAME)
 def enumerator_report_settings(
     project_id: str, data: str, setting_file: str, page_num: str
@@ -469,6 +470,7 @@ def compute_enumerator_overview(
         avg_submissions,
         pct_active_enumerators,
     )
+
 
 @demo_output_onboarding(TAB_NAME)
 def display_enumerator_overview(
@@ -943,6 +945,7 @@ def compute_enumerator_productivity(
 
     return prod_res
 
+
 @demo_output_onboarding(TAB_NAME)
 def display_enumerator_productivity(
     data: pd.DataFrame,
@@ -1094,6 +1097,7 @@ def compute_enumerator_statistics(
     )
 
     return stats_res
+
 
 @demo_output_onboarding(TAB_NAME)
 def display_enumerator_statistics(
@@ -1272,6 +1276,7 @@ def compute_enumerator_statistics_overtime(
     ).reset_index(drop=False)
 
     return stats_overtime_res
+
 
 @demo_output_onboarding(TAB_NAME)
 def display_enumerator_statistics_overtime(
