@@ -10,7 +10,7 @@ from datasure.utils.navigations_utils import page_navigation
 class TestPageNavigation:
     """Test the page_navigation function."""
 
-    @patch("datasure.utils.navigations.st")
+    @patch("datasure.utils.navigations_utils.st")
     def test_navigation_with_both_buttons(self, mock_st):
         """Test page navigation with both previous and next buttons."""
         # Setup mock streamlit components
@@ -46,7 +46,7 @@ class TestPageNavigation:
         assert next_call[1]["use_container_width"] is True
         assert next_call[1]["type"] == "primary"  # Next button should be primary
 
-    @patch("datasure.utils.navigations.st")
+    @patch("datasure.utils.navigations_utils.st")
     def test_navigation_with_prev_button_only(self, mock_st):
         """Test page navigation with only previous button."""
         # Setup mock streamlit components
@@ -69,7 +69,7 @@ class TestPageNavigation:
             use_container_width=True,
         )
 
-    @patch("datasure.utils.navigations.st")
+    @patch("datasure.utils.navigations_utils.st")
     def test_navigation_with_next_button_only(self, mock_st):
         """Test page navigation with only next button."""
         # Setup mock streamlit components
@@ -93,7 +93,7 @@ class TestPageNavigation:
             type="primary",
         )
 
-    @patch("datasure.utils.navigations.st")
+    @patch("datasure.utils.navigations_utils.st")
     def test_navigation_with_no_buttons(self, mock_st):
         """Test page navigation with no buttons."""
         # Setup mock streamlit components
@@ -110,7 +110,7 @@ class TestPageNavigation:
         # Verify no buttons are created
         mock_st.button.assert_not_called()
 
-    @patch("datasure.utils.navigations.st")
+    @patch("datasure.utils.navigations_utils.st")
     def test_prev_button_click_triggers_page_switch(self, mock_st):
         """Test that clicking previous button triggers page switch."""
         # Setup mock streamlit components
@@ -127,7 +127,7 @@ class TestPageNavigation:
         # Verify switch_page is called with correct page name
         mock_st.switch_page.assert_called_once_with(prev_config["page_name"])
 
-    @patch("datasure.utils.navigations.st")
+    @patch("datasure.utils.navigations_utils.st")
     def test_next_button_click_triggers_page_switch(self, mock_st):
         """Test that clicking next button triggers page switch."""
         # Setup mock streamlit components
@@ -144,7 +144,7 @@ class TestPageNavigation:
         # Verify switch_page is called with correct page name
         mock_st.switch_page.assert_called_once_with(next_config["page_name"])
 
-    @patch("datasure.utils.navigations.st")
+    @patch("datasure.utils.navigations_utils.st")
     def test_unique_button_keys_generation(self, mock_st):
         """Test that unique keys are generated for buttons."""
         # Setup mock streamlit components
@@ -172,7 +172,7 @@ class TestPageNavigation:
         assert next_call[1]["key"] == expected_next_key
         assert expected_prev_key != expected_next_key
 
-    @patch("datasure.utils.navigations.st")
+    @patch("datasure.utils.navigations_utils.st")
     def test_column_context_managers(self, mock_st):
         """Test that columns are used as context managers correctly."""
         # Setup mock streamlit components
@@ -192,7 +192,7 @@ class TestPageNavigation:
         mock_next_col.__enter__.assert_called_once()
         mock_next_col.__exit__.assert_called_once()
 
-    @patch("datasure.utils.navigations.st")
+    @patch("datasure.utils.navigations_utils.st")
     def test_empty_string_labels(self, mock_st):
         """Test navigation with empty string labels."""
         # Setup mock streamlit components
@@ -215,7 +215,7 @@ class TestPageNavigation:
         assert prev_call[0][0] == ""
         assert next_call[0][0] == ""
 
-    @patch("datasure.utils.navigations.st")
+    @patch("datasure.utils.navigations_utils.st")
     def test_missing_required_keys_in_config(self, mock_st):
         """Test behavior with missing required keys in button config."""
         # Setup mock streamlit components
@@ -235,7 +235,7 @@ class TestPageNavigation:
         with pytest.raises(KeyError):
             page_navigation(prev=prev_config, next=next_config)
 
-    @patch("datasure.utils.navigations.st")
+    @patch("datasure.utils.navigations_utils.st")
     def test_special_characters_in_page_names(self, mock_st):
         """Test navigation with special characters in page names."""
         # Setup mock streamlit components
