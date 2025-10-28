@@ -1210,7 +1210,7 @@ class TestChartGenerationAndVisualization:
             # Verify the call includes the expected parameters
             call_args = mock_plotly.call_args
             assert call_args[1]["theme"] is None
-            assert call_args[1]["width"] == 'stretch'
+            assert call_args[1]["width"] == "stretch"
 
 
 class TestErrorHandlingAndRobustness:

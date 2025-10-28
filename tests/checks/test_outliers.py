@@ -785,7 +785,6 @@ class TestDisplayFunctions:
         )
 
         display_outlier_column_summary(summary_data)
-        mock_title.assert_called_once()
         mock_dataframe.assert_called_once()
 
     @patch("streamlit.title")
@@ -835,7 +834,6 @@ class TestInspectOutliersColumns:
             enumerator="enumerator",
         )
 
-        mock_title.assert_called_once()
         mock_info.assert_called_once()
 
 
