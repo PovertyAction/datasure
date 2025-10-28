@@ -1,0 +1,693 @@
+"""Tests for the onboarding utilities module."""
+
+import json
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import polars as pl
+import pytest
+
+from datasure.utils.onboarding_utils import (
+    DEMO_PROJECT_ID,
+    DEMO_PROJECT_NAME,
+    CheckPage,
+    DemoDataGenerator,
+    ImportDemoInfo,
+    OnboardingSteps,
+    OutputOnboardingInfo,
+    create_demo_project,
+    demo_container,
+    demo_expander,
+    demo_output_onboarding,
+    get_onboarding_step,
+    is_demo_complete,
+    is_demo_project,
+    load_demo_data,
+    set_onboarding_step,
+    show_demo_banner,
+    show_demo_completion_message,
+    show_demo_intro,
+    show_next_steps,
+    show_progress_indicator,
+)
+
+
+class TestCheckPage:
+    """Test the CheckPage enum."""
+
+    def test_check_page_values(self):
+        """Test that CheckPage enum has correct values."""
+        assert CheckPage.SUMMARY.value == "Summary"
+        assert CheckPage.SURVEY_PROGRESS.value == "Survey Progress"
+        assert CheckPage.DUPLICATES.value == "Duplicates"
+        assert CheckPage.MISSING_DATA.value == "Missing Data"
+        assert CheckPage.OUTLIERS.value == "Outliers"
+        assert CheckPage.ENUMERATOR_STATS.value == "Enumerator Stats"
+        assert CheckPage.DESCRIPTIVE_STATS.value == "Descriptive Stats"
+        assert CheckPage.BACK_CHECKS.value == "Back Checks"
+        assert CheckPage.GPS_CHECKS.value == "GPS Checks"
+
+    def test_check_page_member_count(self):
+        """Test that CheckPage enum has correct number of members."""
+        assert len(CheckPage) == 9
+
+
+class TestDemoContainer:
+    """Test the demo_container function."""
+
+    @patch("datasure.utils.onboarding_utils.st")
+    def test_demo_container_creates_container(self, mock_st):
+        """Test that demo_container creates a streamlit container with styled text."""
+        test_text = "This is a test message"
+        demo_container(test_text)
+
+        # Verify container was created
+        mock_st.container.assert_called_once()
+
+        # Verify markdown was called with unsafe_allow_html=True
+        assert mock_st.markdown.call_count == 2  # Once for styled div, once for spacing
+
+
+class TestImportDemoInfo:
+    """Test the ImportDemoInfo class."""
+
+    def test_get_info_message_valid_ids(self):
+        """Test getting valid demo messages."""
+        message = ImportDemoInfo.get_info_message("add_to_session_info")
+        assert "successfully loaded your demo survey data" in message
+
+        message = ImportDemoInfo.get_info_message("prepare_data_info")
+        assert "Data preparation is a crucial step" in message
+
+        message = ImportDemoInfo.get_info_message("preview_data_info")
+        assert "Data import complete" in message
+
+    def test_get_info_message_invalid_id(self):
+        """Test getting info message with invalid ID returns default message."""
+        message = ImportDemoInfo.get_info_message("invalid_message_id")
+        assert message == "Invalid message ID."
+
+    def test_class_variables_exist(self):
+        """Test that all class variables are defined."""
+        assert hasattr(ImportDemoInfo, "ADD_TO_SESSION_INFO")
+        assert hasattr(ImportDemoInfo, "PREVIEW_DATA_INFO")
+        assert hasattr(ImportDemoInfo, "PREPARE_DATA_INFO")
+        assert hasattr(ImportDemoInfo, "PROCEED_TO_CONFIG_INFO")
+        assert hasattr(ImportDemoInfo, "DEMO_DATA_INFO")
+        assert hasattr(ImportDemoInfo, "PROCEED_TO_HFCS_INFO")
+        assert hasattr(ImportDemoInfo, "ADD_CHECK_CONFIG_INFO")
+
+
+class TestOnboardingSteps:
+    """Test the OnboardingSteps class."""
+
+    def test_get_step_info_valid_steps(self):
+        """Test getting valid step information."""
+        start_step = OnboardingSteps.get_step_info("start")
+        assert start_step["step"] == 1
+        assert start_step["title"] == "Start Here"
+        assert start_step["icon"] == "🏠"
+
+        import_step = OnboardingSteps.get_step_info("import")
+        assert import_step["step"] == 2
+        assert import_step["title"] == "Import Data"
+
+    def test_get_step_info_invalid_step(self):
+        """Test getting step info with invalid step name."""
+        result = OnboardingSteps.get_step_info("invalid_step")
+        assert result == {}
+
+    def test_get_all_steps(self):
+        """Test getting all onboarding steps."""
+        all_steps = OnboardingSteps.get_all_steps()
+        assert len(all_steps) == 6
+        assert all_steps[0]["step"] == 1
+        assert all_steps[5]["step"] == 6
+
+    def test_get_all_steps_order(self):
+        """Test that all steps are in correct order."""
+        all_steps = OnboardingSteps.get_all_steps()
+        for i, step in enumerate(all_steps, start=1):
+            assert step["step"] == i
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.demo_container")
+    def test_get_guidance_valid_step(self, mock_demo_container, mock_st):
+        """Test getting guidance for valid step."""
+        OnboardingSteps.get_guidance(1)
+        mock_st.expander.assert_called_once()
+        mock_demo_container.assert_called_once()
+
+    @patch("datasure.utils.onboarding_utils.st")
+    def test_get_guidance_invalid_step(self, mock_st):
+        """Test that getting guidance for invalid step raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid step: 99"):
+            OnboardingSteps.get_guidance(99)
+
+
+class TestOutputOnboardingInfo:
+    """Test the OutputOnboardingInfo class."""
+
+    def test_get_onboarding_message_summary(self):
+        """Test getting onboarding message for summary tab."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "summary", "summary_report"
+        )
+        assert message["title"] == "Data Quality Summary"
+        assert "overview of the data quality checks" in message["content"]
+
+    def test_get_onboarding_message_progress(self):
+        """Test getting onboarding message for progress tab."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "progress", "progress_report"
+        )
+        assert message["title"] == "Progress Report"
+
+    def test_get_onboarding_message_invalid_tab(self):
+        """Test getting onboarding message with invalid tab."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "invalid_tab", "some_message"
+        )
+        assert message == "Invalid Message"
+
+    def test_get_onboarding_message_invalid_message_id(self):
+        """Test getting onboarding message with invalid message ID."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "summary", "invalid_message_id"
+        )
+        assert message == "Invalid Message"
+
+    def test_class_variables_exist(self):
+        """Test that all class variables are defined."""
+        assert hasattr(OutputOnboardingInfo, "SUMMARY")
+        assert hasattr(OutputOnboardingInfo, "PROGRESS")
+        assert hasattr(OutputOnboardingInfo, "DUPLICATES")
+        assert hasattr(OutputOnboardingInfo, "MISSING")
+        assert hasattr(OutputOnboardingInfo, "OUTLIERS")
+        assert hasattr(OutputOnboardingInfo, "ENUMERATORS")
+        assert hasattr(OutputOnboardingInfo, "DESCRIPTIVE_STATS")
+        assert hasattr(OutputOnboardingInfo, "BACKCHECKS")
+        assert hasattr(OutputOnboardingInfo, "GPSCHECKS")
+
+
+class TestDemoOutputOnboarding:
+    """Test the demo_output_onboarding decorator."""
+
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    @patch("datasure.utils.onboarding_utils.demo_expander")
+    def test_decorator_with_demo_project(self, mock_demo_expander, mock_is_demo):
+        """Test decorator when in demo mode."""
+        mock_is_demo.return_value = True
+
+        @demo_output_onboarding("summary")
+        def summary_report():
+            return "executed"
+
+        result = summary_report()
+        assert result == "executed"
+        mock_demo_expander.assert_called_once()
+
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    @patch("datasure.utils.onboarding_utils.demo_expander")
+    def test_decorator_without_demo_project(self, mock_demo_expander, mock_is_demo):
+        """Test decorator when not in demo mode."""
+        mock_is_demo.return_value = False
+
+        @demo_output_onboarding("summary")
+        def summary_report():
+            return "executed"
+
+        result = summary_report()
+        assert result == "executed"
+        mock_demo_expander.assert_not_called()
+
+
+class TestDemoProjectFunctions:
+    """Test demo project state functions."""
+
+    @patch("datasure.utils.onboarding_utils.st")
+    def test_is_demo_project_true(self, mock_st):
+        """Test is_demo_project returns True when project ID matches."""
+        mock_st.session_state.get.return_value = DEMO_PROJECT_ID
+        assert is_demo_project() is True
+
+    @patch("datasure.utils.onboarding_utils.st")
+    def test_is_demo_project_false(self, mock_st):
+        """Test is_demo_project returns False when project ID doesn't match."""
+        mock_st.session_state.get.return_value = "other_project"
+        assert is_demo_project() is False
+
+    @patch("datasure.utils.onboarding_utils.st")
+    def test_set_onboarding_step(self, mock_st):
+        """Test setting onboarding step."""
+        mock_st.session_state = {}
+        set_onboarding_step(3)
+        assert mock_st.session_state["onboarding_step"] == 3
+
+    @patch("datasure.utils.onboarding_utils.st")
+    def test_get_onboarding_step_exists(self, mock_st):
+        """Test getting onboarding step when it exists."""
+        mock_st.session_state = {"onboarding_step": 4}
+        assert get_onboarding_step() == 4
+
+    @patch("datasure.utils.onboarding_utils.st")
+    def test_get_onboarding_step_default(self, mock_st):
+        """Test getting onboarding step returns default when not set."""
+        # Mock session_state to return None for the onboarding_step key
+        mock_session = MagicMock()
+        mock_session.__getitem__.return_value = None
+        mock_st.session_state = mock_session
+
+        result = get_onboarding_step()
+        # When session_state["onboarding_step"] returns None, "None or 1" evaluates to 1
+        assert result == 1
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.get_onboarding_step")
+    def test_is_demo_complete_true(self, mock_get_step, mock_st):
+        """Test is_demo_complete returns True when all steps completed."""
+        mock_get_step.return_value = 6
+        assert is_demo_complete() is True
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.get_onboarding_step")
+    def test_is_demo_complete_false(self, mock_get_step, mock_st):
+        """Test is_demo_complete returns False when steps incomplete."""
+        mock_get_step.return_value = 3
+        assert is_demo_complete() is False
+
+
+class TestDemoUIFunctions:
+    """Test demo UI display functions."""
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    @patch("datasure.utils.onboarding_utils.get_onboarding_step")
+    def test_show_progress_indicator_demo_mode(
+        self, mock_get_step, mock_is_demo, mock_st
+    ):
+        """Test progress indicator displays in demo mode."""
+        mock_is_demo.return_value = True
+        mock_get_step.return_value = 2
+        mock_st.columns.return_value = [MagicMock() for _ in range(6)]
+
+        show_progress_indicator()
+
+        mock_st.markdown.assert_called()
+        mock_st.columns.assert_called()
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    def test_show_progress_indicator_non_demo(self, mock_is_demo, mock_st):
+        """Test progress indicator doesn't display when not in demo mode."""
+        mock_is_demo.return_value = False
+
+        show_progress_indicator()
+
+        mock_st.markdown.assert_not_called()
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.demo_container")
+    def test_show_demo_intro(self, mock_demo_container, mock_st):
+        """Test demo intro displays correctly."""
+        show_demo_intro()
+        mock_demo_container.assert_called_once()
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    def test_show_demo_banner_demo_mode(self, mock_is_demo, mock_st):
+        """Test demo banner displays in demo mode."""
+        mock_is_demo.return_value = True
+
+        show_demo_banner()
+
+        mock_st.info.assert_called_once()
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    def test_show_demo_banner_non_demo(self, mock_is_demo, mock_st):
+        """Test demo banner doesn't display when not in demo mode."""
+        mock_is_demo.return_value = False
+
+        show_demo_banner()
+
+        mock_st.info.assert_not_called()
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    def test_show_next_steps_middle_step(self, mock_is_demo, mock_st):
+        """Test showing next steps for middle onboarding step."""
+        mock_is_demo.return_value = True
+
+        show_next_steps(2)
+
+        mock_st.markdown.assert_called()
+        mock_st.info.assert_called()
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    def test_show_next_steps_completed(self, mock_is_demo, mock_st):
+        """Test showing next steps when all steps completed."""
+        mock_is_demo.return_value = True
+        mock_st.button.return_value = False
+
+        show_next_steps(6)
+
+        mock_st.success.assert_called_once()
+        mock_st.button.assert_called()
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    def test_show_next_steps_non_demo(self, mock_is_demo, mock_st):
+        """Test next steps doesn't display when not in demo mode."""
+        mock_is_demo.return_value = False
+
+        show_next_steps(2)
+
+        mock_st.markdown.assert_not_called()
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    @patch("datasure.utils.onboarding_utils.is_demo_complete")
+    def test_show_demo_completion_message_complete(
+        self, mock_is_complete, mock_is_demo, mock_st
+    ):
+        """Test completion message displays when demo is complete."""
+        mock_is_demo.return_value = True
+        mock_is_complete.return_value = True
+        mock_st.button.return_value = False
+        mock_st.columns.return_value = [MagicMock(), MagicMock()]
+
+        show_demo_completion_message()
+
+        mock_st.balloons.assert_called_once()
+        mock_st.success.assert_called_once()
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    @patch("datasure.utils.onboarding_utils.is_demo_complete")
+    def test_show_demo_completion_message_non_demo(
+        self, mock_is_complete, mock_is_demo, mock_st
+    ):
+        """Test completion message doesn't display when not in demo mode."""
+        mock_is_demo.return_value = False
+        mock_is_complete.return_value = True
+
+        show_demo_completion_message()
+
+        mock_st.balloons.assert_not_called()
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    @patch("datasure.utils.onboarding_utils.demo_container")
+    def test_demo_expander_demo_mode(self, mock_demo_container, mock_is_demo, mock_st):
+        """Test demo expander displays in demo mode."""
+        mock_is_demo.return_value = True
+
+        demo_expander("Test Title", "Test Content")
+
+        mock_st.expander.assert_called_once()
+        mock_demo_container.assert_called_once_with("Test Content")
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    def test_demo_expander_non_demo(self, mock_is_demo, mock_st):
+        """Test demo expander doesn't display when not in demo mode."""
+        mock_is_demo.return_value = False
+
+        demo_expander("Test Title", "Test Content")
+
+        mock_st.expander.assert_not_called()
+
+
+class TestCreateDemoProject:
+    """Test the create_demo_project function."""
+
+    @patch("datasure.utils.onboarding_utils.get_cache_path")
+    def test_create_demo_project_new(self, mock_get_cache_path, tmp_path):
+        """Test creating a new demo project."""
+        project_path = tmp_path / "demo_project"
+        projects_file = tmp_path / "projects.json"
+
+        def get_cache_path_side_effect(path):
+            if path == DEMO_PROJECT_ID:
+                return project_path
+            elif path == "projects.json":
+                return projects_file
+            return tmp_path / path
+
+        mock_get_cache_path.side_effect = get_cache_path_side_effect
+
+        result = create_demo_project()
+
+        assert result == DEMO_PROJECT_ID
+        assert project_path.exists()
+        assert (project_path / "data").exists()
+        assert (project_path / "settings").exists()
+        assert projects_file.exists()
+
+        # Verify projects.json content
+        with open(projects_file) as f:
+            projects = json.load(f)
+        assert DEMO_PROJECT_ID in projects
+        assert projects[DEMO_PROJECT_ID]["name"] == DEMO_PROJECT_NAME
+        assert projects[DEMO_PROJECT_ID]["is_demo"] is True
+
+    @patch("datasure.utils.onboarding_utils.get_cache_path")
+    def test_create_demo_project_existing(self, mock_get_cache_path, tmp_path):
+        """Test creating demo project when it already exists."""
+        project_path = tmp_path / "demo_project"
+        projects_file = tmp_path / "projects.json"
+
+        # Create existing project structure
+        project_path.mkdir(parents=True)
+        (project_path / "data").mkdir()
+        (project_path / "settings").mkdir()
+
+        # Create existing projects.json
+        existing_projects = {"other_project": {"name": "Other Project"}}
+        with open(projects_file, "w") as f:
+            json.dump(existing_projects, f)
+
+        def get_cache_path_side_effect(path):
+            if path == DEMO_PROJECT_ID:
+                return project_path
+            elif path == "projects.json":
+                return projects_file
+            return tmp_path / path
+
+        mock_get_cache_path.side_effect = get_cache_path_side_effect
+
+        result = create_demo_project()
+
+        assert result == DEMO_PROJECT_ID
+
+        # Verify projects.json was updated
+        with open(projects_file) as f:
+            projects = json.load(f)
+        assert DEMO_PROJECT_ID in projects
+        assert "other_project" in projects  # Existing project preserved
+
+
+class TestDemoDataGenerator:
+    """Test the DemoDataGenerator class."""
+
+    def test_demo_data_generator_initialization(self):
+        """Test DemoDataGenerator initialization."""
+        df = pl.DataFrame({"col1": [1, 2, 3], "col2": ["a", "b", "c"]})
+        generator = DemoDataGenerator(df)
+        assert generator.df.height == 3
+
+    def test_gen_starttime(self):
+        """Test generating starttime column."""
+        df = pl.DataFrame({"id": [1, 2, 3]})
+        generator = DemoDataGenerator(df)
+        result_df = generator._gen_starttime()
+
+        assert "starttime" in result_df.columns
+        assert result_df.height == 3
+
+    def test_gen_endtime(self):
+        """Test generating endtime column."""
+        df = pl.DataFrame({"id": [1, 2, 3]})
+        generator = DemoDataGenerator(df)
+        generator._gen_starttime()
+        result_df = generator._gen_endtime()
+
+        assert "endtime" in result_df.columns
+        assert result_df.height == 3
+
+    def test_gen_submissiondate(self):
+        """Test generating submissiondate column."""
+        df = pl.DataFrame({"id": [1, 2, 3]})
+        generator = DemoDataGenerator(df)
+        generator._gen_starttime()
+        generator._gen_endtime()
+        result_df = generator._gen_submissiondate()
+
+        assert "submissiondate" in result_df.columns
+        assert result_df.height == 3
+
+    def test_gen_consent_status(self):
+        """Test generating consent status column."""
+        df = pl.DataFrame({"id": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]})
+        generator = DemoDataGenerator(df)
+        result_df = generator._gen_consent_status()
+
+        assert "consent" in result_df.columns
+        assert result_df.height == 10
+        # Check that values are either 'yes' or 'no'
+        consent_values = result_df["consent"].to_list()
+        assert all(val in ["yes", "no"] for val in consent_values)
+
+    def test_gen_completion_status(self):
+        """Test generating completion status column."""
+        df = pl.DataFrame({"id": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]})
+        generator = DemoDataGenerator(df)
+        result_df = generator._gen_completion_status()
+
+        assert "completion_status" in result_df.columns
+        assert result_df.height == 10
+        # Check that values are either 'complete' or 'incomplete'
+        status_values = result_df["completion_status"].to_list()
+        assert all(val in ["complete", "incomplete"] for val in status_values)
+
+    def test_add_demo_fields_survey(self):
+        """Test adding all demo fields for survey data."""
+        df = pl.DataFrame({"id": [1, 2, 3]})
+        generator = DemoDataGenerator(df)
+        result_df = generator.add_demo_fields("survey")
+
+        assert "starttime" in result_df.columns
+        assert "endtime" in result_df.columns
+        assert "submissiondate" in result_df.columns
+        assert "consent" in result_df.columns
+        assert "completion_status" in result_df.columns
+
+    def test_add_demo_fields_backcheck(self):
+        """Test adding demo fields for backcheck data."""
+        df = pl.DataFrame({"id": [1, 2, 3]})
+        generator = DemoDataGenerator(df)
+        result_df = generator.add_demo_fields("backcheck")
+
+        assert "starttime" in result_df.columns
+        assert "endtime" in result_df.columns
+        assert "submissiondate" in result_df.columns
+        assert "consent" not in result_df.columns
+        assert "completion_status" not in result_df.columns
+
+
+class TestLoadDemoData:
+    """Test the load_demo_data function."""
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.DemoDataGenerator")
+    @patch("datasure.utils.onboarding_utils.pl.read_csv")
+    @patch("datasure.utils.onboarding_utils.duckdb_save_table")
+    @patch("datasure.utils.onboarding_utils.duckdb_remove_table")
+    def test_load_demo_data_success(
+        self,
+        mock_remove_table,
+        mock_save_table,
+        mock_read_csv,
+        mock_demo_generator,
+        mock_st,
+        tmp_path,
+    ):
+        """Test successful demo data loading."""
+        # Create actual temporary files
+        assets_dir = tmp_path / "assets"
+        assets_dir.mkdir()
+        survey_path = assets_dir / "demo_survey.csv"
+        backcheck_path = assets_dir / "demo_backcheck.csv"
+
+        # Write minimal CSV content
+        survey_path.write_text("id,name\n1,a\n2,b\n3,c\n")
+        backcheck_path.write_text("id,name\n1,x\n2,y\n")
+
+        # Mock DataFrame reading
+        mock_survey_df = pl.DataFrame({"id": [1, 2, 3], "name": ["a", "b", "c"]})
+        mock_backcheck_df = pl.DataFrame({"id": [1, 2], "name": ["x", "y"]})
+        mock_read_csv.side_effect = [mock_survey_df, mock_backcheck_df]
+
+        # Mock DemoDataGenerator
+        mock_generator_instance = MagicMock()
+        mock_generator_instance.add_demo_fields.return_value = mock_survey_df
+        mock_demo_generator.return_value = mock_generator_instance
+
+        # Mock session state
+        mock_st.session_state = {}
+
+        # Patch Path to use our tmp_path
+        with patch("datasure.utils.onboarding_utils.Path") as mock_path_class:
+            mock_file = MagicMock()
+            mock_file.parent.parent = assets_dir.parent
+            mock_path_class.return_value = mock_file
+
+            result = load_demo_data()
+
+            # The function calls multiple things, so we just check it completed
+            assert mock_read_csv.called
+            assert mock_save_table.called
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.Path")
+    def test_load_demo_data_files_not_found(self, mock_path, mock_st):
+        """Test load_demo_data when files don't exist."""
+        # Mock file paths to simulate files not existing
+        mock_file = MagicMock()
+        mock_assets_dir = MagicMock()
+        mock_survey_path = MagicMock()
+        mock_backcheck_path = MagicMock()
+
+        # Set exists to False for survey file
+        mock_survey_path.exists.return_value = False
+        mock_backcheck_path.exists.return_value = False
+
+        # Setup the path chain
+        mock_file.parent.parent.__truediv__.return_value = mock_assets_dir
+        mock_assets_dir.__truediv__.side_effect = [mock_survey_path, mock_backcheck_path]
+        mock_path.return_value = mock_file
+
+        result = load_demo_data()
+
+        assert result is False
+        # Error is called at least once (could be more with fallback)
+        assert mock_st.error.called
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.pl.read_csv")
+    @patch("datasure.utils.onboarding_utils.Path")
+    def test_load_demo_data_read_error_with_fallback(
+        self, mock_path, mock_read_csv, mock_st
+    ):
+        """Test load_demo_data with read error and fallback to pandas."""
+        # Mock file paths
+        mock_assets_dir = MagicMock()
+        mock_survey_path = MagicMock()
+        mock_backcheck_path = MagicMock()
+
+        mock_survey_path.exists.return_value = True
+        mock_backcheck_path.exists.return_value = True
+
+        mock_assets_dir.__truediv__.side_effect = [mock_survey_path, mock_backcheck_path]
+        mock_path.return_value.__truediv__.return_value = mock_assets_dir
+
+        # Mock read_csv to raise error
+        mock_read_csv.side_effect = Exception("Read error")
+
+        result = load_demo_data()
+
+        # Should show error due to failed read
+        assert mock_st.error.called
+
+
+class TestConstants:
+    """Test module constants."""
+
+    def test_demo_project_constants(self):
+        """Test that demo project constants are defined correctly."""
+        assert DEMO_PROJECT_ID == "demoproject"
+        assert DEMO_PROJECT_NAME == "DataSure Demo"
+        assert isinstance(DEMO_PROJECT_ID, str)
+        assert isinstance(DEMO_PROJECT_NAME, str)
