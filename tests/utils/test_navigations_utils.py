@@ -36,14 +36,14 @@ class TestPageNavigation:
         prev_call = mock_st.button.call_args_list[0]
         assert prev_call[0][0] == prev_config["label"]
         assert prev_call[1]["key"] == f"prev_button_{prev_config['label']}"
-        assert prev_call[1]["use_container_width"] is True
+        assert prev_call[1]["width"] == "stretch"
         assert "type" not in prev_call[1]  # Previous button should not be primary
 
         # Check second button call (next)
         next_call = mock_st.button.call_args_list[1]
         assert next_call[0][0] == next_config["label"]
         assert next_call[1]["key"] == f"next_button_{next_config['label']}"
-        assert next_call[1]["use_container_width"] is True
+        assert next_call[1]["width"] == "stretch"
         assert next_call[1]["type"] == "primary"  # Next button should be primary
 
     @patch("datasure.utils.navigations_utils.st")
@@ -66,7 +66,7 @@ class TestPageNavigation:
         mock_st.button.assert_called_once_with(
             prev_config["label"],
             key=f"prev_button_{prev_config['label']}",
-            use_container_width=True,
+            width="stretch",
         )
 
     @patch("datasure.utils.navigations_utils.st")
@@ -89,7 +89,7 @@ class TestPageNavigation:
         mock_st.button.assert_called_once_with(
             next_config["label"],
             key=f"next_button_{next_config['label']}",
-            use_container_width=True,
+            width="stretch",
             type="primary",
         )
 
