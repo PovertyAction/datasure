@@ -1,7 +1,6 @@
 """Tests for the onboarding utilities module."""
 
 import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import polars as pl
@@ -624,8 +623,6 @@ class TestLoadDemoData:
             mock_file.parent.parent = assets_dir.parent
             mock_path_class.return_value = mock_file
 
-            result = load_demo_data()
-
             # The function calls multiple things, so we just check it completed
             assert mock_read_csv.called
             assert mock_save_table.called
@@ -646,7 +643,10 @@ class TestLoadDemoData:
 
         # Setup the path chain
         mock_file.parent.parent.__truediv__.return_value = mock_assets_dir
-        mock_assets_dir.__truediv__.side_effect = [mock_survey_path, mock_backcheck_path]
+        mock_assets_dir.__truediv__.side_effect = [
+            mock_survey_path,
+            mock_backcheck_path,
+        ]
         mock_path.return_value = mock_file
 
         result = load_demo_data()
@@ -670,13 +670,14 @@ class TestLoadDemoData:
         mock_survey_path.exists.return_value = True
         mock_backcheck_path.exists.return_value = True
 
-        mock_assets_dir.__truediv__.side_effect = [mock_survey_path, mock_backcheck_path]
+        mock_assets_dir.__truediv__.side_effect = [
+            mock_survey_path,
+            mock_backcheck_path,
+        ]
         mock_path.return_value.__truediv__.return_value = mock_assets_dir
 
         # Mock read_csv to raise error
         mock_read_csv.side_effect = Exception("Read error")
-
-        result = load_demo_data()
 
         # Should show error due to failed read
         assert mock_st.error.called
