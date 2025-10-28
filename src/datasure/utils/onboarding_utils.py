@@ -5,6 +5,7 @@ from enum import Enum
 from pathlib import Path
 from typing import ClassVar
 
+import pandas as pd
 import polars as pl
 import streamlit as st
 
@@ -1551,7 +1552,22 @@ class DemoDataGenerator:
         return self.df
 
 
-def load_demo_data():
+# Load csv files with flexible parsing
+def load_csv_flexibly(file_path: Path) -> pl.DataFrame:
+    """Load CSV file with flexible parsing using polars and pandas as fallback."""
+    try:
+        df = pl.read_csv(str(file_path), truncate_ragged_lines=True, ignore_errors=True)
+    except Exception as e:
+        st.error(f"Error loading CSV data: {e}")
+        try:
+            df = pl.from_pandas(pd.read_csv(str(file_path)))
+        except Exception as fallback_e:
+            st.error(f"Failed to load CSV data with fallback method: {fallback_e}")
+            raise e  # noqa: B904
+    return df
+
+
+def load_demo_data() -> bool:
     """Load demo data files into the demo project."""
     # Get asset paths
     assets_dir = Path(__file__).parent.parent / "assets"
@@ -1562,147 +1578,89 @@ def load_demo_data():
         st.error("Demo data files not found. Please check the installation.")
         return False
 
+    # Load survey data with flexible CSV parsing
     try:
-        # Load survey data with flexible CSV parsing
-        survey_df = pl.read_csv(
-            str(survey_path), truncate_ragged_lines=True, ignore_errors=True
-        )
+        survey_df = load_csv_flexibly(survey_path)
+    except Exception:
+        return False
 
-        survey_df = DemoDataGenerator(survey_df).add_demo_fields()
+    try:
+        backcheck_df = load_csv_flexibly(backcheck_path)
+    except Exception:
+        return False
 
-        # Save to raw database (for import system)
-        duckdb_save_table(DEMO_PROJECT_ID, survey_df, "demo_survey", "raw")
+    survey_df = DemoDataGenerator(survey_df).add_demo_fields()
 
-        # clean prep/corrected entries
-        duckdb_remove_table(DEMO_PROJECT_ID, "demo_survey", "prep")
-        duckdb_remove_table(DEMO_PROJECT_ID, "demo_survey", "corrected")
+    # Save to raw database (for import system)
+    duckdb_save_table(DEMO_PROJECT_ID, survey_df, "demo_survey", "raw")
 
-        # Load backcheck data with flexible CSV parsing
-        backcheck_df = pl.read_csv(
-            str(backcheck_path), truncate_ragged_lines=True, ignore_errors=True
-        )
+    # clean prep/corrected entries
+    duckdb_remove_table(DEMO_PROJECT_ID, "demo_survey", "prep")
+    duckdb_remove_table(DEMO_PROJECT_ID, "demo_survey", "corrected")
 
-        backcheck_df = DemoDataGenerator(backcheck_df).add_demo_fields("backcheck")
+    # Load backcheck data with flexible CSV parsing
+    backcheck_df = pl.read_csv(
+        str(backcheck_path), truncate_ragged_lines=True, ignore_errors=True
+    )
 
-        # Save to raw database (for import system)
-        duckdb_save_table(DEMO_PROJECT_ID, backcheck_df, "demo_backcheck", "raw")
+    backcheck_df = DemoDataGenerator(backcheck_df).add_demo_fields("backcheck")
 
-        # clean prep/corrected entries
-        duckdb_remove_table(DEMO_PROJECT_ID, "demo_backcheck", "prep")
-        duckdb_remove_table(DEMO_PROJECT_ID, "demo_backcheck", "corrected")
+    # Save to raw database (for import system)
+    duckdb_save_table(DEMO_PROJECT_ID, backcheck_df, "demo_backcheck", "raw")
 
-        # clean log entries
-        duckdb_remove_table(DEMO_PROJECT_ID, "prep_log_demo_survey", "logs")
-        duckdb_remove_table(DEMO_PROJECT_ID, "prep_log_demo_backcheck", "logs")
-        duckdb_remove_table(DEMO_PROJECT_ID, "check_config", "logs")
+    # clean prep/corrected entries
+    duckdb_remove_table(DEMO_PROJECT_ID, "demo_backcheck", "prep")
+    duckdb_remove_table(DEMO_PROJECT_ID, "demo_backcheck", "corrected")
 
-        # Create import log entries to register the data as imported
-        import_log_data = [
-            {
-                "refresh": True,
-                "load": True,
-                "alias": "demo_survey",
-                "filename": "demo_survey.csv",
-                "sheet_name": None,
-                "source": "Demo Data",
-                "server": None,
-                "username": None,
-                "form_id": None,
-                "private_key": None,
-                "save_to": None,
-                "attachments": False,
-            },
-            {
-                "refresh": True,
-                "load": True,
-                "alias": "demo_backcheck",
-                "filename": "demo_backcheck.csv",
-                "sheet_name": None,
-                "source": "Demo Data",
-                "server": None,
-                "username": None,
-                "form_id": None,
-                "private_key": None,
-                "save_to": None,
-                "attachments": False,
-            },
-        ]
+    # clean log entries
+    duckdb_remove_table(DEMO_PROJECT_ID, "prep_log_demo_survey", "logs")
+    duckdb_remove_table(DEMO_PROJECT_ID, "prep_log_demo_backcheck", "logs")
+    duckdb_remove_table(DEMO_PROJECT_ID, "check_config", "logs")
 
-        import_log_df = pl.DataFrame(import_log_data)
-        duckdb_save_table(DEMO_PROJECT_ID, import_log_df, "import_log", "logs")
+    # Create import log entries to register the data as imported
+    import_log_data = [
+        {
+            "refresh": True,
+            "load": True,
+            "alias": "demo_survey",
+            "filename": "demo_survey.csv",
+            "sheet_name": None,
+            "source": "Demo Data",
+            "server": None,
+            "username": None,
+            "form_id": None,
+            "private_key": None,
+            "save_to": None,
+            "attachments": False,
+        },
+        {
+            "refresh": True,
+            "load": True,
+            "alias": "demo_backcheck",
+            "filename": "demo_backcheck.csv",
+            "sheet_name": None,
+            "source": "Demo Data",
+            "server": None,
+            "username": None,
+            "form_id": None,
+            "private_key": None,
+            "save_to": None,
+            "attachments": False,
+        },
+    ]
 
-        # Create empty prep logs for each dataset
-        for alias in ["demo_survey", "demo_backcheck"]:
-            empty_prep_log = pl.DataFrame({"action": [], "description": []})
-            duckdb_save_table(
-                DEMO_PROJECT_ID, empty_prep_log, f"prep_log_{alias}", "logs"
-            )
+    import_log_df = pl.DataFrame(import_log_data)
+    duckdb_save_table(DEMO_PROJECT_ID, import_log_df, "import_log", "logs")
 
-        # Update session state with loaded datasets
-        st.session_state.st_raw_dataset_list = ["demo_survey", "demo_backcheck"]
+    # Create empty prep logs for each dataset
+    for alias in ["demo_survey", "demo_backcheck"]:
+        empty_prep_log = pl.DataFrame({"action": [], "description": []})
+        duckdb_save_table(DEMO_PROJECT_ID, empty_prep_log, f"prep_log_{alias}", "logs")
 
-    except Exception as e:
-        st.error(f"Error loading demo data: {e}")
-        # Try alternative approach with pandas if polars fails
-        try:
-            import pandas as pd
+    # Update session state with loaded datasets
+    st.session_state.st_raw_dataset_list = ["demo_survey", "demo_backcheck"]
 
-            survey_df = pl.from_pandas(pd.read_csv(str(survey_path)))
-            duckdb_save_table(DEMO_PROJECT_ID, survey_df, "demo_survey", "raw")
-
-            backcheck_df = pl.from_pandas(pd.read_csv(str(backcheck_path)))
-            duckdb_save_table(DEMO_PROJECT_ID, backcheck_df, "demo_backcheck", "raw")
-
-            # Create import log entries for fallback method too
-            import_log_data = [
-                {
-                    "refresh": True,
-                    "load": True,
-                    "alias": "demo_survey",
-                    "filename": "demo_survey.csv",
-                    "sheet_name": None,
-                    "source": "Demo Data",
-                    "server": None,
-                    "username": None,
-                    "form_id": None,
-                    "private_key": None,
-                    "save_to": None,
-                    "attachments": False,
-                },
-                {
-                    "refresh": True,
-                    "load": True,
-                    "alias": "demo_backcheck",
-                    "filename": "demo_backcheck.csv",
-                    "sheet_name": None,
-                    "source": "Demo Data",
-                    "server": None,
-                    "username": None,
-                    "form_id": None,
-                    "private_key": None,
-                    "save_to": None,
-                    "attachments": False,
-                },
-            ]
-
-            import_log_df = pl.DataFrame(import_log_data)
-            duckdb_save_table(DEMO_PROJECT_ID, import_log_df, "import_log", "logs")
-
-            # Create empty prep logs for each dataset (fallback method)
-            for alias in ["demo_survey", "demo_backcheck"]:
-                empty_prep_log = pl.DataFrame({"action": [], "description": []})
-                duckdb_save_table(
-                    DEMO_PROJECT_ID, empty_prep_log, f"prep_log_{alias}", "logs"
-                )
-
-            st.session_state.st_raw_dataset_list = ["demo_survey", "demo_backcheck"]
-            st.success("Demo data loaded successfully using fallback method!")
-
-        except Exception as fallback_e:
-            st.error(f"Failed to load demo data with fallback method: {fallback_e}")
-            return False
-    else:
-        return True
+    return True
 
 
 def is_demo_complete() -> bool:

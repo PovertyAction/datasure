@@ -21,6 +21,7 @@ from datasure.utils.onboarding_utils import (
     get_onboarding_step,
     is_demo_complete,
     is_demo_project,
+    load_csv_flexibly,
     load_demo_data,
     set_onboarding_step,
     show_demo_banner,
@@ -29,6 +30,17 @@ from datasure.utils.onboarding_utils import (
     show_next_steps,
     show_progress_indicator,
 )
+
+
+class TestConstants:
+    """Test module constants."""
+
+    def test_demo_project_constants(self):
+        """Test that demo project constants are defined correctly."""
+        assert DEMO_PROJECT_ID == "demoproject"
+        assert DEMO_PROJECT_NAME == "DataSure Demo"
+        assert isinstance(DEMO_PROJECT_ID, str)
+        assert isinstance(DEMO_PROJECT_NAME, str)
 
 
 class TestCheckPage:
@@ -66,6 +78,12 @@ class TestDemoContainer:
         # Verify markdown was called with unsafe_allow_html=True
         assert mock_st.markdown.call_count == 2  # Once for styled div, once for spacing
 
+    @patch("datasure.utils.onboarding_utils.st")
+    def test_demo_container_with_empty_text(self, mock_st):
+        """Test demo_container with empty text."""
+        demo_container("")
+        mock_st.container.assert_called_once()
+
 
 class TestImportDemoInfo:
     """Test the ImportDemoInfo class."""
@@ -81,6 +99,24 @@ class TestImportDemoInfo:
         message = ImportDemoInfo.get_info_message("preview_data_info")
         assert "Data import complete" in message
 
+        message = ImportDemoInfo.get_info_message("proceed_to_config_info")
+        assert "experiment with data preparation" in message
+
+        message = ImportDemoInfo.get_info_message("demo_data_info")
+        assert "Data Import Complete" in message
+
+        message = ImportDemoInfo.get_info_message("proceed_to_hfcs_info")
+        assert "ready to view your HFC reports" in message
+
+        message = ImportDemoInfo.get_info_message("add_check_config_info")
+        assert "Follow these steps to set up data quality checks" in message
+
+        message = ImportDemoInfo.get_info_message("add_prep_steps_info")
+        assert "convert the submissiondate" in message
+
+        message = ImportDemoInfo.get_info_message("add_correction_step_info")
+        assert "make corrections to the demo_survey dataset" in message
+
     def test_get_info_message_invalid_id(self):
         """Test getting info message with invalid ID returns default message."""
         message = ImportDemoInfo.get_info_message("invalid_message_id")
@@ -95,6 +131,8 @@ class TestImportDemoInfo:
         assert hasattr(ImportDemoInfo, "DEMO_DATA_INFO")
         assert hasattr(ImportDemoInfo, "PROCEED_TO_HFCS_INFO")
         assert hasattr(ImportDemoInfo, "ADD_CHECK_CONFIG_INFO")
+        assert hasattr(ImportDemoInfo, "ADD_PREP_STEPS_INFO")
+        assert hasattr(ImportDemoInfo, "ADD_CORRECTION_STEP_INFO")
 
 
 class TestOnboardingSteps:
@@ -110,6 +148,18 @@ class TestOnboardingSteps:
         import_step = OnboardingSteps.get_step_info("import")
         assert import_step["step"] == 2
         assert import_step["title"] == "Import Data"
+
+        prepare_step = OnboardingSteps.get_step_info("prepare")
+        assert prepare_step["step"] == 3
+
+        configure_step = OnboardingSteps.get_step_info("configure")
+        assert configure_step["step"] == 4
+
+        reports_step = OnboardingSteps.get_step_info("reports")
+        assert reports_step["step"] == 5
+
+        correct_step = OnboardingSteps.get_step_info("correct")
+        assert correct_step["step"] == 6
 
     def test_get_step_info_invalid_step(self):
         """Test getting step info with invalid step name."""
@@ -138,10 +188,27 @@ class TestOnboardingSteps:
         mock_demo_container.assert_called_once()
 
     @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.demo_container")
+    def test_get_guidance_all_steps(self, mock_demo_container, mock_st):
+        """Test getting guidance for all valid steps."""
+        for step_num in range(1, 7):
+            OnboardingSteps.get_guidance(step_num)
+        assert mock_st.expander.call_count == 6
+
+    @patch("datasure.utils.onboarding_utils.st")
     def test_get_guidance_invalid_step(self, mock_st):
         """Test that getting guidance for invalid step raises ValueError."""
         with pytest.raises(ValueError, match="Invalid step: 99"):
             OnboardingSteps.get_guidance(99)
+
+    def test_class_variables_exist(self):
+        """Test that all class variables are defined."""
+        assert hasattr(OnboardingSteps, "START")
+        assert hasattr(OnboardingSteps, "IMPORT")
+        assert hasattr(OnboardingSteps, "PREPARE")
+        assert hasattr(OnboardingSteps, "CONFIGURE")
+        assert hasattr(OnboardingSteps, "OUTPUTS")
+        assert hasattr(OnboardingSteps, "CORRECT")
 
 
 class TestOutputOnboardingInfo:
@@ -155,12 +222,77 @@ class TestOutputOnboardingInfo:
         assert message["title"] == "Data Quality Summary"
         assert "overview of the data quality checks" in message["content"]
 
+        # Test other summary messages
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "summary", "summary_settings"
+        )
+        assert message["title"] == "Summary Settings"
+
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "summary", "summary_data_summary"
+        )
+        assert message["title"] == "Data Summary"
+
     def test_get_onboarding_message_progress(self):
         """Test getting onboarding message for progress tab."""
         message = OutputOnboardingInfo.get_onboarding_message(
             "progress", "progress_report"
         )
         assert message["title"] == "Progress Report"
+
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "progress", "progress_report_settings"
+        )
+        assert message["title"] == "Progress Settings"
+
+    def test_get_onboarding_message_duplicates(self):
+        """Test getting onboarding message for duplicates tab."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "duplicates", "duplicate_report"
+        )
+        assert message["title"] == "Duplicate Records Report"
+
+    def test_get_onboarding_message_missing(self):
+        """Test getting onboarding message for missing tab."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "missing", "missing_report"
+        )
+        assert message["title"] == "Missing Data Report"
+
+    def test_get_onboarding_message_outliers(self):
+        """Test getting onboarding message for outliers tab."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "outliers", "outlier_report"
+        )
+        assert message["title"] == "Outliers Report"
+
+    def test_get_onboarding_message_enumerators(self):
+        """Test getting onboarding message for enumerators tab."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "enumerators", "enumerator_report"
+        )
+        assert message["title"] == "Enumerator Stats Report"
+
+    def test_get_onboarding_message_descriptive_stats(self):
+        """Test getting onboarding message for descriptive stats tab."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "descriptive_stats", "descriptive_report"
+        )
+        assert message["title"] == "Descriptive Statistics Report"
+
+    def test_get_onboarding_message_backchecks(self):
+        """Test getting onboarding message for backchecks tab."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "backchecks", "backchecks_report"
+        )
+        assert message["title"] == "Back Checks Report"
+
+    def test_get_onboarding_message_gpschecks(self):
+        """Test getting onboarding message for GPS checks tab."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "gpschecks", "gpschecks_report"
+        )
+        assert message["title"] == "GPS Checks Report"
 
     def test_get_onboarding_message_invalid_tab(self):
         """Test getting onboarding message with invalid tab."""
@@ -220,6 +352,19 @@ class TestDemoOutputOnboarding:
         assert result == "executed"
         mock_demo_expander.assert_not_called()
 
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    @patch("datasure.utils.onboarding_utils.demo_expander")
+    def test_decorator_with_args_and_kwargs(self, mock_demo_expander, mock_is_demo):
+        """Test decorator with function that has arguments."""
+        mock_is_demo.return_value = True
+
+        @demo_output_onboarding("summary")
+        def summary_report(arg1, arg2, kwarg1=None):
+            return f"{arg1}-{arg2}-{kwarg1}"
+
+        result = summary_report("a", "b", kwarg1="c")
+        assert result == "a-b-c"
+
 
 class TestDemoProjectFunctions:
     """Test demo project state functions."""
@@ -275,6 +420,13 @@ class TestDemoProjectFunctions:
         mock_get_step.return_value = 3
         assert is_demo_complete() is False
 
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.get_onboarding_step")
+    def test_is_demo_complete_exceeds_steps(self, mock_get_step, mock_st):
+        """Test is_demo_complete when step exceeds total steps."""
+        mock_get_step.return_value = 10
+        assert is_demo_complete() is True
+
 
 class TestDemoUIFunctions:
     """Test demo UI display functions."""
@@ -306,11 +458,41 @@ class TestDemoUIFunctions:
         mock_st.markdown.assert_not_called()
 
     @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    @patch("datasure.utils.onboarding_utils.get_onboarding_step")
+    def test_show_progress_indicator_step_states(
+        self, mock_get_step, mock_is_demo, mock_st
+    ):
+        """Test progress indicator shows different states for current, completed,
+        and future steps.
+        """
+        mock_is_demo.return_value = True
+        mock_get_step.return_value = 3
+
+        # Create mock columns with context manager support
+        mock_cols = []
+        for _ in range(6):
+            mock_col = MagicMock()
+            mock_col.__enter__ = MagicMock(return_value=mock_col)
+            mock_col.__exit__ = MagicMock(return_value=False)
+            mock_cols.append(mock_col)
+
+        mock_st.columns.return_value = mock_cols
+
+        show_progress_indicator()
+
+        # Verify that markdown was called for each step
+        assert mock_st.markdown.call_count >= 6
+
+    @patch("datasure.utils.onboarding_utils.st")
     @patch("datasure.utils.onboarding_utils.demo_container")
     def test_show_demo_intro(self, mock_demo_container, mock_st):
         """Test demo intro displays correctly."""
         show_demo_intro()
         mock_demo_container.assert_called_once()
+        args = mock_demo_container.call_args[0][0]
+        assert "Start here" in args
+        assert "Importing survey data" in args
 
     @patch("datasure.utils.onboarding_utils.st")
     @patch("datasure.utils.onboarding_utils.is_demo_project")
@@ -342,6 +524,17 @@ class TestDemoUIFunctions:
 
         mock_st.markdown.assert_called()
         mock_st.info.assert_called()
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    def test_show_next_steps_first_step(self, mock_is_demo, mock_st):
+        """Test showing next steps for first step."""
+        mock_is_demo.return_value = True
+
+        show_next_steps(1)
+
+        # Should show special message for step 1
+        assert mock_st.markdown.call_count >= 2
 
     @patch("datasure.utils.onboarding_utils.st")
     @patch("datasure.utils.onboarding_utils.is_demo_project")
@@ -385,12 +578,65 @@ class TestDemoUIFunctions:
     @patch("datasure.utils.onboarding_utils.st")
     @patch("datasure.utils.onboarding_utils.is_demo_project")
     @patch("datasure.utils.onboarding_utils.is_demo_complete")
+    def test_show_demo_completion_message_restart_button(
+        self, mock_is_complete, mock_is_demo, mock_st
+    ):
+        """Test completion message restart button click."""
+        mock_is_demo.return_value = True
+        mock_is_complete.return_value = True
+        mock_st.button.side_effect = [True, False]  # First button clicked
+        mock_st.columns.return_value = [MagicMock(), MagicMock()]
+
+        with patch("datasure.utils.onboarding_utils.set_onboarding_step") as mock_set:
+            show_demo_completion_message()
+            mock_set.assert_called_with(1)
+            mock_st.rerun.assert_called_once()
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    @patch("datasure.utils.onboarding_utils.is_demo_complete")
+    def test_show_demo_completion_message_create_project_button(
+        self, mock_is_complete, mock_is_demo, mock_st
+    ):
+        """Test completion message create new project button click."""
+        mock_is_demo.return_value = True
+        mock_is_complete.return_value = True
+        mock_st.button.side_effect = [False, True]  # Second button clicked
+        mock_st.columns.return_value = [MagicMock(), MagicMock()]
+
+        # Use MagicMock for session_state to support attribute assignment
+        mock_session_state = MagicMock()
+        mock_session_state.onboarding_step = 6
+        mock_st.session_state = mock_session_state
+
+        show_demo_completion_message()
+
+        assert mock_st.session_state.st_project_id == ""
+        mock_st.switch_page.assert_called_with("pages/start_view.py")
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    @patch("datasure.utils.onboarding_utils.is_demo_complete")
     def test_show_demo_completion_message_non_demo(
         self, mock_is_complete, mock_is_demo, mock_st
     ):
         """Test completion message doesn't display when not in demo mode."""
         mock_is_demo.return_value = False
         mock_is_complete.return_value = True
+
+        show_demo_completion_message()
+
+        mock_st.balloons.assert_not_called()
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    @patch("datasure.utils.onboarding_utils.is_demo_complete")
+    def test_show_demo_completion_message_incomplete(
+        self, mock_is_complete, mock_is_demo, mock_st
+    ):
+        """Test completion message doesn't display when demo incomplete."""
+        mock_is_demo.return_value = True
+        mock_is_complete.return_value = False
 
         show_demo_completion_message()
 
@@ -407,6 +653,19 @@ class TestDemoUIFunctions:
 
         mock_st.expander.assert_called_once()
         mock_demo_container.assert_called_once_with("Test Content")
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    @patch("datasure.utils.onboarding_utils.demo_container")
+    def test_demo_expander_collapsed(self, mock_demo_container, mock_is_demo, mock_st):
+        """Test demo expander with expanded=False."""
+        mock_is_demo.return_value = True
+
+        demo_expander("Test Title", "Test Content", expanded=False)
+
+        # Verify expander was called with expanded=False
+        call_args = mock_st.expander.call_args
+        assert call_args[1]["expanded"] is False
 
     @patch("datasure.utils.onboarding_utils.st")
     @patch("datasure.utils.onboarding_utils.is_demo_project")
@@ -527,6 +786,18 @@ class TestDemoDataGenerator:
         assert "submissiondate" in result_df.columns
         assert result_df.height == 3
 
+    def test_gen_dates(self):
+        """Test generating all date columns."""
+        df = pl.DataFrame({"id": [1, 2, 3]})
+        generator = DemoDataGenerator(df)
+        result_df = generator._gen_dates()
+
+        assert "starttime" in result_df.columns
+        assert "endtime" in result_df.columns
+        assert "submissiondate" in result_df.columns
+        # Verify dates are strings
+        assert result_df["starttime"].dtype == pl.Utf8
+
     def test_gen_consent_status(self):
         """Test generating consent status column."""
         df = pl.DataFrame({"id": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]})
@@ -538,6 +809,8 @@ class TestDemoDataGenerator:
         # Check that values are either 'yes' or 'no'
         consent_values = result_df["consent"].to_list()
         assert all(val in ["yes", "no"] for val in consent_values)
+        # Most should be 'yes' given 98% weight
+        assert consent_values.count("yes") >= 8
 
     def test_gen_completion_status(self):
         """Test generating completion status column."""
@@ -575,74 +848,158 @@ class TestDemoDataGenerator:
         assert "consent" not in result_df.columns
         assert "completion_status" not in result_df.columns
 
+    def test_add_demo_fields_default(self):
+        """Test add_demo_fields with default datatype."""
+        df = pl.DataFrame({"id": [1, 2]})
+        generator = DemoDataGenerator(df)
+        result_df = generator.add_demo_fields()  # Default is "survey"
+
+        assert "consent" in result_df.columns
+        assert "completion_status" in result_df.columns
+
+
+class TestLoadCsvFlexibly:
+    """Test the load_csv_flexibly function."""
+
+    @patch("datasure.utils.onboarding_utils.pl.read_csv")
+    @patch("datasure.utils.onboarding_utils.st")
+    def test_load_csv_flexibly_success(self, mock_st, mock_read_csv, tmp_path):
+        """Test successful CSV loading with polars."""
+        csv_path = tmp_path / "test.csv"
+        csv_path.write_text("col1,col2\n1,a\n2,b\n")
+
+        mock_df = pl.DataFrame({"col1": [1, 2], "col2": ["a", "b"]})
+        mock_read_csv.return_value = mock_df
+
+        result = load_csv_flexibly(csv_path)
+
+        assert result.height == 2
+        mock_read_csv.assert_called_once()
+
+    @patch("datasure.utils.onboarding_utils.pl.read_csv")
+    @patch("datasure.utils.onboarding_utils.pd.read_csv")
+    @patch("datasure.utils.onboarding_utils.pl.from_pandas")
+    @patch("datasure.utils.onboarding_utils.st")
+    def test_load_csv_flexibly_fallback_to_pandas(
+        self, mock_st, mock_from_pandas, mock_pd_read, mock_pl_read, tmp_path
+    ):
+        """Test fallback to pandas when polars fails."""
+        csv_path = tmp_path / "test.csv"
+        csv_path.write_text("col1,col2\n1,a\n2,b\n")
+
+        # Make polars fail
+        mock_pl_read.side_effect = Exception("Polars error")
+
+        # Make pandas succeed
+        import pandas as pd
+
+        pandas_df = pd.DataFrame({"col1": [1, 2], "col2": ["a", "b"]})
+        mock_pd_read.return_value = pandas_df
+
+        polars_df = pl.DataFrame({"col1": [1, 2], "col2": ["a", "b"]})
+        mock_from_pandas.return_value = polars_df
+
+        result = load_csv_flexibly(csv_path)
+
+        assert result.height == 2
+        mock_st.error.assert_called()
+        mock_pd_read.assert_called_once()
+
+    @patch("datasure.utils.onboarding_utils.pl.read_csv")
+    @patch("datasure.utils.onboarding_utils.pd.read_csv")
+    @patch("datasure.utils.onboarding_utils.st")
+    def test_load_csv_flexibly_both_fail(
+        self, mock_st, mock_pd_read, mock_pl_read, tmp_path
+    ):
+        """Test when both polars and pandas fail."""
+        csv_path = tmp_path / "test.csv"
+        csv_path.write_text("invalid,csv\ndata")
+
+        # Make both fail
+        polars_error = Exception("Polars error")
+        mock_pl_read.side_effect = polars_error
+        mock_pd_read.side_effect = Exception("Pandas error")
+
+        with pytest.raises(Exception):  # noqa: B017
+            load_csv_flexibly(csv_path)
+
+        assert mock_st.error.call_count == 2
+
 
 class TestLoadDemoData:
     """Test the load_demo_data function."""
 
     @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.load_csv_flexibly")
     @patch("datasure.utils.onboarding_utils.DemoDataGenerator")
-    @patch("datasure.utils.onboarding_utils.pl.read_csv")
     @patch("datasure.utils.onboarding_utils.duckdb_save_table")
     @patch("datasure.utils.onboarding_utils.duckdb_remove_table")
+    @patch("datasure.utils.onboarding_utils.pl.read_csv")
+    @patch("datasure.utils.onboarding_utils.Path")
     def test_load_demo_data_success(
         self,
-        mock_remove_table,
-        mock_save_table,
-        mock_read_csv,
-        mock_demo_generator,
+        mock_path,
+        mock_pl_read,
+        mock_remove,
+        mock_save,
+        mock_generator_class,
+        mock_load_csv,
         mock_st,
-        tmp_path,
     ):
         """Test successful demo data loading."""
-        # Create actual temporary files
-        assets_dir = tmp_path / "assets"
-        assets_dir.mkdir()
-        survey_path = assets_dir / "demo_survey.csv"
-        backcheck_path = assets_dir / "demo_backcheck.csv"
-
-        # Write minimal CSV content
-        survey_path.write_text("id,name\n1,a\n2,b\n3,c\n")
-        backcheck_path.write_text("id,name\n1,x\n2,y\n")
-
-        # Mock DataFrame reading
-        mock_survey_df = pl.DataFrame({"id": [1, 2, 3], "name": ["a", "b", "c"]})
-        mock_backcheck_df = pl.DataFrame({"id": [1, 2], "name": ["x", "y"]})
-        mock_read_csv.side_effect = [mock_survey_df, mock_backcheck_df]
-
-        # Mock DemoDataGenerator
-        mock_generator_instance = MagicMock()
-        mock_generator_instance.add_demo_fields.return_value = mock_survey_df
-        mock_demo_generator.return_value = mock_generator_instance
-
-        # Mock session state
-        mock_st.session_state = {}
-
-        # Patch Path to use our tmp_path
-        with patch("datasure.utils.onboarding_utils.Path") as mock_path_class:
-            mock_file = MagicMock()
-            mock_file.parent.parent = assets_dir.parent
-            mock_path_class.return_value = mock_file
-
-            # The function calls multiple things, so we just check it completed
-            assert mock_read_csv.called
-            assert mock_save_table.called
-
-    @patch("datasure.utils.onboarding_utils.st")
-    @patch("datasure.utils.onboarding_utils.Path")
-    def test_load_demo_data_files_not_found(self, mock_path, mock_st):
-        """Test load_demo_data when files don't exist."""
-        # Mock file paths to simulate files not existing
+        # Setup mocks
         mock_file = MagicMock()
         mock_assets_dir = MagicMock()
         mock_survey_path = MagicMock()
         mock_backcheck_path = MagicMock()
 
-        # Set exists to False for survey file
+        mock_survey_path.exists.return_value = True
+        mock_backcheck_path.exists.return_value = True
+
+        mock_file.parent.parent = mock_assets_dir
+        mock_assets_dir.__truediv__.side_effect = [
+            mock_survey_path,
+            mock_backcheck_path,
+        ]
+        mock_path.return_value = mock_file
+
+        # Mock DataFrames
+        survey_df = pl.DataFrame({"id": [1, 2], "name": ["a", "b"]})
+        backcheck_df = pl.DataFrame({"id": [1], "name": ["x"]})
+
+        mock_load_csv.side_effect = [survey_df, backcheck_df]
+        mock_pl_read.return_value = backcheck_df
+
+        # Mock generator
+        mock_generator = MagicMock()
+        mock_generator.add_demo_fields.return_value = survey_df
+        mock_generator_class.return_value = mock_generator
+
+        # Mock session state - use MagicMock to support attribute assignment
+        mock_st.session_state = MagicMock()
+
+        result = load_demo_data()
+
+        assert result is True
+        assert mock_st.session_state.st_raw_dataset_list == [
+            "demo_survey",
+            "demo_backcheck",
+        ]
+
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.Path")
+    def test_load_demo_data_files_not_found(self, mock_path, mock_st):
+        """Test load_demo_data when files don't exist."""
+        # Setup mocks for files not existing
+        mock_file = MagicMock()
+        mock_assets_dir = MagicMock()
+        mock_survey_path = MagicMock()
+        mock_backcheck_path = MagicMock()
+
         mock_survey_path.exists.return_value = False
         mock_backcheck_path.exists.return_value = False
 
-        # Setup the path chain
-        mock_file.parent.parent.__truediv__.return_value = mock_assets_dir
+        mock_file.parent.parent = mock_assets_dir
         mock_assets_dir.__truediv__.side_effect = [
             mock_survey_path,
             mock_backcheck_path,
@@ -652,17 +1009,15 @@ class TestLoadDemoData:
         result = load_demo_data()
 
         assert result is False
-        # Error is called at least once (could be more with fallback)
-        assert mock_st.error.called
+        mock_st.error.assert_called()
 
     @patch("datasure.utils.onboarding_utils.st")
-    @patch("datasure.utils.onboarding_utils.pl.read_csv")
+    @patch("datasure.utils.onboarding_utils.load_csv_flexibly")
     @patch("datasure.utils.onboarding_utils.Path")
-    def test_load_demo_data_read_error_with_fallback(
-        self, mock_path, mock_read_csv, mock_st
-    ):
-        """Test load_demo_data with read error and fallback to pandas."""
-        # Mock file paths
+    def test_load_demo_data_survey_load_fails(self, mock_path, mock_load_csv, mock_st):
+        """Test load_demo_data when survey loading fails."""
+        # Setup paths
+        mock_file = MagicMock()
         mock_assets_dir = MagicMock()
         mock_survey_path = MagicMock()
         mock_backcheck_path = MagicMock()
@@ -670,25 +1025,47 @@ class TestLoadDemoData:
         mock_survey_path.exists.return_value = True
         mock_backcheck_path.exists.return_value = True
 
+        mock_file.parent.parent = mock_assets_dir
         mock_assets_dir.__truediv__.side_effect = [
             mock_survey_path,
             mock_backcheck_path,
         ]
-        mock_path.return_value.__truediv__.return_value = mock_assets_dir
+        mock_path.return_value = mock_file
 
-        # Mock read_csv to raise error
-        mock_read_csv.side_effect = Exception("Read error")
+        # Make survey loading fail
+        mock_load_csv.side_effect = Exception("Load error")
 
-        # Should show error due to failed read
-        assert mock_st.error.called
+        result = load_demo_data()
 
+        assert result is False
 
-class TestConstants:
-    """Test module constants."""
+    @patch("datasure.utils.onboarding_utils.st")
+    @patch("datasure.utils.onboarding_utils.load_csv_flexibly")
+    @patch("datasure.utils.onboarding_utils.Path")
+    def test_load_demo_data_backcheck_load_fails(
+        self, mock_path, mock_load_csv, mock_st
+    ):
+        """Test load_demo_data when backcheck loading fails."""
+        # Setup paths
+        mock_file = MagicMock()
+        mock_assets_dir = MagicMock()
+        mock_survey_path = MagicMock()
+        mock_backcheck_path = MagicMock()
 
-    def test_demo_project_constants(self):
-        """Test that demo project constants are defined correctly."""
-        assert DEMO_PROJECT_ID == "demoproject"
-        assert DEMO_PROJECT_NAME == "DataSure Demo"
-        assert isinstance(DEMO_PROJECT_ID, str)
-        assert isinstance(DEMO_PROJECT_NAME, str)
+        mock_survey_path.exists.return_value = True
+        mock_backcheck_path.exists.return_value = True
+
+        mock_file.parent.parent = mock_assets_dir
+        mock_assets_dir.__truediv__.side_effect = [
+            mock_survey_path,
+            mock_backcheck_path,
+        ]
+        mock_path.return_value = mock_file
+
+        # First call succeeds (survey), second fails (backcheck)
+        survey_df = pl.DataFrame({"id": [1, 2]})
+        mock_load_csv.side_effect = [survey_df, Exception("Backcheck error")]
+
+        result = load_demo_data()
+
+        assert result is False
