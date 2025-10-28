@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from datasure.utils.navigations import page_navigation
+from datasure.utils.navigations_utils import page_navigation
 
 
 class TestPageNavigation:

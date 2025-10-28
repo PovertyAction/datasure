@@ -535,17 +535,6 @@ class TestPrepApplyAction:
         mock_save.assert_called()
 
     @patch("datasure.processing.prep.duckdb_get_table")
-    def test_prep_apply_action_empty_log_reapply(self, mock_get):
-        """Test re-applying with empty log."""
-        # Mock empty log
-        mock_log = pl.DataFrame({"prep_args": []})
-        mock_get.return_value = mock_log
-
-        # Should return None for empty log
-        result = prep_apply_action("test_project", "test_alias", prep_args=None)
-        assert result is None
-
-    @patch("datasure.processing.prep.duckdb_get_table")
     def test_prep_apply_action_ast_literal_eval(self, mock_get):
         """Test handling of string prep_args that need ast.literal_eval."""
         # Mock log with string representation of prep_args

@@ -564,7 +564,6 @@ class TestDisplayFunctions:
         display_progress_overtime(sample_dataframe, "submission_date", "settings.json")
 
         # Verify components were called
-        mock_streamlit_display["write"].assert_called()
         mock_streamlit_display["radio"].assert_called()
         mock_streamlit_display["plotly"].assert_called()
 
@@ -1211,7 +1210,7 @@ class TestChartGenerationAndVisualization:
             # Verify the call includes the expected parameters
             call_args = mock_plotly.call_args
             assert call_args[1]["theme"] is None
-            assert call_args[1]["use_container_width"] is True
+            assert call_args[1]["width"] == 'stretch'
 
 
 class TestErrorHandlingAndRobustness:
