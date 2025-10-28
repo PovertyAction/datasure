@@ -157,6 +157,32 @@ class ImportDemoInfo:
         crucial step to ensure accurate date handling in your analysis.
     """
 
+    ADD_CORRECTION_STEP_INFO: ClassVar[str] = """
+        You are about to make corrections to the demo_survey dataset.
+        Follow the instructions provided in the guidance section to apply the necessary corrections.
+
+        ##### Instructions for Demo:
+        - Make the following corrections to the demo_survey dataset:
+            1. For the duplicate records found on hhid "UP015-005", we find out upon investigation that
+            the correct HHID for the response with the key "uuid:0dk0vt97-786b-250u-34k7-z34615zz820c" is "UP015-055". Correct the ID by
+            doing the following:
+                - Click on **:material/add: Add correction** button
+                - Under **Select Key**, choose "uuid:0dk0vt97-786b-250u-34k7-z34615zz820c"
+                - Under **Select Action**, choose "modify value"
+                - Under **Select Column to Modify**, choose "hhid"
+                - You will notice that the current value is loaded automatically.
+                - Under **New Value**, enter "UP015-055"
+                - Add **Reason for Correction** such as "Correcting duplicate HHID after investigation"
+                - Click on **:material/check: Apply** to save the correction.
+                - Go back to the **Duplicates** tab to verify that the duplicate has been resolved.
+            2. You can apply a similar correction progress for all corrections. The options for corrections include:
+                - Modify Value: Modify a specific value in a column
+                - Remove Row: Remove an entire row from the dataset
+                - Remove Value: Replace a specific value with null/missing
+
+        **Final step:** After applying corrections, revisit the quality reports to see how the data quality has improved!
+    """
+
     @classmethod
     def get_info_message(cls, message_id: str) -> str:
         """Retrieve demo messages based on type."""
@@ -169,6 +195,7 @@ class ImportDemoInfo:
             "proceed_to_hfcs_info": cls.PROCEED_TO_HFCS_INFO,
             "add_check_config_info": cls.ADD_CHECK_CONFIG_INFO,
             "add_prep_steps_info": cls.ADD_PREP_STEPS_INFO,
+            "add_correction_step_info": cls.ADD_CORRECTION_STEP_INFO,
         }
         return demo_messages.get(message_id, "Invalid message ID.")
 
@@ -318,6 +345,27 @@ class OnboardingSteps:
         "guidance_content": """
         ##### In this step you'll:
         - Learn how to make corrections to your datasets after analyzing Data Quality Reports
+
+        ##### Instructions for Demo:
+        - Make the following corrections to the demo_survey dataset:
+            1. For the duplicate records found on hhid "UP015-005", we find out upon investigation that
+            the correct HHID for the response with the key "uuid:0dk0vt97-786b-250u-34k7-z34615zz820c" is "UP015-055". Correct the ID by
+            doing the following:
+                - Click on **:material/add: Add correction** button
+                - Under **Select Key**, choose "uuid:0dk0vt97-786b-250u-34k7-z34615zz820c"
+                - Under **Select Action**, choose "modify value"
+                - Under **Select Column to Modify**, choose "hhid"
+                - You will notice that the current value is loaded automatically.
+                - Under **New Value**, enter "UP015-055"
+                - Add **Reason for Correction** such as "Correcting duplicate HHID after investigation"
+                - Click on **:material/check: Apply** to save the correction.
+                - Go back to the **Duplicates** tab to verify that the duplicate has been resolved.
+            2. You can apply a similar correction progress for all corrections. The options for corrections include:
+                - Modify Value: Modify a specific value in a column
+                - Remove Row: Remove an entire row from the dataset
+                - Remove Value: Replace a specific value with null/missing
+
+        **Final step:** After applying corrections, revisit the quality reports to see how the data quality has improved!
 
         """,
     }

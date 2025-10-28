@@ -4,6 +4,7 @@ import streamlit as st
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.utils import duckdb_get_table, get_check_config_settings
 from datasure.utils.navigations_utils import demo_sidebar_help, page_navigation
+from datasure.utils.onboarding_utils import ImportDemoInfo, demo_expander
 
 demo_sidebar_help()
 
@@ -13,6 +14,12 @@ CORRECTION_ACTIONS = ("modify value", "remove value", "remove row")
 
 st.title("Correct Data")
 st.markdown("Make necessary corrections to data based on issues identified in checks.")
+
+demo_expander(
+    "How to add correction steps",
+    ImportDemoInfo.get_info_message("add_correction_step_info"),
+    expanded=True,
+)
 
 # Initialize project ID from session state
 project_id: str = st.session_state.get("st_project_id", "")
