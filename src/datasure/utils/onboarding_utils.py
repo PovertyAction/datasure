@@ -883,7 +883,9 @@ class OutputOnboardingInfo:
         **Next**: Explore the **Enumerator Overview** section below.
         """,
         },
-        "display_enumerator_overview": {"title": "Enumerator Overview", "content": """
+        "display_enumerator_overview": {
+            "title": "Enumerator Overview",
+            "content": """
         ##### Enumerator Overview
         This section provides a quick overview of enumerator performance in your survey dataset, including:
         - Total Number Enumerators: Total number of unique enumerators in the dataset.
@@ -963,14 +965,16 @@ class OutputOnboardingInfo:
         },
     }
 
-    DESCRIPTIVE_STATS: ClassVar[dict] = {"descriptive_report": {
-        "title": "Descriptive Statistics Report",
-        "content": """
+    DESCRIPTIVE_STATS: ClassVar[dict] = {
+        "descriptive_report": {
+            "title": "Descriptive Statistics Report",
+            "content": """
         ### Descriptive Statistics Report
         This tab provides detailed descriptive statistics for numeric columns in your survey dataset.
         It includes measures such as mean, median, standard deviation, min, max, and percentiles to help you understand the distribution and characteristics of your data.
         **Next**: Go to the settings icon (⚙️) to configure global settings for the descriptive statistics tab.
-        """},
+        """,
+        },
         "descriptive_report_settings": {
             "title": "Descriptive Statistics Settings",
             "content": """
@@ -988,11 +992,130 @@ class OutputOnboardingInfo:
             - Basic Statistics: This toggle allows you to show only basic statistics (count, mean, std, min, 25%, 50%, 75%, max) in the descriptive statistics report table for this column. Switch on
             this toggle for the age column.
             - Select table type: This dropdown allows you to choose the type of table to display for the descriptive statistics report for this column.
-            You can choose between a "one-way table", "two-way table" or "summary statistics". For the household count column, 
+            You can choose between a "one-way table", "two-way table" or "summary statistics". For the household count column,
             switch to the different table types to see how the data is presented in each format.
 
         **Next**: Explore the **Back Checks** tab.
-        """},
+        """,
+        },
+    }
+    BACKCHECKS: ClassVar[dict] = {
+        "backchecks_report": {
+            "title": "Back Checks Report",
+            "content": """
+        ### Back Checks Report
+        This tab provides detailed insights into back checks conducted for your survey dataset.
+        It includes reports on back check outcomes, discrepancies identified, and overall back check performance.
+
+        **Next**: Go to the settings icon (⚙️) to configure global settings for the back checks tab.
+        """,
+        },
+        "backcheck_report_settings": {
+            "title": "Back Checks Settings",
+            "content": """
+        ##### Setup for Back Checks Tab
+        In this section, you can configure global settings for the back checks tab, you will notice that some settings are pre-filled with default values.
+        This tab contains the following settings:
+        - **Survey ID**: The main identifier for your survey respondents (e.g., household ID, Respondent ID).
+        - **Survey Key**: The unique key column for your survey dataset (e.g., KEY). This is different from the Survey ID which identifies unique respondents
+        - **Enumerator**: The column indicating who collected the data (e.g., enumerator name or ID).
+        - **Back Checker**: The column indicating who conducted the back check (e.g., back_checker_name or ID).
+        - **Date**: The date when the back check was conducted (e.g., back_check_date
+        - **Target Number of backchecks**: The target number of back checks to be conducted as a percentage of total surveys collected (e.g., 10%).
+        - **How would you like to handle duplicates**: Toggle to indicate whether to include or exclude duplicate survey records when calculating back check statistics.
+        - :material/add: **Add Add a back check column**: Click this button to configure back check columns. You can add one or more back check columns from your dataset to analyze back check outcomes.
+
+        ##### Instructions for Demo:
+        For the demo data, set the following values:
+        | column          | category | ok_range | comparison_condition  |
+        |-----------------|----------|----------|-----------------------|
+        | age             | 1        | 1        | ignore_missing_values |
+        | household_count | 2        | None     | ignore_missing_values |
+        | minc_pri        | 1        | None     | ignore_missing_values |
+        | npinc_out       | 1        | None     | ignore_missing_values |
+        | no_save         | 1        | None     | ignore_missing_values |
+        | pri_govt_sch    | 1        | None     | ignore_missing_values |
+
+
+        **Next**: Explore the **Back Check Summary** section below.
+        """,
+        },
+        "display_category_and_trends": {
+            "title": "Back Check Trends by Category",
+            "content": """
+        ##### Back Check Trends by Category
+        This section shows the back check information by column category and the trends over time, including:
+        - metrics for each back check category such as:
+            - Number of columns in category
+            - Number of values compared
+            - Percentage of discrepancies found
+        **Next**: Explore the **Error Trends** section below.
+        """,
+        },
+        "display_error_trends": {
+            "title": "Error Trends",
+            "content": """
+        ##### Back Check Error Trends Over Time
+        This section visualizes back check error trends over time, helping you identify patterns and changes in back check performance, including:
+        - A line chart showing the percentage of back check discrepancies over time.
+
+        ##### Instructions for Demo:
+        For this demo, remove the "2" in the "select back check category" section and select "weekly" in the "select time period" section to see how back check discrepancies vary over time.
+
+        **Next**: Explore the **Column Statistics** section below.
+        """,
+        },
+        "display_column_stats": {
+            "title": "Back Check Column Statistics",
+            "content": """
+        ##### Back Check Column Statistics
+        This section provides detailed statistics about back check performance for each back check column, including:
+        - A table showing each back check column with the following details:
+            - Column: Name of the back check column.
+            - data type: Data type of the back check column.
+            - Category: Category assigned to the back check column.
+            - \# surveys: Total number of surveys where the back check column was compared.
+            - \# backchecks: Total number of back checks conducted for the column.
+            - \# compared: Total number of values compared for the back check column.
+            - \# different: Total number of discrepancies found for the back check column.
+            - error rate: Percentage of discrepancies found for the back check column.
+        **Next**: Explore the **Back Check Details Table** section below.
+        """,  # noqa: W605
+        },
+        "display_statistics_tables": {
+            "title": "Enumerator Statistics",
+            "content": """
+        ##### Enumerator Statistics
+        This section provides detailed statistics about back check performance for each enumerator, including:
+        - A table showing each enumerator with the following details:
+            - Enumerator: Identifier for the enumerator.
+            - \# surveys: Total number of surveys where back checks were conducted by the enumerator.
+            - \# back checked: Total number of enumerators surveys that have been back checked.
+            - \# of values compared: Total number of values compared for back checks conducted by the enumerator.
+            - \# different: Total number of discrepancies found for back checks conducted by the enumerator.
+            - error rate: Percentage of discrepancies found for back checks conducted by the enumerator.
+
+        ##### Back Checker Statistics
+        This section provides detailed statistics about back check performance for each back checker, including:
+        - A table showing each back checker with the following details:
+            - Back Checker: Identifier for the back checker.
+            - \# back checked: Total number of back checker surveys that have been back checked.
+            - \# of values compared: Total number of values compared for back checks conducted by the back checker.
+            - \# different: Total number of discrepancies found for back checks conducted by the back checker.
+            - error rate: Percentage of discrepancies found for back checks conducted by the back checker.
+
+        ##### Comparison Details
+        This section provides detailed information about the back check comparisons made in your dataset, including:
+        - A table showing each back check comparison with the following details:
+            - Survey ID: Identifier for the survey respondent.
+            - Enumerator: Identifier for the enumerator who collected the data.
+            - Back Checker: Identifier for the back checker who conducted the back check.
+            - Survey Value: The original value recorded in the survey.
+            - Back Check Value: The value recorded during the back check.
+            - Comparison Result: Result of the comparison (e.g., "not_compared", "different", "not_different").
+            - Column Name: Name of the back check column.
+        """,  # noqa: W605
+        },
     }
 
     @classmethod
@@ -1006,6 +1129,7 @@ class OutputOnboardingInfo:
             "outliers": cls.OUTLIERS,
             "enumerators": cls.ENUMERATORS,
             "descriptive_stats": cls.DESCRIPTIVE_STATS,
+            "backchecks": cls.BACKCHECKS,
         }
         return messages.get(tab, {"invalid": "Invalid Message"}).get(
             message_id, "Invalid Message"

@@ -64,6 +64,7 @@ def datetime_check(col: pd.Series) -> bool:
 
     return False
 
+
 @demo_output_onboarding(TAB_NAME)
 def descriptive_report_settings(
     data: pd.DataFrame, setting_file: str, page_num: int
