@@ -176,3 +176,6 @@ archived/notebooks/*test*.ipynb
 cache/*
 !cache/.gitkeep
 **.DS_Store
+
+# local claude permissions file
+.claude/settings.local.json
