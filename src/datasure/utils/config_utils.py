@@ -10,7 +10,8 @@ import polars as pl
 import streamlit as st
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from datasure.utils import duckdb_get_table, duckdb_save_table, get_df_info
+from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.dataframe_utils import get_df_info
 
 # ============================================================================
 # PYDANTIC MODELS
@@ -23,10 +24,12 @@ class CheckConfiguration(BaseModel):
     page_name: str = Field(..., min_length=1, max_length=20)
     survey_data_name: str = Field(..., min_length=1)
     survey_key: str = Field(..., min_length=1)
-    survey_id: str | None = None
-    survey_date: str | None = None
-    enumerator: str | None = None
-    backcheck_data_name: str | None = None
+    survey_id: str = Field(..., min_length=1)
+    survey_date: str | None = Field(..., min_length=1)
+    enumerator: str | None = Field(..., min_length=1)
+    backcheck_data_name: str = Field(..., min_length=1)
+    backcheck_date: str | None = Field(..., min_length=1)
+    backchecker: str | None = Field(..., min_length=1)
     tracking_data_name: str | None = None
 
     @field_validator("page_name")
@@ -42,20 +45,18 @@ class CheckConfiguration(BaseModel):
         return self.model_dump()
 
 
-class ColumnSelections(BaseModel):
-    """Model for column selections in the UI."""
+class SurveyColumnSelections(BaseModel):
+    """Model for Survey column selections in the UI."""
 
     survey_key: str | None = None
     survey_id: str | None = None
     survey_date: str | None = None
     enumerator: str | None = None
-    backcheck_data_name: str | None = None
-    tracking_data_name: str | None = None
-
-    def is_valid_for_submission(self) -> bool:
-        """Check if minimum required fields are selected."""
-        return self.survey_key is not None
-
+    
+class BackcheckColumnSelectors(BaseModel):
+    """Model for back check column selections in UI."""
+    backcheck_date: str | None = None
+    backchecker: str | None = None
 
 class ConfigurationService:
     """Service for managing check configurations."""
@@ -196,11 +197,11 @@ class DatasetService:
             type="pd",
         )
 
-        _, string_columns, numeric_columns, datetime_columns, _ = get_df_info(
+        _, _, _, datetime_columns, categorical_columns = get_df_info(
             survey_df, cols_only=True
         )
 
-        return string_columns, numeric_columns, datetime_columns
+        return datetime_columns, categorical_columns
 
     def get_available_aliases_excluding(
         self, all_aliases: list[str], exclude: list[str]
@@ -221,7 +222,7 @@ class ConfigurationFormState:
         """Initialize form state."""
         self.page_name: str | None = None
         self.survey_data_name: str | None = None
-        self.columns: ColumnSelections = ColumnSelections()
+        self.columns: SurveyColumnSelections = SurveyColumnSelections()
 
 
 def render_page_name_input() -> str | None:
@@ -258,11 +259,10 @@ def render_survey_dataset_selector(alias_list: list[str]) -> str | None:
     )
 
 
-def render_column_selectors(
-    string_columns: list[str],
-    numeric_columns: list[str],
-    datetime_columns: list[str],
-) -> ColumnSelections:
+def render_survey_column_selectors(
+    datetime_columns: list[str] | None = None,
+    categorical_columns: list[str] | None = None,
+) -> SurveyColumnSelections:
     """
     Render column selection inputs.
 
@@ -278,18 +278,16 @@ def render_column_selectors(
     with st.container(border=True):
         st.subheader("Select survey data columns")
 
-        key_options = string_columns + numeric_columns
-
         survey_key = st.selectbox(
             "Select Key Column (Required*)",
-            options=key_options,
+            options=categorical_columns,
             index=None,
             help="Select the column that uniquely identifies each record.",
         )
 
         survey_id = st.selectbox(
             "Select ID Column (Optional)",
-            options=key_options,
+            options=categorical_columns,
             index=None,
             help="Select the column that contains the ID for each record.",
         )
@@ -303,66 +301,73 @@ def render_column_selectors(
 
         enumerator = st.selectbox(
             "Select Enumerator Column (Optional)",
-            options=key_options,
+            options=categorical_columns,
             index=None,
             help="Select the column that contains the enumerator for each record.",
         )
 
-        return ColumnSelections(
+        return SurveyColumnSelections(
             survey_key=survey_key,
             survey_id=survey_id,
             survey_date=survey_date,
             enumerator=enumerator,
         )
 
-
-def render_additional_dataset_selectors(
-    all_aliases: list[str],
-    survey_data_name: str,
-) -> tuple[str | None, str | None]:
+def render_backcheck_dataset_selector(alias_list: list[str], survey_data_name: str) -> str | None:
     """
-    Render backcheck and tracking dataset selectors.
+    Render backcheck dataset selection dropdown.
 
     Args:
-        all_aliases: All available dataset aliases
-        survey_data_name: Currently selected survey dataset
+        alias_list: List of available dataset aliases
 
     Returns
     -------
-        tuple: (backcheck_data_name, tracking_data_name)
+        Selected dataset name or None
     """
     dataset_service = DatasetService(project_id="")  # Project ID not needed here
 
     # Get backcheck options (exclude survey dataset)
-    backcheck_options = dataset_service.get_available_aliases_excluding(
-        all_aliases, [survey_data_name]
+    backcheck_data_options = dataset_service.get_available_aliases_excluding(
+        alias_list, [survey_data_name]
     )
 
-    backcheck_data_name = st.selectbox(
-        "Select Backcheck Dataset (Optional)",
-        options=backcheck_options,
+    return st.selectbox(
+        "Select Survey Dataset",
+        options=backcheck_data_options,
         index=None,
-        help="Select the backcheck dataset to compare with the survey dataset.",
+        help="Select the backcheck dataset to check.",
     )
 
-    # Get tracking options (exclude both survey and backcheck)
-    exclude_list = [survey_data_name]
-    if backcheck_data_name:
-        exclude_list.append(backcheck_data_name)
 
-    tracking_options = dataset_service.get_available_aliases_excluding(
-        all_aliases, exclude_list
-    )
+def render_backcheck_column_selectors(
+        datetime_columns: list[str] | None = None,
+        categorical_columns: list[str] | None = None
+    ) -> BackcheckColumnSelectors:
+    """
+    Render column selection inputs for backcheck dataset.
+    """
+    with st.container(border=True):
+        st.subheader("Select backcheck data columns")
 
-    tracking_data_name = st.selectbox(
-        "Select Tracking Dataset (Optional)",
-        options=tracking_options,
-        index=None,
-        help="Select the tracking dataset to compare with the survey dataset.",
-    )
+        backcheck_date = st.selectbox(
+            "Select Backcheck Date Column (Optional)",
+            options=datetime_columns,
+            index=None,
+            help="Select the column that contains the date for each record in backcheck dataset.",
+        )
 
-    return backcheck_data_name, tracking_data_name
+        backchecker = st.selectbox(
+            "Select Backchecker Column (Optional)",
+            options=categorical_columns,
+            index=None,
+            help="Select the column that contains the backchecker for each record in backcheck dataset.",
+        )
 
+        return BackcheckColumnSelectors(
+            backcheck_date=backcheck_date,
+            backchecker=backchecker,
+        )
+    
 
 def add_check_configuration_form(
     project_id: str,
@@ -408,23 +413,22 @@ def add_check_configuration_form(
             return
 
         # Step 3: Get dataset columns
-        string_cols, numeric_cols, datetime_cols = dataset_service.get_dataset_columns(
+        datetime_cols, categorical_cols = dataset_service.get_dataset_columns(
             survey_data_name
         )
 
-        # Step 4: Column selections
-        column_selections = render_column_selectors(
-            string_cols, numeric_cols, datetime_cols
-        )
+        # Step 4: Survey Column selections
+        survey_column_selections = render_survey_column_selectors(datetime_cols, categorical_cols)
 
-        # Step 5: Additional datasets
-        backcheck_name, tracking_name = render_additional_dataset_selectors(
+        # Step 5: Backcheck dataset selection
+        backcheck_data_name = render_backcheck_dataset_selector(
             alias_list, survey_data_name
         )
 
-        # Update column selections with additional datasets
-        column_selections.backcheck_data_name = backcheck_name
-        column_selections.tracking_data_name = tracking_name
+        # Step 6: Back Check Column Selectors
+        backcheck_column_selections = render_backcheck_column_selectors(
+            datetime_cols, categorical_cols
+        )
 
         # Step 6: Submit button
         add_button = st.button(
@@ -434,20 +438,28 @@ def add_check_configuration_form(
             key="add_check_config_btn",
         )
 
+        # merge survey and backcheck column selection
+        if backcheck_data_name:
+            column_selections = survey_column_selections.dict() | backcheck_column_selections.dict()
+        else:
+            column_selections = survey_column_selections
+
         if add_button:
             _handle_configuration_submission(
                 config_service=config_service,
+                column_selections=column_selections,
                 page_name=page_name,
                 survey_data_name=survey_data_name,
-                column_selections=column_selections,
+                backcheck_data_name=backcheck_data_name
             )
 
 
 def _handle_configuration_submission(
     config_service: ConfigurationService,
+    column_selections: dict,
     page_name: str,
     survey_data_name: str,
-    column_selections: ColumnSelections,
+    backcheck_data_name: str | None,
 ) -> None:
     """
     Handle form submission and save configuration.
@@ -458,21 +470,18 @@ def _handle_configuration_submission(
         survey_data_name: Selected survey dataset name
         column_selections: User's column selections
     """
-    # Validate minimum requirements
-    if not column_selections.is_valid_for_submission():
-        st.error("Please select a key column.")
-        return
-
     # Build configuration data
     config_data = {
         "page_name": page_name,
         "survey_data_name": survey_data_name,
-        "survey_key": column_selections.survey_key,
-        "survey_id": column_selections.survey_id,
-        "survey_date": column_selections.survey_date,
-        "enumerator": column_selections.enumerator,
-        "backcheck_data_name": column_selections.backcheck_data_name,
-        "tracking_data_name": column_selections.tracking_data_name,
+        "survey_key": column_selections.get('survey_key'),
+        "survey_id": column_selections.get('survey_id'),
+        "survey_date": column_selections.get('survey_date'),
+        "enumerator": column_selections.get('enumerator'),
+        "backcheck_data_name": backcheck_data_name,
+        "backcheck_date": column_selections.get('backcheck_date'),
+        "backchecker": column_selections.get('backchecker'),
+        "tracking_data_name": column_selections.get('tracking_data_name'),
     }
 
     # Validate and save
@@ -557,6 +566,8 @@ def render_configuration_table(config_df) -> None:
             "survey_date": st.column_config.TextColumn("Date Column"),
             "enumerator": st.column_config.TextColumn("Enumerator Column"),
             "backcheck_data_name": st.column_config.TextColumn("Backcheck Dataset"),
+            "backcheck_date": st.column_config.TextColumn("Backcheck Date Column"),
+            "backchecker": st.column_config.TextColumn("Backchecker Column"),
             "tracking_data_name": st.column_config.TextColumn("Tracking Dataset"),
         },
     )
