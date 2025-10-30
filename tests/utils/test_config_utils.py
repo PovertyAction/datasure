@@ -1007,7 +1007,7 @@ class TestRenderConfigurationTable:
         call_args = mock_st.dataframe.call_args
 
         assert call_args[0][0].equals(mock_df)
-        assert call_args[1]["use_container_width"] is True
+        assert call_args[1]["width"] == 'stretch'
         assert call_args[1]["hide_index"] is True
         assert call_args[1]["key"] == "check_config_log"
         assert "column_config" in call_args[1]

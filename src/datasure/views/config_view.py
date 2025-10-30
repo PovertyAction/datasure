@@ -1,5 +1,7 @@
 """Check configuration view for DataSure application."""
 
+import sys
+
 import streamlit as st
 
 from datasure.utils import duckdb_get_aliases
@@ -21,9 +23,10 @@ from datasure.utils.onboarding_utils import (
     is_demo_project,
 )
 
-# Add demo navigation and guidance
-add_demo_navigation("config_view.py", step=4)
-demo_sidebar_help()
+# Add demo navigation and guidance (skip during tests)
+if "pytest" not in sys.modules:
+    add_demo_navigation("config_view.py", step=4)
+    demo_sidebar_help()
 
 
 def _get_project_id() -> str:
@@ -152,5 +155,6 @@ def main() -> None:
     _render_navigation(config_service)
 
 
-# Execute main function
-main()
+# Execute main function (skip during tests)
+if "pytest" not in sys.modules:
+    main()
