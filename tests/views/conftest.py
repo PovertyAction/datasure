@@ -22,20 +22,26 @@ class MockSessionState(dict):
 
 @pytest.fixture(scope="session", autouse=True)
 def mock_streamlit_for_views():
-    """Mock streamlit module for all view tests to prevent module-level execution issues."""
+    """Mock streamlit module for all view tests to prevent module-level
+    execution issues.
+    """
     # Create a comprehensive mock for streamlit
     st_mock = MagicMock()
 
     # Mock session_state as a dict-like object that supports attribute access
-    st_mock.session_state = MockSessionState({
-        "st_project_id": None,
-        "st_prep_data_page": None,
-        "st_output_page1": None,
-        "current_page": None,
-    })
+    st_mock.session_state = MockSessionState(
+        {
+            "st_project_id": None,
+            "st_prep_data_page": None,
+            "st_output_page1": None,
+            "current_page": None,
+        }
+    )
 
     # Mock common streamlit functions
-    st_mock.stop = Mock(side_effect=StopIteration)  # Use StopIteration instead of generic Exception
+    st_mock.stop = Mock(
+        side_effect=StopIteration
+    )  # Use StopIteration instead of generic Exception
     st_mock.info = Mock()
     st_mock.warning = Mock()
     st_mock.error = Mock()

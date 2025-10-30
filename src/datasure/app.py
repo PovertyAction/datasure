@@ -2,6 +2,8 @@ from pathlib import Path
 
 import streamlit as st
 
+from datasure.utils.config_utils import ConfigurationService
+
 # --- PAGE SETUP --- #
 
 # initialize session states
@@ -64,33 +66,48 @@ config_checks_page = st.Page(
 
 st.session_state.st_config_checks_page = config_checks_page
 
-output_page_1 = st.Page(
-    page=str(_views_dir / "output_view_1.py"),
-    title="Report 1",
-    icon=":material/counter_1:",
-)
+# get list of current config page_names
+page_names = ConfigurationService(st.session_state.st_project_id).get_page_names()
+page_count = len(page_names)
 
-st.session_state.st_output_page1 = output_page_1
+if page_count >= 1:
+    st.session_state.st_output_pages = []
+    for i in range(0, page_count):
+        page_name = page_names[i]
+        page_number = i + 1
+        output_page = st.Page(
+            page=str(_views_dir / f"output_view_{page_number}.py"),
+            title=page_name,
+            icon=f":material/counter_{page_number}:",
+        )
 
-corr_page = st.Page(
-    page=str(_views_dir / "correction_view.py"),
-    title="Correct Data",
-    icon=":material/cleaning_services:",
-)
+        st.session_state.st_output_pages.append(output_page)
 
-st.session_state.st_corr_page = corr_page
+    corr_page = st.Page(
+        page=str(_views_dir / "correction_view.py"),
+        title="Correct Data",
+        icon=":material/cleaning_services:",
+    )
 
+    st.session_state.st_corr_page = corr_page
 
-# --- NAVIGATION MENU --- #
+    # --- NAVIGATION MENU WITH CHECK OUTPUTS AND CORRECTION PAGES--- #
 
+    nav_menu = st.navigation(
+        {
+            "": [start_page, import_data_page, prep_data_page, config_checks_page],
+            "DQA Reports": st.session_state.st_output_pages,
+            "---": [corr_page],
+        },
+    )
+else:
+    # --- NAVIGATION MENU WITHOUT CHECK OUTPUTS AND CORRECTION PAGES--- #
+    nav_menu = st.navigation(
+        {
+            "": [start_page, import_data_page, prep_data_page, config_checks_page],
+        },
+    )
 
-nav_menu = st.navigation(
-    {
-        "": [start_page, import_data_page, prep_data_page, config_checks_page],
-        "DQA Reports": [output_page_1],
-        "---": [corr_page],
-    },
-)
 
 # --- GLOBAL ASSETS --- #
 

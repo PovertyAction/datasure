@@ -6,12 +6,14 @@ This module provides:
 - UI components for Streamlit interface
 """
 
+from pathlib import Path
+
 import polars as pl
 import streamlit as st
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.dataframe_utils import get_df_info
+from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 
 # ============================================================================
 # PYDANTIC MODELS
@@ -52,11 +54,19 @@ class SurveyColumnSelections(BaseModel):
     survey_id: str | None = None
     survey_date: str | None = None
     enumerator: str | None = None
-    
+
+
 class BackcheckColumnSelectors(BaseModel):
     """Model for back check column selections in UI."""
+
     backcheck_date: str | None = None
     backchecker: str | None = None
+
+
+# ============================================================================
+# SERVICE LAYER
+# ============================================================================
+
 
 class ConfigurationService:
     """Service for managing check configurations."""
@@ -124,6 +134,25 @@ class ConfigurationService:
 
         return f"{field}: {msg}"
 
+    def _add_page_file(self, page_number: int, replace: bool = False) -> None:
+        """Create a new output view file for the configuration."""
+        template_path = (
+            Path(__file__).parent.parent / "views" / "output_view_template.py"
+        )
+        new_page_path = (
+            Path(__file__).parent.parent / "views" / f"output_view_{page_number}.py"
+        )
+
+        # skip if file exists and not replacing
+        if new_page_path.exists() and not replace:
+            return
+
+        with open(template_path) as template_file:
+            template_content = template_file.read()
+
+        with open(new_page_path, "w") as new_page_file:
+            new_page_file.write(template_content)
+
     def add_configuration(self, config: CheckConfiguration) -> bool:
         """
         Add a new check configuration.
@@ -147,7 +176,21 @@ class ConfigurationService:
             alias="check_config",
             db_name="logs",
         )
+
+        # Create new output view file
+        page_number = config_log.height
+        self._add_page_file(page_number)
+
         return True
+
+    def _remove_page_file(self, page_number: int) -> None:
+        """Remove the output view file for the configuration."""
+        page_path = (
+            Path(__file__).parent.parent / "views" / f"output_view_{page_number}.py"
+        )
+
+        if page_path.exists():
+            page_path.unlink()
 
     def remove_configuration(self, page_name: str) -> bool:
         """
@@ -162,6 +205,12 @@ class ConfigurationService:
         if current_log.is_empty():
             return False
 
+        # get page number
+        indices = current_log.select(
+            pl.arg_where(pl.col("page_name") == page_name)
+        ).to_series()
+        page_number = indices[0] + 1
+
         updated_log = current_log.filter(pl.col("page_name") != page_name)
 
         duckdb_save_table(
@@ -170,6 +219,13 @@ class ConfigurationService:
             alias="check_config",
             db_name="logs",
         )
+
+        st.write("Removing Page: ", page_number)
+
+        # remove output view file
+        if page_number:
+            self._remove_page_file(page_number)
+
         return True
 
 
@@ -197,9 +253,11 @@ class DatasetService:
             type="pd",
         )
 
-        _, _, _, datetime_columns, categorical_columns = get_df_info(
+        _, string_columns, numeric_columns, datetime_columns, _ = get_df_info(
             survey_df, cols_only=True
         )
+
+        categorical_columns = string_columns + numeric_columns
 
         return datetime_columns, categorical_columns
 
@@ -313,7 +371,10 @@ def render_survey_column_selectors(
             enumerator=enumerator,
         )
 
-def render_backcheck_dataset_selector(alias_list: list[str], survey_data_name: str) -> str | None:
+
+def render_backcheck_dataset_selector(
+    alias_list: list[str], survey_data_name: str
+) -> str | None:
     """
     Render backcheck dataset selection dropdown.
 
@@ -340,12 +401,10 @@ def render_backcheck_dataset_selector(alias_list: list[str], survey_data_name: s
 
 
 def render_backcheck_column_selectors(
-        datetime_columns: list[str] | None = None,
-        categorical_columns: list[str] | None = None
-    ) -> BackcheckColumnSelectors:
-    """
-    Render column selection inputs for backcheck dataset.
-    """
+    datetime_columns: list[str] | None = None,
+    categorical_columns: list[str] | None = None,
+) -> BackcheckColumnSelectors:
+    """Render column selection inputs for backcheck dataset."""
     with st.container(border=True):
         st.subheader("Select backcheck data columns")
 
@@ -367,7 +426,7 @@ def render_backcheck_column_selectors(
             backcheck_date=backcheck_date,
             backchecker=backchecker,
         )
-    
+
 
 def add_check_configuration_form(
     project_id: str,
@@ -418,7 +477,9 @@ def add_check_configuration_form(
         )
 
         # Step 4: Survey Column selections
-        survey_column_selections = render_survey_column_selectors(datetime_cols, categorical_cols)
+        survey_column_selections = render_survey_column_selectors(
+            datetime_cols, categorical_cols
+        )
 
         # Step 5: Backcheck dataset selection
         backcheck_data_name = render_backcheck_dataset_selector(
@@ -440,7 +501,9 @@ def add_check_configuration_form(
 
         # merge survey and backcheck column selection
         if backcheck_data_name:
-            column_selections = survey_column_selections.dict() | backcheck_column_selections.dict()
+            column_selections = (
+                survey_column_selections.dict() | backcheck_column_selections.dict()
+            )
         else:
             column_selections = survey_column_selections
 
@@ -450,7 +513,7 @@ def add_check_configuration_form(
                 column_selections=column_selections,
                 page_name=page_name,
                 survey_data_name=survey_data_name,
-                backcheck_data_name=backcheck_data_name
+                backcheck_data_name=backcheck_data_name,
             )
 
 
@@ -474,14 +537,14 @@ def _handle_configuration_submission(
     config_data = {
         "page_name": page_name,
         "survey_data_name": survey_data_name,
-        "survey_key": column_selections.get('survey_key'),
-        "survey_id": column_selections.get('survey_id'),
-        "survey_date": column_selections.get('survey_date'),
-        "enumerator": column_selections.get('enumerator'),
+        "survey_key": column_selections.get("survey_key"),
+        "survey_id": column_selections.get("survey_id"),
+        "survey_date": column_selections.get("survey_date"),
+        "enumerator": column_selections.get("enumerator"),
         "backcheck_data_name": backcheck_data_name,
-        "backcheck_date": column_selections.get('backcheck_date'),
-        "backchecker": column_selections.get('backchecker'),
-        "tracking_data_name": column_selections.get('tracking_data_name'),
+        "backcheck_date": column_selections.get("backcheck_date"),
+        "backchecker": column_selections.get("backchecker"),
+        "tracking_data_name": column_selections.get("tracking_data_name"),
     }
 
     # Validate and save
