@@ -345,6 +345,10 @@ class TestLoadDefaultProgressSettings:
             "enum_col",
             "consent",
             "outcome",
+            None,
+            None,
+            None,
+            None,
         )
         mock_load_settings.return_value = {
             "survey_id": "custom_survey_id",
@@ -379,6 +383,10 @@ class TestLoadDefaultProgressSettings:
             "enum_col",
             "consent",
             "outcome",
+            None,
+            None,
+            None,
+            None,
         )
         mock_load_settings.return_value = {}
 
@@ -408,6 +416,10 @@ class TestLoadDefaultProgressSettings:
             "enum_col",
             "consent",
             "outcome",
+            None,
+            None,
+            None,
+            None,
         )
 
         # Mock load_check_settings to return different values for different calls
@@ -929,6 +941,10 @@ class TestLoadDefaultProgressSettingsEdgeCases:
             "enum_col",
             "consent",
             "outcome",
+            None,
+            None,
+            None,
+            None,
         )
         # Mock load_check_settings to raise an exception
         mock_load_settings.side_effect = Exception("File read error")
@@ -959,6 +975,10 @@ class TestLoadDefaultProgressSettingsEdgeCases:
             None,
             "consent",
             "outcome",
+            None,
+            None,
+            None,
+            None,
         )
         mock_load_settings.return_value = {
             "survey_id": "survey_id",
@@ -980,7 +1000,7 @@ class TestLoadDefaultProgressSettingsEdgeCases:
     ):
         """Test load_default_progress_settings with empty string values."""
         mock_exists.return_value = True
-        mock_get_config.return_value = ("", "", "", "", "", "", "", "")
+        mock_get_config.return_value = ("", "", "", "", "", "", "", "", "", "", "", "")
         mock_load_settings.return_value = {
             "survey_id": "",
             "enumerator": "",

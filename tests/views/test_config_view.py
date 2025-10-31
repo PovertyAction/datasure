@@ -255,7 +255,7 @@ class TestRenderNavigation:
         mock_service = Mock()
         mock_service.get_all_configurations.return_value = pl.DataFrame()
         mock_st.session_state.st_prep_data_page = "prep_page"
-        mock_st.session_state.st_output_page1 = "output_page"
+        mock_st.session_state.st_output_pages = ["output_page"]
 
         _render_navigation(mock_service)
 
@@ -265,7 +265,7 @@ class TestRenderNavigation:
         assert call_args[1]["prev"]["page_name"] == "prep_page"
         assert call_args[1]["prev"]["label"] == "← Back: Prepare Data"
         assert call_args[1]["next"]["page_name"] == "output_page"
-        assert call_args[1]["next"]["label"] == "Next: Output Page 1 →"
+        assert call_args[1]["next"]["label"] == "Next: Output Page →"
 
 
 class TestMain:

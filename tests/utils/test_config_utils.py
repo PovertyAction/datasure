@@ -326,9 +326,11 @@ class TestConfigurationService:
                     "survey_id": "id",
                     "survey_date": "date",
                     "enumerator": "enum",
+                    "survey_target": 100,
                     "backcheck_data_name": "backcheck",
                     "backcheck_date": "bc_date",
                     "backchecker": "bc_checker",
+                    "backcheck_target_percent": 10,
                     "tracking_data_name": "tracking",
                 }
             ]
@@ -346,9 +348,11 @@ class TestConfigurationService:
                     "survey_id": "id1",
                     "survey_date": None,
                     "enumerator": None,
+                    "survey_target": None,
                     "backcheck_data_name": "backcheck_1",
                     "backcheck_date": None,
                     "backchecker": None,
+                    "backcheck_target_percent": None,
                     "tracking_data_name": None,
                 },
                 {
@@ -358,9 +362,11 @@ class TestConfigurationService:
                     "survey_id": "id2",
                     "survey_date": None,
                     "enumerator": None,
+                    "survey_target": None,
                     "backcheck_data_name": "backcheck_2",
                     "backcheck_date": None,
                     "backchecker": None,
+                    "backcheck_target_percent": None,
                     "tracking_data_name": None,
                 },
             ]
@@ -657,9 +663,11 @@ class TestConfigurationService:
             survey_id="id2",
             survey_date=None,
             enumerator=None,
+            survey_target=None,
             backcheck_data_name="backcheck_2",
             backcheck_date=None,
             backchecker=None,
+            backcheck_target_percent=None,
         )
 
         result = service.add_configuration(config)
@@ -731,7 +739,7 @@ class TestConfigurationService:
 
         assert result is True
         mock_save_table.assert_called_once()
-        mock_remove_page_file.assert_called_once_with(1)
+        mock_remove_page_file.assert_called_once_with(2)
         call_args = mock_save_table.call_args
         saved_df = call_args[0][1]
         assert len(saved_df) == 1

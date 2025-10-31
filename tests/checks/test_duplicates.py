@@ -242,6 +242,10 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
             None,
             None,
             None,
+            None,
+            None,
+            None,
+            None,
         )
         result = load_default_duplicates_settings("test_project", "settings.json", 1)
         self.assertEqual(result[0], "enumid")
@@ -268,6 +272,10 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
             "skey2",
             "sid2",
             "sdate2",
+            None,
+            None,
+            None,
+            None,
             None,
             None,
             None,
@@ -303,6 +311,10 @@ class TestDuplicates(unittest.TestCase):  # noqa: D101
             "skey1",
             "sid1",
             "sdate1",
+            None,
+            None,
+            None,
+            None,
             None,
             None,
             None,

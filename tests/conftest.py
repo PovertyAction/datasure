@@ -417,12 +417,16 @@ def mock_database_functions(monkeypatch):
                 {
                     "page_name": ["enumerator"],
                     "survey_data_name": ["test_survey"],
-                    "form_title": ["Test Form"],
+                    "survey_key": ["Test Form"],
                     "survey_id": ["survey_id"],
                     "survey_date": ["submission_date"],
-                    "enumerator_id": ["enumerator"],
-                    "consent_col": ["consent"],
-                    "outcome_col": ["outcome"],
+                    "enumerator": ["enumerator"],
+                    "survey_target": [100],
+                    "backcheck_data_name": ["backcheck_data"],
+                    "backcheck_date": ["backcheck_date"],
+                    "backchecker": ["backchecker"],
+                    "backcheck_target_percent": [10],
+                    "tracking_data_name": ["tracking_data"],
                 }
             )
         else:
@@ -431,17 +435,22 @@ def mock_database_functions(monkeypatch):
 
     def mock_config(*args, **kwargs):
         # Return mock values in the expected order:
-        # formdef_version, project_name, form_title, survey_id,
-        # survey_date, enumerator_id, consent_col, outcome_col
+        # page_name, survey_data_name, survey_key, survey_id,
+        # survey_date, enumerator, survey_target, backcheck_data_name,
+        # backcheck_date, backchecker, backcheck_target_percent, tracking_data_name
         return (
-            "v1",  # formdef_version
-            "Test Project",  # project_name
-            "Test Form",  # form_title
+            "enumerator",  # page_name
+            "test_survey",  # survey_data_name
+            "Test Form",  # survey_key
             "survey_id",  # survey_id
             "submission_date",  # survey_date
-            "enumerator",  # enumerator_id
-            "consent",  # consent_col
-            "outcome",  # outcome_col
+            "enumerator",  # enumerator
+            100,  # survey_target
+            "backcheck_data",  # backcheck_data_name
+            "backcheck_date",  # backcheck_date
+            "backchecker",  # backchecker
+            10,  # backcheck_target_percent
+            "tracking_data",  # tracking_data_name
         )
 
     # Clear streamlit cache to ensure our mocks are applied

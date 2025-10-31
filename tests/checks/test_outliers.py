@@ -139,6 +139,10 @@ class TestLoadDefaultSettings:
                 "enum1",
                 None,
                 None,
+                None,
+                None,
+                None,
+                None,
             )
             mock_exists.return_value = True
             mock_load.return_value = {
@@ -172,6 +176,10 @@ class TestLoadDefaultSettings:
                 "enum1",
                 None,
                 None,
+                None,
+                None,
+                None,
+                None,
             )
             mock_exists.return_value = False
 
@@ -197,6 +205,10 @@ class TestLoadDefaultSettings:
                 "id1",
                 None,
                 "enum1",
+                None,
+                None,
+                None,
+                None,
                 None,
                 None,
             )
