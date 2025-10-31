@@ -224,8 +224,7 @@ class ConfigurationService:
         pages_after_removal = updated_log.height
 
         # remove output view file
-        if pages_after_removal > 0:
-            self._remove_page_file(pages_after_removal + 1)
+        self._remove_page_file(pages_after_removal + 1)
 
         st.rerun()
 
