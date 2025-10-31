@@ -36,11 +36,22 @@ def load_default_progress_settings(
     tuple : default settings for progress report
     """
     # Get config page defaults
-    _, _, _, config_survey_id, config_survey_date, config_enumerator, _, _ = (
-        get_check_config_settings(
-            project_id=project_id,
-            page_row_index=page_num - 1,
-        )
+    (
+        _,
+        _,
+        _,
+        config_survey_id,
+        config_survey_date,
+        config_enumerator,
+        _,
+        _,
+        _,
+        _,
+        _,
+        _,
+    ) = get_check_config_settings(
+        project_id=project_id,
+        page_row_index=page_num - 1,
     )
     # load default settings in the following order:
     # - if settings file exists, load settings from file

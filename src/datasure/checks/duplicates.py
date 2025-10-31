@@ -31,11 +31,22 @@ def load_default_duplicates_settings(
         dict: A dictionary containing the default settings for duplicates report.
     """
     # Get config page defaults
-    _, _, config_survey_key, config_survey_id, config_survey_date, _, _, _ = (
-        get_check_config_settings(
-            project_id=project_id,
-            page_row_index=page_num - 1,
-        )
+    (
+        _,
+        _,
+        config_survey_key,
+        config_survey_id,
+        config_survey_date,
+        _,
+        _,
+        _,
+        _,
+        _,
+        _,
+        _,
+    ) = get_check_config_settings(
+        project_id=project_id,
+        page_row_index=page_num - 1,
     )
     # load default settings in the following order:
     # - if settings file exists, load settings from file

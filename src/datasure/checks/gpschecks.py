@@ -48,6 +48,10 @@ def load_default_settings(project_id: str, setting_file: str, page_num: int) -> 
         config_enumerator,
         _,
         _,
+        _,
+        _,
+        _,
+        _,
     ) = get_check_config_settings(
         project_id=project_id,
         page_row_index=page_num - 1,
