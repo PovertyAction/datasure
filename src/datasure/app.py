@@ -19,8 +19,8 @@ if "st_prep_data_page" not in st.session_state:
 if "st_config_checks_page" not in st.session_state:
     st.session_state.st_config_checks_page = None
 
-if "st_output_page1" not in st.session_state:
-    st.session_state.st_output_page1 = None
+if "st_output_pages" not in st.session_state:
+    st.session_state.st_output_pages = []
 
 if "st_corr_page" not in st.session_state:
     st.session_state.st_corr_page = None
@@ -66,47 +66,54 @@ config_checks_page = st.Page(
 
 st.session_state.st_config_checks_page = config_checks_page
 
-# get list of current config page_names
-page_names = ConfigurationService(st.session_state.st_project_id).get_page_names()
-page_count = len(page_names)
-
-if page_count >= 1:
-    st.session_state.st_output_pages = []
-    for i in range(0, page_count):
-        page_name = page_names[i]
-        page_number = i + 1
-        output_page = st.Page(
-            page=str(_views_dir / f"output_view_{page_number}.py"),
-            title=page_name,
-            icon=f":material/counter_{page_number}:",
-        )
-
-        st.session_state.st_output_pages.append(output_page)
-
-    corr_page = st.Page(
-        page=str(_views_dir / "correction_view.py"),
-        title="Correct Data",
-        icon=":material/cleaning_services:",
-    )
-
-    st.session_state.st_corr_page = corr_page
-
-    # --- NAVIGATION MENU WITH CHECK OUTPUTS AND CORRECTION PAGES--- #
-
+if not st.session_state.st_project_id:
+    # --- NAVIGATION MENU WITH START PAGE ONLY #
     nav_menu = st.navigation(
         {
-            "": [start_page, import_data_page, prep_data_page, config_checks_page],
-            "DQA Reports": st.session_state.st_output_pages,
-            "---": [corr_page],
+            "": [start_page],
         },
     )
 else:
-    # --- NAVIGATION MENU WITHOUT CHECK OUTPUTS AND CORRECTION PAGES--- #
-    nav_menu = st.navigation(
-        {
-            "": [start_page, import_data_page, prep_data_page, config_checks_page],
-        },
-    )
+    # get list of current config page_names
+    page_names = ConfigurationService(st.session_state.st_project_id).get_page_names()
+    page_count = len(page_names)
+
+    if page_count >= 1:
+        st.session_state.st_output_pages = []
+        for i in range(0, page_count):
+            page_name = page_names[i]
+            page_number = i + 1
+            output_page = st.Page(
+                page=str(_views_dir / f"output_view_{page_number}.py"),
+                title=page_name,
+                icon=f":material/counter_{page_number}:",
+            )
+
+            st.session_state.st_output_pages.append(output_page)
+
+        corr_page = st.Page(
+            page=str(_views_dir / "correction_view.py"),
+            title="Correct Data",
+            icon=":material/cleaning_services:",
+        )
+
+        st.session_state.st_corr_page = corr_page
+
+        # --- NAVIGATION MENU WITH CHECK OUTPUTS AND CORRECTION PAGES--- #
+        nav_menu = st.navigation(
+            {
+                "": [start_page, import_data_page, prep_data_page, config_checks_page],
+                "DQA Reports": st.session_state.st_output_pages,
+                "---": [corr_page],
+            },
+        )
+    else:
+        # --- NAVIGATION MENU WITHOUT CHECK OUTPUTS AND CORRECTION PAGES--- #
+        nav_menu = st.navigation(
+            {
+                "": [start_page, import_data_page, prep_data_page, config_checks_page],
+            },
+        )
 
 
 # --- GLOBAL ASSETS --- #
