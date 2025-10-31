@@ -29,9 +29,11 @@ class CheckConfiguration(BaseModel):
     survey_id: str = Field(..., min_length=1)
     survey_date: str | None = Field(..., min_length=1)
     enumerator: str | None = Field(..., min_length=1)
+    survey_target: int | None = None
     backcheck_data_name: str = Field(..., min_length=1)
     backcheck_date: str | None = Field(..., min_length=1)
     backchecker: str | None = Field(..., min_length=1)
+    backcheck_target_percent: int | None = None
     tracking_data_name: str | None = None
 
     @field_validator("page_name")
@@ -54,6 +56,7 @@ class SurveyColumnSelections(BaseModel):
     survey_id: str | None = None
     survey_date: str | None = None
     enumerator: str | None = None
+    survey_target: int | None = None
 
 
 class BackcheckColumnSelectors(BaseModel):
@@ -61,6 +64,7 @@ class BackcheckColumnSelectors(BaseModel):
 
     backcheck_date: str | None = None
     backchecker: str | None = None
+    backcheck_target_percent: int | None = None
 
 
 # ============================================================================
@@ -181,6 +185,8 @@ class ConfigurationService:
         page_number = config_log.height
         self._add_page_file(page_number)
 
+        st.rerun()
+
         return True
 
     def _remove_page_file(self, page_number: int) -> None:
@@ -205,12 +211,6 @@ class ConfigurationService:
         if current_log.is_empty():
             return False
 
-        # get page number
-        indices = current_log.select(
-            pl.arg_where(pl.col("page_name") == page_name)
-        ).to_series()
-        page_number = indices[0] + 1
-
         updated_log = current_log.filter(pl.col("page_name") != page_name)
 
         duckdb_save_table(
@@ -220,11 +220,14 @@ class ConfigurationService:
             db_name="logs",
         )
 
-        st.write("Removing Page: ", page_number)
+        # Get the number of pages left ater removal
+        pages_after_removal = updated_log.height
 
         # remove output view file
-        if page_number:
-            self._remove_page_file(page_number)
+        if pages_after_removal > 0:
+            self._remove_page_file(pages_after_removal + 1)
+
+        st.rerun()
 
         return True
 
@@ -364,11 +367,19 @@ def render_survey_column_selectors(
             help="Select the column that contains the enumerator for each record.",
         )
 
+        survey_target = st.number_input(
+            "Enter Target Number of responses for the Survey (Optional)",
+            min_value=0,
+            step=1,
+            help="Enter the target number of responses for the survey dataset.",
+        )
+
         return SurveyColumnSelections(
             survey_key=survey_key,
             survey_id=survey_id,
             survey_date=survey_date,
             enumerator=enumerator,
+            survey_target=survey_target,
         )
 
 
@@ -393,7 +404,7 @@ def render_backcheck_dataset_selector(
     )
 
     return st.selectbox(
-        "Select Survey Dataset",
+        "Select Backcheck Dataset",
         options=backcheck_data_options,
         index=None,
         help="Select the backcheck dataset to check.",
@@ -422,9 +433,18 @@ def render_backcheck_column_selectors(
             help="Select the column that contains the backchecker for each record in backcheck dataset.",
         )
 
+        backcheck_target_percent = st.number_input(
+            "Enter Target Percentage of surveys to be Backchecked (Optional)",
+            min_value=0,
+            max_value=100,
+            step=1,
+            help="Enter the target percentage of surveys to be backchecked.",
+        )
+
         return BackcheckColumnSelectors(
             backcheck_date=backcheck_date,
             backchecker=backchecker,
+            backcheck_target_percent=backcheck_target_percent,
         )
 
 
@@ -540,10 +560,12 @@ def _handle_configuration_submission(
         "survey_key": column_selections.get("survey_key"),
         "survey_id": column_selections.get("survey_id"),
         "survey_date": column_selections.get("survey_date"),
+        "survey_target": column_selections.get("survey_target"),
         "enumerator": column_selections.get("enumerator"),
         "backcheck_data_name": backcheck_data_name,
         "backcheck_date": column_selections.get("backcheck_date"),
         "backchecker": column_selections.get("backchecker"),
+        "backcheck_target_percent": column_selections.get("backcheck_target_percent"),
         "tracking_data_name": column_selections.get("tracking_data_name"),
     }
 
@@ -628,9 +650,13 @@ def render_configuration_table(config_df) -> None:
             "survey_id": st.column_config.TextColumn("ID Column"),
             "survey_date": st.column_config.TextColumn("Date Column"),
             "enumerator": st.column_config.TextColumn("Enumerator Column"),
+            "survey_target": st.column_config.NumberColumn("Target Survey Responses"),
             "backcheck_data_name": st.column_config.TextColumn("Backcheck Dataset"),
             "backcheck_date": st.column_config.TextColumn("Backcheck Date Column"),
             "backchecker": st.column_config.TextColumn("Backchecker Column"),
             "tracking_data_name": st.column_config.TextColumn("Tracking Dataset"),
+            "backcheck_target_percent": st.column_config.NumberColumn(
+                "Target Backcheck Percentage"
+            ),
         },
     )
