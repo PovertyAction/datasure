@@ -123,15 +123,19 @@ def _render_navigation(config_service: ConfigurationService) -> None:
             )
             show_demo_next_action(4, "st_output_page1", "View Quality Reports")
     else:
+        if len(st.session_state.st_output_pages) > 0:
+            next_page = {
+                "page_name": st.session_state.st_output_pages[0],
+                "label": "Next: Output Page →",
+            }
+        else:
+            next_page = None
         page_navigation(
             prev={
                 "page_name": st.session_state.st_prep_data_page,
                 "label": "← Back: Prepare Data",
             },
-            next={
-                "page_name": st.session_state.st_output_page1,
-                "label": "Next: Output Page 1 →",
-            },
+            next=next_page,
         )
 
 
