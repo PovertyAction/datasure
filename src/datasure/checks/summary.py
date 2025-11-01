@@ -116,12 +116,14 @@ class DateRangeCalculator:
     def get_today() -> Date:
         """Get today's date."""
         from datetime import datetime
+
         return datetime.now().date()
 
     @staticmethod
     def get_yesterday() -> Date:
         """Get yesterday's date."""
         from datetime import datetime, timedelta
+
         return (datetime.now() - timedelta(days=1)).date()
 
     @staticmethod
@@ -139,6 +141,7 @@ class DateRangeCalculator:
             Start date of the specified week
         """
         from datetime import datetime, timedelta
+
         return (datetime.now() - timedelta(weeks=weeks_ago + 1)).date()
 
     @staticmethod
@@ -432,9 +435,7 @@ def calculate_submission_metrics(
 
     # Calculate submissions by date
     submissions_by_date_pl = (
-        df.group_by(date_column)
-        .agg(pl.len().alias("submissions"))
-        .sort(date_column)
+        df.group_by(date_column).agg(pl.len().alias("submissions")).sort(date_column)
     )
 
     # Convert to pandas for compatibility with Plotly
@@ -575,16 +576,12 @@ def calculate_progress_metrics(
     avg_per_day = daily_counts.select(pl.col("count").mean()).item()
 
     # Calculate average submissions per week
-    weekly_data = df.select(
-        pl.col(date_column).dt.truncate("1w").alias("week")
-    )
+    weekly_data = df.select(pl.col(date_column).dt.truncate("1w").alias("week"))
     weekly_counts = weekly_data.group_by("week").agg(pl.len().alias("count"))
     avg_per_week = weekly_counts.select(pl.col("count").mean()).item()
 
     # Calculate average submissions per month
-    monthly_data = df.select(
-        pl.col(date_column).dt.truncate("1mo").alias("month")
-    )
+    monthly_data = df.select(pl.col(date_column).dt.truncate("1mo").alias("month"))
     monthly_counts = monthly_data.group_by("month").agg(pl.len().alias("count"))
     avg_per_month = monthly_counts.select(pl.col("count").mean()).item()
 
@@ -854,7 +851,9 @@ def calculate_data_quality_metrics(
     if survey_id and survey_id in data.columns:
         total_rows = data.height
         unique_rows = data.select(pl.col(survey_id)).unique().height
-        duplicates_pct = ((total_rows - unique_rows) / total_rows * 100) if total_rows > 0 else 0.0
+        duplicates_pct = (
+            ((total_rows - unique_rows) / total_rows * 100) if total_rows > 0 else 0.0
+        )
     else:
         duplicates_pct = None
 
@@ -862,7 +861,11 @@ def calculate_data_quality_metrics(
     if data.height > 0:
         null_counts = data.null_count()
         total_cells = data.height * len(data.columns)
-        missing_pct = (null_counts.sum_horizontal().item() / total_cells * 100) if total_cells > 0 else 0.0
+        missing_pct = (
+            (null_counts.sum_horizontal().item() / total_cells * 100)
+            if total_cells > 0
+            else 0.0
+        )
     else:
         missing_pct = 0.0
 
@@ -901,7 +904,9 @@ def load_default_settings(project_id: str, setting_file: str, page_num: int) -> 
         A tuple containing the default settings (date, target, survey_id)
     """
     # Get config page defaults
-    config_settings = ConfigurationService(project_id).get_page_configuration(page_num - 1)
+    config_settings = ConfigurationService(project_id).get_page_configuration(
+        page_num - 1
+    )
     config_survey_id = config_settings.get("survey_id", None)
     config_survey_date = config_settings.get("survey_date", None)
     config_survey_target = config_settings.get("survey_target", None)
