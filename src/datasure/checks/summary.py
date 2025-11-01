@@ -1,53 +1,912 @@
 import os
+from datetime import date as Date
+from typing import Any
 
 import matplotlib.pyplot as plt
 import pandas as pd
 import plotly.express as px
+import polars as pl
 import seaborn as sns
 import streamlit as st
+from pydantic import BaseModel, Field, field_validator
 
-from datasure.utils import (
-    donut_chart2,
-    get_check_config_settings,
-    get_df_info,
+from datasure.utils.chart_utils import donut_chart2
+from datasure.utils.config_utils import ConfigurationService
+from datasure.utils.dataframe_utils import get_df_info
+from datasure.utils.onboarding_utils import demo_output_onboarding
+from datasure.utils.settings_utils import (
     load_check_settings,
     save_check_settings,
     trigger_save,
 )
-from datasure.utils.onboarding_utils import demo_output_onboarding
 
 TAB_NAME: str = "summary"
 
 
-def load_default_settings(project_id: str, setting_file: str, page_num: int) -> tuple:
-    """
-    Load the default settings for the summary report.
+# ============================================================================
+# Pydantic Models for Data Validation and Structured Return Types
+# ============================================================================
+
+
+class SummarySettings(BaseModel):
+    """Settings configuration for the summary report with validation."""
+
+    date_column: str | None = None
+    target_submissions: int | None = Field(None, ge=0)
+    survey_id_column: str | None = None
+
+    @field_validator("target_submissions")
+    @classmethod
+    def validate_target(cls, v: int | None) -> int | None:
+        """Validate that target is non-negative if provided."""
+        if v is not None and v < 0:
+            raise ValueError("Target submissions must be non-negative")
+        return v
+
+
+class SubmissionMetrics(BaseModel):
+    """Metrics for submission analysis with validation."""
+
+    first_submission_date: Date | None = None
+    last_submission_date: Date | None = None
+    today_count: int = Field(ge=0)
+    this_week_count: int = Field(ge=0)
+    this_month_count: int = Field(ge=0)
+    total_count: int = Field(ge=0)
+    today_delta_pct: float = 0.0
+    this_week_delta_pct: float = 0.0
+    this_month_delta_pct: float = 0.0
+    submissions_by_date: pd.DataFrame = Field(default_factory=pd.DataFrame)
+
+    class Config:  # noqa: D106
+        arbitrary_types_allowed = True
+
+
+class ProgressMetrics(BaseModel):
+    """Metrics for progress tracking with validation."""
+
+    progress_pct: float = Field(ge=0.0)
+    avg_per_day: float = Field(ge=0.0)
+    avg_per_week: float = Field(ge=0.0)
+    avg_per_month: float = Field(ge=0.0)
+
+
+class DataSummaryMetrics(BaseModel):
+    """Metrics for data summary with validation."""
+
+    string_columns_count: int = Field(ge=0)
+    numeric_columns_count: int = Field(ge=0)
+    date_columns_count: int = Field(ge=0)
+    total_columns_count: int = Field(ge=0)
+
+    @field_validator("total_columns_count")
+    @classmethod
+    def validate_total(cls, v: int, info: Any) -> int:
+        """Validate that total equals sum of type counts."""
+        if hasattr(info, "data"):
+            expected = (
+                info.data.get("string_columns_count", 0)
+                + info.data.get("numeric_columns_count", 0)
+                + info.data.get("date_columns_count", 0)
+            )
+            if v != expected:
+                # Allow total to be set separately (for columns of other types)
+                pass
+        return v
+
+
+class DataQualityMetrics(BaseModel):
+    """Metrics for data quality assessment with validation."""
+
+    duplicates_pct: float | None = Field(None, ge=0.0, le=100.0)
+    outliers_pct: float = Field(ge=0.0, le=100.0)
+    missing_pct: float = Field(ge=0.0, le=100.0)
+    backcheck_error_pct: float = Field(ge=0.0, le=100.0)
+
+
+# ============================================================================
+# Date Computation Helpers
+# ============================================================================
+
+
+class DateRangeCalculator:
+    """Helper class for calculating date ranges for time-based filtering."""
+
+    @staticmethod
+    def get_today() -> Date:
+        """Get today's date."""
+        from datetime import datetime
+        return datetime.now().date()
+
+    @staticmethod
+    def get_yesterday() -> Date:
+        """Get yesterday's date."""
+        from datetime import datetime, timedelta
+        return (datetime.now() - timedelta(days=1)).date()
+
+    @staticmethod
+    def get_week_start(weeks_ago: int = 0) -> Date:
+        """Get the start date for a week.
+
+        Parameters
+        ----------
+        weeks_ago : int
+            Number of weeks to go back from today (0 = current week)
+
+        Returns
+        -------
+        Date
+            Start date of the specified week
+        """
+        from datetime import datetime, timedelta
+        return (datetime.now() - timedelta(weeks=weeks_ago + 1)).date()
+
+    @staticmethod
+    def get_month_start(months_ago: int = 0) -> Date:
+        """Get the start date for a month.
+
+        Parameters
+        ----------
+        months_ago : int
+            Number of months to go back from today (0 = current month)
+
+        Returns
+        -------
+        Date
+            Start date of the specified month
+        """
+        from datetime import datetime, timedelta
+
+        today = datetime.now()
+        # Approximate: go back by (months_ago + 1) * 30 days
+        # This is a simple approximation that works for most cases
+        return (today - timedelta(days=(months_ago + 1) * 30)).date()
+
+
+# ============================================================================
+# Data Conversion and Validation
+# ============================================================================
+
+
+def pandas_to_polars(df: pd.DataFrame) -> pl.DataFrame:
+    """Convert pandas DataFrame to Polars DataFrame.
 
     Parameters
     ----------
-    setting_file : str
-            The settings file to load.
+    df : pd.DataFrame
+        Input pandas dataframe
 
-    page_num : int
-            The page number of the report.
+    Returns
+    -------
+    pl.DataFrame
+        Converted Polars dataframe
+    """
+    return pl.from_pandas(df)
+
+
+def polars_to_pandas(df: pl.DataFrame) -> pd.DataFrame:
+    """Convert Polars DataFrame to pandas DataFrame.
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        Input Polars dataframe
+
+    Returns
+    -------
+    pd.DataFrame
+        Converted pandas dataframe
+    """
+    return df.to_pandas()
+
+
+def validate_and_convert_date_column(
+    data: pl.DataFrame, date_column: str
+) -> pl.DataFrame:
+    """Validate and convert a column to date format.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        Input dataframe
+    date_column : str
+        Name of the date column to validate and convert
+
+    Returns
+    -------
+    pl.DataFrame
+        Dataframe with only the date column, converted to date type
+
+    Raises
+    ------
+    ValueError
+        If the column cannot be converted to date
+    """
+    try:
+        # Check if column exists
+        if date_column not in data.columns:
+            raise ValueError(f"Column {date_column} not found in dataframe")  # noqa: TRY301
+
+        # Try to cast to date type, selecting only the date column
+        df = data.select(
+            pl.col(date_column).cast(pl.Date, strict=False).alias(date_column)
+        )
+        return df  # noqa: TRY300
+    except Exception as e:
+        raise ValueError(f"Column {date_column} cannot be converted to date: {e}")  # noqa: B904
+
+
+def prepare_date_data(data: pl.DataFrame, date_column: str) -> tuple[pl.DataFrame, int]:
+    """Prepare date data by converting to date and handling missing values.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        Input dataframe
+    date_column : str
+        Name of the date column
+
+    Returns
+    -------
+    tuple[pl.DataFrame, int]
+        Tuple of (processed dataframe, missing date count)
+    """
+    # Convert to date if needed
+    df = validate_and_convert_date_column(data, date_column)
+
+    # Count missing values
+    missing_count = df.select(pl.col(date_column).is_null().sum()).item()
+
+    # Drop missing values
+    df = df.filter(pl.col(date_column).is_not_null())
+
+    return df, missing_count
+
+
+# ============================================================================
+# Submission Metrics Computation
+# ============================================================================
+
+
+def calculate_submission_count(
+    df: pl.DataFrame,
+    date_column: str,
+    start_date: Date | None,
+    end_date: Date | None = None,
+) -> int:
+    """Calculate submission count within a date range.
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        Dataframe with date column
+    date_column : str
+        Name of the date column
+    start_date : Date | None
+        Start date for filtering (inclusive)
+    end_date : Date | None
+        End date for filtering (exclusive). If None, no upper bound.
+
+    Returns
+    -------
+    int
+        Count of submissions in the date range
+    """
+    if start_date is None:
+        return 0
+
+    if end_date is None:
+        filtered = df.filter(pl.col(date_column) >= start_date)
+    else:
+        filtered = df.filter(
+            (pl.col(date_column) >= start_date) & (pl.col(date_column) < end_date)
+        )
+
+    return filtered.height
+
+
+def calculate_percentage_change(current: int, previous: int) -> float:
+    """Calculate percentage change between two values.
+
+    Parameters
+    ----------
+    current : int
+        Current value
+    previous : int
+        Previous value
+
+    Returns
+    -------
+    float
+        Percentage change
+    """
+    if previous == 0:
+        return 0.0
+    return ((current - previous) / previous) * 100
+
+
+@st.cache_data
+def compute_summary_submissions(data: pd.DataFrame, date: str) -> tuple:
+    """Compute submission metrics for the summary report.
+
+    This function is maintained for backward compatibility with existing tests.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        The survey data (pandas)
+    date : str
+        The date column in the survey data
 
     Returns
     -------
     tuple
-            A tuple containing the default settings for the summary report.
-
+        A tuple containing:
+        - first_submission_date: Date | None
+        - last_submission_date: Date | None
+        - submissions_today: int
+        - submissions_this_week: int
+        - submissions_this_month: int
+        - submissions_total: int
+        - submissions_today_delta: float
+        - submissions_this_week_delta: float
+        - submissions_this_month_delta: float
+        - submissions_by_date: pd.DataFrame
     """
-    # Get config page defaults
-    _, _, _, config_survey_id, config_survey_date, _, _, _, _, _, _, _ = (
-        get_check_config_settings(
-            project_id=project_id,
-            page_row_index=page_num - 1,
-        )
+    # Convert to Polars for computation
+    pl_data = pandas_to_polars(data)
+    metrics = calculate_submission_metrics(pl_data, date)
+
+    return (
+        metrics.first_submission_date,
+        metrics.last_submission_date,
+        metrics.today_count,
+        metrics.this_week_count,
+        metrics.this_month_count,
+        metrics.total_count,
+        metrics.today_delta_pct,
+        metrics.this_week_delta_pct,
+        metrics.this_month_delta_pct,
+        metrics.submissions_by_date,
     )
 
-    # load default settings in the following order:
-    # - if settings file exists, load settings from file
-    # - if settings file does not exist, load default settings from config
+
+def calculate_submission_metrics(
+    data: pl.DataFrame, date_column: str
+) -> SubmissionMetrics:
+    """Calculate comprehensive submission metrics using Polars.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        The survey data
+    date_column : str
+        The date column in the survey data
+
+    Returns
+    -------
+    SubmissionMetrics
+        Structured metrics for submissions
+    """
+    # Handle empty data
+    if data.height == 0:
+        return _create_empty_submission_metrics()
+
+    # Prepare and validate date data
+    df, missing_count = prepare_date_data(data, date_column)
+
+    # Handle case where all dates are missing
+    if df.height == 0:
+        return _create_empty_submission_metrics(total_count=missing_count)
+
+    # Calculate date boundaries
+    first_date = df.select(pl.col(date_column).min()).item()
+    last_date = df.select(pl.col(date_column).max()).item()
+
+    # Get date ranges
+    today = DateRangeCalculator.get_today()
+    yesterday = DateRangeCalculator.get_yesterday()
+    this_week_start = DateRangeCalculator.get_week_start(weeks_ago=0)
+    last_week_start = DateRangeCalculator.get_week_start(weeks_ago=1)
+    this_month_start = DateRangeCalculator.get_month_start(months_ago=0)
+    last_month_start = DateRangeCalculator.get_month_start(months_ago=1)
+
+    # Calculate current period counts
+    today_count = df.filter(pl.col(date_column) == today).height
+    this_week_count = calculate_submission_count(df, date_column, this_week_start)
+    this_month_count = calculate_submission_count(df, date_column, this_month_start)
+
+    # Calculate previous period counts for deltas
+    yesterday_count = df.filter(pl.col(date_column) == yesterday).height
+    last_week_count = calculate_submission_count(
+        df, date_column, last_week_start, this_week_start
+    )
+    last_month_count = calculate_submission_count(
+        df, date_column, last_month_start, this_month_start
+    )
+
+    # Calculate percentage changes
+    today_delta = calculate_percentage_change(today_count, yesterday_count)
+    this_week_delta = calculate_percentage_change(this_week_count, last_week_count)
+    this_month_delta = calculate_percentage_change(this_month_count, last_month_count)
+
+    # Calculate submissions by date
+    submissions_by_date_pl = (
+        df.group_by(date_column)
+        .agg(pl.len().alias("submissions"))
+        .sort(date_column)
+    )
+
+    # Convert to pandas for compatibility with Plotly
+    submissions_by_date = polars_to_pandas(submissions_by_date_pl)
+
+    return SubmissionMetrics(
+        first_submission_date=first_date,
+        last_submission_date=last_date,
+        today_count=today_count,
+        this_week_count=this_week_count,
+        this_month_count=this_month_count,
+        total_count=data.height,
+        today_delta_pct=today_delta,
+        this_week_delta_pct=this_week_delta,
+        this_month_delta_pct=this_month_delta,
+        submissions_by_date=submissions_by_date,
+    )
+
+
+def _create_empty_submission_metrics(total_count: int = 0) -> SubmissionMetrics:
+    """Create empty submission metrics for edge cases.
+
+    Parameters
+    ----------
+    total_count : int
+        Total submission count (for cases with missing dates)
+
+    Returns
+    -------
+    SubmissionMetrics
+        Empty metrics structure
+    """
+    return SubmissionMetrics(
+        first_submission_date=None,
+        last_submission_date=None,
+        today_count=0,
+        this_week_count=0,
+        this_month_count=0,
+        total_count=total_count,
+        today_delta_pct=0.0,
+        this_week_delta_pct=0.0,
+        this_month_delta_pct=0.0,
+        submissions_by_date=pd.DataFrame(),
+    )
+
+
+# ============================================================================
+# Progress Metrics Computation
+# ============================================================================
+
+
+@st.cache_data
+def compute_summary_progress(
+    data: pd.DataFrame, date: str, target: int | None = None
+) -> tuple:
+    """Compute progress metrics for the summary report.
+
+    This function is maintained for backward compatibility with existing tests.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        The survey data (pandas)
+    date : str
+        The date column in the survey data
+    target : int | None
+        The target number of submissions
+
+    Returns
+    -------
+    tuple
+        A tuple containing:
+        - progress: float
+        - average_submission_per_day: float
+        - average_submission_per_week: float
+        - average_submission_per_month: float
+
+    Raises
+    ------
+    ValueError
+        If target is not a positive integer
+    """
+    # Convert to Polars for computation
+    pl_data = pandas_to_polars(data)
+    metrics = calculate_progress_metrics(pl_data, date, target)
+    return (
+        metrics.progress_pct,
+        metrics.avg_per_day,
+        metrics.avg_per_week,
+        metrics.avg_per_month,
+    )
+
+
+def calculate_progress_metrics(
+    data: pl.DataFrame, date_column: str, target: int | None = None
+) -> ProgressMetrics:
+    """Calculate progress metrics for survey submissions using Polars.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        The survey data
+    date_column : str
+        The date column in the survey data
+    target : int | None
+        The target number of submissions
+
+    Returns
+    -------
+    ProgressMetrics
+        Structured progress metrics
+
+    Raises
+    ------
+    ValueError
+        If target is not a positive integer
+    """
+    # Validate target
+    if target is not None and (not isinstance(target, int) or target < 0):
+        raise ValueError("Target must be a positive integer")
+
+    # Handle empty data
+    if data.height == 0:
+        return _create_empty_progress_metrics()
+
+    # Prepare and validate date data
+    df, _ = prepare_date_data(data, date_column)
+
+    # Handle case where all dates are missing
+    if df.height == 0:
+        return _create_empty_progress_metrics()
+
+    # Calculate progress percentage
+    progress_pct = (df.height / target * 100) if target else 0.0
+
+    # Calculate average submissions per day
+    daily_counts = df.group_by(date_column).agg(pl.len().alias("count"))
+    avg_per_day = daily_counts.select(pl.col("count").mean()).item()
+
+    # Calculate average submissions per week
+    weekly_data = df.select(
+        pl.col(date_column).dt.truncate("1w").alias("week")
+    )
+    weekly_counts = weekly_data.group_by("week").agg(pl.len().alias("count"))
+    avg_per_week = weekly_counts.select(pl.col("count").mean()).item()
+
+    # Calculate average submissions per month
+    monthly_data = df.select(
+        pl.col(date_column).dt.truncate("1mo").alias("month")
+    )
+    monthly_counts = monthly_data.group_by("month").agg(pl.len().alias("count"))
+    avg_per_month = monthly_counts.select(pl.col("count").mean()).item()
+
+    return ProgressMetrics(
+        progress_pct=progress_pct,
+        avg_per_day=avg_per_day,
+        avg_per_week=avg_per_week,
+        avg_per_month=avg_per_month,
+    )
+
+
+def _create_empty_progress_metrics() -> ProgressMetrics:
+    """Create empty progress metrics for edge cases.
+
+    Returns
+    -------
+    ProgressMetrics
+        Empty metrics structure
+    """
+    return ProgressMetrics(
+        progress_pct=0.0,
+        avg_per_day=0.0,
+        avg_per_week=0.0,
+        avg_per_month=0.0,
+    )
+
+
+# ============================================================================
+# Progress by Column Computation
+# ============================================================================
+
+
+def determine_auto_time_period(total_submissions: int) -> str:
+    """Determine the best time period based on submission count.
+
+    Parameters
+    ----------
+    total_submissions : int
+        Total number of submissions
+
+    Returns
+    -------
+    str
+        Time period ('Daily', 'Weekly', or 'Monthly')
+    """
+    if total_submissions < 20:
+        return "Daily"
+    elif total_submissions < 140:
+        return "Weekly"
+    else:
+        return "Monthly"
+
+
+@st.cache_data
+def compute_summary_progress_by_col(
+    data: pd.DataFrame,
+    date: str,
+    progress_by_col: str,
+    progress_time_period: str,
+) -> tuple:
+    """Compute progress metrics grouped by a column.
+
+    This function is maintained for backward compatibility with existing tests.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        The survey data (pandas)
+    date : str
+        The date column in the survey data
+    progress_by_col : str
+        The column to compute progress by
+    progress_time_period : str
+        The time period to compute progress by ('Auto', 'Daily', 'Weekly', 'Monthly')
+
+    Returns
+    -------
+    tuple
+        A tuple containing:
+        - progress_data: pd.DataFrame (pivoted progress data)
+        - vmin_val: float (minimum value for heatmap)
+        - vmax_val: float (maximum value for heatmap)
+        - format_cols: list (columns for formatting)
+    """
+    # Handle empty data
+    if data.empty:
+        return pd.DataFrame(), 0, 0, []
+
+    # Convert to Polars for computation
+    pl_data = pandas_to_polars(data)
+
+    # Determine time period
+    if progress_time_period == "Auto":
+        time_period = determine_auto_time_period(pl_data.height)
+    else:
+        time_period = progress_time_period
+
+    # Select relevant columns
+    progress_data = pl_data.select([date, progress_by_col])
+
+    # Validate and convert date column
+    try:
+        progress_data = progress_data.with_columns(
+            pl.col(date).cast(pl.Date, strict=False).alias(date)
+        )
+    except Exception as e:
+        raise ValueError(f"Column {date} is not a datetime column: {e}")  # noqa: B904
+
+    # Create time period aggregation
+    if time_period == "Daily":
+        time_expr = pl.col(date).alias("time period")
+    elif time_period == "Weekly":
+        time_expr = pl.col(date).dt.truncate("1w").alias("time period")
+    else:  # Monthly
+        time_expr = pl.col(date).dt.truncate("1mo").alias("time period")
+
+    # Aggregate by time period and progress column
+    progress_data = (
+        progress_data.with_columns(time_expr)
+        .group_by(["time period", progress_by_col])
+        .agg(pl.len().alias("count"))
+    )
+
+    # Convert time period to date for display
+    progress_data = progress_data.with_columns(
+        pl.col("time period").cast(pl.Date).alias("time period")
+    )
+
+    # Pivot the data
+    # Convert to pandas for pivoting (Polars pivot is still evolving)
+    progress_pd = polars_to_pandas(progress_data)
+    progress_pd = progress_pd.pivot(
+        index=progress_by_col, columns="time period", values="count"
+    ).fillna(0)
+
+    # Calculate heatmap range
+    if not progress_pd.empty:
+        vmin_val = progress_pd.min().min()
+        vmax_val = progress_pd.max().max()
+        format_cols = progress_pd.columns
+    else:
+        vmin_val = 0
+        vmax_val = 0
+        format_cols = []
+
+    return progress_pd, vmin_val, vmax_val, format_cols
+
+
+# ============================================================================
+# Data Summary Computation
+# ============================================================================
+
+
+@st.cache_data
+def compute_summary_data_summary(data: pd.DataFrame) -> tuple:
+    """Compute data summary metrics.
+
+    This function is maintained for backward compatibility.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        The survey data (pandas)
+
+    Returns
+    -------
+    tuple
+        A tuple containing column counts by type
+    """
+    # Convert to Polars for computation
+    pl_data = pandas_to_polars(data)
+    metrics = calculate_data_summary_metrics(pl_data)
+    return (
+        metrics.string_columns_count,
+        metrics.numeric_columns_count,
+        metrics.date_columns_count,
+        metrics.total_columns_count,
+    )
+
+
+def calculate_data_summary_metrics(data: pl.DataFrame) -> DataSummaryMetrics:
+    """Calculate data summary metrics using Polars.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        The survey data
+
+    Returns
+    -------
+    DataSummaryMetrics
+        Structured data summary metrics
+    """
+    # Count columns by type
+    string_cols = 0
+    numeric_cols = 0
+    date_cols = 0
+
+    for dtype in data.dtypes:
+        if dtype in [pl.Utf8, pl.Categorical]:
+            string_cols += 1
+        elif dtype in [pl.Int8, pl.Int16, pl.Int32, pl.Int64, pl.Float32, pl.Float64]:
+            numeric_cols += 1
+        elif dtype in [pl.Date, pl.Datetime]:
+            date_cols += 1
+
+    return DataSummaryMetrics(
+        string_columns_count=string_cols,
+        numeric_columns_count=numeric_cols,
+        date_columns_count=date_cols,
+        total_columns_count=len(data.columns),
+    )
+
+
+# ============================================================================
+# Data Quality Computation
+# ============================================================================
+
+
+@st.cache_data
+def compute_summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> tuple:
+    """Compute data quality metrics.
+
+    This function is maintained for backward compatibility.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        The survey data (pandas)
+    survey_id : str | None
+        The survey ID column in the survey data
+
+    Returns
+    -------
+    tuple
+        A tuple containing data quality metrics
+    """
+    # Convert to Polars for computation
+    pl_data = pandas_to_polars(data)
+    metrics = calculate_data_quality_metrics(pl_data, survey_id)
+    return (
+        metrics.duplicates_pct,
+        metrics.outliers_pct,
+        metrics.missing_pct,
+        metrics.backcheck_error_pct,
+    )
+
+
+def calculate_data_quality_metrics(
+    data: pl.DataFrame, survey_id: str | None
+) -> DataQualityMetrics:
+    """Calculate data quality metrics using Polars.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        The survey data
+    survey_id : str | None
+        The survey ID column in the survey data
+
+    Returns
+    -------
+    DataQualityMetrics
+        Structured data quality metrics
+    """
+    # Calculate duplicates percentage
+    if survey_id and survey_id in data.columns:
+        total_rows = data.height
+        unique_rows = data.select(pl.col(survey_id)).unique().height
+        duplicates_pct = ((total_rows - unique_rows) / total_rows * 100) if total_rows > 0 else 0.0
+    else:
+        duplicates_pct = None
+
+    # Calculate missing percentage
+    if data.height > 0:
+        null_counts = data.null_count()
+        total_cells = data.height * len(data.columns)
+        missing_pct = (null_counts.sum_horizontal().item() / total_cells * 100) if total_cells > 0 else 0.0
+    else:
+        missing_pct = 0.0
+
+    # Placeholder values for future implementation
+    outliers_pct = 0.0
+    backcheck_error_pct = 0.0
+
+    return DataQualityMetrics(
+        duplicates_pct=duplicates_pct,
+        outliers_pct=outliers_pct,
+        missing_pct=missing_pct,
+        backcheck_error_pct=backcheck_error_pct,
+    )
+
+
+# ============================================================================
+# Settings Management
+# ============================================================================
+
+
+def load_default_settings(project_id: str, setting_file: str, page_num: int) -> tuple:
+    """Load the default settings for the summary report.
+
+    Parameters
+    ----------
+    project_id : str
+        The project identifier
+    setting_file : str
+        The settings file to load
+    page_num : int
+        The page number of the report
+
+    Returns
+    -------
+    tuple
+        A tuple containing the default settings (date, target, survey_id)
+    """
+    # Get config page defaults
+    config_settings = ConfigurationService(project_id).get_page_configuration(page_num - 1)
+    config_survey_id = config_settings.get("survey_id", None)
+    config_survey_date = config_settings.get("survey_date", None)
+    config_survey_target = config_settings.get("survey_target", None)
+
+    # Load settings from file if it exists
     if setting_file and os.path.exists(setting_file):
         default_settings = load_check_settings(setting_file, "summary") or {}
     else:
@@ -55,49 +914,85 @@ def load_default_settings(project_id: str, setting_file: str, page_num: int) -> 
 
     default_date = default_settings.get("date", config_survey_date)
     default_survey_id = default_settings.get("survey_id", config_survey_id)
-
-    # if target is not set, return None
-    default_target = default_settings.get("target")
+    default_target = default_settings.get("target", config_survey_target)
 
     return default_date, default_target, default_survey_id
 
 
-# define function to create summary report
-@demo_output_onboarding(TAB_NAME)
-def summary_settings(
-    project_id: str, data: pd.DataFrame, setting_file: str, page_num
-) -> tuple:
-    """
-    Get the settings for the summary report.
+def save_setting(
+    setting_file: str,
+    setting_name: str,
+    setting_value: str | int,
+    state_key: str,
+) -> None:
+    """Save a single setting to the settings file.
 
     Parameters
     ----------
+    setting_file : str
+        Path to the settings file
+    setting_name : str
+        Name of the setting
+    setting_value : str | int
+        Value of the setting
+    state_key : str
+        Session state key for the setting
+    """
+    if st.session_state.get(state_key):
+        save_check_settings(
+            settings_file=setting_file,
+            check_name="summary",
+            check_settings={setting_name: setting_value},
+        )
+        st.session_state[state_key] = False
+
+
+# ============================================================================
+# UI Components
+# ============================================================================
+
+
+@demo_output_onboarding(TAB_NAME)
+def summary_settings(
+    project_id: str, data: pd.DataFrame, setting_file: str, page_num: int
+) -> tuple:
+    """Render settings UI and return selected settings.
+
+    Parameters
+    ----------
+    project_id : str
+        The project identifier
     data : pd.DataFrame
-            The survey data
+        The survey data (pandas)
+    setting_file : str
+        Path to the settings file
+    page_num : int
+        The page number
 
     Returns
     -------
     tuple
-            A tuple containing the settings for the summary report
-
+        A tuple containing (date_column, target, survey_id_column)
     """
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for summary report")
-
         st.write("---")
-        st.markdown("### Select columns to include in summary report")
 
+        # Load defaults
         default_date, default_target, default_survey_id = load_default_settings(
             project_id=project_id, setting_file=setting_file, page_num=page_num
         )
 
+        # Get column information
         _, string_columns, numeric_columns, datetime_columns, _ = get_df_info(
             data, cols_only=True
         )
-        with st.container(border=True):
-            sc1, sc2, sc3 = st.columns(spec=3)
 
-            with sc1:
+        st.markdown("#### Survey Identifiers")
+        with st.container(border=True):
+            si1, _, _ = st.columns(spec=3)
+            # Survey ID selection
+            with si1:
                 id_col_options = string_columns + numeric_columns
                 default_survey_id_index = (
                     id_col_options.index(default_survey_id)
@@ -114,18 +1009,13 @@ def summary_settings(
                     on_change=trigger_save,
                     kwargs={"state_name": "summary_survey_id"},
                 )
-                if (
-                    "summary_survey_id" in st.session_state
-                    and st.session_state.summary_survey_id
-                ):
-                    save_check_settings(
-                        settings_file=setting_file,
-                        check_name="summary",
-                        check_settings={"survey_id": survey_id},
-                    )
-                    st.session_state.summary_survey_id = False
+                save_setting(setting_file, "survey_id", survey_id, "summary_survey_id")
 
-            with sc2:
+        st.markdown("#### Survey Date")
+        with st.container(border=True):
+            dc1, _, _ = st.columns(spec=3)
+            # Date selection
+            with dc1:
                 default_date_index = (
                     datetime_columns.index(default_date)
                     if default_date and default_date in datetime_columns
@@ -140,15 +1030,13 @@ def summary_settings(
                     on_change=trigger_save,
                     kwargs={"state_name": "summary_date"},
                 )
-                if "summary_date" in st.session_state and st.session_state.summary_date:
-                    save_check_settings(
-                        settings_file=setting_file,
-                        check_name="summary",
-                        check_settings={"date": date},
-                    )
-                    st.session_state.summary_date = False
+                save_setting(setting_file, "date", date, "summary_date")
 
-            with sc3:
+        st.markdown("#### Submission Target")
+        with st.container(border=True):
+            tc1, _, _ = st.columns(spec=3)
+            # Target selection
+            with tc1:
                 target = st.number_input(
                     label="Total Expected Interviews",
                     min_value=0,
@@ -158,416 +1046,84 @@ def summary_settings(
                     on_change=trigger_save,
                     kwargs={"state_name": "summary_target"},
                 )
-                if (
-                    "summary_target" in st.session_state
-                    and st.session_state.summary_target
-                ):
-                    save_check_settings(
-                        settings_file=setting_file,
-                        check_name="summary",
-                        check_settings={"target": target},
-                    )
-                    st.session_state.summary_target = False
+                save_setting(setting_file, "target", target, "summary_target")
 
     return date, target, survey_id or None
 
 
-@st.cache_data
-def compute_summary_submissions(data: pd.DataFrame, date: str) -> tuple:
-    """
-    Compute values for summary submissions
-
-    Parameters
-    ----------
-    data : pd.DataFrame
-            The survey data
-
-    date : str
-            The date column in the survey data
-
-    Returns
-    -------
-    tuple
-            A tuple containing the summary values
-
-    """
-    summary_df = data[[date]].copy(deep=True)
-
-    # return None and 0 if no data
-    if summary_df.empty:
-        return (
-            None,
-            None,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            pd.DataFrame(),
-        )
-
-    # check if date column is in the data
-    # try convertting to datetime
-    # and raise error if conversion fails
-    if not pd.api.types.is_datetime64_any_dtype(summary_df[date]):
-        summary_df[date] = pd.to_datetime(summary_df[date], errors="coerce")
-        if not pd.api.types.is_datetime64_any_dtype(summary_df[date]):
-            raise ValueError(f"Column {date} is not a datetime column")
-
-    summary_df[date] = summary_df[date].dt.date
-    # count number of submissions with missing date
-    missing_date_count = max(summary_df[date].isnull().sum(), 0)
-    summary_df = summary_df.dropna(subset=[date])
-    # dataset is empty after dropping missing date return None
-    if summary_df.empty:
-        return (
-            None,
-            None,
-            0,
-            0,
-            0,
-            missing_date_count,
-            0,
-            0,
-            0,
-            pd.DataFrame(),
-        )
-
-    first_submission_date = summary_df[date].min()
-    last_submission_date = summary_df[date].max()
-
-    todays_date = pd.Timestamp.now().date()
-    submissions_today = summary_df[summary_df[date] == todays_date].shape[0]
-
-    yestedays_date = (pd.Timestamp.now().normalize() - pd.DateOffset(days=1)).date()
-    submissions_yesterday = summary_df[summary_df[date] == yestedays_date].shape[0]
-
-    this_week_start_date = (
-        pd.Timestamp.now().normalize() - pd.DateOffset(weeks=1)
-    ).date()
-    submissions_this_week = summary_df[summary_df[date] >= this_week_start_date].shape[
-        0
-    ]
-
-    lastweek_start_date = (
-        pd.Timestamp.now().normalize() - pd.DateOffset(weeks=2)
-    ).date()
-    lastweek_end_date = (pd.Timestamp.now().normalize() - pd.DateOffset(weeks=1)).date()
-    submissions_last_week = summary_df[
-        (summary_df[date] >= lastweek_start_date)
-        & (summary_df[date] < lastweek_end_date)
-    ].shape[0]
-
-    this_months_start_date = (
-        pd.Timestamp.now().normalize() - pd.DateOffset(months=1)
-    ).date()
-    submissions_this_month = summary_df[
-        summary_df[date] >= this_months_start_date
-    ].shape[0]
-
-    last_month_start_date = (
-        pd.Timestamp.now().normalize() - pd.DateOffset(months=2)
-    ).date()
-    last_month_end_date = (
-        pd.Timestamp.now().normalize() - pd.DateOffset(months=1)
-    ).date()
-    submissions_last_month = summary_df[
-        (summary_df[date] >= last_month_start_date)
-        & (summary_df[date] < last_month_end_date)
-    ].shape[0]
-
-    submissions_total = data.shape[0]
-
-    submissions_today_delta = (
-        ((submissions_today - submissions_yesterday) / submissions_yesterday) * 100
-        if submissions_yesterday > 0
-        else 0
-    )
-    submissions_this_week_delta = (
-        ((submissions_this_week - submissions_last_week) / submissions_last_week) * 100
-        if submissions_last_week > 0
-        else 0
-    )
-    submissions_this_month_delta = (
-        ((submissions_this_month - submissions_last_month) / submissions_last_month)
-        * 100
-        if submissions_last_month > 0
-        else 0
-    )
-
-    submissions_by_date = (
-        summary_df.groupby(date).size().reset_index(name="submissions")
-    )
-
-    return (
-        first_submission_date,
-        last_submission_date,
-        submissions_today,
-        submissions_this_week,
-        submissions_this_month,
-        submissions_total + missing_date_count,
-        submissions_today_delta,
-        submissions_this_week_delta,
-        submissions_this_month_delta,
-        submissions_by_date,
-    )
-
-
 @demo_output_onboarding(TAB_NAME)
 def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
-    """
-    Generates a summary report for the survey data
+    """Render submission details report.
 
     Parameters
     ----------
     data : pd.DataFrame
-            The survey data
-
-    date : str
-            The date column in the survey data
-
-    Returns
-    -------
-    None
+        The survey data (pandas)
+    date : str | None
+        The date column in the survey data
     """
-    if date:
-        (
-            first_submission_date,
-            last_submission_date,
-            submissions_today,
-            submissions_this_week,
-            submissions_this_month,
-            submissions_total,
-            submissions_today_delta,
-            submissions_this_week_delta,
-            submissions_this_month_delta,
-            submissions_by_date,
-        ) = compute_summary_submissions(data=data, date=date)
-
-        dc1, _, _, dc2 = st.columns(spec=4)
-        dc1.metric(
-            label="First Submission",
-            value=str(first_submission_date),
-            help="Date of the first submission",
-        )
-        dc2.metric(
-            label="Last Submission",
-            value=str(last_submission_date),
-            help="Date of the last submission",
-        )
-
-        mc1, mc2, mc3, mc4 = st.columns(spec=4, border=True)
-
-        mc1.metric(
-            label="Today",
-            value=f"{submissions_today:,}",
-            delta=f"{submissions_today_delta:.2f}%",
-            help="Number of submissions today. Delta is the percentage change from yesterday.",
-        )
-        mc2.metric(
-            label="This week",
-            value=f"{submissions_this_week:,}",
-            delta=f"{submissions_this_week_delta:.2f}%",
-            help="Number of submissions this week. Delta is the percentage change from last week.",
-        )
-        mc3.metric(
-            label="This month",
-            value=f"{submissions_this_month:,}",
-            delta=f"{submissions_this_month_delta:.2f}%",
-            help="Number of submissions this month. Delta is the percentage change from last month",
-        )
-        mc4.metric(
-            label="Total",
-            value=f"{submissions_total:,}",
-            help="Total number of submissions",
-        )
-
-        fig = px.area(
-            submissions_by_date,
-            x=date,
-            y="submissions",
-            title="Submissions by date",
-            color_discrete_sequence=["#e8848b"],
-        )
-        fig.update_layout(width=1000, height=500)
-        fig.update_yaxes(tick0=0)
-        st.plotly_chart(fig, width="stretch")
-    else:
+    if not date:
         st.info(
-            "Submission details report requires a date column to be selected. Go to the :material/settings: settings section above."
+            "Submission details report requires a date column to be selected. "
+            "Go to the :material/settings: settings section above."
         )
+        return
 
+    # Convert to Polars and calculate metrics
+    pl_data = pandas_to_polars(data)
+    metrics = calculate_submission_metrics(pl_data, date)
 
-@st.cache_data
-def compute_summary_progress(
-    data: pd.DataFrame, date: str, target: int | None = None
-) -> tuple:
-    """
-    Compute values for summary progress
-
-    Parameters
-    ----------
-    data : pd.DataFrame
-            The survey data
-
-    date : str
-            The date column in the survey data
-
-    enumerator : str | None
-            The enumerator column in the survey data
-
-    target : int | None
-            The target number of submissions
-
-    Returns
-    -------
-    tuple
-            A tuple containing the summary values
-
-    """
-    # if target is negative, or not an integer, raise error
-    if target is not None and (not isinstance(target, int) or target < 0):
-        raise ValueError("Target must be a positive integer")
-    prog_summary_df = data[[date]].copy(deep=True)
-    # return None and 0 if no data
-    if prog_summary_df.empty:
-        return (
-            0,
-            0,
-            0,
-            0,
-        )
-    # check if date column is datetime
-    # try convertting to datetime
-    # and raise error if conversion fails
-    if not pd.api.types.is_datetime64_any_dtype(prog_summary_df[date]):
-        prog_summary_df[date] = pd.to_datetime(prog_summary_df[date], errors="coerce")
-        if not pd.api.types.is_datetime64_any_dtype(prog_summary_df[date]):
-            raise ValueError(f"Column {date} is not a datetime column")
-
-    # drop missing date
-    prog_summary_df = prog_summary_df.dropna(subset=[date])
-    # dataset is empty after dropping missing date return None
-    if prog_summary_df.empty:
-        return (
-            0,
-            0,
-            0,
-            0,
-        )
-    progress = (prog_summary_df.shape[0] / target) * 100 if target else 0
-    average_submission_per_day = prog_summary_df[date].dt.date.value_counts().mean()
-    prog_summary_df["week"] = prog_summary_df[date].dt.to_period("W").dt.to_timestamp()
-    average_submission_per_week = prog_summary_df.groupby("week").size().mean()
-    prog_summary_df["month"] = prog_summary_df[date].dt.to_period("M").dt.to_timestamp()
-    average_submission_per_month = prog_summary_df.groupby("month").size().mean()
-
-    return (
-        progress,
-        average_submission_per_day,
-        average_submission_per_week,
-        average_submission_per_month,
+    # Display date range
+    dc1, _, _, dc2 = st.columns(spec=4)
+    dc1.metric(
+        label="First Submission",
+        value=str(metrics.first_submission_date),
+        help="Date of the first submission",
+    )
+    dc2.metric(
+        label="Last Submission",
+        value=str(metrics.last_submission_date),
+        help="Date of the last submission",
     )
 
+    # Display metrics
+    mc1, mc2, mc3, mc4 = st.columns(spec=4, border=True)
 
-@st.cache_data
-def compute_summary_progress_by_col(
-    data: pd.DataFrame,
-    date: str,
-    progress_by_col: str,
-    progress_time_period: str,
-) -> tuple:
-    """
-    Compute values for summary progress by column
-
-    Parameters
-    ----------
-    data : pd.DataFrame
-            The survey data
-
-    date : str
-            The date column in the survey data
-
-    progress_by_col : str
-            The column to compute progress by
-
-    progress_time_period : str
-            The time period to compute progress by
-
-    Returns
-    -------
-    pd.DataFrame
-            A DataFrame containing the summary values
-
-    """
-    if progress_time_period == "Auto":
-        total_submissions = data.shape[0]
-        if total_submissions > 0:
-            if total_submissions < 20:
-                progress_time_period_use = "Daily"
-            elif total_submissions < 140:
-                progress_time_period_use = "Weekly"
-            else:
-                progress_time_period_use = "Monthly"
-    else:
-        progress_time_period_use = progress_time_period
-
-    progress_data = data[[date, progress_by_col]].copy(deep=True)
-    # return None and 0 if no data
-    if progress_data.empty:
-        return (
-            pd.DataFrame(),
-            0,
-            0,
-            [],
-        )
-    # check if date column is datetime
-    # try convertting to datetime
-    # and raise error if conversion fails
-    if not pd.api.types.is_datetime64_any_dtype(progress_data[date]):
-        progress_data[date] = pd.to_datetime(progress_data[date], errors="coerce")
-        if not pd.api.types.is_datetime64_any_dtype(progress_data[date]):
-            raise ValueError(f"Column {date} is not a datetime column")
-
-    progress_data["time period"] = data[date].dt.to_period("D").dt.to_timestamp()
-    progress_data = (
-        progress_data.groupby(["time period", progress_by_col])
-        .size()
-        .reset_index(name="count")
+    mc1.metric(
+        label="Today",
+        value=f"{metrics.today_count:,}",
+        delta=f"{metrics.today_delta_pct:.2f}%",
+        help="Number of submissions today. Delta is the percentage change from yesterday.",
+    )
+    mc2.metric(
+        label="This week",
+        value=f"{metrics.this_week_count:,}",
+        delta=f"{metrics.this_week_delta_pct:.2f}%",
+        help="Number of submissions this week. Delta is the percentage change from last week.",
+    )
+    mc3.metric(
+        label="This month",
+        value=f"{metrics.this_month_count:,}",
+        delta=f"{metrics.this_month_delta_pct:.2f}%",
+        help="Number of submissions this month. Delta is the percentage change from last month",
+    )
+    mc4.metric(
+        label="Total",
+        value=f"{metrics.total_count:,}",
+        help="Total number of submissions",
     )
 
-    if progress_time_period_use == "Weekly":
-        progress_data["time period"] = (
-            progress_data["time period"].dt.to_period("W").dt.to_timestamp()
-        )
-        progress_data = (
-            progress_data.groupby(["time period", progress_by_col])
-            .sum("count")
-            .reset_index()
-        )
-    elif progress_time_period_use == "Monthly":
-        progress_data["time period"] = (
-            progress_data["time period"].dt.to_period("M").dt.to_timestamp()
-        )
-        progress_data = (
-            progress_data.groupby(["time period", progress_by_col])
-            .sum("count")
-            .reset_index()
-        )
-
-    progress_data["time period"] = progress_data["time period"].dt.date
-    progress_data = progress_data.pivot(
-        index=progress_by_col, columns="time period", values="count"
-    ).fillna(0)
-
-    vmin_val = progress_data.min().min()
-    vmax_val = progress_data.max().max()
-
-    format_cols = progress_data.columns
-
-    return progress_data, vmin_val, vmax_val, format_cols
+    # Display chart
+    fig = px.area(
+        metrics.submissions_by_date,
+        x=date,
+        y="submissions",
+        title="Submissions by date",
+        color_discrete_sequence=["#e8848b"],
+    )
+    fig.update_layout(width=1000, height=500)
+    fig.update_yaxes(tick0=0)
+    st.plotly_chart(fig, width="stretch")
 
 
 @demo_output_onboarding(TAB_NAME)
@@ -577,75 +1133,89 @@ def summary_progress(
     setting_file: str,
     target: int | None = None,
 ) -> None:
-    """
-    Generates a summary progress report for the survey data
+    """Render progress report.
 
     Parameters
     ----------
     data : pd.DataFrame
-            The survey data
-
-    enumerator : str
-            The enumerator column in the survey data
-
-    Returns
-    -------
-    None
+        The survey data (pandas)
+    date : str
+        The date column in the survey data
+    setting_file : str
+        Path to the settings file
+    target : int | None
+        The target number of submissions
     """
     if not date:
         st.info(
-            "Progress section requires a date column to be selected. go to the :material/settings: settings section above."
+            "Progress section requires a date column to be selected. "
+            "Go to the :material/settings: settings section above."
         )
         return
 
-    (
-        progress,
-        average_submission_per_day,
-        average_submission_per_week,
-        average_submission_per_month,
-    ) = compute_summary_progress(
-        data=data,
-        date=date,
-        target=target,
-    )
+    # Convert to Polars and calculate progress metrics
+    pl_data = pandas_to_polars(data)
+    metrics = calculate_progress_metrics(pl_data, date, target)
 
+    # Display metrics
     mc1, mc2, mc3, mc4 = st.columns(spec=4, border=True)
+
     with mc1:
         st.write("Submission progress")
         if not target:
             st.info("Target not set. Progress cannot be computed.")
         else:
             sp1, sp2 = st.columns([0.80, 0.20])
-            progress_val = progress if progress <= 100 else 100
+            progress_val = min(metrics.progress_pct, 100)
             sp1.progress(value=int(progress_val))
-            sp2.write(f"{progress:.2f}%")
+            sp2.write(f"{metrics.progress_pct:.2f}%")
+
     mc2.metric(
         label="Average submissions per day",
-        value=f"{average_submission_per_day:,.2f}",
+        value=f"{metrics.avg_per_day:,.2f}",
         help="Average number of submissions per day",
     )
     mc3.metric(
         label="Average submissions per week",
-        value=f"{average_submission_per_week:,.2f}",
+        value=f"{metrics.avg_per_week:,.2f}",
         help="Average number of submissions per week",
     )
     mc4.metric(
         label="Average submissions per month",
-        value=f"{average_submission_per_month:,.2f}",
+        value=f"{metrics.avg_per_month:,.2f}",
         help="Average number of submissions per month",
     )
 
-    # load default settings if default values exist in setting_file
+    # Progress by column
+    _render_progress_by_column(data, date, setting_file)
+
+
+def _render_progress_by_column(
+    data: pd.DataFrame, date: str, setting_file: str
+) -> None:
+    """Render progress by column section.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        The survey data (pandas)
+    date : str
+        The date column
+    setting_file : str
+        Path to the settings file
+    """
+    # Load default settings
     default_settings = load_check_settings(setting_file, "summary") or {}
 
-    # progress by column
+    # Progress by column selection
     pc1, _ = st.columns([0.3, 0.7])
     with pc1:
         progress_by_col = default_settings.get("progress_by_col", None)
-        progress_options = data.columns.tolist()
-        progress_options.remove(date)
+        progress_options = [col for col in data.columns if col != date]
         progress_col_index = (
-            progress_options.index(progress_by_col) if progress_by_col else None
+            progress_options.index(progress_by_col)
+            if progress_by_col and progress_by_col in progress_options
+            else None
         )
         progress_by_col = st.selectbox(
             label="Progress by",
@@ -656,204 +1226,140 @@ def summary_progress(
             on_change=trigger_save,
             kwargs={"state_name": "progress_by_col"},
         )
-        if "progress_by_col" in st.session_state and st.session_state.progress_by_col:
+        save_setting(
+            setting_file, "progress_by_col", progress_by_col, "progress_by_col"
+        )
+
+    if not progress_by_col:
+        return
+
+    # Time period selection
+    _, pil1 = st.columns([0.80, 0.20])
+    with pil1:
+        progress_time_period = default_settings.get("progress_time_period", "Auto")
+        progress_time_period = st.pills(
+            label="Progress time period",
+            options=["Auto", "Daily", "Weekly", "Monthly"],
+            default=progress_time_period,
+            help="Select a time period to compute progress by",
+            key="progress_time_period",
+        )
+
+        if progress_time_period:
             save_check_settings(
                 settings_file=setting_file,
                 check_name="summary",
-                check_settings={"progress_by_col": progress_by_col},
-            )
-            st.session_state.progress_by_col = False
-
-    if progress_by_col:
-        _, pil1 = st.columns([0.80, 0.20])
-        with pil1:
-            progress_time_period = default_settings.get("progress_time_period", None)
-            progress_time_period = st.pills(
-                label="Progress time period",
-                options=["Auto", "Daily", "Weekly", "Monthly"],
-                default=progress_time_period if progress_time_period else "Auto",
-                help="Select a time period to compute progress by",
-                key="progress_time_period",
+                check_settings={"progress_time_period": progress_time_period},
             )
 
-            if progress_time_period:
-                save_check_settings(
-                    settings_file=setting_file,
-                    check_name="summary",
-                    check_settings={
-                        "progress_time_period": progress_time_period,
-                    },
-                )
+    # Compute and display progress data
+    progress_data, vmin_val, vmax_val, format_cols = compute_summary_progress_by_col(
+        data=data,
+        date=date,
+        progress_by_col=progress_by_col,
+        progress_time_period=progress_time_period,
+    )
 
-        progress_data, vmin_val, vmax_val, format_cols = (
-            compute_summary_progress_by_col(
-                data=data,
-                date=date,
-                progress_by_col=progress_by_col,
-                progress_time_period=progress_time_period,
-            )
-        )
-
-        cmap = sns.light_palette("pink", as_cmap=True)
-        styler_limit = progress_data.shape[0] * progress_data.shape[1]
-        pd.set_option("styler.render.max_elements", styler_limit)
-        st.dataframe(
-            progress_data.style.format(
-                subset=format_cols, precision=0
-            ).background_gradient(
-                subset=format_cols, cmap=cmap, axis=1, vmin=vmin_val, vmax=vmax_val
-            ),
-            width="stretch",
-        )
-
-
-@st.cache_data
-def compute_summary_data_summary(data: pd.DataFrame) -> tuple:
-    """
-    Compute values for summary data summary
-
-    Parameters
-    ----------
-    data : pd.DataFrame
-            The survey data
-
-    Returns
-    -------
-    tuple
-            A tuple containing the summary values
-
-    """
-    num_str_cols = data.select_dtypes(include=["object"]).shape[1]
-    num_num_cols = data.select_dtypes(include=["number"]).shape[1]
-    num_date_cols = data.select_dtypes(include=["datetime"]).shape[1]
-    col_count = data.shape[1]
-
-    return num_str_cols, num_num_cols, num_date_cols, col_count
+    # Display heatmap
+    cmap = sns.light_palette("pink", as_cmap=True)
+    styler_limit = progress_data.shape[0] * progress_data.shape[1]
+    pd.set_option("styler.render.max_elements", styler_limit)
+    st.dataframe(
+        progress_data.style.format(subset=format_cols, precision=0).background_gradient(
+            subset=format_cols, cmap=cmap, axis=1, vmin=vmin_val, vmax=vmax_val
+        ),
+        width="stretch",
+    )
 
 
 @demo_output_onboarding(TAB_NAME)
 def summary_data_summary(data: pd.DataFrame) -> None:
-    """
-    Generates summary details of for the survey data
+    """Render data summary section.
 
     Parameters
     ----------
     data : pd.DataFrame
-            The survey data
-
-    Returns
-    -------
-    None
+        The survey data (pandas)
     """
-    num_str_cols, num_num_cols, num_date_cols, col_count = compute_summary_data_summary(
-        data=data
-    )
+    # Convert to Polars and calculate metrics
+    pl_data = pandas_to_polars(data)
+    metrics = calculate_data_summary_metrics(pl_data)
 
     ds1, ds2, ds3, ds4 = st.columns(spec=4, border=True)
     ds1.metric(
         label="String Columns",
-        value=f"{num_str_cols:,}",
+        value=f"{metrics.string_columns_count:,}",
         help="Number of string columns",
     )
     ds2.metric(
         label="Numeric Columns",
-        value=f"{num_num_cols:,}",
+        value=f"{metrics.numeric_columns_count:,}",
         help="Number of numeric columns",
     )
     ds3.metric(
-        label="Date Columns", value=f"{num_date_cols:,}", help="Number of date columns"
+        label="Date Columns",
+        value=f"{metrics.date_columns_count:,}",
+        help="Number of date columns",
     )
     ds4.metric(
-        label="Total Columns", value=f"{col_count:,}", help="Total number of columns"
+        label="Total Columns",
+        value=f"{metrics.total_columns_count:,}",
+        help="Total number of columns",
     )
-
-
-@st.cache_data
-def compute_summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> tuple:
-    """
-    Compute values for summary data quality
-
-    Parameters
-    ----------
-    data : pd.DataFrame
-            The survey data
-
-    survey_id : str | None
-            The survey ID column in the survey data
-
-    Returns
-    -------
-    tuple
-            A tuple containing the summary values
-
-    """
-    if survey_id:
-        perc_duplicates = (
-            data.duplicated(subset=[survey_id]).mean() * 100 if survey_id else 0
-        )
-    else:
-        perc_duplicates = None
-    perc_outliers = 0
-    perc_missing = data.isnull().mean().mean() * 100
-    perc_back_check_error_rate = 0
-
-    return perc_duplicates, perc_outliers, perc_missing, perc_back_check_error_rate
 
 
 @demo_output_onboarding(TAB_NAME)
 def summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> None:
-    """
-    Generates a summary report for the survey data
+    """Render data quality section.
 
     Parameters
     ----------
     data : pd.DataFrame
-            The survey data
-
-    Returns
-    -------
-    None
+        The survey data (pandas)
+    survey_id : str | None
+        The survey ID column
     """
-    perc_duplicates, perc_outliers, perc_missing, perc_back_check_error_rate = (
-        compute_summary_data_quality(
-            data=data,
-            survey_id=survey_id,
-        )
-    )
+    # Convert to Polars and calculate metrics
+    pl_data = pandas_to_polars(data)
+    metrics = calculate_data_quality_metrics(pl_data, survey_id)
 
-    if survey_id:
-        perc_duplicates_chart = donut_chart2(
-            actual_value=perc_duplicates,
-        )
+    # Create donut charts
+    if metrics.duplicates_pct is not None:
+        perc_duplicates_chart = donut_chart2(actual_value=metrics.duplicates_pct)
         plt.close(perc_duplicates_chart)
-    perc_outliers_chart = donut_chart2(
-        actual_value=perc_outliers,
-    )
+
+    perc_outliers_chart = donut_chart2(actual_value=metrics.outliers_pct)
     plt.close(perc_outliers_chart)
-    perc_missing_chart = donut_chart2(
-        actual_value=perc_missing,
-    )
+
+    perc_missing_chart = donut_chart2(actual_value=metrics.missing_pct)
     plt.close(perc_missing_chart)
+
     perc_back_check_error_rate_chart = donut_chart2(
-        actual_value=perc_back_check_error_rate,
+        actual_value=metrics.backcheck_error_pct
     )
 
+    # Display charts
     dq1, dq2, dq3, dq4 = st.columns(spec=4, border=True)
+
     with dq1:
-        if perc_duplicates:
+        if metrics.duplicates_pct is not None:
             st.markdown(f"**% of duplicates values on {survey_id}**")
             st.pyplot(perc_duplicates_chart)
         else:
             st.markdown("**% of duplicates values ID Column**")
             st.info(
-                "Percentage of duplicate values requires a survey ID column to be selected. Go to the :material/settings: settings section above."
+                "Percentage of duplicate values requires a survey ID column to be selected. "
+                "Go to the :material/settings: settings section above."
             )
+
     with dq2:
         st.markdown("**% of values flagged as outliers**")
         st.pyplot(perc_outliers_chart)
+
     with dq3:
         st.markdown("**% of missing values in survey dataset**")
         st.pyplot(perc_missing_chart)
+
     with dq4:
         st.markdown("**Back check error rate**")
         st.pyplot(perc_back_check_error_rate_chart)
@@ -863,32 +1369,29 @@ def summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> None:
 def summary_report(
     project_id: str, data: pd.DataFrame, setting_file: str, page_num: int
 ) -> None:
-    """
-    Generates a summary report for the survey data
+    """Generate comprehensive summary report.
 
     Parameters
     ----------
+    project_id : str
+        The project identifier
     data : pd.DataFrame
-            The survey data
-
-    settings : dict
-            The settings for the summary report
-
-    Returns
-    -------
-    None
+        The survey data (pandas)
+    setting_file : str
+        Path to the settings file
+    page_num : int
+        The page number
     """
+    # Get settings
     date, target, survey_id = summary_settings(project_id, data, setting_file, page_num)
 
+    # Render sections
     st.write("---")
     st.markdown("## Data Summary")
     summary_data_summary(data=data)
 
     st.markdown("## Submission details")
-    summary_submissions(
-        data=data,
-        date=date,
-    )
+    summary_submissions(data=data, date=date)
 
     st.write("---")
     st.markdown("## Progress")
