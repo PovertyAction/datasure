@@ -1,4 +1,3 @@
-import os
 from datetime import date as Date
 from typing import Any
 
@@ -11,7 +10,6 @@ import streamlit as st
 from pydantic import BaseModel, Field, field_validator
 
 from datasure.utils.chart_utils import donut_chart2
-from datasure.utils.config_utils import ConfigurationService
 from datasure.utils.dataframe_utils import get_df_info
 from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.settings_utils import (
@@ -31,11 +29,11 @@ TAB_NAME: str = "summary"
 class SummarySettings(BaseModel):
     """Settings configuration for the summary report with validation."""
 
-    date_column: str | None = None
-    target_submissions: int | None = Field(None, ge=0)
-    survey_id_column: str | None = None
+    survey_id: str | None = None
+    survey_date: str | None = None
+    survey_target: int | None = Field(None, ge=0)
 
-    @field_validator("target_submissions")
+    @field_validator("survey_target")
     @classmethod
     def validate_target(cls, v: int | None) -> int | None:
         """Validate that target is non-negative if provided."""
@@ -882,84 +880,13 @@ def calculate_data_quality_metrics(
 
 
 # ============================================================================
-# Settings Management
-# ============================================================================
-
-
-def load_default_settings(project_id: str, setting_file: str, page_num: int) -> tuple:
-    """Load the default settings for the summary report.
-
-    Parameters
-    ----------
-    project_id : str
-        The project identifier
-    setting_file : str
-        The settings file to load
-    page_num : int
-        The page number of the report
-
-    Returns
-    -------
-    tuple
-        A tuple containing the default settings (date, target, survey_id)
-    """
-    # Get config page defaults
-    config_settings = ConfigurationService(project_id).get_page_configuration(
-        page_num - 1
-    )
-    config_survey_id = config_settings.get("survey_id", None)
-    config_survey_date = config_settings.get("survey_date", None)
-    config_survey_target = config_settings.get("survey_target", None)
-
-    # Load settings from file if it exists
-    if setting_file and os.path.exists(setting_file):
-        default_settings = load_check_settings(setting_file, "summary") or {}
-    else:
-        default_settings = {}
-
-    default_date = default_settings.get("date", config_survey_date)
-    default_survey_id = default_settings.get("survey_id", config_survey_id)
-    default_target = default_settings.get("target", config_survey_target)
-
-    return default_date, default_target, default_survey_id
-
-
-def save_setting(
-    setting_file: str,
-    setting_name: str,
-    setting_value: str | int,
-    state_key: str,
-) -> None:
-    """Save a single setting to the settings file.
-
-    Parameters
-    ----------
-    setting_file : str
-        Path to the settings file
-    setting_name : str
-        Name of the setting
-    setting_value : str | int
-        Value of the setting
-    state_key : str
-        Session state key for the setting
-    """
-    if st.session_state.get(state_key):
-        save_check_settings(
-            settings_file=setting_file,
-            check_name="summary",
-            check_settings={setting_name: setting_value},
-        )
-        st.session_state[state_key] = False
-
-
-# ============================================================================
 # UI Components
 # ============================================================================
 
 
 @demo_output_onboarding(TAB_NAME)
 def summary_settings(
-    project_id: str, data: pd.DataFrame, setting_file: str, page_num: int
+    data: pd.DataFrame, setting_file: str, config: SummarySettings
 ) -> tuple:
     """Render settings UI and return selected settings.
 
@@ -984,8 +911,10 @@ def summary_settings(
         st.write("---")
 
         # Load defaults
-        default_date, default_target, default_survey_id = load_default_settings(
-            project_id=project_id, setting_file=setting_file, page_num=page_num
+        default_survey_id, default_date, default_target = (
+            config.survey_id,
+            config.survey_date,
+            config.survey_target,
         )
 
         # Get column information
@@ -1012,9 +941,9 @@ def summary_settings(
                     index=default_survey_id_index,
                     key="survey_id_summary",
                     on_change=trigger_save,
-                    kwargs={"state_name": "summary_survey_id"},
+                    kwargs={"state_name": TAB_NAME + "_survey_id"},
                 )
-                save_setting(setting_file, "survey_id", survey_id, "summary_survey_id")
+                save_check_settings(setting_file, TAB_NAME, {"survey_id": survey_id})
 
         st.markdown("#### Survey Date")
         with st.container(border=True):
@@ -1033,9 +962,9 @@ def summary_settings(
                     index=default_date_index,
                     key="date_summary",
                     on_change=trigger_save,
-                    kwargs={"state_name": "summary_date"},
+                    kwargs={"state_name": TAB_NAME + "_date"},
                 )
-                save_setting(setting_file, "date", date, "summary_date")
+                save_check_settings(setting_file, TAB_NAME, {"date": date})
 
         st.markdown("#### Submission Target")
         with st.container(border=True):
@@ -1049,9 +978,9 @@ def summary_settings(
                     help="Total number of interviews expected",
                     key="total_goal_summary",
                     on_change=trigger_save,
-                    kwargs={"state_name": "summary_target"},
+                    kwargs={"state_name": TAB_NAME + "_target"},
                 )
-                save_setting(setting_file, "target", target, "summary_target")
+                save_check_settings(setting_file, TAB_NAME, {"target": target})
 
     return date, target, survey_id or None
 
@@ -1229,10 +1158,10 @@ def _render_progress_by_column(
             key="progress_by_col_key",
             help="Select a column to compute progress by",
             on_change=trigger_save,
-            kwargs={"state_name": "progress_by_col"},
+            kwargs={"state_name": TAB_NAME + "_progress_by_col"},
         )
-        save_setting(
-            setting_file, "progress_by_col", progress_by_col, "progress_by_col"
+        save_check_settings(
+            setting_file, TAB_NAME, {"progress_by_col": progress_by_col}
         )
 
     if not progress_by_col:
@@ -1248,13 +1177,15 @@ def _render_progress_by_column(
             default=progress_time_period,
             help="Select a time period to compute progress by",
             key="progress_time_period",
+            on_change=trigger_save,
+            kwargs={"state_name": TAB_NAME + "_progress_time_period"},
         )
 
         if progress_time_period:
             save_check_settings(
-                settings_file=setting_file,
-                check_name="summary",
-                check_settings={"progress_time_period": progress_time_period},
+                setting_file,
+                TAB_NAME,
+                {"progress_time_period": progress_time_period},
             )
 
     # Compute and display progress data
@@ -1372,7 +1303,7 @@ def summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> None:
 
 @demo_output_onboarding(TAB_NAME)
 def summary_report(
-    project_id: str, data: pd.DataFrame, setting_file: str, page_num: int
+    project_id: str, data: pd.DataFrame, setting_file: str, page_num: int, config: dict
 ) -> None:
     """Generate comprehensive summary report.
 
@@ -1388,7 +1319,10 @@ def summary_report(
         The page number
     """
     # Get settings
-    date, target, survey_id = summary_settings(project_id, data, setting_file, page_num)
+    config_settings = SummarySettings(**config)
+    survey_date, survey_target, survey_id = summary_settings(
+        data, setting_file, config_settings
+    )
 
     # Render sections
     st.write("---")
@@ -1396,11 +1330,13 @@ def summary_report(
     summary_data_summary(data=data)
 
     st.markdown("## Submission details")
-    summary_submissions(data=data, date=date)
+    summary_submissions(data=data, date=survey_date)
 
     st.write("---")
     st.markdown("## Progress")
-    summary_progress(data=data, date=date, target=target, setting_file=setting_file)
+    summary_progress(
+        data=data, date=survey_date, target=survey_target, setting_file=setting_file
+    )
 
     st.write("---")
     st.markdown("## Data Quality")
