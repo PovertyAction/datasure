@@ -25,14 +25,17 @@ from datasure.checks import (
     progress_report,
     summary_report,
 )
-from datasure.utils import (
+from datasure.utils.cache_utils import get_cache_path
+from datasure.utils.config_utils import CheckConfiguration
+from datasure.utils.duckdb_utils import (
     duckdb_get_table,
-    get_cache_path,
-    get_check_config_settings,
 )
 from datasure.utils.navigations_utils import (
     add_demo_navigation,
     demo_sidebar_help,
+)
+from datasure.utils.settings_utils import (
+    get_check_config_settings,
 )
 
 
@@ -175,23 +178,15 @@ def load_page_config(project_id: str, page_number: int) -> PageConfig:
     page_data_index = page_number - 1
 
     # Get configuration from check_config table
-    (
-        page_name,
-        survey_data_name,
-        survey_key,
-        survey_id,
-        survey_date,
-        enumerator,
-        survey_target,
-        backcheck_data_name,
-        backheck_date,
-        backchecker,
-        backcheck_target_percent,
-        tracking_data_name,
-    ) = get_check_config_settings(
+    check_config_info: CheckConfiguration = get_check_config_settings(
         project_id=project_id,
         page_row_index=page_data_index,
     )
+
+    check_config = CheckConfiguration(**check_config_info)
+
+    # Validate configuration
+    page_name = check_config.page_name
 
     # Generate page name ID for file naming
     page_name_id = page_name.lower().replace(" ", "_").replace("-", "_")
@@ -207,17 +202,17 @@ def load_page_config(project_id: str, page_number: int) -> PageConfig:
         page_number=page_number,
         page_name=page_name,
         page_name_id=page_name_id,
-        survey_data_name=survey_data_name,
-        survey_key=survey_key,
-        survey_id=survey_id,
-        survey_date=survey_date,
-        enumerator=enumerator,
-        survey_target=survey_target,
-        backcheck_data_name=backcheck_data_name,
-        backcheck_date=backheck_date,
-        backchecker=backchecker,
-        backcheck_target_percent=backcheck_target_percent,
-        tracking_data_name=tracking_data_name,
+        survey_data_name=check_config.survey_data_name,
+        survey_key=check_config.survey_key,
+        survey_id=check_config.survey_id,
+        survey_date=check_config.survey_date,
+        enumerator=check_config.enumerator,
+        survey_target=check_config.survey_target,
+        backcheck_data_name=check_config.backcheck_data_name,
+        backcheck_date=check_config.backcheck_date,
+        backchecker=check_config.backchecker,
+        backcheck_target_percent=check_config.backcheck_target_percent,
+        tracking_data_name=check_config.tracking_data_name,
         setting_file=setting_file,
         missing_setting_file=missing_setting_file,
     )
@@ -292,11 +287,17 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
 
     # Render each tab
     with summary:
+        summary_config: dict = {
+            "survey_id": config.survey_id,
+            "survey_date": config.survey_date,
+            "survey_target": config.survey_target,
+        }
         summary_report(
             project_id,
             data.page_data,
             config.setting_file,
             config.page_number,
+            summary_config,
         )
 
     with missing:
