@@ -79,7 +79,7 @@ class ImportDemoInfo:
         2. **Transform date column**: Add data preparation steps if you want to experiment.
         Do the following:
             - Select the **demo_survey** tab
-            - Click on the "Add Preparation Step" button
+            - Click on the "Add data prep step" button
             - Under "Select Action", choose "Transform Column"
             - For "Select Column to Transform", choose "submissiondate"
             - For "select function", choose "string to datetime". Note that the functions
