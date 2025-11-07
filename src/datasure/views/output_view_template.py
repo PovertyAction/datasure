@@ -214,7 +214,7 @@ def load_page_config(project_id: str, page_number: int) -> PageConfig:
         enumerator=enumerator,
         survey_target=survey_target,
         backcheck_data_name=backcheck_data_name,
-        backcheck_date=backheck_date,
+        backcheck_date=backcheck_date,
         backchecker=backchecker,
         backcheck_target_percent=backcheck_target_percent,
         tracking_data_name=tracking_data_name,
