@@ -74,6 +74,11 @@ line-length = 88
 fix = true
 # Assume Python 3.11
 target-version = "py311"
+exclude = [
+    ".claude/skills/",
+    ".claude/subagents/",
+]
+
 
 [tool.ruff.lint]
 # docs: https://docs.astral.sh/ruff/rules/
