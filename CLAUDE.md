@@ -2,6 +2,8 @@
 
 This file provides comprehensive guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Last Updated:** 2025-11-07
+
 ## Project Overview
 
 This is **DataSure** - an IPA (Innovations for Poverty Action) Data Management System built with Python and Streamlit. It provides a web-based interface for data quality monitoring and high-frequency checks (HFCs) in survey data collection projects.
@@ -13,11 +15,24 @@ This is **DataSure** - an IPA (Innovations for Poverty Action) Data Management S
 - Professional-grade build system with multi-platform distribution
 - Comprehensive testing framework with pytest and extensive fixtures
 - Code quality tooling with ruff, pre-commit hooks, and SonarQube integration
+- Claude Code integration with custom skills, subagents, and slash commands
 
 ## Project Structure
 
 ```text
 /
+├── .claude/                        # Claude Code integration (NEW)
+│   ├── commands/                # Slash commands for Claude Code
+│   │   └── update_claude.md    # Auto-update CLAUDE.md command
+│   ├── skills/                  # Claude Code skills
+│   │   ├── duckdb/             # DuckDB CLI skill
+│   │   ├── markdownlint/       # Markdown linting skill
+│   │   ├── ruff/               # Python linting skill
+│   │   ├── skill-creator/      # Skill creation helper
+│   │   ├── streamlit/          # Streamlit development skill
+│   │   └── uv/                 # UV package manager skill
+│   └── subagents/              # Specialized subagents
+│       └── py-format-lint/     # Python formatting and linting
 ├── src/datasure/                   # Main package (source layout)
 │   ├── __init__.py             # Package metadata (__version__ = "0.1.0")
 │   ├── app.py                  # Main Streamlit application entry point
@@ -34,7 +49,6 @@ This is **DataSure** - an IPA (Innovations for Poverty Action) Data Management S
 ├── archived/                   # Legacy/experimental code (gitignored)
 ├── pyproject.toml             # Modern Python package configuration
 ├── Justfile                   # Cross-platform command runner
-├── build.spec                 # PyInstaller configuration for Windows builds
 └── CLAUDE.md                  # This file
 ```
 
@@ -62,7 +76,8 @@ just lab                     # Launch Jupyter Lab
 ```bash
 just lint-py              # Lint Python code with Ruff
 just fmt-python           # Format Python code with Ruff
-just fmt-all              # Format all code and markdown
+just fmt-all              # Format all code and markdown (Python + Markdown)
+just fmt-md               # Format markdown with markdownlint-cli2
 just pre-commit-run        # Run pre-commit hooks manually
 ```
 
@@ -553,6 +568,51 @@ just push-all                # Pushes commits and tags
 - Code quality analysis (SonarQube)
 - Pre-commit hook validation
 
+## Claude Code Integration
+
+DataSure includes comprehensive Claude Code integration to enhance AI-assisted development workflows.
+
+### Available Skills
+
+Skills provide specialized capabilities and domain knowledge. Invoke skills using the Skill tool:
+
+1. **duckdb** - DuckDB CLI operations for data querying and analysis
+2. **markdownlint** - Markdown formatting and linting with markdownlint-cli2
+3. **ruff** - Python code linting and formatting (auto-invoked on code changes)
+4. **skill-creator** - Helper for creating new Claude Code skills
+5. **streamlit** - Streamlit development patterns and best practices
+6. **uv** - UV package manager for Python project management
+
+### Slash Commands
+
+Custom commands available via `/command` syntax:
+
+- `/update_claude` - Automatically update CLAUDE.md based on recent git changes
+
+### Subagents
+
+Specialized agents for complex tasks:
+
+- **py-format-lint** - Python formatting and linting subagent (format + lint workflow)
+
+### Using Claude Code Features
+
+**Example: Auto-update CLAUDE.md**
+
+```bash
+# After making changes, update documentation
+/update_claude
+```
+
+**Example: Invoke skills**
+
+```python
+# Claude will automatically invoke the ruff skill when Python code is modified
+# Manual invocation: use the Skill tool with skill name
+```
+
+**Skills are automatically managed** - Claude Code will proactively use the ruff skill when Python code is written or modified to ensure code quality.
+
 ## Common Development Tasks
 
 ### Adding a New Data Quality Check
@@ -718,5 +778,78 @@ For bypassing quality gates in emergencies:
 - Use trusted publishing for PyPI uploads
 - Sign releases when possible
 - Monitor for security vulnerabilities in dependencies
+
+## Recent Updates (Updated: 2025-11-07)
+
+### Claude Code Integration (November 2025)
+
+**New Features:**
+
+- **Skills System**: Added 6 specialized skills for enhanced development workflows:
+  - DuckDB, Markdownlint, Ruff (auto-invoked), Skill-creator, Streamlit, and UV
+  - Skills provide domain-specific knowledge and best practices
+- **Slash Commands**: `/update_claude` command for automated CLAUDE.md maintenance
+- **Subagents**: Python format-lint subagent for comprehensive code quality workflows
+- **Automated Documentation**: Git-aware documentation updates via slash command
+
+**Impact on Development:**
+
+- Improved code quality through proactive ruff skill invocation
+- Faster documentation updates with automated git analysis
+- Enhanced Streamlit development with specialized guidance
+- Better package management with UV skill integration
+
+### Summary Check Refactoring (November 2025)
+
+**Major Refactoring:**
+
+- Refactored [summary.py](src/datasure/checks/summary.py) for improved readability and maintainability
+- Removed hardcoded state management in settings utilities
+- Dynamic state derivation based on check name and settings keys
+- Improved test coverage for summary check module
+
+**Breaking Changes:**
+
+- `load_default_settings` function removed - now loading directly from output page
+- `save_check_settings` function signature changed for dynamic state management
+
+### Dependency Management Improvements (November 2025)
+
+**Configuration Changes:**
+
+- Migrated optional dependencies to `dependency-groups` in [pyproject.toml](pyproject.toml)
+- Cleaner dependency organization and management
+- Updated [uv.lock](uv.lock) to reflect new structure
+- Switched to markdownlint-cli2 from markdownlint-cli
+
+**Justfile Updates:**
+
+- Updated markdown formatting commands for markdownlint-cli2
+- Simplified command structure for better cross-platform compatibility
+
+### Check Configuration System (November 2025)
+
+**UI Improvements:**
+
+- Enhanced configuration view for multiple check pages
+- Improved `load_page_config` function readability
+- Better separation of concerns in settings management
+- New onboarding utilities for check configuration
+
+**Files Modified:**
+
+- [output_view_template.py](src/datasure/views/output_view_template.py)
+- [onboarding_utils.py](src/datasure/utils/onboarding_utils.py)
+- [settings_utils.py](src/datasure/utils/settings_utils.py)
+- [config_utils.py](src/datasure/utils/config_utils.py)
+
+### Testing Enhancements (November 2025)
+
+**Test Updates:**
+
+- Updated test suite to handle new settings utility structure
+- Enhanced test fixtures in [conftest.py](tests/conftest.py)
+- Improved test coverage for settings and configuration utilities
+- Added comprehensive tests for summary check refactoring
 
 This comprehensive guide should help you navigate the DataSure codebase effectively and maintain its professional standards. The project follows modern Python best practices and provides multiple distribution channels for different user needs.
