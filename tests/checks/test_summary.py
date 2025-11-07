@@ -29,11 +29,9 @@ from datasure.checks.summary import (
     compute_summary_progress_by_col,
     compute_summary_submissions,
     determine_auto_time_period,
-    load_default_settings,
     pandas_to_polars,
     polars_to_pandas,
     prepare_date_data,
-    save_setting,
     validate_and_convert_date_column,
 )
 
@@ -102,28 +100,28 @@ class TestSummarySettings:
     def test_valid_settings_all_fields(self):
         """Test creating valid settings with all fields."""
         settings = SummarySettings(
-            date_column="date_col", target_submissions=100, survey_id_column="id_col"
+            survey_date="date_col", survey_target=100, survey_id="id_col"
         )
-        assert settings.date_column == "date_col"
-        assert settings.target_submissions == 100
-        assert settings.survey_id_column == "id_col"
+        assert settings.survey_date == "date_col"
+        assert settings.survey_target == 100
+        assert settings.survey_id == "id_col"
 
     def test_valid_settings_minimal(self):
         """Test creating valid settings with minimal fields."""
         settings = SummarySettings()
-        assert settings.date_column is None
-        assert settings.target_submissions is None
-        assert settings.survey_id_column is None
+        assert settings.survey_date is None
+        assert settings.survey_target is None
+        assert settings.survey_id is None
 
     def test_valid_target_zero(self):
         """Test that zero target is valid."""
-        settings = SummarySettings(target_submissions=0)
-        assert settings.target_submissions == 0
+        settings = SummarySettings(survey_target=0)
+        assert settings.survey_target == 0
 
     def test_invalid_negative_target(self):
         """Test that negative target raises validation error."""
         with pytest.raises(ValidationError):
-            SummarySettings(target_submissions=-1)
+            SummarySettings(survey_target=-1)
 
 
 class TestSubmissionMetrics:
@@ -600,14 +598,12 @@ class TestProgressByColumn:
     def test_compute_summary_progress_by_col_invalid_date(self):
         """Test progress by column with invalid date column."""
         df = pd.DataFrame({"text": ["a", "b", "c"], "col": ["x", "y", "z"]})
-        # This should raise an error during date conversion
-        try:
-            result = compute_summary_progress_by_col(df, "text", "col", "Daily")
-            # If it doesn't raise, the result should be empty or have issues
-            assert result[0].empty or True  # Allow either behavior
-        except (ValueError, Exception):
-            # Expected to raise an error
-            pass
+        # Polars may handle this differently - it converts but values might be null
+        # Test that it still returns a result (even if empty/null)
+        result = compute_summary_progress_by_col(df, "text", "col", "Daily")
+        # Should return empty or result with null dates
+        assert isinstance(result, tuple)
+        assert len(result) == 4
 
 
 # ============================================================================
@@ -710,115 +706,6 @@ class TestDataQuality:
 
 
 # ============================================================================
-# SETTINGS MANAGEMENT TESTS
-# ============================================================================
-
-
-class TestSettingsManagement:
-    """Test settings management functions."""
-
-    @patch("datasure.checks.summary.ConfigurationService")
-    @patch("datasure.checks.summary.os.path.exists")
-    @patch("datasure.checks.summary.load_check_settings")
-    def test_load_default_settings_with_config(
-        self, mock_load_settings, mock_exists, mock_config_service
-    ):
-        """Test loading default settings with config service."""
-        mock_exists.return_value = True
-        mock_load_settings.return_value = {
-            "date": "custom_date",
-            "target": 500,
-            "survey_id": "custom_id",
-        }
-        mock_service = Mock()
-        mock_service.get_page_configuration.return_value = {
-            "survey_id": "config_id",
-            "survey_date": "config_date",
-            "survey_target": 100,
-        }
-        mock_config_service.return_value = mock_service
-
-        date_col, target, survey_id = load_default_settings(
-            "project_123", "settings.json", 1
-        )
-
-        assert date_col == "custom_date"
-        assert target == 500
-        assert survey_id == "custom_id"
-
-    @patch("datasure.checks.summary.ConfigurationService")
-    @patch("datasure.checks.summary.os.path.exists")
-    @patch("datasure.checks.summary.load_check_settings")
-    def test_load_default_settings_no_file(
-        self, mock_load_settings, mock_exists, mock_config_service
-    ):
-        """Test loading default settings without settings file."""
-        mock_exists.return_value = False
-        mock_service = Mock()
-        mock_service.get_page_configuration.return_value = {
-            "survey_id": "config_id",
-            "survey_date": "config_date",
-            "survey_target": 100,
-        }
-        mock_config_service.return_value = mock_service
-
-        date_col, target, survey_id = load_default_settings(
-            "project_123", "nonexistent.json", 1
-        )
-
-        assert date_col == "config_date"
-        assert target == 100
-        assert survey_id == "config_id"
-
-    @patch("datasure.checks.summary.ConfigurationService")
-    @patch("datasure.checks.summary.os.path.exists")
-    @patch("datasure.checks.summary.load_check_settings")
-    def test_load_default_settings_empty_config(
-        self, mock_load_settings, mock_exists, mock_config_service
-    ):
-        """Test loading default settings with empty config."""
-        mock_exists.return_value = True
-        mock_load_settings.return_value = None
-        mock_service = Mock()
-        mock_service.get_page_configuration.return_value = {}
-        mock_config_service.return_value = mock_service
-
-        date_col, target, survey_id = load_default_settings(
-            "project_123", "settings.json", 1
-        )
-
-        assert date_col is None
-        assert target is None
-        assert survey_id is None
-
-    @patch("datasure.checks.summary.st")
-    @patch("datasure.checks.summary.save_check_settings")
-    def test_save_setting_when_triggered(self, mock_save_settings, mock_st):
-        """Test saving a setting when state key is True."""
-        mock_st.session_state.get.return_value = True
-        mock_st.session_state = {"test_key": True}
-
-        save_setting("settings.json", "date", "2024-01-01", "test_key")
-
-        mock_save_settings.assert_called_once_with(
-            settings_file="settings.json",
-            check_name="summary",
-            check_settings={"date": "2024-01-01"},
-        )
-        assert mock_st.session_state["test_key"] is False
-
-    @patch("datasure.checks.summary.st")
-    @patch("datasure.checks.summary.save_check_settings")
-    def test_save_setting_when_not_triggered(self, mock_save_settings, mock_st):
-        """Test not saving when state key is False."""
-        mock_st.session_state.get.return_value = False
-
-        save_setting("settings.json", "date", "2024-01-01", "test_key")
-
-        mock_save_settings.assert_not_called()
-
-
-# ============================================================================
 # UI COMPONENT TESTS
 # ============================================================================
 
@@ -828,14 +715,12 @@ class TestUIComponents:
 
     @patch("datasure.checks.summary.st")
     @patch("datasure.checks.summary.get_df_info")
-    @patch("datasure.checks.summary.load_default_settings")
-    @patch("datasure.checks.summary.save_setting")
+    @patch("datasure.checks.summary.save_check_settings")
     @patch("datasure.checks.summary.trigger_save")
     def test_summary_settings(
         self,
         mock_trigger_save,
-        mock_save_setting,
-        mock_load_defaults,
+        mock_save_settings,
         mock_get_info,
         mock_st,
     ):
@@ -843,7 +728,6 @@ class TestUIComponents:
         from datasure.checks.summary import summary_settings
 
         # Setup mocks
-        mock_load_defaults.return_value = ("date_col", 100, "id_col")
         mock_get_info.return_value = (None, ["id"], [1, 2, 3], ["date_col"], None)
 
         # Mock expander and container context managers
@@ -874,7 +758,8 @@ class TestUIComponents:
         mock_st.number_input.return_value = 100
 
         df = pd.DataFrame({"id": [1], "date_col": [date(2024, 1, 1)]})
-        result = summary_settings("project_123", df, "settings.json", 1)
+        config = SummarySettings(survey_id="id_col", survey_date="date_col", survey_target=100)
+        result = summary_settings(df, "settings.json", config)
 
         assert isinstance(result, tuple)
         assert len(result) == 3
@@ -895,6 +780,31 @@ class TestUIComponents:
         mock_st.info.assert_called_once()
 
     @patch("datasure.checks.summary.st")
+    @patch("datasure.checks.summary.px")
+    def test_summary_submissions_with_date(self, mock_px, mock_st):
+        """Test summary submissions with date column."""
+        from datasure.checks.summary import summary_submissions
+
+        # Create mock figure
+        mock_fig = Mock()
+        mock_px.area.return_value = mock_fig
+
+        # Create test data with dates
+        df = pd.DataFrame({
+            "id": [1, 2, 3],
+            "date_col": pd.date_range("2024-01-01", periods=3),
+        })
+
+        # Mock columns
+        mock_col = Mock()
+        mock_st.columns.return_value = [mock_col, mock_col, mock_col, mock_col]
+
+        summary_submissions(df, date="date_col")
+
+        # Verify plotly chart was called
+        mock_st.plotly_chart.assert_called_once()
+
+    @patch("datasure.checks.summary.st")
     @patch("datasure.checks.summary.pandas_to_polars")
     @patch("datasure.checks.summary.calculate_progress_metrics")
     @patch("datasure.checks.summary._render_progress_by_column")
@@ -908,6 +818,55 @@ class TestUIComponents:
         summary_progress(df, date=None, target=100, setting_file="settings.json")
 
         mock_st.info.assert_called_once()
+
+    @patch("datasure.checks.summary.st")
+    @patch("datasure.checks.summary._render_progress_by_column")
+    def test_summary_progress_with_date_and_target(self, mock_render, mock_st):
+        """Test summary progress with date column and target."""
+        from datasure.checks.summary import summary_progress
+
+        # Create test data with dates
+        df = pd.DataFrame({
+            "id": [1, 2, 3],
+            "date_col": pd.date_range("2024-01-01", periods=3),
+        })
+
+        # Mock columns - return different values for different calls
+        mock_col = Mock()
+        mock_col.__enter__ = Mock(return_value=mock_col)
+        mock_col.__exit__ = Mock(return_value=False)
+        mock_st.columns.side_effect = [
+            [mock_col, mock_col, mock_col, mock_col],  # First call
+            [mock_col, mock_col],  # Second call (sp1, sp2)
+        ]
+
+        summary_progress(df, date="date_col", target=100, setting_file="settings.json")
+
+        # Verify _render_progress_by_column was called
+        mock_render.assert_called_once()
+
+    @patch("datasure.checks.summary.st")
+    @patch("datasure.checks.summary._render_progress_by_column")
+    def test_summary_progress_with_date_no_target(self, mock_render, mock_st):
+        """Test summary progress with date column but no target."""
+        from datasure.checks.summary import summary_progress
+
+        # Create test data with dates
+        df = pd.DataFrame({
+            "id": [1, 2, 3],
+            "date_col": pd.date_range("2024-01-01", periods=3),
+        })
+
+        # Mock columns
+        mock_col = Mock()
+        mock_col.__enter__ = Mock(return_value=mock_col)
+        mock_col.__exit__ = Mock(return_value=False)
+        mock_st.columns.return_value = [mock_col, mock_col, mock_col, mock_col]
+
+        summary_progress(df, date="date_col", target=None, setting_file="settings.json")
+
+        # Verify info message about target not set
+        assert mock_st.info.called
 
     @patch("datasure.checks.summary.st")
     @patch("datasure.checks.summary.pandas_to_polars")
@@ -973,6 +932,133 @@ class TestUIComponents:
         assert mock_chart.called
 
     @patch("datasure.checks.summary.st")
+    @patch("datasure.checks.summary.pandas_to_polars")
+    @patch("datasure.checks.summary.calculate_data_quality_metrics")
+    @patch("datasure.checks.summary.donut_chart2")
+    @patch("datasure.checks.summary.plt")
+    def test_summary_data_quality_no_survey_id(
+        self, mock_plt, mock_chart, mock_calc, mock_convert, mock_st
+    ):
+        """Test summary data quality UI component without survey ID."""
+        from datasure.checks.summary import summary_data_quality
+
+        mock_convert.return_value = pl.DataFrame()
+        mock_calc.return_value = DataQualityMetrics(
+            duplicates_pct=None,
+            outliers_pct=1.0,
+            missing_pct=0.5,
+            backcheck_error_pct=0.1,
+        )
+        mock_chart.return_value = Mock()
+
+        # Mock columns with context manager support
+        col_mock1 = Mock()
+        col_mock1.__enter__ = Mock(return_value=col_mock1)
+        col_mock1.__exit__ = Mock(return_value=False)
+        col_mock2 = Mock()
+        col_mock2.__enter__ = Mock(return_value=col_mock2)
+        col_mock2.__exit__ = Mock(return_value=False)
+        col_mock3 = Mock()
+        col_mock3.__enter__ = Mock(return_value=col_mock3)
+        col_mock3.__exit__ = Mock(return_value=False)
+        col_mock4 = Mock()
+        col_mock4.__enter__ = Mock(return_value=col_mock4)
+        col_mock4.__exit__ = Mock(return_value=False)
+
+        mock_st.columns.return_value = [col_mock1, col_mock2, col_mock3, col_mock4]
+
+        df = pd.DataFrame({"id": [1, 2, 3]})
+        summary_data_quality(df, None)
+
+        assert mock_st.columns.called
+
+    @patch("datasure.checks.summary.st")
+    @patch("datasure.checks.summary.load_check_settings")
+    @patch("datasure.checks.summary.save_check_settings")
+    @patch("datasure.checks.summary.trigger_save")
+    @patch("datasure.checks.summary.compute_summary_progress_by_col")
+    @patch("datasure.checks.summary.sns")
+    @patch("datasure.checks.summary.pd")
+    def test_render_progress_by_column(
+        self,
+        mock_pd_module,
+        mock_sns,
+        mock_compute,
+        mock_trigger,
+        mock_save,
+        mock_load,
+        mock_st,
+    ):
+        """Test _render_progress_by_column UI component."""
+        from datasure.checks.summary import _render_progress_by_column
+
+        # Mock settings
+        mock_load.return_value = {"progress_by_col": "region", "progress_time_period": "Auto"}
+
+        # Mock columns
+        col_mock1 = Mock()
+        col_mock1.__enter__ = Mock(return_value=col_mock1)
+        col_mock1.__exit__ = Mock(return_value=False)
+        col_mock2 = Mock()
+        col_mock2.__enter__ = Mock(return_value=col_mock2)
+        col_mock2.__exit__ = Mock(return_value=False)
+        mock_st.columns.return_value = [col_mock1, col_mock2]
+
+        # Mock selectbox and pills
+        mock_st.selectbox.return_value = "region"
+        mock_st.pills.return_value = "Auto"
+
+        # Mock compute result
+        progress_df = pd.DataFrame({"region": ["A", "B"], "2024-01-01": [10, 20]})
+        mock_compute.return_value = (progress_df, 10, 20, ["2024-01-01"])
+
+        # Mock sns and pd
+        mock_cmap = Mock()
+        mock_sns.light_palette.return_value = mock_cmap
+
+        df = pd.DataFrame({
+            "region": ["A", "B", "C"],
+            "date_col": pd.date_range("2024-01-01", periods=3),
+        })
+
+        _render_progress_by_column(df, "date_col", "settings.json")
+
+        assert mock_st.selectbox.called
+        assert mock_st.pills.called
+        assert mock_st.dataframe.called
+
+    @patch("datasure.checks.summary.st")
+    @patch("datasure.checks.summary.load_check_settings")
+    def test_render_progress_by_column_no_selection(self, mock_load, mock_st):
+        """Test _render_progress_by_column when no column selected."""
+        from datasure.checks.summary import _render_progress_by_column
+
+        # Mock settings
+        mock_load.return_value = {}
+
+        # Mock columns
+        col_mock1 = Mock()
+        col_mock1.__enter__ = Mock(return_value=col_mock1)
+        col_mock1.__exit__ = Mock(return_value=False)
+        col_mock2 = Mock()
+        col_mock2.__enter__ = Mock(return_value=col_mock2)
+        col_mock2.__exit__ = Mock(return_value=False)
+        mock_st.columns.return_value = [col_mock1, col_mock2]
+
+        # Mock selectbox to return None
+        mock_st.selectbox.return_value = None
+
+        df = pd.DataFrame({
+            "region": ["A", "B", "C"],
+            "date_col": pd.date_range("2024-01-01", periods=3),
+        })
+
+        _render_progress_by_column(df, "date_col", "settings.json")
+
+        # Should return early without calling compute or dataframe
+        assert not mock_st.dataframe.called
+
+    @patch("datasure.checks.summary.st")
     @patch("datasure.checks.summary.summary_settings")
     @patch("datasure.checks.summary.summary_data_summary")
     @patch("datasure.checks.summary.summary_submissions")
@@ -993,7 +1079,8 @@ class TestUIComponents:
         mock_settings.return_value = ("date_col", 100, "id_col")
 
         df = pd.DataFrame({"id": [1, 2, 3], "date_col": [date(2024, 1, 1)] * 3})
-        summary_report("project_123", df, "settings.json", 1)
+        config = {"survey_id": "id_col", "survey_date": "date_col", "survey_target": 100}
+        summary_report("project_123", df, "settings.json", 1, config)
 
         mock_settings.assert_called_once()
         mock_data_summary.assert_called_once()
