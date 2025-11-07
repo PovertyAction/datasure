@@ -250,7 +250,11 @@ class TestGetCheckConfigSettings:
             "survey_id_456",  # survey_id
             "2024-01-01",  # survey_date
             "enumerator_1",  # enumerator
+            100,  # survey_target
             "backcheck_data",  # backcheck_data_name
+            "2024-01-15",  # backcheck_date
+            "backchecker_1",  # backchecker
+            10,  # backcheck_target_percent
             "tracking_data",  # tracking_data_name
         ]
         mock_duckdb_get_table.return_value = mock_df
@@ -266,7 +270,7 @@ class TestGetCheckConfigSettings:
         )
 
         # Verify the row method was called with correct index
-        assert mock_df.row.call_count == 8  # Called once for each column
+        assert mock_df.row.call_count == 12  # Called once for each column
         mock_df.row.assert_called_with(page_row_index)
 
         # Verify the returned tuple
@@ -277,7 +281,11 @@ class TestGetCheckConfigSettings:
             "survey_id_456",
             "2024-01-01",
             "enumerator_1",
+            100,
             "backcheck_data",
+            "2024-01-15",
+            "backchecker_1",
+            10,
             "tracking_data",
         )
         assert result == expected_result
@@ -293,7 +301,11 @@ class TestGetCheckConfigSettings:
             "id2",
             "2024-02-01",
             "enum2",
+            200,
             "back2",
+            "2024-02-15",
+            "backchecker2",
+            20,
             "track2",
         ]
         mock_duckdb_get_table.return_value = mock_df
@@ -304,7 +316,7 @@ class TestGetCheckConfigSettings:
         result = get_check_config_settings(project_id, page_row_index)
 
         # Verify the row method was called with correct index
-        assert mock_df.row.call_count == 8  # Called once for each column
+        assert mock_df.row.call_count == 12  # Called once for each column
         mock_df.row.assert_called_with(page_row_index)
 
         assert result[0] == "page2"

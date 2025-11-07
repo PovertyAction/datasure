@@ -12,6 +12,9 @@ from datasure.utils import (
     save_check_settings,
     trigger_save,
 )
+from datasure.utils.onboarding_utils import demo_output_onboarding
+
+TAB_NAME: str = "backchecks"
 
 IGNORE_MISSING_VALUES = "ignore_missing_values"
 DO_NOT_COMPARE_VALUES = "Do not compare if the values contain:"
@@ -50,6 +53,10 @@ def load_default_backcheck_settings(
         config_survey_id,
         config_survey_date,
         config_enumerator,
+        _,
+        _,
+        _,
+        _,
         _,
         _,
     ) = get_check_config_settings(
@@ -331,9 +338,7 @@ def _handle_column_configuration(common_cols: list[str]) -> pd.DataFrame:
         )
 
     # Display the table and allow user interaction
-    with st.popover(
-        "Add a backcheck column", icon=":material/add:", use_container_width=True
-    ):
+    with st.popover("Add a backcheck column", icon=":material/add:", width="stretch"):
         column_name = st.selectbox(
             "column",
             options=common_cols,
@@ -383,7 +388,7 @@ def _handle_column_configuration(common_cols: list[str]) -> pd.DataFrame:
     return st.data_editor(
         st.session_state.column_config_data,
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -508,7 +513,7 @@ def _generate_backcheck_summaries(
     return column_category_summary, svy_bc_comparison_df
 
 
-def _display_overview_section(
+def display_overview_section(
     survey_df_bc: pd.DataFrame,
     backcheck_df_bc: pd.DataFrame,
     merged_df: pd.DataFrame,
@@ -535,7 +540,6 @@ def _display_overview_section(
     tuple[int, int, int, int]
         Overview metrics.
     """
-    st.subheader("Overview")
     min_backcheck_rate = st.number_input(
         "Enter a minimum percentage target of surveys backchecked by enumerator e.g. 10%",
         min_value=0,
@@ -584,7 +588,8 @@ def _display_overview_section(
     )
 
 
-def _display_category_and_trends(
+@demo_output_onboarding(TAB_NAME)
+def display_category_and_trends(
     bc_column_config_df: pd.DataFrame,
     column_category_summary: pd.DataFrame,
     survey_data: pd.DataFrame,
@@ -617,7 +622,6 @@ def _display_category_and_trends(
     """
     # Display category error rates
     if bc_column_config_df.empty:
-        st.write("Backcheck category summary")
         st.info(NO_BACKCHECK_COLUMNS_SET)
         st.write("")
     else:
@@ -781,6 +785,7 @@ def _generate_backchecker_statistics(
     return pd.DataFrame()
 
 
+@demo_output_onboarding(TAB_NAME)
 def backcheck_report_settings(
     project_id: str,
     survey_data: pd.DataFrame,
@@ -1610,6 +1615,7 @@ def display_overview_charts(
             st.plotly_chart(fig_enum)
 
 
+@demo_output_onboarding(TAB_NAME)
 def display_error_trends(
     error_trends_summary: pd.DataFrame,
     date: str,
@@ -1707,7 +1713,7 @@ def display_error_trends(
             yaxis_title="Error Rate (%)",
             hovermode="x unified",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
 
 def _display_filtered_statistics(
@@ -1742,9 +1748,10 @@ def _display_filtered_statistics(
     else:
         filtered_stats = stats_df
 
-    st.dataframe(filtered_stats, use_container_width=True, hide_index=True)
+    st.dataframe(filtered_stats, width="stretch", hide_index=True)
 
 
+@demo_output_onboarding(TAB_NAME)
 def display_statistics_tables(
     enumerator_statistics: pd.DataFrame,
     backchecker_statistics: pd.DataFrame,
@@ -1783,6 +1790,22 @@ def display_statistics_tables(
     )
 
 
+@demo_output_onboarding(TAB_NAME)
+def display_column_stats(column_stats: pd.DataFrame) -> None:
+    """Display column statistics table.
+
+    Parameters
+    ----------
+    column_stats : pd.DataFrame
+        DataFrame containing column statistics.
+    """
+    if column_stats.empty:
+        st.info(NO_BACKCHECK_COLUMNS_SET)
+    else:
+        st.dataframe(column_stats, width="stretch", hide_index=True)
+
+
+@demo_output_onboarding(TAB_NAME)
 def backchecks_report(
     project_id: str,
     survey_data: pd.DataFrame,
@@ -1858,12 +1881,13 @@ def backchecks_report(
     )
 
     # Display overview section
-    _display_overview_section(
+    display_overview_section(
         survey_df_bc, backcheck_df_bc, merged_df, enumerator, backcheck_goal
     )
 
     # Display category error rates and trends
-    _display_category_and_trends(
+    st.subheader("Backcheck category summary")
+    display_category_and_trends(
         bc_column_config_df,
         column_category_summary,
         survey_data,
@@ -1875,14 +1899,8 @@ def backchecks_report(
     )
 
     # Display column statistics
-    if bc_column_config_df.empty:
-        st.write("Column Statistics")
-        st.info(NO_BACKCHECK_COLUMNS_SET)
-    else:
-        st.subheader("Column Statistics")
-        st.dataframe(column_category_summary, use_container_width=True, hide_index=True)
-
-    st.write("")
+    st.subheader("Column Statistics")
+    display_column_stats(column_category_summary)
 
     # Generate and display statistics
     enumerator_statistics = _generate_enumerator_statistics(
@@ -1904,6 +1922,7 @@ def backchecks_report(
     )
 
     # Display statistics tables
+    st.subheader("Statistics Tables")
     display_statistics_tables(
         enumerator_statistics=enumerator_statistics,
         backchecker_statistics=backchecker_statistics,

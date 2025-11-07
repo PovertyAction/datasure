@@ -5,6 +5,9 @@ import seaborn as sns
 import streamlit as st
 
 from datasure.utils import load_check_settings, save_check_settings, trigger_save
+from datasure.utils.onboarding_utils import demo_output_onboarding
+
+TAB_NAME: str = "descriptive_stats"
 
 
 def load_default_summary_settings(setting_file: str, page_num: int) -> tuple:
@@ -62,6 +65,7 @@ def datetime_check(col: pd.Series) -> bool:
     return False
 
 
+@demo_output_onboarding(TAB_NAME)
 def descriptive_report_settings(
     data: pd.DataFrame, setting_file: str, page_num: int
 ) -> tuple:
@@ -305,7 +309,7 @@ def plot_date_distribution(data: pd.DataFrame, date_col: str) -> None:
                 cmap=cmap,
                 gmap=prepped_date_data["Frequency"],
             ),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
@@ -317,7 +321,7 @@ def plot_date_distribution(data: pd.DataFrame, date_col: str) -> None:
         st.bar_chart(
             prepped_date_data.set_index("Start Date"),
             y="Frequency",
-            use_container_width=True,
+            width="stretch",
             height=300,
             color="#FF8000",
         )
@@ -493,7 +497,7 @@ def plot_categorical_distribution(data: pd.DataFrame, categorical_col: str) -> N
                 cmap=cmap,
                 gmap=one_way_table["Frequency"],
             ),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
@@ -520,7 +524,7 @@ def plot_categorical_distribution(data: pd.DataFrame, categorical_col: str) -> N
         pd.set_option("styler.render.max_elements", styler_limit)
         st.dataframe(
             two_way_table.style.background_gradient(subset=format_cols, cmap=cmap),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
@@ -529,7 +533,7 @@ def plot_categorical_distribution(data: pd.DataFrame, categorical_col: str) -> N
         st.write("### Basic Statistics")
         st.dataframe(
             basic_statistics,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
@@ -559,7 +563,7 @@ def plot_categorical_distribution(data: pd.DataFrame, categorical_col: str) -> N
                 summary_statistics.style.format(
                     {c: "{:,.2f}" for c in format_cols},
                 ).background_gradient(subset=format_cols, cmap=cmap),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
         else:
@@ -573,6 +577,7 @@ def plot_categorical_distribution(data: pd.DataFrame, categorical_col: str) -> N
 
 
 # define function to create summary report
+@demo_output_onboarding(TAB_NAME)
 def descriptive_report(data: pd.DataFrame, setting_file: str, page_num: int) -> None:  # noqa: D417, RUF100
     """
     Visualize the distribution of categorical and numeric variables in the dataframe.

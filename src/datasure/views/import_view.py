@@ -16,7 +16,19 @@ from datasure.utils.duckdb_utils import (
     duckdb_save_table,
     duckdb_table_exists,
 )
-from datasure.utils.navigations import page_navigation
+from datasure.utils.navigations_utils import (
+    add_demo_navigation,
+    demo_callout,
+    demo_sidebar_help,
+    page_navigation,
+    show_demo_next_action,
+)
+from datasure.utils.onboarding_utils import (
+    DEMO_PROJECT_ID,
+    ImportDemoInfo,
+    demo_expander,
+    is_demo_project,
+)
 from datasure.utils.secure_credentials import (
     delete_stored_credentials,
     list_stored_credentials,
@@ -30,6 +42,11 @@ CREDENTIAL_TYPE = ("SurveyCTO Login", "SurveyCTO Private Key")
 # --- CONFIGURE PAGE --- #
 
 st.set_page_config("Import Data", page_icon=":sync:", layout="wide")
+
+# Add demo navigation and guidance
+add_demo_navigation("import_view.py", step=2)
+demo_sidebar_help()
+
 st.title("Import Data")
 st.write("---")
 
@@ -46,6 +63,15 @@ if not project_id:
 # add session state for raw dataset list
 if "st_raw_dataset_list" not in st.session_state:
     st.session_state.st_raw_dataset_list = duckdb_get_aliases(project_id, to_load=True)
+
+# Demo-specific setup
+if (
+    is_demo_project()
+    and project_id == DEMO_PROJECT_ID
+    and "demo_survey" not in st.session_state.st_raw_dataset_list
+):
+    # Ensure demo datasets are in the list
+    st.session_state.st_raw_dataset_list.extend(["demo_survey", "demo_backcheck"])
 
 if "st_prep_dataset_list" not in st.session_state:
     st.session_state.st_prep_dataset_list = None
@@ -145,6 +171,10 @@ def _add_to_session_state(alias: str) -> None:
     """Add alias to session state if not already present."""
     if alias not in st.session_state.st_raw_dataset_list:
         st.session_state.st_raw_dataset_list.append(alias)
+
+        # Demo success message
+        if is_demo_project():
+            demo_callout(ImportDemoInfo.get_info_message("add_to_session_info"))
 
 
 # --- Update import log in the cache file --- #
@@ -376,6 +406,10 @@ if not import_log.is_empty():
         # activate prep section
 
         st.subheader("Preview Imported Data")
+
+        # Demo guidance
+        if is_demo_project():
+            demo_callout(ImportDemoInfo.get_info_message("preview_data_info"))
         sb, _, mb1, mb2, mb3 = st.columns([0.3, 0.25, 0.15, 0.15, 0.15])
         with sb:
             selected_dataset = st.selectbox(
@@ -421,10 +455,26 @@ if not import_log.is_empty():
 
         st.dataframe(preview_data, width="stretch")
 
+        # Demo expander with educational content
+        if is_demo_project():
+            demo_expander(
+                "About Your Pre-loaded Demo Data",
+                ImportDemoInfo.get_info_message("demo_data_info"),
+                expanded=True,
+            )
+
+            # Demo next action
+            st.write("---")
+            show_demo_next_action(2, "st_prep_data_page", "Prepare Your Data")
+
 else:
     st.info("No import data found. Please add import configurations.")
 
-
-page_navigation(
-    next={"page_name": st.session_state.st_prep_data_page, "label": "Next: Prep Data →"}
-)
+# Previous and next pages (import, prep) - only for non-demo projects
+if not is_demo_project():
+    page_navigation(
+        next={
+            "page_name": st.session_state.st_prep_data_page,
+            "label": "Next: Prepare Data →",
+        }
+    )

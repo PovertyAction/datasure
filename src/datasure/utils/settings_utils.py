@@ -121,8 +121,12 @@ def get_check_config_settings(project_id: str, page_row_index: int) -> tuple:
     survey_id = hfc_config_logs.row(page_row_index)[3]
     survey_date = hfc_config_logs.row(page_row_index)[4]
     enumerator = hfc_config_logs.row(page_row_index)[5]
-    backcheck_data_name = hfc_config_logs.row(page_row_index)[6]
-    tracking_data_name = hfc_config_logs.row(page_row_index)[7]
+    survey_target = hfc_config_logs.row(page_row_index)[6]
+    backcheck_data_name = hfc_config_logs.row(page_row_index)[7]
+    backcheck_date = hfc_config_logs.row(page_row_index)[8]
+    backchecker = hfc_config_logs.row(page_row_index)[9]
+    backcheck_target_percent = hfc_config_logs.row(page_row_index)[10]
+    tracking_data_name = hfc_config_logs.row(page_row_index)[11]
 
     return (
         page_name,
@@ -131,6 +135,10 @@ def get_check_config_settings(project_id: str, page_row_index: int) -> tuple:
         survey_id,
         survey_date,
         enumerator,
+        survey_target,
         backcheck_data_name,
+        backcheck_date,
+        backchecker,
+        backcheck_target_percent,
         tracking_data_name,
     )

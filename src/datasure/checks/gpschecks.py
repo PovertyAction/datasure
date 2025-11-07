@@ -15,6 +15,9 @@ from datasure.utils import (
     save_check_settings,
     trigger_save,
 )
+from datasure.utils.onboarding_utils import demo_output_onboarding
+
+TAB_NAME: str = "gpschecks"
 
 
 def load_default_settings(project_id: str, setting_file: str, page_num: int) -> tuple:
@@ -43,6 +46,10 @@ def load_default_settings(project_id: str, setting_file: str, page_num: int) -> 
         config_survey_id,
         config_survey_date,
         config_enumerator,
+        _,
+        _,
+        _,
+        _,
         _,
         _,
     ) = get_check_config_settings(
@@ -96,6 +103,7 @@ def load_default_settings(project_id: str, setting_file: str, page_num: int) -> 
 
 
 #  gps check settings
+@demo_output_onboarding(TAB_NAME)
 def gps_check_settings(
     project_id: str, data: pd.DataFrame, setting_file: str, page_num
 ) -> tuple:
@@ -869,6 +877,7 @@ def plot_clusters_on_map(
     st.pydeck_chart(deck, height=450, use_container_width=True)
 
 
+@demo_output_onboarding(TAB_NAME)
 # gps checks report
 def gpschecks_report(
     project_id: str, data: pd.DataFrame, setting_file: str, page_num: int
@@ -1124,9 +1133,7 @@ def gpschecks_report(
 
                 st.write("Below is a list of potential GPS outliers:")
 
-                st.dataframe(
-                    gps_outliers_df[outliers_df_cols], use_container_width=True
-                )
+                st.dataframe(gps_outliers_df[outliers_df_cols], width="stretch")
 
                 st.session_state.gps_outlier_rate = (
                     gps_outliers_df.shape[0] / flag_outliers_df.shape[0]
@@ -1173,7 +1180,7 @@ def gpschecks_report(
                     gps_accuracy_statistics = calculate_gps_accuracy_statistics(
                         data, gps_accuracy, accuracy_cluster_col, accuracy_stats_list
                     )
-                    st.dataframe(gps_accuracy_statistics, use_container_width=True)
+                    st.dataframe(gps_accuracy_statistics, width="stretch")
             else:
                 st.warning(
                     "No GPS accuracy column selected. Please select a GPS accuracy column to display statistics."

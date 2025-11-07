@@ -140,6 +140,10 @@ def test_load_default_settings_no_file(mock_config_settings):
         "enumerator",
         None,
         None,
+        None,
+        None,
+        None,
+        None,
     )
 
     result = load_default_settings("test_project", None, 1)

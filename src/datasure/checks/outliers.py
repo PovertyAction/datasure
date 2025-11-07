@@ -16,6 +16,9 @@ from datasure.utils import (
     save_check_settings,
     trigger_save,
 )
+from datasure.utils.onboarding_utils import demo_output_onboarding
+
+TAB_NAME: str = "outliers"
 
 
 def load_default_settings(project_id: str, settings_file: str, page_num: int) -> tuple:
@@ -37,11 +40,22 @@ def load_default_settings(project_id: str, settings_file: str, page_num: int) ->
 
     """
     # Get config page defaults
-    _, _, config_survey_key, config_survey_id, _, config_enumerator, _, _ = (
-        get_check_config_settings(
-            project_id=project_id,
-            page_row_index=page_num - 1,
-        )
+    (
+        _,
+        _,
+        config_survey_key,
+        config_survey_id,
+        _,
+        config_enumerator,
+        _,
+        _,
+        _,
+        _,
+        _,
+        _,
+    ) = get_check_config_settings(
+        project_id=project_id,
+        page_row_index=page_num - 1,
     )
     # load default settings in the following order:
     # - if settings file exists, load settings from file
@@ -237,6 +251,7 @@ def update_outlier_settings(
 
 
 # outliers check settings
+@demo_output_onboarding(TAB_NAME)
 def outliers_report_settings(
     project_id: str, data: pd.DataFrame, settings_file: str, page_num: int, label: str
 ) -> tuple:
@@ -420,9 +435,7 @@ def outliers_report_settings(
         oc1, oc2, _ = st.columns([0.4, 0.3, 0.3])
         with (
             oc1,
-            st.popover(
-                label=":material/add: Add outlier column", use_container_width=True
-            ),
+            st.popover(label=":material/add: Add outlier column", width="stretch"),
         ):
             search_type = st.selectbox(
                 label="Search type",
@@ -576,7 +589,7 @@ def outliers_report_settings(
             st.button(
                 label="Add outlier column",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 on_click=update_outlier_settings,
                 kwargs={
                     "project_id": project_id,
@@ -598,7 +611,7 @@ def outliers_report_settings(
             oc2,
             st.popover(
                 label=":material/delete: Delete outlier column",
-                use_container_width=True,
+                width="stretch",
             ),
         ):
             st.markdown("### Remove outlier columns")
@@ -637,7 +650,7 @@ def outliers_report_settings(
                     confirm_delete = st.button(
                         label="Confirm deletion",
                         type="primary",
-                        use_container_width=True,
+                        width="stretch",
                     )
                     if confirm_delete:
                         # remove the selected index from the logs
@@ -668,7 +681,7 @@ def outliers_report_settings(
         else:
             st.dataframe(
                 outlier_logs,
-                use_container_width=True,
+                width="stretch",
                 hide_index=False,
                 column_config={
                     "search_type": st.column_config.Column("Search Type"),
@@ -992,12 +1005,10 @@ def compute_outlier_output(
     return merged_results
 
 
+@demo_output_onboarding(TAB_NAME)
 def display_outlier_output(outlier_data: pd.DataFrame) -> None:
     """Display the outlier output in a Streamlit app."""
     # Get the outlier settings from the database
-
-    st.write("---")
-    st.title("Outliers")
 
     outlier_data_disp = outlier_data[outlier_data["outlier reason"] != "no outlier"]
 
@@ -1007,7 +1018,7 @@ def display_outlier_output(outlier_data: pd.DataFrame) -> None:
 
     st.dataframe(
         outlier_data_disp,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         column_config={
             "column name": st.column_config.Column("Column Name"),
@@ -1144,11 +1155,9 @@ def compute_column_outlier_summary(
     return outlier_summary
 
 
+@demo_output_onboarding(TAB_NAME)
 def display_outlier_column_summary(outlier_summary: pd.DataFrame) -> None:
     """Display the outlier summary in a Streamlit app."""
-    st.write("---")
-    st.title("Outlier Column Summary")
-
     if outlier_summary.empty:
         raise ValueError(
             "No outlier summary data available. Please check the outlier settings and data."
@@ -1163,7 +1172,7 @@ def display_outlier_column_summary(outlier_summary: pd.DataFrame) -> None:
 
     st.dataframe(
         outlier_summary,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         column_config={
             "column name": st.column_config.Column("Column Name"),
@@ -1346,6 +1355,7 @@ def display_outlier_metrics(
             )
 
 
+@demo_output_onboarding(TAB_NAME)
 def inspect_outliers_columns(
     data: pd.DataFrame,
     outlier_data: pd.DataFrame,
@@ -1366,7 +1376,6 @@ def inspect_outliers_columns(
     -------
         None
     """
-    st.title("Inspect Columns")
     if outlier_data.empty:
         st.info(
             "No outlier columns selected. Please select outlier columns to inspect."
@@ -1523,7 +1532,7 @@ def inspect_outliers_columns(
         fig = plot_col_distribution(
             data=col_outlier_details[[selected_col]], col_name=selected_col
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     with dc2:
         st.subheader(f"Violin plot of {selected_col} values")
@@ -1532,11 +1541,11 @@ def inspect_outliers_columns(
             data=col_outlier_details[selected_col],
             title=selected_col,
         )
-        st.plotly_chart(violin_fig, use_container_width=True)
+        st.plotly_chart(violin_fig, width="stretch")
 
     st.dataframe(
         col_outlier_details,
-        use_container_width=True,
+        width="stretch",
         hide_index=False,
     )
 
@@ -1622,12 +1631,18 @@ def outliers_report(
     )
 
     # display outlier summary
+    st.write("---")
+    st.title("Outlier Column Summary")
     display_outlier_column_summary(outlier_summary)
 
     # display outlier output
+    st.write("---")
+    st.title("Outliers")
     display_outlier_output(outlier_data)
 
     # inspect outlier columns
+    st.write("---")
+    st.title("Inspect Columns")
     inspect_outliers_columns(
         data=data,
         outlier_data=outlier_data,

@@ -396,27 +396,73 @@ class TransformColumnsOperation(PrepOperation):
             raise OperationError(f"Failed to transform columns: {e}") from e
 
     @staticmethod
-    def _parse_flexible_datetime(col_name: str) -> pl.Expr:
+    def _parse_flexible_datetime(data: pl.DataFrame, col_name: str) -> pl.Expr:
         """Try multiple datetime formats and return the first successful one"""
         formats_to_try = [
-            "%d%b%Y %H:%M:%S",  # 18aug2025 19:49:00
-            "%d-%b-%Y %H:%M:%S",  # 18-aug-2025 19:49:00
-            "%Y-%m-%d %H:%M:%S",  # 2025-08-18 19:49:00
-            "%m/%d/%Y %H:%M:%S",  # 08/18/2025 19:49:00
-            "%d/%m/%Y %H:%M:%S",  # 18/08/2025 19:49:00
-            "%Y-%m-%d",  # 2025-08-18
-            "%m/%d/%Y",  # 08/18/2025
-            "%d-%m-%Y",  # 18-08-2025
+            {
+                "format": "%d%b%Y %H:%M:%S",
+                "validator": r"^\d{1,2}[a-zA-Z]{3}\d{4} \d{2}:\d{2}:\d{2}$",
+                "example": "18aug2025 19:49:00",
+            },
+            {
+                "format": "%d-%b-%Y %H:%M:%S",
+                "validator": r"^\d{1,2}-[a-zA-Z]{3}-\d{4} \d{2}:\d{2}:\d{2}$",
+                "example": "18-aug-2025 19:49:00",
+            },
+            {
+                "format": "%Y-%m-%d %H:%M:%S",
+                "validator": r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$",
+                "example": "2025-08-18 19:49:00",
+            },
+            {
+                "format": "%m/%d/%Y %H:%M:%S",
+                "validator": r"^\d{1,2}/\d{1,2}/\d{4} \d{2}:\d{2}:\d{2}$",
+                "example": "08/18/2025 19:49:00",
+            },
+            {
+                "format": "%d/%m/%Y %H:%M:%S",
+                "validator": r"^\d{1,2}/\d{1,2}/\d{4} \d{2}:\d{2}:\d{2}$",
+                "example": "18/08/2025 19:49:00",
+            },
+            {
+                "format": "%Y-%m-%d",
+                "validator": r"^\d{4}-\d{2}-\d{2}$",
+                "example": "2025-08-18",
+            },
+            {
+                "format": "%m/%d/%Y",
+                "validator": r"^\d{1,2}/\d{1,2}/\d{4}$",
+                "example": "08/18/2025",
+            },
+            {
+                "format": "%d-%m-%Y",
+                "validator": r"^\d{1,2}-\d{1,2}-\d{4}$",
+                "example": "18-08-2025",
+            },
         ]
 
         for fmt in formats_to_try:
-            try:
-                return pl.col(col_name).str.to_datetime(format=fmt, strict=False)
-            except Exception:
+            # check that all non-missing values match the format using regex
+            validator = fmt["validator"]
+            validate_col = (
+                data.filter(pl.col(col_name).is_not_null())
+                .select(
+                    pl.col(col_name).str.contains(f"^{validator.strip('^$')}$").all()
+                )
+                .item()
+            )
+            if not validate_col:
                 continue
+            else:
+                return pl.col(col_name).str.to_datetime(
+                    format=fmt["format"], strict=False
+                )
 
-        # If all formats fail, all missing values
-        return pl.lit(None).cast(pl.Datetime)
+        # If all formats fail, all missing values, return Exception
+        supported_formats = ", ".join([f["example"] for f in formats_to_try])
+        raise ValidationError(
+            f"Failed to parse datetime for column '{col_name}'. Ensure values match supported formats like: {supported_formats}"
+        )
 
     def _apply_transformation(
         self,
@@ -479,7 +525,7 @@ class TransformColumnsOperation(PrepOperation):
         # String to datetime
         if func_name in ["string to date", "string to datetime"]:
             return data.with_columns(
-                self._parse_flexible_datetime(column_name).alias(column_name)
+                self._parse_flexible_datetime(data, column_name).alias(column_name)
             )
 
         # Get dummies (one-hot encoding)
@@ -781,7 +827,15 @@ def prep_apply_action(
         )
 
         if prep_log_df.is_empty():
-            return None  # No actions to re-apply
+            # set result data to raw data if no actions in log
+            # return none
+            duckdb_save_table(
+                project_id,
+                raw_data,
+                alias,
+                db_name="prep",
+            )
+            return None
 
         # Convert to list of actions
         existing_actions = []

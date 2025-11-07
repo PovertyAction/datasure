@@ -72,18 +72,6 @@ def duckdb_save_table(
     alias: str : alias for the data
     db_name: str : name of the DuckDB database
     """
-    # Add validation for empty DataFrames
-    if hasattr(table_data, "empty") and table_data.empty:
-        logger.warning(
-            f"Attempted to save empty DataFrame for alias '{alias}'. Skipping save operation."
-        )
-        return
-    # For Polars DataFrames
-    if hasattr(table_data, "is_empty") and table_data.is_empty():
-        logger.warning(
-            f"Attempted to save empty DataFrame for alias '{alias}'. Skipping save operation."
-        )
-        return
     db_path = (
         get_cache_path(project_id, "settings", "logs.duckdb")
         if db_name == "logs"

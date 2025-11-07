@@ -14,6 +14,9 @@ from datasure.utils import (
     save_check_settings,
     trigger_save,
 )
+from datasure.utils.onboarding_utils import demo_output_onboarding
+
+TAB_NAME: str = "summary"
 
 
 def load_default_settings(project_id: str, setting_file: str, page_num: int) -> tuple:
@@ -35,9 +38,11 @@ def load_default_settings(project_id: str, setting_file: str, page_num: int) -> 
 
     """
     # Get config page defaults
-    _, _, _, config_survey_id, config_survey_date, _, _, _ = get_check_config_settings(
-        project_id=project_id,
-        page_row_index=page_num - 1,
+    _, _, _, config_survey_id, config_survey_date, _, _, _, _, _, _, _ = (
+        get_check_config_settings(
+            project_id=project_id,
+            page_row_index=page_num - 1,
+        )
     )
 
     # load default settings in the following order:
@@ -58,6 +63,7 @@ def load_default_settings(project_id: str, setting_file: str, page_num: int) -> 
 
 
 # define function to create summary report
+@demo_output_onboarding(TAB_NAME)
 def summary_settings(
     project_id: str, data: pd.DataFrame, setting_file: str, page_num
 ) -> tuple:
@@ -309,6 +315,7 @@ def compute_summary_submissions(data: pd.DataFrame, date: str) -> tuple:
     )
 
 
+@demo_output_onboarding(TAB_NAME)
 def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
     """
     Generates a summary report for the survey data
@@ -325,7 +332,6 @@ def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
     -------
     None
     """
-    st.markdown("## Submission details")
     if date:
         (
             first_submission_date,
@@ -387,7 +393,7 @@ def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
         )
         fig.update_layout(width=1000, height=500)
         fig.update_yaxes(tick0=0)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     else:
         st.info(
             "Submission details report requires a date column to be selected. Go to the :material/settings: settings section above."
@@ -564,6 +570,7 @@ def compute_summary_progress_by_col(
     return progress_data, vmin_val, vmax_val, format_cols
 
 
+@demo_output_onboarding(TAB_NAME)
 def summary_progress(
     data: pd.DataFrame,
     date: str,
@@ -585,8 +592,6 @@ def summary_progress(
     -------
     None
     """
-    st.write("---")
-    st.markdown("## Progress")
     if not date:
         st.info(
             "Progress section requires a date column to be selected. go to the :material/settings: settings section above."
@@ -698,7 +703,7 @@ def summary_progress(
             ).background_gradient(
                 subset=format_cols, cmap=cmap, axis=1, vmin=vmin_val, vmax=vmax_val
             ),
-            use_container_width=True,
+            width="stretch",
         )
 
 
@@ -726,6 +731,7 @@ def compute_summary_data_summary(data: pd.DataFrame) -> tuple:
     return num_str_cols, num_num_cols, num_date_cols, col_count
 
 
+@demo_output_onboarding(TAB_NAME)
 def summary_data_summary(data: pd.DataFrame) -> None:
     """
     Generates summary details of for the survey data
@@ -739,9 +745,6 @@ def summary_data_summary(data: pd.DataFrame) -> None:
     -------
     None
     """
-    st.write("---")
-    st.markdown("## Data Summary")
-
     num_str_cols, num_num_cols, num_date_cols, col_count = compute_summary_data_summary(
         data=data
     )
@@ -797,6 +800,7 @@ def compute_summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> t
     return perc_duplicates, perc_outliers, perc_missing, perc_back_check_error_rate
 
 
+@demo_output_onboarding(TAB_NAME)
 def summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> None:
     """
     Generates a summary report for the survey data
@@ -810,9 +814,6 @@ def summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> None:
     -------
     None
     """
-    st.write("---")
-    st.markdown("## Data Quality")
-
     perc_duplicates, perc_outliers, perc_missing, perc_back_check_error_rate = (
         compute_summary_data_quality(
             data=data,
@@ -858,6 +859,7 @@ def summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> None:
         st.pyplot(perc_back_check_error_rate_chart)
 
 
+@demo_output_onboarding(TAB_NAME)
 def summary_report(
     project_id: str, data: pd.DataFrame, setting_file: str, page_num: int
 ) -> None:
@@ -877,10 +879,21 @@ def summary_report(
     None
     """
     date, target, survey_id = summary_settings(project_id, data, setting_file, page_num)
+
+    st.write("---")
+    st.markdown("## Data Summary")
     summary_data_summary(data=data)
+
+    st.markdown("## Submission details")
     summary_submissions(
         data=data,
         date=date,
     )
+
+    st.write("---")
+    st.markdown("## Progress")
     summary_progress(data=data, date=date, target=target, setting_file=setting_file)
+
+    st.write("---")
+    st.markdown("## Data Quality")
     summary_data_quality(data=data, survey_id=survey_id)

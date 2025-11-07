@@ -9,7 +9,18 @@ from datasure.utils.duckdb_utils import (
     duckdb_get_table,
     duckdb_save_table,
 )
-from datasure.utils.navigations import page_navigation
+from datasure.utils.navigations_utils import (
+    add_demo_navigation,
+    demo_callout,
+    demo_sidebar_help,
+    page_navigation,
+    show_demo_next_action,
+)
+from datasure.utils.onboarding_utils import (
+    ImportDemoInfo,
+    demo_expander,
+    is_demo_project,
+)
 from datasure.utils.prep_utils import (
     PrepActionResult,
     PrepDescriptions,
@@ -134,10 +145,22 @@ class PrepViewConfig:
 # -- DATA PREP PAGE --#
 # Creates page for data preprocessing
 
+# Add demo navigation and guidance
+add_demo_navigation("prep_view.py", step=3)
+demo_sidebar_help()
+
 st.title("Get Your Data Ready")
 st.write(
     "Prepare your dataset for Data Quality Checks. Use these tools to transform, add and remove columns and rows in your dataset."
 )
+
+# Demo guidance
+if is_demo_project():
+    demo_expander(
+        "Prepare Your Data for Quality Checks",
+        ImportDemoInfo.get_info_message("prepare_data_info"),
+        expanded=True,
+    )
 
 # Initialize configuration
 config = PrepViewConfig()
@@ -675,6 +698,12 @@ if show_prep_page_info:
         with tab:
             st.subheader("Apply Changes:")
 
+            # Demo guidance for apply changes section
+            if is_demo_project():
+                demo_callout(
+                    "Optional: Use these tools to transform your data. info",
+                )
+
             # create for text and form
             pt1, pt2, _ = st.columns((0.4, 0.3, 0.3))
 
@@ -708,6 +737,15 @@ if show_prep_page_info:
             # display preview of peppered data
             with st.container(border=True):
                 st.subheader("Preview Downloaded Data")
+
+                # Demo guidance for data preview
+                if is_demo_project():
+                    demo_callout(
+                        f"Here's your {label} data! Notice the data quality issues like missing values ({miss_perc:.1f}% missing) "
+                        "that we'll identify in the next step.",
+                        "info",
+                    )
+
                 st.write("---")
 
                 mc1, mc2, mc3 = st.columns((0.3, 0.3, 0.4))
@@ -719,19 +757,63 @@ if show_prep_page_info:
                     value=f"{miss_perc:.2f}%",
                     border=True,
                 )
-                st.dataframe(
-                    prep_data,
-                    width="stretch",
-                    hide_index=False,
-                )
 
-page_navigation(
-    prev={
-        "page_name": st.session_state.st_import_data_page,
-        "label": "← Back: Import Data",
-    },
-    next={
-        "page_name": st.session_state.st_config_checks_page,
-        "label": "Next: Configure Checks →",
-    },
-)
+                st.dataframe(prep_data, width="stretch", hide_index=False)
+
+# Demo next action or regular navigation
+if is_demo_project():
+    st.write("---")
+
+    enable_next_count = 0
+
+    prep_log_survey: pl.DataFrame = duckdb_get_table(
+        project_id=project_id,
+        alias="prep_log_demo_survey",
+        db_name="logs",
+    )
+
+    prep_log_backcheck: pl.DataFrame = duckdb_get_table(
+        project_id=project_id,
+        alias="prep_log_demo_backcheck",
+        db_name="logs",
+    )
+
+    if not prep_log_survey.is_empty() and not prep_log_backcheck.is_empty():
+        # check that the correct prep steps have been added
+        pattern = r'"submissiondate"\s+updated\s+using\s+string\s+to\s+datetime'
+        if prep_log_survey["description"].str.contains(pattern).any():
+            enable_next_count += 1
+
+        if prep_log_backcheck["description"].str.contains(pattern).any():
+            enable_next_count += 1
+
+    if prep_log_survey.is_empty() or prep_log_backcheck.is_empty():
+        demo_expander(
+            "Add data preparation steps for the survey and backcheck datasets",
+            ImportDemoInfo.get_info_message("add_prep_steps_info"),
+            expanded=False,
+        )
+    else:
+        demo_expander(
+            "Optional: Try Data Preparation Features",
+            ImportDemoInfo.get_info_message("proceed_to_config_info"),
+            expanded=False,
+        )
+
+    show_demo_next_action(
+        3,
+        "st_config_checks_page",
+        "Configure Quality Checks",
+        disabled=enable_next_count < 2,
+    )
+else:
+    page_navigation(
+        prev={
+            "page_name": st.session_state.st_import_data_page,
+            "label": "← Back: Import Data",
+        },
+        next={
+            "page_name": st.session_state.st_config_checks_page,
+            "label": "Next: Configure Checks →",
+        },
+    )
