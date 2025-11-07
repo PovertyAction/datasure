@@ -520,13 +520,6 @@ dependencies = [
     { name = "streamlit-extras" },
 ]
 
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-]
-
 [package.dev-dependencies]
 dev = [
     { name = "jupyter" },
@@ -553,16 +546,12 @@ requires-dist = [
     { name = "polars-readstat", specifier = ">=0.5.1" },
     { name = "pyarrow", specifier = ">=16.0.0" },
     { name = "pydantic", specifier = ">=2.11.7" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
     { name = "requests", specifier = ">=2.32.3" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.4" },
     { name = "scikit-learn", specifier = ">=1.5.2" },
     { name = "seaborn", specifier = ">=0.13.2" },
     { name = "streamlit", specifier = ">=1.49.0" },
     { name = "streamlit-extras", specifier = ">=0.5.5" },
 ]
-provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
 dev = [
