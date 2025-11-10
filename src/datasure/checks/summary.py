@@ -158,10 +158,11 @@ class DateRangeCalculator:
         """
         from datetime import datetime, timedelta
 
-        today = datetime.now()
-        # Approximate: go back by (months_ago + 1) * 30 days
-        # This is a simple approximation that works for most cases
-        return (today - timedelta(days=(months_ago + 1) * 30)).date()
+    from dateutil.relativedelta import relativedelta
+    
+    today = datetime.now()
+    target_month = today - relativedelta(months=months_ago + 1)
+    return target_month.date()
 
 
 # ============================================================================
