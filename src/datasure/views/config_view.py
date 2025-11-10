@@ -80,7 +80,11 @@ def _render_configuration_actions(project_id: str, alias_list: list[str]) -> Non
     col1, col2, _ = st.columns([0.4, 0.3, 0.3])
 
     with col1:
-        add_check_configuration_form(project_id, alias_list)
+        st.button(":material/add: Add New Check Configuration",
+                  on_click=add_check_configuration_form,
+                  args=(project_id, alias_list),
+                  width='stretch',
+                  )
 
     with col2:
         remove_check_configuration_form(project_id)
