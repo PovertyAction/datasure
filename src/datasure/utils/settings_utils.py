@@ -68,8 +68,7 @@ def save_check_settings(
     st.session_state[state_name] = False
 
 
-# @st.cache_data
-def load_check_settings(settings_file, check_name) -> tuple:
+def load_check_settings(settings_file, check_name) -> dict:
     """Load the settings for a check from a dictionary.
 
     Parameters
@@ -85,11 +84,11 @@ def load_check_settings(settings_file, check_name) -> tuple:
     """
     # check if the file exists
     if not os.path.exists(settings_file):
-        return None
+        return {}
     with open(settings_file) as f:
         settings_dict = json.load(f)
 
-    return settings_dict.get(check_name)
+    return settings_dict.get(check_name, {})
 
 
 def trigger_save(state_name: str):
