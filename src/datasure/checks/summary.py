@@ -1303,7 +1303,7 @@ def summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> None:
 
 @demo_output_onboarding(TAB_NAME)
 def summary_report(
-    project_id: str, data: pd.DataFrame, setting_file: str, page_num: int, config: dict
+    data: pd.DataFrame, setting_file: str, config: dict
 ) -> None:
     """Generate comprehensive summary report.
 
