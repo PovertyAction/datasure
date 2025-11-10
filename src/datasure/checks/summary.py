@@ -1,4 +1,5 @@
 from datetime import date as Date
+from datetime import datetime, timedelta
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -7,6 +8,7 @@ import plotly.express as px
 import polars as pl
 import seaborn as sns
 import streamlit as st
+from dateutil.relativedelta import relativedelta
 from pydantic import BaseModel, Field, field_validator
 
 from datasure.utils.chart_utils import donut_chart2
@@ -88,8 +90,9 @@ class DataSummaryMetrics(BaseModel):
                 + info.data.get("date_columns_count", 0)
             )
             if v != expected:
-                # Allow total to be set separately (for columns of other types)
-                pass
+                raise ValueError(
+                    "Total columns count must equal sum of string, numeric, and date columns counts"
+                )
         return v
 
 
@@ -138,8 +141,6 @@ class DateRangeCalculator:
         Date
             Start date of the specified week
         """
-        from datetime import datetime, timedelta
-
         return (datetime.now() - timedelta(weeks=weeks_ago + 1)).date()
 
     @staticmethod
@@ -156,12 +157,9 @@ class DateRangeCalculator:
         Date
             Start date of the specified month
         """
-        from datetime import datetime, timedelta
-
         today = datetime.now()
-        # Approximate: go back by (months_ago + 1) * 30 days
-        # This is a simple approximation that works for most cases
-        return (today - timedelta(days=(months_ago + 1) * 30)).date()
+        target_month = today - relativedelta(months=months_ago + 1)
+        return target_month.date()
 
 
 # ============================================================================

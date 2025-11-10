@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 import pandas as pd
 import polars as pl
 import pytest
+from dateutil.relativedelta import relativedelta
 from pydantic import ValidationError
 
 from datasure.checks.summary import (
@@ -200,15 +201,25 @@ class TestDataSummaryMetrics:
         assert metrics.total_columns_count == 17
 
     def test_total_validation(self):
-        """Test that total can be set independently."""
-        # This should pass even though sum doesn't match total
+        """Test that total must equal sum of type counts."""
+        # This should raise an error because sum doesn't match total
+        with pytest.raises(ValidationError, match="Total columns count must equal sum"):
+            DataSummaryMetrics(
+                string_columns_count=5,
+                numeric_columns_count=5,
+                date_columns_count=5,
+                total_columns_count=20,  # Doesn't match sum (15)
+            )
+
+    def test_total_validation_success(self):
+        """Test that total validation passes when sum matches."""
         metrics = DataSummaryMetrics(
             string_columns_count=5,
             numeric_columns_count=5,
             date_columns_count=5,
-            total_columns_count=20,  # Could include other column types
+            total_columns_count=15,  # Matches sum
         )
-        assert metrics.total_columns_count == 20
+        assert metrics.total_columns_count == 15
 
 
 class TestDataQualityMetrics:
@@ -294,13 +305,13 @@ class TestDateRangeCalculator:
     def test_get_month_start_current(self):
         """Test getting start of current month."""
         result = DateRangeCalculator.get_month_start(months_ago=0)
-        expected = (datetime.now() - timedelta(days=30)).date()
+        expected = (datetime.now() - relativedelta(months=1)).date()
         assert result == expected
 
     def test_get_month_start_last_month(self):
         """Test getting start of last month."""
         result = DateRangeCalculator.get_month_start(months_ago=1)
-        expected = (datetime.now() - timedelta(days=60)).date()
+        expected = (datetime.now() - relativedelta(months=2)).date()
         assert result == expected
 
 
