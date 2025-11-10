@@ -230,6 +230,20 @@ class ConfigurationService:
 
         return True
 
+    def get_page_configuration(self, row_index: int) -> dict:
+        """
+        Return configuration info for row
+
+        Returns
+        -------
+            dict - dict of column names and values for specified row_index
+        """
+        config_df = self.get_all_configurations()
+        if config_df.is_empty() or row_index >= config_df.height:
+            return {}
+
+        return config_df.row(row_index, named=True)
+
 
 class DatasetService:
     """Service for working with datasets and their columns."""

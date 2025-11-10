@@ -49,23 +49,13 @@ def load_default_enumerator_settings(
        outcome_vals : list - outcome values
     """
     # Get config page defaults
-    (
-        _,
-        _,
-        _,
-        config_survey_id,
-        config_survey_date,
-        config_enumerator,
-        _,
-        _,
-        _,
-        _,
-        _,
-        _,
-    ) = get_check_config_settings(
+    config = get_check_config_settings(
         project_id=project_id,
         page_row_index=page_num - 1,
     )
+    config_survey_id = config.get("survey_id")
+    config_survey_date = config.get("survey_date")
+    config_enumerator = config.get("enumerator")
     if setting_file and os.path.exists(setting_file):
         default_settings = (
             load_check_settings(settings_file=setting_file, check_name="enumerator")

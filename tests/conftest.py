@@ -434,24 +434,21 @@ def mock_database_functions(monkeypatch):
             return pl.DataFrame()
 
     def mock_config(*args, **kwargs):
-        # Return mock values in the expected order:
-        # page_name, survey_data_name, survey_key, survey_id,
-        # survey_date, enumerator, survey_target, backcheck_data_name,
-        # backcheck_date, backchecker, backcheck_target_percent, tracking_data_name
-        return (
-            "enumerator",  # page_name
-            "test_survey",  # survey_data_name
-            "Test Form",  # survey_key
-            "survey_id",  # survey_id
-            "submission_date",  # survey_date
-            "enumerator",  # enumerator
-            100,  # survey_target
-            "backcheck_data",  # backcheck_data_name
-            "backcheck_date",  # backcheck_date
-            "backchecker",  # backchecker
-            10,  # backcheck_target_percent
-            "tracking_data",  # tracking_data_name
-        )
+        # Return mock values as a dict (new format for get_check_config_settings)
+        return {
+            "page_name": "enumerator",
+            "survey_data_name": "test_survey",
+            "survey_key": "Test Form",
+            "survey_id": "survey_id",
+            "survey_date": "submission_date",
+            "enumerator": "enumerator",
+            "survey_target": 100,
+            "backcheck_data_name": "backcheck_data",
+            "backcheck_date": "backcheck_date",
+            "backchecker": "backchecker",
+            "backcheck_target_percent": 10,
+            "tracking_data_name": "tracking_data",
+        }
 
     # Clear streamlit cache to ensure our mocks are applied
     st.cache_data.clear()
@@ -461,11 +458,14 @@ def mock_database_functions(monkeypatch):
         "datasure.utils.duckdb_utils.duckdb_get_table", mock_duckdb_get_table
     )
     monkeypatch.setattr("datasure.utils.duckdb_get_table", mock_duckdb_get_table)
-    monkeypatch.setattr(
-        "datasure.utils.settings_utils.duckdb_get_table", mock_duckdb_get_table
-    )
 
-    # Also directly patch the function used in settings_utils
+    # Also directly patch the function used in settings_utils and check modules
     monkeypatch.setattr(
         "datasure.utils.settings_utils.get_check_config_settings", mock_config
+    )
+    monkeypatch.setattr(
+        "datasure.checks.backchecks.get_check_config_settings", mock_config
+    )
+    monkeypatch.setattr(
+        "datasure.checks.enumerator.get_check_config_settings", mock_config
     )

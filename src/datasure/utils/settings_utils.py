@@ -7,7 +7,7 @@ from functools import lru_cache
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
 
-from .duckdb_utils import duckdb_get_table
+from datasure.utils.config_utils import ConfigurationService
 
 
 class ProjectID(BaseModel):
@@ -26,7 +26,9 @@ class ProjectID(BaseModel):
 
 
 @st.cache_data
-def save_check_settings(settings_file, check_name, check_settings) -> None:
+def save_check_settings(
+    settings_file: str, check_name: str, check_settings: dict
+) -> None:
     """Save the settings for a check to a dictionary.
 
     Parameters
@@ -42,6 +44,11 @@ def save_check_settings(settings_file, check_name, check_settings) -> None:
     None
 
     """
+    dict_key = check_settings.keys().__iter__().__next__()  # get the first key
+    state_name = check_name + "_" + dict_key
+    if state_name not in st.session_state or not st.session_state[state_name]:
+        return
+
     if not os.path.exists(settings_file):
         with open(settings_file, "w") as f:
             json.dump({}, f)
@@ -57,6 +64,8 @@ def save_check_settings(settings_file, check_name, check_settings) -> None:
     # save the dictionary to the file
     with open(settings_file, "w") as f:
         json.dump(settings_dict, f)
+
+    st.session_state[state_name] = False
 
 
 # @st.cache_data
@@ -99,7 +108,7 @@ def get_hash_id(name: str, length=6) -> str:
 
 
 # --- Get Check Config Settings from DuckDB --- #
-def get_check_config_settings(project_id: str, page_row_index: int) -> tuple:
+def get_check_config_settings(project_id: str, page_row_index: int) -> dict:
     """Get the check configuration settings from DuckDB.
 
     Parameters
@@ -111,34 +120,8 @@ def get_check_config_settings(project_id: str, page_row_index: int) -> tuple:
     -------
     tuple: The check configuration settings.
     """
-    hfc_config_logs = duckdb_get_table(
-        project_id=project_id, alias="check_config", db_name="logs"
+    hfc_config_logs = ConfigurationService(project_id).get_page_configuration(
+        page_row_index
     )
 
-    page_name = hfc_config_logs.row(page_row_index)[0]
-    survey_data_name = hfc_config_logs.row(page_row_index)[1]
-    survey_key = hfc_config_logs.row(page_row_index)[2]
-    survey_id = hfc_config_logs.row(page_row_index)[3]
-    survey_date = hfc_config_logs.row(page_row_index)[4]
-    enumerator = hfc_config_logs.row(page_row_index)[5]
-    survey_target = hfc_config_logs.row(page_row_index)[6]
-    backcheck_data_name = hfc_config_logs.row(page_row_index)[7]
-    backcheck_date = hfc_config_logs.row(page_row_index)[8]
-    backchecker = hfc_config_logs.row(page_row_index)[9]
-    backcheck_target_percent = hfc_config_logs.row(page_row_index)[10]
-    tracking_data_name = hfc_config_logs.row(page_row_index)[11]
-
-    return (
-        page_name,
-        survey_data_name,
-        survey_key,
-        survey_id,
-        survey_date,
-        enumerator,
-        survey_target,
-        backcheck_data_name,
-        backcheck_date,
-        backchecker,
-        backcheck_target_percent,
-        tracking_data_name,
-    )
+    return hfc_config_logs if hfc_config_logs else {}

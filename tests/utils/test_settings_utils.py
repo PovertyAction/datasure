@@ -1,9 +1,13 @@
 """Tests for the settings utilities module."""
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import Mock, patch
+
+import pytest
+from pydantic import ValidationError
 
 from datasure.utils.settings_utils import (
+    ProjectID,
     get_check_config_settings,
     get_hash_id,
     load_check_settings,
@@ -12,14 +16,65 @@ from datasure.utils.settings_utils import (
 )
 
 
+class TestProjectID:
+    """Test the ProjectID Pydantic model."""
+
+    def test_valid_project_id(self):
+        """Test creating a valid project ID."""
+        valid_ids = ["abc12345", "12345678", "a1b2c3d4", "00000000"]
+
+        for project_id in valid_ids:
+            obj = ProjectID(project_id=project_id)
+            assert obj.project_id == project_id
+
+    def test_invalid_project_id_length_too_short(self):
+        """Test that project ID shorter than 8 characters is invalid."""
+        with pytest.raises(ValidationError):
+            ProjectID(project_id="abc123")
+
+    def test_invalid_project_id_length_too_long(self):
+        """Test that project ID longer than 8 characters is invalid."""
+        with pytest.raises(ValidationError):
+            ProjectID(project_id="abc123456")
+
+    def test_invalid_project_id_special_characters(self):
+        """Test that project ID with special characters is invalid."""
+        invalid_ids = ["abc@1234", "abc-1234", "abc_1234", "abc 1234"]
+
+        for project_id in invalid_ids:
+            with pytest.raises(ValidationError, match="alphanumeric only"):
+                ProjectID(project_id=project_id)
+
+    def test_invalid_project_id_uppercase(self):
+        """Test that project ID with uppercase is invalid."""
+        with pytest.raises(ValidationError, match="alphanumeric only"):
+            ProjectID(project_id="ABC12345")
+
+    def test_project_id_edge_cases(self):
+        """Test edge cases for project ID validation."""
+        # All lowercase letters
+        ProjectID(project_id="abcdefgh")
+
+        # All numbers
+        ProjectID(project_id="12345678")
+
+        # Mixed
+        ProjectID(project_id="a1b2c3d4")
+
+
 class TestSaveCheckSettings:
     """Test the save_check_settings function."""
 
-    def test_save_check_settings_new_file(self, tmp_path):
+    @patch("datasure.utils.settings_utils.st")
+    def test_save_check_settings_new_file(self, mock_st, tmp_path):
         """Test saving settings to a new file."""
         settings_file = tmp_path / "test_settings.json"
         check_name = "test_check"
         check_settings = {"param1": "value1", "param2": 42}
+
+        # Mock session state to allow save
+        state_name = check_name + "_param1"
+        mock_st.session_state = {state_name: True}
 
         save_check_settings(str(settings_file), check_name, check_settings)
 
@@ -30,8 +85,11 @@ class TestSaveCheckSettings:
 
         assert check_name in data
         assert data[check_name] == check_settings
+        # Verify session state was reset to False
+        assert mock_st.session_state[state_name] is False
 
-    def test_save_check_settings_existing_file(self, tmp_path):
+    @patch("datasure.utils.settings_utils.st")
+    def test_save_check_settings_existing_file(self, mock_st, tmp_path):
         """Test saving settings to an existing file."""
         settings_file = tmp_path / "test_settings.json"
 
@@ -42,6 +100,10 @@ class TestSaveCheckSettings:
 
         check_name = "new_check"
         check_settings = {"param1": "value1", "param2": 42}
+
+        # Mock session state to allow save
+        state_name = check_name + "_param1"
+        mock_st.session_state = {state_name: True}
 
         save_check_settings(str(settings_file), check_name, check_settings)
 
@@ -54,17 +116,22 @@ class TestSaveCheckSettings:
         assert data["existing_check"] == {"old_param": "old_value"}
         assert data["new_check"] == check_settings
 
-    def test_save_check_settings_update_existing(self, tmp_path):
+    @patch("datasure.utils.settings_utils.st")
+    def test_save_check_settings_update_existing(self, mock_st, tmp_path):
         """Test updating settings for an existing check."""
         settings_file = tmp_path / "test_settings.json"
         check_name = "test_check"
 
         # Save initial settings
         initial_settings = {"param1": "value1", "param2": 42}
+        state_name1 = check_name + "_param1"
+        mock_st.session_state = {state_name1: True}
         save_check_settings(str(settings_file), check_name, initial_settings)
 
         # Update with new settings
         update_settings = {"param2": 100, "param3": "new_value"}
+        state_name2 = check_name + "_param2"
+        mock_st.session_state = {state_name2: True}
         save_check_settings(str(settings_file), check_name, update_settings)
 
         # Verify settings were merged correctly
@@ -73,6 +140,37 @@ class TestSaveCheckSettings:
 
         expected = {"param1": "value1", "param2": 100, "param3": "new_value"}
         assert data[check_name] == expected
+
+    @patch("datasure.utils.settings_utils.st")
+    def test_save_check_settings_no_session_state(self, mock_st, tmp_path):
+        """Test that save is skipped when session state is False."""
+        settings_file = tmp_path / "test_settings.json"
+        check_name = "test_check"
+        check_settings = {"param1": "value1"}
+
+        # Mock session state to False - should not save
+        state_name = check_name + "_param1"
+        mock_st.session_state = {state_name: False}
+
+        save_check_settings(str(settings_file), check_name, check_settings)
+
+        # Verify file was NOT created
+        assert not settings_file.exists()
+
+    @patch("datasure.utils.settings_utils.st")
+    def test_save_check_settings_missing_session_state(self, mock_st, tmp_path):
+        """Test that save is skipped when session state key is missing."""
+        settings_file = tmp_path / "test_settings.json"
+        check_name = "test_check"
+        check_settings = {"param1": "value1"}
+
+        # Mock session state without the key
+        mock_st.session_state = {}
+
+        save_check_settings(str(settings_file), check_name, check_settings)
+
+        # Verify file was NOT created
+        assert not settings_file.exists()
 
 
 class TestLoadCheckSettings:
@@ -238,95 +336,76 @@ class TestGetHashId:
 class TestGetCheckConfigSettings:
     """Test the get_check_config_settings function."""
 
-    @patch("datasure.utils.settings_utils.duckdb_get_table")
-    def test_get_check_config_settings_success(self, mock_duckdb_get_table):
+    @patch("datasure.utils.settings_utils.ConfigurationService")
+    def test_get_check_config_settings_success(self, mock_config_service):
         """Test successful retrieval of check config settings."""
-        # Mock the polars DataFrame returned by duckdb_get_table
-        mock_df = MagicMock()
-        mock_df.row.return_value = [
-            "test_page",  # page_name
-            "survey_data",  # survey_data_name
-            "survey_key_123",  # survey_key
-            "survey_id_456",  # survey_id
-            "2024-01-01",  # survey_date
-            "enumerator_1",  # enumerator
-            100,  # survey_target
-            "backcheck_data",  # backcheck_data_name
-            "2024-01-15",  # backcheck_date
-            "backchecker_1",  # backchecker
-            10,  # backcheck_target_percent
-            "tracking_data",  # tracking_data_name
-        ]
-        mock_duckdb_get_table.return_value = mock_df
+        # Mock the ConfigurationService
+        mock_service = Mock()
+        mock_config_data = {
+            "survey_id": "survey_id_456",
+            "survey_date": "2024-01-01",
+            "survey_target": 100,
+        }
+        mock_service.get_page_configuration.return_value = mock_config_data
+        mock_config_service.return_value = mock_service
 
-        project_id = "test_project"
+        project_id = "test_proj"
         page_row_index = 0
 
         result = get_check_config_settings(project_id, page_row_index)
 
-        # Verify duckdb_get_table was called correctly
-        mock_duckdb_get_table.assert_called_once_with(
-            project_id=project_id, alias="check_config", db_name="logs"
-        )
+        # Verify ConfigurationService was instantiated with correct project_id
+        mock_config_service.assert_called_once_with(project_id)
 
-        # Verify the row method was called with correct index
-        assert mock_df.row.call_count == 12  # Called once for each column
-        mock_df.row.assert_called_with(page_row_index)
+        # Verify get_page_configuration was called with correct index
+        mock_service.get_page_configuration.assert_called_once_with(page_row_index)
 
-        # Verify the returned tuple
-        expected_result = (
-            "test_page",
-            "survey_data",
-            "survey_key_123",
-            "survey_id_456",
-            "2024-01-01",
-            "enumerator_1",
-            100,
-            "backcheck_data",
-            "2024-01-15",
-            "backchecker_1",
-            10,
-            "tracking_data",
-        )
-        assert result == expected_result
+        # Verify the returned dict
+        assert result == mock_config_data
 
-    @patch("datasure.utils.settings_utils.duckdb_get_table")
-    def test_get_check_config_settings_different_row(self, mock_duckdb_get_table):
+    @patch("datasure.utils.settings_utils.ConfigurationService")
+    def test_get_check_config_settings_different_row(self, mock_config_service):
         """Test retrieval with different row index."""
-        mock_df = MagicMock()
-        mock_df.row.return_value = [
-            "page2",
-            "data2",
-            "key2",
-            "id2",
-            "2024-02-01",
-            "enum2",
-            200,
-            "back2",
-            "2024-02-15",
-            "backchecker2",
-            20,
-            "track2",
-        ]
-        mock_duckdb_get_table.return_value = mock_df
+        mock_service = Mock()
+        mock_config_data = {
+            "survey_id": "id2",
+            "survey_date": "2024-02-01",
+            "survey_target": 200,
+        }
+        mock_service.get_page_configuration.return_value = mock_config_data
+        mock_config_service.return_value = mock_service
 
-        project_id = "test_project"
+        project_id = "test_proj"
         page_row_index = 5
 
         result = get_check_config_settings(project_id, page_row_index)
 
-        # Verify the row method was called with correct index
-        assert mock_df.row.call_count == 12  # Called once for each column
-        mock_df.row.assert_called_with(page_row_index)
+        # Verify get_page_configuration was called with correct index
+        mock_service.get_page_configuration.assert_called_once_with(page_row_index)
 
-        assert result[0] == "page2"
-        assert result[1] == "data2"
+        assert result == mock_config_data
+
+    @patch("datasure.utils.settings_utils.ConfigurationService")
+    def test_get_check_config_settings_empty_config(self, mock_config_service):
+        """Test retrieval when config is None."""
+        mock_service = Mock()
+        mock_service.get_page_configuration.return_value = None
+        mock_config_service.return_value = mock_service
+
+        project_id = "test_proj"
+        page_row_index = 0
+
+        result = get_check_config_settings(project_id, page_row_index)
+
+        # Should return empty dict when config is None
+        assert result == {}
 
 
 class TestSettingsUtilsIntegration:
     """Integration tests for settings utilities."""
 
-    def test_save_and_load_integration(self, tmp_path):
+    @patch("datasure.utils.settings_utils.st")
+    def test_save_and_load_integration(self, mock_st, tmp_path):
         """Test full workflow of saving and loading settings."""
         settings_file = tmp_path / "integration_test.json"
         check_name = "integration_check"
@@ -337,6 +416,10 @@ class TestSettingsUtilsIntegration:
             "metadata": {"version": "1.0", "author": "test"},
         }
 
+        # Mock session state to allow save
+        state_name = check_name + "_threshold"
+        mock_st.session_state = {state_name: True}
+
         # Save settings
         save_check_settings(str(settings_file), check_name, original_settings)
 
@@ -346,7 +429,8 @@ class TestSettingsUtilsIntegration:
         # Verify they match
         assert loaded_settings == original_settings
 
-    def test_multiple_checks_workflow(self, tmp_path):
+    @patch("datasure.utils.settings_utils.st")
+    def test_multiple_checks_workflow(self, mock_st, tmp_path):
         """Test workflow with multiple checks in same file."""
         settings_file = tmp_path / "multi_check_test.json"
 
@@ -358,6 +442,10 @@ class TestSettingsUtilsIntegration:
         }
 
         for check_name, settings in checks.items():
+            # Get first key from settings
+            first_key = next(iter(settings.keys()))
+            state_name = check_name + "_" + first_key
+            mock_st.session_state = {state_name: True}
             save_check_settings(str(settings_file), check_name, settings)
 
         # Load all checks

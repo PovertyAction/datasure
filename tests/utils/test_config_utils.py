@@ -754,6 +754,75 @@ class TestConfigurationService:
 
         assert result is False
 
+    def test_get_page_configuration_empty_log(self, mock_empty_df):
+        """Test getting page configuration from empty log returns empty dict."""
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=mock_empty_df)
+
+        result = service.get_page_configuration(0)
+
+        assert result == {}
+
+    def test_get_page_configuration_valid_index(self, mock_config_df):
+        """Test getting page configuration with valid row index."""
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=mock_config_df)
+
+        result = service.get_page_configuration(0)
+
+        assert isinstance(result, dict)
+        assert result["page_name"] == "Existing Page"
+        assert result["survey_data_name"] == "survey_1"
+        assert result["survey_key"] == "key"
+        assert result["survey_id"] == "id"
+        assert result["survey_date"] == "date"
+        assert result["enumerator"] == "enum"
+        assert result["survey_target"] == 100
+        assert result["backcheck_data_name"] == "backcheck"
+        assert result["backcheck_date"] == "bc_date"
+        assert result["backchecker"] == "bc_checker"
+        assert result["backcheck_target_percent"] == 10
+        assert result["tracking_data_name"] == "tracking"
+
+    def test_get_page_configuration_index_out_of_range(self, mock_config_df):
+        """Test getting page configuration with out of range index."""
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=mock_config_df)
+
+        result = service.get_page_configuration(999)
+
+        assert result == {}
+
+    def test_get_page_configuration_multiple_pages(self, mock_multi_config_df):
+        """Test getting page configuration from multiple configurations."""
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=mock_multi_config_df)
+
+        # Get first page
+        result_first = service.get_page_configuration(0)
+        assert result_first["page_name"] == "Page One"
+        assert result_first["survey_data_name"] == "survey_1"
+        assert result_first["survey_key"] == "key1"
+
+        # Get second page
+        result_second = service.get_page_configuration(1)
+        assert result_second["page_name"] == "Page Two"
+        assert result_second["survey_data_name"] == "survey_2"
+        assert result_second["survey_key"] == "key2"
+
+    def test_get_page_configuration_negative_index(self, mock_config_df):
+        """Test getting page configuration with negative index."""
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=mock_config_df)
+
+        # Polars .row() method supports negative indexing like Python lists
+        # -1 should return the last row
+        result = service.get_page_configuration(-1)
+
+        assert isinstance(result, dict)
+        assert result["page_name"] == "Existing Page"
+        assert result["survey_data_name"] == "survey_1"
+
 
 # ============================================================================
 # DATASET SERVICE TESTS

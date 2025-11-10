@@ -46,23 +46,14 @@ def load_default_backcheck_settings(
         Default settings for backcheck report.
     """
     # Get config page defaults
-    (
-        _,
-        _,
-        config_survey_key,
-        config_survey_id,
-        config_survey_date,
-        config_enumerator,
-        _,
-        _,
-        _,
-        _,
-        _,
-        _,
-    ) = get_check_config_settings(
+    config = get_check_config_settings(
         project_id=project_id,
         page_row_index=page_num - 1,
     )
+    config_survey_key = config.get("survey_key")
+    config_survey_id = config.get("survey_id")
+    config_survey_date = config.get("survey_date")
+    config_enumerator = config.get("enumerator")
 
     if setting_file and os.path.exists(setting_file):
         with suppress(Exception):
