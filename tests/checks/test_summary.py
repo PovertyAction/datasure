@@ -758,7 +758,9 @@ class TestUIComponents:
         mock_st.number_input.return_value = 100
 
         df = pd.DataFrame({"id": [1], "date_col": [date(2024, 1, 1)]})
-        config = SummarySettings(survey_id="id_col", survey_date="date_col", survey_target=100)
+        config = SummarySettings(
+            survey_id="id_col", survey_date="date_col", survey_target=100
+        )
         result = summary_settings(df, "settings.json", config)
 
         assert isinstance(result, tuple)
@@ -790,10 +792,12 @@ class TestUIComponents:
         mock_px.area.return_value = mock_fig
 
         # Create test data with dates
-        df = pd.DataFrame({
-            "id": [1, 2, 3],
-            "date_col": pd.date_range("2024-01-01", periods=3),
-        })
+        df = pd.DataFrame(
+            {
+                "id": [1, 2, 3],
+                "date_col": pd.date_range("2024-01-01", periods=3),
+            }
+        )
 
         # Mock columns
         mock_col = Mock()
@@ -826,10 +830,12 @@ class TestUIComponents:
         from datasure.checks.summary import summary_progress
 
         # Create test data with dates
-        df = pd.DataFrame({
-            "id": [1, 2, 3],
-            "date_col": pd.date_range("2024-01-01", periods=3),
-        })
+        df = pd.DataFrame(
+            {
+                "id": [1, 2, 3],
+                "date_col": pd.date_range("2024-01-01", periods=3),
+            }
+        )
 
         # Mock columns - return different values for different calls
         mock_col = Mock()
@@ -852,10 +858,12 @@ class TestUIComponents:
         from datasure.checks.summary import summary_progress
 
         # Create test data with dates
-        df = pd.DataFrame({
-            "id": [1, 2, 3],
-            "date_col": pd.date_range("2024-01-01", periods=3),
-        })
+        df = pd.DataFrame(
+            {
+                "id": [1, 2, 3],
+                "date_col": pd.date_range("2024-01-01", periods=3),
+            }
+        )
 
         # Mock columns
         mock_col = Mock()
@@ -993,7 +1001,10 @@ class TestUIComponents:
         from datasure.checks.summary import _render_progress_by_column
 
         # Mock settings
-        mock_load.return_value = {"progress_by_col": "region", "progress_time_period": "Auto"}
+        mock_load.return_value = {
+            "progress_by_col": "region",
+            "progress_time_period": "Auto",
+        }
 
         # Mock columns
         col_mock1 = Mock()
@@ -1016,10 +1027,12 @@ class TestUIComponents:
         mock_cmap = Mock()
         mock_sns.light_palette.return_value = mock_cmap
 
-        df = pd.DataFrame({
-            "region": ["A", "B", "C"],
-            "date_col": pd.date_range("2024-01-01", periods=3),
-        })
+        df = pd.DataFrame(
+            {
+                "region": ["A", "B", "C"],
+                "date_col": pd.date_range("2024-01-01", periods=3),
+            }
+        )
 
         _render_progress_by_column(df, "date_col", "settings.json")
 
@@ -1048,10 +1061,12 @@ class TestUIComponents:
         # Mock selectbox to return None
         mock_st.selectbox.return_value = None
 
-        df = pd.DataFrame({
-            "region": ["A", "B", "C"],
-            "date_col": pd.date_range("2024-01-01", periods=3),
-        })
+        df = pd.DataFrame(
+            {
+                "region": ["A", "B", "C"],
+                "date_col": pd.date_range("2024-01-01", periods=3),
+            }
+        )
 
         _render_progress_by_column(df, "date_col", "settings.json")
 
@@ -1079,7 +1094,11 @@ class TestUIComponents:
         mock_settings.return_value = ("date_col", 100, "id_col")
 
         df = pd.DataFrame({"id": [1, 2, 3], "date_col": [date(2024, 1, 1)] * 3})
-        config = {"survey_id": "id_col", "survey_date": "date_col", "survey_target": 100}
+        config = {
+            "survey_id": "id_col",
+            "survey_date": "date_col",
+            "survey_target": 100,
+        }
         summary_report("project_123", df, "settings.json", 1, config)
 
         mock_settings.assert_called_once()
