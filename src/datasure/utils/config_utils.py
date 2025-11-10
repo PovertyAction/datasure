@@ -23,18 +23,22 @@ from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 class CheckConfiguration(BaseModel):
     """Model for check configuration validation."""
 
-    page_name: str = Field(..., min_length=1, max_length=20)
-    survey_data_name: str = Field(..., min_length=1)
-    survey_key: str = Field(..., min_length=1)
-    survey_id: str = Field(..., min_length=1)
-    survey_date: str | None = Field(..., min_length=1)
-    enumerator: str | None = Field(..., min_length=1)
-    survey_target: int | None = None
-    backcheck_data_name: str = Field(..., min_length=1)
-    backcheck_date: str | None = Field(..., min_length=1)
-    backchecker: str | None = Field(..., min_length=1)
-    backcheck_target_percent: int | None = None
-    tracking_data_name: str | None = None
+    page_name: str = Field(default=None, min_length=1, max_length=20)
+    survey_data_name: str = Field(default=None, min_length=1)
+    survey_key: str = Field(default=None, min_length=1)
+    survey_id: str = Field(default=None, min_length=1)
+    survey_date: str | None = Field(default=None, min_length=1)
+    enumerator: str | None = Field(default=None, min_length=1)
+    team: str | None = Field(default=None, min_length=1)
+    formversion: str | None = Field(default=None, min_length=1)
+    duration: str | None = Field(default=None, min_length=1)
+    survey_target: int | None = Field(default=None, ge=0)
+    backcheck_data_name: str = Field(default=None, min_length=1)
+    backcheck_date: str | None = Field(default=None, min_length=1)
+    backchecker: str | None = Field(default=None, min_length=1)
+    backchecker_team: str | None = Field(default=None, min_length=1)
+    backcheck_target_percent: int | None = Field(default=None, ge=0, le=100)
+    tracking_data_name: str | None = Field(default=None, min_length=1)
 
     @field_validator("page_name")
     @classmethod
@@ -52,19 +56,23 @@ class CheckConfiguration(BaseModel):
 class SurveyColumnSelections(BaseModel):
     """Model for Survey column selections in the UI."""
 
-    survey_key: str | None = None
-    survey_id: str | None = None
-    survey_date: str | None = None
-    enumerator: str | None = None
-    survey_target: int | None = None
+    survey_key: str | None = Field(..., min_length=1)
+    survey_id: str | None = Field(default=None, min_length=1)
+    survey_date: str | None = Field(default=None, min_length=1)
+    enumerator: str | None = Field(default=None, min_length=1)
+    team: str | None = Field(default=None, min_length=1)
+    formversion: str | None = Field(default=None, min_length=1)
+    duration: str | None = Field(default=None, min_length=1)
+    survey_target: int | None = Field(default=None, ge=0)
 
 
 class BackcheckColumnSelectors(BaseModel):
     """Model for back check column selections in UI."""
 
-    backcheck_date: str | None = None
-    backchecker: str | None = None
-    backcheck_target_percent: int | None = None
+    backcheck_date: str | None = Field(default=None, min_length=1)
+    backchecker: str | None = Field(default=None, min_length=1)
+    backchecker_team: str | None = Field(default=None, min_length=1)
+    backcheck_target_percent: int | None = Field(default=None, ge=0, le=100)
 
 
 # ============================================================================
@@ -241,7 +249,6 @@ class ConfigurationService:
         config_df = self.get_all_configurations()
         if config_df.is_empty() or row_index >= config_df.height:
             return {}
-
         return config_df.row(row_index, named=True)
 
 
@@ -275,7 +282,7 @@ class DatasetService:
 
         categorical_columns = string_columns + numeric_columns
 
-        return datetime_columns, categorical_columns
+        return datetime_columns, numeric_columns, categorical_columns
 
     def get_available_aliases_excluding(
         self, all_aliases: list[str], exclude: list[str]
@@ -335,6 +342,7 @@ def render_survey_dataset_selector(alias_list: list[str]) -> str | None:
 
 def render_survey_column_selectors(
     datetime_columns: list[str] | None = None,
+    numeric_columns: list[str] | None = None,
     categorical_columns: list[str] | None = None,
 ) -> SurveyColumnSelections:
     """
@@ -380,6 +388,27 @@ def render_survey_column_selectors(
             help="Select the column that contains the enumerator for each record.",
         )
 
+        team = st.selectbox(
+            "Select Team Column (Optional)",
+            options=categorical_columns,
+            index=None,
+            help="Select the column that contains the team for each record.",
+        )
+
+        formversion = st.selectbox(
+            "Select Form Version Column (Optional)",
+            options=numeric_columns,
+            index=None,
+            help="Select the column that contains the form version for each record.",
+        )
+
+        duration = st.selectbox(
+            "Select Duration Column (Optional)",
+            options=numeric_columns,
+            index=None,
+            help="Select the column that contains the duration for each record.",
+        )
+
         survey_target = st.number_input(
             "Enter Target Number of responses for the Survey (Optional)",
             min_value=0,
@@ -392,6 +421,9 @@ def render_survey_column_selectors(
             survey_id=survey_id,
             survey_date=survey_date,
             enumerator=enumerator,
+            team=team,
+            formversion=formversion,
+            duration=duration,
             survey_target=survey_target,
         )
 
@@ -446,6 +478,13 @@ def render_backcheck_column_selectors(
             help="Select the column that contains the backchecker for each record in backcheck dataset.",
         )
 
+        backchecker_team = st.selectbox(
+            "Select Backchecker Team Column (Optional)",
+            options=categorical_columns,
+            index=None,
+            help="Select the column that contains the team for each record in the backcheck dataset.",
+        )
+
         backcheck_target_percent = st.number_input(
             "Enter Target Percentage of surveys to be Backchecked (Optional)",
             min_value=0,
@@ -457,10 +496,11 @@ def render_backcheck_column_selectors(
         return BackcheckColumnSelectors(
             backcheck_date=backcheck_date,
             backchecker=backchecker,
+            backchecker_team=backchecker_team,
             backcheck_target_percent=backcheck_target_percent,
         )
 
-
+@st.dialog(title="Add New Check Configuration", width="medium")
 def add_check_configuration_form(
     project_id: str,
     alias_list: list[str],
@@ -475,79 +515,74 @@ def add_check_configuration_form(
     config_service = ConfigurationService(project_id)
     dataset_service = DatasetService(project_id)
 
-    with st.popover(
-        label="Add new check configuration",
-        icon=":material/add:",
+    # Step 1: Page name input
+    page_name = render_page_name_input()
+
+    # Early validation of page name
+    if not page_name:
+        st.info("Enter a page name to continue")
+        return
+
+    # Check if page name is valid
+    config_data = {"page_name": page_name}
+    is_valid, error_msg, _ = config_service.validate_configuration(
+        {**config_data, "survey_data_name": "temp", "survey_key": "temp"}
+    )
+
+    if not is_valid and "already exists" in (error_msg or ""):
+        st.error(error_msg)
+        return
+
+    # Step 2: Survey dataset selection
+    survey_data_name = render_survey_dataset_selector(alias_list)
+
+    if not survey_data_name:
+        return
+
+    # Step 3: Get dataset columns
+    datetime_cols, numeric_columns, categorical_cols = dataset_service.get_dataset_columns(
+        survey_data_name
+    )
+
+    # Step 4: Survey Column selections
+    survey_column_selections = render_survey_column_selectors(
+        datetime_cols, numeric_columns, categorical_cols
+    )
+
+    # Step 5: Backcheck dataset selection
+    backcheck_data_name = render_backcheck_dataset_selector(
+        alias_list, survey_data_name
+    )
+
+    # Step 6: Back Check Column Selectors
+    backcheck_column_selections = render_backcheck_column_selectors(
+        datetime_cols, categorical_cols
+    )
+
+    # Step 6: Submit button
+    add_button = st.button(
+        "Add Check Configuration",
+        type="primary",
         width="stretch",
-    ):
-        # Step 1: Page name input
-        page_name = render_page_name_input()
+        key="add_check_config_btn",
+    )
 
-        # Early validation of page name
-        if not page_name:
-            st.info("Enter a page name to continue")
-            return
-
-        # Check if page name is valid
-        config_data = {"page_name": page_name}
-        is_valid, error_msg, _ = config_service.validate_configuration(
-            {**config_data, "survey_data_name": "temp", "survey_key": "temp"}
+    # merge survey and backcheck column selection
+    if backcheck_data_name:
+        column_selections = (
+            survey_column_selections.dict() | backcheck_column_selections.dict()
         )
+    else:
+        column_selections = survey_column_selections
 
-        if not is_valid and "already exists" in (error_msg or ""):
-            st.error(error_msg)
-            return
-
-        # Step 2: Survey dataset selection
-        survey_data_name = render_survey_dataset_selector(alias_list)
-
-        if not survey_data_name:
-            return
-
-        # Step 3: Get dataset columns
-        datetime_cols, categorical_cols = dataset_service.get_dataset_columns(
-            survey_data_name
+    if add_button:
+        _handle_configuration_submission(
+            config_service=config_service,
+            column_selections=column_selections,
+            page_name=page_name,
+            survey_data_name=survey_data_name,
+            backcheck_data_name=backcheck_data_name,
         )
-
-        # Step 4: Survey Column selections
-        survey_column_selections = render_survey_column_selectors(
-            datetime_cols, categorical_cols
-        )
-
-        # Step 5: Backcheck dataset selection
-        backcheck_data_name = render_backcheck_dataset_selector(
-            alias_list, survey_data_name
-        )
-
-        # Step 6: Back Check Column Selectors
-        backcheck_column_selections = render_backcheck_column_selectors(
-            datetime_cols, categorical_cols
-        )
-
-        # Step 6: Submit button
-        add_button = st.button(
-            "Add Check Configuration",
-            type="primary",
-            width="stretch",
-            key="add_check_config_btn",
-        )
-
-        # merge survey and backcheck column selection
-        if backcheck_data_name:
-            column_selections = (
-                survey_column_selections.dict() | backcheck_column_selections.dict()
-            )
-        else:
-            column_selections = survey_column_selections
-
-        if add_button:
-            _handle_configuration_submission(
-                config_service=config_service,
-                column_selections=column_selections,
-                page_name=page_name,
-                survey_data_name=survey_data_name,
-                backcheck_data_name=backcheck_data_name,
-            )
 
 
 def _handle_configuration_submission(
@@ -573,11 +608,15 @@ def _handle_configuration_submission(
         "survey_key": column_selections.get("survey_key"),
         "survey_id": column_selections.get("survey_id"),
         "survey_date": column_selections.get("survey_date"),
-        "survey_target": column_selections.get("survey_target"),
         "enumerator": column_selections.get("enumerator"),
+        "team": column_selections.get("team"),
+        "formversion": column_selections.get("formversion"),
+        "duration": column_selections.get("duration"),
+        "survey_target": column_selections.get("survey_target"),
         "backcheck_data_name": backcheck_data_name,
         "backcheck_date": column_selections.get("backcheck_date"),
         "backchecker": column_selections.get("backchecker"),
+        "backchecker_team": column_selections.get("backchecker_team"),
         "backcheck_target_percent": column_selections.get("backcheck_target_percent"),
         "tracking_data_name": column_selections.get("tracking_data_name"),
     }
