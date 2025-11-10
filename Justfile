@@ -67,15 +67,15 @@ fmt-py f:
 
 # Format all markdown and config files
 fmt-markdown:
-    markdownlint --config .markdownlint.yaml "**/*.md" --fix
+    markdownlint-cli2 --config .markdownlint.yaml "**/*.md" "#.venv" --fix
 
 # Format a single markdown file, "f"
 fmt-md f:
-    markdownlint --config .markdownlint.yaml {{ f }} --fix
+    markdownlint-cli2 --config .markdownlint.yaml {{ f }} --fix
 
 # Check format of all markdown files
 fmt-check-markdown:
-    markdownlint --config .markdownlint.yaml "**/*.md" "**/*.md"
+    markdownlint-cli2 --config .markdownlint.yaml "**/*.md" "#.venv"
 
 # Run all linting and formatting
 fmt-all: lint-py fmt-python fmt-markdown
@@ -495,14 +495,12 @@ version:
 [windows]
 pre-install:
     winget install Casey.Just astral-sh.uv GitHub.cli OpenJS.NodeJS
-    npm install -g markdownlint-cli
+    npm install -g markdownlint-cli2
 
-# install required software
 [linux]
 pre-install:
-    brew install just uv gh markdownlint-cli
+    brew install just uv gh markdownlint-cli2
 
-# install required software
 [macos]
 pre-install:
-    brew install just uv gh markdownlint-cli
+    brew install just uv gh markdownlint-cli2

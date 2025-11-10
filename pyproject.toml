@@ -53,12 +53,10 @@ Issues = "https://github.com/PovertyAction/datasure/issues"
 [project.scripts]
 datasure = "datasure.cli:main"
 
-[project.optional-dependencies]
-dev = ["pytest>=8.0.0", "pytest-cov>=4.1.0", "ruff>=0.6.4"]
-
-
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
     "jupyter>=1.1.1",
     "ruff>=0.6.4",
     "sqlfluff>=3.1.1",
@@ -76,6 +74,11 @@ line-length = 88
 fix = true
 # Assume Python 3.11
 target-version = "py311"
+exclude = [
+    ".claude/skills/",
+    ".claude/subagents/",
+]
+
 
 [tool.ruff.lint]
 # docs: https://docs.astral.sh/ruff/rules/
