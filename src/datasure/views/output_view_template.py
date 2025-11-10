@@ -51,10 +51,14 @@ class PageConfig:
     survey_id: str | None
     survey_date: str | None
     enumerator: str | None
+    team: str | None
+    formversion: str | None
+    duration: str | None
     survey_target: int | None
     backcheck_data_name: str | None
     backcheck_date: str | None
     backchecker: str | None
+    backchecker_team: str | None
     backcheck_target_percent: int | None
     tracking_data_name: str | None
     setting_file: Path
@@ -178,7 +182,7 @@ def load_page_config(project_id: str, page_number: int) -> PageConfig:
     page_data_index = page_number - 1
 
     # Get configuration from check_config table
-    check_config_info: CheckConfiguration = get_check_config_settings(
+    check_config_info: dict = get_check_config_settings(
         project_id=project_id,
         page_row_index=page_data_index,
     )
@@ -207,10 +211,14 @@ def load_page_config(project_id: str, page_number: int) -> PageConfig:
         survey_id=check_config.survey_id,
         survey_date=check_config.survey_date,
         enumerator=check_config.enumerator,
+        team=check_config.team,
+        formversion=check_config.formversion,
+        duration=check_config.duration,
         survey_target=check_config.survey_target,
         backcheck_data_name=check_config.backcheck_data_name,
         backcheck_date=check_config.backcheck_date,
         backchecker=check_config.backchecker,
+        backchecker_team=check_config.backchecker_team,
         backcheck_target_percent=check_config.backcheck_target_percent,
         tracking_data_name=check_config.tracking_data_name,
         setting_file=setting_file,
@@ -263,107 +271,37 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
     # Create tabs
     (
         summary,
-        survey_progress,
-        duplicates,
-        missing,
         outliers,
-        enum_stats,
-        desc_stats,
-        back_checks,
-        gps_checks,
     ) = st.tabs(
         (
             "Summary",
-            "Survey Progress",
-            "Duplicates",
-            "Missing Data",
-            "Outliers",
-            "Enumerator Stats",
-            "Descriptive Stats",
-            "Back Checks",
-            "GPS Checks",
+            "Outliers & Constraints",
         )
     )
 
     # Render each tab
     with summary:
-        summary_config: dict = {
-            "survey_id": config.survey_id,
-            "survey_date": config.survey_date,
-            "survey_target": config.survey_target,
-        }
+        summary_config: dict = {'survey_id': config.survey_id,
+                                'survey_date': config.survey_date,
+                                'survey_target': config.survey_target}
         summary_report(
-            project_id,
             data.page_data,
             config.setting_file,
-            config.page_number,
-            summary_config,
-        )
-
-    with missing:
-        missing_report(
-            project_id,
-            data.page_data,
-            config.setting_file,
-            config.page_name,
-        )
-
-    with survey_progress:
-        progress_report(
-            project_id,
-            data.page_data,
-            config.setting_file,
-            config.page_number,
-        )
-
-    with duplicates:
-        duplicates_report(
-            project_id,
-            data.page_data,
-            config.setting_file,
-            config.page_number,
+            summary_config
         )
 
     with outliers:
+        outliers_config: dict = {'survey_key': config.survey_key,
+                                 'survey_id': config.survey_id,
+                                 'enumerator': config.enumerator,
+                                 'team': config.team,
+                                 'survey_date': config.survey_date}
         outliers_report(
             project_id,
+            config.page_name_id,
             data.page_data,
             config.setting_file,
-            config.page_number,
-        )
-
-    with enum_stats:
-        enumerator_report(
-            project_id,
-            data.page_data,
-            config.setting_file,
-            config.missing_setting_file,
-            config.page_number,
-        )
-
-    with desc_stats:
-        descriptive_report(
-            data.page_data,
-            config.setting_file,
-            config.page_number,
-        )
-
-    with back_checks:
-        if data.backcheck_data is not None:
-            backchecks_report(
-                project_id,
-                data.page_data,
-                data.backcheck_data,
-                config.setting_file,
-                config.page_number,
-            )
-
-    with gps_checks:
-        gpschecks_report(
-            project_id,
-            data.page_data,
-            config.setting_file,
-            config.page_number,
+            outliers_config,
         )
 
 
