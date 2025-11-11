@@ -2,5 +2,6 @@
     "sonarlint.connectedMode.project": {
         "connectionId": "povertyaction",
         "projectKey": "PovertyAction_datasure"
-    }
+    },
+    "python.analysis.autoImportCompletions": true
 }
