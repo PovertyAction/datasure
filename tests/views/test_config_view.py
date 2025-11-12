@@ -133,8 +133,13 @@ class TestRenderConfigurationActions:
         # Verify columns created with correct proportions
         mock_st.columns.assert_called_once_with([0.4, 0.3, 0.3])
 
-        # Verify forms called with correct parameters
-        mock_add_form.assert_called_once_with(project_id, alias_list)
+        # Verify button created with correct callback
+        mock_st.button.assert_called_once()
+        call_kwargs = mock_st.button.call_args[1]
+        assert call_kwargs["on_click"] == mock_add_form
+        assert call_kwargs["args"] == (project_id, alias_list)
+
+        # Verify remove form called with correct parameter
         mock_remove_form.assert_called_once_with(project_id)
 
     @patch("datasure.views.config_view.remove_check_configuration_form")
@@ -151,7 +156,11 @@ class TestRenderConfigurationActions:
 
         _render_configuration_actions("project_id", [])
 
-        mock_add_form.assert_called_once_with("project_id", [])
+        # Verify button created with correct callback and empty list
+        call_kwargs = mock_st.button.call_args[1]
+        assert call_kwargs["on_click"] == mock_add_form
+        assert call_kwargs["args"] == ("project_id", [])
+
         mock_remove_form.assert_called_once_with("project_id")
 
 
@@ -266,6 +275,30 @@ class TestRenderNavigation:
         assert call_args[1]["prev"]["label"] == "← Back: Prepare Data"
         assert call_args[1]["next"]["page_name"] == "output_page"
         assert call_args[1]["next"]["label"] == "Next: Output Page →"
+
+    @patch("datasure.views.config_view.page_navigation")
+    @patch("datasure.views.config_view.st")
+    @patch("datasure.views.config_view.is_demo_project")
+    def test_regular_navigation_no_output_pages(
+        self, mock_is_demo, mock_st, mock_page_nav
+    ):
+        """Test regular navigation when no output pages exist."""
+        from datasure.views.config_view import _render_navigation
+
+        mock_is_demo.return_value = False
+        mock_service = Mock()
+        mock_service.get_all_configurations.return_value = pl.DataFrame()
+        mock_st.session_state.st_prep_data_page = "prep_page"
+        mock_st.session_state.st_output_pages = []
+
+        _render_navigation(mock_service)
+
+        mock_is_demo.assert_called_once()
+        mock_page_nav.assert_called_once()
+        call_args = mock_page_nav.call_args
+        assert call_args[1]["prev"]["page_name"] == "prep_page"
+        assert call_args[1]["prev"]["label"] == "← Back: Prepare Data"
+        assert call_args[1]["next"] is None
 
 
 class TestMain:

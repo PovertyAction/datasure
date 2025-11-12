@@ -34,7 +34,6 @@ from datasure.checks.outliers import (
     load_default_settings,
     safe_to_numeric,
     stack_outlier_columns,
-    update_unlocked_cols,
 )
 
 # ============================================================================
@@ -440,58 +439,6 @@ class TestSafeToNumeric:
             safe_to_numeric([1, 2, 3])
 
 
-class TestUpdateUnlockedCols:
-    """Test update_unlocked_cols function."""
-
-    @patch("datasure.checks.outliers._update_unlocked_cols")
-    def test_update_unlocked_cols_basic(self, mock_update):
-        """Test basic functionality."""
-        df = pl.DataFrame(
-            {
-                "search_type": ["exact", "startswith"],
-                "pattern": [None, "hh_"],
-                "column_name": [["col1"], ["hh_1"]],
-                "locked": [True, False],
-            }
-        )
-        # Mock the cached function
-        mock_update.return_value = df
-        col_names = ["col1", "hh_1", "hh_2", "hh_3"]
-        result = update_unlocked_cols(df, col_names)
-        assert isinstance(result, pl.DataFrame)
-        mock_update.assert_called_once()
-
-    @patch("datasure.checks.outliers._update_unlocked_cols")
-    def test_missing_required_columns(self, mock_update):
-        """Test with missing required columns."""
-        df = pl.DataFrame({"other": [1, 2, 3]})
-        # The actual validation happens in _update_unlocked_cols
-        mock_update.side_effect = ValueError("Missing required columns")
-        with pytest.raises(ValueError, match="Missing required columns"):
-            update_unlocked_cols(df, ["col1"])
-
-    @patch("datasure.checks.outliers._update_unlocked_cols")
-    def test_all_locked_rows(self, mock_update):
-        """Test when all rows are locked."""
-        df = pl.DataFrame(
-            {
-                "search_type": ["exact"],
-                "pattern": [None],
-                "column_name": [["col1"]],
-                "locked": [True],
-            }
-        )
-        mock_update.return_value = df
-        result = update_unlocked_cols(df, ["col1", "col2"])
-        assert result.height == 1
-        mock_update.assert_called_once()
-
-
-# ============================================================================
-# STATISTICAL FUNCTION TESTS
-# ============================================================================
-
-
 class TestComputeOutlierStatsPolars:
     """Test compute_outlier_stats_polars function."""
 
@@ -758,3 +705,364 @@ class TestIntegration:
 
         # Verify results
         assert isinstance(violations, pl.DataFrame)
+
+
+# ============================================================================
+# Additional Core Logic Tests for Coverage
+# ============================================================================
+
+
+class TestGetOutlierCols:
+    """Test get_outlier_cols function."""
+
+    def test_with_numpy_array(self):
+        """Test with numpy array in outlier_cols."""
+        import numpy as np
+        import pandas as pd
+
+        from datasure.checks.outliers import get_outlier_cols
+
+        df = pd.DataFrame(
+            {
+                "outlier_cols": [
+                    np.array(["col1"]),
+                    np.array(["col2"]),
+                ]
+            }
+        )
+        result = get_outlier_cols(df)
+        assert result == ["col1", "col2"]
+
+    def test_with_list(self):
+        """Test with list in outlier_cols."""
+        import pandas as pd
+
+        from datasure.checks.outliers import get_outlier_cols
+
+        df = pd.DataFrame(
+            {
+                "outlier_cols": [
+                    ["col1", "col2"],
+                    ["col3"],
+                ]
+            }
+        )
+        result = get_outlier_cols(df)
+        assert result == ["col1", "col2", "col3"]
+
+    def test_mixed_types(self):
+        """Test with mixed numpy array and list."""
+        import numpy as np
+        import pandas as pd
+
+        from datasure.checks.outliers import get_outlier_cols
+
+        df = pd.DataFrame(
+            {
+                "outlier_cols": [
+                    np.array(["col1"]),
+                    ["col2", "col3"],
+                ]
+            }
+        )
+        result = get_outlier_cols(df)
+        assert result == ["col1", "col2", "col3"]
+
+
+class TestComputeMetrics:
+    """Test metrics computation functions."""
+
+    def test_compute_constraint_metrics(self):
+        """Test _compute_constraint_metrics function."""
+        from datasure.checks.outliers import _compute_constraint_metrics
+
+        violation_data = pl.DataFrame(
+            {
+                "column name": ["col1", "col1", "col2", "col3"],
+                "violation reason": [
+                    "Value is below hard minimum 0",
+                    "Value is below soft minimum 5",
+                    "Value is above soft maximum 100",
+                    "Value is above hard maximum 150",
+                ],
+            }
+        )
+
+        metrics = _compute_constraint_metrics(violation_data)
+
+        assert metrics.columns_checked == 3
+        assert metrics.total_violations == 4
+        assert metrics.hard_min_violations == 1
+        assert metrics.soft_min_violations == 1
+        assert metrics.soft_max_violations == 1
+        assert metrics.hard_max_violations == 1
+
+    def test_compute_outlier_metrics_with_enumerator(self):
+        """Test _compute_outlier_metrics with enumerator column."""
+        from datasure.checks.outliers import _compute_outlier_metrics
+
+        outliers_data = pl.DataFrame(
+            {
+                "column name": ["col1", "col1", "col2"],
+                "outlier reason": [
+                    "Value is below lower bound 10.0",
+                    "Value is above upper bound 100.0",
+                    "no outlier",
+                ],
+                "enumerator": ["enum1", "enum2", "enum1"],
+            }
+        )
+
+        metrics = _compute_outlier_metrics(outliers_data, "enumerator")
+
+        assert metrics.columns_checked == 2
+        assert metrics.columns_with_outliers == 1
+        assert metrics.total_outliers == 2
+        assert metrics.enumerators_with_outliers == 2
+
+    def test_compute_outlier_metrics_without_enumerator(self):
+        """Test _compute_outlier_metrics without enumerator column."""
+        from datasure.checks.outliers import _compute_outlier_metrics
+
+        outliers_data = pl.DataFrame(
+            {
+                "column name": ["col1", "col2"],
+                "outlier reason": [
+                    "Value is below lower bound 10.0",
+                    "no outlier",
+                ],
+            }
+        )
+
+        metrics = _compute_outlier_metrics(outliers_data, None)
+
+        assert metrics.columns_checked == 2
+        assert metrics.columns_with_outliers == 1
+        assert metrics.total_outliers == 1
+        assert metrics.enumerators_with_outliers == 0
+
+
+class TestComputeOutlierOutputEdgeCases:
+    """Test compute_outlier_output edge cases."""
+
+    def test_with_grouped_columns_single_column(self):
+        """Test outlier detection with grouped columns (single column)."""
+        data = pl.DataFrame(
+            {
+                "survey_key": ["K001", "K002", "K003"],
+                "numeric_col1": [1.0, 2.0, 100.0],
+            }
+        )
+
+        settings = OutlierSettings(survey_key="survey_key")
+
+        column_config = pl.DataFrame(
+            [
+                {
+                    "column_name": ["numeric_col1"],
+                    "grouped_columns": False,
+                    "outlier_enabled": True,
+                    "outlier_method": OutlierMethod.IQR.value,
+                    "outlier_multiplier": 1.5,
+                    "outlier_threshold": 2,
+                }
+            ]
+        )
+
+        result = compute_outlier_output(data, settings, column_config)
+
+        assert not result.is_empty()
+        assert "outlier reason" in result.columns
+
+    def test_with_grouped_columns_multiple(self):
+        """Test outlier detection with grouped columns (multiple columns)."""
+        data = pl.DataFrame(
+            {
+                "survey_key": ["K001", "K002", "K003"],
+                "numeric_col1": [1.0, 2.0, 3.0],
+                "numeric_col2": [10.0, 20.0, 100.0],
+            }
+        )
+
+        settings = OutlierSettings(survey_key="survey_key")
+
+        column_config = pl.DataFrame(
+            [
+                {
+                    "column_name": ["numeric_col1", "numeric_col2"],
+                    "grouped_columns": True,
+                    "outlier_enabled": True,
+                    "outlier_method": OutlierMethod.IQR.value,
+                    "outlier_multiplier": 1.5,
+                    "outlier_threshold": 2,
+                }
+            ]
+        )
+
+        result = compute_outlier_output(data, settings, column_config)
+
+        assert not result.is_empty()
+        assert "column name" in result.columns
+
+    def test_with_ungrouped_multiple_columns(self):
+        """Test outlier detection with ungrouped multiple columns."""
+        data = pl.DataFrame(
+            {
+                "survey_key": ["K001", "K002", "K003"],
+                "numeric_col1": [1.0, 2.0, 100.0],
+                "numeric_col2": [10.0, 20.0, 30.0],
+            }
+        )
+
+        settings = OutlierSettings(survey_key="survey_key")
+
+        column_config = pl.DataFrame(
+            [
+                {
+                    "column_name": ["numeric_col1", "numeric_col2"],
+                    "grouped_columns": False,
+                    "outlier_enabled": True,
+                    "outlier_method": OutlierMethod.SD.value,
+                    "outlier_multiplier": 3.0,
+                    "outlier_threshold": 2,
+                }
+            ]
+        )
+
+        result = compute_outlier_output(data, settings, column_config)
+
+        assert not result.is_empty()
+        assert len(result["column name"].unique()) == 2
+
+
+class TestConstraintValidation:
+    """Test constraint bounds validation."""
+
+    def test_constraint_bounds_all_none(self):
+        """Test ConstraintBounds with all None values."""
+        bounds = ConstraintBounds()
+        assert bounds.hard_min is None
+        assert bounds.soft_min is None
+        assert bounds.soft_max is None
+        assert bounds.hard_max is None
+
+    def test_constraint_bounds_partial(self):
+        """Test ConstraintBounds with partial values."""
+        bounds = ConstraintBounds(soft_min=10, soft_max=100)
+        assert bounds.soft_min == 10
+        assert bounds.soft_max == 100
+        assert bounds.hard_min is None
+        assert bounds.hard_max is None
+
+    def test_constraint_bounds_invalid_order(self):
+        """Test ConstraintBounds with invalid hierarchy."""
+        with pytest.raises(ValidationError, match="must be <="):
+            ConstraintBounds(hard_min=100, soft_min=50)
+
+    def test_constraint_bounds_negative_values(self):
+        """Test ConstraintBounds with negative values."""
+        bounds = ConstraintBounds(hard_min=-100, soft_min=-50, soft_max=50, hard_max=100)
+        assert bounds.hard_min == -100
+        assert bounds.soft_min == -50
+
+
+class TestOutlierColumnConfigValidation:
+    """Test OutlierColumnConfig validation edge cases."""
+
+    def test_pattern_required_for_non_exact(self):
+        """Test that pattern is required for non-exact search types."""
+        with pytest.raises(ValidationError, match="Pattern is required"):
+            OutlierColumnConfig(
+                search_type=SearchType.STARTSWITH,
+                pattern=None,
+                outlier_cols=["col1"],
+                outlier_multiplier=1.5,
+            )
+
+    def test_soft_max_validation(self):
+        """Test soft_max must be greater than soft_min."""
+        with pytest.raises(ValidationError, match="soft_max must be greater"):
+            OutlierColumnConfig(
+                search_type=SearchType.EXACT,
+                outlier_cols=["col1"],
+                outlier_multiplier=1.5,
+                soft_min=100,
+                soft_max=50,
+            )
+
+    def test_valid_config_with_constraints(self):
+        """Test valid configuration with all constraints."""
+        config = OutlierColumnConfig(
+            search_type=SearchType.EXACT,
+            outlier_cols=["col1"],
+            outlier_multiplier=1.5,
+            soft_min=10,
+            soft_max=100,
+        )
+        assert config.soft_min == 10
+        assert config.soft_max == 100
+
+
+class TestSafeToNumericEdgeCases:
+    """Test safe_to_numeric edge cases."""
+
+    def test_series_with_utf8_decimal(self):
+        """Test Series conversion with UTF-8 decimal strings."""
+        series = pl.Series(["1.5", "2.5", "3.5"])
+        result = safe_to_numeric(series)
+        assert result.dtype == pl.Float64
+
+    def test_series_already_numeric(self):
+        """Test Series that's already numeric."""
+        series = pl.Series([1, 2, 3])
+        result = safe_to_numeric(series)
+        assert result.dtype in pl.NUMERIC_DTYPES
+
+    def test_dataframe_without_column(self):
+        """Test DataFrame without specifying column."""
+        df = pl.DataFrame({"col1": [1, 2, 3]})
+        with pytest.raises(ValueError, match="Column is required"):
+            safe_to_numeric(df)
+
+    def test_invalid_input_type(self):
+        """Test with invalid input type."""
+        with pytest.raises(TypeError, match="must be a Polars DataFrame or Series"):
+            safe_to_numeric("invalid")
+
+    def test_dataframe_utf8_conversion(self):
+        """Test DataFrame column UTF-8 conversion."""
+        df = pl.DataFrame({"col1": ["1.5", "2.5", "3.5"]})
+        result = safe_to_numeric(df, "col1")
+        assert result["col1"].dtype == pl.Float64
+
+
+class TestExpandColNamesEdgeCases:
+    """Test expand_col_names edge cases."""
+
+    def test_invalid_col_names_type(self):
+        """Test with invalid col_names type."""
+        with pytest.raises(TypeError, match="col_names must be a list"):
+            expand_col_names("not_a_list", "pattern")
+
+    def test_empty_pattern(self):
+        """Test with empty pattern."""
+        with pytest.raises(TypeError, match="pattern must be provided"):
+            expand_col_names(["col1", "col2"], "")
+
+    def test_invalid_pattern_type(self):
+        """Test with invalid pattern type."""
+        with pytest.raises(TypeError, match="pattern must be a string"):
+            expand_col_names(["col1", "col2"], 123)
+
+    def test_invalid_search_type(self):
+        """Test with invalid search type."""
+        with pytest.raises(ValueError, match="Invalid search_type"):
+            expand_col_names(["col1", "col2"], "col", search_type="invalid")
+
+    def test_regex_pattern(self):
+        """Test with regex pattern."""
+        cols = ["col_1", "col_2", "other_1"]
+        result = expand_col_names(cols, r"col_\d+", search_type="regex")
+        assert result == ["col_1", "col_2"]
+
+
