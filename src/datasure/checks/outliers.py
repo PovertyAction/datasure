@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go  # type: ignore
 import polars as pl
-import seaborn as sns
 import streamlit as st
 from pydantic import (
     BaseModel,
@@ -23,7 +22,6 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from traitlets import default
 
 from datasure.utils.dataframe_utils import get_df_info
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
@@ -213,9 +211,200 @@ class OutlierSettings(BaseModel):
     enumerator: str | None = Field(None, description="Column name for enumerator ID", min_length=1)
     team: str | None = Field(None, description="Column name for team", min_length=1)
 
+
+# =============================================================================
+# Utility Functions
+# =============================================================================
+
+
+def _ensure_list(value: Any) -> list:
+    """Ensure value is a list.
+
+    Parameters
+    ----------
+    value : Any
+        Value to convert.
+
+    Returns
+    -------
+    list
+        Value as a list.
+    """
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return value
+    return list(value)
+
+
+def _build_include_cols(
+    survey_key: str,
+    survey_id: str | None,
+    survey_date: str | None,
+    enumerator: str | None,
+    team: str | None,
+) -> list[str]:
+    """Build list of columns to include in output.
+
+    Parameters
+    ----------
+    survey_key : str
+        Survey key column.
+    survey_id : str | None
+        Survey ID column.
+    survey_date : str | None
+        Survey date column.
+    enumerator : str | None
+        Enumerator column.
+    team : str | None
+        Team column.
+
+    Returns
+    -------
+    list[str]
+        Deduplicated list of columns to include.
+    """
+    include_cols = []
+    for col in [survey_key, survey_id, survey_date, enumerator, team]:
+        if col and col not in include_cols:
+            include_cols.append(col)
+    return include_cols
+
+
+def _sanitize_df_for_join(
+    main_df: pl.DataFrame,
+    join_df: pl.DataFrame,
+    join_key: str,
+) -> pl.DataFrame:
+    """Sanitize join DataFrame to avoid column name conflicts.
+
+    Parameters
+    ----------
+    main_df : pl.DataFrame
+        Main DataFrame.
+    join_df : pl.DataFrame
+        DataFrame to join.
+    join_key : str
+        Column name to join on.
+
+    Returns
+    -------
+    pl.DataFrame
+        Sanitized join DataFrame.
+    """
+    main_cols = main_df.columns
+    join_cols = join_df.columns
+
+    sanitized_cols = [col for col in join_cols if col not in main_cols or col == join_key]
+
+    return join_df.select(sanitized_cols)
+
+
+def _convert_series_to_numeric(series: pl.Series) -> pl.Series:
+    """Convert a Polars Series to numeric type.
+
+    Parameters
+    ----------
+    series : pl.Series
+        Series to convert.
+
+    Returns
+    -------
+    pl.Series
+        Converted series.
+
+    Raises
+    ------
+    ValueError
+        If conversion fails.
+    """
+    if series.dtype in pl.NUMERIC_DTYPES:
+        return series
+
+    try:
+        if series.dtype == pl.Utf8:
+            return series.str.to_decimal().cast(pl.Float64, strict=False)
+        return series.cast(pl.Float64, strict=False)
+    except Exception as e:
+        raise ValueError(
+            f"Could not convert Series to numeric: {e}, keeping as {series.dtype}"
+        ) from e
+
+
+def _convert_dataframe_column_to_numeric(df: pl.DataFrame, column: str) -> pl.DataFrame:
+    """Convert a DataFrame column to numeric type.
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        DataFrame containing the column.
+    column : str
+        Column name to convert.
+
+    Returns
+    -------
+    pl.DataFrame
+        DataFrame with converted column.
+
+    Raises
+    ------
+    ValueError
+        If conversion fails.
+    """
+    if df[column].dtype in pl.NUMERIC_DTYPES:
+        return df
+
+    try:
+        if df[column].dtype == pl.Utf8:
+            return df.with_columns(
+                pl.col(column).str.to_decimal().cast(pl.Float64, strict=False).alias(column)
+            )
+        return df.with_columns(
+            pl.col(column).cast(pl.Float64, strict=False).alias(column)
+        )
+    except Exception as e:
+        raise ValueError(
+            f"Could not convert column '{column}' to numeric: {e}, keeping as {df[column].dtype}"
+        ) from e
+
+
+def safe_to_numeric(data: pl.DataFrame | pl.Series, column: str | None = None) -> pl.DataFrame | pl.Series:
+    """Safely convert columns to numeric, keeping original if conversion fails.
+
+    Parameters
+    ----------
+    data : pl.DataFrame | pl.Series
+        Data to convert.
+    column : str | None
+        Column name to convert (required for DataFrames).
+
+    Returns
+    -------
+    pl.DataFrame | pl.Series
+        Converted data.
+
+    Raises
+    ------
+    ValueError
+        If conversion fails or invalid inputs provided.
+    TypeError
+        If input is not a Polars DataFrame or Series.
+    """
+    if isinstance(data, pl.Series):
+        return _convert_series_to_numeric(data)
+
+    if isinstance(data, pl.DataFrame):
+        if not column:
+            raise ValueError("Column is required with dataframes")
+        return _convert_dataframe_column_to_numeric(data, column)
+
+    raise TypeError("Input data must be a Polars DataFrame or Series.")
+
+
 # =============================================================================
 # Settings and Configuration Functions
 # =============================================================================
+
 
 def load_default_settings(
     settings_file: str, config: OutlierSettings
@@ -224,18 +413,15 @@ def load_default_settings(
 
     Parameters
     ----------
-    project_id : str
-        The project identifier.
     settings_file : str
         The settings file to load.
-    page_num : int
-        The page number of the report.
+    config : OutlierSettings
+        Default configuration.
 
     Returns
     -------
-    tuple
-        A tuple containing (survey_id, enumerator, survey_key,
-        display_cols, min_threshold).
+    OutlierSettings
+        Merged settings.
     """
     # Load saved settings
     saved_settings = load_check_settings(settings_file, TAB_NAME)
@@ -245,6 +431,7 @@ def load_default_settings(
 
     # Merge with defaults
     return OutlierSettings(**default_settings)
+
 
 @st.cache_data
 def expand_col_names(
@@ -297,73 +484,95 @@ def expand_col_names(
     return [col for col in col_names if search_funcs[search_type](col)]
 
 
-def _should_expand_row(row: pd.Series) -> bool:
-    """Check if a settings row should have its columns expanded.
+def _should_expand_row(row: dict) -> bool:
+    """Check if a configuration row should have its columns expanded.
 
     Parameters
     ----------
-    row : pd.Series
-        Settings row to check.
+    row : dict
+        Configuration row to check (from Polars iter_rows).
 
     Returns
     -------
     bool
         True if row should be expanded.
     """
-    return row["search_type"] != SearchType.EXACT.value and not row["lock_cols"]
+    return row["search_type"] != SearchType.EXACT.value and not row.get("locked", False)
+
 
 @st.cache_data
-def update_unlocked_cols(
-    outlier_settings: pd.DataFrame, col_names: list[str]
-) -> pd.DataFrame:
-    """Update column names for unlocked rows in outlier settings.
+def _update_unlocked_cols(
+    column_config: pl.DataFrame,
+    col_names: list[str],
+) -> pl.DataFrame:
+    """Update column names for unlocked rows in column configuration.
 
     Parameters
     ----------
-    outlier_settings : pd.DataFrame
-        DataFrame containing outlier settings.
+    column_config : pl.DataFrame
+        Polars DataFrame containing outlier column configuration.
     col_names : list[str]
         List of available column names.
 
     Returns
     -------
-    pd.DataFrame
-        Updated outlier settings with expanded column names.
+    pl.DataFrame
+        Updated column configuration with expanded column names.
 
     Raises
     ------
     ValueError
         If essential columns are missing or pattern is invalid.
     """
-    essential_cols = ["outlier_cols", "lock_cols"]
-    for col in essential_cols:
-        if col not in outlier_settings.columns:
-            raise ValueError(
-                f"Essential column '{col}' is missing from outlier settings."
+    required_columns = {"search_type", "pattern", "column_name", "locked"}
+    missing_columns = required_columns - set(column_config.columns)
+    if missing_columns:
+        raise ValueError(
+            f"Missing required columns in column_config: {', '.join(missing_columns)}"
+        )
+
+    updated_rows = []
+    for row in column_config.iter_rows(named=True):
+        if _should_expand_row(row):
+            expanded_cols = expand_col_names(
+                col_names=col_names,
+                pattern=row["pattern"],
+                search_type=row["search_type"],
             )
+            row["outlier_cols"] = expanded_cols
+        updated_rows.append(row)
 
-    # Identify rows to expand
-    outlier_settings["to_expand"] = outlier_settings.apply(_should_expand_row, axis=1)
+    return pl.DataFrame(updated_rows)
 
-    if outlier_settings["to_expand"].sum() == 0:
-        return outlier_settings
 
-    # Update unlocked rows
-    for index, row in outlier_settings.iterrows():
-        if row["to_expand"]:
-            pattern = row["pattern"]
-            if not pattern or not pattern.strip():
-                raise ValueError(
-                    f"Missing pattern for row {index}. Please provide a valid pattern."
-                )
+def update_unlocked_cols(
+    outlier_settings: pl.DataFrame, col_names: list[str]
+) -> pl.DataFrame:
+    """Update column names for unlocked rows in outlier settings.
 
-            new_col_names = expand_col_names(col_names, pattern, row["search_type"])
-            outlier_settings.at[index, "outlier_cols"] = new_col_names
+    Public API wrapper for backward compatibility.
 
-    return outlier_settings
+    Parameters
+    ----------
+    outlier_settings : pl.DataFrame
+        Polars DataFrame containing outlier settings or column configuration.
+    col_names : list[str]
+        List of available column names.
+
+    Returns
+    -------
+    pl.DataFrame
+        Updated settings with expanded column names.
+
+    Raises
+    ------
+    ValueError
+        If essential columns are missing or pattern is invalid.
+    """
+    return _update_unlocked_cols(outlier_settings, col_names)
 
 # =============================================================================
-# Core Statistics Computation (Polars-optimized)
+# Statistical Computation Functions (Polars-optimized)
 # =============================================================================
 
 
@@ -501,6 +710,58 @@ def compute_outlier_stats_polars(
     )
 
 
+@st.cache_data
+def stack_outlier_columns(df: pl.DataFrame, col_names: list[str]) -> pl.Series:
+    """Stack specified columns of a DataFrame into a single Series.
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        The DataFrame containing the data.
+    col_names : list[str]
+        List of column names to stack.
+
+    Returns
+    -------
+    pl.Series
+        A Series containing the stacked values.
+
+    Raises
+    ------
+    ValueError
+        If DataFrame is empty or columns don't exist.
+    """
+    if df.is_empty():
+        raise ValueError("The DataFrame is empty.")
+
+    for col in col_names:
+        if col not in df.columns:
+            raise ValueError(f"Column '{col}' does not exist in the DataFrame.")
+
+    # Check and convert columns to numeric if needed
+    for col in col_names:
+        dtype = df[col].dtype
+        if dtype not in [pl.Int8, pl.Int16, pl.Int32, pl.Int64,
+                         pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
+                         pl.Float32, pl.Float64]:
+            try:
+                df = df.with_columns(pl.col(col).cast(pl.Float64))
+            except Exception:
+                raise ValueError(
+                    f"Column '{col}' cannot be converted to numeric type."
+                ) from None
+
+    # Stack the columns - melt/unpivot in Polars
+    stacked_values = (
+        df.select(col_names)
+        .unpivot()
+        .get_column("value")
+        .drop_nulls()  # Remove null values like pandas stack() does
+    )
+
+    return stacked_values
+
+
 def _build_outlier_expression(
     col: str,
     lower_bound: float,
@@ -516,10 +777,6 @@ def _build_outlier_expression(
         Statistical lower bound.
     upper_bound : float
         Statistical upper bound.
-    soft_min : float | None
-        User-defined soft minimum.
-    soft_max : float | None
-        User-defined soft maximum.
 
     Returns
     -------
@@ -555,10 +812,6 @@ def _add_statistics_columns(
         Detection method used.
     outlier_multiplier : float
         Multiplier used.
-    soft_min : float | None
-        Soft minimum threshold.
-    soft_max : float | None
-        Soft maximum threshold.
     col_name : str
         Name of the column being analyzed.
 
@@ -610,10 +863,6 @@ def _process_single_column_outliers(
         Outlier detection method.
     outlier_multiplier : float
         Multiplier for detection.
-    soft_min : float | None
-        Soft minimum threshold.
-    soft_max : float | None
-        Soft maximum threshold.
     min_threshold : int
         Minimum sample size threshold.
     non_null_count : int
@@ -671,56 +920,10 @@ def _process_single_column_outliers(
 
     return col_df
 
-def _build_include_cols(
-    survey_key: str,
-    survey_id: str | None,
-    survey_date: str | None,
-    enumerator: str | None,
-    team: str | None,
-) -> list[str]:
-    """Build list of columns to include in output.
 
-    Parameters
-    ----------
-    display_cols : list[str]
-        User-selected display columns.
-    survey_key : str
-        Survey key column.
-    survey_id : str | None
-        Survey ID column.
-    enumerator : str | None
-        Enumerator column.
-
-    Returns
-    -------
-    list[str]
-        Deduplicated list of columns to include.
-    """
-    include_cols = []
-    for col in [survey_key, survey_id, survey_date, enumerator, team]:
-        if col and col not in include_cols:
-            include_cols.append(col)
-    return include_cols
-
-
-def _ensure_list(value: Any) -> list:
-    """Ensure value is a list.
-
-    Parameters
-    ----------
-    value : Any
-        Value to convert.
-
-    Returns
-    -------
-    list
-        Value as a list.
-    """
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, list):
-        return value
-    return list(value)
+# =============================================================================
+# Outlier Detection - Main Logic
+# =============================================================================
 
 
 def compute_outlier_output(
@@ -732,24 +935,16 @@ def compute_outlier_output(
 
     Parameters
     ----------
-    df : pd.DataFrame
+    data : pl.DataFrame
         DataFrame containing the survey data.
-    outlier_settings : pd.DataFrame
-        DataFrame containing the outlier settings.
-    display_cols : list[str]
-        Columns to display in output.
-    min_threshold : float | None
-        Minimum sample size for outlier detection.
-    survey_key : str
-        Column name for survey key.
-    survey_id : str | None
-        Column name for survey ID.
-    enumerator : str | None
-        Column name for enumerator ID.
+    outlier_settings : dict
+        Outlier settings configuration.
+    column_config : pl.DataFrame
+        DataFrame containing the outlier column configurations.
 
     Returns
     -------
-    pd.DataFrame
+    pl.DataFrame
         DataFrame containing the outlier summary.
 
     Raises
@@ -777,7 +972,7 @@ def compute_outlier_output(
     # Process outlier settings
     outlier_results_list = []
     for row in column_config.iter_rows(named=True):
-        # Ccheck if outlier detection is enabled
+        # Check if outlier detection is enabled
         outlier_enabled = row.get("outlier_enabled", False)
         if not outlier_enabled:
             continue
@@ -854,162 +1049,10 @@ def compute_outlier_output(
 
     return pl.DataFrame()
 
-@st.cache_data
-def stack_outlier_columns(df: pl.DataFrame, col_names: list[str]) -> pl.Series:
-    """Stack specified columns of a DataFrame into a single Series.
 
-    Parameters
-    ----------
-    df : pl.DataFrame
-        The DataFrame containing the data.
-    col_names : list[str]
-        List of column names to stack.
-
-    Returns
-    -------
-    pl.Series
-        A Series containing the stacked values.
-
-    Raises
-    ------
-    ValueError
-        If DataFrame is empty or columns don't exist.
-    """
-    if df.is_empty():
-        raise ValueError("The DataFrame is empty.")
-
-    for col in col_names:
-        if col not in df.columns:
-            raise ValueError(f"Column '{col}' does not exist in the DataFrame.")
-
-    # Check and convert columns to numeric if needed
-    for col in col_names:
-        dtype = df[col].dtype
-        if dtype not in [pl.Int8, pl.Int16, pl.Int32, pl.Int64, 
-                         pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
-                         pl.Float32, pl.Float64]:
-            try:
-                df = df.with_columns(pl.col(col).cast(pl.Float64))
-            except Exception:
-                raise ValueError(
-                    f"Column '{col}' cannot be converted to numeric type."
-                ) from None
-
-    # Stack the columns - melt/unpivot in Polars
-    stacked_values = (
-        df.select(col_names)
-        .unpivot()
-        .get_column("value")
-        .drop_nulls()  # Remove null values like pandas stack() does
-    )
-
-    return stacked_values
-
-
-@st.cache_data
-def compute_outlier_stats(
-    series: pd.Series, outlier_type: str | None, multiplier: float | None
-) -> dict[str, Any]:
-    """Compute outlier statistics for a Series (legacy Pandas version).
-
-    Parameters
-    ----------
-    series : pd.Series
-        The Series to compute statistics for.
-    outlier_type : str | None
-        The type of outlier detection method.
-    multiplier : float | None
-        The multiplier to use.
-
-    Returns
-    -------
-    dict[str, Any]
-        Dictionary containing computed statistics.
-
-    Raises
-    ------
-    ValueError
-        If series is empty or parameters are invalid.
-    """
-    if series.empty:
-        raise ValueError("The Series is empty.")
-
-    valid_types = [None, OutlierMethod.IQR.value, OutlierMethod.SD.value]
-    if outlier_type not in valid_types:
-        raise ValueError("Invalid outlier type. Use 'IQR' or 'SD'.")
-
-    if multiplier is not None and multiplier <= 0:
-        raise ValueError("Multiplier must be a positive number.")
-
-    count = series.count()
-    min_value = series.min()
-    max_value = series.max()
-    mean = series.mean()
-    median = series.median()
-    sd = series.std()
-    iqr = series.quantile(0.75) - series.quantile(0.25)
-
-    if outlier_type == OutlierMethod.SD.value:
-        multiplier = multiplier or OutlierMultipliers.SD.value
-        lower_bound = mean - (multiplier * sd)
-        upper_bound = mean + (multiplier * sd)
-    else:
-        multiplier = multiplier or OutlierMultipliers.IQR.value
-        q1 = series.quantile(0.25)
-        q3 = series.quantile(0.75)
-        iqr = q3 - q1
-        lower_bound = q1 - (multiplier * iqr)
-        upper_bound = q3 + (multiplier * iqr)
-
-    return {
-        "count": count,
-        "min_value": min_value,
-        "max_value": max_value,
-        "mean": mean,
-        "median": median,
-        "sd": sd,
-        "iqr": iqr,
-        "lower_bound": lower_bound,
-        "upper_bound": upper_bound,
-    }
-
-
-def safe_to_numeric(data: pl.DataFrame | pl.Series, column: list | None = None) -> pl.DataFrame:
-    """Safely convert columns to numeric, keeping original if conversion fails"""
-    if isinstance(data, pl.DataFrame) and not column:
-        raise ValueError("Column is required with dataframes")
-
-    # For series
-    if isinstance(data, pl.Series):
-        if data.dtype in pl.NUMERIC_DTYPES:
-            return data
-        else:
-            try:
-                if data.dtype == pl.Utf8:
-                    converted = data.str.to_decimal().cast(pl.Float64, strict=False)
-                else:
-                    converted = data.cast(pl.Float64, strict=False)
-                return converted  # noqa: TRY300
-            except Exception as e:
-                raise ValueError(f"Could not convert Series to numeric: {e}, keeping as {data.dtype}") from e
-    elif isinstance(data, pl.DataFrame):
-        if data[column].dtype in pl.NUMERIC_DTYPES:
-            return data
-        else:
-            try:
-                if data[column].dtype == pl.Utf8:
-                    converted = data.with_columns(
-                        pl.col(column).str.to_decimal().cast(pl.Float64, strict=False).alias(column)
-                    )
-                else:
-                    converted = data.with_columns(
-                        pl.col(column).cast(pl.Float64, strict=False).alias(column)
-                    )
-                return converted  # noqa: TRY300
-            except Exception as e:
-                raise ValueError(f"Could not convert column '{column}' to numeric: {e}, keeping as {data[column].dtype}") from e
-    else:
-        raise TypeError("Input data must be a Polars DataFrame or Series.")
+# =============================================================================
+# Constraint Violations - Main Logic
+# =============================================================================
 
 
 def compute_constraint_violations(
@@ -1104,19 +1147,24 @@ def compute_constraint_violations(
     return violation_results
 
 
+# =============================================================================
+# Metrics Computation - Analytics
+# =============================================================================
+
+
 def _compute_constraint_metrics(
     violation_data: pl.DataFrame) -> ConstraintMetrics:
     """Compute metrics related to constraint violations.
+
     Parameters
     ----------
     violation_data : pl.DataFrame
         DataFrame containing constraint violation data.
+
     Returns
     -------
     ConstraintMetrics
         Pydantic model containing computed metrics.
-    total_violations = violation_data.filter(pl.col("violation reason") != "no violation").height
-    total_variables = violation_data.select("column name").n_unique()
     """
     columns_checked = violation_data.select("column name").n_unique()
     total_violations = violation_data.filter(
@@ -1145,17 +1193,234 @@ def _compute_constraint_metrics(
         hard_max_violations=hard_max_violations,
     )
 
+
+def _compute_outlier_metrics(
+    outliers_data: pl.DataFrame,
+    enumerator: str | None,
+) -> OutlierMetrics:
+    """Compute outlier metrics.
+
+    Parameters
+    ----------
+    outliers_data : pl.DataFrame
+        DataFrame containing outlier data.
+    enumerator : str | None
+        Enumerator column name.
+
+    Returns
+    -------
+    OutlierMetrics
+        Pydantic model containing computed metrics.
+    """
+    columns_checked = outliers_data.select("column name").n_unique()
+    columns_with_outliers = (
+        outliers_data.filter(pl.col("outlier reason") != "no outlier")
+        .select("column name")
+        .n_unique()
+    )
+    total_outliers = outliers_data.filter(
+        pl.col("outlier reason") != "no outlier"
+    ).height
+    if enumerator:
+        enumerators_with_outliers = (
+            outliers_data.filter(pl.col("outlier reason") != "no outlier")
+            .select(enumerator)
+            .n_unique()
+        )
+    else:
+        enumerators_with_outliers = 0
+
+    return OutlierMetrics(
+        columns_checked=columns_checked,
+        columns_with_outliers=columns_with_outliers,
+        total_outliers=total_outliers,
+        enumerators_with_outliers=enumerators_with_outliers,
+    )
+
+
+def compute_column_outlier_summary(
+    outlier_data: pl.DataFrame, survey_key: str
+) -> pl.DataFrame:
+    """Compute a summary of outliers for each column using Polars.
+
+    Parameters
+    ----------
+    outlier_data : pl.DataFrame
+        Polars DataFrame containing outlier data.
+    survey_key : str
+        Survey key column name.
+
+    Returns
+    -------
+    pl.DataFrame
+        Summary DataFrame with outlier counts per column.
+    """
+    if outlier_data.is_empty():
+        return pl.DataFrame()
+
+    # Remove duplicates
+    outlier_summary = outlier_data.unique(subset=["column name", survey_key])
+
+    # Count occurrences per column
+    col_counts = (
+        outlier_summary
+        .group_by("column name")
+        .agg(pl.count().alias("count"))
+    )
+
+    # Join counts back
+    outlier_summary = outlier_summary.join(col_counts, on="column name", how="left")
+
+    # Flag outliers
+    outlier_summary = outlier_summary.with_columns(
+        pl.when(pl.col("outlier reason") != "no outlier")
+        .then(pl.lit(1))
+        .otherwise(pl.lit(0))
+        .alias("flagged as outlier")
+    )
+
+    # Count outliers per column
+    outlier_counts = (
+        outlier_summary
+        .group_by("column name")
+        .agg(pl.col("flagged as outlier").sum().alias("outlier count"))
+    )
+
+    # Merge outlier counts
+    outlier_summary = outlier_summary.join(
+        outlier_counts, on="column name", how="left"
+    )
+
+    # Select and order columns
+    outlier_summary = outlier_summary.select(
+        [
+            "column name",
+            "count",
+            "outlier count",
+            "min_value",
+            "max_value",
+            "mean",
+            "median",
+            "std",
+            "iqr",
+            "lower_bound",
+            "upper_bound",
+        ]
+    )
+
+    return outlier_summary.unique(subset=["column name"])
+
+
+def get_outlier_cols(outlier_settings: pd.DataFrame) -> list[str]:
+    """Get list of outlier columns from settings DataFrame.
+
+    Parameters
+    ----------
+    outlier_settings : pd.DataFrame
+        DataFrame containing outlier settings.
+
+    Returns
+    -------
+    list[str]
+        List of column names to check for outliers.
+    """
+    cols = []
+    for i in range(len(outlier_settings)):
+        col = outlier_settings.iloc[i]["outlier_cols"]
+        if isinstance(col, np.ndarray):
+            cols.append(col[0])
+        elif isinstance(col, list):
+            cols.extend(col)
+
+    return cols
+
+
+# =============================================================================
+# Visualization Functions
+# =============================================================================
+
+
+@st.cache_data
+def _create_box_plot(data: pd.Series, title: str) -> go.Figure:
+    """Create a box plot using plotly.
+
+    Parameters
+    ----------
+    data : pd.Series
+        Data series to plot.
+    title : str
+        Title for the plot.
+
+    Returns
+    -------
+    go.Figure
+        Plotly figure object.
+    """
+    return go.Figure(
+        data=go.Box(
+            y=data,
+            boxpoints="outliers",
+            marker_color="darkblue",
+            line_color="black",
+            fillcolor="lightblue",
+            opacity=0.6,
+            x0=title,
+        )
+    )
+
+
+@st.cache_data
+def _create_descriptive_stats(column_data: pl.DataFrame) -> pl.DataFrame:
+    """Create descriptive statistics table.
+
+    Parameters
+    ----------
+    column_data : pl.DataFrame
+        Column data to analyze.
+
+    Returns
+    -------
+    pl.DataFrame
+        Descriptive statistics table.
+    """
+    table = column_data.describe()
+    table.columns = ["statistic", "value"]
+    # rename statistics
+    stat_rename = {
+        "count": "Number of Values",
+        "null_count": "Number of Missing Values",
+        "mean": "Mean",
+        "std": "Standard Deviation",
+        "min": "Minimum Value",
+        "25%": "25th Percentile (Q1)",
+        "50%": "Median (Q2)",
+        "75%": "75th Percentile (Q3)",
+        "max": "Maximum Value",
+    }
+
+    table = table.with_columns(
+        pl.col('statistic').replace(stat_rename).alias('statistic')
+    )
+
+    return table
+
+
+# =============================================================================
+# Streamlit UI - Metrics Display
+# =============================================================================
+
+
 def _render_constraint_metrics(
-        violationdata: pl.DataFrame,
+        violation_data: pl.DataFrame,
     ) -> None:
     """Render constraint violation metrics using Streamlit.
 
     Parameters
     ----------
-    ViolationData : pl.DataFrame
+    violation_data : pl.DataFrame
         DataFrame containing constraint violation data.
     """
-    metrics: ConstraintMetrics = _compute_constraint_metrics(violationdata)
+    metrics: ConstraintMetrics = _compute_constraint_metrics(violation_data)
 
     _, _, uc3, uc4 = st.columns(4)
     with uc3, st.container(border=True):
@@ -1194,6 +1459,52 @@ def _render_constraint_metrics(
     )
 
 
+def _render_outlier_metrics(
+    outliers_data: pl.DataFrame,
+    settings: OutlierSettings,
+) -> None:
+    """Render outlier metrics using Streamlit.
+
+    Parameters
+    ----------
+    outliers_data : pl.DataFrame
+        DataFrame containing outlier data.
+    settings : OutlierSettings
+        Outlier settings configuration.
+    """
+    metrics: OutlierMetrics = _compute_outlier_metrics(
+        outliers_data, settings.enumerator
+    )
+
+    uc1, uc2, uc3, uc4 = st.columns(4, border=True)
+    uc1.metric(
+        label="Number of columns checked",
+        value=f"{metrics.columns_checked:,}",
+        help="Number of columns checked for outliers",
+    )
+    uc2.metric(
+        label="Columns with Outliers",
+        value=f"{metrics.columns_with_outliers:,}",
+        help="Number of columns that have outliers detected",
+    )
+    uc3.metric(
+        label="Total Outliers",
+        value=f"{metrics.total_outliers:,}",
+        help="Total number of outliers detected",
+    )
+    if settings.enumerator:
+        uc4.metric(
+            label="Enumerators with Outliers",
+            value=f"{metrics.enumerators_with_outliers:,}",
+            help="Number of unique enumerators with outliers detected",
+        )
+
+
+# =============================================================================
+# Streamlit UI - Table Display
+# =============================================================================
+
+
 def _render_constraint_violations_table(
     data: pl.DataFrame,
     violation_data: pl.DataFrame,
@@ -1204,12 +1515,14 @@ def _render_constraint_violations_table(
 
     Parameters
     ----------
+    data : pl.DataFrame
+        Original survey data.
     violation_data : pl.DataFrame
         DataFrame containing constraint violation data.
-    survey_id : str | None
-        Survey ID column name.
-    enumerator : str | None
-        Enumerator column name.
+    settings : OutlierSettings
+        Outlier settings configuration.
+    setting_file : str
+        Path to settings file.
     """
     if violation_data.is_empty():
         st.info("No constraint violations detected.")
@@ -1270,194 +1583,6 @@ def _render_constraint_violations_table(
 
     st.dataframe(violations_df)
 
-def _sanitize_df_for_join(
-    main_df: pl.DataFrame,
-    join_df: pl.DataFrame,
-    join_key: str,
-) -> pl.DataFrame:
-    """Sanitize join DataFrame to avoid column name conflicts.
-
-    Parameters
-    ----------
-    main_df : pl.DataFrame
-        Main DataFrame.
-    join_df : pl.DataFrame
-        DataFrame to join.
-    join_key : str
-        Column name to join on.
-
-    Returns
-    -------
-    pl.DataFrame
-        Sanitized join DataFrame.
-    """
-    main_cols = main_df.columns
-    join_cols = join_df.columns
-
-    sanitized_cols = [col for col in join_cols if col not in main_cols or col == join_key]
-
-    return join_df.select(sanitized_cols)
-
-
-# =============================================================================
-# Summary and Display Helper Functions
-# =============================================================================
-
-
-def compute_column_outlier_summary(
-    outlier_data: pd.DataFrame, survey_key: str
-) -> pd.DataFrame:
-    """Compute a summary of outliers for each column.
-
-    Parameters
-    ----------
-    outlier_data : pd.DataFrame
-        DataFrame containing outlier data.
-    survey_key : str
-        Survey key column name.
-
-    Returns
-    -------
-    pd.DataFrame
-        Summary DataFrame with outlier counts per column.
-    """
-    if outlier_data.empty:
-        return pd.DataFrame()
-
-    outlier_summary = outlier_data.drop_duplicates(subset=["column name", survey_key])
-
-    col_counts = outlier_summary["column name"].value_counts().reset_index()
-    outlier_summary = outlier_summary.merge(col_counts, on="column name", how="left")
-
-    outlier_summary["flagged as outlier"] = outlier_summary.apply(
-        lambda row: 1 if row["outlier reason"] != "no outlier" else 0, axis=1
-    )
-
-    outlier_counts = (
-        outlier_summary.groupby("column name")["flagged as outlier"].sum().reset_index()
-    )
-    outlier_counts.columns = ["column name", "outlier count"]
-
-    outlier_summary = outlier_summary.merge(
-        outlier_counts, on="column name", how="left"
-    )
-
-    outlier_summary = outlier_summary[
-        [
-            "column name",
-            "count",
-            "outlier count",
-            "min_value",
-            "max_value",
-            "mean",
-            "median",
-            "std",
-            "iqr",
-            "lower_bound",
-            "upper_bound",
-        ]
-    ]
-
-    return outlier_summary.drop_duplicates(subset=["column name"])
-
-
-def get_outlier_cols(outlier_settings: pd.DataFrame) -> list[str]:
-    """Get list of outlier columns from settings DataFrame.
-
-    Parameters
-    ----------
-    outlier_settings : pd.DataFrame
-        DataFrame containing outlier settings.
-
-    Returns
-    -------
-    list[str]
-        List of column names to check for outliers.
-    """
-    cols = []
-    for i in range(len(outlier_settings)):
-        col = outlier_settings.iloc[i]["outlier_cols"]
-        if isinstance(col, np.ndarray):
-            cols.append(col[0])
-        elif isinstance(col, list):
-            cols.extend(col)
-
-    return cols
-
-
-
-def _compute_outlier_metrics(
-    outliers_data: pl.DataFrame,
-    enumerator: str | None,
-) -> OutlierMetrics:
-    """Compute outlier Metrics"""
-    columns_checked = outliers_data.select("column name").n_unique()
-    columns_with_outliers = (
-        outliers_data.filter(pl.col("outlier reason") != "no outlier")
-        .select("column name")
-        .n_unique()
-    )
-    total_outliers = outliers_data.filter(
-        pl.col("outlier reason") != "no outlier"
-    ).height
-    if enumerator:
-        enumerators_with_outliers = (
-            outliers_data.filter(pl.col("outlier reason") != "no outlier")
-            .select(enumerator)
-            .n_unique()
-        )
-    else:
-        enumerators_with_outliers = 0
-
-    return OutlierMetrics(
-        columns_checked=columns_checked,
-        columns_with_outliers=columns_with_outliers,
-        total_outliers=total_outliers,
-        enumerators_with_outliers=enumerators_with_outliers,
-    )
-
-
-def _render_outlier_metrics(
-    outliers_data: pl.DataFrame,
-    settings: OutlierSettings,
-) -> None:
-    """Render outlier metrics using Streamlit.
-
-    Parameters
-    ----------
-    outliers_data : pl.DataFrame
-        DataFrame containing outlier data.
-    survey_id : str | None
-        Survey ID column name.
-    enumerator : str | None
-        Enumerator column name.
-    """
-    metrics: OutlierMetrics = _compute_outlier_metrics(
-        outliers_data, settings.enumerator
-    )
-
-    uc1, uc2, uc3, uc4 = st.columns(4, border=True)
-    uc1.metric(
-        label="Number of columns checked",
-        value=f"{metrics.columns_checked:,}",
-        help="Number of columns checked for outliers",
-    )
-    uc2.metric(
-        label="Columns with Outliers",
-        value=f"{metrics.columns_with_outliers:,}",
-        help="Number of columns that have outliers detected",
-    )
-    uc3.metric(
-        label="Total Outliers",
-        value=f"{metrics.total_outliers:,}",
-        help="Total number of outliers detected",
-    )
-    if settings.enumerator:
-        uc4.metric(
-            label="Enumerators with Outliers",
-            value=f"{metrics.enumerators_with_outliers:,}",
-            help="Number of unique enumerators with outliers detected",
-        )
 
 def _render_outlier_table(
     data: pl.DataFrame,
@@ -1469,12 +1594,14 @@ def _render_outlier_table(
 
     Parameters
     ----------
+    data : pl.DataFrame
+        Original survey data.
     outliers_data : pl.DataFrame
         DataFrame containing outlier data.
-    survey_id : str | None
-        Survey ID column name.
-    enumerator : str | None
-        Enumerator column name.
+    settings : OutlierSettings
+        Outlier settings configuration.
+    setting_file : str
+        Path to settings file.
     """
     if outliers_data.is_empty():
         st.info("No outliers detected in the selected columns.")
@@ -1527,179 +1654,9 @@ def _render_outlier_table(
     st.dataframe(outlier_show_df)
 
 
-# =============================================================================
-# Visualization Functions
-# =============================================================================
-
-
-# create box plot
-@st.cache_data
-def _create_box_plot(data: pd.Series, title: str) -> go.Figure:
-    """Create a box plot using plotly.
-
-    Parameters
-    ----------
-    data : pd.Series
-        Data series to plot.
-    title : str
-        Title for the plot.
-
-    Returns
-    -------
-    go.Figure
-        Plotly figure object.
-    """
-    return go.Figure(
-        data=go.Box(
-            y=data,
-            boxpoints="outliers",
-            marker_color="darkblue",
-            line_color="black",
-            fillcolor="lightblue",
-            opacity=0.6,
-            x0=title,
-        )
-    )
-
-
-@st.cache_data
-def _create_descriptive_stats (column_data: pd.DataFrame) -> pl.DataFrame:
-    """Create descriptive statistics table"""
-    col_name = column_data.columns[0]
-    # check if column is numeric
-
-    table = column_data.describe()
-    table.columns = ["statistic", "value"]
-    # rename statistics
-    stat_rename = {
-        "count": "Number of Values",
-        "null_count": "Number of Missing Values",
-        "mean": "Mean",
-        "std": "Standard Deviation",
-        "min": "Minimum Value",
-        "25%": "25th Percentile (Q1)",
-        "50%": "Median (Q2)",
-        "75%": "75th Percentile (Q3)",
-        "max": "Maximum Value",
-    }
-
-    table = table.with_columns(
-        pl.col('statistic').replace(stat_rename).alias('statistic')
-    )
-
-    return table
-
-
-
-# =============================================================================
-# Streamlit Display Functions
-# =============================================================================
-
-
-@demo_output_onboarding(TAB_NAME)
-def display_outlier_output(outlier_data: pd.DataFrame) -> None:
-    """Display the outlier output in a Streamlit app.
-
-    Parameters
-    ----------
-    outlier_data : pd.DataFrame
-        DataFrame containing outlier detection results.
-    """
-    outlier_data_disp = outlier_data[outlier_data["outlier reason"] != "no outlier"]
-
-    if outlier_data_disp.empty:
-        st.info("No outliers detected in the selected columns.")
-        return
-
-    st.dataframe(
-        outlier_data_disp,
-        width="stretch",
-        hide_index=True,
-        column_config={
-            "column name": st.column_config.Column("Column Name"),
-            "column value": st.column_config.Column(
-                "Column Value",
-                help="The value of the column that is flagged as an outlier.",
-            ),
-            "min_value": st.column_config.NumberColumn("Min Value", format="%.2f"),
-            "max_value": st.column_config.NumberColumn("Max Value", format="%.2f"),
-            "mean": st.column_config.NumberColumn("Mean", format="%.4f"),
-            "std": st.column_config.NumberColumn("SD", format="%.4f"),
-            "median": st.column_config.NumberColumn("Median", format="%.4f"),
-            "iqr": st.column_config.NumberColumn("IQR", format="%.2f"),
-            "outlier reason": st.column_config.Column(
-                "Outlier Reason",
-                help="Reason for flagging the value as an outlier.",
-            ),
-            "outlier_method": st.column_config.Column(
-                "Outlier Method",
-                help="Method used for outlier detection (IQR or SD).",
-            ),
-            "soft_min": st.column_config.NumberColumn("Soft Min"),
-            "soft_max": st.column_config.NumberColumn("Soft Max"),
-            "outlier_multiplier": st.column_config.NumberColumn("Outlier Multiplier"),
-            "lower_bound": st.column_config.NumberColumn(
-                "Lower Bound", format="%.2f", width="small"
-            ),
-            "upper_bound": st.column_config.NumberColumn(
-                "Upper Bound", format="%.2f", width="small"
-            ),
-        },
-    )
-
-
-@demo_output_onboarding(TAB_NAME)
-def display_outlier_column_summary(outlier_summary: pd.DataFrame) -> None:
-    """Display the outlier summary in a Streamlit app.
-
-    Parameters
-    ----------
-    outlier_summary : pd.DataFrame
-        DataFrame containing outlier summary statistics.
-
-    Raises
-    ------
-    ValueError
-        If summary data is empty.
-    """
-    if outlier_summary.empty:
-        raise ValueError(
-            "No outlier summary data available. Please check the outlier "
-            "settings and data."
-        )
-
-    cmap = sns.light_palette("pink", as_cmap=True)
-    styler_limit = outlier_summary.shape[0] * outlier_summary.shape[1]
-    pd.set_option("styler.render.max_elements", styler_limit)
-    outlier_summary = outlier_summary.style.background_gradient(
-        subset=["outlier count"], cmap=cmap
-    )
-
-    st.dataframe(
-        outlier_summary,
-        width="stretch",
-        hide_index=True,
-        column_config={
-            "column name": st.column_config.Column("Column Name"),
-            "count": st.column_config.NumberColumn("# of Values", format="%.0f"),
-            "outlier count": st.column_config.NumberColumn(
-                "# of Outliers", format="%.0f"
-            ),
-            "min_value": st.column_config.NumberColumn("Minimum Value", format="%.0f"),
-            "max_value": st.column_config.NumberColumn("Maximum Value", format="%.0f"),
-            "mean": st.column_config.NumberColumn("Mean", format="%.2f"),
-            "median": st.column_config.NumberColumn("Median", format="%.2f"),
-            "iqr": st.column_config.NumberColumn("Interquartile Range", format="%.2f"),
-            "std": st.column_config.NumberColumn("Standard Deviation", format="%.2f"),
-            "lower_bound": st.column_config.NumberColumn("Lower Bound", format="%.2f"),
-            "upper_bound": st.column_config.NumberColumn("Upper Bound", format="%.2f"),
-        },
-    )
-
-
 def _render_outlier_column_inspection(
     data: pl.DataFrame,
-    outliers_data: pd.DataFrame,
+    outliers_data: pl.DataFrame,
     settings: OutlierSettings,
     setting_file: str,
 ) -> None:
@@ -1707,22 +1664,14 @@ def _render_outlier_column_inspection(
 
     Parameters
     ----------
-    data : pd.DataFrame
+    data : pl.DataFrame
         DataFrame containing the survey data.
-    outlier_data : pd.DataFrame
+    outliers_data : pl.DataFrame
         DataFrame containing outlier detection results.
-    col_summary : pd.DataFrame
-        DataFrame containing column summary statistics.
-    outlier_cols : list[str]
-        List of outlier columns to inspect.
-    display_cols : list[str] | None
-        Columns to display.
-    survey_key : str
-        Survey key column name.
-    survey_id : str
-        Survey ID column name.
-    enumerator : str
-        Enumerator column name.
+    settings : OutlierSettings
+        Outlier settings configuration.
+    setting_file : str
+        Path to settings file.
     """
     if outliers_data.is_empty():
         st.info(
@@ -1793,10 +1742,10 @@ def _render_outlier_column_inspection(
 
     with dc3:
         box_plot = _create_box_plot(
-            data=column_data[selected_col],
+            data=column_data[selected_col].to_pandas(),
             title=selected_col,
         )
-        st.plotly_chart(box_plot, width="stretch")
+        st.plotly_chart(box_plot, use_container_width=True)
 
 
     with st.expander(":material/clarify: Show more columns in report", expanded=False):
@@ -1824,13 +1773,12 @@ def _render_outlier_column_inspection(
 
     st.dataframe(
         display_df,
-        width="stretch",
+        use_container_width=True,
         hide_index=False,
     )
 
-
 # =============================================================================
-# Settings UI Functions
+# Streamlit UI - Settings Configuration
 # =============================================================================
 
 
@@ -1870,22 +1818,19 @@ def outliers_report_settings(
 
     Parameters
     ----------
-    project_id : str
-        The project identifier.
-    data : pd.DataFrame
-        DataFrame containing the survey data.
     settings_file : str
         Path to settings file.
-    page_num : int
-        Page number for configuration.
-    label : str
-        Label for the settings.
+    config : OutlierSettings
+        Default configuration.
+    categorical_columns : list[str]
+        List of categorical columns.
+    datetime_columns : list[str]
+        List of datetime columns.
 
     Returns
     -------
-    tuple
-        Configuration values (display_cols, min_threshold, survey_id,
-        survey_key, enumerator).
+    OutlierSettings
+        User-configured settings.
     """
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for outliers report")
@@ -2012,45 +1957,31 @@ def outliers_report_settings(
     )
 
 
-def _render_outlier_column_actions(project_id: str, page_name_id: str, numeric_columns: list[str]) -> None:
-    """Render the outlier column configuration UI."""
-    outlier_settings = duckdb_get_table(
-        project_id,
-        f"outliers_{page_name_id}",
-        "logs",
-    )
-
-    os1, os2, _ = st.columns([0.4, 0.3, 0.3])
-    with os1:
-        st.button("Add Outlier/Constraint Column",
-                  key="add_outlier_column",
-                  help="Add a new outlier column configuration.",
-                  width="stretch",
-                  type="primary",
-                  on_click=_add_outlier_column,
-                  args=(project_id, page_name_id, numeric_columns,))
-    with os2:
-        _delete_outlier_column(project_id, page_name_id, outlier_settings)
-
-    if outlier_settings.is_empty():
-        st.info(
-            "Use the :material/add: button to add columns to check for outliers and the "
-            ":material/delete: button to remove columns."
-        )
-    else:
-        _render_outlier_settings_table(outlier_settings)
+# =============================================================================
+# Streamlit UI - Column Configuration
+# =============================================================================
 
 
-@st.dialog("Add Outlier & Constraint Column(s)", width="medium", on_dismiss="rerun")
-def _add_outlier_column(project_id: str, page_name_id: str, numeric_columns: list[str]) -> None:
-    """Dialog to add a new outlier column configuration."""
+def _render_search_type_selection(numeric_columns: list[str]) -> tuple[str, str | None, list[str], bool]:
+    """Render search type selection UI.
+
+    Parameters
+    ----------
+    numeric_columns : list[str]
+        List of numeric columns.
+
+    Returns
+    -------
+    tuple[str, str | None, list[str], bool]
+        Search type, pattern, selected columns, and lock_cols flag.
+    """
     search_type_options = [e.value for e in SearchType]
     search_type = st.selectbox(
-                label="Search type",
-                options=search_type_options,
-                index=0,
-                help="Select the type of search to perform on the column names.",
-            )
+        label="Search type",
+        options=search_type_options,
+        index=0,
+        help="Select the type of search to perform on the column names.",
+    )
 
     _create_search_type_info(search_type)
 
@@ -2062,6 +1993,7 @@ def _add_outlier_column(project_id: str, page_name_id: str, numeric_columns: lis
             help="Select column or group of columns to check for outliers.",
         )
         pattern, lock_cols = None, None
+        return search_type, pattern, outlier_cols_sel, lock_cols
     else:
         pattern = st.text_input(
             label="Enter pattern to match column names",
@@ -2080,121 +2012,219 @@ def _add_outlier_column(project_id: str, page_name_id: str, numeric_columns: lis
             "**Columns Selected:** ",
             ", ".join(outlier_cols_patt) if outlier_cols_patt else "None",
         )
+        return search_type, pattern, outlier_cols_patt, None
 
-    outlier_cols = (
-        outlier_cols_sel
-        if search_type == SearchType.EXACT.value
-        else outlier_cols_patt
-    )
 
-    if outlier_cols:
-        gc1, gc2 = st.columns([0.5, 0.5])
-        with gc1:
-            group_cols = st.toggle(
-                label="Group columns",
-                key="group_outlier_cols",
-                help="Group selected columns together for outlier detection.",
-                disabled=not outlier_cols or len(outlier_cols) < 2,
-            )
-        with gc2:
-            lock_cols = st.toggle(
-                label="Lock column selection",
-                key="outlier_cols_lock",
-                help="Lock the selected columns to prevent changes.",
-                disabled=not outlier_cols
-                or len(outlier_cols) < 2
-                or search_type == SearchType.EXACT.value,
-            )
+def _render_column_grouping_options(outlier_cols: list[str], search_type: str) -> tuple[bool, bool]:
+    """Render column grouping and locking options.
 
-        with st.container(border=True):
-            st.write("**Outlier Options:**")
-            enable_outliers = st.toggle("Enable Outlier Checks", key="enable_coutlier", value=True)
-            if enable_outliers:
-                oc1, oc2 = st.columns([0.5, 0.5])
-                with oc1:
-                    outlier_method = st.selectbox(
-                        label="Select outlier detection method",
-                        options=[e.value for e in OutlierMethod],
-                        index=0,
-                        help="Select the method to use for outlier detection.",
-                        key="outlier_method",
-                    )
-                with oc2:
-                    default_multiplier = (
-                        OutlierMultipliers.IQR.value
-                        if outlier_method == OutlierMethod.IQR.value
-                        else OutlierMultipliers.SD.value
-                    )
-                    outlier_multiplier = st.number_input(
-                        label="Select multiplier for outlier detection",
-                        min_value=0.1,
-                        max_value=10.0,
-                        value=default_multiplier,
-                        step=0.1,
-                        help="Select the multiplier to use for outlier detection.",
-                        key="outlier_multiplier",
-                    )
+    Parameters
+    ----------
+    outlier_cols : list[str]
+        Selected outlier columns.
+    search_type : str
+        Search type used.
 
-                outlier_threshold_default = OutlierThresholds.SD.value if outlier_method == OutlierMethod.SD.value else OutlierThresholds.IQR.value
-                outlier_threshold = st.number_input(
-                    label="Outlier threshold (%)",
-                    min_value=1,
-                    value=outlier_threshold_default,
-                    help="Set the minimum number values required to flag outliers in the column.",
-                    key="outlier_threshold",
+    Returns
+    -------
+    tuple[bool, bool]
+        Group columns flag and lock columns flag.
+    """
+    gc1, gc2 = st.columns([0.5, 0.5])
+    with gc1:
+        group_cols = st.toggle(
+            label="Group columns",
+            key="group_outlier_cols",
+            help="Group selected columns together for outlier detection.",
+            disabled=not outlier_cols or len(outlier_cols) < 2,
+        )
+    with gc2:
+        lock_cols = st.toggle(
+            label="Lock column selection",
+            key="outlier_cols_lock",
+            help="Lock the selected columns to prevent changes.",
+            disabled=not outlier_cols
+            or len(outlier_cols) < 2
+            or search_type == SearchType.EXACT.value,
+        )
+    return group_cols, lock_cols
+
+
+def _render_outlier_options() -> tuple[bool, dict | None, bool]:
+    """Render outlier detection options UI.
+
+    Returns
+    -------
+    tuple[bool, dict | None, bool]
+        Enable outliers flag, outlier settings dict, and validation status.
+    """
+    with st.container(border=True):
+        st.write("**Outlier Options:**")
+        enable_outliers = st.toggle("Enable Outlier Checks", key="enable_coutlier", value=True)
+        if enable_outliers:
+            oc1, oc2 = st.columns([0.5, 0.5])
+            with oc1:
+                outlier_method = st.selectbox(
+                    label="Select outlier detection method",
+                    options=[e.value for e in OutlierMethod],
+                    index=0,
+                    help="Select the method to use for outlier detection.",
+                    key="outlier_method",
+                )
+            with oc2:
+                default_multiplier = (
+                    OutlierMultipliers.IQR.value
+                    if outlier_method == OutlierMethod.IQR.value
+                    else OutlierMultipliers.SD.value
+                )
+                outlier_multiplier = st.number_input(
+                    label="Select multiplier for outlier detection",
+                    min_value=0.1,
+                    max_value=10.0,
+                    value=default_multiplier,
+                    step=0.1,
+                    help="Select the multiplier to use for outlier detection.",
+                    key="outlier_multiplier",
                 )
 
-                outlier_settings, valid_outlier = _validate_outlier_settings({
-                    "outlier_method": outlier_method,
-                    "outlier_multiplier": outlier_multiplier,
-                    "outlier_threshold": outlier_threshold,
-                })
-            else:
-                outlier_settings, valid_outlier = None, True
+            outlier_threshold_default = OutlierThresholds.SD.value if outlier_method == OutlierMethod.SD.value else OutlierThresholds.IQR.value
+            outlier_threshold = st.number_input(
+                label="Outlier threshold (%)",
+                min_value=1,
+                value=outlier_threshold_default,
+                help="Set the minimum number values required to flag outliers in the column.",
+                key="outlier_threshold",
+            )
 
-        with st.container(border=True):
-            st.write("**Constraint Options:**")
-
-            hc1, hc2 = st.columns(2)
-            with hc1:
-                hard_min = st.number_input(
-                        label="(OPTIONAL) Hard minimum",
-                        help="(OPTIONAL) Hard minimum value for outlier detection.",
-                        value=None,
-                    )
-            with hc2:
-                hard_max = st.number_input(
-                        label="(OPTIONAL) Hard maximum",
-                        help="(OPTIONAL) Hard maximum value for outlier detection.",
-                        value=None,
-                    )
-
-            sc1, sc2 = st.columns(2)
-            with sc1:
-                soft_min = st.number_input(
-                        label="(OPTIONAL) Soft minimum",
-                        help="(OPTIONAL) Soft minimum value for outlier detection.",
-                        value=None,
-                    )
-            with sc2:
-                soft_max = st.number_input(
-                        label="(OPTIONAL) Soft maximum",
-                        help="(OPTIONAL) Soft maximum value for outlier detection.",
-                        value=None,
-                    )
-
-            constraint_settings, valid_constraint = _validate_constraint_settings({
-                "hard_min": hard_min,
-                "soft_min": soft_min,
-                "soft_max": soft_max,
-                "hard_max": hard_max,
+            outlier_settings, valid_outlier = _validate_outlier_settings({
+                "outlier_method": outlier_method,
+                "outlier_multiplier": outlier_multiplier,
+                "outlier_threshold": outlier_threshold,
             })
+            return enable_outliers, outlier_settings, valid_outlier
+        else:
+            return False, None, True
+
+
+def _render_constraint_options() -> tuple[dict, bool]:
+    """Render constraint bounds options UI.
+
+    Returns
+    -------
+    tuple[dict, bool]
+        Constraint settings dict and validation status.
+    """
+    with st.container(border=True):
+        st.write("**Constraint Options:**")
+
+        hc1, hc2 = st.columns(2)
+        with hc1:
+            hard_min = st.number_input(
+                label="(OPTIONAL) Hard minimum",
+                help="(OPTIONAL) Hard minimum value for outlier detection.",
+                value=None,
+            )
+        with hc2:
+            hard_max = st.number_input(
+                label="(OPTIONAL) Hard maximum",
+                help="(OPTIONAL) Hard maximum value for outlier detection.",
+                value=None,
+            )
+
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            soft_min = st.number_input(
+                label="(OPTIONAL) Soft minimum",
+                help="(OPTIONAL) Soft minimum value for outlier detection.",
+                value=None,
+            )
+        with sc2:
+            soft_max = st.number_input(
+                label="(OPTIONAL) Soft maximum",
+                help="(OPTIONAL) Soft maximum value for outlier detection.",
+                value=None,
+            )
+
+        return _validate_constraint_settings({
+            "hard_min": hard_min,
+            "soft_min": soft_min,
+            "soft_max": soft_max,
+            "hard_max": hard_max,
+        })
+
+
+def _render_outlier_column_actions(project_id: str, page_name_id: str, numeric_columns: list[str]) -> None:
+    """Render the outlier column configuration UI.
+
+    Parameters
+    ----------
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page name identifier.
+    numeric_columns : list[str]
+        List of numeric columns.
+    """
+    outlier_settings = duckdb_get_table(
+        project_id,
+        f"outliers_{page_name_id}",
+        "logs",
+    )
+
+    os1, os2, _ = st.columns([0.4, 0.3, 0.3])
+    with os1:
+        st.button("Add Outlier/Constraint Column",
+                  key="add_outlier_column",
+                  help="Add a new outlier column configuration.",
+                  use_container_width=True,
+                  type="primary",
+                  on_click=_add_outlier_column,
+                  args=(project_id, page_name_id, numeric_columns,))
+    with os2:
+        _delete_outlier_column(project_id, page_name_id, outlier_settings)
+
+    if outlier_settings.is_empty():
+        st.info(
+            "Use the :material/add: button to add columns to check for outliers and the "
+            ":material/delete: button to remove columns."
+        )
+    else:
+        _render_outlier_settings_table(outlier_settings)
+
+
+@st.dialog("Add Outlier & Constraint Column(s)", width="medium")
+def _add_outlier_column(project_id: str, page_name_id: str, numeric_columns: list[str]) -> None:
+    """Dialog to add a new outlier column configuration.
+
+    Parameters
+    ----------
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page name identifier.
+    numeric_columns : list[str]
+        List of numeric columns.
+    """
+    # Render search type selection
+    search_type, pattern, outlier_cols, lock_cols_initial = _render_search_type_selection(numeric_columns)
+
+    if outlier_cols:
+        # Render grouping options
+        group_cols, lock_cols = _render_column_grouping_options(outlier_cols, search_type)
+        if lock_cols_initial is not None:
+            lock_cols = lock_cols_initial
+
+        # Render outlier options
+        enable_outliers, outlier_settings, valid_outlier = _render_outlier_options()
+
+        # Render constraint options
+        constraint_settings, valid_constraint = _render_constraint_options()
 
         button_disabled = not outlier_cols or (enable_outliers and not valid_outlier) or not valid_constraint
         if st.button("Add Outlier & Constraint Configuration",
                 key="confirm_add_outlier_column",
                 type="primary",
-                width="stretch",
+                use_container_width=True,
                 disabled=button_disabled,
                 ):
             _update_outlier_column_config(
@@ -2212,6 +2242,7 @@ def _add_outlier_column(project_id: str, page_name_id: str, numeric_columns: lis
 
             st.success("Outlier & Constraint configuration added successfully.")
 
+
 def _validate_constraint_settings(
     constraint_settings: dict
 ) -> tuple[ConstraintBounds | None, bool]:
@@ -2224,13 +2255,8 @@ def _validate_constraint_settings(
 
     Returns
     -------
-    ConstraintBounds
-        Validated constraint settings.
-
-    Raises
-    ------
-    ValidationError
-        If validation fails.
+    tuple[ConstraintBounds | None, bool]
+        Validated constraint settings and validation status.
     """
     try:
         return ConstraintBounds(
@@ -2240,6 +2266,7 @@ def _validate_constraint_settings(
         user_message = _format_constraint_validation_error(e)
         st.error(user_message)
         return None, False
+
 
 def _validate_outlier_settings(
     outlier_settings: dict
@@ -2253,13 +2280,8 @@ def _validate_outlier_settings(
 
     Returns
     -------
-    OutlierOptionsConfig
-        Validated outlier settings.
-
-    Raises
-    ------
-    ValidationError
-        If validation fails.
+    tuple[OutlierOptionsConfig | None, bool]
+        Validated outlier settings and validation status.
     """
     try:
         return OutlierOptionsConfig(
@@ -2270,8 +2292,20 @@ def _validate_outlier_settings(
         st.error(user_message)
         return None, False
 
+
 def _format_constraint_validation_error(e: ValidationError) -> str:
-    """Convert Pydantic ValidationError to user-friendly message."""
+    """Convert Pydantic ValidationError to user-friendly message.
+
+    Parameters
+    ----------
+    e : ValidationError
+        Pydantic validation error.
+
+    Returns
+    -------
+    str
+        User-friendly error message.
+    """
     errors = []
     for error in e.errors():
         field = " -> ".join(str(loc) for loc in error['loc'])
@@ -2287,8 +2321,20 @@ def _format_constraint_validation_error(e: ValidationError) -> str:
 
     return "Invalid constraint configuration:\n" + "\n".join(errors)
 
+
 def _format_outlier_validation_error(e: ValidationError) -> str:
-    """Convert Pydantic ValidationError to user-friendly message."""
+    """Convert Pydantic ValidationError to user-friendly message.
+
+    Parameters
+    ----------
+    e : ValidationError
+        Pydantic validation error.
+
+    Returns
+    -------
+    str
+        User-friendly error message.
+    """
     errors = []
     for error in e.errors():
         field = " -> ".join(str(loc) for loc in error['loc'])
@@ -2304,6 +2350,7 @@ def _format_outlier_validation_error(e: ValidationError) -> str:
 
     return "Invalid outlier configuration:\n" + "\n".join(errors)
 
+
 def _update_outlier_column_config(
     project_id: str,
     page_name_id: str,
@@ -2316,7 +2363,31 @@ def _update_outlier_column_config(
     outlier_settings: OutlierOptionsConfig | None,
     constraint_settings: ConstraintBounds | None,
 ) -> None:
-    """Update the outlier column configuration in the database."""
+    """Update the outlier column configuration in the database.
+
+    Parameters
+    ----------
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page name identifier.
+    search_type : str
+        Search type used.
+    pattern : str | None
+        Pattern for column matching.
+    outlier_cols : list[str]
+        Selected columns.
+    group_cols : bool
+        Whether to group columns.
+    lock_cols : bool
+        Whether to lock column selection.
+    outlier_enabled : bool
+        Whether outlier detection is enabled.
+    outlier_settings : OutlierOptionsConfig | None
+        Outlier detection settings.
+    constraint_settings : ConstraintBounds | None
+        Constraint bounds settings.
+    """
     # get existing config
     existing_config = duckdb_get_table(
         project_id=project_id,
@@ -2355,12 +2426,19 @@ def _update_outlier_column_config(
         db_name="logs",
     )
 
+
 def _render_outlier_settings_table(outlier_settings: pl.DataFrame) -> None:
-    """Render the outlier settings table in Streamlit."""
+    """Render the outlier settings table in Streamlit.
+
+    Parameters
+    ----------
+    outlier_settings : pl.DataFrame
+        Outlier settings configuration.
+    """
     with st.expander("Outlier & Constraint Column Settings", expanded=False):
         st.dataframe(
             outlier_settings,
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
             column_config={
                 "search_type": st.column_config.Column("Search Type"),
@@ -2379,11 +2457,22 @@ def _render_outlier_settings_table(outlier_settings: pl.DataFrame) -> None:
             },
         )
 
+
 def _delete_outlier_column(project_id: str, page_name_id: str, outliers_settings: pl.DataFrame) -> None:
-    """Render delete outlier column button and handle deletion."""
+    """Render delete outlier column button and handle deletion.
+
+    Parameters
+    ----------
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page name identifier.
+    outliers_settings : pl.DataFrame
+        Current outlier settings.
+    """
     with (st.popover(
             label=":material/delete: Delete outlier column",
-            width="stretch",
+            use_container_width=True,
             ),
         ):
             st.markdown("#### Remove outlier columns")
@@ -2415,7 +2504,7 @@ def _delete_outlier_column(project_id: str, page_name_id: str, outliers_settings
                     confirm_delete = st.button(
                         label="Confirm deletion",
                         type="primary",
-                        width="stretch",
+                        use_container_width=True,
                     )
                     if confirm_delete:
                         updated_settings = outliers_settings.filter(
@@ -2432,7 +2521,6 @@ def _delete_outlier_column(project_id: str, page_name_id: str, outliers_settings
                         st.rerun()
 
 
-
 # =============================================================================
 # Main Report Function
 # =============================================================================
@@ -2447,12 +2535,14 @@ def outliers_report(
     ----------
     project_id : str
         The project identifier.
+    page_name_id : str
+        Page name identifier.
     data : pd.DataFrame
         DataFrame containing the survey data.
     setting_file : str
         Path to settings file.
-    page_num : int
-        Page number for configuration.
+    config : dict
+        Configuration dictionary.
     """
     # get column info
     # convert to polars for processing
@@ -2473,10 +2563,25 @@ def outliers_report(
     st.title("Outlier/Constraint Columns Configuration")
     _render_outlier_column_actions(project_id, page_name_id, string_numeric_cols)
 
+    # get outlier column config
     outliers_column_config = duckdb_get_table(
         project_id,
         f"outliers_{page_name_id}",
         "logs",
+    )
+
+    # update lock columns if needed
+    outliers_column_config = _update_unlocked_cols(
+        outliers_column_config,
+        string_numeric_cols,
+    )
+
+    # save updated config
+    duckdb_save_table(
+        project_id,
+        outliers_column_config,
+        f"outliers_{page_name_id}",
+        db_name="logs",
     )
 
     # Compute outliers
