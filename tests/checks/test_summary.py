@@ -1,38 +1,52 @@
 """Comprehensive tests for the summary module with 100% code coverage."""
 
+# Standard library imports
 from datetime import date, datetime, timedelta
 from unittest.mock import Mock, patch
 
+# Third-party imports
 import pandas as pd
 import polars as pl
 import pytest
 from dateutil.relativedelta import relativedelta
 from pydantic import ValidationError
 
+# Local application imports
 from datasure.checks.summary import (
+    # Pydantic Models
     DataQualityMetrics,
     DataSummaryMetrics,
     DateRangeCalculator,
     ProgressMetrics,
     SubmissionMetrics,
     SummarySettings,
+    # Private helper functions
     _create_empty_progress_metrics,
     _create_empty_submission_metrics,
+    # Calculation functions
     calculate_data_quality_metrics,
     calculate_data_summary_metrics,
     calculate_percentage_change,
     calculate_progress_metrics,
     calculate_submission_count,
     calculate_submission_metrics,
+    # Backward compatibility wrappers
     compute_summary_data_quality,
     compute_summary_data_summary,
     compute_summary_progress,
     compute_summary_progress_by_col,
     compute_summary_submissions,
+    # Utility functions
     determine_auto_time_period,
     pandas_to_polars,
     polars_to_pandas,
     prepare_date_data,
+    # UI components
+    summary_data_quality,
+    summary_data_summary,
+    summary_progress,
+    summary_settings,
+    summary_submissions,
     validate_and_convert_date_column,
 )
 
@@ -736,8 +750,6 @@ class TestUIComponents:
         mock_st,
     ):
         """Test summary settings UI component."""
-        from datasure.checks.summary import summary_settings
-
         # Setup mocks
         mock_get_info.return_value = (None, ["id"], [1, 2, 3], ["date_col"], None)
 
@@ -785,8 +797,6 @@ class TestUIComponents:
         self, mock_px, mock_calc, mock_convert, mock_st
     ):
         """Test summary submissions without date column."""
-        from datasure.checks.summary import summary_submissions
-
         df = pd.DataFrame({"id": [1, 2, 3]})
         summary_submissions(df, date=None)
 
@@ -796,8 +806,6 @@ class TestUIComponents:
     @patch("datasure.checks.summary.px")
     def test_summary_submissions_with_date(self, mock_px, mock_st):
         """Test summary submissions with date column."""
-        from datasure.checks.summary import summary_submissions
-
         # Create mock figure
         mock_fig = Mock()
         mock_px.area.return_value = mock_fig
@@ -827,8 +835,6 @@ class TestUIComponents:
         self, mock_render, mock_calc, mock_convert, mock_st
     ):
         """Test summary progress without date column."""
-        from datasure.checks.summary import summary_progress
-
         df = pd.DataFrame({"id": [1, 2, 3]})
         summary_progress(df, date=None, target=100, setting_file="settings.json")
 
@@ -838,8 +844,6 @@ class TestUIComponents:
     @patch("datasure.checks.summary._render_progress_by_column")
     def test_summary_progress_with_date_and_target(self, mock_render, mock_st):
         """Test summary progress with date column and target."""
-        from datasure.checks.summary import summary_progress
-
         # Create test data with dates
         df = pd.DataFrame(
             {
@@ -866,8 +870,6 @@ class TestUIComponents:
     @patch("datasure.checks.summary._render_progress_by_column")
     def test_summary_progress_with_date_no_target(self, mock_render, mock_st):
         """Test summary progress with date column but no target."""
-        from datasure.checks.summary import summary_progress
-
         # Create test data with dates
         df = pd.DataFrame(
             {
@@ -892,8 +894,6 @@ class TestUIComponents:
     @patch("datasure.checks.summary.calculate_data_summary_metrics")
     def test_summary_data_summary(self, mock_calc, mock_convert, mock_st):
         """Test summary data summary UI component."""
-        from datasure.checks.summary import summary_data_summary
-
         mock_convert.return_value = pl.DataFrame()
         mock_calc.return_value = DataSummaryMetrics(
             string_columns_count=5,
@@ -917,8 +917,6 @@ class TestUIComponents:
         self, mock_plt, mock_chart, mock_calc, mock_convert, mock_st
     ):
         """Test summary data quality UI component."""
-        from datasure.checks.summary import summary_data_quality
-
         mock_convert.return_value = pl.DataFrame()
         mock_calc.return_value = DataQualityMetrics(
             duplicates_pct=2.5,
@@ -1100,17 +1098,22 @@ class TestUIComponents:
         mock_st,
     ):
         """Test complete summary report generation."""
+        import polars as pl
+
         from datasure.checks.summary import summary_report
 
         mock_settings.return_value = ("date_col", 100, "id_col")
 
         df = pd.DataFrame({"id": [1, 2, 3], "date_col": [date(2024, 1, 1)] * 3})
+        # Convert to Polars as expected by the function
+        pl_df = pl.from_pandas(df)
         config = {
             "survey_id": "id_col",
             "survey_date": "date_col",
             "survey_target": 100,
         }
-        summary_report("project_123", df, "settings.json", 1, config)
+        # Updated signature: (data: pl.DataFrame, setting_file: str, config: dict)
+        summary_report(pl_df, "settings.json", config)
 
         mock_settings.assert_called_once()
         mock_data_summary.assert_called_once()
