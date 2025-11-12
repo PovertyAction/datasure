@@ -15,14 +15,7 @@ import polars as pl
 import streamlit as st
 
 from datasure.checks import (
-    backchecks_report,
-    descriptive_report,
-    duplicates_report,
-    enumerator_report,
-    gpschecks_report,
-    missing_report,
     outliers_report,
-    progress_report,
     summary_report,
 )
 from datasure.utils.cache_utils import get_cache_path
@@ -280,21 +273,21 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
 
     # Render each tab
     with summary:
-        summary_config: dict = {'survey_id': config.survey_id,
-                                'survey_date': config.survey_date,
-                                'survey_target': config.survey_target}
-        summary_report(
-            data.page_data,
-            config.setting_file,
-            summary_config
-        )
+        summary_config: dict = {
+            "survey_id": config.survey_id,
+            "survey_date": config.survey_date,
+            "survey_target": config.survey_target,
+        }
+        summary_report(data.page_data, config.setting_file, summary_config)
 
     with outliers:
-        outliers_config: dict = {'survey_key': config.survey_key,
-                                 'survey_id': config.survey_id,
-                                 'enumerator': config.enumerator,
-                                 'team': config.team,
-                                 'survey_date': config.survey_date}
+        outliers_config: dict = {
+            "survey_key": config.survey_key,
+            "survey_id": config.survey_id,
+            "enumerator": config.enumerator,
+            "team": config.team,
+            "survey_date": config.survey_date,
+        }
         outliers_report(
             project_id,
             config.page_name_id,

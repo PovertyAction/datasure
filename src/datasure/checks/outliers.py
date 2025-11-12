@@ -6,6 +6,7 @@ This module provides comprehensive outlier detection functionality with:
 - Pydantic validation for data integrity
 - Modular, testable architecture
 """
+
 import re
 from enum import Enum, IntEnum
 from typing import Any
@@ -56,17 +57,20 @@ class SearchType(str, Enum):
     CONTAINS = "contains"
     REGEX = "regex"
 
+
 class OutlierThresholds(IntEnum):
     """Integer thresholds"""
 
     IQR = 20
     SD = 30
 
+
 class OutlierMultipliers(float, Enum):
     """Float multipliers"""
 
     IQR = 1.5
     SD = 3.0
+
 
 # =============================================================================
 # Pydantic Models for Data Validation
@@ -78,6 +82,7 @@ class OutlierBounds(BaseModel):
 
     lower_bound: float
     upper_bound: float
+
 
 class OutlierOptionsConfig(BaseModel):
     """Configuration for outlier options."""
@@ -97,6 +102,7 @@ class OutlierOptionsConfig(BaseModel):
         description="Minimum number of non-null values required to flag outliers.",
     )
 
+
 class ConstraintBounds(BaseModel):
     """User-defined constraint bounds for outlier detection.
 
@@ -109,14 +115,14 @@ class ConstraintBounds(BaseModel):
     soft_max: int | float | None = Field(None, description="Expected Maximum bound")
     hard_max: int | float | None = Field(None, description="Absolute Maximum bound")
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def validate_bounds_hierarchy(self):
         """Validate the complete hierarchy of bounds."""
         bounds = [
-            ('hard_min', self.hard_min),
-            ('soft_min', self.soft_min),
-            ('soft_max', self.soft_max),
-            ('hard_max', self.hard_max)
+            ("hard_min", self.hard_min),
+            ("soft_min", self.soft_min),
+            ("soft_max", self.soft_max),
+            ("hard_max", self.hard_max),
         ]
 
         # Get only non-None values with their names
@@ -134,23 +140,32 @@ class ConstraintBounds(BaseModel):
 
         return self
 
+
 class ConstraintMetrics(BaseModel):
     """Computed metrics for constraint violations."""
 
     columns_checked: int = Field(ge=0, description="Number of columns checked")
-    total_violations: int = Field(ge=0, description="Total number of constraint violations")
+    total_violations: int = Field(
+        ge=0, description="Total number of constraint violations"
+    )
     hard_min_violations: int = Field(ge=0, description="Count of values below hard_min")
     soft_min_violations: int = Field(ge=0, description="Count of values below soft_min")
     soft_max_violations: int = Field(ge=0, description="Count of values above soft_max")
     hard_max_violations: int = Field(ge=0, description="Count of values above hard_max")
 
+
 class OutlierMetrics(BaseModel):
     """Computed Metrics for Outlier Checks"""
 
     columns_checked: int = Field(ge=0, description="Number of columns checked")
-    columns_with_outliers: int = Field(ge=0, description="Total number of columns with outlier values")
+    columns_with_outliers: int = Field(
+        ge=0, description="Total number of columns with outlier values"
+    )
     total_outliers: int = Field(ge=0, description="Total number of outliers flagged")
-    enumerators_with_outliers: int = Field(ge=0, description="Total number of outliers flagged")
+    enumerators_with_outliers: int = Field(
+        ge=0, description="Total number of outliers flagged"
+    )
+
 
 class OutlierStatistics(BaseModel):
     """Complete statistical summary for outlier detection."""
@@ -206,9 +221,15 @@ class OutlierSettings(BaseModel):
     """Main configuration for outlier report."""
 
     survey_key: str = Field(..., description="Column name for survey key", min_length=1)
-    survey_id: str | None = Field(None, description="Column name for survey ID", min_length=1)
-    survey_date: str | None = Field(None, description="Column name for survey date", min_length=1)
-    enumerator: str | None = Field(None, description="Column name for enumerator ID", min_length=1)
+    survey_id: str | None = Field(
+        None, description="Column name for survey ID", min_length=1
+    )
+    survey_date: str | None = Field(
+        None, description="Column name for survey date", min_length=1
+    )
+    enumerator: str | None = Field(
+        None, description="Column name for enumerator ID", min_length=1
+    )
     team: str | None = Field(None, description="Column name for team", min_length=1)
 
 
@@ -295,7 +316,9 @@ def _sanitize_df_for_join(
     main_cols = main_df.columns
     join_cols = join_df.columns
 
-    sanitized_cols = [col for col in join_cols if col not in main_cols or col == join_key]
+    sanitized_cols = [
+        col for col in join_cols if col not in main_cols or col == join_key
+    ]
 
     return join_df.select(sanitized_cols)
 
@@ -357,7 +380,10 @@ def _convert_dataframe_column_to_numeric(df: pl.DataFrame, column: str) -> pl.Da
     try:
         if df[column].dtype == pl.Utf8:
             return df.with_columns(
-                pl.col(column).str.to_decimal().cast(pl.Float64, strict=False).alias(column)
+                pl.col(column)
+                .str.to_decimal()
+                .cast(pl.Float64, strict=False)
+                .alias(column)
             )
         return df.with_columns(
             pl.col(column).cast(pl.Float64, strict=False).alias(column)
@@ -368,7 +394,9 @@ def _convert_dataframe_column_to_numeric(df: pl.DataFrame, column: str) -> pl.Da
         ) from e
 
 
-def safe_to_numeric(data: pl.DataFrame | pl.Series, column: str | None = None) -> pl.DataFrame | pl.Series:
+def safe_to_numeric(
+    data: pl.DataFrame | pl.Series, column: str | None = None
+) -> pl.DataFrame | pl.Series:
     """Safely convert columns to numeric, keeping original if conversion fails.
 
     Parameters
@@ -571,6 +599,7 @@ def update_unlocked_cols(
     """
     return _update_unlocked_cols(outlier_settings, col_names)
 
+
 # =============================================================================
 # Statistical Computation Functions (Polars-optimized)
 # =============================================================================
@@ -741,9 +770,18 @@ def stack_outlier_columns(df: pl.DataFrame, col_names: list[str]) -> pl.Series:
     # Check and convert columns to numeric if needed
     for col in col_names:
         dtype = df[col].dtype
-        if dtype not in [pl.Int8, pl.Int16, pl.Int32, pl.Int64,
-                         pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
-                         pl.Float32, pl.Float64]:
+        if dtype not in [
+            pl.Int8,
+            pl.Int16,
+            pl.Int32,
+            pl.Int64,
+            pl.UInt8,
+            pl.UInt16,
+            pl.UInt32,
+            pl.UInt64,
+            pl.Float32,
+            pl.Float64,
+        ]:
             try:
                 df = df.with_columns(pl.col(col).cast(pl.Float64))
             except Exception:
@@ -961,10 +999,9 @@ def compute_outlier_output(
     survey_date = outlier_settings.survey_date
     enumerator = outlier_settings.enumerator
     team = outlier_settings.team
-    include_cols = _build_include_cols(survey_key, survey_id,
-                                        survey_date,
-                                        enumerator,
-                                        team)
+    include_cols = _build_include_cols(
+        survey_key, survey_id, survey_date, enumerator, team
+    )
 
     # Select admin data
     admin_data_polars = data.select(include_cols)
@@ -1108,7 +1145,9 @@ def compute_constraint_violations(
             col_df = safe_to_numeric(col_df, col)
 
             col_df = col_df.with_columns(
-                violation_expr.otherwise(pl.lit("no violation")).alias("violation reason")
+                violation_expr.otherwise(pl.lit("no violation")).alias(
+                    "violation reason"
+                )
             )
 
             # add hard and soft bounds columns
@@ -1118,14 +1157,10 @@ def compute_constraint_violations(
                 ("soft_max", soft_max),
                 ("hard_max", hard_max),
             ]:
-                col_df = col_df.with_columns(
-                    pl.lit(bound_value).alias(bound_name)
-                )
+                col_df = col_df.with_columns(pl.lit(bound_value).alias(bound_name))
 
             col_df = col_df.rename({col: "column value"})
-            col_df = col_df.with_columns(
-                pl.lit(col).alias("column name")
-            ).select(
+            col_df = col_df.with_columns(pl.lit(col).alias("column name")).select(
                 [
                     survey_key,
                     "column name",
@@ -1152,8 +1187,7 @@ def compute_constraint_violations(
 # =============================================================================
 
 
-def _compute_constraint_metrics(
-    violation_data: pl.DataFrame) -> ConstraintMetrics:
+def _compute_constraint_metrics(violation_data: pl.DataFrame) -> ConstraintMetrics:
     """Compute metrics related to constraint violations.
 
     Parameters
@@ -1262,11 +1296,7 @@ def compute_column_outlier_summary(
     outlier_summary = outlier_data.unique(subset=["column name", survey_key])
 
     # Count occurrences per column
-    col_counts = (
-        outlier_summary
-        .group_by("column name")
-        .agg(pl.count().alias("count"))
-    )
+    col_counts = outlier_summary.group_by("column name").agg(pl.count().alias("count"))
 
     # Join counts back
     outlier_summary = outlier_summary.join(col_counts, on="column name", how="left")
@@ -1280,16 +1310,12 @@ def compute_column_outlier_summary(
     )
 
     # Count outliers per column
-    outlier_counts = (
-        outlier_summary
-        .group_by("column name")
-        .agg(pl.col("flagged as outlier").sum().alias("outlier count"))
+    outlier_counts = outlier_summary.group_by("column name").agg(
+        pl.col("flagged as outlier").sum().alias("outlier count")
     )
 
     # Merge outlier counts
-    outlier_summary = outlier_summary.join(
-        outlier_counts, on="column name", how="left"
-    )
+    outlier_summary = outlier_summary.join(outlier_counts, on="column name", how="left")
 
     # Select and order columns
     outlier_summary = outlier_summary.select(
@@ -1399,7 +1425,7 @@ def _create_descriptive_stats(column_data: pl.DataFrame) -> pl.DataFrame:
     }
 
     table = table.with_columns(
-        pl.col('statistic').replace(stat_rename).alias('statistic')
+        pl.col("statistic").replace(stat_rename).alias("statistic")
     )
 
     return table
@@ -1411,8 +1437,8 @@ def _create_descriptive_stats(column_data: pl.DataFrame) -> pl.DataFrame:
 
 
 def _render_constraint_metrics(
-        violation_data: pl.DataFrame,
-    ) -> None:
+    violation_data: pl.DataFrame,
+) -> None:
     """Render constraint violation metrics using Streamlit.
 
     Parameters
@@ -1425,10 +1451,10 @@ def _render_constraint_metrics(
     _, _, uc3, uc4 = st.columns(4)
     with uc3, st.container(border=True):
         st.metric(
-        label="Number of columns checked",
-        value=f"{metrics.columns_checked:,}",
-        help="Number of columns checked for constraint violations",
-    )
+            label="Number of columns checked",
+            value=f"{metrics.columns_checked:,}",
+            help="Number of columns checked for constraint violations",
+        )
     with uc4, st.container(border=True):
         st.metric(
             label="Total Violations",
@@ -1548,7 +1574,9 @@ def _render_constraint_violations_table(
         # get saved settings
         saved_settings = load_check_settings(setting_file, TAB_NAME)
         cols = saved_settings.get("constraint_display_cols", [])
-        default_constraint_display_cols = [col for col in cols if col in display_options]
+        default_constraint_display_cols = [
+            col for col in cols if col in display_options
+        ]
 
         constraint_display_cols = st.multiselect(
             label="Select columns to display",
@@ -1558,7 +1586,9 @@ def _render_constraint_violations_table(
             on_change=trigger_save,
             kwargs={"state_name": TAB_NAME + "_constraint_display_cols"},
         )
-        save_check_settings(setting_file, TAB_NAME, {"constraint_display_cols": constraint_display_cols})
+        save_check_settings(
+            setting_file, TAB_NAME, {"constraint_display_cols": constraint_display_cols}
+        )
 
     if constraint_display_cols:
         include_cols.extend(constraint_display_cols)
@@ -1634,7 +1664,9 @@ def _render_outlier_table(
             on_change=trigger_save,
             kwargs={"state_name": TAB_NAME + "_outlier_display_cols"},
         )
-        save_check_settings(setting_file, TAB_NAME, {"outlier_display_cols": outlier_display_cols})
+        save_check_settings(
+            setting_file, TAB_NAME, {"outlier_display_cols": outlier_display_cols}
+        )
 
     if outlier_display_cols:
         include_cols.extend(outlier_display_cols)
@@ -1689,10 +1721,10 @@ def _render_outlier_column_inspection(
         team=settings.team,
     )
 
-
     # list of outlier columns checked
-    columns_checked_list = outliers_data.select("column name").unique().to_series().to_list()
-
+    columns_checked_list = (
+        outliers_data.select("column name").unique().to_series().to_list()
+    )
 
     ic1, _ = st.columns([0.2, 0.8])
 
@@ -1735,9 +1767,7 @@ def _render_outlier_column_inspection(
     st.subheader(f"Details/Distribution for {selected_col} values")
     dc1, _, dc3 = st.columns([0.3, 0.1, 0.6])
     with dc1:
-        desc_stats = _create_descriptive_stats(
-            column_data
-        )
+        desc_stats = _create_descriptive_stats(column_data)
         st.dataframe(desc_stats)
 
     with dc3:
@@ -1747,10 +1777,15 @@ def _render_outlier_column_inspection(
         )
         st.plotly_chart(box_plot, use_container_width=True)
 
-
     with st.expander(":material/clarify: Show more columns in report", expanded=False):
-        st.info("Select additional columns to include in the outlier inspection report.")
-        display_options = [col for col in all_columns if col not in include_cols and col != selected_col]
+        st.info(
+            "Select additional columns to include in the outlier inspection report."
+        )
+        display_options = [
+            col
+            for col in all_columns
+            if col not in include_cols and col != selected_col
+        ]
         inspect_display_cols = st.multiselect(
             label="Select columns to display",
             options=display_options,
@@ -1776,6 +1811,7 @@ def _render_outlier_column_inspection(
         use_container_width=True,
         hide_index=False,
     )
+
 
 # =============================================================================
 # Streamlit UI - Settings Configuration
@@ -1808,7 +1844,10 @@ def _create_search_type_info(search_type_param: str) -> None:
 
 @demo_output_onboarding(TAB_NAME)
 def outliers_report_settings(
-    settings_file: str, config: OutlierSettings, categorical_columns: list[str], datetime_columns: list[str]
+    settings_file: str,
+    config: OutlierSettings,
+    categorical_columns: list[str],
+    datetime_columns: list[str],
 ) -> OutlierSettings:
     """Create a settings UI for outliers report configuration.
 
@@ -1889,8 +1928,7 @@ def outliers_report_settings(
                 default_survey_date = default_settings.survey_date
                 default_survey_date_index = (
                     datetime_columns.index(default_survey_date)
-                    if default_survey_date
-                    and default_survey_date in datetime_columns
+                    if default_survey_date and default_survey_date in datetime_columns
                     else None
                 )
 
@@ -1926,9 +1964,7 @@ def outliers_report_settings(
                     on_change=trigger_save,
                     kwargs={"state_name": TAB_NAME + "_enumerator"},
                 )
-                save_check_settings(
-                    settings_file, TAB_NAME, {"enumerator": enumerator}
-                )
+                save_check_settings(settings_file, TAB_NAME, {"enumerator": enumerator})
 
             with ec2:
                 default_team = default_settings.team
@@ -1962,7 +1998,9 @@ def outliers_report_settings(
 # =============================================================================
 
 
-def _render_search_type_selection(numeric_columns: list[str]) -> tuple[str, str | None, list[str], bool]:
+def _render_search_type_selection(
+    numeric_columns: list[str],
+) -> tuple[str, str | None, list[str], bool]:
     """Render search type selection UI.
 
     Parameters
@@ -2015,7 +2053,9 @@ def _render_search_type_selection(numeric_columns: list[str]) -> tuple[str, str 
         return search_type, pattern, outlier_cols_patt, None
 
 
-def _render_column_grouping_options(outlier_cols: list[str], search_type: str) -> tuple[bool, bool]:
+def _render_column_grouping_options(
+    outlier_cols: list[str], search_type: str
+) -> tuple[bool, bool]:
     """Render column grouping and locking options.
 
     Parameters
@@ -2060,7 +2100,9 @@ def _render_outlier_options() -> tuple[bool, dict | None, bool]:
     """
     with st.container(border=True):
         st.write("**Outlier Options:**")
-        enable_outliers = st.toggle("Enable Outlier Checks", key="enable_coutlier", value=True)
+        enable_outliers = st.toggle(
+            "Enable Outlier Checks", key="enable_coutlier", value=True
+        )
         if enable_outliers:
             oc1, oc2 = st.columns([0.5, 0.5])
             with oc1:
@@ -2087,7 +2129,11 @@ def _render_outlier_options() -> tuple[bool, dict | None, bool]:
                     key="outlier_multiplier",
                 )
 
-            outlier_threshold_default = OutlierThresholds.SD.value if outlier_method == OutlierMethod.SD.value else OutlierThresholds.IQR.value
+            outlier_threshold_default = (
+                OutlierThresholds.SD.value
+                if outlier_method == OutlierMethod.SD.value
+                else OutlierThresholds.IQR.value
+            )
             outlier_threshold = st.number_input(
                 label="Outlier threshold (%)",
                 min_value=1,
@@ -2096,11 +2142,13 @@ def _render_outlier_options() -> tuple[bool, dict | None, bool]:
                 key="outlier_threshold",
             )
 
-            outlier_settings, valid_outlier = _validate_outlier_settings({
-                "outlier_method": outlier_method,
-                "outlier_multiplier": outlier_multiplier,
-                "outlier_threshold": outlier_threshold,
-            })
+            outlier_settings, valid_outlier = _validate_outlier_settings(
+                {
+                    "outlier_method": outlier_method,
+                    "outlier_multiplier": outlier_multiplier,
+                    "outlier_threshold": outlier_threshold,
+                }
+            )
             return enable_outliers, outlier_settings, valid_outlier
         else:
             return False, None, True
@@ -2145,15 +2193,19 @@ def _render_constraint_options() -> tuple[dict, bool]:
                 value=None,
             )
 
-        return _validate_constraint_settings({
-            "hard_min": hard_min,
-            "soft_min": soft_min,
-            "soft_max": soft_max,
-            "hard_max": hard_max,
-        })
+        return _validate_constraint_settings(
+            {
+                "hard_min": hard_min,
+                "soft_min": soft_min,
+                "soft_max": soft_max,
+                "hard_max": hard_max,
+            }
+        )
 
 
-def _render_outlier_column_actions(project_id: str, page_name_id: str, numeric_columns: list[str]) -> None:
+def _render_outlier_column_actions(
+    project_id: str, page_name_id: str, numeric_columns: list[str]
+) -> None:
     """Render the outlier column configuration UI.
 
     Parameters
@@ -2173,13 +2225,19 @@ def _render_outlier_column_actions(project_id: str, page_name_id: str, numeric_c
 
     os1, os2, _ = st.columns([0.4, 0.3, 0.3])
     with os1:
-        st.button("Add Outlier/Constraint Column",
-                  key="add_outlier_column",
-                  help="Add a new outlier column configuration.",
-                  use_container_width=True,
-                  type="primary",
-                  on_click=_add_outlier_column,
-                  args=(project_id, page_name_id, numeric_columns,))
+        st.button(
+            "Add Outlier/Constraint Column",
+            key="add_outlier_column",
+            help="Add a new outlier column configuration.",
+            use_container_width=True,
+            type="primary",
+            on_click=_add_outlier_column,
+            args=(
+                project_id,
+                page_name_id,
+                numeric_columns,
+            ),
+        )
     with os2:
         _delete_outlier_column(project_id, page_name_id, outlier_settings)
 
@@ -2193,7 +2251,9 @@ def _render_outlier_column_actions(project_id: str, page_name_id: str, numeric_c
 
 
 @st.dialog("Add Outlier & Constraint Column(s)", width="medium")
-def _add_outlier_column(project_id: str, page_name_id: str, numeric_columns: list[str]) -> None:
+def _add_outlier_column(
+    project_id: str, page_name_id: str, numeric_columns: list[str]
+) -> None:
     """Dialog to add a new outlier column configuration.
 
     Parameters
@@ -2206,11 +2266,15 @@ def _add_outlier_column(project_id: str, page_name_id: str, numeric_columns: lis
         List of numeric columns.
     """
     # Render search type selection
-    search_type, pattern, outlier_cols, lock_cols_initial = _render_search_type_selection(numeric_columns)
+    search_type, pattern, outlier_cols, lock_cols_initial = (
+        _render_search_type_selection(numeric_columns)
+    )
 
     if outlier_cols:
         # Render grouping options
-        group_cols, lock_cols = _render_column_grouping_options(outlier_cols, search_type)
+        group_cols, lock_cols = _render_column_grouping_options(
+            outlier_cols, search_type
+        )
         if lock_cols_initial is not None:
             lock_cols = lock_cols_initial
 
@@ -2220,13 +2284,18 @@ def _add_outlier_column(project_id: str, page_name_id: str, numeric_columns: lis
         # Render constraint options
         constraint_settings, valid_constraint = _render_constraint_options()
 
-        button_disabled = not outlier_cols or (enable_outliers and not valid_outlier) or not valid_constraint
-        if st.button("Add Outlier & Constraint Configuration",
-                key="confirm_add_outlier_column",
-                type="primary",
-                use_container_width=True,
-                disabled=button_disabled,
-                ):
+        button_disabled = (
+            not outlier_cols
+            or (enable_outliers and not valid_outlier)
+            or not valid_constraint
+        )
+        if st.button(
+            "Add Outlier & Constraint Configuration",
+            key="confirm_add_outlier_column",
+            type="primary",
+            use_container_width=True,
+            disabled=button_disabled,
+        ):
             _update_outlier_column_config(
                 project_id,
                 page_name_id,
@@ -2244,7 +2313,7 @@ def _add_outlier_column(project_id: str, page_name_id: str, numeric_columns: lis
 
 
 def _validate_constraint_settings(
-    constraint_settings: dict
+    constraint_settings: dict,
 ) -> tuple[ConstraintBounds | None, bool]:
     """Validate constraint settings using Pydantic model.
 
@@ -2259,9 +2328,7 @@ def _validate_constraint_settings(
         Validated constraint settings and validation status.
     """
     try:
-        return ConstraintBounds(
-            **constraint_settings
-        ), True
+        return ConstraintBounds(**constraint_settings), True
     except ValidationError as e:
         user_message = _format_constraint_validation_error(e)
         st.error(user_message)
@@ -2269,7 +2336,7 @@ def _validate_constraint_settings(
 
 
 def _validate_outlier_settings(
-    outlier_settings: dict
+    outlier_settings: dict,
 ) -> tuple[OutlierOptionsConfig | None, bool]:
     """Validate outlier settings using Pydantic model.
 
@@ -2284,9 +2351,7 @@ def _validate_outlier_settings(
         Validated outlier settings and validation status.
     """
     try:
-        return OutlierOptionsConfig(
-            **outlier_settings
-        ), True
+        return OutlierOptionsConfig(**outlier_settings), True
     except ValidationError as e:
         user_message = _format_outlier_validation_error(e)
         st.error(user_message)
@@ -2308,13 +2373,15 @@ def _format_constraint_validation_error(e: ValidationError) -> str:
     """
     errors = []
     for error in e.errors():
-        field = " -> ".join(str(loc) for loc in error['loc'])
-        msg = error['msg']
+        field = " -> ".join(str(loc) for loc in error["loc"])
+        msg = error["msg"]
 
         # Customize messages based on error type
-        if error['type'] == 'float_not_finite':
-            errors.append(f"• {field}: Value must be a finite number (not NaN or infinity)")
-        elif error['type'] == 'value_error':
+        if error["type"] == "float_not_finite":
+            errors.append(
+                f"• {field}: Value must be a finite number (not NaN or infinity)"
+            )
+        elif error["type"] == "value_error":
             errors.append(f"• {msg}")  # Your custom validation messages
         else:
             errors.append(f"• {field}: {msg}")
@@ -2337,14 +2404,18 @@ def _format_outlier_validation_error(e: ValidationError) -> str:
     """
     errors = []
     for error in e.errors():
-        field = " -> ".join(str(loc) for loc in error['loc'])
-        msg = error['msg']
+        field = " -> ".join(str(loc) for loc in error["loc"])
+        msg = error["msg"]
 
         # Customize messages based on error type
-        if error['type'] == 'value_error.number.not_ge':
-            errors.append(f"• {field}: Value must be greater than or equal to the minimum allowed.")
-        elif error['type'] == 'value_error.number.not_le':
-            errors.append(f"• {field}: Value must be less than or equal to the maximum allowed.")
+        if error["type"] == "value_error.number.not_ge":
+            errors.append(
+                f"• {field}: Value must be greater than or equal to the minimum allowed."
+            )
+        elif error["type"] == "value_error.number.not_le":
+            errors.append(
+                f"• {field}: Value must be less than or equal to the maximum allowed."
+            )
         else:
             errors.append(f"• {field}: {msg}")
 
@@ -2404,8 +2475,12 @@ def _update_outlier_column_config(
         "locked": lock_cols,
         "outlier_enabled": outlier_enabled,
         "outlier_method": outlier_settings.outlier_method if outlier_settings else None,
-        "outlier_multiplier": outlier_settings.outlier_multiplier if outlier_settings else None,
-        "outlier_threshold": outlier_settings.outlier_threshold if outlier_settings else None,
+        "outlier_multiplier": outlier_settings.outlier_multiplier
+        if outlier_settings
+        else None,
+        "outlier_threshold": outlier_settings.outlier_threshold
+        if outlier_settings
+        else None,
         "hard_min": constraint_settings.hard_min if constraint_settings else None,
         "soft_min": constraint_settings.soft_min if constraint_settings else None,
         "soft_max": constraint_settings.soft_max if constraint_settings else None,
@@ -2448,7 +2523,9 @@ def _render_outlier_settings_table(outlier_settings: pl.DataFrame) -> None:
                 "locked": st.column_config.CheckboxColumn("Locked"),
                 "outlier_enabled": st.column_config.CheckboxColumn("Outlier Enabled"),
                 "outlier_method": st.column_config.Column("Outlier Method"),
-                "outlier_multiplier": st.column_config.NumberColumn("Outlier Multiplier"),
+                "outlier_multiplier": st.column_config.NumberColumn(
+                    "Outlier Multiplier"
+                ),
                 "outlier_threshold": st.column_config.NumberColumn("Outlier Threshold"),
                 "hard_min": st.column_config.NumberColumn("Hard Min"),
                 "soft_min": st.column_config.NumberColumn("Soft Min"),
@@ -2458,7 +2535,9 @@ def _render_outlier_settings_table(outlier_settings: pl.DataFrame) -> None:
         )
 
 
-def _delete_outlier_column(project_id: str, page_name_id: str, outliers_settings: pl.DataFrame) -> None:
+def _delete_outlier_column(
+    project_id: str, page_name_id: str, outliers_settings: pl.DataFrame
+) -> None:
     """Render delete outlier column button and handle deletion.
 
     Parameters
@@ -2470,55 +2549,58 @@ def _delete_outlier_column(project_id: str, page_name_id: str, outliers_settings
     outliers_settings : pl.DataFrame
         Current outlier settings.
     """
-    with (st.popover(
+    with (
+        st.popover(
             label=":material/delete: Delete outlier column",
             use_container_width=True,
-            ),
-        ):
-            st.markdown("#### Remove outlier columns")
+        ),
+    ):
+        st.markdown("#### Remove outlier columns")
 
-            if outliers_settings.is_empty():
-                st.info(
-                    "No outlier columns have been added yet. "
+        if outliers_settings.is_empty():
+            st.info("No outlier columns have been added yet. ")
+        else:
+            outliers_settings = outliers_settings.with_row_index().with_columns(
+                (
+                    pl.col("index").cast(pl.Utf8)
+                    + " - "
+                    + pl.col("search_type")
+                    + " - "
+                    + pl.col("pattern").fill_null("")
+                ).alias("composite_index")
+            )
+
+            unique_index = (
+                outliers_settings["composite_index"]
+                .unique(maintain_order=True)
+                .to_list()
+            )
+
+            selected_index = st.selectbox(
+                label="Select outlier column to remove",
+                options=unique_index,
+                help="Select the outlier column to remove from the list.",
+            )
+
+            if selected_index:
+                confirm_delete = st.button(
+                    label="Confirm deletion",
+                    type="primary",
+                    use_container_width=True,
                 )
-            else:
-                outliers_settings = outliers_settings.with_row_index().with_columns(
-                    (
-                        pl.col("index").cast(pl.Utf8)
-                        + " - "
-                        + pl.col("search_type")
-                        + " - "
-                        + pl.col("pattern").fill_null("")
-                    ).alias("composite_index")
-                )
+                if confirm_delete:
+                    updated_settings = outliers_settings.filter(
+                        pl.col("composite_index") != selected_index
+                    ).drop("composite_index")
 
-                unique_index = outliers_settings["composite_index"].unique(maintain_order=True).to_list()
-
-                selected_index = st.selectbox(
-                    label="Select outlier column to remove",
-                    options=unique_index,
-                    help="Select the outlier column to remove from the list.",
-                )
-
-                if selected_index:
-                    confirm_delete = st.button(
-                        label="Confirm deletion",
-                        type="primary",
-                        use_container_width=True,
+                    duckdb_save_table(
+                        project_id,
+                        updated_settings,
+                        f"outliers_{page_name_id}",
+                        "logs",
                     )
-                    if confirm_delete:
-                        updated_settings = outliers_settings.filter(
-                            pl.col("composite_index") != selected_index
-                        ).drop("composite_index")
 
-                        duckdb_save_table(
-                            project_id,
-                            updated_settings,
-                            f"outliers_{page_name_id}",
-                            "logs",
-                        )
-
-                        st.rerun()
+                    st.rerun()
 
 
 # =============================================================================
@@ -2527,7 +2609,11 @@ def _delete_outlier_column(project_id: str, page_name_id: str, outliers_settings
 
 
 def outliers_report(
-    project_id: str, page_name_id: str, data: pd.DataFrame, setting_file: str, config: dict
+    project_id: str,
+    page_name_id: str,
+    data: pd.DataFrame,
+    setting_file: str,
+    config: dict,
 ) -> None:
     """Create a comprehensive outliers report.
 
@@ -2548,8 +2634,8 @@ def outliers_report(
     # convert to polars for processing
     data = pl.from_pandas(data)
     _, string_columns, numeric_columns, datetime_columns, _ = get_df_info(
-            data, cols_only=True
-        )
+        data, cols_only=True
+    )
 
     string_numeric_cols = list(set(string_columns + numeric_columns))
 
@@ -2602,9 +2688,7 @@ def outliers_report(
     st.write("---")
     st.title("Constraint Violations")
 
-    _render_constraint_metrics(
-        constraint_violations
-    )
+    _render_constraint_metrics(constraint_violations)
 
     st.subheader("Constraint Violations Details")
     _render_constraint_violations_table(
@@ -2618,9 +2702,7 @@ def outliers_report(
     st.write("---")
     st.title("Outliers")
 
-    _render_outlier_metrics(
-        outlier_data,
-        outliers_settings)
+    _render_outlier_metrics(outlier_data, outliers_settings)
 
     st.subheader("Outlier Details")
     _render_outlier_table(

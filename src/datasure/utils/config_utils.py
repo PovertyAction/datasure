@@ -500,6 +500,7 @@ def render_backcheck_column_selectors(
             backcheck_target_percent=backcheck_target_percent,
         )
 
+
 @st.dialog(title="Add New Check Configuration", width="medium")
 def add_check_configuration_form(
     project_id: str,
@@ -540,8 +541,8 @@ def add_check_configuration_form(
         return
 
     # Step 3: Get dataset columns
-    datetime_cols, numeric_columns, categorical_cols = dataset_service.get_dataset_columns(
-        survey_data_name
+    datetime_cols, numeric_columns, categorical_cols = (
+        dataset_service.get_dataset_columns(survey_data_name)
     )
 
     # Step 4: Survey Column selections

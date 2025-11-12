@@ -121,6 +121,7 @@ class TestLoadDefaultSettings:
     def test_load_default_settings_file_exists(self):
         """Test when settings file exists."""
         from datasure.checks.outliers import OutlierSettings
+
         with (
             patch("datasure.checks.outliers.load_check_settings") as mock_load,
         ):
@@ -150,6 +151,7 @@ class TestLoadDefaultSettings:
     def test_load_default_settings_file_missing(self):
         """Test when settings file is missing."""
         from datasure.checks.outliers import OutlierSettings
+
         with (
             patch("datasure.checks.outliers.load_check_settings") as mock_load,
         ):
@@ -172,6 +174,7 @@ class TestLoadDefaultSettings:
     def test_load_default_settings_partial_config(self):
         """Test when settings file exists but has partial config."""
         from datasure.checks.outliers import OutlierSettings
+
         with (
             patch("datasure.checks.outliers.load_check_settings") as mock_load,
         ):
@@ -252,13 +255,16 @@ class TestUpdateUnlockedCols:
     def test_update_unlocked_cols_basic(self, outlier_settings_data):
         """Test basic functionality with new column schema."""
         import polars as pl
+
         # Create test data with new schema
-        test_df = pl.DataFrame({
-            "search_type": ["exact", "startswith"],
-            "pattern": [None, "hh_"],
-            "column_name": [["numeric_col1"], ["hh_member_1_age"]],
-            "locked": [True, False],
-        })
+        test_df = pl.DataFrame(
+            {
+                "search_type": ["exact", "startswith"],
+                "pattern": [None, "hh_"],
+                "column_name": [["numeric_col1"], ["hh_member_1_age"]],
+                "locked": [True, False],
+            }
+        )
 
         col_names = [
             "hh_member_1_age",
@@ -275,17 +281,17 @@ class TestUpdateUnlockedCols:
     def test_update_unlocked_cols_missing_columns(self):
         """Test with missing essential columns."""
         import polars as pl
+
         df = pl.DataFrame({"other_col": [1, 2, 3]})
         col_names = ["col1", "col2"]
 
-        with pytest.raises(
-            ValueError, match="Missing required columns"
-        ):
+        with pytest.raises(ValueError, match="Missing required columns"):
             update_unlocked_cols(df, col_names)
 
     def test_update_unlocked_cols_no_unlocked_rows(self):
         """Test when all rows are locked or exact."""
         import polars as pl
+
         df = pl.DataFrame(
             {
                 "search_type": ["exact", "exact"],
@@ -304,6 +310,7 @@ class TestUpdateUnlockedCols:
     def test_update_unlocked_cols_missing_pattern(self):
         """Test with missing pattern for unlocked row."""
         import polars as pl
+
         df = pl.DataFrame(
             {
                 "search_type": ["startswith"],
@@ -328,6 +335,7 @@ class TestStackOutlierColumns:
     def test_stack_outlier_columns_basic(self, sample_data):
         """Test basic functionality."""
         import polars as pl
+
         pl_data = pl.from_pandas(sample_data)
         col_names = ["numeric_col1", "numeric_col2"]
         result = stack_outlier_columns(pl_data, col_names)
@@ -339,6 +347,7 @@ class TestStackOutlierColumns:
     def test_stack_outlier_columns_empty_dataframe(self):
         """Test with empty DataFrame."""
         import polars as pl
+
         empty_df = pl.DataFrame()
         col_names = ["col1", "col2"]
 
@@ -348,6 +357,7 @@ class TestStackOutlierColumns:
     def test_stack_outlier_columns_missing_column(self, sample_data):
         """Test with missing column."""
         import polars as pl
+
         pl_data = pl.from_pandas(sample_data)
         col_names = ["nonexistent_col"]
 
@@ -357,6 +367,7 @@ class TestStackOutlierColumns:
     def test_stack_outlier_columns_non_numeric(self, sample_data):
         """Test with non-numeric column that can't be converted."""
         import polars as pl
+
         pl_data = pl.from_pandas(sample_data)
         col_names = ["string_col"]
 
@@ -368,6 +379,7 @@ class TestStackOutlierColumns:
     def test_stack_outlier_columns_single_column(self, sample_data):
         """Test with single column."""
         import polars as pl
+
         pl_data = pl.from_pandas(sample_data)
         col_names = ["numeric_col1"]
         result = stack_outlier_columns(pl_data, col_names)
@@ -382,8 +394,11 @@ class TestComputeOutlierStats:
     def test_compute_outlier_stats_iqr_method(self, numeric_series):
         """Test with IQR method."""
         import polars as pl
+
         pl_series = pl.Series(numeric_series)
-        result = compute_outlier_stats_polars(pl_series, "Interquartile Range (IQR)", 1.5)
+        result = compute_outlier_stats_polars(
+            pl_series, "Interquartile Range (IQR)", 1.5
+        )
 
         # Result is now an OutlierStatistics Pydantic model
         assert result.count == 6
@@ -393,6 +408,7 @@ class TestComputeOutlierStats:
     def test_compute_outlier_stats_sd_method(self, numeric_series):
         """Test with Standard Deviation method."""
         import polars as pl
+
         pl_series = pl.Series(numeric_series)
         result = compute_outlier_stats_polars(pl_series, "Standard Deviation (SD)", 2.0)
 
@@ -405,6 +421,7 @@ class TestComputeOutlierStats:
     def test_compute_outlier_stats_empty_series(self):
         """Test with empty series."""
         import polars as pl
+
         empty_series = pl.Series([])
 
         with pytest.raises(ValueError, match="The Series is empty"):
@@ -413,6 +430,7 @@ class TestComputeOutlierStats:
     def test_compute_outlier_stats_invalid_method(self, numeric_series):
         """Test with invalid outlier method."""
         import polars as pl
+
         pl_series = pl.Series(numeric_series)
         with pytest.raises(ValueError, match="Invalid outlier type"):
             compute_outlier_stats_polars(pl_series, "Invalid Method", 1.5)
@@ -420,6 +438,7 @@ class TestComputeOutlierStats:
     def test_compute_outlier_stats_invalid_multiplier(self, numeric_series):
         """Test with invalid multiplier."""
         import polars as pl
+
         pl_series = pl.Series(numeric_series)
         with pytest.raises(ValueError, match="Multiplier must be a positive number"):
             compute_outlier_stats_polars(pl_series, "Interquartile Range (IQR)", -1.5)
@@ -427,6 +446,7 @@ class TestComputeOutlierStats:
     def test_compute_outlier_stats_default_multipliers(self, numeric_series):
         """Test with default multipliers."""
         import polars as pl
+
         pl_series = pl.Series(numeric_series)
         # Test IQR with None multiplier (should default to 1.5)
         result_iqr = compute_outlier_stats_polars(
@@ -611,6 +631,7 @@ class TestComputeColumnOutlierSummary:
     def test_compute_column_outlier_summary_basic(self):
         """Test basic functionality."""
         import polars as pl
+
         outlier_data = pl.DataFrame(
             {
                 "survey_key": ["K001", "K002", "K003", "K001", "K002"],
@@ -643,6 +664,7 @@ class TestComputeColumnOutlierSummary:
     def test_compute_column_outlier_summary_empty(self):
         """Test with empty DataFrame."""
         import polars as pl
+
         empty_df = pl.DataFrame()
         result = compute_column_outlier_summary(empty_df, "survey_key")
         assert result.is_empty()
@@ -773,6 +795,7 @@ class TestIntegration:
     def test_stack_and_compute_workflow(self, sample_data):
         """Test stacking columns and computing statistics."""
         import polars as pl
+
         # Convert to Polars
         pl_data = pl.from_pandas(sample_data)
 

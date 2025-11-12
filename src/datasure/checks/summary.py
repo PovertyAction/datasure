@@ -7,6 +7,7 @@ This module provides comprehensive summary functionality with:
 - Polars-based optimizations for performance
 - Pydantic validation for data integrity
 """
+
 from datetime import date as Date
 from datetime import datetime, timedelta
 from typing import Any
@@ -1389,15 +1390,13 @@ def summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> None:
 
 
 @demo_output_onboarding(TAB_NAME)
-def summary_report(
-    data: pd.DataFrame, setting_file: str, config: dict
-) -> None:
+def summary_report(data: pl.DataFrame, setting_file: str, config: dict) -> None:
     """Generate comprehensive summary report.
 
     Parameters
     ----------
-    data : pd.DataFrame
-        The survey data (pandas).
+    data : pl.DataFrame
+        The survey data (polars).
     setting_file : str
         Path to the settings file.
     config : dict
