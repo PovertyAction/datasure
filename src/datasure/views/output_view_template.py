@@ -123,16 +123,15 @@ def load_data_with_fallback(
             project_id=project_id,
             alias=data_name,
             db_name=db_name,
-            type="pd",
         )
-        if not data.empty:
+        if not data.is_empty:
             return data
 
     # Return empty DataFrame if all attempts fail
-    return pd.DataFrame()
+    return pl.DataFrame()
 
 
-def get_page_title(project_id: str, page_number: int, check_log: pl.DataFrame) -> str:
+def get_page_title(page_number: int, check_log: pl.DataFrame) -> str:
     """
     Generate the page title based on configuration.
 
@@ -374,7 +373,7 @@ def main() -> None:
     check_log = validate_prerequisites(project_id)
 
     # Set page title
-    page_title = get_page_title(project_id, page_number, check_log)
+    page_title = get_page_title(page_number, check_log)
     st.title(page_title)
 
     # Load page configuration
