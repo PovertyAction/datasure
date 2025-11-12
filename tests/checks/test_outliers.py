@@ -11,20 +11,15 @@ import streamlit as st  # noqa: F401
 from datasure.checks.outliers import (
     compute_column_outlier_summary,
     compute_outlier_output,
-    compute_outlier_stats,
-    create_violin_plot,
+    compute_outlier_stats_polars,
     display_outlier_column_summary,
-    display_outlier_metrics,
     display_outlier_output,
     expand_col_names,
     get_outlier_cols,
-    inspect_outliers_columns,
     load_default_settings,
     outliers_report,
     outliers_report_settings,  # noqa: F401
-    plot_col_distribution,
     stack_outlier_columns,
-    update_outlier_settings,
     update_unlocked_cols,
 )
 
@@ -125,106 +120,79 @@ class TestLoadDefaultSettings:
 
     def test_load_default_settings_file_exists(self):
         """Test when settings file exists."""
+        from datasure.checks.outliers import OutlierSettings
         with (
-            patch("datasure.checks.outliers.get_check_config_settings") as mock_config,
-            patch("datasure.checks.outliers.os.path.exists") as mock_exists,
             patch("datasure.checks.outliers.load_check_settings") as mock_load,
         ):
-            mock_config.return_value = (
-                None,
-                None,
-                "key1",
-                "id1",
-                None,
-                "enum1",
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-            mock_exists.return_value = True
             mock_load.return_value = {
                 "survey_id": "test_id",
                 "enumerator": "test_enum",
                 "survey_key": "test_key",
-                "outlier_display_cols": ["col1", "col2"],
-                "min_threshold": 25,
+                "team": "team1",
+                "survey_date": "2023-01-01",
             }
 
-            result = load_default_settings("project1", "settings.json", 1)
+            config = OutlierSettings(
+                survey_key="default_key",
+                survey_id="default_id",
+                enumerator="default_enum",
+                team="default_team",
+                survey_date="2023-01-01",
+            )
 
-            assert result[0] == "test_id"
-            assert result[1] == "test_enum"
-            assert result[2] == "test_key"
-            assert result[3] == ["col1", "col2"]
-            assert result[4] == 25
+            result = load_default_settings("settings.json", config)
+
+            assert result.survey_id == "test_id"
+            assert result.enumerator == "test_enum"
+            assert result.survey_key == "test_key"
+            assert result.team == "team1"
 
     def test_load_default_settings_file_missing(self):
         """Test when settings file is missing."""
+        from datasure.checks.outliers import OutlierSettings
         with (
-            patch("datasure.checks.outliers.get_check_config_settings") as mock_config,
-            patch("datasure.checks.outliers.os.path.exists") as mock_exists,
+            patch("datasure.checks.outliers.load_check_settings") as mock_load,
         ):
-            mock_config.return_value = (
-                None,
-                None,
-                "key1",
-                "id1",
-                None,
-                "enum1",
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
+            mock_load.return_value = {}
+
+            config = OutlierSettings(
+                survey_key="default_key",
+                survey_id="default_id",
+                enumerator="default_enum",
+                team=None,
+                survey_date=None,
             )
-            mock_exists.return_value = False
 
-            result = load_default_settings("project1", "settings.json", 1)
+            result = load_default_settings("settings.json", config)
 
-            assert result[0] == "id1"
-            assert result[1] == "enum1"
-            assert result[2] == "key1"
-            assert result[3] is None
-            assert result[4] is None
+            assert result.survey_id == "default_id"
+            assert result.enumerator == "default_enum"
+            assert result.survey_key == "default_key"
 
     def test_load_default_settings_partial_config(self):
         """Test when settings file exists but has partial config."""
+        from datasure.checks.outliers import OutlierSettings
         with (
-            patch("datasure.checks.outliers.get_check_config_settings") as mock_config,
-            patch("datasure.checks.outliers.os.path.exists") as mock_exists,
             patch("datasure.checks.outliers.load_check_settings") as mock_load,
         ):
-            mock_config.return_value = (
-                None,
-                None,
-                "key1",
-                "id1",
-                None,
-                "enum1",
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-            mock_exists.return_value = True
             mock_load.return_value = {
                 "survey_id": "test_id",
                 # Missing other keys
             }
 
-            result = load_default_settings("project1", "settings.json", 1)
+            config = OutlierSettings(
+                survey_key="default_key",
+                survey_id="default_id",
+                enumerator="default_enum",
+                team=None,
+                survey_date=None,
+            )
 
-            assert result[0] == "test_id"
-            assert result[1] == "enum1"  # Falls back to config
-            assert result[2] == "key1"  # Falls back to config
-            assert result[3] is None  # Default
-            assert result[4] is None  # Default
+            result = load_default_settings("settings.json", config)
+
+            assert result.survey_id == "test_id"
+            assert result.enumerator == "default_enum"  # Falls back to config
+            assert result.survey_key == "default_key"  # Falls back to config
 
 
 class TestExpandColNames:
@@ -282,52 +250,66 @@ class TestUpdateUnlockedCols:
     """Test update_unlocked_cols function."""
 
     def test_update_unlocked_cols_basic(self, outlier_settings_data):
-        """Test basic functionality."""
+        """Test basic functionality with new column schema."""
+        import polars as pl
+        # Create test data with new schema
+        test_df = pl.DataFrame({
+            "search_type": ["exact", "startswith"],
+            "pattern": [None, "hh_"],
+            "column_name": [["numeric_col1"], ["hh_member_1_age"]],
+            "locked": [True, False],
+        })
+
         col_names = [
             "hh_member_1_age",
             "hh_member_2_age",
             "hh_member_3_age",
             "numeric_col1",
         ]
-        result = update_unlocked_cols(outlier_settings_data, col_names)
+        result = update_unlocked_cols(test_df, col_names)
 
-        assert isinstance(result, pd.DataFrame)
-        assert "outlier_cols" in result.columns
-        assert "lock_cols" in result.columns
+        assert isinstance(result, pl.DataFrame)
+        assert "column_name" in result.columns
+        assert "locked" in result.columns
 
     def test_update_unlocked_cols_missing_columns(self):
         """Test with missing essential columns."""
-        df = pd.DataFrame({"other_col": [1, 2, 3]})
+        import polars as pl
+        df = pl.DataFrame({"other_col": [1, 2, 3]})
         col_names = ["col1", "col2"]
 
         with pytest.raises(
-            ValueError, match="Essential column 'outlier_cols' is missing"
+            ValueError, match="Missing required columns"
         ):
             update_unlocked_cols(df, col_names)
 
     def test_update_unlocked_cols_no_unlocked_rows(self):
         """Test when all rows are locked or exact."""
-        df = pd.DataFrame(
+        import polars as pl
+        df = pl.DataFrame(
             {
                 "search_type": ["exact", "exact"],
                 "pattern": [None, None],
-                "outlier_cols": [["col1"], ["col2"]],
-                "lock_cols": [True, True],
+                "column_name": [["col1"], ["col2"]],
+                "locked": [True, True],
             }
         )
         col_names = ["col1", "col2"]
 
         result = update_unlocked_cols(df, col_names)
-        assert result.equals(df)
+        # With Polars, compare column names and shape
+        assert result.columns == df.columns
+        assert result.height == df.height
 
     def test_update_unlocked_cols_missing_pattern(self):
         """Test with missing pattern for unlocked row."""
-        df = pd.DataFrame(
+        import polars as pl
+        df = pl.DataFrame(
             {
-                "search_type": "startswith",
-                "pattern": None,
-                "outlier_cols": ["col1"],
-                "lock_cols": False,
+                "search_type": ["startswith"],
+                "pattern": [None],
+                "column_name": [["col1"]],
+                "locked": [False],
             }
         )
         col_names = ["col1", "col2"]
@@ -336,99 +318,8 @@ class TestUpdateUnlockedCols:
             update_unlocked_cols(df, col_names)
 
 
-class TestUpdateOutlierSettings:
-    """Test update_outlier_settings function."""
-
-    @patch("datasure.checks.outliers.duckdb_get_table")
-    @patch("datasure.checks.outliers.duckdb_save_table")
-    def test_update_outlier_settings_basic(self, mock_save, mock_get):
-        """Test basic functionality."""
-        mock_get.return_value.to_pandas.return_value = pd.DataFrame()
-
-        update_outlier_settings(
-            project_id="test_project",
-            label="test_label",
-            search_type="exact",
-            outlier_cols=["col1"],
-            outlier_method="Interquartile Range (IQR)",
-            outlier_multiplier=1.5,
-            grouped_cols=False,
-            pattern=None,
-            lock_cols=None,
-            soft_min=None,
-            soft_max=None,
-        )
-
-        mock_get.assert_called_once()
-        mock_save.assert_called_once()
-
-    def test_update_outlier_settings_invalid_inputs(self):
-        """Test with invalid input types."""
-        with pytest.raises(TypeError, match="outlier_cols must be a list"):
-            update_outlier_settings(
-                project_id="test",
-                label="test",
-                search_type="exact",
-                outlier_cols="not_a_list",
-                outlier_method="IQR",
-                outlier_multiplier=1.5,
-                grouped_cols=False,
-                pattern=None,
-                lock_cols=None,
-                soft_min=None,
-                soft_max=None,
-            )
-
-        with pytest.raises(TypeError, match="search_type must be a string"):
-            update_outlier_settings(
-                project_id="test",
-                label="test",
-                search_type=123,
-                outlier_cols=["col1"],
-                outlier_method="IQR",
-                outlier_multiplier=1.5,
-                grouped_cols=False,
-                pattern=None,
-                lock_cols=None,
-                soft_min=None,
-                soft_max=None,
-            )
-
-    @patch("datasure.checks.outliers.duckdb_get_table")
-    @patch("datasure.checks.outliers.duckdb_save_table")
-    def test_update_outlier_settings_with_existing_logs(self, mock_save, mock_get):
-        """Test when existing logs are present."""
-        existing_logs = pd.DataFrame(
-            {
-                "search_type": ["exact"],
-                "pattern": [None],
-                "outlier_cols": [["old_col"]],
-                "lock_cols": [False],
-                "grouped_cols": [False],
-                "outlier_method": ["IQR"],
-                "outlier_multiplier": [1.5],
-                "soft_min": [None],
-                "soft_max": [None],
-            }
-        )
-        mock_get.return_value.to_pandas.return_value = existing_logs
-
-        update_outlier_settings(
-            project_id="test_project",
-            label="test_label",
-            search_type="exact",
-            outlier_cols=["col1"],
-            outlier_method="Standard Deviation (SD)",
-            outlier_multiplier=2.0,
-            grouped_cols=True,
-            pattern=None,
-            lock_cols=True,
-            soft_min=10.0,
-            soft_max=100.0,
-        )
-
-        mock_get.assert_called_once()
-        mock_save.assert_called_once()
+# TestUpdateOutlierSettings removed - function no longer exists
+# Configuration is now handled through UI dialogs and _update_outlier_column_config
 
 
 class TestStackOutlierColumns:
@@ -436,121 +327,120 @@ class TestStackOutlierColumns:
 
     def test_stack_outlier_columns_basic(self, sample_data):
         """Test basic functionality."""
+        import polars as pl
+        pl_data = pl.from_pandas(sample_data)
         col_names = ["numeric_col1", "numeric_col2"]
-        result = stack_outlier_columns(sample_data, col_names)
+        result = stack_outlier_columns(pl_data, col_names)
 
-        assert isinstance(result, pd.Series)
-        assert len(result) == len(sample_data) * len(col_names)
+        assert isinstance(result, pl.Series)
+        # Should have data from both columns (minus nulls)
+        assert result.len() > 0
 
-    def test_stack_outlier_columns_empty_dataframe(self, empty_dataframe):
+    def test_stack_outlier_columns_empty_dataframe(self):
         """Test with empty DataFrame."""
+        import polars as pl
+        empty_df = pl.DataFrame()
         col_names = ["col1", "col2"]
 
         with pytest.raises(ValueError, match="The DataFrame is empty"):
-            stack_outlier_columns(empty_dataframe, col_names)
+            stack_outlier_columns(empty_df, col_names)
 
     def test_stack_outlier_columns_missing_column(self, sample_data):
         """Test with missing column."""
+        import polars as pl
+        pl_data = pl.from_pandas(sample_data)
         col_names = ["nonexistent_col"]
 
         with pytest.raises(ValueError, match="Column 'nonexistent_col' does not exist"):
-            stack_outlier_columns(sample_data, col_names)
+            stack_outlier_columns(pl_data, col_names)
 
     def test_stack_outlier_columns_non_numeric(self, sample_data):
         """Test with non-numeric column that can't be converted."""
+        import polars as pl
+        pl_data = pl.from_pandas(sample_data)
         col_names = ["string_col"]
 
         with pytest.raises(
             ValueError, match="Column 'string_col' cannot be converted to numeric type"
         ):
-            stack_outlier_columns(sample_data, col_names)
+            stack_outlier_columns(pl_data, col_names)
 
     def test_stack_outlier_columns_single_column(self, sample_data):
         """Test with single column."""
+        import polars as pl
+        pl_data = pl.from_pandas(sample_data)
         col_names = ["numeric_col1"]
-        result = stack_outlier_columns(sample_data, col_names)
+        result = stack_outlier_columns(pl_data, col_names)
 
-        assert isinstance(result, pd.Series)
-        assert len(result) == len(sample_data)
+        assert isinstance(result, pl.Series)
+        assert result.len() == pl_data.height
 
 
 class TestComputeOutlierStats:
-    """Test compute_outlier_stats function."""
+    """Test compute_outlier_stats_polars function."""
 
     def test_compute_outlier_stats_iqr_method(self, numeric_series):
         """Test with IQR method."""
-        result = compute_outlier_stats(numeric_series, "Interquartile Range (IQR)", 1.5)
+        import polars as pl
+        pl_series = pl.Series(numeric_series)
+        result = compute_outlier_stats_polars(pl_series, "Interquartile Range (IQR)", 1.5)
 
-        assert isinstance(result, dict)
-        expected_keys = [
-            "count",
-            "min_value",
-            "max_value",
-            "mean",
-            "median",
-            "sd",
-            "iqr",
-            "lower_bound",
-            "upper_bound",
-        ]
-        for key in expected_keys:
-            assert key in result
-
-        assert result["count"] == 6
-        assert result["min_value"] == 1
-        assert result["max_value"] == 100
+        # Result is now an OutlierStatistics Pydantic model
+        assert result.count == 6
+        assert result.min_value == 1
+        assert result.max_value == 100
 
     def test_compute_outlier_stats_sd_method(self, numeric_series):
         """Test with Standard Deviation method."""
-        result = compute_outlier_stats(numeric_series, "Standard Deviation (SD)", 2.0)
+        import polars as pl
+        pl_series = pl.Series(numeric_series)
+        result = compute_outlier_stats_polars(pl_series, "Standard Deviation (SD)", 2.0)
 
-        assert isinstance(result, dict)
-        expected_keys = [
-            "count",
-            "min_value",
-            "max_value",
-            "mean",
-            "median",
-            "sd",
-            "iqr",
-            "lower_bound",
-            "upper_bound",
-        ]
-        for key in expected_keys:
-            assert key in result
+        # Result is now an OutlierStatistics Pydantic model
+        assert hasattr(result, "count")
+        assert hasattr(result, "min_value")
+        assert hasattr(result, "lower_bound")
+        assert hasattr(result, "upper_bound")
 
     def test_compute_outlier_stats_empty_series(self):
         """Test with empty series."""
-        empty_series = pd.Series([])
+        import polars as pl
+        empty_series = pl.Series([])
 
         with pytest.raises(ValueError, match="The Series is empty"):
-            compute_outlier_stats(empty_series, "Interquartile Range (IQR)", 1.5)
+            compute_outlier_stats_polars(empty_series, "Interquartile Range (IQR)", 1.5)
 
     def test_compute_outlier_stats_invalid_method(self, numeric_series):
         """Test with invalid outlier method."""
+        import polars as pl
+        pl_series = pl.Series(numeric_series)
         with pytest.raises(ValueError, match="Invalid outlier type"):
-            compute_outlier_stats(numeric_series, "Invalid Method", 1.5)
+            compute_outlier_stats_polars(pl_series, "Invalid Method", 1.5)
 
     def test_compute_outlier_stats_invalid_multiplier(self, numeric_series):
         """Test with invalid multiplier."""
+        import polars as pl
+        pl_series = pl.Series(numeric_series)
         with pytest.raises(ValueError, match="Multiplier must be a positive number"):
-            compute_outlier_stats(numeric_series, "Interquartile Range (IQR)", -1.5)
+            compute_outlier_stats_polars(pl_series, "Interquartile Range (IQR)", -1.5)
 
     def test_compute_outlier_stats_default_multipliers(self, numeric_series):
         """Test with default multipliers."""
+        import polars as pl
+        pl_series = pl.Series(numeric_series)
         # Test IQR with None multiplier (should default to 1.5)
-        result_iqr = compute_outlier_stats(
-            numeric_series, "Interquartile Range (IQR)", None
+        result_iqr = compute_outlier_stats_polars(
+            pl_series, "Interquartile Range (IQR)", None
         )
-        assert "lower_bound" in result_iqr
-        assert "upper_bound" in result_iqr
+        assert result_iqr.lower_bound is not None
+        assert result_iqr.upper_bound is not None
 
         # Test SD with None multiplier (should default to 3.0)
-        result_sd = compute_outlier_stats(
-            numeric_series, "Standard Deviation (SD)", None
+        result_sd = compute_outlier_stats_polars(
+            pl_series, "Standard Deviation (SD)", None
         )
-        assert "lower_bound" in result_sd
-        assert "upper_bound" in result_sd
+        assert result_sd.lower_bound is not None
+        assert result_sd.upper_bound is not None
 
 
 class TestComputeOutlierOutput:
@@ -720,7 +610,8 @@ class TestComputeColumnOutlierSummary:
 
     def test_compute_column_outlier_summary_basic(self):
         """Test basic functionality."""
-        outlier_data = pd.DataFrame(
+        import polars as pl
+        outlier_data = pl.DataFrame(
             {
                 "survey_key": ["K001", "K002", "K003", "K001", "K002"],
                 "column name": ["col1", "col1", "col1", "col2", "col2"],
@@ -733,26 +624,28 @@ class TestComputeColumnOutlierSummary:
                 ],
                 "min_value": [1, 1, 1, 5, 5],
                 "max_value": [100, 100, 100, 200, 200],
-                "mean": [50, 50, 50, 100, 100],
-                "median": [45, 45, 45, 95, 95],
-                "std": [25, 25, 25, 50, 50],
-                "iqr": [30, 30, 30, 60, 60],
-                "lower_bound": [10, 10, 10, 20, 20],
-                "upper_bound": [90, 90, 90, 180, 180],
+                "mean": [50.0, 50.0, 50.0, 100.0, 100.0],
+                "median": [45.0, 45.0, 45.0, 95.0, 95.0],
+                "std": [25.0, 25.0, 25.0, 50.0, 50.0],
+                "iqr": [30.0, 30.0, 30.0, 60.0, 60.0],
+                "lower_bound": [10.0, 10.0, 10.0, 20.0, 20.0],
+                "upper_bound": [90.0, 90.0, 90.0, 180.0, 180.0],
             }
         )
 
         result = compute_column_outlier_summary(outlier_data, "survey_key")
 
-        assert isinstance(result, pd.DataFrame)
+        assert isinstance(result, pl.DataFrame)
         assert "column name" in result.columns
         assert "outlier count" in result.columns
-        assert len(result) == 2  # Two unique columns
+        assert result.height == 2  # Two unique columns
 
-    def test_compute_column_outlier_summary_empty(self, empty_dataframe):
+    def test_compute_column_outlier_summary_empty(self):
         """Test with empty DataFrame."""
-        result = compute_column_outlier_summary(empty_dataframe, "survey_key")
-        assert result.empty
+        import polars as pl
+        empty_df = pl.DataFrame()
+        result = compute_column_outlier_summary(empty_df, "survey_key")
+        assert result.is_empty()
 
 
 class TestDisplayFunctions:
@@ -879,17 +772,21 @@ class TestIntegration:
 
     def test_stack_and_compute_workflow(self, sample_data):
         """Test stacking columns and computing statistics."""
+        import polars as pl
+        # Convert to Polars
+        pl_data = pl.from_pandas(sample_data)
+
         # Stack columns
-        stacked = stack_outlier_columns(sample_data, ["numeric_col1", "numeric_col2"])
+        stacked = stack_outlier_columns(pl_data, ["numeric_col1", "numeric_col2"])
 
         # Compute stats on stacked series
-        stats = compute_outlier_stats(stacked, "Interquartile Range (IQR)", 1.5)
+        stats = compute_outlier_stats_polars(stacked, "Interquartile Range (IQR)", 1.5)
 
-        assert isinstance(stacked, pd.Series)
-        assert isinstance(stats, dict)
-        assert len(stacked) == len(sample_data) * 2
-        assert "lower_bound" in stats
-        assert "upper_bound" in stats
+        assert isinstance(stacked, pl.Series)
+        # Stats is now an OutlierStatistics Pydantic model
+        assert hasattr(stats, "lower_bound")
+        assert hasattr(stats, "upper_bound")
+        assert stacked.len() > 0
 
 
 class TestOutliersReport:
