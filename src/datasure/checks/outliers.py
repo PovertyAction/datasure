@@ -23,6 +23,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from traitlets import default
 
 from datasure.utils.dataframe_utils import get_df_info
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
@@ -1232,14 +1233,17 @@ def _render_constraint_violations_table(
         )
 
         # get saved settings
-        
+        saved_settings = load_check_settings(setting_file, TAB_NAME)
+        cols = saved_settings.get("constraint_display_cols", [])
+        default_constraint_display_cols = [col for col in cols if col in display_options]
 
         constraint_display_cols = st.multiselect(
             label="Select columns to display",
             options=display_options,
+            default=default_constraint_display_cols,
             key="constraint_violation_display_cols",
             on_change=trigger_save,
-            kwargs=("state_name", TAB_NAME + "constraint_display_cols"),
+            kwargs={"state_name": TAB_NAME + "_constraint_display_cols"},
         )
         save_check_settings(setting_file, TAB_NAME, {"constraint_display_cols": constraint_display_cols})
 
@@ -1459,6 +1463,7 @@ def _render_outlier_table(
     data: pl.DataFrame,
     outliers_data: pl.DataFrame,
     settings: OutlierSettings,
+    setting_file: str,
 ) -> None:
     """Render outlier data table using Streamlit.
 
@@ -1487,13 +1492,22 @@ def _render_outlier_table(
 
     display_options = [col for col in all_columns if col not in include_cols]
 
+    # get saved settings
+    saved_settings = load_check_settings(setting_file, TAB_NAME)
+    cols = saved_settings.get("outlier_display_cols", [])
+    default_outlier_display_cols = [col for col in cols if col in display_options]
+
     with st.expander(":material/clarify: Show more columns in report", expanded=False):
         st.info("Select additional columns to include in the outlier report.")
         outlier_display_cols = st.multiselect(
             label="Select columns to display",
+            default=default_outlier_display_cols,
             options=display_options,
             key="outlier_display_cols",
+            on_change=trigger_save,
+            kwargs={"state_name": TAB_NAME + "_outlier_display_cols"},
         )
+        save_check_settings(setting_file, TAB_NAME, {"outlier_display_cols": outlier_display_cols})
 
     if outlier_display_cols:
         include_cols.extend(outlier_display_cols)
@@ -1518,9 +1532,10 @@ def _render_outlier_table(
 # =============================================================================
 
 
+# create box plot
 @st.cache_data
-def _create_violin_plot(data: pd.Series, title: str) -> go.Figure:
-    """Create a violin plot using plotly.
+def _create_box_plot(data: pd.Series, title: str) -> go.Figure:
+    """Create a box plot using plotly.
 
     Parameters
     ----------
@@ -1535,12 +1550,12 @@ def _create_violin_plot(data: pd.Series, title: str) -> go.Figure:
         Plotly figure object.
     """
     return go.Figure(
-        data=go.Violin(
+        data=go.Box(
             y=data,
-            box_visible=True,
+            boxpoints="outliers",
+            marker_color="darkblue",
             line_color="black",
-            meanline_visible=True,
-            fillcolor="darkgreen",
+            fillcolor="lightblue",
             opacity=0.6,
             x0=title,
         )
@@ -1686,6 +1701,7 @@ def _render_outlier_column_inspection(
     data: pl.DataFrame,
     outliers_data: pd.DataFrame,
     settings: OutlierSettings,
+    setting_file: str,
 ) -> None:
     """Inspect outlier columns in the DataFrame.
 
@@ -1729,15 +1745,32 @@ def _render_outlier_column_inspection(
     columns_checked_list = outliers_data.select("column name").unique().to_series().to_list()
 
 
-    ic1, ic2 = st.columns([0.2, 0.8])
+    ic1, _ = st.columns([0.2, 0.8])
 
     with ic1:
+        # get saved settings
+        saved_settings = load_check_settings(setting_file, TAB_NAME)
+        default_selected_col = saved_settings.get("selected_col", None)
+        default_selected_col_index = (
+            columns_checked_list.index(default_selected_col)
+            if default_selected_col and default_selected_col in columns_checked_list
+            else None
+        )
         selected_col = st.selectbox(
             label="Select outlier columns to inspect",
             options=columns_checked_list,
+            index=default_selected_col_index,
+            key="outlier_inspect_col",
             help="Select the outlier columns to inspect. "
             "You can only select one column at a time.",
+            on_change=trigger_save,
+            kwargs={"state_name": TAB_NAME + "_selected_col"},
         )
+        save_check_settings(setting_file, TAB_NAME, {"selected_col": selected_col})
+
+        if not selected_col:
+            st.info("Select an outlier column to inspect.")
+            return
 
         if selected_col not in data.columns:
             raise ValueError(
@@ -1747,7 +1780,27 @@ def _render_outlier_column_inspection(
         else:
             include_cols.append(selected_col)
 
-    with ic2:
+    # create a subset of the data
+    column_data = data.select([selected_col])
+
+    st.subheader(f"Details/Distribution for {selected_col} values")
+    dc1, _, dc3 = st.columns([0.3, 0.1, 0.6])
+    with dc1:
+        desc_stats = _create_descriptive_stats(
+            column_data
+        )
+        st.dataframe(desc_stats)
+
+    with dc3:
+        box_plot = _create_box_plot(
+            data=column_data[selected_col],
+            title=selected_col,
+        )
+        st.plotly_chart(box_plot, width="stretch")
+
+
+    with st.expander(":material/clarify: Show more columns in report", expanded=False):
+        st.info("Select additional columns to include in the outlier inspection report.")
         display_options = [col for col in all_columns if col not in include_cols and col != selected_col]
         inspect_display_cols = st.multiselect(
             label="Select columns to display",
@@ -1760,34 +1813,14 @@ def _render_outlier_column_inspection(
         if inspect_display_cols:
             include_cols.extend(inspect_display_cols)
 
-
-    if selected_col:
-        # select columns to display from data
-        display_df = data.select(include_cols)
-        outliers_df = _sanitize_df_for_join(display_df, outliers_data, settings.survey_key)
-        display_df = display_df.join(
-            outliers_df,
-            on=settings.survey_key,
-            how="inner",
-        )
-
-    # create a subset of the data
-    column_data = data.select([selected_col])
-
-    st.subheader(f"Details/Distribution for {selected_col} values")
-    dc1, dc2 = st.columns([0.3, 0.7])
-    with dc1:
-        desc_stats = _create_descriptive_stats(
-            column_data
-        )
-        st.dataframe(desc_stats)
-
-    with dc2:
-        violin_fig = _create_violin_plot(
-            data=display_df[selected_col],
-            title=selected_col,
-        )
-        st.plotly_chart(violin_fig, width="stretch")
+    # select columns to display from data
+    display_df = data.select(include_cols)
+    outliers_df = _sanitize_df_for_join(display_df, outliers_data, settings.survey_key)
+    display_df = display_df.join(
+        outliers_df,
+        on=settings.survey_key,
+        how="inner",
+    )
 
     st.dataframe(
         display_df,
@@ -2489,6 +2522,7 @@ def outliers_report(
         data,
         outlier_data,
         outliers_settings,
+        setting_file,
     )
 
     st.subheader("Inspect Columns")
@@ -2496,5 +2530,6 @@ def outliers_report(
     _render_outlier_column_inspection(
         data,
         outlier_data,
-        outliers_settings
+        outliers_settings,
+        setting_file,
     )
