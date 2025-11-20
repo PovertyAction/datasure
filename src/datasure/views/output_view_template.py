@@ -117,7 +117,7 @@ def load_data_with_fallback(
             alias=data_name,
             db_name=db_name,
         )
-        if not data.is_empty:
+        if not data.is_empty():
             return data
 
     # Return empty DataFrame if all attempts fail
@@ -241,7 +241,7 @@ def load_check_data(project_id: str, config: PageConfig) -> CheckData:
     backcheck_data = None
     if config.backcheck_data_name:
         backcheck_data = load_data_with_fallback(project_id, config.backcheck_data_name)
-        if backcheck_data.empty:
+        if backcheck_data.is_empty():
             backcheck_data = None
 
     return CheckData(page_data=page_data, backcheck_data=backcheck_data)
