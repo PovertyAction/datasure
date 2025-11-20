@@ -913,6 +913,7 @@ def _process_single_column_outliers(
     """
     # Select relevant columns
     col_df = df_polars.select([survey_key, col])
+    col_df = safe_to_numeric(col_df, col)
 
     # Add outlier reason
     if non_null_count < min_threshold:
@@ -1775,7 +1776,7 @@ def _render_outlier_column_inspection(
             data=column_data[selected_col].to_pandas(),
             title=selected_col,
         )
-        st.plotly_chart(box_plot, use_container_width=True)
+        st.plotly_chart(box_plot, width="stretch")
 
     with st.expander(":material/clarify: Show more columns in report", expanded=False):
         st.info(
@@ -1808,7 +1809,7 @@ def _render_outlier_column_inspection(
 
     st.dataframe(
         display_df,
-        use_container_width=True,
+        width="stretch",
         hide_index=False,
     )
 
@@ -2229,7 +2230,7 @@ def _render_outlier_column_actions(
             "Add Outlier/Constraint Column",
             key="add_outlier_column",
             help="Add a new outlier column configuration.",
-            use_container_width=True,
+            width="stretch",
             type="primary",
             on_click=_add_outlier_column,
             args=(
@@ -2293,7 +2294,7 @@ def _add_outlier_column(
             "Add Outlier & Constraint Configuration",
             key="confirm_add_outlier_column",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             disabled=button_disabled,
         ):
             _update_outlier_column_config(
@@ -2310,6 +2311,7 @@ def _add_outlier_column(
             )
 
             st.success("Outlier & Constraint configuration added successfully.")
+            st.rerun()
 
 
 def _validate_constraint_settings(
@@ -2470,7 +2472,7 @@ def _update_outlier_column_config(
     new_config = {
         "search_type": search_type,
         "pattern": pattern,
-        "column_name": outlier_cols,
+        "column_name": [outlier_cols],
         "grouped_columns": group_cols,
         "locked": lock_cols,
         "outlier_enabled": outlier_enabled,
@@ -2486,10 +2488,28 @@ def _update_outlier_column_config(
         "soft_max": constraint_settings.soft_max if constraint_settings else None,
         "hard_max": constraint_settings.hard_max if constraint_settings else None,
     }
+
+    schema = {
+        "search_type": pl.Utf8,
+        "pattern": pl.Utf8,
+        "column_name": pl.List(pl.Utf8),
+        "grouped_columns": pl.Boolean,
+        "locked": pl.Boolean,
+        "outlier_enabled": pl.Boolean,
+        "outlier_method": pl.Utf8,
+        "outlier_multiplier": pl.Float64,
+        "outlier_threshold": pl.Int64,
+        "hard_min": pl.Float64,
+        "soft_min": pl.Float64,
+        "soft_max": pl.Float64,
+        "hard_max": pl.Float64,
+    }
+
     # Append new configurations to existing polars DataFrame
-    new_config_df = pl.DataFrame(new_config)
+    new_config_df = pl.DataFrame(new_config, schema=schema)
     if not existing_config.is_empty():
-        updated_config = pl.concat([existing_config, new_config_df], how="vertical")
+        formatted_existing_config = _ensure_column_formats(existing_config)
+        updated_config = pl.concat([formatted_existing_config, new_config_df], how="vertical")
     else:
         updated_config = new_config_df
 
@@ -2499,6 +2519,40 @@ def _update_outlier_column_config(
         updated_config,
         f"outliers_{page_name_id}",
         db_name="logs",
+    )
+
+
+def _ensure_column_formats(
+    outlier_settings: pl.DataFrame,
+) -> pl.DataFrame:
+    """Ensure correct data types for outlier settings DataFrame.
+
+    Parameters
+    ----------
+    outlier_settings : pl.DataFrame
+        Outlier settings configuration.
+
+    Returns
+    -------
+    pl.DataFrame
+        DataFrame with ensured data types.
+    """
+    return outlier_settings.with_columns(
+        [
+            pl.col("search_type").cast(pl.Utf8),
+            pl.col("pattern").cast(pl.Utf8),
+            pl.col("column_name").cast(pl.List(pl.Utf8)),
+            pl.col("grouped_columns").cast(pl.Boolean),
+            pl.col("locked").cast(pl.Boolean),
+            pl.col("outlier_enabled").cast(pl.Boolean),
+            pl.col("outlier_method").cast(pl.Utf8),
+            pl.col("outlier_multiplier").cast(pl.Float64),
+            pl.col("outlier_threshold").cast(pl.Int64),
+            pl.col("hard_min").cast(pl.Float64),
+            pl.col("soft_min").cast(pl.Float64),
+            pl.col("soft_max").cast(pl.Float64),
+            pl.col("hard_max").cast(pl.Float64),
+        ]
     )
 
 
@@ -2513,7 +2567,7 @@ def _render_outlier_settings_table(outlier_settings: pl.DataFrame) -> None:
     with st.expander("Outlier & Constraint Column Settings", expanded=False):
         st.dataframe(
             outlier_settings,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config={
                 "search_type": st.column_config.Column("Search Type"),
@@ -2552,7 +2606,7 @@ def _delete_outlier_column(
     with (
         st.popover(
             label=":material/delete: Delete outlier column",
-            use_container_width=True,
+            width="stretch",
         ),
     ):
         st.markdown("#### Remove outlier columns")
@@ -2586,7 +2640,7 @@ def _delete_outlier_column(
                 confirm_delete = st.button(
                     label="Confirm deletion",
                     type="primary",
-                    use_container_width=True,
+                    width="stretch",
                 )
                 if confirm_delete:
                     updated_settings = outliers_settings.filter(
@@ -2611,7 +2665,7 @@ def _delete_outlier_column(
 def outliers_report(
     project_id: str,
     page_name_id: str,
-    data: pd.DataFrame,
+    data: pl.DataFrame,
     setting_file: str,
     config: dict,
 ) -> None:
@@ -2631,8 +2685,6 @@ def outliers_report(
         Configuration dictionary.
     """
     # get column info
-    # convert to polars for processing
-    data = pl.from_pandas(data)
     _, string_columns, numeric_columns, datetime_columns, _ = get_df_info(
         data, cols_only=True
     )
@@ -2647,7 +2699,7 @@ def outliers_report(
 
     # Outlier columns configuration
     st.title("Outlier/Constraint Columns Configuration")
-    _render_outlier_column_actions(project_id, page_name_id, string_numeric_cols)
+    _render_outlier_column_actions(project_id, page_name_id, numeric_columns)
 
     # get outlier column config
     outliers_column_config = duckdb_get_table(
@@ -2655,6 +2707,9 @@ def outliers_report(
         f"outliers_{page_name_id}",
         "logs",
     )
+
+    if outliers_column_config.is_empty():
+        return
 
     # update lock columns if needed
     outliers_column_config = _update_unlocked_cols(
@@ -2670,12 +2725,9 @@ def outliers_report(
         db_name="logs",
     )
 
-    # Compute outliers
-    outlier_data = compute_outlier_output(
-        data,
-        outliers_settings,
-        outliers_column_config,
-    )
+    # Show constraint violations
+    st.write("---")
+    st.title("Constraint Violations")
 
     # compute constraint violations
     constraint_violations = compute_constraint_violations(
@@ -2684,39 +2736,55 @@ def outliers_report(
         outliers_column_config,
     )
 
-    # Show constraint violations
-    st.write("---")
-    st.title("Constraint Violations")
+    if constraint_violations.is_empty():
+        st.info("No constraint violations detected.")
 
-    _render_constraint_metrics(constraint_violations)
+    else:
+        # show constraint metrics
+        _render_constraint_metrics(constraint_violations)
 
-    st.subheader("Constraint Violations Details")
-    _render_constraint_violations_table(
-        data,
-        constraint_violations,
-        outliers_settings,
-        setting_file,
-    )
+        # show constraint violations table
+        st.subheader("Constraint Violations Details")
+        _render_constraint_violations_table(
+            data,
+            constraint_violations,
+            outliers_settings,
+            setting_file,
+        )
 
     # show outliers metrics
     st.write("---")
     st.title("Outliers")
 
-    _render_outlier_metrics(outlier_data, outliers_settings)
-
-    st.subheader("Outlier Details")
-    _render_outlier_table(
+    # Compute outliers
+    outlier_data = compute_outlier_output(
         data,
-        outlier_data,
         outliers_settings,
-        setting_file,
+        outliers_column_config,
     )
 
-    st.subheader("Inspect Columns")
+    if outlier_data.is_empty():
+        st.info("No outliers detected.")
 
-    _render_outlier_column_inspection(
-        data,
-        outlier_data,
-        outliers_settings,
-        setting_file,
-    )
+    else:
+        # show outlier metrics
+        _render_outlier_metrics(outlier_data, outliers_settings)
+
+        # show outlier details table
+        st.subheader("Outlier Details")
+        _render_outlier_table(
+            data,
+            outlier_data,
+            outliers_settings,
+            setting_file,
+        )
+
+        # show outlier column inspection
+        st.subheader("Inspect Columns")
+
+        _render_outlier_column_inspection(
+            data,
+            outlier_data,
+            outliers_settings,
+            setting_file,
+        )
