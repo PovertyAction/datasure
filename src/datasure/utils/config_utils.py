@@ -33,7 +33,7 @@ class CheckConfiguration(BaseModel):
     formversion: str | None = Field(default=None, min_length=1)
     duration: str | None = Field(default=None, min_length=1)
     survey_target: int | None = Field(default=None, ge=0)
-    backcheck_data_name: str = Field(default=None, min_length=1)
+    backcheck_data_name: str | None = Field(default=None, min_length=1)
     backcheck_date: str | None = Field(default=None, min_length=1)
     backchecker: str | None = Field(default=None, min_length=1)
     backchecker_team: str | None = Field(default=None, min_length=1)
@@ -340,6 +340,7 @@ def render_survey_dataset_selector(alias_list: list[str]) -> str | None:
     )
 
 
+@st.fragment
 def render_survey_column_selectors(
     datetime_columns: list[str] | None = None,
     numeric_columns: list[str] | None = None,
@@ -455,7 +456,7 @@ def render_backcheck_dataset_selector(
         help="Select the backcheck dataset to check.",
     )
 
-
+@st.fragment
 def render_backcheck_column_selectors(
     datetime_columns: list[str] | None = None,
     categorical_columns: list[str] | None = None,
@@ -550,15 +551,27 @@ def add_check_configuration_form(
         datetime_cols, numeric_columns, categorical_cols
     )
 
+    column_selections = dict(survey_column_selections)
+
     # Step 5: Backcheck dataset selection
     backcheck_data_name = render_backcheck_dataset_selector(
         alias_list, survey_data_name
     )
 
-    # Step 6: Back Check Column Selectors
-    backcheck_column_selections = render_backcheck_column_selectors(
-        datetime_cols, categorical_cols
-    )
+    if backcheck_data_name:
+        # Get backcheck dataset columns
+        (
+            backcheck_datetime_cols,
+            _,
+            backcheck_categorical_cols,
+        ) = dataset_service.get_dataset_columns(backcheck_data_name)
+        # Step 6: Back Check Column Selectors
+        backcheck_column_selections = render_backcheck_column_selectors(
+            backcheck_datetime_cols, backcheck_categorical_cols
+        )
+
+        # merge survey and backcheck column selection
+        column_selections = dict(survey_column_selections) | dict(backcheck_column_selections)
 
     # Step 6: Submit button
     add_button = st.button(
@@ -569,13 +582,6 @@ def add_check_configuration_form(
     )
 
     # merge survey and backcheck column selection
-    if backcheck_data_name:
-        column_selections = (
-            survey_column_selections.dict() | backcheck_column_selections.dict()
-        )
-    else:
-        column_selections = survey_column_selections
-
     if add_button:
         _handle_configuration_submission(
             config_service=config_service,
