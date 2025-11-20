@@ -511,7 +511,7 @@ def calculate_submission_metrics(
 
 
 @st.cache_data
-def compute_summary_submissions(data: pd.DataFrame, date: str) -> tuple:
+def compute_summary_submissions(data: pl.DataFrame, date: str) -> tuple:
     """Compute submission metrics for the summary report.
 
     This function is maintained for backward compatibility with existing tests.
@@ -539,8 +539,7 @@ def compute_summary_submissions(data: pd.DataFrame, date: str) -> tuple:
         - submissions_by_date: pd.DataFrame
     """
     # Convert to Polars for computation
-    pl_data = _pandas_to_polars(data)
-    metrics = calculate_submission_metrics(pl_data, date)
+    metrics = calculate_submission_metrics(data, date)
 
     return (
         metrics.first_submission_date,
@@ -643,7 +642,7 @@ def calculate_progress_metrics(
 
 @st.cache_data
 def compute_summary_progress(
-    data: pd.DataFrame, date: str, target: int | None = None
+    data: pl.DataFrame, date: str, target: int | None = None
 ) -> tuple:
     """Compute progress metrics for the summary report.
 
@@ -672,9 +671,7 @@ def compute_summary_progress(
     ValueError
         If target is not a positive integer.
     """
-    # Convert to Polars for computation
-    pl_data = _pandas_to_polars(data)
-    metrics = calculate_progress_metrics(pl_data, date, target)
+    metrics = calculate_progress_metrics(data, date, target)
     return (
         metrics.progress_pct,
         metrics.avg_per_day,
@@ -715,7 +712,7 @@ determine_auto_time_period = _determine_auto_time_period
 
 @st.cache_data
 def compute_summary_progress_by_col(
-    data: pd.DataFrame,
+    data: pl.DataFrame,
     date: str,
     progress_by_col: str,
     progress_time_period: str,
@@ -745,20 +742,17 @@ def compute_summary_progress_by_col(
         - format_cols: list (columns for formatting)
     """
     # Handle empty data
-    if data.empty:
+    if data.is_empty:
         return pd.DataFrame(), 0, 0, []
-
-    # Convert to Polars for computation
-    pl_data = _pandas_to_polars(data)
 
     # Determine time period
     if progress_time_period == "Auto":
-        time_period = _determine_auto_time_period(pl_data.height)
+        time_period = _determine_auto_time_period(data.height)
     else:
         time_period = progress_time_period
 
     # Select relevant columns
-    progress_data = pl_data.select([date, progress_by_col])
+    progress_data = data.select([date, progress_by_col])
 
     # Validate and convert date column
     try:
@@ -848,7 +842,7 @@ def calculate_data_summary_metrics(data: pl.DataFrame) -> DataSummaryMetrics:
 
 
 @st.cache_data
-def compute_summary_data_summary(data: pd.DataFrame) -> tuple:
+def compute_summary_data_summary(data: pl.DataFrame) -> tuple:
     """Compute data summary metrics.
 
     This function is maintained for backward compatibility.
@@ -863,9 +857,7 @@ def compute_summary_data_summary(data: pd.DataFrame) -> tuple:
     tuple
         A tuple containing column counts by type.
     """
-    # Convert to Polars for computation
-    pl_data = _pandas_to_polars(data)
-    metrics = calculate_data_summary_metrics(pl_data)
+    metrics = calculate_data_summary_metrics(data)
     return (
         metrics.string_columns_count,
         metrics.numeric_columns_count,
@@ -931,7 +923,7 @@ def calculate_data_quality_metrics(
 
 
 @st.cache_data
-def compute_summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> tuple:
+def compute_summary_data_quality(data: pl.DataFrame, survey_id: str | None) -> tuple:
     """Compute data quality metrics.
 
     This function is maintained for backward compatibility.
@@ -948,9 +940,7 @@ def compute_summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> t
     tuple
         A tuple containing data quality metrics.
     """
-    # Convert to Polars for computation
-    pl_data = _pandas_to_polars(data)
-    metrics = calculate_data_quality_metrics(pl_data, survey_id)
+    metrics = calculate_data_quality_metrics(data, survey_id)
     return (
         metrics.duplicates_pct,
         metrics.outliers_pct,
@@ -966,7 +956,7 @@ def compute_summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> t
 
 @demo_output_onboarding(TAB_NAME)
 def summary_settings(
-    data: pd.DataFrame, setting_file: str, config: SummarySettings
+    data: pl.DataFrame, setting_file: str, config: SummarySettings
 ) -> tuple:
     """Render settings UI and return selected settings.
 
@@ -1069,7 +1059,7 @@ def summary_settings(
 
 
 @demo_output_onboarding(TAB_NAME)
-def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
+def summary_submissions(data: pl.DataFrame, date: str | None = None) -> None:
     """Render submission details report.
 
     Parameters
@@ -1086,9 +1076,7 @@ def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
         )
         return
 
-    # Convert to Polars and calculate metrics
-    pl_data = _pandas_to_polars(data)
-    metrics = calculate_submission_metrics(pl_data, date)
+    metrics = calculate_submission_metrics(data, date)
 
     # Display date range
     dc1, _, _, dc2 = st.columns(spec=4)
@@ -1145,7 +1133,7 @@ def summary_submissions(data: pd.DataFrame, date: str | None = None) -> None:
 
 @demo_output_onboarding(TAB_NAME)
 def summary_progress(
-    data: pd.DataFrame,
+    data: pl.DataFrame,
     date: str,
     setting_file: str,
     target: int | None = None,
@@ -1170,9 +1158,7 @@ def summary_progress(
         )
         return
 
-    # Convert to Polars and calculate progress metrics
-    pl_data = _pandas_to_polars(data)
-    metrics = calculate_progress_metrics(pl_data, date, target)
+    metrics = calculate_progress_metrics(data, date, target)
 
     # Display metrics
     mc1, mc2, mc3, mc4 = st.columns(spec=4, border=True)
@@ -1208,7 +1194,7 @@ def summary_progress(
 
 
 def _render_progress_by_column(
-    data: pd.DataFrame, date: str, setting_file: str
+    data: pl.DataFrame, date: str, setting_file: str
 ) -> None:
     """Render progress by column section.
 
@@ -1292,7 +1278,7 @@ def _render_progress_by_column(
 
 
 @demo_output_onboarding(TAB_NAME)
-def summary_data_summary(data: pd.DataFrame) -> None:
+def summary_data_summary(data: pl.DataFrame) -> None:
     """Render data summary section.
 
     Parameters
@@ -1300,9 +1286,7 @@ def summary_data_summary(data: pd.DataFrame) -> None:
     data : pd.DataFrame
         The survey data (pandas).
     """
-    # Convert to Polars and calculate metrics
-    pl_data = _pandas_to_polars(data)
-    metrics = calculate_data_summary_metrics(pl_data)
+    metrics = calculate_data_summary_metrics(data)
 
     ds1, ds2, ds3, ds4 = st.columns(spec=4, border=True)
     ds1.metric(
@@ -1328,7 +1312,7 @@ def summary_data_summary(data: pd.DataFrame) -> None:
 
 
 @demo_output_onboarding(TAB_NAME)
-def summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> None:
+def summary_data_quality(data: pl.DataFrame, survey_id: str | None) -> None:
     """Render data quality section.
 
     Parameters
@@ -1338,9 +1322,7 @@ def summary_data_quality(data: pd.DataFrame, survey_id: str | None) -> None:
     survey_id : str | None
         The survey ID column.
     """
-    # Convert to Polars and calculate metrics
-    pl_data = _pandas_to_polars(data)
-    metrics = calculate_data_quality_metrics(pl_data, survey_id)
+    metrics = calculate_data_quality_metrics(data, survey_id)
 
     # Create donut charts
     if metrics.duplicates_pct is not None:
