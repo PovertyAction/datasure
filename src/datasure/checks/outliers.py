@@ -528,7 +528,7 @@ def _should_expand_row(row: dict) -> bool:
     return row["search_type"] != SearchType.EXACT.value and not row.get("locked", False)
 
 
-@st.cache_data
+@st.cache_data(hash_funcs={pl.DataFrame: lambda x: None})
 def _update_unlocked_cols(
     column_config: pl.DataFrame,
     col_names: list[str],
@@ -739,7 +739,7 @@ def compute_outlier_stats_polars(
     )
 
 
-@st.cache_data
+@st.cache_data(hash_funcs={pl.DataFrame: lambda df: str(df.schema)})
 def stack_outlier_columns(df: pl.DataFrame, col_names: list[str]) -> pl.Series:
     """Stack specified columns of a DataFrame into a single Series.
 
