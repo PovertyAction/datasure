@@ -7,6 +7,7 @@ This module provides comprehensive outlier detection functionality with:
 - Modular, testable architecture
 """
 
+import math
 import re
 from enum import Enum, IntEnum
 from typing import Any
@@ -175,8 +176,8 @@ class OutlierStatistics(BaseModel):
     max_value: float
     mean: float
     median: float
-    sd: float = Field(ge=0, alias="std")
-    iqr: float = Field(ge=0)
+    sd: float
+    iqr: float
     lower_bound: float
     upper_bound: float
 
@@ -184,7 +185,6 @@ class OutlierStatistics(BaseModel):
         """Pydantic config."""
 
         populate_by_name = True
-
 
 class OutlierColumnConfig(BaseModel):
     """Configuration for a single outlier column check."""
@@ -342,7 +342,8 @@ def _convert_series_to_numeric(series: pl.Series) -> pl.Series:
         If conversion fails.
     """
     if series.dtype in pl.NUMERIC_DTYPES:
-        return series
+        # Cast to Float64 for consistency in concatenation
+        return series.cast(pl.Float64)
 
     try:
         if series.dtype == pl.Utf8:
@@ -375,7 +376,8 @@ def _convert_dataframe_column_to_numeric(df: pl.DataFrame, column: str) -> pl.Da
         If conversion fails.
     """
     if df[column].dtype in pl.NUMERIC_DTYPES:
-        return df
+        # Cast to Float64 for consistency in concatenation
+        return df.with_columns(pl.col(column).cast(pl.Float64).alias(column))
 
     try:
         if df[column].dtype == pl.Utf8:
@@ -732,7 +734,7 @@ def compute_outlier_stats_polars(
         max_value=max_value,
         mean=mean,
         median=median,
-        std=sd,
+        sd=sd,
         iqr=iqr,
         lower_bound=bounds.lower_bound,
         upper_bound=bounds.upper_bound,
@@ -860,16 +862,16 @@ def _add_statistics_columns(
     """
     return col_df.with_columns(
         [
-            pl.lit(outlier_stats.min_value).alias("min_value"),
-            pl.lit(outlier_stats.max_value).alias("max_value"),
-            pl.lit(outlier_stats.mean).alias("mean"),
-            pl.lit(outlier_stats.median).alias("median"),
-            pl.lit(outlier_stats.sd).alias("std"),
-            pl.lit(outlier_stats.iqr).alias("iqr"),
-            pl.lit(outlier_stats.lower_bound).alias("lower_bound"),
-            pl.lit(outlier_stats.upper_bound).alias("upper_bound"),
+            pl.lit(outlier_stats.min_value, dtype=pl.Float64).alias("min_value"),
+            pl.lit(outlier_stats.max_value, dtype=pl.Float64).alias("max_value"),
+            pl.lit(outlier_stats.mean, dtype=pl.Float64).alias("mean"),
+            pl.lit(outlier_stats.median, dtype=pl.Float64).alias("median"),
+            pl.lit(outlier_stats.sd, dtype=pl.Float64).alias("std"),
+            pl.lit(outlier_stats.iqr, dtype=pl.Float64).alias("iqr"),
+            pl.lit(outlier_stats.lower_bound, dtype=pl.Float64).alias("lower_bound"),
+            pl.lit(outlier_stats.upper_bound, dtype=pl.Float64).alias("upper_bound"),
             pl.lit(outlier_method).alias("outlier_method"),
-            pl.lit(outlier_multiplier).alias("outlier_multiplier"),
+            pl.lit(outlier_multiplier, dtype=pl.Float64).alias("outlier_multiplier"),
             pl.lit(col_name).alias("column name"),
         ]
     )
