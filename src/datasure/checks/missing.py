@@ -7,6 +7,7 @@ This module provides comprehensive missing data analysis functionality with:
 - DuckDB storage for missing code configurations
 """
 
+from turtle import width
 from typing import Any
 
 import numpy as np
@@ -937,7 +938,7 @@ def missing_columns(missing_data: pl.DataFrame, missing_codes_df: pl.DataFrame, 
             mv_data_filtered.style.format(subset=perc_cols, precision=2).background_gradient(
                 subset=perc_cols, cmap=cmap, axis=1, vmin=vmin_val, vmax=vmax_val
             ),
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
             column_config={
                 "Column": st.column_config.Column(pinned=True),
@@ -1003,7 +1004,7 @@ def missing_over_time(missing_data: pl.DataFrame, data: pl.DataFrame, setting_fi
         color_discrete_sequence=["#e8848b"],
     )
     fig.update_layout(width=1000, height=500, yaxis_range=[0, 100])
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 
 @demo_output_onboarding(TAB_NAME)
@@ -1073,7 +1074,7 @@ def missing_compare(missing_data: pl.DataFrame, data: pl.DataFrame, setting_file
     )
 
     if not compare_col:
-        st.dataframe(group_by_data, use_container_width=True)
+        st.dataframe(group_by_data, width='stretch')
     else:
         cmap = sns.light_palette("pink", as_cmap=True)
         styler_limit = group_by_data.shape[0] * group_by_data.shape[1]
@@ -1084,7 +1085,7 @@ def missing_compare(missing_data: pl.DataFrame, data: pl.DataFrame, setting_file
             .format(subset=["values (count)"], thousands=",")
             .format(subset=["values (%)"], precision=2)
             .background_gradient(subset=compare_col, cmap=cmap, axis=1, vmin=vmin_val, vmax=vmax_val),
-            use_container_width=True,
+            width='stretch',
             column_config={
                 "values (count)": st.column_config.Column(pinned=True),
                 "values (%)": st.column_config.Column(pinned=True),
@@ -1144,7 +1145,7 @@ def missing_correlation(missing_data: pl.DataFrame, color_map: list, setting_fil
 
         fig = px.imshow(nullity_corr, color_continuous_scale=color_map)
         fig.update_layout(width=1000, height=1000)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     else:
         st.warning("Select at least two columns to calculate correlation")
 
@@ -1165,7 +1166,7 @@ def missing_matrix(missing_data: pl.DataFrame, color_map: list) -> None:
     fig = px.imshow(nullity_matrix, color_continuous_scale=color_map)
     fig.layout.coloraxis.showscale = False
     fig.update_layout(width=1000, height=1000)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 
 # =============================================================================
