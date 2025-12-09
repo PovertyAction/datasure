@@ -8,10 +8,9 @@ This module provides comprehensive progress tracking functionality with:
 - Modular, testable architecture
 """
 
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
-from traitlets import default
 import plotly.express as px
 import plotly.graph_objects as go
 import polars as pl
@@ -78,8 +77,11 @@ class ProgressSettings(BaseModel):
     survey_date: str | None = Field(None, description="Survey date column")
     enumerator: str | None = Field(None, description="Enumerator ID column")
     survey_target: int | None = Field(None, ge=0, description="Target number of surveys")
+    target_submissions_per_period: int | None = Field(
+        None, ge=0, description="Target number of submissions per time period"
+    )
 
-    @field_validator("survey_target")
+    @field_validator("survey_target", "target_submissions_per_period")
     @classmethod
     def validate_target(cls, v: int | None) -> int | None:
         """Validate target is positive if provided."""
@@ -97,6 +99,25 @@ class ProgressSummary(BaseModel):
     percentage_completed: float = Field(
         ge=0, le=100, description="Percentage of target completed"
     )
+
+
+class TimePeriodConfig(BaseModel):
+    """Configuration for time period aggregation."""
+
+    time_period: Literal["Day", "Week", "Month"] = Field(
+        description="Time period for aggregating progress data"
+    )
+
+    @field_validator("time_period")
+    @classmethod
+    def validate_time_period(cls, v: str) -> str:
+        """Validate that time period is one of the allowed values."""
+        valid_periods = {"Day", "Week", "Month"}
+        if v not in valid_periods:
+            raise ValueError(
+                f"Invalid time period '{v}'. Must be one of: {', '.join(valid_periods)}"
+            )
+        return v
 
 
 # =============================================================================
@@ -255,10 +276,12 @@ def progress_report_settings(
                 save_check_settings(settings_file, TAB_NAME, {"enumerator": enumerator})
 
         with st.container(border=True):
-            st.subheader("Submission Target")
-            tc1, _, _ = st.columns(spec=3)
+            st.subheader("Submission Targets")
+            tc1, tc2, _ = st.columns(spec=3)
             default_target = default_settings.survey_target
-            # Target selection
+            default_target_per_period = default_settings.target_submissions_per_period
+
+            # Total target selection
             with tc1:
                 target = st.number_input(
                     label="Total Expected Interviews",
@@ -271,12 +294,28 @@ def progress_report_settings(
                 )
                 save_check_settings(settings_file, TAB_NAME, {"target": target})
 
+            # Target per period selection
+            with tc2:
+                target_per_period = st.number_input(
+                    label="Target Submissions Per Period",
+                    min_value=0,
+                    value=default_target_per_period if default_target_per_period else 0,
+                    help="Target number of submissions per time period (Day/Week/Month)",
+                    key="target_per_period_progress",
+                    on_change=trigger_save,
+                    kwargs={"state_name": TAB_NAME + "_target_per_period"},
+                )
+                save_check_settings(
+                    settings_file, TAB_NAME, {"target_per_period": target_per_period}
+                )
+
     return ProgressSettings(
         survey_key=survey_key,
         survey_id=survey_id,
         survey_date=survey_date,
         enumerator=enumerator,
         survey_target=target,
+        target_submissions_per_period=target_per_period if target_per_period > 0 else None,
     )
 
 
@@ -287,7 +326,7 @@ def progress_report_settings(
 
 
 @st.cache_data
-def _compute_progress_summary(
+def compute_progress_summary(
     data: pl.DataFrame, target: int | None
 ) -> ProgressSummary:
     """Compute summary statistics for progress report.
@@ -329,7 +368,7 @@ def display_progress_summary(data: pl.DataFrame, target: int | None) -> None:
     target : int | None
         Target number of interviews
     """
-    progress_summary = _compute_progress_summary(
+    progress_summary = compute_progress_summary(
         data, target
     )
 
@@ -374,69 +413,117 @@ def display_progress_summary(data: pl.DataFrame, target: int | None) -> None:
 
 @st.cache_data
 def compute_progress_overtime(
-    data: pd.DataFrame,
+    data: pl.DataFrame,
     date: str,
-    time_period: str,
-) -> tuple[pd.DataFrame, float]:
-    """Compute progress over time.
+    time_period: Literal["Day", "Week", "Month"],
+) -> pl.DataFrame:
+    """Compute progress over time statistics.
 
     Parameters
     ----------
-    data : pd.DataFrame
+    data : pl.DataFrame
         Dataset
     date : str
         Column name for date
-    time_period : str
-        Time period aggregation (Day, Week, Month)
+    time_period : Literal["Day", "Week", "Month"]
+        Time period aggregation (Day, Week, or Month)
 
     Returns
     -------
-    tuple
-        (period_stats DataFrame, average_interviews)
+    pl.DataFrame
+        DataFrame with time_period and num_interviews columns
+
+    Raises
+    ------
+    ValueError
+        If time_period is not one of: Day, Week, Month
     """
-    data = data.copy()
+    # Validate time period using Pydantic model
+    validated_config = TimePeriodConfig(time_period=time_period)
+    validated_period = validated_config.time_period
 
     # Create time period column based on selection
-    if time_period == "Day":
-        data["time_period"] = pd.to_datetime(data[date]).dt.date
-    elif time_period == "Week":
-        data["time_period"] = (
-            pd.to_datetime(data[date]).dt.to_period("W").dt.start_time.dt.date
+    if validated_period == "Day":
+        period_stats = data.select(
+            pl.col(date).cast(pl.Date).alias("time_period")
+        ).group_by("time_period").agg(
+            pl.len().alias("num_interviews")
+        ).sort("time_period")
+    elif validated_period == "Week":
+        period_stats = data.select(
+            pl.col(date).cast(pl.Date).dt.truncate("1w").alias("time_period")
+        ).group_by("time_period").agg(
+            pl.len().alias("num_interviews")
+        ).sort("time_period")
+    elif validated_period == "Month":
+        period_stats = data.select(
+            pl.col(date).cast(pl.Date).dt.truncate("1mo").alias("time_period")
+        ).group_by("time_period").agg(
+            pl.len().alias("num_interviews")
+        ).sort("time_period")
+
+    return period_stats
+
+
+@st.cache_data
+def compute_average_interviews(period_stats: pl.DataFrame) -> float:
+    """Compute average number of interviews across time periods.
+
+    Parameters
+    ----------
+    period_stats : pl.DataFrame
+        DataFrame with num_interviews column
+
+    Returns
+    -------
+    float
+        Average number of interviews per period
+    """
+    return period_stats["num_interviews"].mean()
+
+def render_time_period_selector() -> Literal["Day", "Week", "Month"]:
+    """Render time period selector UI.
+
+    Returns
+    -------
+    Literal["Day", "Week", "Month"]
+        Selected time period
+    """
+    _, tp_col = st.columns([0.8, 0.2])
+    with tp_col:
+
+        options_map = {"Day": ":material/event: Daily", "Week": ":material/date_range: Weekly", "Month": ":material/calendar_month: Monthly"}
+
+        time_period = st.pills(
+            label="Time Period",
+            options=options_map.keys(),
+            format_func=lambda x: options_map[x],
+            key="time_period_progress_overtime",
+            help="Select time period for aggregating progress data",
+            selection_mode="single",
         )
-    elif time_period == "Month":
-        data["time_period"] = (
-            pd.to_datetime(data[date]).dt.to_period("M").dt.start_time.dt.date
-        )
 
-    # Group data by time period and count number of interviews
-    period_stats = (
-        data[["time_period"]]
-        .groupby("time_period")
-        .agg({"time_period": "count"})
-        .rename(columns={"time_period": "num_interviews"})
-        .reset_index()
-    )
-
-    # Calculate the average number of interviews
-    average_interviews = period_stats["num_interviews"].mean()
-
-    return period_stats, average_interviews
-
+    return time_period
 
 @demo_output_onboarding(TAB_NAME)
 def display_progress_overtime(
-    data: pd.DataFrame, date: str | None, setting_file: str
+    data: pl.DataFrame,
+    date: str | None,
+    setting_file: str,
+    target_per_period: int | None = None,
 ) -> None:
     """Display progress over time.
 
     Parameters
     ----------
-    data : pd.DataFrame
+    data : pl.DataFrame
         Dataset
     date : str | None
         Column name for date
     setting_file : str
         Path to settings file
+    target_per_period : int | None
+        Target number of submissions per period
     """
     if not date:
         st.info(
@@ -445,15 +532,7 @@ def display_progress_overtime(
         )
         return
 
-    time_period = st.radio(
-        label="Select time period:",
-        options=["Day", "Week", "Month"],
-        horizontal=True,
-        key="time_period_progress_overtime",
-        help="Select time period for progress report",
-        on_change=trigger_save,
-        kwargs=({"state_name": "time_period_progress_overtime_save"}),
-    )
+    time_period = render_time_period_selector()
 
     if st.session_state.get("time_period_progress_overtime_save"):
         save_check_settings(
@@ -463,47 +542,72 @@ def display_progress_overtime(
         )
         st.session_state["time_period_progress_overtime_save"] = False
 
-    period_stats, average_interviews = compute_progress_overtime(
+    period_stats = compute_progress_overtime(
         data=data,
         date=date,
         time_period=time_period,
     )
 
+    average_interviews = compute_average_interviews(period_stats)
+
+    # Convert time_period and num_interviews to lists for plotting
+    time_periods = period_stats["time_period"].to_list()
+    num_interviews = period_stats["num_interviews"].to_list()
+
+    # Determine threshold for coloring bars (target or average)
+    threshold = target_per_period if target_per_period else average_interviews
+
+    # Create color list based on threshold
+    bar_colors = [
+        "#2ECC71" if count >= threshold else "#f87171" for count in num_interviews
+    ]
+
     # Create the figure
     fig = go.Figure()
 
-    # Add bar plot for interviews per time period
+    # Add bar plot for interviews per time period with conditional coloring
     fig.add_trace(
         go.Bar(
-            x=period_stats["time_period"],
-            y=period_stats["num_interviews"],
+            x=time_periods,
+            y=num_interviews,
             name="Interviews",
-            marker_color="#F28C28",
+            marker_color=bar_colors,
             hovertemplate="<b>%{x}</b><br>" + "Interviews: %{y}<br>",
         )
     )
 
-    # Add average interview line
+    # Add threshold line (target or average)
+    threshold_label = (
+        f"Target: {threshold}"
+        if target_per_period
+        else f"Avg Interviews: {threshold:.2f}"
+    )
     fig.add_trace(
         go.Scatter(
-            x=[period_stats["time_period"].min(), period_stats["time_period"].max()],
-            y=[average_interviews, average_interviews],
+            x=[time_periods[0], time_periods[-1]],
+            y=[threshold, threshold],
             mode="lines",
-            name=f"Avg Interviews: {average_interviews:.2f}",
+            name=threshold_label,
             line={"color": "#4D5E90", "width": 2, "dash": "dash"},
         )
     )
 
-    # Update layout
+    # Update layout with transparent background
     fig.update_layout(
         title=f"Interview Progress by {time_period}",
         title_x=0,
-        plot_bgcolor="white",
-        paper_bgcolor="white",
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
         height=400,
         margin={"t": 50, "b": 50, "l": 50, "r": 50},
         showlegend=True,
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+        legend={
+            "orientation": "h",
+            "yanchor": "bottom",
+            "y": 1.02,
+            "xanchor": "right",
+            "x": 1,
+        },
         xaxis={
             "title": time_period,
             "showgrid": False,
@@ -983,6 +1087,8 @@ def progress_report(
 
     string_numeric_cols = list(set(string_columns + numeric_columns))
 
+    st.title("Progress Tracking")
+
     # Load settings
     config_settings = ProgressSettings(**config)
     progress_settings = progress_report_settings(
@@ -990,18 +1096,20 @@ def progress_report(
     )
 
     st.write("---")
-    st.title("Progress Summary")
-
+    st.subheader("Progress Summary")
     display_progress_summary(data, progress_settings.survey_target)
-    """"
 
     st.write("---")
-    st.write("## Progress Summary")
-    display_progress_summary(
+    st.subheader("Progress Over Time")
+    display_progress_overtime(
         data=data,
-        target=target,
+        date=progress_settings.survey_date,
+        setting_file=setting_file,
+        target_per_period=progress_settings.target_submissions_per_period,
     )
 
+
+    """"
     st.write("---")
     st.write("## Progress Over Time")
     display_progress_overtime(
