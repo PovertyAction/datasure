@@ -77,15 +77,26 @@ class ProgressSettings(BaseModel):
     survey_id: str | None = Field(..., min_length=1, description="Survey ID column")
     survey_date: str | None = Field(None, description="Survey date column")
     enumerator: str | None = Field(None, description="Enumerator ID column")
-    target: int | None = Field(None, ge=0, description="Target number of surveys")
+    survey_target: int | None = Field(None, ge=0, description="Target number of surveys")
 
-    @field_validator("target")
+    @field_validator("survey_target")
     @classmethod
     def validate_target(cls, v: int | None) -> int | None:
         """Validate target is positive if provided."""
         if v is not None and v < 0:
             raise ValueError("Target must be a positive number")
         return v
+
+class ProgressSummary(BaseModel):
+    """Summary statistics for progress tracking."""
+
+    total_submitted: int = Field(ge=0, description="Total number of submitted surveys")
+    target: int | None = Field(
+        None, ge=0, description="Target number of surveys to collect"
+    )
+    percentage_completed: float = Field(
+        ge=0, le=100, description="Percentage of target completed"
+    )
 
 
 # =============================================================================
@@ -148,7 +159,6 @@ def progress_report_settings(
     ProgressSettings
         User-configured settings.
     """
-    st.write("Progress Report Settings:", config)
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for progress report")
         st.write("---")
@@ -247,7 +257,7 @@ def progress_report_settings(
         with st.container(border=True):
             st.subheader("Submission Target")
             tc1, _, _ = st.columns(spec=3)
-            default_target = default_settings.target
+            default_target = default_settings.survey_target
             # Target selection
             with tc1:
                 target = st.number_input(
@@ -266,7 +276,7 @@ def progress_report_settings(
         survey_id=survey_id,
         survey_date=survey_date,
         enumerator=enumerator,
-        target=target,
+        survey_target=target,
     )
 
 
@@ -277,9 +287,9 @@ def progress_report_settings(
 
 
 @st.cache_data
-def compute_progress_summary(
-    data: pd.DataFrame, target: int | None
-) -> tuple[int, int | None, float]:
+def _compute_progress_summary(
+    data: pl.DataFrame, target: int | None
+) -> ProgressSummary:
     """Compute summary statistics for progress report.
 
     Parameters
@@ -294,18 +304,22 @@ def compute_progress_summary(
     tuple
         (total_submitted, target, percentage_completed)
     """
-    total_submitted = len(data)
+    total_submitted = data.height
 
     if target and target > 0:
         percentage_completed = (total_submitted / target) * 100
     else:
         percentage_completed = 0.0
 
-    return total_submitted, target, percentage_completed
+    return ProgressSummary(
+        total_submitted=total_submitted,
+        target=target,
+        percentage_completed=percentage_completed,
+    )
 
 
 @demo_output_onboarding(TAB_NAME)
-def display_progress_summary(data: pd.DataFrame, target: int | None) -> None:
+def display_progress_summary(data: pl.DataFrame, target: int | None) -> None:
     """Display summary statistics for progress report.
 
     Parameters
@@ -315,15 +329,15 @@ def display_progress_summary(data: pd.DataFrame, target: int | None) -> None:
     target : int | None
         Target number of interviews
     """
-    total_submitted, target, percentage_completed = compute_progress_summary(
-        data=data, target=target
+    progress_summary = _compute_progress_summary(
+        data, target
     )
 
     mc1, mc2, mc3 = st.columns([0.5, 0.25, 0.25], border=True)
 
     with mc1:
         st.write("Submission progress")
-        sp1, sp2 = st.columns([0.9, 0.1])
+        sp1, sp2 = st.columns([0.8, 0.2])
 
         if not target:
             sp1.info(
@@ -331,9 +345,9 @@ def display_progress_summary(data: pd.DataFrame, target: int | None) -> None:
                 "settings to set it."
             )
         else:
-            progress_val = min(percentage_completed / 100, 1.0)
+            progress_val = min(progress_summary.percentage_completed / 100, 1.0)
             sp1.progress(value=progress_val)
-            sp2.write(f"{percentage_completed:.2f}%")
+            sp2.write(f"{progress_summary.percentage_completed:.2f}%")
 
     if not target:
         with mc2:
@@ -343,12 +357,14 @@ def display_progress_summary(data: pd.DataFrame, target: int | None) -> None:
                 "settings to set it."
             )
     else:
+        formatted_target = f"{target:,}" if target > 0 else "Invalid Target"
         mc2.metric(
             label="Target Interviews",
-            value=target if (target and target > 0) else "Invalid Target",
+            value=formatted_target,
         )
 
-    mc3.metric(label="Total Submitted Interviews", value=total_submitted)
+    formatted_submitted = f"{progress_summary.total_submitted:,}"
+    mc3.metric(label="Total Submitted Interviews", value=formatted_submitted)
 
 
 # =============================================================================
@@ -976,6 +992,7 @@ def progress_report(
     st.write("---")
     st.title("Progress Summary")
 
+    display_progress_summary(data, progress_settings.survey_target)
     """"
 
     st.write("---")
