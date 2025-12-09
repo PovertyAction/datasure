@@ -120,6 +120,20 @@ class TimePeriodConfig(BaseModel):
         return v
 
 
+class AttemptedInterviewsResult(BaseModel):
+    """Result model for attempted interviews computation."""
+
+    attempted_interviews: Any = Field(description="DataFrame with attempted interviews data")
+    total_submitted: int = Field(ge=0, description="Total number of submissions")
+    number_of_unique_ids: int = Field(ge=0, description="Number of unique survey IDs")
+    min_attempts: int = Field(ge=0, description="Minimum number of attempts")
+    max_attempts: int = Field(ge=0, description="Maximum number of attempts")
+
+    class Config:
+        """Pydantic config."""
+        arbitrary_types_allowed = True
+
+
 # =============================================================================
 # Settings and Configuration Functions
 # =============================================================================
@@ -837,15 +851,68 @@ def display_progress_chart(data: pd.DataFrame, setting_file: str) -> None:
 # =============================================================================
 
 
-@st.cache_data
-def compute_attempted_interviews(
-    data: pd.DataFrame, survey_id: str, date: str, display_cols: list[str]
-) -> tuple[pd.DataFrame, int, int, int, int]:
-    """Compute attempted interviews.
+def _aggregate_attempts_by_survey_id(
+    data: pl.DataFrame, survey_id: str, date: str
+) -> pl.DataFrame:
+    """Aggregate interview attempts by survey ID.
 
     Parameters
     ----------
-    data : pd.DataFrame
+    data : pl.DataFrame
+        Dataset
+    survey_id : str
+        Column name for survey ID
+    date : str
+        Column name for date
+
+    Returns
+    -------
+    pl.DataFrame
+        Aggregated attempts with num_interviews, last_attempt_date, and attempt_dates
+    """
+    return data.group_by(survey_id).agg([
+        pl.len().alias("num_interviews"),
+        pl.col(date).max().alias("last_attempt_date"),
+        pl.col(date).alias("attempt_dates"),
+    ]).sort(survey_id)
+
+
+def _expand_attempt_dates(attempts_df: pl.DataFrame) -> pl.DataFrame:
+    """Expand attempt dates list into separate columns.
+
+    Parameters
+    ----------
+    attempts_df : pl.DataFrame
+        DataFrame with attempt_dates column containing lists
+
+    Returns
+    -------
+    pl.DataFrame
+        DataFrame with expanded attempt date columns
+    """
+    # Get the maximum number of attempts to determine how many columns we need
+    max_attempts = attempts_df.select(
+        pl.col("attempt_dates").list.len().max()
+    ).item()
+
+    # Explode attempt dates into separate columns
+    # Use list.get with default=None to handle lists shorter than max_attempts
+    for i in range(max_attempts):
+        attempts_df = attempts_df.with_columns(
+            pl.col("attempt_dates").list.get(i, null_on_oob=True).alias(f"Attempt Date {i + 1}")
+        )
+
+    return attempts_df.drop("attempt_dates")
+
+
+def _prepare_display_columns(
+    data: pl.DataFrame, survey_id: str, date: str, display_cols: list[str]
+) -> pl.DataFrame:
+    """Prepare display columns with forward and backward fill.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
         Dataset
     survey_id : str
         Column name for survey ID
@@ -856,80 +923,117 @@ def compute_attempted_interviews(
 
     Returns
     -------
-    tuple
-        (attempted_interviews DataFrame, total_submitted, number_of_unique_ids,
-         min_attempts, max_attempts)
+    pl.DataFrame
+        DataFrame with filled display columns, one row per survey ID
     """
-    total_submitted = len(data)
+    if not display_cols:
+        return pl.DataFrame({survey_id: data[survey_id].unique()})
 
-    # Calculate the number of interviews attempted for each survey ID
-    attempted_interviews = (
-        data.groupby(survey_id)
-        .agg(
-            num_interviews=pd.NamedAgg(column=survey_id, aggfunc="count"),
-            last_attempt_date=pd.NamedAgg(column=date, aggfunc="max"),
-            attempt_dates=pd.NamedAgg(column=date, aggfunc=lambda x: list(x)),
+    # Sort and select relevant columns
+    cols_to_select = [survey_id, date] + display_cols
+    sorted_data = data.select(cols_to_select).sort([survey_id, date])
+
+    # Forward fill and backward fill within each group
+    filled_data = sorted_data.with_columns([
+        pl.col(col).forward_fill().backward_fill().over(survey_id)
+        for col in display_cols
+    ])
+
+    # Keep only one row per survey ID (the first one after sorting)
+    return filled_data.unique(subset=[survey_id], keep="first")
+
+
+def _compute_summary_stats(attempts_df: pl.DataFrame) -> tuple[int, int, int]:
+    """Compute summary statistics for attempted interviews.
+
+    Parameters
+    ----------
+    attempts_df : pl.DataFrame
+        DataFrame with attempted interviews data
+
+    Returns
+    -------
+    tuple
+        (number_of_unique_ids, min_attempts, max_attempts)
+    """
+    num_unique = attempts_df.height
+    min_attempts = attempts_df["num_interviews"].min()
+    max_attempts = attempts_df["num_interviews"].max()
+
+    return num_unique, min_attempts, max_attempts
+
+
+@st.cache_data
+def compute_attempted_interviews(
+    data: pl.DataFrame, survey_id: str, date: str, display_cols: list[str]
+) -> AttemptedInterviewsResult:
+    """Compute attempted interviews statistics.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        Dataset
+    survey_id : str
+        Column name for survey ID
+    date : str
+        Column name for date
+    display_cols : list[str]
+        List of columns to display
+
+    Returns
+    -------
+    AttemptedInterviewsResult
+        Pydantic model containing attempted interviews data and summary statistics
+    """
+    total_submitted = data.height
+
+    # Step 1: Aggregate attempts by survey ID
+    attempted_interviews = _aggregate_attempts_by_survey_id(data, survey_id, date)
+
+    # Step 2: Expand attempt dates into separate columns
+    attempted_interviews = _expand_attempt_dates(attempted_interviews)
+
+    # Step 3: Prepare display columns if any
+    if display_cols:
+        display_data = _prepare_display_columns(data, survey_id, date, display_cols)
+
+        # Merge display columns with attempted interviews
+        attempted_interviews = attempted_interviews.join(
+            display_data.drop([date]), on=survey_id, how="left"
         )
-        .reset_index()
-    )
 
-    # Expand attempt dates into separate columns
-    attempt_dates_df = attempted_interviews["attempt_dates"].apply(pd.Series)
-    attempt_dates_df.columns = [
-        f"Attempt Date {i + 1}" for i in range(attempt_dates_df.shape[1])
-    ]
-    attempted_interviews = pd.concat([attempted_interviews, attempt_dates_df], axis=1)
-    attempted_interviews.drop(columns=["attempt_dates"], inplace=True)
-
-    # Add display columns
-    display_cols_use = display_cols + [survey_id]
-    data_sorted = data.sort_values(by=[survey_id, date])
-    display_data = data_sorted[display_cols_use].copy()
-
-    # Forward fill and backward fill display columns
-    for col in display_cols:
-        display_data[col] = display_data.groupby(survey_id)[col].transform(
-            lambda x: x.ffill().bfill()
+        # Reorder columns: survey_id, num_interviews, last_attempt_date, display_cols, attempt dates
+        attempt_date_cols = [
+            col for col in attempted_interviews.columns if col.startswith("Attempt Date")
+        ]
+        ordered_cols = (
+            [survey_id, "num_interviews", "last_attempt_date"]
+            + display_cols
+            + attempt_date_cols
         )
+        attempted_interviews = attempted_interviews.select(ordered_cols)
 
-    display_data = display_data.drop_duplicates(subset=[survey_id])
+    # Step 4: Calculate summary statistics
+    num_unique, min_attempts, max_attempts = _compute_summary_stats(attempted_interviews)
 
-    # Merge the display data with the attempted interviews data
-    attempted_interviews = pd.merge(
-        attempted_interviews,
-        display_data,
-        how="left",
-        on=survey_id,
-    )
-
-    # Order columns
-    cols = [survey_id] + ["num_interviews", "last_attempt_date"] + display_cols
-    cols += list(attempt_dates_df.columns)
-    attempted_interviews = attempted_interviews[cols]
-
-    # Calculate summary statistics
-    number_of_unique_ids = attempted_interviews[survey_id].nunique()
-    min_attempts = attempted_interviews["num_interviews"].min()
-    max_attempts = attempted_interviews["num_interviews"].max()
-
-    return (
-        attempted_interviews,
-        total_submitted,
-        number_of_unique_ids,
-        min_attempts,
-        max_attempts,
+    return AttemptedInterviewsResult(
+        attempted_interviews=attempted_interviews,
+        total_submitted=total_submitted,
+        number_of_unique_ids=num_unique,
+        min_attempts=min_attempts,
+        max_attempts=max_attempts,
     )
 
 
 @demo_output_onboarding(TAB_NAME)
 def display_attempted_interviews(
-    data: pd.DataFrame, survey_id: str | None, date: str | None, setting_file: str
+    data: pl.DataFrame, survey_id: str | None, date: str | None, setting_file: str
 ) -> None:
-    """Display attempted interviews.
+    """Display attempted interviews report.
 
     Parameters
     ----------
-    data : pd.DataFrame
+    data : pl.DataFrame
         Dataset
     survey_id : str | None
         Column name for survey ID
@@ -945,36 +1049,36 @@ def display_attempted_interviews(
         )
         return
 
-    st.markdown("### Select columns to display")
+
     default_settings = load_check_settings(
         settings_file=setting_file, check_name="progress"
     )
     display_cols = default_settings.get("display_cols") if default_settings else None
-    display_cols = st.multiselect(
-        label="",
-        options=data.columns,
-        help="Columns to display in the attempted interviews report",
-        key="attempted_interviews_display_cols",
-        default=display_cols,
-        on_change=trigger_save,
-        kwargs=({"state_name": "attempted_interviews_display_cols_save"}),
-    )
 
-    if st.session_state.get("attempted_interviews_display_cols_save"):
-        save_check_settings(
-            settings_file=setting_file,
-            check_name="progress",
-            check_settings={"display_cols": display_cols},
+    with st.expander(":material/clarify: Show more columns in report", expanded=False):
+        st.info(
+            "Select additional columns to include in the table displaying attempted interviews. "
         )
-        st.session_state["attempted_interviews_display_cols_save"] = False
+        display_cols = st.multiselect(
+            label="",
+            options=data.columns,
+            help="Columns to display in the attempted interviews report",
+            key="attempted_interviews_display_cols",
+            default=display_cols,
+            on_change=trigger_save,
+            kwargs=({"state_name": "attempted_interviews_display_cols_save"}),
+        )
 
-    (
-        attempted_interviews,
-        total_submitted,
-        number_of_unique_ids,
-        min_attempts,
-        max_attempts,
-    ) = compute_attempted_interviews(
+        if st.session_state.get("attempted_interviews_display_cols_save"):
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="progress",
+                check_settings={"display_cols": display_cols},
+            )
+            st.session_state["attempted_interviews_display_cols_save"] = False
+
+    # Compute attempted interviews using Polars
+    result = compute_attempted_interviews(
         data=data,
         survey_id=survey_id,
         date=date,
@@ -982,37 +1086,97 @@ def display_attempted_interviews(
     )
 
     # Display metrics
-    cmap = sns.light_palette("pink", as_cmap=True)
-    vmin = attempted_interviews["num_interviews"].min()
-    vmax = attempted_interviews["num_interviews"].max()
-
-    cm1, cm2, cm3, cm4 = st.columns(4, border=True)
-    cm1.metric(label="Total Submitted Interviews", value=total_submitted)
-    cm2.metric(label="Number of Unique IDs", value=number_of_unique_ids)
-    cm3.metric(label="Min Attempts", value=min_attempts)
-    cm4.metric(label="Max Attempts", value=max_attempts)
+    _display_metrics(result)
 
     # Display chart and table
+    _display_chart_and_table(result.attempted_interviews, survey_id)
+
+
+def _display_metrics(result: AttemptedInterviewsResult) -> None:
+    """Display summary metrics for attempted interviews.
+
+    Parameters
+    ----------
+    result : AttemptedInterviewsResult
+        Result containing attempted interviews data and statistics
+    """
+    cm1, cm2, cm3, cm4 = st.columns(4, border=True)
+    total_submissions_formatted = f"{result.total_submitted:,}"
+    cm1.metric(label="Total Submitted Interviews", value=total_submissions_formatted)
+    number_of_unique_ids_formatted = f"{result.number_of_unique_ids:,}"
+    cm2.metric(label="Number of Unique IDs", value=number_of_unique_ids_formatted)
+    min_attempts_formatted = f"{result.min_attempts:,}"
+    cm3.metric(label="Min Attempts", value=min_attempts_formatted)
+    max_attempts_formatted = f"{result.max_attempts:,}"
+    cm4.metric(label="Max Attempts", value=max_attempts_formatted)
+
+
+def _display_chart_and_table(
+    attempted_interviews: pl.DataFrame, survey_id: str
+) -> None:
+    """Display frequency chart and detailed table.
+
+    Parameters
+    ----------
+    attempted_interviews : pl.DataFrame
+        DataFrame with attempted interviews data
+    survey_id : str
+        Column name for survey ID
+    """
     ai1, ai2 = st.columns([0.4, 0.6])
 
     with ai1:
-        # Aggregate attempted interviews into attempted_frequency
+        # Aggregate attempted interviews into frequency counts
         attempted_frequency = (
-            attempted_interviews.groupby("num_interviews")
-            .size()
-            .reset_index(name="frequency")
+            attempted_interviews
+            .group_by("num_interviews")
+            .agg(pl.len().alias("frequency"))
+            .sort("num_interviews")
         )
-        fig = px.bar(
-            attempted_frequency, x="frequency", y="num_interviews", orientation="h"
+
+        # Calculate total and percentage
+        total_surveys = attempted_frequency["frequency"].sum()
+        attempted_frequency = attempted_frequency.with_columns(
+            (pl.col("frequency") / total_surveys * 100).alias("percentage")
         )
+
+        # Convert to list for plotting
+        num_interviews_list = attempted_frequency["num_interviews"].to_list()
+        percentage_list = attempted_frequency["percentage"].to_list()
+        frequency_list = attempted_frequency["frequency"].to_list()
+
+        # Create custom hover text
+        hover_text = [
+            f"<b>{attempts} Attempts</b><br>"
+            f"Percentage: {pct:.1f}%<br>"
+            f"Frequency: {freq}"
+            for attempts, pct, freq in zip(num_interviews_list, percentage_list, frequency_list, strict=False)
+        ]
+
+        # Create figure using go.Bar for better control
+        fig = go.Figure()
+
+        fig.add_trace(
+            go.Bar(
+                x=percentage_list,
+                y=num_interviews_list,
+                orientation="h",
+                marker_color="#f87171",
+                hovertemplate="%{customdata}<extra></extra>",
+                customdata=hover_text,
+            )
+        )
+
         fig.update_layout(
-            title="Attempted Interviews Frequency",
+            title="Attempted Interviews Distribution",
             title_x=0.5,
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
             height=400,
             margin={"t": 50, "b": 50, "l": 50, "r": 50},
-            hovermode="x",
+            hovermode="closest",
             xaxis={
-                "title": "Frequency",
+                "title": "Percentage (%)",
                 "showgrid": False,
                 "gridcolor": "lightgrey",
             },
@@ -1023,18 +1187,21 @@ def display_attempted_interviews(
                 "autorange": "reversed",
             },
         )
-        fig.update_traces(
-            marker_color="#F28C28",
-            hovertemplate="<b>Attempts: %{y}</b><br>"
-            + "Frequency: %{x}<extra></extra>",
-        )
         st.plotly_chart(fig, use_container_width=True)
 
     with ai2:
-        styler_limit = attempted_interviews.shape[0] * attempted_interviews.shape[1]
+        # Convert to pandas for styling (Streamlit doesn't support Polars styling yet)
+        attempts_pd = attempted_interviews.to_pandas()
+
+        cmap = sns.light_palette("pink", as_cmap=True)
+        vmin = attempts_pd["num_interviews"].min()
+        vmax = attempts_pd["num_interviews"].max()
+
+        styler_limit = attempts_pd.shape[0] * attempts_pd.shape[1]
         pd.set_option("styler.render.max_elements", styler_limit)
+
         st.dataframe(
-            data=attempted_interviews.style.background_gradient(
+            data=attempts_pd.style.background_gradient(
                 subset=["num_interviews"],
                 cmap=cmap,
                 vmin=vmin,
@@ -1102,22 +1269,23 @@ def progress_report(
     st.write("---")
     st.subheader("Progress Over Time")
     display_progress_overtime(
-        data=data,
-        date=progress_settings.survey_date,
-        setting_file=setting_file,
-        target_per_period=progress_settings.target_submissions_per_period,
+        data,
+        progress_settings.survey_date,
+        setting_file,
+        progress_settings.target_submissions_per_period,
+    )
+
+    st.write("---")
+    st.subheader("Attempted Interviews")
+    display_attempted_interviews(
+        data,
+        progress_settings.survey_id,
+        progress_settings.survey_date,
+        setting_file,
     )
 
 
     """"
-    st.write("---")
-    st.write("## Progress Over Time")
-    display_progress_overtime(
-        data=data,
-        date=date,
-        setting_file=setting_file,
-    )
-
     st.write("---")
     st.write("## Attempted Interviews")
     display_attempted_interviews(
