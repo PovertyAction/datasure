@@ -373,6 +373,20 @@ map_df = pd.DataFrame({
 st.map(map_df)
 ```
 
+### Widget options and styling
+
+```python
+# Example of widget with with options
+st.selectbox(
+    "Choose an option",
+    options=["Option 1", "Option 2", "Option 3"],
+    index=1,  # Default to "Option 2"
+    help="Select one of the options",
+    width='stretch'  # Make widget stretch to container width
+)
+
+```
+
 ### Third-Party Visualizations
 
 ```python
