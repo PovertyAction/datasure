@@ -15,7 +15,9 @@ import polars as pl
 import streamlit as st
 
 from datasure.checks import (
+    missing_report,
     outliers_report,
+    progress_report,
     summary_report,
 )
 from datasure.utils.cache_utils import get_cache_path
@@ -263,10 +265,14 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
     # Create tabs
     (
         summary,
+        progress,
+        missing,
         outliers,
     ) = st.tabs(
         (
             "Summary",
+            "Progress Tracking",
+            "Missing Values",
             "Outliers & Constraints",
         )
     )
@@ -279,6 +285,30 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             "survey_target": config.survey_target,
         }
         summary_report(data.page_data, config.setting_file, summary_config)
+
+    with progress:
+        progress_config: dict = {
+            "survey_key": config.survey_key,
+            "survey_id": config.survey_id,
+            "enumerator": config.enumerator,
+            "survey_date": config.survey_date,
+            "survey_target": config.survey_target,
+        }
+        progress_report(
+            project_id,
+            config.page_name_id,
+            data.page_data,
+            config.setting_file,
+            progress_config,
+        )
+
+    with missing:
+        missing_report(
+            project_id,
+            config.page_name_id,
+            data.page_data,
+            config.setting_file,
+        )
 
     with outliers:
         outliers_config: dict = {
