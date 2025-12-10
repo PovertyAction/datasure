@@ -11,7 +11,6 @@ This module provides comprehensive progress tracking functionality with:
 from typing import Any, Literal
 
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import polars as pl
 import seaborn as sns
@@ -28,6 +27,9 @@ from datasure.utils.settings_utils import (
 )
 
 TAB_NAME = "progress"
+
+# Configure pandas styler for large dataframes (performance optimization)
+pd.set_option("styler.render.max_elements", 1_000_000)
 
 
 # =============================================================================
@@ -89,18 +91,6 @@ class ProgressSettings(BaseModel):
             raise ValueError("Target must be a positive number")
         return v
 
-class ProgressSummary(BaseModel):
-    """Summary statistics for progress tracking."""
-
-    total_submitted: int = Field(ge=0, description="Total number of submitted surveys")
-    target: int | None = Field(
-        None, ge=0, description="Target number of surveys to collect"
-    )
-    percentage_completed: float = Field(
-        ge=0, le=100, description="Percentage of target completed"
-    )
-
-
 class TimePeriodConfig(BaseModel):
     """Configuration for time period aggregation."""
 
@@ -131,6 +121,7 @@ class AttemptedInterviewsResult(BaseModel):
 
     class Config:
         """Pydantic config."""
+
         arbitrary_types_allowed = True
 
 
@@ -138,22 +129,29 @@ class AttemptedInterviewsResult(BaseModel):
 # Settings and Configuration Functions
 # =============================================================================
 
+@st.cache_data(ttl=60)
 def load_default_settings(
     settings_file: str, config: ProgressSettings
 ) -> ProgressSettings:
-    """Load the default settings for the progress report.
+    """Load and merge saved settings with default configuration.
+
+    Loads previously saved progress report settings from the settings file
+    and merges them with the provided default configuration. Saved settings
+    take precedence over defaults.
+
+    Cached for 60 seconds to reduce file I/O operations.
 
     Parameters
     ----------
     settings_file : str
-        The settings file to load.
+        Path to the settings file containing saved progress configurations.
     config : ProgressSettings
-        Default configuration.
+        Default configuration to use as fallback for missing settings.
 
     Returns
     -------
     ProgressSettings
-        Merged settings.
+        Merged settings combining saved and default configurations.
     """
     # Load saved settings
     saved_settings = load_check_settings(settings_file, TAB_NAME)
@@ -172,27 +170,33 @@ def progress_report_settings(
     categorical_columns: list[str],
     datetime_columns: list[str],
 ) -> ProgressSettings:
-    """Create a settings UI for progress report configuration.
+    """Create and render the settings UI for progress report configuration.
 
-    This function creates the comprehensive Streamlit UI for configuring
-    outlier detection settings. Due to its complexity (UI rendering),
-    it maintains a higher cognitive complexity but is well-structured.
+    This function creates a comprehensive Streamlit UI for configuring
+    progress report settings. It includes:
+    - Survey identifiers (key and ID columns)
+    - Survey date column selection
+    - Enumerator ID column
+    - Submission targets (total and per period)
+
+    Settings are automatically saved to the settings file when changed
+    and loaded from previous sessions if available.
 
     Parameters
     ----------
     settings_file : str
-        Path to settings file.
+        Path to settings file for saving/loading configurations.
     config : ProgressSettings
-        Default configuration.
+        Default configuration used as fallback values.
     categorical_columns : list[str]
-        List of categorical columns.
+        Available categorical columns for selection (survey key, ID, enumerator).
     datetime_columns : list[str]
-        List of datetime columns.
+        Available datetime columns for date selection.
 
     Returns
     -------
     ProgressSettings
-        User-configured settings.
+        User-configured settings from the UI.
     """
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for progress report")
@@ -345,17 +349,20 @@ def compute_progress_summary(
 ) -> ProgressSummary:
     """Compute summary statistics for progress report.
 
+    Calculates the total number of submitted surveys and the percentage
+    of the target completed. If no target is provided, percentage is 0.
+
     Parameters
     ----------
-    data : pd.DataFrame
-        Data to display
+    data : pl.DataFrame
+        Survey data containing all submitted interviews.
     target : int | None
-        Target number of interviews
+        Target number of surveys to collect. If None, percentage is set to 0.
 
     Returns
     -------
-    tuple
-        (total_submitted, target, percentage_completed)
+    ProgressSummary
+        Pydantic model containing total_submitted, target, and percentage_completed.
     """
     total_submitted = data.height
 
@@ -373,14 +380,22 @@ def compute_progress_summary(
 
 @demo_output_onboarding(TAB_NAME)
 def display_progress_summary(data: pl.DataFrame, target: int | None) -> None:
-    """Display summary statistics for progress report.
+    """Display summary statistics and progress metrics in Streamlit UI.
+
+    Renders three columns showing:
+    - Progress bar with percentage completion (if target is set)
+    - Target interviews metric
+    - Total submitted interviews metric
+
+    If no target is set, displays informational messages guiding users
+    to configure settings.
 
     Parameters
     ----------
-    data : pd.DataFrame
-        Data to display
+    data : pl.DataFrame
+        Survey data containing all submitted interviews.
     target : int | None
-        Target number of interviews
+        Target number of surveys to collect. If None, shows info messages.
     """
     progress_summary = compute_progress_summary(
         data, target
@@ -495,31 +510,53 @@ def compute_average_interviews(period_stats: pl.DataFrame) -> float:
     """
     return period_stats["num_interviews"].mean()
 
-def render_time_period_selector() -> Literal["Day", "Week", "Month"]:
-    """Render time period selector UI.
+def render_time_period_selector(settings_file: str, tab_name: str) -> Literal["Day", "Week", "Month"]:
+    """Render time period selector UI using Streamlit pills component.
+
+    Creates a pills selector allowing users to choose the aggregation period
+    for progress over time visualization (Daily, Weekly, or Monthly).
+    The selected value is saved to settings and persisted across sessions.
+
+    Parameters
+    ----------
+    settings_file : str
+        Path to settings file for saving/loading the selected time period.
+    tab_name : str
+        Name of the tab for namespacing saved settings.
 
     Returns
     -------
     Literal["Day", "Week", "Month"]
-        Selected time period
+        Selected time period for aggregation.
     """
     _, tp_col = st.columns([0.8, 0.2])
     with tp_col:
 
         options_map = {"Day": ":material/event: Daily", "Week": ":material/date_range: Weekly", "Month": ":material/calendar_month: Monthly"}
 
+        saved_settings = load_check_settings(settings_file, tab_name) or {}
+        default_time_period = saved_settings.get("time_period_progress_overtime_save", "Day")
+
         time_period = st.pills(
             label="Time Period",
             options=options_map.keys(),
             format_func=lambda x: options_map[x],
             key="time_period_progress_overtime",
+            default=default_time_period,
             help="Select time period for aggregating progress data",
             selection_mode="single",
+            on_change=trigger_save,
+            kwargs={"state_name": TAB_NAME + "_time_period"},
+        )
+
+        save_check_settings(
+            settings_file, TAB_NAME, {"time_period": time_period}
         )
 
     return time_period
 
 @demo_output_onboarding(TAB_NAME)
+@st.fragment
 def display_progress_overtime(
     data: pl.DataFrame,
     date: str | None,
@@ -546,7 +583,7 @@ def display_progress_overtime(
         )
         return
 
-    time_period = render_time_period_selector()
+    time_period = render_time_period_selector(setting_file, TAB_NAME)
 
     if st.session_state.get("time_period_progress_overtime_save"):
         save_check_settings(
@@ -637,7 +674,7 @@ def display_progress_overtime(
         },
     )
 
-    st.plotly_chart(fig, theme=None, use_container_width=True)
+    st.plotly_chart(fig, theme=None, width='stretch')
 
 
 # =============================================================================
@@ -647,46 +684,46 @@ def display_progress_overtime(
 
 @st.cache_data
 def compute_progress_chart(
-    data: pd.DataFrame,
+    data: pl.DataFrame,
     consent_col: str | None,
     consent_vals: list[Any] | None,
     outcome_col: str | None,
     outcome_vals: list[Any] | None,
 ) -> tuple[float, float]:
-    """Compute progress chart statistics.
+    """Compute progress chart statistics using Polars for performance.
 
     Parameters
     ----------
-    data : pd.DataFrame
-        Dataset
+    data : pl.DataFrame
+        Dataset (using Polars for better performance)
     consent_col : str | None
         Column name for consent
     consent_vals : list | None
-        List of consent values
+        List of consent values indicating valid consent
     outcome_col : str | None
         Column name for outcome
     outcome_vals : list | None
-        List of outcome values
+        List of outcome values indicating survey completion
 
     Returns
     -------
-    tuple
+    tuple[float, float]
         (consent_percentage, completion_percentage)
     """
-    total_submitted = len(data)
+    total_submitted = data.height
 
-    # Calculate consent percentage
+    # Calculate consent percentage using Polars
     if consent_col and consent_vals:
-        valid_consent_count = len(data[data[consent_col].isin(consent_vals)])
+        valid_consent_count = data.filter(pl.col(consent_col).is_in(consent_vals)).height
         consent_percentage = (
             (valid_consent_count / total_submitted) * 100 if total_submitted > 0 else 0
         )
     else:
         consent_percentage = 0.0
 
-    # Calculate completion percentage
+    # Calculate completion percentage using Polars
     if outcome_col and outcome_vals:
-        completed_count = len(data[data[outcome_col].isin(outcome_vals)])
+        completed_count = data.filter(pl.col(outcome_col).is_in(outcome_vals)).height
         completion_percentage = (
             (completed_count / total_submitted) * 100 if total_submitted > 0 else 0
         )
@@ -696,16 +733,43 @@ def compute_progress_chart(
     return consent_percentage, completion_percentage
 
 
-@demo_output_onboarding(TAB_NAME)
-def display_progress_chart(data: pd.DataFrame, setting_file: str) -> None:
-    """Display progress chart.
+@st.cache_data
+def _get_unique_values(data: pl.DataFrame, column: str) -> list[Any]:
+    """Get unique values from a Polars DataFrame column (cached for performance).
 
     Parameters
     ----------
-    data : pd.DataFrame
+    data : pl.DataFrame
         Dataset
+    column : str
+        Column name
+
+    Returns
+    -------
+    list[Any]
+        List of unique values
+    """
+    return data[column].unique().to_list()
+
+
+@demo_output_onboarding(TAB_NAME)
+def display_progress_chart(data: pl.DataFrame, setting_file: str) -> None:
+    """Display consent and completion progress charts with interactive configuration.
+
+    Renders two donut charts showing:
+    - Percentage of valid consent (left chart)
+    - Percentage of survey completion (right chart)
+
+    Users can select consent and outcome columns via dropdowns, then
+    specify which values indicate valid consent or completion. Settings
+    are automatically saved and loaded across sessions.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        Survey data containing consent and outcome columns (Polars for performance).
     setting_file : str
-        Path to settings file
+        Path to settings file for saving/loading configurations.
     """
     survey_cols = data.columns
     _, cc1, _, cc2, _ = st.columns([0.1, 0.35, 0.1, 0.35, 0.1])
@@ -723,7 +787,7 @@ def display_progress_chart(data: pd.DataFrame, setting_file: str) -> None:
     # Consent column selection
     with cc1, st.container(border=True):
         consent_index = (
-            survey_cols.get_loc(consent) if consent and consent in survey_cols else None
+            survey_cols.index(consent) if consent and consent in survey_cols else None
         )
         consent = st.selectbox(
             label="Select consent column",
@@ -744,7 +808,7 @@ def display_progress_chart(data: pd.DataFrame, setting_file: str) -> None:
             st.session_state["progress_consent_pie_chart_save"] = False
 
         if consent:
-            consent_val_options = data[consent].unique()
+            consent_val_options = _get_unique_values(data, consent)
             default_consent_vals = (
                 consent_vals if consent_vals and consent_vals in consent_val_options else None
             )
@@ -774,7 +838,7 @@ def display_progress_chart(data: pd.DataFrame, setting_file: str) -> None:
     # Outcome column selection
     with cc2, st.container(border=True):
         outcome_index = (
-            survey_cols.get_loc(outcome) if outcome and outcome in survey_cols else None
+            survey_cols.index(outcome) if outcome and outcome in survey_cols else None
         )
         outcome = st.selectbox(
             label="Select outcome column",
@@ -795,7 +859,7 @@ def display_progress_chart(data: pd.DataFrame, setting_file: str) -> None:
             st.session_state["outcome_progress_chart_save"] = False
 
         if outcome:
-            outcome_val_options = data[outcome].unique()
+            outcome_val_options = _get_unique_values(data, outcome)
             default_outcome_vals = (
                 outcome_vals if outcome_vals and outcome_vals in outcome_val_options else None
             )
@@ -838,12 +902,12 @@ def display_progress_chart(data: pd.DataFrame, setting_file: str) -> None:
     with cc1:
         if consent and consent_vals:
             st.markdown("**% consent**")
-            st.pyplot(perc_consent_chart, use_container_width=True)
+            st.pyplot(perc_consent_chart, width='stretch')
 
     with cc2:
         if outcome and outcome_vals:
             st.markdown("**% completion**")
-            st.pyplot(perc_completion_chart, use_container_width=True)
+            st.pyplot(perc_completion_chart, width='stretch')
 
 
 # =============================================================================
@@ -1002,7 +1066,8 @@ def compute_attempted_interviews(
             display_data.drop([date]), on=survey_id, how="left"
         )
 
-        # Reorder columns: survey_id, num_interviews, last_attempt_date, display_cols, attempt dates
+        # Reorder columns: survey_id, num_interviews, last_attempt_date,
+        # display_cols, attempt dates
         attempt_date_cols = [
             col for col in attempted_interviews.columns if col.startswith("Attempt Date")
         ]
@@ -1026,6 +1091,7 @@ def compute_attempted_interviews(
 
 
 @demo_output_onboarding(TAB_NAME)
+@st.fragment
 def display_attempted_interviews(
     data: pl.DataFrame, survey_id: str | None, date: str | None, setting_file: str
 ) -> None:
@@ -1066,16 +1132,15 @@ def display_attempted_interviews(
             key="attempted_interviews_display_cols",
             default=display_cols,
             on_change=trigger_save,
-            kwargs=({"state_name": "attempted_interviews_display_cols_save"}),
+            kwargs=({"state_name": TAB_NAME + "_display_cols"}),
         )
 
-        if st.session_state.get("attempted_interviews_display_cols_save"):
-            save_check_settings(
-                settings_file=setting_file,
-                check_name="progress",
-                check_settings={"display_cols": display_cols},
-            )
-            st.session_state["attempted_interviews_display_cols_save"] = False
+        save_check_settings(
+            setting_file,
+            TAB_NAME,
+            {"display_cols": display_cols},
+        )
+
 
     # Compute attempted interviews using Polars
     result = compute_attempted_interviews(
@@ -1187,18 +1252,17 @@ def _display_chart_and_table(
                 "autorange": "reversed",
             },
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
     with ai2:
         # Convert to pandas for styling (Streamlit doesn't support Polars styling yet)
         attempts_pd = attempted_interviews.to_pandas()
+        # Dynamically set pd styler max elements based on DataFrame size
+        pd.set_option("styler.render.max_elements", attempts_pd.size + 1)
 
         cmap = sns.light_palette("pink", as_cmap=True)
         vmin = attempts_pd["num_interviews"].min()
         vmax = attempts_pd["num_interviews"].max()
-
-        styler_limit = attempts_pd.shape[0] * attempts_pd.shape[1]
-        pd.set_option("styler.render.max_elements", styler_limit)
 
         st.dataframe(
             data=attempts_pd.style.background_gradient(
@@ -1207,7 +1271,7 @@ def _display_chart_and_table(
                 vmin=vmin,
                 vmax=vmax,
             ),
-            use_container_width=True,
+            width='stretch',
             column_config={
                 survey_id: st.column_config.Column(pinned=True),
                 "num_interviews": st.column_config.Column(
@@ -1234,18 +1298,30 @@ def progress_report(
     setting_file: str,
     config: dict,
 ) -> None:
-    """Display progress report.
+    """Display comprehensive progress tracking report with multiple sections.
+
+    Main entry point for the progress report module. Renders a complete
+    progress tracking dashboard including:
+    - Settings configuration UI
+    - Progress summary with target tracking
+    - Progress over time visualization
+    - Attempted interviews analysis
+
+    The report supports both Pandas and Polars DataFrames, converts column
+    information, and orchestrates all sub-components.
 
     Parameters
     ----------
     project_id : str
-        Project identifier
-    data : pd.DataFrame
-        Data to display
+        Unique identifier for the current project.
+    page_name_id : str
+        Identifier for the current page/tab.
+    data : pl.DataFrame
+        Survey data to analyze and display.
     setting_file : str
-        Path to settings file
-    page_num : int
-        Page number
+        Path to settings file for configuration persistence.
+    config : dict
+        Default configuration dictionary to initialize ProgressSettings.
     """
     # get column info
     _, string_columns, numeric_columns, datetime_columns, _ = get_df_info(
@@ -1283,19 +1359,3 @@ def progress_report(
         progress_settings.survey_date,
         setting_file,
     )
-
-
-    """"
-    st.write("---")
-    st.write("## Attempted Interviews")
-    display_attempted_interviews(
-        data=data,
-        survey_id=survey_id,
-        date=date,
-        setting_file=setting_file,
-    )
-
-    st.write("---")
-    st.write("## Consent and Completion Progress Chart")
-    display_progress_chart(data=data, setting_file=setting_file)
-    """
