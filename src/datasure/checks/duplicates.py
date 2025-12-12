@@ -8,6 +8,7 @@ This module provides comprehensive duplicate detection functionality with:
 - Modular, testable architecture
 """
 
+import datetime
 import os
 import re
 from enum import Enum
@@ -89,15 +90,81 @@ class DuplicatesColumnConfig(BaseModel):
         return v
 
 
+class FilterCondition(BaseModel):
+    """Validation model for filter conditions."""
+
+    condition_col: str = Field(..., min_length=1, description="Column to apply condition on")
+    condition_type: str = Field(..., description="Type of condition to apply")
+    condition_value: int | float | str | list | tuple | datetime.date | None = Field(
+        ..., description="Value(s) to compare against"
+    )
+    missing_as_duplicates: bool = Field(
+        default=False, description="Whether to treat missing values as duplicates"
+    )
+
+    @field_validator("condition_value")
+    @classmethod
+    def validate_condition_value(cls, v, info):
+        """Validate condition value based on condition type."""
+        condition_type = info.data.get("condition_type")
+
+        if condition_type in [NumCondition.IN_RANGE.value] and (
+            not isinstance(v, list | tuple) or len(v) != 2
+        ):
+            raise ValueError(
+                f"Condition type '{condition_type}' requires a tuple/list of 2 values"
+            )
+
+        if condition_type in [
+            NumCondition.INCLUDES.value,
+            StrCondition.INCLUDES.value,
+        ] and not isinstance(v, list | tuple | set):
+            raise ValueError(
+                f"Condition type '{condition_type}' requires a list/tuple/set of values"
+            )
+
+        return v
+
+
 class DuplicatesSettings(BaseModel):
     """Settings for progress report configuration."""
 
+    filtered_data: pl.DataFrame | None = None
     survey_key: str = Field(None, description="Survey key column")
     survey_id: str | None = Field(..., min_length=1, description="Survey ID column")
     survey_date: str | None = Field(None, description="Survey date column")
     enumerator: str | None = Field(None, description="Enumerator ID column")
     conditions: dict = Field(default_factory=dict, description="Conditions for duplicates checks")
 
+    # set arbitrary types allowed for polars DataFrame
+    model_config = {
+        "arbitrary_types_allowed": True,
+    }
+
+class DateDefaults(BaseModel):
+        """Default date range model."""
+
+        start_date: datetime.date = Field(
+            default=datetime.date(1970, 1, 1),
+            description="Default start date (January 1, 1970)",
+        )
+        end_date: datetime.date = Field(
+            default=datetime.date(2100, 12, 31),
+            description="Default end date (December 31, 2100)",
+        )
+
+        default_start_date: datetime.date = Field(
+            default=datetime.date.today() - datetime.timedelta(days=30),
+            description="Default start date for date input (30 days ago)",
+        )
+        default_end_date: datetime.date = Field(
+            default=datetime.date.today() + datetime.timedelta(days=30),
+            description="Default end date for date input (today)",
+        )
+
+# =============================================================================
+# Settings Load and Save Functions
+# =============================================================================
 
 @st.cache_data(ttl=60)
 def load_default_duplicates_settings(
@@ -268,9 +335,11 @@ def duplicates_report_settings(
                 "Configure filters for duplicates checks. These settings help exclude irrelevant records from the duplicates analysis."
             )
 
-            conditions = _render_duplicates_condition_options(data)
+            conditions = _render_duplicates_condition_options(data, settings_file)
+            filtered_data = _filter_data_on_conditions(data, conditions)
 
     return DuplicatesSettings(
+        filtered_data=filtered_data,
         survey_key=survey_key,
         survey_id=survey_id,
         survey_date=survey_date,
@@ -492,7 +561,6 @@ def _render_search_type_selection(
         )
         return search_type, pattern, dup_cols_patt, None
 
-
 def _render_column_locking_options(
     dup_cols: list[str], search_type: str, lock_cols_initial: bool | None
 ) -> bool:
@@ -525,21 +593,27 @@ def _render_column_locking_options(
     )
     return lock_cols
 
-
-def _render_duplicates_condition_options(data: pl.DataFrame) -> dict:
+@st.fragment
+def _render_duplicates_condition_options(data: pl.DataFrame, settings_file: str) -> dict:
     """Render duplicates condition options
 
     Allow users to set conditions for duplicates checks.
     """
+    # get defaults
+    saved_settings = load_check_settings(settings_file, TAB_NAME)
+
+    default_missing_as_duplicates = saved_settings.get("missing_as_duplicates", False)
     missing_as_duplicates = st.toggle(
         label="Consider missing values as duplicates",
+        value=default_missing_as_duplicates,
         key="duplicates_missing_as_duplicates",
         help="If enabled, missing values will be treated as duplicates during the check.",
     )
 
-    co1, co2, co3 = st.columns(3)
+    co1, co2, co3 = st.columns([0.3, 0.3, 0.4])
     all_columns = data.columns
     with co1:
+        default_condition_col = saved_settings.get("condition_col", None)
         condition_col = st.selectbox(
             label="Condition Column",
             options=all_columns,
@@ -551,10 +625,12 @@ def _render_duplicates_condition_options(data: pl.DataFrame) -> dict:
 
         with co2:
             # check column data type to determine condition types
-            NUMERIC_DTYPES = pl.NUMERIC_DTYPES | pl.TEMPORAL_DTYPES
+            NUMERIC_DTYPES = pl.NUMERIC_DTYPES | pl.DATETIME_DTYPES
             col_is_numeric = data[condition_col].dtype in NUMERIC_DTYPES
             ConditionType = NumCondition if col_is_numeric else StrCondition
             condition_type_options = [e.value for e in ConditionType]
+
+            default_condition_type = saved_settings.get("condition_type", None)
             condition_type = st.selectbox(
                 label="Condition Type",
                 options=condition_type_options,
@@ -568,18 +644,297 @@ def _render_duplicates_condition_options(data: pl.DataFrame) -> dict:
         )
 
         with co3:
-            condition_value = st.selectbox(
-                label="Condition Value",
-                options=condition_values,
-                key="duplicates_condition_value",
-                help="Select the value to filter the condition column.",
-            )
+
+            default_condition_value = saved_settings.get("condition_value", None)
+
+            # check if value is a date/time type for proper input
+            is_datetime = data[condition_col].dtype in pl.DATETIME_DTYPES
+            is_numeric = data[condition_col].dtype in pl.NUMERIC_DTYPES
+            if is_datetime:
+                min_date = DateDefaults().start_date
+                max_date = DateDefaults().end_date
+
+                # create the date input with default range
+                date_range = (DateDefaults().default_start_date, DateDefaults().default_end_date) if condition_type in [NumCondition.IN_RANGE.value] else DateDefaults().default_start_date
+
+                  # get default date range from saved settings
+                default_condition_value = _validate_duplicates_condition_date_value(
+                    default_condition_col, date_range
+                )
+
+                condition_value = st.date_input(
+                    value=default_condition_value,
+                    min_value=min_date,
+                    max_value=max_date,
+                    label="Condition Value",
+                    key="duplicates_condition_date_value",
+                    help="Select the date value to filter the condition column.",
+                )
+
+            elif is_numeric:
+
+                if not default_condition_value:
+                    default_condition_value = (min(condition_values), max(condition_values))
+
+                if condition_type == NumCondition.IN_RANGE.value:
+                    condition_value = st.slider(
+                        label="Condition Value Range",
+                        min_value=min(condition_values),
+                        max_value=max(condition_values),
+                        value=default_condition_value,
+                        key="duplicates_condition_numeric_range_value",
+                        help="Select the numeric range to filter the condition column.",
+                    )
+                elif condition_type in [NumCondition.INCLUDES.value, NumCondition.EXCLUDES.value]:
+                    if default_condition_value and not isinstance(default_condition_value, list):
+                        default_condition_value = [default_condition_value]
+                    condition_value = st.multiselect(
+                        label="Condition Values",
+                        options=condition_values,
+                        key="duplicates_condition_numeric_multivalue",
+                        help="Select the numeric values to filter the condition column.",
+                    )
+                else:
+                    if default_condition_value and isinstance(default_condition_value, list):
+                        default_condition_value = default_condition_value[0]
+                    condition_value = st.number_input(
+                        label="Condition Value",
+                        value=None,
+                        key="duplicates_condition_numeric_value",
+                        help="Enter the numeric value to filter the condition column.",
+                    )
+
+            else:
+
+                default_condition_value = saved_settings.get("condition_value", [])
+                if default_condition_value and not isinstance(default_condition_value, list):
+                    default_condition_value = [default_condition_value]
+
+
+                if condition_type in [StrCondition.INCLUDES.value, StrCondition.EXCLUDES.value]:
+                    condition_value = st.multiselect(
+                        label="Condition Values",
+                        options=default_condition_value,
+                        key="duplicates_condition_string_multivalue",
+                        help="Select the string values to filter the condition column.",
+                    )
+
+                else:
+                    condition_value = st.selectbox(
+                        label="Condition Value",
+                        options=default_condition_value,
+                        key="duplicates_condition_value",
+                        help="Select the value to filter the condition column.",
+                    )
 
     return {
         "missing_as_duplicates": missing_as_duplicates,
+        "condition_type": condition_type if condition_col else None,
         "condition_col": condition_col,
         "condition_value": condition_value if condition_col else {},
     }
+
+
+# =============================================================================
+# Filter Helper Functions
+# =============================================================================
+
+
+def _validate_duplicates_condition_date_value(
+    value: datetime.date | list[datetime.date] | None,
+    default_value: datetime.date | tuple[datetime.date, datetime.date],
+) -> datetime.date | tuple[datetime.date, datetime.date]:
+    """Validate and return appropriate date value for condition.
+
+    Parameters
+    ----------
+    value : datetime.date | list[datetime.date] | None
+        The input date value(s) to validate.
+    default_value : datetime.date | tuple[datetime.date, datetime.date]
+        The default date value(s) to use if input is invalid.
+
+    Returns
+    -------
+    datetime.date | tuple[datetime.date, datetime.date]
+        Validated date value(s).
+    """
+    if isinstance(value, datetime.date):
+        return value
+    elif isinstance(value, list) and all(isinstance(d, datetime.date) for d in value):  # noqa: SIM102
+        if len(value) == 2:
+            return (value[0], value[1])
+    return default_value
+
+def _apply_numeric_condition(
+    col: pl.Expr, condition_type: str, value: int | float | list | tuple
+) -> pl.Expr:
+    """Apply numeric condition to a column expression.
+
+    Parameters
+    ----------
+    col : pl.Expr
+        Polars column expression.
+    condition_type : str
+        Type of numeric condition.
+    value : int | float | list | tuple
+        Value(s) to compare against.
+
+    Returns
+    -------
+    pl.Expr
+        Filtered column expression.
+    """
+    if condition_type == NumCondition.EQUALS.value:
+        return col == value
+    elif condition_type == NumCondition.NOT_EQUALS.value:
+        return col != value
+    elif condition_type == NumCondition.GREATER_THAN.value:
+        return col > value
+    elif condition_type == NumCondition.GREATER_THAN_OR_EQUAL.value:
+        return col >= value
+    elif condition_type == NumCondition.LESS_THAN.value:
+        return col < value
+    elif condition_type == NumCondition.LESS_THAN_OR_EQUAL.value:
+        return col <= value
+    elif condition_type == NumCondition.INCLUDES.value:
+        return col.is_in(value)
+    elif condition_type == NumCondition.EXCLUDES.value:
+        return ~col.is_in(value)
+    elif condition_type == NumCondition.IN_RANGE.value:
+        min_val, max_val = value[0], value[1]
+        return (col >= min_val) & (col <= max_val)
+    else:
+        raise ValueError(f"Unsupported numeric condition type: {condition_type}")
+
+
+def _apply_string_condition(
+    col: pl.Expr, condition_type: str, value: str | list
+) -> pl.Expr:
+    """Apply string condition to a column expression.
+
+    Parameters
+    ----------
+    col : pl.Expr
+        Polars column expression.
+    condition_type : str
+        Type of string condition.
+    value : str | list
+        Value(s) to compare against.
+
+    Returns
+    -------
+    pl.Expr
+        Filtered column expression.
+    """
+    if condition_type == StrCondition.EQUALS.value:
+        return col == value
+    elif condition_type == StrCondition.NOT_EQUALS.value:
+        return col != value
+    elif condition_type == StrCondition.STARTWITH.value:
+        return col.str.starts_with(value)
+    elif condition_type == StrCondition.ENDWITH.value:
+        return col.str.ends_with(value)
+    elif condition_type == StrCondition.CONTAINS.value:
+        return col.str.contains(value)
+    elif condition_type == StrCondition.INCLUDES.value:
+        return col.is_in(value)
+    elif condition_type == StrCondition.EXCLUDES.value:
+        return ~col.is_in(value)
+    else:
+        raise ValueError(f"Unsupported string condition type: {condition_type}")
+
+
+def _build_filter_expression(
+    validated_condition: FilterCondition, col_expr: pl.Expr
+) -> pl.Expr:
+    """Build the appropriate filter expression based on condition type.
+
+    Parameters
+    ----------
+    validated_condition : FilterCondition
+        Validated condition configuration.
+    col_expr : pl.Expr
+        Column expression to filter.
+
+    Returns
+    -------
+    pl.Expr
+        Complete filter expression including null handling.
+    """
+    condition_type = validated_condition.condition_type
+    condition_value = validated_condition.condition_value
+
+    # Determine if this is a numeric or string condition
+    numeric_conditions = [e.value for e in NumCondition]
+    string_conditions = [e.value for e in StrCondition]
+
+    if condition_type in numeric_conditions:
+        filter_expr = _apply_numeric_condition(col_expr, condition_type, condition_value)
+    elif condition_type in string_conditions:
+        filter_expr = _apply_string_condition(col_expr, condition_type, condition_value)
+    else:
+        raise ValueError(f"Unknown condition type: {condition_type}")
+
+    # Handle missing values based on missing_as_duplicates flag
+    if validated_condition.missing_as_duplicates:
+        filter_expr = col_expr.is_null() | filter_expr
+
+    return filter_expr
+
+
+def _filter_data_on_conditions(
+    data: pl.DataFrame, conditions: dict
+) -> pl.DataFrame:
+    """Filter data based on duplicates conditions.
+
+    This function validates the conditions using Pydantic, then applies
+    the appropriate filter based on the condition type. Supports both
+    numeric and string condition types with comprehensive operators.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        The dataset to filter.
+    conditions : dict
+        Conditions for filtering with keys:
+        - condition_col: Column name to filter on
+        - condition_type: Type of condition (from NumCondition or StrCondition)
+        - condition_value: Value(s) to compare against
+        - missing_as_duplicates: Whether to include null values
+
+    Returns
+    -------
+    pl.DataFrame
+        Filtered dataset.
+
+    Raises
+    ------
+    ValueError
+        If conditions are invalid or condition type is not supported.
+    """
+    if not conditions:
+        return data
+
+    # Check if required keys exist
+    condition_col = conditions.get("condition_col")
+    if not condition_col or not conditions.get("condition_type"):
+        return data
+
+    # Validate conditions using Pydantic
+    try:
+        validated_condition = FilterCondition(**conditions)
+    except Exception as e:
+        st.error(f"Invalid filter condition: {e}")
+        return data
+
+    # Build and apply filter expression
+    try:
+        col_expr = pl.col(validated_condition.condition_col)
+        filter_expr = _build_filter_expression(validated_condition, col_expr)
+        return data.filter(filter_expr)
+    except Exception as e:
+        st.error(f"Error applying filter: {e}")
+        return data
 
 
 def _update_duplicates_column_config(
@@ -1317,11 +1672,6 @@ def duplicates_report(
     # Duplicates column configuration
     st.write("---")
     st.title("Duplicates Column Configuration")
-    st.info(
-        "Configure which columns to check for duplicates using different search methods. "
-        "Locked columns won't be updated when patterns change."
-    )
-
     # Get all columns for duplicate checking (strings and numerics)
     all_columns = data.columns
     _render_duplicates_column_actions(project_id, page_name_id, all_columns)
@@ -1334,9 +1684,6 @@ def duplicates_report(
     )
 
     if duplicates_column_config.is_empty():
-        st.info(
-            "No duplicates columns have been configured yet. Use the 'Add Duplicates Column(s)' button above to get started."
-        )
         return
 
     # Update unlocked columns if needed
