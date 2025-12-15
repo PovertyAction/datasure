@@ -8,6 +8,7 @@ This module provides comprehensive duplicate detection functionality with:
 - Modular, testable architecture
 """
 
+import contextlib
 import datetime
 import os
 import re
@@ -201,6 +202,7 @@ def load_default_duplicates_settings(
 
 
 def duplicates_report_settings(
+    project_id: str,
     settings_file: str,
     data: pl.DataFrame,
     config: DuplicatesSettings,
@@ -335,8 +337,8 @@ def duplicates_report_settings(
                 "Configure filters for duplicates checks. These settings help exclude irrelevant records from the duplicates analysis."
             )
 
-            conditions = _render_duplicates_condition_options(data, settings_file)
-            filtered_data = _filter_data_on_conditions(data, conditions)
+            conditions = _render_duplicates_condition_options(project_id, data, settings_file)
+            filtered_data = _filter_data_on_conditions(project_id, data, conditions)
 
     return DuplicatesSettings(
         filtered_data=filtered_data,
@@ -594,7 +596,7 @@ def _render_column_locking_options(
     return lock_cols
 
 @st.fragment
-def _render_duplicates_condition_options(data: pl.DataFrame, settings_file: str) -> dict:
+def _render_duplicates_condition_options(project_id: str, data: pl.DataFrame, settings_file: str) -> dict:
     """Render duplicates condition options
 
     Allow users to set conditions for duplicates checks.
@@ -606,20 +608,28 @@ def _render_duplicates_condition_options(data: pl.DataFrame, settings_file: str)
     missing_as_duplicates = st.toggle(
         label="Consider missing values as duplicates",
         value=default_missing_as_duplicates,
-        key="duplicates_missing_as_duplicates",
+        key="duplicates_missing_as_duplicates_key",
         help="If enabled, missing values will be treated as duplicates during the check.",
+        on_change=trigger_save,
+        kwargs={"state_name": TAB_NAME + "_missing_as_duplicates"},
+    )
+    save_check_settings(
+        settings_file, TAB_NAME, {"missing_as_duplicates": missing_as_duplicates}
     )
 
     co1, co2, co3 = st.columns([0.3, 0.3, 0.4])
     all_columns = data.columns
     with co1:
-        default_condition_col = saved_settings.get("condition_col", None)
         condition_col = st.selectbox(
             label="Condition Column",
             options=all_columns,
-            key="duplicates_condition_col",
+            key="duplicates_condition_col_key",
             help="Select the column to apply the condition on.",
+            on_change=trigger_save,
+            kwargs={"state_name": TAB_NAME + "_condition_col"},
         )
+
+        save_check_settings(settings_file, TAB_NAME, {"condition_col": condition_col})
 
     if condition_col:
 
@@ -631,12 +641,21 @@ def _render_duplicates_condition_options(data: pl.DataFrame, settings_file: str)
             condition_type_options = [e.value for e in ConditionType]
 
             default_condition_type = saved_settings.get("condition_type", None)
+            default_condition_type_index = (
+                condition_type_options.index(default_condition_type)
+                if default_condition_type and default_condition_type in condition_type_options
+                else 0
+            )
             condition_type = st.selectbox(
                 label="Condition Type",
+                index=default_condition_type_index,
                 options=condition_type_options,
-                key="duplicates_condition_type",
+                key="duplicates_condition_type_key",
                 help="Select the type of condition to apply.",
+                on_change=trigger_save,
+                kwargs={"state_name": TAB_NAME + "_condition_type"},
             )
+            save_check_settings(settings_file, TAB_NAME, {"condition_type": condition_type})
 
         # column values for the selected condition column
         condition_values = (
@@ -645,6 +664,7 @@ def _render_duplicates_condition_options(data: pl.DataFrame, settings_file: str)
 
         with co3:
 
+            condition_value_dict = {}
             default_condition_value = saved_settings.get("condition_value", None)
 
             # check if value is a date/time type for proper input
@@ -657,9 +677,9 @@ def _render_duplicates_condition_options(data: pl.DataFrame, settings_file: str)
                 # create the date input with default range
                 date_range = (DateDefaults().default_start_date, DateDefaults().default_end_date) if condition_type in [NumCondition.IN_RANGE.value] else DateDefaults().default_start_date
 
-                  # get default date range from saved settings
+                # get default date range from saved settings
                 default_condition_value = _validate_duplicates_condition_date_value(
-                    default_condition_col, date_range
+                    default_condition_value, date_range
                 )
 
                 condition_value = st.date_input(
@@ -667,9 +687,13 @@ def _render_duplicates_condition_options(data: pl.DataFrame, settings_file: str)
                     min_value=min_date,
                     max_value=max_date,
                     label="Condition Value",
-                    key="duplicates_condition_date_value",
+                    key="duplicates_condition_date_value_key",
                     help="Select the date value to filter the condition column.",
+                    on_change=trigger_save,
+                    kwargs={"state_name": TAB_NAME + "_condition_value"},
                 )
+                # for date, convert to string for saving (handles dates and date ranges)
+                condition_value_dict = {"condition_value": _serialize_condition_value_for_json(condition_value)}
 
             elif is_numeric:
 
@@ -682,26 +706,37 @@ def _render_duplicates_condition_options(data: pl.DataFrame, settings_file: str)
                         min_value=min(condition_values),
                         max_value=max(condition_values),
                         value=default_condition_value,
-                        key="duplicates_condition_numeric_range_value",
+                        key="duplicates_condition_numeric_range_value_key",
                         help="Select the numeric range to filter the condition column.",
+                        on_change=trigger_save,
+                        kwargs={"state_name": TAB_NAME + "_condition_value"},
                     )
+
                 elif condition_type in [NumCondition.INCLUDES.value, NumCondition.EXCLUDES.value]:
                     if default_condition_value and not isinstance(default_condition_value, list):
                         default_condition_value = [default_condition_value]
                     condition_value = st.multiselect(
                         label="Condition Values",
                         options=condition_values,
-                        key="duplicates_condition_numeric_multivalue",
+                        key="duplicates_condition_numeric_multivalue_key",
                         help="Select the numeric values to filter the condition column.",
+                        on_change=trigger_save,
+                        kwargs={"state_name": TAB_NAME + "_condition_value"},
                     )
+
                 else:
                     if default_condition_value and isinstance(default_condition_value, list):
                         default_condition_value = default_condition_value[0]
+                    else:
+                        default_condition_value = None
+
                     condition_value = st.number_input(
                         label="Condition Value",
-                        value=None,
-                        key="duplicates_condition_numeric_value",
+                        value=default_condition_value,
+                        key="duplicates_condition_numeric_value_key",
                         help="Enter the numeric value to filter the condition column.",
+                        on_change=trigger_save,
+                        kwargs={"state_name": TAB_NAME + "_condition_value"},
                     )
 
             else:
@@ -710,30 +745,60 @@ def _render_duplicates_condition_options(data: pl.DataFrame, settings_file: str)
                 if default_condition_value and not isinstance(default_condition_value, list):
                     default_condition_value = [default_condition_value]
 
-
                 if condition_type in [StrCondition.INCLUDES.value, StrCondition.EXCLUDES.value]:
                     condition_value = st.multiselect(
                         label="Condition Values",
-                        options=default_condition_value,
+                        options=condition_values,
+                        default=default_condition_value,
                         key="duplicates_condition_string_multivalue",
                         help="Select the string values to filter the condition column.",
+                        on_change=trigger_save,
+                        kwargs={"state_name": TAB_NAME + "_condition_value"},
                     )
 
                 else:
-                    condition_value = st.selectbox(
-                        label="Condition Value",
-                        options=default_condition_value,
-                        key="duplicates_condition_value",
-                        help="Select the value to filter the condition column.",
+                    default_condition_value_index = (
+                        condition_values.index(default_condition_value)
+                        if default_condition_value and default_condition_value in condition_values
+                        else 0
                     )
 
-    return {
-        "missing_as_duplicates": missing_as_duplicates,
-        "condition_type": condition_type if condition_col else None,
-        "condition_col": condition_col,
-        "condition_value": condition_value if condition_col else {},
-    }
+                    condition_value = st.selectbox(
+                        label="Condition Value",
+                        options=condition_values,
+                        index=default_condition_value_index,
+                        key="duplicates_condition_value",
+                        help="Select the value to filter the condition column.",
+                        on_change=trigger_save,
+                        kwargs={"state_name": TAB_NAME + "_condition_value"},
+                    )
 
+            # Ensure condition_value is JSON-serializable
+            # (handles dates, date ranges, etc.)
+            if not condition_value_dict:
+                condition_value_dict = {"condition_value": _serialize_condition_value_for_json(condition_value)}
+            save_check_settings(settings_file, TAB_NAME, condition_value_dict)
+
+            conditions_dict = {
+                "condition_col": condition_col,
+                "condition_type": condition_type,
+                "condition_value": condition_value,
+                "missing_as_duplicates": missing_as_duplicates,
+            }
+
+    # add apply condition button
+    if st.button(
+        "Apply Condition",
+        key="apply_duplicates_condition_button",
+        type="primary",
+        width="stretch",
+        disabled=not condition_value,
+    ):
+        _filter_data_on_conditions(project_id, data, conditions_dict)
+        st.rerun()
+
+
+    return conditions_dict if condition_col else {}
 
 # =============================================================================
 # Filter Helper Functions
@@ -741,10 +806,13 @@ def _render_duplicates_condition_options(data: pl.DataFrame, settings_file: str)
 
 
 def _validate_duplicates_condition_date_value(
-    value: datetime.date | list[datetime.date] | None,
+    value: str | list[str] | None,
     default_value: datetime.date | tuple[datetime.date, datetime.date],
 ) -> datetime.date | tuple[datetime.date, datetime.date]:
     """Validate and return appropriate date value for condition.
+
+    Inputs are strings from saved settings.
+    Converts to datetime.date or tuple of datetime.date.
 
     Parameters
     ----------
@@ -758,15 +826,42 @@ def _validate_duplicates_condition_date_value(
     datetime.date | tuple[datetime.date, datetime.date]
         Validated date value(s).
     """
-    if isinstance(value, datetime.date):
+    if not value:
+        return default_value
+
+    try:
+        if isinstance(value, list) and len(value) == 2:
+            start_date = datetime.date.fromisoformat(value[0])
+            end_date = datetime.date.fromisoformat(value[1])
+            return (start_date, end_date)
+        else:
+            return datetime.date.fromisoformat(value)
+    except Exception:
+        return default_value
+
+
+def _serialize_condition_value_for_json(value: datetime.date | tuple | list | int | float | str) -> str | list | int | float:
+    """Convert date values to JSON-serializable strings.
+
+    Parameters
+    ----------
+    value : datetime.date | tuple | list | int | float | str
+        The value to serialize.
+
+    Returns
+    -------
+    str | list | int | float
+        JSON-serializable value.
+    """
+    if isinstance(value, datetime.date) and not isinstance(value, datetime.datetime):
+        return str(value)
+    elif isinstance(value, tuple | list):
+        return [_serialize_condition_value_for_json(v) for v in value]
+    else:
         return value
-    elif isinstance(value, list) and all(isinstance(d, datetime.date) for d in value):  # noqa: SIM102
-        if len(value) == 2:
-            return (value[0], value[1])
-    return default_value
 
 def _apply_numeric_condition(
-    col: pl.Expr, condition_type: str, value: int | float | list | tuple
+    col: pl.Expr, condition_type: str, value: int | float | list | tuple | datetime.date
 ) -> pl.Expr:
     """Apply numeric condition to a column expression.
 
@@ -776,14 +871,36 @@ def _apply_numeric_condition(
         Polars column expression.
     condition_type : str
         Type of numeric condition.
-    value : int | float | list | tuple
+    value : int | float | list | tuple | datetime.date
         Value(s) to compare against.
 
     Returns
     -------
     pl.Expr
         Filtered column expression.
+
+    Notes
+    -----
+    When comparing a datetime column with a date value, the column is
+    automatically cast to date type to ensure all datetime values within
+    that date match the condition.
     """
+    # Handle date vs datetime comparison by casting datetime columns to date
+    if isinstance(value, datetime.date) and not isinstance(value, datetime.datetime):
+        col = col.cast(pl.Date)
+    elif condition_type == NumCondition.INCLUDES.value and isinstance(value, list | tuple):
+        # Check if any value in the list is a date (but not datetime)
+        if any(isinstance(v, datetime.date) and not isinstance(v, datetime.datetime) for v in value):
+            col = col.cast(pl.Date)
+    elif (
+        condition_type == NumCondition.IN_RANGE.value
+        and isinstance(value, list | tuple)
+        and len(value) == 2
+        and any(isinstance(v, datetime.date) and not isinstance(v, datetime.datetime) for v in value)
+    ):
+        # Check if range values are dates (but not datetime)
+        col = col.cast(pl.Date)
+
     if condition_type == NumCondition.EQUALS.value:
         return col == value
     elif condition_type == NumCondition.NOT_EQUALS.value:
@@ -883,8 +1000,8 @@ def _build_filter_expression(
 
 
 def _filter_data_on_conditions(
-    data: pl.DataFrame, conditions: dict
-) -> pl.DataFrame:
+    project_id: str, data: pl.DataFrame, conditions: dict
+) -> None:
     """Filter data based on duplicates conditions.
 
     This function validates the conditions using Pydantic, then applies
@@ -913,28 +1030,74 @@ def _filter_data_on_conditions(
         If conditions are invalid or condition type is not supported.
     """
     if not conditions:
-        return data
+        filtered_data = data
 
     # Check if required keys exist
     condition_col = conditions.get("condition_col")
     if not condition_col or not conditions.get("condition_type"):
-        return data
+        filtered_data = data
+
+    # Convert condition_value to proper type based on column dtype
+    condition_value = conditions.get("condition_value")
+    if condition_col and condition_value and condition_col in data.columns:
+        col_dtype = data[condition_col].dtype
+
+        # Handle datetime columns - convert strings to date objects
+        if col_dtype in pl.DATETIME_DTYPES:
+            if isinstance(condition_value, str):
+                # Convert ISO format string to date object
+                with contextlib.suppress(ValueError, TypeError):
+                    conditions["condition_value"] = datetime.date.fromisoformat(condition_value)
+            elif isinstance(condition_value, list):
+                # Convert list of date strings to date objects
+                with contextlib.suppress(ValueError, TypeError):
+                    conditions["condition_value"] = [
+                        datetime.date.fromisoformat(v) if isinstance(v, str) else v
+                        for v in condition_value
+                    ]
+
+        # Handle numeric columns - convert strings to numbers
+        elif col_dtype in pl.NUMERIC_DTYPES:
+            if isinstance(condition_value, str):
+                with contextlib.suppress(ValueError, TypeError):
+                    # Try int first, then float
+                    if col_dtype in pl.INTEGER_DTYPES:
+                        conditions["condition_value"] = int(condition_value)
+                    else:
+                        conditions["condition_value"] = float(condition_value)
+            elif isinstance(condition_value, list):
+                with contextlib.suppress(ValueError, TypeError):
+                    if col_dtype in pl.INTEGER_DTYPES:
+                        conditions["condition_value"] = [
+                            int(v) if isinstance(v, str) else v for v in condition_value
+                        ]
+                    else:
+                        conditions["condition_value"] = [
+                            float(v) if isinstance(v, str) else v for v in condition_value
+                        ]
 
     # Validate conditions using Pydantic
     try:
         validated_condition = FilterCondition(**conditions)
     except Exception as e:
-        st.error(f"Invalid filter condition: {e}")
-        return data
+        raise ValueError(f"Invalid conditions: {e}") from e
 
     # Build and apply filter expression
     try:
         col_expr = pl.col(validated_condition.condition_col)
         filter_expr = _build_filter_expression(validated_condition, col_expr)
-        return data.filter(filter_expr)
+        filtered_data = data.filter(filter_expr)
+
     except Exception as e:
-        st.error(f"Error applying filter: {e}")
-        return data
+        raise ValueError(f"Error applying filter: {e}") from e
+
+    # save filtered data to duckdb
+    duckdb_save_table(
+        project_id,
+        filtered_data,
+        "filtered_duplicates_data",
+        "intermediate",
+    )
 
 
 def _update_duplicates_column_config(
@@ -1153,6 +1316,124 @@ def _update_unlocked_duplicates_cols(
     return pl.DataFrame(updated_rows)
 
 
+def _render_id_duplicates_metrics(
+    id_duplicates_data: pl.DataFrame, duplicates_settings: DuplicatesSettings, resolved_duplicates: int = 0
+) -> None:
+    """Render metrics for survey ID duplicates.
+
+    Parameters
+    ----------
+    id_duplicates_data : pl.DataFrame
+        DataFrame containing survey ID duplicates.
+    """
+    survey_id = duplicates_settings.survey_id
+    if not survey_id:
+        st.info("Survey ID column is not configured for duplicates check.")
+        return
+
+    if id_duplicates_data.is_empty():
+        st.info("No duplicates found for the survey ID column.")
+        return
+
+    total_id_duplicates = id_duplicates_data.height
+    total_missing_ids = id_duplicates_data.filter(pl.col(survey_id).is_null()).height
+
+    gc1, gc2, gc3, _ = st.columns(4)
+    with gc1, st.container(border=True):
+        st.metric(
+            label="Total ID Duplicates",
+            value=total_id_duplicates,
+            help="Total number of duplicates found in the survey ID column.",
+        )
+    with gc2, st.container(border=True):
+        st.metric(
+            label="Missing Survey IDs",
+            value=total_missing_ids,
+            help="Total number of missing survey IDs in the duplicates.",
+        )
+    with gc3, st.container(border=True):
+        st.metric(
+            label="Resolved ID Duplicates",
+            value=resolved_duplicates,
+            help="Total number of duplicates resolved.",
+        )
+
+def _render_id_duplicates_table(data: pl.DataFrame, id_duplicates_data: pl.DataFrame, duplicates_settings: DuplicatesSettings, settings_file: str) -> None:
+    """
+    Show ID duplicates table
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        The full dataset.
+    id_duplicates_data : pl.DataFrame
+        DataFrame containing survey ID duplicates.
+    duplicates_settings : DuplicatesSettings
+        Duplicates settings configuration.
+    settings_file : str
+        Path to the settings file.
+
+    Returns
+    -------
+    None
+    """
+    survey_id = duplicates_settings.survey_id
+    survey_key = duplicates_settings.survey_key
+    if not survey_id:
+        st.info("Survey ID column is not configured for duplicates check.")
+        return
+
+    with st.expander(":material/clarify: Show more columns in report", expanded=False):
+        saved_settings = load_check_settings(settings_file, TAB_NAME)
+        default_id_table_display_cols = saved_settings.get("id_table_display_cols", [])
+        display_options = [col for col in data.columns if col not in [survey_id, survey_key]]
+        id_table_display_cols = st.multiselect(
+            label="Select additional columns to display",
+            options=display_options,
+            help="Select additional columns to include in the duplicates report.",
+            default=default_id_table_display_cols,
+            key="id_duplicates_table_display_cols_key",
+            on_change=trigger_save,
+            kwargs={"state_name": TAB_NAME + "_id_table_display_cols"},
+        )
+
+        save_check_settings(
+            settings_file,
+            TAB_NAME,
+            {"id_table_display_cols": id_table_display_cols},
+        )
+
+        if id_table_display_cols:
+            id_duplicates_data = id_duplicates_data.join(
+                data.select([survey_id, survey_key] + id_table_display_cols),
+                on=[survey_id, survey_key],
+                how="left",
+            ).unique()
+
+    st.dataframe(
+        id_duplicates_data,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            survey_id: st.column_config.Column(
+                "Survey ID",
+                help="Unique identifier for each survey response.",
+            ),
+            survey_key: st.column_config.Column(
+                "Survey Key",
+                help="Unique key for each survey entry.",
+            ),
+            "id_dup_count": st.column_config.Column(
+                "Duplicate Count",
+                help="Number of times this Survey ID appears in the dataset.",
+            ),
+            "id_dup_percent": st.column_config.Column(
+                "Duplicate Percentage",
+                help="Percentage of total entries that are duplicates for this Survey ID.",
+            ),
+        },
+    )
+
 # =============================================================================
 # Duplicates Statistics and Display Functions
 # =============================================================================
@@ -1293,7 +1574,6 @@ def compute_id_duplicates(
     survey_id: str,
     survey_date: str | None,
     survey_key: str,
-    display_cols: list | None,
 ) -> pl.DataFrame:
     """
     Compute duplicates for the survey ID column.
@@ -1324,36 +1604,13 @@ def compute_id_duplicates(
     # Handle survey_date
     survey_date_list = [] if survey_date is None else [survey_date]
 
-    # Select columns to display
-    if display_cols:
-        if survey_date_list:
-            display_cols = survey_date_list + display_cols
-
-        # Remove any duplicate columns from display_cols
-        display_cols = list(set(display_cols))
-
-        # Merge with additional display columns if needed
-        if survey_date_list:
-            id_dups_data = id_dups_data.select([
-                survey_id, survey_key, survey_date, "id_dup_count", "id_dup_percent"
-            ] + display_cols)
-        else:
-            id_dups_data = id_dups_data.select([
-                survey_id, survey_key, "id_dup_count", "id_dup_percent"
-            ] + display_cols)
-    else:
-        if survey_date_list:
-            id_dups_data = id_dups_data.select([
-                survey_id,
-                survey_key,
-                survey_date,
-                "id_dup_count",
-                "id_dup_percent",
-            ])
-        else:
-            id_dups_data = id_dups_data.select([
-                survey_id, survey_key, "id_dup_count", "id_dup_percent"
-            ])
+    id_dups_data = id_dups_data.select([
+        survey_id,
+        survey_key,
+        survey_date,
+        "id_dup_count",
+        "id_dup_percent",
+    ])
 
     return id_dups_data.sort([survey_id, "id_dup_count"], descending=[True, False])
 
@@ -1666,14 +1923,42 @@ def duplicates_report(
 
     config_settings = DuplicatesSettings(**config)
     duplicates_settings = duplicates_report_settings(
-        setting_file, data, config_settings, string_numeric_cols, datetime_columns
+        project_id, setting_file, data, config_settings, string_numeric_cols, datetime_columns
+    )
+
+    # get filtered data if any conditions applied
+    filtered_data = duckdb_get_table(
+        project_id,
+        "filtered_duplicates_data",
+        "intermediate",
+    )
+
+    if not filtered_data.is_empty():
+        filtered_data = data
+
+    # ---- ID Duplicates --- #
+    st.write("---")
+    st.title("ID Duplicates")
+
+    id_duplicates_data = compute_id_duplicates(
+        filtered_data,
+        duplicates_settings.survey_id,
+        duplicates_settings.survey_date,
+        duplicates_settings.survey_key,
+    )
+    _render_id_duplicates_metrics(id_duplicates_data, config_settings)
+    _render_id_duplicates_table(
+        data,
+        id_duplicates_data,
+        duplicates_settings,
+        setting_file,
     )
 
     # Duplicates column configuration
     st.write("---")
-    st.title("Duplicates Column Configuration")
+    st.title("Other Duplicates")
     # Get all columns for duplicate checking (strings and numerics)
-    all_columns = data.columns
+    all_columns = filtered_data.columns
     _render_duplicates_column_actions(project_id, page_name_id, all_columns)
 
     # Get duplicates column config
@@ -1706,34 +1991,4 @@ def duplicates_report(
         all_dup_cols.extend(row["column_name"])
 
     # Remove duplicates and sort
-    all_dup_cols = sorted(list(set(all_dup_cols)))
-
-    # ---- Show report --- #
-    st.write("---")
-    st.markdown("## Duplicates Statistics Overview")
-    display_duplicates_statistics(
-        data=data,
-        survey_id=duplicates_settings.survey_id,
-        dup_cols=all_dup_cols,
-    )
-
-    st.write("---")
-    st.markdown("## Duplicate Entries Survey ID")
-    display_id_duplicates(
-        data=data,
-        survey_id=duplicates_settings.survey_id,
-        survey_date=duplicates_settings.survey_date,
-        survey_key=duplicates_settings.survey_key,
-        setting_file=setting_file,
-    )
-
-    st.write("---")
-    st.markdown("## Duplicate Entries for columns")
-    display_column_duplicates(
-        data=data,
-        survey_id=duplicates_settings.survey_id,
-        survey_key=duplicates_settings.survey_key,
-        survey_date=duplicates_settings.survey_date,
-        dup_cols=all_dup_cols,
-        setting_file=setting_file,
-    )
+    all_dup_cols = list(set(all_dup_cols))
