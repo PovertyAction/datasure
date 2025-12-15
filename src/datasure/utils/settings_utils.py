@@ -25,7 +25,6 @@ class ProjectID(BaseModel):
         return v
 
 
-@st.cache_data
 def save_check_settings(
     settings_file: str, check_name: str, check_settings: dict
 ) -> None:
