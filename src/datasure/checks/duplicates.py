@@ -90,6 +90,13 @@ class DuplicatesColumnConfig(BaseModel):
             raise ValueError("Pattern is required for non-exact search types")
         return v
 
+class DuplicatesStats(BaseModel):
+    """Statistics for duplicates check."""
+
+    number_of_columns_checked: int
+    total_duplicates: int
+    number_of_cols_with_duplicates: int
+    number_of_cols_without_duplicates: int
 
 class FilterCondition(BaseModel):
     """Validation model for filter conditions."""
@@ -1404,11 +1411,25 @@ def _render_id_duplicates_table(data: pl.DataFrame, id_duplicates_data: pl.DataF
         )
 
         if id_table_display_cols:
-            id_duplicates_data = id_duplicates_data.join(
-                data.select([survey_id, survey_key] + id_table_display_cols),
-                on=[survey_id, survey_key],
-                how="left",
-            ).unique()
+            # Build join keys - only include columns that exist in both dataframes
+            join_keys = []
+            if survey_id and survey_id in data.columns and survey_id in id_duplicates_data.columns:
+                join_keys.append(survey_id)
+            if survey_key and survey_key in data.columns and survey_key in id_duplicates_data.columns:
+                join_keys.append(survey_key)
+
+            # Only perform join if we have valid join keys
+            if join_keys:
+                # Build selection list - only include columns that exist
+                select_cols = join_keys + [col for col in id_table_display_cols if col in data.columns]
+
+                id_duplicates_data = id_duplicates_data.join(
+                    data.select(select_cols),
+                    on=join_keys,
+                    how="left",
+                ).unique()
+            else:
+                st.warning("Cannot join additional columns: required join keys not found in data.")
 
     st.dataframe(
         id_duplicates_data,
@@ -1438,133 +1459,71 @@ def _render_id_duplicates_table(data: pl.DataFrame, id_duplicates_data: pl.DataF
 # Duplicates Statistics and Display Functions
 # =============================================================================
 
-
-@st.cache_data
 def compute_duplicates_statistics(
-    data: pl.DataFrame, survey_id: str | None, dup_cols: list
-) -> tuple:
+    data: pl.DataFrame,
+    duplicates_settings: DuplicatesSettings,
+    dup_cols: list,
+) -> DuplicatesStats:
     """
-    Compute statistics for duplicates in the dataset.
+    Compute statistics for duplicates.
 
     Parameters
     ----------
-        data (pl.DataFrame): The dataset to compute duplicates statistics for.
-        survey_id (str): The survey ID column name.
-        survey_key (str): The survey key column name.
+        data (pl.DataFrame): The dataset to compute statistics for.
+        duplicates_settings (DuplicatesSettings): Duplicates settings configuration.
         dup_cols (list): The columns to check for duplicates.
 
     Returns
     -------
-        tuple: A tuple containing the total number of columns checked, the number of
-        columns with duplicates, the number of columns without duplicates, total number
-            of duplicates
-        total number of ID duplicates and total number of duplicates resolved.
-        id_duplicates_data (pl.DataFrame): A DataFrame containing the duplicate entries
-          for the survey ID.
-        all_duplicates_data (pl.DataFrame): A DataFrame containing the duplicate entries
-          for the selected columns.
+        DuplicatesStats: Statistics about duplicates.
     """
-    total_cols_checked = len(dup_cols)
-    # Check which columns have duplicates
-    cols_with_dups = [
-        col for col in dup_cols
-        if data.select(pl.col(col)).is_duplicated().any()
-    ]
-    total_cols_with_dups = len(cols_with_dups)
-    total_cols_no_dups = total_cols_checked - total_cols_with_dups
+    survey_id = duplicates_settings.survey_id
+    survey_key = duplicates_settings.survey_key
 
-    if survey_id:
-        # Find duplicates in survey_id column
-        id_dups_data = data.filter(
-            pl.col(survey_id).is_duplicated()
-        )
-        total_id_dups = id_dups_data.height
-    else:
-        id_dups_data, total_id_dups = pl.DataFrame(), 0
+    if not survey_id and not survey_key:
+        raise ValueError("Either survey_id or survey_key must be provided.")
 
-    total_resolved_dups = st.session_state.get("resolved_duplicates", 0)
-    total_dups = 0
-    for col in dup_cols:
-        # Check if column has duplicates
-        if data.select(pl.col(col)).is_duplicated().any():
-            col_dups_data = data.filter(pl.col(col).is_duplicated())
-            total_dups += col_dups_data.height
-
-    return (
-        total_cols_checked,
-        total_cols_with_dups,
-        total_cols_no_dups,
-        total_dups,
-        total_id_dups,
-        total_resolved_dups,
-    )
-
-
-@demo_output_onboarding(TAB_NAME)
-def display_duplicates_statistics(
-    data: pl.DataFrame, survey_id: str, dup_cols: list
-) -> None:
-    """
-    Display an overview of duplicates statistics in the dataset.
-
-    Parameters
-    ----------
-        data (pl.DataFrame): The dataset to display duplicates statistics for.
-        survey_id (str): The survey ID column name.
-        survey_key (str): The survey key column name.
-        dup_cols (list): The columns to check for duplicates.
-
-    Returns
-    -------
-        None
-    """
-    if not (any([survey_id, dup_cols])):
-        st.info(
-            "Duplicates statistics requires a survey ID column or at least one column to check for duplicates. Go to :material/settings: settings to select a survey ID column and columns to check for duplicates."
-        )
-        return
-    (
-        total_cols_checked,
-        total_cols_with_dups,
-        total_cols_no_dups,
-        total_dups,
-        total_id_dups,
-        total_resolved_dups,
-    ) = compute_duplicates_statistics(data=data, survey_id=survey_id, dup_cols=dup_cols)
-    _, gc2 = st.columns(2)
-    with gc2:
-        tc3, tc4 = st.columns(2, border=True)
-        tc3.metric(
-            label="Total Duplicates",
-            value=total_dups,
-            help="Total number of duplicates in the dataset",
-        )
-        tc4.metric(
-            label="Resolved Duplicates",
-            value=total_resolved_dups,
-            help="Total number of duplicates resolved",
+    # Safety check: ensure dup_cols is not None or empty
+    if not dup_cols:
+        return DuplicatesStats(
+            number_of_columns_checked=0,
+            total_duplicates=0,
+            number_of_cols_with_duplicates=0,
+            number_of_cols_without_duplicates=0,
         )
 
-    bc1, bc2, bc3, bc4 = st.columns(4, border=True)
-    bc1.metric(
-        label="Columns Checked",
-        value=total_cols_checked,
-        help="Total number of columns checked for duplicates",
-    )
-    bc2.metric(
-        label="Columns With No Duplicates",
-        value=total_cols_no_dups,
-        help="Total number of columns with no duplicates",
-    )
-    bc3.metric(
-        label="Columns With Duplicates",
-        value=total_cols_with_dups,
-        help="Total number of columns with duplicates",
-    )
-    bc4.metric(
-        label="Survey ID Duplicates",
-        value=total_id_dups,
-        help="Total number of duplicates in the survey ID column",
+    number_of_cols_with_duplicates = 0
+    number_of_cols_without_duplicates = 0
+
+    # remove survey_id and key from dup_cols if they are included
+    dup_cols_checked = [col for col in dup_cols if col not in [survey_id, survey_key]]
+    number_of_cols_checked = len(dup_cols_checked)
+
+    # If no columns remain after filtering, return zeros
+    if number_of_cols_checked == 0:
+        return DuplicatesStats(
+            number_of_columns_checked=0,
+            total_duplicates=0,
+            number_of_cols_with_duplicates=0,
+            number_of_cols_without_duplicates=0,
+        )
+
+    total_duplicates = 0
+    for dup_col in dup_cols_checked:
+        # count duplicates for each column
+        col_dups_data = data.filter(pl.col(dup_col).is_duplicated())
+        total_duplicates += col_dups_data.height
+        if col_dups_data.height > 0:
+            number_of_cols_with_duplicates += 1
+        else:
+            number_of_cols_without_duplicates += 1
+
+    # Ensure all values are Python ints (not Polars or numpy types)
+    return DuplicatesStats(
+        number_of_columns_checked=int(number_of_cols_checked),
+        total_duplicates=int(total_duplicates),
+        number_of_cols_with_duplicates=int(number_of_cols_with_duplicates),
+        number_of_cols_without_duplicates=int(number_of_cols_without_duplicates),
     )
 
 
@@ -1600,9 +1559,6 @@ def compute_id_duplicates(
     id_dups_data = id_dups_data.with_columns([
         (pl.col("id_dup_count") / total_records * 100).alias("id_dup_percent")
     ])
-
-    # Handle survey_date
-    survey_date_list = [] if survey_date is None else [survey_date]
 
     id_dups_data = id_dups_data.select([
         survey_id,
@@ -1703,7 +1659,6 @@ def compute_column_duplicates(
     survey_key: str,
     survey_date: str,
     dup_col: str,
-    display_cols: list | None,
 ) -> pl.DataFrame:
     """
     Compute duplicates for the selected columns.
@@ -1745,15 +1700,170 @@ def compute_column_duplicates(
     if survey_date and survey_date in data.columns:
         existing_vars.append(survey_date)
 
-    # Build final column list
-    if display_cols:
-        cols_to_select = existing_vars + base_cols + display_cols
-    else:
-        cols_to_select = existing_vars + base_cols
+    cols_to_select = existing_vars + base_cols
 
     var_dups_data = var_dups_data.select(cols_to_select)
 
     return var_dups_data.sort([f"{dup_col}_dup_count", dup_col], descending=[True, False])
+
+
+def _render_other_duplicates_metrics(
+    data: pl.DataFrame,
+    duplicates_settings: DuplicatesSettings,
+    dup_cols: list | None = None,
+) -> None:
+    """Render metrics for other column duplicates.
+
+    Parameters
+    ----------
+    col_dups_data : pl.DataFrame
+        DataFrame containing column duplicates.
+    dup_col : str
+        The column being checked for duplicates.
+    """
+    if data.is_empty():
+        return
+
+    # Return early if no columns to check
+    if not dup_cols or len(dup_cols) == 0:
+        st.info("No columns configured for duplicate checking.")
+        return
+
+    duplicates_stats: DuplicatesStats = compute_duplicates_statistics(
+        data,
+        duplicates_settings,
+        dup_cols
+    )
+
+    gc1, gc2, gc3, gc4 = st.columns(4)
+    with gc1, st.container(border=True):
+        st.metric(
+        label="Columns Checked",
+        value=duplicates_stats.number_of_columns_checked,
+        help="Total number of columns checked for duplicates.",
+    )
+
+    with gc2, st.container(border=True):
+        st.metric(
+            label="Total Duplicates",
+            value=duplicates_stats.total_duplicates,
+            help="Total number of duplicate entries found across all checked columns.",
+        )
+
+    with gc3, st.container(border=True):
+        st.metric(
+            label="Columns with Duplicates",
+            value=duplicates_stats.number_of_cols_with_duplicates,
+            help="Number of columns that have at least one duplicate entry.",
+        )
+
+    with gc4, st.container(border=True):
+        st.metric(
+            label="Columns without Duplicates",
+            value=duplicates_stats.number_of_cols_without_duplicates,
+            help="Number of columns that have no duplicate entries.",
+        )
+
+def _render_other_duplicates_table(
+    data: pl.DataFrame,
+    dup_cols: list,
+    duplicates_settings: DuplicatesSettings,
+    settings_file: str,
+) -> None:
+    """
+    Show other column duplicates table
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        The full dataset.
+
+    dup_col : list
+        The columns being checked for duplicates.
+
+    duplicates_settings : DuplicatesSettings
+        Duplicates settings configuration.
+    settings_file : str
+        Path to the settings file.
+
+    Returns
+    -------
+    None
+    """
+    # select column to check for duplicates
+    cc1, _ = st.columns([0.3, 0.7])
+    with cc1:
+        col_checked = st.selectbox(
+            label="Select column to check for duplicates",
+            options=dup_cols,
+            key="other_dup_col_selectbox",
+        )
+
+    col_dups_data = compute_column_duplicates(
+        data=data,
+        survey_id=duplicates_settings.survey_id,
+        survey_key=duplicates_settings.survey_key,
+        survey_date=duplicates_settings.survey_date,
+        dup_col=col_checked,
+    )
+
+    with st.expander(":material/clarify: Show more columns in report", expanded=False):
+        saved_settings = load_check_settings(settings_file, TAB_NAME)
+        default_var_table_display_cols = saved_settings.get(f"{col_checked}_display_cols", [])
+        display_options = [
+            col for col in data.columns if col not in [duplicates_settings.survey_id, duplicates_settings.survey_key, duplicates_settings.survey_date, col_checked]
+        ]
+        var_table_display_cols = st.multiselect(
+            label="Select additional columns to display",
+            options=display_options,
+            help="Select additional columns to include in the duplicates report.",
+            default=default_var_table_display_cols,
+            key="other_duplicates_table_display_cols_key",
+            on_change=trigger_save,
+            kwargs={"state_name": TAB_NAME + f"_{col_checked}_display_cols"},
+        )
+
+        save_check_settings(
+            settings_file,
+            TAB_NAME,
+            {f"{col_checked}_display_cols": var_table_display_cols},
+        )
+
+        if var_table_display_cols:
+            # Build join keys - only include columns that exist in both dataframes
+            join_keys = []
+            if duplicates_settings.survey_id and duplicates_settings.survey_id in data.columns and duplicates_settings.survey_id in col_dups_data.columns:
+                join_keys.append(duplicates_settings.survey_id)
+            if duplicates_settings.survey_key and duplicates_settings.survey_key in data.columns and duplicates_settings.survey_key in col_dups_data.columns:
+                join_keys.append(duplicates_settings.survey_key)
+
+            # Only perform join if we have valid join keys
+            if join_keys:
+                # Build selection list - only include columns that exist
+                select_cols = join_keys + [col for col in var_table_display_cols if col in data.columns]
+
+                col_dups_data = col_dups_data.join(
+                    data.select(select_cols),
+                    on=join_keys,
+                    how="left",
+                ).unique()
+            else:
+                st.warning("Cannot join additional columns: required join keys not found in data.")
+
+    st.dataframe(
+        col_dups_data,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            f"{col_checked}_dup_count": st.column_config.Column(
+                label=f"# of {col_checked} duplicates"
+            ),
+            f"{col_checked}_dup_percent": st.column_config.NumberColumn(
+                label="% of total records", format="%.2f%%"
+            ),
+        },
+    )
+
 
 
 @demo_output_onboarding(TAB_NAME)
@@ -1992,3 +2102,16 @@ def duplicates_report(
 
     # Remove duplicates and sort
     all_dup_cols = list(set(all_dup_cols))
+
+    _render_other_duplicates_metrics(
+        filtered_data,
+        config_settings,
+        all_dup_cols,
+    )
+
+    _render_other_duplicates_table(
+        filtered_data,
+        all_dup_cols,
+        duplicates_settings,
+        setting_file
+    )
