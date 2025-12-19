@@ -12,13 +12,21 @@ This module provides comprehensive enumerator performance tracking with:
 """
 
 import json
+from datetime import date as dt_date
+from datetime import timedelta
+from re import sub
 
 import polars as pl
 import streamlit as st
+from datasure.checks import missing
 from pydantic import BaseModel, Field, field_validator
 
 from datasure.utils.dataframe_utils import get_df_info
-from datasure.utils.duckdb_utils import duckdb_save_table
+from datasure.utils.duckdb_utils import (
+    duckdb_get_table,
+    duckdb_save_table,
+    load_missing_codes_from_db,
+)
 from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.settings_utils import (
     load_check_settings,
@@ -65,22 +73,11 @@ class EnumeratorSettings(BaseModel):
     survey_id: str | None = Field(..., min_length=1, description="Survey ID column")
     survey_date: str | None = Field(None, description="Survey date column")
     enumerator: str | None = Field(None, description="Enumerator ID column")
-    formdef_version: str | None = Field(None, description="Form version column")
+    formversion: str | None = Field(None, description="Form version column")
     duration: str | None = Field(None, description="Duration column")
+    duration_unit: str = Field("default='seconds'", description="Duration unit")
     team: str | None = Field(None, description="Team identifier column")
-    consent: str | None = Field(None, description="Consent status column")
-    consent_vals: list[str] | None = Field(None, description="Valid consent values")
-    outcome: str | None = Field(None, description="Outcome status column")
-    outcome_vals: list[str] | None = Field(None, description="Completed survey values")
 
-    @field_validator("consent_vals", "outcome_vals")
-    @classmethod
-    def validate_value_lists(cls, v: list[str] | None) -> list[str] | None:
-        """Validate that value lists are not empty if provided."""
-        if v is not None and len(v) == 0:
-            return None
-        return v
-    
 class ConsentOutcomeSettings(BaseModel):
     """Settings for consent and outcome configuration.
 
@@ -382,12 +379,76 @@ def enumerator_report_settings(
                 save_check_settings(settings_file, TAB_NAME, {"team": team})
 
         with st.container(border=True):
+            st.subheader("Survey Duration")
+            dc1, dc2, _ = st.columns(3)
+            with dc1:
+                default_duration = default_settings.duration
+                default_duration_index = (
+                    categorical_columns.index(default_duration)
+                    if default_duration and default_duration in categorical_columns
+                    else None
+                )
+                duration = st.selectbox(
+                    "Duration Column",
+                    options=categorical_columns,
+                    key="duration_enumerator",
+                    help="Select the column that contains the survey duration in seconds",
+                    index=default_duration_index,
+                    on_change=trigger_save,
+                    kwargs={"state_name": TAB_NAME + "_duration"},
+                )
+                save_check_settings(settings_file, TAB_NAME, {"duration": duration})
+
+            with dc2:
+                default_duration_unit = default_settings.duration_unit
+                default_duration_unit_index = (
+                    ["seconds", "minutes", "hours"].index(default_duration_unit)
+                    if default_duration_unit in ["seconds", "minutes", "hours"]
+                    else 0
+                )
+                duration_unit = st.selectbox(
+                    "Duration Unit",
+                    options=["seconds", "minutes", "hours"],
+                    key="duration_unit_enumerator",
+                    help="Select the unit for survey duration",
+                    index=default_duration_unit_index,
+                    on_change=trigger_save,
+                    kwargs={"state_name": TAB_NAME + "_duration_unit"},
+                )
+                save_check_settings(settings_file, TAB_NAME, {"duration_unit": duration_unit})
+
+        with st.container(border=True):
+            st.subheader("Form Version")
+            fv1, _ = st.columns([1, 2])
+            with fv1:
+                default_formversion = default_settings.formversion
+                default_formversion_index = (
+                    categorical_columns.index(default_formversion)
+                    if default_formversion and default_formversion in categorical_columns
+                    else None
+                )
+                formversion = st.selectbox(
+                    "Form Version Column",
+                    options=categorical_columns,
+                    key="formversion_enumerator",
+                    help="Select the column that contains the form version",
+                    index=default_formversion_index,
+                    on_change=trigger_save,
+                    kwargs={"state_name": TAB_NAME + "_formversion"},
+                )
+                save_check_settings(settings_file, TAB_NAME, {"formversion": formversion})
+
+
+        with st.container(border=True):
             st.subheader("Consent and Outcome Settings")
             st.info(
                 "Configure consent and outcome columns along with their valid values."
             )
 
-            conditions = _render_consent_outcome_settings(project_id, data, categorical_columns, settings_file)
+            _render_consent_outcome_settings(project_id, data, categorical_columns, settings_file)
+            if "st_apply_consent_outcome_enumerator" in st.session_state and st.session_state["st_apply_consent_outcome_enumerator"]:  # noqa: RUF019
+                st.success("Consent and outcome settings applied successfully.")
+                st.session_state["st_apply_consent_outcome_enumerator"] = False
 
     return EnumeratorSettings(
         survey_key=survey_key,
@@ -395,6 +456,9 @@ def enumerator_report_settings(
         survey_date=survey_date,
         enumerator=enumerator,
         team=team,
+        formversion=formversion,
+        duration=duration,
+        duration_unit=duration_unit,
     )
 
 @st.fragment
@@ -497,7 +561,20 @@ def _render_consent_outcome_settings(
 
     if st.button("Apply Consent and Outcome Settings", key="apply_consent_outcome_enumerator", type="primary", width="stretch"):
         _create_enum_data_on_settings(project_id, data, config)
+        _trigger_success_message("st_apply_consent_outcome_enumerator")
         st.rerun()
+
+
+def _trigger_success_message(button_key: str) -> None:
+    """Trigger a success message after button click.
+
+    Parameters
+    ----------
+    button_key : str
+        Unique key of the button to associate the success message with.
+    """
+    st.session_state[f"{button_key}"] = True
+
 
 def _create_enum_data_on_settings(
     project_id: str,
@@ -518,7 +595,6 @@ def _create_enum_data_on_settings(
     # If consent and consent values are provided, create a dummy column indicating 
     # valid consent else set to 1
 
-    enum_data = data
     if config.consent and config.consent_vals:
         enum_data = data.with_columns(
             pl.col(config.consent).is_in(config.consent_vals).cast(pl.Int32).alias("consent_granted_agg_col")
@@ -529,11 +605,11 @@ def _create_enum_data_on_settings(
         )
 
     if config.outcome and config.outcome_vals:
-        enum_data = data.with_columns(
+        enum_data = enum_data.with_columns(
             pl.col(config.outcome).is_in(config.outcome_vals).cast(pl.Int32).alias("completed_survey_agg_col")
         )
     else:
-        enum_data = data.with_columns(
+        enum_data = enum_data.with_columns(
             pl.lit(1).cast(pl.Int32).alias("completed_survey_agg_col")
         )
 
@@ -625,7 +701,7 @@ def compute_enumerator_overview(
 
 @st.cache_data(ttl=300)
 def compute_enumerator_missing_table(
-    data: pl.DataFrame, missing_settings_file: str, enumerator: str
+    data: pl.DataFrame, missing_settings_file: pl.DataFrame, enumerator: str
 ) -> pl.DataFrame:
     """Compute enumerator missing data statistics.
 
@@ -648,9 +724,8 @@ def compute_enumerator_missing_table(
         DataFrame containing missing data statistics by enumerator.
     """
     try:
-        with open(missing_settings_file) as f:
-            settings_dict = json.load(f)
-            missing_codes_data = settings_dict
+        # convert pl.DataFrame to dict
+        missing_codes_data = json.loads(missing_settings_file.to_json())
     except FileNotFoundError:
         missing_codes_data = {}
 
@@ -681,16 +756,12 @@ def compute_enumerator_missing_table(
 
 @st.cache_data(ttl=300)
 def compute_enumerator_summary(
+    project_id: str,
     data: pl.DataFrame,
-    missing_settings_file: str,
     date: str,
     enumerator: str,
-    formdef_version: str | None,
+    formversion: str | None,
     duration: str | None,
-    consent: str | None,
-    consent_vals: list[str] | None,
-    outcome: str | None,
-    outcome_vals: list[str] | None,
 ) -> pl.DataFrame:
     """Compute comprehensive enumerator summary statistics.
 
@@ -742,8 +813,6 @@ def compute_enumerator_summary(
     ])
 
     # Calculate time-based submissions
-    from datetime import date as dt_date
-    from datetime import timedelta
     today = dt_date.today()
     start_of_week = today - timedelta(days=today.weekday())
     start_of_month = today.replace(day=1)
@@ -767,8 +836,9 @@ def compute_enumerator_summary(
     summary_df = summary_df.join(lagged_df, on=enumerator, how="left")
 
     # Add missing data statistics
+    missing_settings_file = load_missing_codes_from_db(project_id)
     enumerator_missing_df = compute_enumerator_missing_table(
-        data=data, missing_settings_file=missing_settings_file, enumerator=enumerator
+        data, missing_settings_file, enumerator
     )
     summary_df = summary_df.join(enumerator_missing_df, on=enumerator, how="left")
 
@@ -783,16 +853,16 @@ def compute_enumerator_summary(
         summary_df = summary_df.join(duration_df, on=enumerator, how="left")
 
     # Add form version statistics if available
-    if formdef_version:
+    if formversion:
         # Get latest form version per date
         formdef_outdated = (
             df.group_by(date, maintain_order=True)
-            .agg(pl.col(formdef_version).max().alias("latest daily form version"))
+            .agg(pl.col(formversion).max().alias("latest daily form version"))
         )
 
         df = df.join(formdef_outdated, on=date, how="left")
         df = df.with_columns(
-            (pl.col(formdef_version) != pl.col("latest daily form version")).alias(
+            (pl.col(formversion) != pl.col("latest daily form version")).alias(
                 "outdated_form_version"
             )
         )
@@ -802,12 +872,12 @@ def compute_enumerator_summary(
         )
 
         formdef_df = df.group_by(enumerator, maintain_order=True).agg([
-            pl.col(formdef_version).n_unique().alias("# form versions"),
-            pl.col(formdef_version).max().alias("latest form version"),
+            pl.col(formversion).n_unique().alias("# form versions"),
+            pl.col(formversion).max().alias("latest form version"),
         ])
 
         latest_enum_formversion = df.group_by(enumerator, maintain_order=True).agg(
-            pl.col(formdef_version).max().alias("last form version")
+            pl.col(formversion).max().alias("last form version")
         )
 
         summary_df = summary_df.join(formdef_df, on=enumerator, how="left")
@@ -815,24 +885,17 @@ def compute_enumerator_summary(
         summary_df = summary_df.join(latest_enum_formversion, on=enumerator, how="left")
 
     # Add consent statistics if available
-    if consent and consent_vals:
-        df = df.with_columns(
-            pl.col(consent).is_in(consent_vals).cast(pl.Int32).alias("consent_granted_agg_col")
-        )
-        consent_df = df.group_by(enumerator, maintain_order=True).agg(
-            pl.col("consent_granted_agg_col").mean().alias("% consent")
-        )
-        summary_df = summary_df.join(consent_df, on=enumerator, how="left")
+
+    consent_df = df.group_by(enumerator, maintain_order=True).agg(
+        pl.col("consent_granted_agg_col").mean().alias("% consent")
+    )
+    summary_df = summary_df.join(consent_df, on=enumerator, how="left")
 
     # Add outcome statistics if available
-    if outcome and outcome_vals:
-        df = df.with_columns(
-            pl.col(outcome).is_in(outcome_vals).cast(pl.Int32).alias("completed_survey_agg_col")
-        )
-        outcome_df = df.group_by(enumerator, maintain_order=True).agg(
-            pl.col("completed_survey_agg_col").mean().alias("% completed survey")
-        )
-        summary_df = summary_df.join(outcome_df, on=enumerator, how="left")
+    outcome_df = df.group_by(enumerator, maintain_order=True).agg(
+        pl.col("completed_survey_agg_col").mean().alias("% completed survey")
+    )
+    summary_df = summary_df.join(outcome_df, on=enumerator, how="left")
 
     return summary_df
 
@@ -1053,8 +1116,7 @@ def compute_enumerator_statistics_overtime(
 # =============================================================================
 
 
-@demo_output_onboarding(TAB_NAME)
-def display_enumerator_overview(
+def _render_enumerator_overview_metrics(
     data: pl.DataFrame, date: str, enumerator: str, team: str | None
 ) -> None:
     """Display enumerator overview metrics.
@@ -1080,32 +1142,36 @@ def display_enumerator_overview(
         )
         return
 
-    metrics = compute_enumerator_overview(data=data, date=date, enumerator=enumerator, team=team)
+    metrics: EnumeratorOverviewMetrics = compute_enumerator_overview(data, date, enumerator, team)
 
     tc1, tc2, tc3, tc4 = st.columns(4, border=True)
-    tc1.metric("Total number of enumerators", metrics.num_enumerators)
-    tc2.metric("Total number of teams", metrics.num_teams)
-    tc3.metric("Active enumerators (past 7 days)", metrics.num_active_enumerators)
-    tc4.metric("Percentage of active enumerator (past 7 days)", metrics.pct_active_enumerators)
+    num_enumerators_formatted = f"{metrics.num_enumerators:,}" if isinstance(metrics.num_enumerators, int) else metrics.num_enumerators
+    tc1.metric(r"\# of enumerators", num_enumerators_formatted, help="Total unique enumerators in the dataset")
+    num_teams_formatted = f"{metrics.num_teams:,}" if isinstance(metrics.num_teams, int) else metrics.num_teams
+    tc2.metric(r"\# of teams", num_teams_formatted, help="Total unique teams in the dataset")
+    num_active_enumerators_formatted = f"{metrics.num_active_enumerators:,}"
+    tc3.metric(r"\# of Active enumerators (past 7 days)", num_active_enumerators_formatted, help="Number of enumerators with submissions in the past 7 days")
+    pct_active_enumerators_formatted = f"{metrics.pct_active_enumerators}"
+    tc4.metric("% of active enumerator (past 7 days)", pct_active_enumerators_formatted, help="Percentage of enumerators active in the past 7 days")
 
     bc1, bc2, bc3, bc4 = st.columns(4, border=True)
-    bc1.metric("Minimum number of submissions", metrics.min_submissions)
-    bc2.metric("Highest number of submissions", metrics.max_submissions)
-    bc3.metric("Average number of submissions", metrics.avg_submissions)
-    bc4.metric("Total number of submissions", metrics.all_submissions)
+    min_submissions_formatted = f"{metrics.min_submissions:,}"
+    bc1.metric("Fewest enumerator submissions", min_submissions_formatted, help="Minimum number of submissions by any enumerator")
+    max_submissions_formatted = f"{metrics.max_submissions:,}"
+    bc2.metric("Highest enumerator submissions", max_submissions_formatted, help="Maximum number of submissions by any enumerator")
+    avg_submissions_formatted = f"{metrics.avg_submissions:,}"
+    bc3.metric("Average enumerator submissions", avg_submissions_formatted, help="Average number of submissions per enumerator")
+    all_submissions_formatted = f"{metrics.all_submissions:,}"
+    bc4.metric("Total survey submissions", all_submissions_formatted, help="Total number of survey submissions in the dataset")
 
 
-def display_enumerator_summary(
+def _render_enumerator_summary_table(
+    project_id: str,
     data: pl.DataFrame,
-    missing_settings_file: str,
     date: str,
     enumerator: str,
-    formdef_version: str | None,
+    formversion: str | None,
     duration: str | None,
-    consent: str | None,
-    consent_vals: list[str] | None,
-    outcome: str | None,
-    outcome_vals: list[str] | None,
 ) -> None:
     """Display enumerator summary table.
 
@@ -1147,17 +1213,15 @@ def display_enumerator_summary(
         return
 
     summary_df = compute_enumerator_summary(
-        data=data,
-        missing_settings_file=missing_settings_file,
-        date=date,
-        enumerator=enumerator,
-        formdef_version=formdef_version,
-        duration=duration,
-        consent=consent,
-        consent_vals=consent_vals,
-        outcome=outcome,
-        outcome_vals=outcome_vals,
+        project_id,
+        data,
+        date,
+        enumerator,
+        formversion,
+        duration,
     )
+
+    st.write("Submission DF:", summary_df)
 
     # Display using Streamlit's native dataframe display
     st.dataframe(
@@ -1545,3 +1609,28 @@ def enumerator_report(
         project_id, setting_file, data, config_settings, string_numeric_cols, datetime_columns
     )
 
+    # get data for enumerator report
+    data_enum_report = duckdb_get_table(
+        project_id,
+        "enumerator_data_with_consent_outcome",
+        "intermediate",
+    )
+
+    _render_enumerator_overview_metrics(
+        data_enum_report,
+        enumerator_settings.survey_date,
+        enumerator_settings.enumerator,
+        enumerator_settings.team,
+    )
+
+    # create missing data and summary table
+    missing_codes_df = load_missing_codes_from_db(project_id)
+
+    _render_enumerator_summary_table(
+        project_id,
+        data_enum_report,
+        enumerator_settings.survey_date,
+        enumerator_settings.enumerator,
+        enumerator_settings.formversion,
+        enumerator_settings.duration,
+    )
