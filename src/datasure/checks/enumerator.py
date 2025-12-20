@@ -1262,6 +1262,7 @@ def _render_enumerator_overview_metrics(
     bc4.metric("Total survey submissions", all_submissions_formatted, help="Total number of survey submissions in the dataset")
 
 
+@st.fragment
 def _render_enumerator_summary_table(
     project_id: str,
     data: pl.DataFrame,
@@ -1318,9 +1319,73 @@ def _render_enumerator_summary_table(
         duration,
     )
 
+    options_map = {"submissions": ":material/arrow_upload_progress: Submissions", "missing": ":material/incomplete_circle: Missing Data", "duration": ":material/timer: Duration", "formversion": ":material/difference: Form Version", "consent_outcome": ":material/check_circle: Consent & Outcome"}
+    with st.container(horizontal_alignment="right"):
+        show_info = st.pills(
+                "Select Summary Information to Display",
+                options=options_map.keys(),
+                format_func=lambda x: options_map[x],
+                key="show_info_enumerator",
+                help="Select which summary information to display in the table",
+                selection_mode="multi",
+            )
+
+    # Define column groups
+    column_groups = {
+        "submissions": [
+            "first submission",
+            "last submission",
+            "# submissions",
+            "# unique dates",
+            "# submissions today",
+            "# submissions this week",
+            "# submissions this month",
+        ],
+        "missing": [
+            col for col in summary_df.columns
+            if "%" in col and ("Null" in col or "Missing" in col or any(
+                keyword in col for keyword in ["Don't Know", "Refuse", "Not Applicable"]
+            ))
+        ],
+        "duration": [
+            "min duration",
+            "mean duration",
+            "median duration",
+            "max duration",
+        ],
+        "formversion": [
+            "# form versions",
+            "latest form version",
+            "last form version",
+            "# of outdated form versions",
+        ],
+        "consent_outcome": [
+            "% consent",
+            "% completed survey",
+        ],
+    }
+
+    # Filter columns based on selection
+    if show_info:
+        # Always include enumerator and # submissions
+        columns_to_show = [enumerator, "# submissions"]
+
+        # Add columns from selected categories
+        for category in show_info:
+            columns_to_show.extend([
+                col for col in column_groups[category]
+                if col in summary_df.columns and col not in columns_to_show
+            ])
+
+        # Filter the dataframe
+        filtered_df = summary_df.select(columns_to_show)
+    else:
+        # Show all columns if nothing is selected
+        filtered_df = summary_df
+
     # Display using Streamlit's native dataframe display
     st.dataframe(
-        summary_df,
+        filtered_df,
         hide_index=True,
         width="stretch",
         column_config={
