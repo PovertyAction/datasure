@@ -11,16 +11,14 @@ This module provides comprehensive enumerator performance tracking with:
 - Polars-based data processing for performance
 """
 
-import json
 from datetime import date as dt_date
 from datetime import timedelta
-from re import sub
 
 import polars as pl
 import streamlit as st
-from datasure.checks import missing
 from pydantic import BaseModel, Field, field_validator
 
+from datasure.checks import missing
 from datasure.utils.dataframe_utils import get_df_info
 from datasure.utils.duckdb_utils import (
     duckdb_get_table,
@@ -592,7 +590,7 @@ def _create_enum_data_on_settings(
     conditions : ConsentOutcomeSettings
         Consent and outcome configuration settings.
     """
-    # If consent and consent values are provided, create a dummy column indicating 
+    # If consent and consent values are provided, create a dummy column indicating
     # valid consent else set to 1
 
     if config.consent and config.consent_vals:
@@ -701,11 +699,12 @@ def compute_enumerator_overview(
 
 @st.cache_data(ttl=300)
 def compute_enumerator_missing_table(
-    data: pl.DataFrame, missing_settings_file: pl.DataFrame, enumerator: str
+    data: pl.DataFrame, missing_codes_config: pl.DataFrame, enumerator: str
 ) -> pl.DataFrame:
-    """Compute enumerator missing data statistics.
+    """Compute missing data statistics per enumerator.
 
-    Analyzes missing data patterns by enumerator using configured missing codes.
+    Calculates missing data counts and percentages for each enumerator
+    based on provided missing codes configuration.
 
     Cached for 5 minutes to improve performance for repeated calls.
 
@@ -721,37 +720,135 @@ def compute_enumerator_missing_table(
     Returns
     -------
     pl.DataFrame
-        DataFrame containing missing data statistics by enumerator.
+        DataFrame with missing data statistics per enumerator.
     """
-    try:
-        # convert pl.DataFrame to dict
-        missing_codes_data = json.loads(missing_settings_file.to_json())
-    except FileNotFoundError:
-        missing_codes_data = {}
+    # define columns to exclude from missing data stats
+    columns_to_exclude = ["consent_granted_agg_col", "completed_survey_agg_col"]
 
-    # Calculate null values percentage
-    data = data.with_columns(
-        (pl.all().is_null().sum() / pl.len()).alias("% Null values")
+    data_for_missing = data.select([
+        col for col in data.columns if col not in columns_to_exclude
+    ])
+
+    # Metadata for missing data calculation
+    enum_data_missing = data_for_missing.select([enumerator])
+
+    # If missing_codes_config is empty, calculate only null missingness
+    if missing_codes_config.is_empty():
+        # Calculate overall null missingness per enumerator
+        columns_to_check = [col for col in data_for_missing.columns if col != enumerator]
+
+        # Count nulls per row and calculate percentage
+        missing_summary = data_for_missing.with_columns([
+            pl.sum_horizontal([
+                pl.col(col).is_null().cast(pl.Int32) for col in columns_to_check
+            ]).alias("_null_count"),
+            pl.lit(len(columns_to_check)).alias("_total_fields")
+        ]).with_columns(
+            (pl.col("_null_count") / pl.col("_total_fields") * 100).alias("% Null values")
+        )
+
+        # Group by enumerator and calculate mean missingness rate
+        result_df = missing_summary.group_by(enumerator, maintain_order=True).agg(
+            pl.col("% Null values").mean()
+        )
+
+        return result_df
+
+    # If missing_codes_config is provided, calculate missingness by category
+    # Get missing code pairs from the config
+    missing_code_pairs = missing._get_missing_code_pairs(missing_codes_config)
+
+    # Compute missing data with paired encoding
+    missing_data_encoded = missing._compute_missing_data_paired(
+        data_for_missing, missing_codes_config
     )
 
-    miss_cols = ["% Null values"]
+    # Get columns to check (exclude enumerator column)
+    columns_to_check = [col for col in missing_data_encoded.columns if col != enumerator]
+    total_fields = len(columns_to_check)
 
-    if missing_codes_data and "Missing Labels" in missing_codes_data:
-        for i in range(len(missing_codes_data["Missing Labels"])):
-            miss_label = missing_codes_data["Missing Labels"][i]
-            # NOTE: Missing codes logic simplified - implement if needed
-            miss_col_name = f"% {miss_label}"
-            data = data.with_columns(
-                pl.lit(0).alias(miss_col_name)  # Placeholder - implement proper logic
-            )
-            miss_cols.append(miss_col_name)
+    # Calculate counts for each missing category per row
+    agg_expressions = []
 
-    # Group by enumerator and calculate means
-    mv_data = data.group_by(enumerator, maintain_order=True).agg(
-        [pl.col(col).mean() for col in miss_cols]
+    # Add null values count (encoded as 1)
+    agg_expressions.append(
+        pl.sum_horizontal([
+            (pl.col(col) == 1).cast(pl.Int32) for col in columns_to_check
+        ]).alias("_null_count")
     )
 
-    return mv_data
+    # Add count for each special missing code category (starting from 2)
+    for idx, label in enumerate(missing_code_pairs.keys(), start=2):
+        agg_expressions.append(
+            pl.sum_horizontal([
+                (pl.col(col) == idx).cast(pl.Int32) for col in columns_to_check
+            ]).alias(f"_{label}_count")
+        )
+
+    # Add total missing count (any value > 0)
+    agg_expressions.append(
+        pl.sum_horizontal([
+            (pl.col(col) > 0).cast(pl.Int32) for col in columns_to_check
+        ]).alias("_total_missing_count")
+    )
+
+    # Add total fields count
+    agg_expressions.append(pl.lit(total_fields).alias("_total_fields"))
+
+    # Apply the aggregations
+    missing_counts = missing_data_encoded.select([
+        pl.col(enumerator)
+    ] + agg_expressions)
+
+    # Calculate percentages
+    percentage_expressions = []
+
+    # Null values percentage
+    percentage_expressions.append(
+        (pl.col("_null_count") / pl.col("_total_fields") * 100).alias("% Null values")
+    )
+
+    # Special missing code category percentages
+    for label in missing_code_pairs:
+        percentage_expressions.append(
+            (pl.col(f"_{label}_count") / pl.col("_total_fields") * 100).alias(f"% {label}")
+        )
+
+    # Total missing percentage
+    percentage_expressions.append(
+        (pl.col("_total_missing_count") / pl.col("_total_fields") * 100).alias("% Total Missing")
+    )
+
+    missing_with_percentages = missing_counts.with_columns(percentage_expressions)
+
+    # Group by enumerator and calculate mean percentages
+    final_agg_expressions = [
+        pl.col("% Null values").mean()
+    ]
+
+    for label in missing_code_pairs:
+        final_agg_expressions.append(
+            pl.col(f"% {label}").mean()
+        )
+
+    final_agg_expressions.append(
+        pl.col("% Total Missing").mean()
+    )
+
+    # drop enumerator column from missing_with_percentages
+    missing_with_percentages = missing_with_percentages.select(
+        [col for col in missing_with_percentages.columns if col != enumerator]
+    )
+    # merge missing_with_percentages with enumerator column
+    missing_with_percentages = pl.concat(
+        [enum_data_missing, missing_with_percentages], how="horizontal"
+    )
+
+    result_df = missing_with_percentages.group_by(enumerator, maintain_order=True).agg(
+        final_agg_expressions
+    )
+
+    return result_df
 
 
 @st.cache_data(ttl=300)
@@ -1221,8 +1318,6 @@ def _render_enumerator_summary_table(
         duration,
     )
 
-    st.write("Submission DF:", summary_df)
-
     # Display using Streamlit's native dataframe display
     st.dataframe(
         summary_df,
@@ -1230,12 +1325,13 @@ def _render_enumerator_summary_table(
         width="stretch",
         column_config={
             enumerator: st.column_config.TextColumn("Enumerator"),
-            "# submissions": st.column_config.NumberColumn("# Submissions", format="%d"),
-            "# unique dates": st.column_config.NumberColumn("# Unique Dates", format="%d"),
-            "# submissions today": st.column_config.NumberColumn("# Today", format="%d"),
-            "# submissions this week": st.column_config.NumberColumn("# This Week", format="%d"),
-            "# submissions this month": st.column_config.NumberColumn("# This Month", format="%d"),
-            "% Null values": st.column_config.NumberColumn("% Null", format="%.2f%%"),
+            "# submissions": st.column_config.NumberColumn("# of Submissions", format="%d"),
+            "# unique dates": st.column_config.NumberColumn("# of Days", format="%d"),
+            "# submissions today": st.column_config.NumberColumn("# submitted Today", format="%d"),
+            "# submissions this week": st.column_config.NumberColumn("# submitted This Week", format="%d"),
+            "# submissions this month": st.column_config.NumberColumn("# submitted This Month", format="%d"),
+            "% Null values": st.column_config.NumberColumn("% Null Values", format="%.2f%%"),
+            "% Total Missing": st.column_config.NumberColumn("% Total Missing", format="%.2f%%"),
             "% consent": st.column_config.NumberColumn("% Consent", format="%.2f%%"),
             "% completed survey": st.column_config.NumberColumn("% Completed", format="%.2f%%"),
             "min duration": st.column_config.NumberColumn("Min Duration (s)", format="%.2f"),
@@ -1622,9 +1718,6 @@ def enumerator_report(
         enumerator_settings.enumerator,
         enumerator_settings.team,
     )
-
-    # create missing data and summary table
-    missing_codes_df = load_missing_codes_from_db(project_id)
 
     _render_enumerator_summary_table(
         project_id,
