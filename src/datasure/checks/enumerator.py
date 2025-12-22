@@ -11,9 +11,12 @@ This module provides comprehensive enumerator performance tracking with:
 - Polars-based data processing for performance
 """
 
+from calendar import c
 from datetime import date as dt_date
 from datetime import timedelta
+from typing import Literal
 
+from pandas import options
 import polars as pl
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
@@ -25,7 +28,6 @@ from datasure.utils.duckdb_utils import (
     duckdb_save_table,
     load_missing_codes_from_db,
 )
-from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.settings_utils import (
     load_check_settings,
     save_check_settings,
@@ -130,6 +132,22 @@ class ProductivitySettings(BaseModel):
         return v
 
 
+# Constants for statistics options
+ALLOWED_STATISTICS = ["count", "min", "mean", "median", "max", "std", "25th percentile", "75th percentile"]
+ALLOWED_STATISTICS_OVERTIME = ALLOWED_STATISTICS + ["missing"]
+ALLOWED_TIME_PERIODS = ["Daily", "Weekly", "Monthly"]
+WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+WEEKDAY_OFFSET_MAP = {
+    "Monday": "SUN",
+    "Tuesday": "MON",
+    "Wednesday": "TUE",
+    "Thursday": "WED",
+    "Friday": "THU",
+    "Saturday": "FRI",
+    "Sunday": "SAT",
+}
+
+
 class StatisticsSettings(BaseModel):
     """Settings for statistics analysis configuration.
 
@@ -148,10 +166,54 @@ class StatisticsSettings(BaseModel):
     @classmethod
     def validate_stats(cls, v: list[str]) -> list[str]:
         """Validate that statistics are from allowed list."""
-        allowed = ["count", "min", "mean", "median", "max", "std", "25th percentile", "75th percentile"]
         for stat in v:
-            if stat not in allowed:
-                raise ValueError(f"Invalid statistic: {stat}. Must be one of {allowed}")
+            if stat not in ALLOWED_STATISTICS:
+                raise ValueError(f"Invalid statistic: {stat}. Must be one of {ALLOWED_STATISTICS}")
+        return v
+
+
+class StatisticsOvertimeSettings(BaseModel):
+    """Settings for statistics over time analysis configuration.
+
+    Attributes
+    ----------
+    period : str
+        Time period for analysis (Daily, Weekly, Monthly).
+    weekstartday : str
+        First day of the week for weekly analysis.
+    stat : str
+        Statistic to compute over time.
+    statscol : str | None
+        Column to compute statistics on.
+    """
+
+    period_overtime: str = Field(default="Daily", description="Time period for analysis")
+    weekstartday: str = Field(default="Monday", description="Week start day")
+    stat: str = Field(default="count", description="Statistic to compute")
+    statscol: str | None = Field(None, description="Column for statistics")
+
+    @field_validator("period_overtime")
+    @classmethod
+    def validate_period(cls, v: str) -> str:
+        """Validate period is from allowed list."""
+        if v not in ALLOWED_TIME_PERIODS:
+            raise ValueError(f"Invalid period: {v}. Must be one of {ALLOWED_TIME_PERIODS}")
+        return v
+
+    @field_validator("weekstartday")
+    @classmethod
+    def validate_weekstartday(cls, v: str) -> str:
+        """Validate weekstartday is from allowed list."""
+        if v not in WEEKDAY_NAMES:
+            raise ValueError(f"Invalid weekstartday: {v}. Must be one of {WEEKDAY_NAMES}")
+        return v
+
+    @field_validator("stat")
+    @classmethod
+    def validate_stat(cls, v: str) -> str:
+        """Validate stat is from allowed list."""
+        if v not in ALLOWED_STATISTICS_OVERTIME:
+            raise ValueError(f"Invalid statistic: {v}. Must be one of {ALLOWED_STATISTICS_OVERTIME}")
         return v
 
 
@@ -1022,7 +1084,7 @@ def compute_enumerator_productivity(
     enumerator : str
         Enumerator column name.
     period : str
-        Time period: "Daily", "Weekly", or "Monthly".
+        Time period: "Daily", "Weekly", "Monthly", "Day", "Week", or "Month".
     weekstartday : str
         Start day of the week (e.g., "SUN", "MON") for weekly analysis.
 
@@ -1033,19 +1095,56 @@ def compute_enumerator_productivity(
     """
     prod_df = data.clone()
 
-    # Create time period column based on selection
-    if period == "Daily":
+    # Normalize period values to handle both old and new formats
+    period_normalized = period
+    if period == "Day":
+        period_normalized = "Daily"
+    elif period == "Week":
+        period_normalized = "Weekly"
+    elif period == "Month":
+        period_normalized = "Monthly"
+
+    # Create time period column based on selection with user-friendly formatting
+    if period_normalized == "Daily":
+        # Format as "Jan 1, 2025"
         prod_df = prod_df.with_columns(
-            pl.col(date).dt.strftime("%Y-%m-%d").alias("TIME PERIOD")
+            pl.col(date).dt.strftime("%b %d, %Y").alias("TIME PERIOD")
         )
-    elif period == "Weekly":
-        # Polars week calculation - adjust based on weekstartday
+    elif period_normalized == "Weekly":
+        # Calculate week start and end dates for user-friendly display
+        # Map weekstartday to offset (0=Monday, 6=Sunday in ISO calendar)
+        weekday_offset_map = {
+            "SUN": 0,  # Start on Sunday
+            "MON": 1,  # Start on Monday
+            "TUE": 2,  # Start on Tuesday
+            "WED": 3,  # Start on Wednesday
+            "THU": 4,  # Start on Thursday
+            "FRI": 5,  # Start on Friday
+            "SAT": 6,  # Start on Saturday
+        }
+        offset = weekday_offset_map.get(weekstartday, 1)
+
+        # Calculate the week start date (beginning of the week containing this date)
+        # weekday() returns 0=Monday, 6=Sunday
+        prod_df = prod_df.with_columns([
+            # Calculate days since the start of the week
+            ((pl.col(date).dt.weekday() - offset + 7) % 7).alias("_days_since_week_start"),
+        ])
+
+        # Calculate week_start_date by subtracting days_since_week_start
+        prod_df = prod_df.with_columns([
+            (pl.col(date) - pl.duration(days=pl.col("_days_since_week_start"))).alias("_week_start"),
+            (pl.col(date) - pl.duration(days=pl.col("_days_since_week_start")) + pl.duration(days=6)).alias("_week_end"),
+        ])
+
+        # Format as "Jan 1, 2025 to Jan 7, 2025"
         prod_df = prod_df.with_columns(
-            pl.col(date).dt.strftime("%Y-W%W").alias("TIME PERIOD")
+            (pl.col("_week_start").dt.strftime("%b %d, %Y") + " to " + pl.col("_week_end").dt.strftime("%b %d, %Y")).alias("TIME PERIOD")
         )
-    elif period == "Monthly":
+    elif period_normalized == "Monthly":
+        # Format as "January 2025"
         prod_df = prod_df.with_columns(
-            pl.col(date).dt.strftime("%Y-%m").alias("TIME PERIOD")
+            pl.col(date).dt.strftime("%B %Y").alias("TIME PERIOD")
         )
 
     # Count submissions per period and enumerator
@@ -1157,7 +1256,7 @@ def compute_enumerator_statistics_overtime(
     stat : str
         Statistic to compute (e.g., "mean", "median", "missing").
     period : str
-        Time period: "Daily", "Weekly", or "Monthly".
+        Time period: "Daily", "Weekly", "Monthly", "Day", "Week", or "Month".
     weekstartday : str
         Start day of the week for weekly analysis.
 
@@ -1168,18 +1267,56 @@ def compute_enumerator_statistics_overtime(
     """
     stats_overtime_df = data.select([date, enumerator, statscol]).clone()
 
-    # Create time period column
-    if period == "Daily":
+    # Normalize period values to handle both old and new formats
+    period_normalized = period
+    if period == "Day":
+        period_normalized = "Daily"
+    elif period == "Week":
+        period_normalized = "Weekly"
+    elif period == "Month":
+        period_normalized = "Monthly"
+
+    # Create time period column with user-friendly formatting
+    if period_normalized == "Daily":
+        # Format as "Jan 1, 2025"
         stats_overtime_df = stats_overtime_df.with_columns(
-            pl.col(date).dt.strftime("%Y-%m-%d").alias("TIME PERIOD")
+            pl.col(date).dt.strftime("%b %d, %Y").alias("TIME PERIOD")
         )
-    elif period == "Weekly":
+    elif period_normalized == "Weekly":
+        # Calculate week start and end dates for user-friendly display
+        # Map weekstartday to offset (0=Monday, 6=Sunday in ISO calendar)
+        weekday_offset_map = {
+            "SUN": 0,  # Start on Sunday
+            "MON": 1,  # Start on Monday
+            "TUE": 2,  # Start on Tuesday
+            "WED": 3,  # Start on Wednesday
+            "THU": 4,  # Start on Thursday
+            "FRI": 5,  # Start on Friday
+            "SAT": 6,  # Start on Saturday
+        }
+        offset = weekday_offset_map.get(weekstartday, 1)
+
+        # Calculate the week start date (beginning of the week containing this date)
+        # weekday() returns 0=Monday, 6=Sunday
+        stats_overtime_df = stats_overtime_df.with_columns([
+            # Calculate days since the start of the week
+            ((pl.col(date).dt.weekday() - offset + 7) % 7).alias("_days_since_week_start"),
+        ])
+
+        # Calculate week_start_date by subtracting days_since_week_start
+        stats_overtime_df = stats_overtime_df.with_columns([
+            (pl.col(date) - pl.duration(days=pl.col("_days_since_week_start"))).alias("_week_start"),
+            (pl.col(date) - pl.duration(days=pl.col("_days_since_week_start")) + pl.duration(days=6)).alias("_week_end"),
+        ])
+
+        # Format as "Jan 1, 2025 to Jan 7, 2025"
         stats_overtime_df = stats_overtime_df.with_columns(
-            pl.col(date).dt.strftime("%Y-W%W").alias("TIME PERIOD")
+            (pl.col("_week_start").dt.strftime("%b %d, %Y") + " to " + pl.col("_week_end").dt.strftime("%b %d, %Y")).alias("TIME PERIOD")
         )
-    elif period == "Monthly":
+    elif period_normalized == "Monthly":
+        # Format as "January 2025"
         stats_overtime_df = stats_overtime_df.with_columns(
-            pl.col(date).dt.strftime("%Y-%m").alias("TIME PERIOD")
+            pl.col(date).dt.strftime("%B %Y").alias("TIME PERIOD")
         )
 
     # Calculate statistic
@@ -1300,9 +1437,6 @@ def _render_enumerator_summary_table(
     outcome_vals : list[str] | None
         Completed survey values (optional).
     """
-    st.write("---")
-    st.markdown("## Enumerator Summary")
-
     if not (enumerator and date):
         st.info(
             "Enumerator summary requires a date and enumerator column to be selected. "
@@ -1320,7 +1454,7 @@ def _render_enumerator_summary_table(
     )
 
     options_map = {"submissions": ":material/arrow_upload_progress: Submissions", "missing": ":material/incomplete_circle: Missing Data", "duration": ":material/timer: Duration", "formversion": ":material/difference: Form Version", "consent_outcome": ":material/check_circle: Consent & Outcome"}
-    with st.container(horizontal_alignment="right"):
+    with st.container(horizontal_alignment="left"):
         show_info = st.pills(
                 "Select Summary Information to Display",
                 options=options_map.keys(),
@@ -1411,9 +1545,7 @@ def _render_enumerator_summary_table(
 # Display Functions - Productivity
 # =============================================================================
 
-
-@demo_output_onboarding(TAB_NAME)
-def display_enumerator_productivity(
+def _render_enumerator_productivity(
     data: pl.DataFrame,
     date: str,
     enumerator: str,
@@ -1442,67 +1574,223 @@ def display_enumerator_productivity(
         )
         return
 
-    default_settings = load_check_settings(
-        settings_file=settings_file, check_name="enumerator"
-    ) or {}
-
-    st.markdown("##### Productivity")
-    view_option_list = ("Daily", "Weekly", "Monthly")
-    default_view = default_settings.get("view_option", "Daily")
-    default_view_index = view_option_list.index(default_view)
-
-    view_option = st.radio(
-        label="Select View:",
-        options=view_option_list,
-        index=default_view_index,
-        key="view_option_enumerator",
-        horizontal=True,
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_view_option"},
+    _render_enumerator_productivity_table(
+        data=data, date=date, enumerator=enumerator, settings_file=settings_file
     )
-    save_check_settings(settings_file, "enumerator", {"view_option": view_option})
 
-    weekstartday = "SAT"
-    if view_option == "Weekly":
-        day_list = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
-        default_weekstartday_sel = default_settings.get("weekstartday", "Monday")
-        default_weekstartday_sel_index = day_list.index(default_weekstartday_sel)
 
+@st.fragment
+def _render_enumerator_productivity_table(
+    data: pl.DataFrame,
+    date: str,
+    enumerator: str,
+    settings_file: str,
+) -> None:
+    """Display enumerator productivity table.
+    Shows submission counts by enumerator over time with configurable
+    time periods (daily, weekly, monthly).
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        DataFrame containing survey data.
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+    settings_file : str
+        Path to settings file for saving/loading configurations.
+    """
+    time_period = _render_time_period_selector(settings_file, tab_name=TAB_NAME)
+    if time_period == "Week":
+        weekstartday = _render_weekday_selector(settings_file, tab_name=TAB_NAME)
+    else:
+        weekstartday = "MON"  # Default value, not used for non-weekly periods
+
+    productivity_df = compute_enumerator_productivity(
+        data=data, date=date, enumerator=enumerator, period=time_period, weekstartday=weekstartday
+    )
+
+    st.dataframe(productivity_df, hide_index=True, width="stretch")
+
+
+def _render_time_period_selector(
+    settings_file: str, tab_name: str = TAB_NAME,
+) -> Literal["Day", "Week", "Month"]:
+    options_map = {"Day": ":material/event: Daily", "Week": ":material/date_range: Weekly", "Month": ":material/calendar_month: Monthly"}
+
+    saved_settings = load_check_settings(settings_file, tab_name) or {}
+    default_time_period = saved_settings.get("time_period_enumerator_productivity", "Day")
+
+    with st.container(horizontal_alignment="left"):
+        time_period = st.pills(
+                label="Time Period",
+                options=options_map.keys(),
+                format_func=lambda x: options_map[x],
+                key="time_period_enumerator_productivity_key",
+                default=default_time_period,
+                help="Select time period for aggregating productivity",
+                selection_mode="single",
+                on_change=trigger_save,
+                kwargs={"state_name": tab_name + "_time_period"},
+            )
+        save_check_settings(
+                settings_file, tab_name, {"time_period": time_period}
+            )
+
+    return time_period or "Day"
+
+def _render_weekday_selector(
+    settings_file: str, tab_name: str = TAB_NAME,
+) -> str:
+    day_list = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+    saved_settings = load_check_settings(settings_file, tab_name) or {}
+    default_weekstartday_sel = saved_settings.get("weekstartday_enumerator_productivity", "Monday")
+    default_weekstartday_sel_index = day_list.index(default_weekstartday_sel)
+
+    cl1, _ = st.columns([1, 3])
+    with cl1:
         weekstartday_sel = st.selectbox(
             label="Select the first day of the week",
             options=day_list,
             index=default_weekstartday_sel_index,
-            key="project_week_start_day",
+            key="week_start_day_enumerator_productivity_key",
+            help="Select the first day of the week",
             on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_weekstartday"},
+            kwargs={"state_name": tab_name + "_weekstartday"},
         )
-        save_check_settings(settings_file, "enumerator", {"weekstartday": weekstartday_sel})
-
-        weekstart_adjust_dict = {
-            "Monday": "SUN",
-            "Tuesday": "MON",
-            "Wednesday": "TUE",
-            "Thursday": "WED",
-            "Friday": "THU",
-            "Saturday": "FRI",
-            "Sunday": "SAT",
-        }
-        weekstartday = weekstart_adjust_dict[weekstartday_sel]
-
-    productivity_df = compute_enumerator_productivity(
-        data=data, date=date, enumerator=enumerator, period=view_option, weekstartday=weekstartday
+    save_check_settings(
+        settings_file, tab_name, {"weekstartday": weekstartday_sel}
     )
 
-    st.dataframe(productivity_df, hide_index=True, width="stretch")
+    weekstart_adjust_dict = {
+        "Monday": "SUN",
+        "Tuesday": "MON",
+        "Wednesday": "TUE",
+        "Thursday": "WED",
+        "Friday": "THU",
+        "Saturday": "FRI",
+        "Sunday": "SAT",
+    }
+    weekstartday = weekstart_adjust_dict[weekstartday_sel]
+
+    return weekstartday
 
 
 # =============================================================================
 # Display Functions - Statistics
 # =============================================================================
 
+def _load_statistics_settings(settings_file: str) -> StatisticsSettings:
+    """Load and validate statistics settings from file.
 
-@demo_output_onboarding(TAB_NAME)
-def display_enumerator_statistics(
+    Parameters
+    ----------
+    settings_file : str
+        Path to settings file.
+
+    Returns
+    -------
+    StatisticsSettings
+        Validated statistics settings.
+    """
+    saved_settings = load_check_settings(settings_file, TAB_NAME) or {}
+    try:
+        return StatisticsSettings(**saved_settings)
+    except ValueError:
+        # Return default settings if validation fails
+        return StatisticsSettings()
+
+
+def _get_numeric_columns(data: pl.DataFrame, exclude_cols: list[str] | None = None) -> list[str]:
+    """Extract numeric column names from DataFrame.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        DataFrame to extract columns from.
+    exclude_cols : list[str] | None
+        Columns to exclude from the result.
+
+    Returns
+    -------
+    list[str]
+        List of numeric column names.
+    """
+    exclude_cols = exclude_cols or []
+    return [
+        col for col in data.columns
+        if data[col].dtype in pl.NUMERIC_DTYPES and col not in exclude_cols
+    ]
+
+
+def _render_column_selector(
+    numeric_cols: list[str],
+    default_cols: list[str] | None,
+    settings_file: str,
+) -> list[str]:
+    """Render column selection widget.
+
+    Parameters
+    ----------
+    numeric_cols : list[str]
+        Available numeric columns.
+    default_cols : list[str] | None
+        Default selected columns.
+    settings_file : str
+        Path to settings file.
+
+    Returns
+    -------
+    list[str]
+        Selected columns.
+    """
+    selected_cols = st.multiselect(
+        label="Select columns:",
+        options=numeric_cols,
+        default=default_cols,
+        help="Select columns to include in statistics",
+        key="selected_columns_enumerator",
+        on_change=trigger_save,
+        kwargs={"state_name": TAB_NAME + "_statscols"},
+    )
+    save_check_settings(settings_file, TAB_NAME, {"statscols": selected_cols})
+    return selected_cols
+
+
+def _render_statistics_selector(
+    default_stats: list[str],
+    settings_file: str,
+) -> list[str]:
+    """Render statistics selection widget.
+
+    Parameters
+    ----------
+    default_stats : list[str]
+        Default selected statistics.
+    settings_file : str
+        Path to settings file.
+
+    Returns
+    -------
+    list[str]
+        Selected statistics.
+    """
+    selected_stats = st.multiselect(
+        "Select statistics:",
+        options=ALLOWED_STATISTICS,
+        default=default_stats,
+        help="Select statistics to calculate",
+        key="statistics_options_enumerator",
+        on_change=trigger_save,
+        kwargs={"state_name": TAB_NAME + "_stats"},
+    )
+    save_check_settings(settings_file, TAB_NAME, {"stats": selected_stats})
+    return selected_stats
+
+@st.fragment
+def _render_enumerator_statistics_table(
     data: pl.DataFrame,
     enumerator: str,
     settings_file: str,
@@ -1521,6 +1809,7 @@ def display_enumerator_statistics(
     settings_file : str
         Path to settings file for saving/loading configurations.
     """
+    # Validate inputs
     if not enumerator:
         st.info(
             "Enumerator statistics requires an enumerator column to be selected. "
@@ -1528,63 +1817,229 @@ def display_enumerator_statistics(
         )
         return
 
-    default_settings = load_check_settings(
-        settings_file=settings_file, check_name="enumerator"
-    ) or {}
+    # Load and validate settings using Pydantic
+    settings = _load_statistics_settings(settings_file)
 
-    st.markdown("##### Statistics")
-    s1, s2 = st.columns(2)
+    # Get numeric columns excluding enumerator
+    numeric_cols = _get_numeric_columns(data, exclude_cols=[enumerator, "consent_granted_agg_col", "completed_survey_agg_col"])
 
-    # Get numeric columns
-    numeric_cols = [col for col in data.columns if data[col].dtype in pl.NUMERIC_DTYPES]
+    # Render UI in two columns
+    col1, col2 = st.columns(2)
 
-    with s1:
-        default_statscols = default_settings.get("statscols", None)
-        statscols = st.multiselect(
-            label="Select columns:",
-            options=numeric_cols,
-            default=default_statscols,
-            help="Select columns to include in statistics",
-            key="selected_columns_enumerator",
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_statscols"},
-        )
-        save_check_settings(settings_file, "enumerator", {"statscols": statscols})
+    with col1:
+        statscols = _render_column_selector(numeric_cols, settings.statscols, settings_file)
 
-    with s2:
-        default_stats = default_settings.get("stats", ["count", "mean"])
-        stats = st.multiselect(
-            "Select statistics:",
-            options=[
-                "count",
-                "min",
-                "mean",
-                "median",
-                "max",
-                "std",
-                "25th percentile",
-                "75th percentile",
-            ],
-            default=default_stats,
-            help="Select statistics to calculate",
-            key="statistics_options_enumerator",
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_stats"},
-        )
-        save_check_settings(settings_file, "enumerator", {"stats": stats})
+    with col2:
+        stats = _render_statistics_selector(settings.stats, settings_file)
 
+    # Compute and display statistics
     if statscols:
         stats_df = compute_enumerator_statistics(
-            data=data, enumerator=enumerator, statscols=statscols, stats=stats
+            data=data,
+            enumerator=enumerator,
+            statscols=statscols,
+            stats=stats,
         )
-
         st.dataframe(stats_df, hide_index=True, width="stretch")
     else:
         st.info("No columns selected for statistics calculation.", icon=":material/info:")
 
 
-@demo_output_onboarding(TAB_NAME)
-def display_enumerator_statistics_overtime(
+def _render_enumerator_statistics(
+    data: pl.DataFrame,
+    enumerator: str,
+    settings_file: str,
+) -> None:
+    """Display enumerator statistics table.
+
+    Shows configurable summary statistics for selected numeric columns
+    grouped by enumerator.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        DataFrame containing survey data.
+    enumerator : str
+        Enumerator column name.
+    settings_file : str
+        Path to settings file for saving/loading configurations.
+    """
+    # Validate inputs
+    if not enumerator:
+        st.info(
+            "Enumerator statistics requires an enumerator column to be selected. "
+            "Go to the :material/settings: settings section above to select it."
+        )
+        return
+
+    _render_enumerator_statistics_table(
+        data=data, enumerator=enumerator, settings_file=settings_file
+    )
+
+
+def _load_statistics_overtime_settings(settings_file: str) -> StatisticsOvertimeSettings:
+    """Load and validate statistics overtime settings from file.
+
+    Parameters
+    ----------
+    settings_file : str
+        Path to settings file.
+
+    Returns
+    -------
+    StatisticsOvertimeSettings
+        Validated statistics overtime settings.
+    """
+    saved_settings = load_check_settings(settings_file, TAB_NAME) or {}
+    try:
+        return StatisticsOvertimeSettings(**saved_settings)
+    except ValueError:
+        # Return default settings if validation fails
+        return StatisticsOvertimeSettings()
+
+
+def _render_period_selector_overtime(
+    default_period: str,
+    settings_file: str,
+) -> str:
+    """Render time period selection widget.
+
+    Parameters
+    ----------
+    default_period : str
+        Default selected period.
+    settings_file : str
+        Path to settings file.
+
+    Returns
+    -------
+    str
+        Selected time period.
+    """
+    options_map = {"Day": ":material/event: Daily", "Week": ":material/date_range: Weekly", "Month": ":material/calendar_month: Monthly"}
+    default_period = "Week"
+    period = st.pills(
+        label="Select Time Period:",
+        options=options_map.keys(),
+        format_func=lambda x: options_map[x],
+        default=default_period,
+        key="project_enumerator_statistics_overtime_period_pills",
+        help="Select time period for aggregating statistics",
+        selection_mode="single",
+        on_change=trigger_save,
+        kwargs={"state_name": TAB_NAME + "_period_overtime"},
+    )
+    save_check_settings(settings_file, TAB_NAME, {"period_overtime": period})
+    return period or "Day"
+
+
+def _render_weekday_selector_overtime(
+    default_weekday: str,
+    settings_file: str,
+) -> str:
+    """Render weekday selection widget (for weekly period).
+
+    Parameters
+    ----------
+    default_weekday : str
+        Default selected weekday.
+    settings_file : str
+        Path to settings file.
+
+    Returns
+    -------
+    str
+        Selected weekday offset code (e.g., "SUN", "MON").
+    """
+    default_weekday_index = WEEKDAY_NAMES.index(default_weekday)
+
+    weekday_sel = st.selectbox(
+        label="Select the first day of the week",
+        options=WEEKDAY_NAMES,
+        index=default_weekday_index,
+        help="Select the first day of the week",
+        key="project_week_start_day_enumerator_overtime",
+        on_change=trigger_save,
+        kwargs={"state_name": TAB_NAME + "_weekstartday_overtime"},
+    )
+    save_check_settings(settings_file, TAB_NAME, {"weekstartday": weekday_sel})
+
+    return WEEKDAY_OFFSET_MAP[weekday_sel]
+
+
+def _render_statistic_selector(
+    default_stat: str,
+    settings_file: str,
+) -> str:
+    """Render statistic selection widget.
+
+    Parameters
+    ----------
+    default_stat : str
+        Default selected statistic.
+    settings_file : str
+        Path to settings file.
+
+    Returns
+    -------
+    str
+        Selected statistic.
+    """
+    default_stat_index = ALLOWED_STATISTICS_OVERTIME.index(default_stat)
+
+    stat = st.selectbox(
+        label="Select statistic:",
+        options=ALLOWED_STATISTICS_OVERTIME,
+        index=default_stat_index,
+        help="Select statistic to calculate over time",
+        key="enumerator_statistics_overtime_stat",
+        on_change=trigger_save,
+        kwargs={"state_name": TAB_NAME + "_stat_overtime"},
+    )
+    save_check_settings(settings_file, TAB_NAME, {"stat": stat})
+    return stat
+
+
+def _render_column_selector_single(
+    numeric_cols: list[str],
+    default_col: str | None,
+    settings_file: str,
+) -> str | None:
+    """Render single column selection widget.
+
+    Parameters
+    ----------
+    numeric_cols : list[str]
+        Available numeric columns.
+    default_col : str | None
+        Default selected column.
+    settings_file : str
+        Path to settings file.
+
+    Returns
+    -------
+    str | None
+        Selected column.
+    """
+    default_col_index = (
+        numeric_cols.index(default_col) if default_col and default_col in numeric_cols else None
+    )
+
+    statscol = st.selectbox(
+        label="Select column:",
+        options=numeric_cols,
+        index=default_col_index,
+        help="Select column to include in statistics",
+        key="enumerator_statistics_overtime_column",
+        on_change=trigger_save,
+        kwargs={"state_name": TAB_NAME + "_statscol_overtime"},
+    )
+    save_check_settings(settings_file, TAB_NAME, {"statscol": statscol})
+    return statscol
+
+
+@st.fragment
+def _render_enumerator_statistics_overtime_table(
     data: pl.DataFrame,
     date: str,
     enumerator: str,
@@ -1606,6 +2061,7 @@ def display_enumerator_statistics_overtime(
     settings_file : str
         Path to settings file for saving/loading configurations.
     """
+    # Validate inputs
     if not (enumerator and date):
         st.info(
             "Enumerator statistics over time requires a date and enumerator column to be selected. "
@@ -1613,101 +2069,33 @@ def display_enumerator_statistics_overtime(
         )
         return
 
-    st.markdown("##### Statistics Over Time")
-    default_settings = load_check_settings(
-        settings_file=settings_file, check_name="enumerator"
-    ) or {}
+    # Load and validate settings using Pydantic
+    settings = _load_statistics_overtime_settings(settings_file)
 
-    s1, s2, s3 = st.columns([0.2, 0.15, 0.75])
+    # Get numeric columns excluding enumerator and helper columns
+    numeric_cols = _get_numeric_columns(
+        data,
+        exclude_cols=[enumerator, "consent_granted_agg_col", "completed_survey_agg_col"]
+    )
 
-    with s1:
-        period_list = ("Daily", "Weekly", "Monthly")
-        default_period = default_settings.get("period", "Daily")
-        default_period_index = period_list.index(default_period)
+    # Render UI in three columns
+    col1, col2, col3 = st.columns([0.3, 0.2, 0.5])
 
-        period = st.radio(
-            label="Select Time Period:",
-            options=period_list,
-            index=default_period_index,
-            key="project_enumerator_statistics_overtime_period",
-            horizontal=True,
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_period"},
-        )
-        save_check_settings(settings_file, "enumerator", {"period": period})
+    with col1:
+        statscol = _render_column_selector_single(numeric_cols, settings.statscol, settings_file)
 
-    weekstartday = "SAT"
-    if period == "Weekly":
-        day_list = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
-        default_weekstartday_sel = default_settings.get("weekstartday", "Monday")
-        default_weekstartday_sel_index = day_list.index(default_weekstartday_sel)
+    with col2:
+        stat = _render_statistic_selector(settings.stat, settings_file)
 
-        weekstartday_sel = st.selectbox(
-            label="Select the first day of the week",
-            options=day_list,
-            index=default_weekstartday_sel_index,
-            help="Select the first day of the week",
-            key="project_week_start_day_enumerator",
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_weekstartday_overtime"},
-        )
-        save_check_settings(settings_file, "enumerator", {"weekstartday": weekstartday_sel})
+    with col3:
+        period = _render_period_selector_overtime(settings.period_overtime, settings_file)
+        # Conditionally render weekday selector for weekly period
+        weekstartday = "SAT"  # Default
+        if period == "Week":
+            weekstartday = _render_weekday_selector_overtime(settings.weekstartday, settings_file)
 
-        weekstart_adjust_dict = {
-            "Monday": "SUN",
-            "Tuesday": "MON",
-            "Wednesday": "TUE",
-            "Thursday": "WED",
-            "Friday": "THU",
-            "Saturday": "FRI",
-            "Sunday": "SAT",
-        }
-        weekstartday = weekstart_adjust_dict[weekstartday_sel]
 
-    with s2:
-        stat_list = (
-            "count",
-            "min",
-            "mean",
-            "median",
-            "max",
-            "std",
-            "25th percentile",
-            "75th percentile",
-            "missing",
-        )
-        default_stat = default_settings.get("stat", "count")
-        default_stat_index = stat_list.index(default_stat)
-
-        stat = st.selectbox(
-            label="Select statistic:",
-            options=stat_list,
-            index=default_stat_index,
-            help="Select statistics to calculate",
-            key="enumerator_statistics_overtime_stat",
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_stat"},
-        )
-        save_check_settings(settings_file, "enumerator", {"stat": stat})
-
-    with s3:
-        numeric_cols = [col for col in data.columns if data[col].dtype in pl.NUMERIC_DTYPES]
-        default_statscol = default_settings.get("statscol", None)
-        default_statscol_index = (
-            numeric_cols.index(default_statscol) if default_statscol in numeric_cols else None
-        )
-
-        statscol = st.selectbox(
-            label="Select column:",
-            options=numeric_cols,
-            index=default_statscol_index,
-            help="Select columns to include in statistics",
-            key="enumerator_statistics_overtime_column",
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_statscol"},
-        )
-        save_check_settings(settings_file, "enumerator", {"statscol": statscol})
-
+    # Compute and display statistics
     if statscol:
         stats_overtime_df = compute_enumerator_statistics_overtime(
             data=data,
@@ -1718,10 +2106,44 @@ def display_enumerator_statistics_overtime(
             period=period,
             weekstartday=weekstartday,
         )
-
         st.dataframe(stats_overtime_df, hide_index=True, width="stretch")
     else:
-        st.info("No columns selected for statistics calculation.", icon=":material/info:")
+        st.info("No column selected for statistics calculation.", icon=":material/info:")
+
+
+def _render_enumerator_statistics_overtime(
+    data: pl.DataFrame,
+    date: str,
+    enumerator: str,
+    settings_file: str,
+) -> None:
+    """Display enumerator statistics over time table.
+
+    Shows how a specific statistic changes over time periods for each
+    enumerator with configurable time periods and statistics.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        DataFrame containing survey data.
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+    settings_file : str
+        Path to settings file for saving/loading configurations.
+    """
+    # Validate inputs
+    if not (enumerator and date):
+        st.info(
+            "Enumerator statistics over time requires a date and enumerator column to be selected. "
+            "Go to the :material/settings: settings section above to select them."
+        )
+        return
+
+    _render_enumerator_statistics_overtime_table(
+        data=data, date=date, enumerator=enumerator, settings_file=settings_file
+    )
 
 
 # =============================================================================
@@ -1784,6 +2206,9 @@ def enumerator_report(
         enumerator_settings.team,
     )
 
+    st.write("---")
+    st.subheader("Enumerator Summary")
+
     _render_enumerator_summary_table(
         project_id,
         data_enum_report,
@@ -1791,4 +2216,33 @@ def enumerator_report(
         enumerator_settings.enumerator,
         enumerator_settings.formversion,
         enumerator_settings.duration,
+    )
+
+    st.write("---")
+    st.subheader("Enumerator Productivity")
+
+    _render_enumerator_productivity(
+        data_enum_report,
+        enumerator_settings.survey_date,
+        enumerator_settings.enumerator,
+        setting_file,
+    )
+
+    st.write("---")
+    st.subheader("Column Statistics by Enumerator")
+
+    _render_enumerator_statistics(
+        data_enum_report,
+        enumerator_settings.enumerator,
+        setting_file,
+    )
+
+    st.write("---")
+    st.subheader("Enumerator Statistics Over Time")
+
+    _render_enumerator_statistics_overtime(
+        data_enum_report,
+        enumerator_settings.survey_date,
+        enumerator_settings.enumerator,
+        setting_file,
     )
