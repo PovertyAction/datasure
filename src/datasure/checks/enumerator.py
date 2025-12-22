@@ -11,12 +11,10 @@ This module provides comprehensive enumerator performance tracking with:
 - Polars-based data processing for performance
 """
 
-from calendar import c
 from datetime import date as dt_date
 from datetime import timedelta
 from typing import Literal
 
-from pandas import options
 import polars as pl
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
@@ -137,6 +135,8 @@ ALLOWED_STATISTICS = ["count", "min", "mean", "median", "max", "std", "25th perc
 ALLOWED_STATISTICS_OVERTIME = ALLOWED_STATISTICS + ["missing"]
 ALLOWED_TIME_PERIODS = ["Daily", "Weekly", "Monthly"]
 WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+# Maps weekday names to offset codes used in computation
 WEEKDAY_OFFSET_MAP = {
     "Monday": "SUN",
     "Tuesday": "MON",
@@ -145,6 +145,17 @@ WEEKDAY_OFFSET_MAP = {
     "Friday": "THU",
     "Saturday": "FRI",
     "Sunday": "SAT",
+}
+
+# Maps offset codes to numeric values for week calculations
+WEEKDAY_OFFSET_TO_NUMERIC = {
+    "SUN": 0,
+    "MON": 1,
+    "TUE": 2,
+    "WED": 3,
+    "THU": 4,
+    "FRI": 5,
+    "SAT": 6,
 }
 
 
@@ -1112,17 +1123,7 @@ def compute_enumerator_productivity(
         )
     elif period_normalized == "Weekly":
         # Calculate week start and end dates for user-friendly display
-        # Map weekstartday to offset (0=Monday, 6=Sunday in ISO calendar)
-        weekday_offset_map = {
-            "SUN": 0,  # Start on Sunday
-            "MON": 1,  # Start on Monday
-            "TUE": 2,  # Start on Tuesday
-            "WED": 3,  # Start on Wednesday
-            "THU": 4,  # Start on Thursday
-            "FRI": 5,  # Start on Friday
-            "SAT": 6,  # Start on Saturday
-        }
-        offset = weekday_offset_map.get(weekstartday, 1)
+        offset = WEEKDAY_OFFSET_TO_NUMERIC.get(weekstartday, 1)
 
         # Calculate the week start date (beginning of the week containing this date)
         # weekday() returns 0=Monday, 6=Sunday
@@ -1284,17 +1285,7 @@ def compute_enumerator_statistics_overtime(
         )
     elif period_normalized == "Weekly":
         # Calculate week start and end dates for user-friendly display
-        # Map weekstartday to offset (0=Monday, 6=Sunday in ISO calendar)
-        weekday_offset_map = {
-            "SUN": 0,  # Start on Sunday
-            "MON": 1,  # Start on Monday
-            "TUE": 2,  # Start on Tuesday
-            "WED": 3,  # Start on Wednesday
-            "THU": 4,  # Start on Thursday
-            "FRI": 5,  # Start on Friday
-            "SAT": 6,  # Start on Saturday
-        }
-        offset = weekday_offset_map.get(weekstartday, 1)
+        offset = WEEKDAY_OFFSET_TO_NUMERIC.get(weekstartday, 1)
 
         # Calculate the week start date (beginning of the week containing this date)
         # weekday() returns 0=Monday, 6=Sunday
@@ -1615,8 +1606,26 @@ def _render_enumerator_productivity_table(
 
 
 def _render_time_period_selector(
-    settings_file: str, tab_name: str = TAB_NAME,
+    settings_file: str,
+    tab_name: str = TAB_NAME,
 ) -> Literal["Day", "Week", "Month"]:
+    """Render time period selector widget using pills interface.
+
+    Displays a pills widget allowing users to choose the time aggregation period
+    for productivity analysis (Day, Week, or Month).
+
+    Parameters
+    ----------
+    settings_file : str
+        Path to settings file for saving/loading configurations.
+    tab_name : str
+        Name of the tab for settings storage (default: TAB_NAME).
+
+    Returns
+    -------
+    Literal["Day", "Week", "Month"]
+        Selected time period.
+    """
     options_map = {"Day": ":material/event: Daily", "Week": ":material/date_range: Weekly", "Month": ":material/calendar_month: Monthly"}
 
     saved_settings = load_check_settings(settings_file, tab_name) or {}
@@ -1641,19 +1650,35 @@ def _render_time_period_selector(
     return time_period or "Day"
 
 def _render_weekday_selector(
-    settings_file: str, tab_name: str = TAB_NAME,
+    settings_file: str,
+    tab_name: str = TAB_NAME,
 ) -> str:
-    day_list = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+    """Render weekday selector widget for productivity analysis.
 
+    Displays a selectbox allowing users to choose the first day of the week
+    for weekly productivity calculations.
+
+    Parameters
+    ----------
+    settings_file : str
+        Path to settings file for saving/loading configurations.
+    tab_name : str
+        Name of the tab for settings storage (default: TAB_NAME).
+
+    Returns
+    -------
+    str
+        Weekday offset code (e.g., "SUN", "MON") for calculations.
+    """
     saved_settings = load_check_settings(settings_file, tab_name) or {}
     default_weekstartday_sel = saved_settings.get("weekstartday_enumerator_productivity", "Monday")
-    default_weekstartday_sel_index = day_list.index(default_weekstartday_sel)
+    default_weekstartday_sel_index = WEEKDAY_NAMES.index(default_weekstartday_sel)
 
     cl1, _ = st.columns([1, 3])
     with cl1:
         weekstartday_sel = st.selectbox(
             label="Select the first day of the week",
-            options=day_list,
+            options=WEEKDAY_NAMES,
             index=default_weekstartday_sel_index,
             key="week_start_day_enumerator_productivity_key",
             help="Select the first day of the week",
@@ -1664,18 +1689,7 @@ def _render_weekday_selector(
         settings_file, tab_name, {"weekstartday": weekstartday_sel}
     )
 
-    weekstart_adjust_dict = {
-        "Monday": "SUN",
-        "Tuesday": "MON",
-        "Wednesday": "TUE",
-        "Thursday": "WED",
-        "Friday": "THU",
-        "Saturday": "FRI",
-        "Sunday": "SAT",
-    }
-    weekstartday = weekstart_adjust_dict[weekstartday_sel]
-
-    return weekstartday
+    return WEEKDAY_OFFSET_MAP[weekstartday_sel]
 
 
 # =============================================================================
