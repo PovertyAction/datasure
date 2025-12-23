@@ -15,7 +15,6 @@ from datetime import date as dt_date
 from datetime import timedelta
 from typing import Literal
 
-from click import group
 import polars as pl
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
@@ -1175,14 +1174,14 @@ def compute_enumerator_productivity(
 @st.cache_data(ttl=300)
 def compute_enumerator_statistics(
     data: pl.DataFrame,
-    enumerator: str,
+    group_by_cols: list[str],
     statscols: list[str],
     stats: list[str],
 ) -> pl.DataFrame:
     """Compute enumerator statistics across specified columns.
 
     Calculates summary statistics (mean, median, std, etc.) for numeric
-    columns grouped by enumerator.
+    columns grouped by enumerator (and optionally team).
 
     Cached for 5 minutes to improve performance for repeated calls.
 
@@ -1190,8 +1189,8 @@ def compute_enumerator_statistics(
     ----------
     data : pl.DataFrame
         DataFrame containing survey data.
-    enumerator : str
-        Enumerator column name.
+    group_by_cols : list[str]
+        List of columns to group by (e.g., ["enumerator"] or ["enumerator", "team"]).
     statscols : list[str]
         List of columns to compute statistics on.
     stats : list[str]
@@ -1200,7 +1199,7 @@ def compute_enumerator_statistics(
     Returns
     -------
     pl.DataFrame
-        DataFrame with enumerators and computed statistics.
+        DataFrame with enumerators (and teams) and computed statistics.
     """
     # Map stat names to Polars expressions
     stat_mapping = {
@@ -1225,7 +1224,7 @@ def compute_enumerator_statistics(
                 method = stat_mapping.get(stat, stat)
                 agg_exprs.append(getattr(pl.col(col), method)().alias(f"{col}_{stat}"))
 
-    stats_res = data.group_by(enumerator, maintain_order=True).agg(agg_exprs)
+    stats_res = data.group_by(group_by_cols, maintain_order=True).agg(agg_exprs)
 
     return stats_res
 
@@ -1234,7 +1233,7 @@ def compute_enumerator_statistics(
 def compute_enumerator_statistics_overtime(
     data: pl.DataFrame,
     date: str,
-    enumerator: str,
+    group_by_cols: list[str],
     statscol: str,
     stat: str,
     period: str,
@@ -1243,7 +1242,7 @@ def compute_enumerator_statistics_overtime(
     """Compute enumerator statistics over time for a specific column.
 
     Analyzes how a specific statistic changes over time periods for each
-    enumerator.
+    enumerator (and optionally team).
 
     Cached for 5 minutes to improve performance for repeated calls.
 
@@ -1253,8 +1252,8 @@ def compute_enumerator_statistics_overtime(
         DataFrame containing survey data.
     date : str
         Date column name.
-    enumerator : str
-        Enumerator column name.
+    group_by_cols : list[str]
+        List of columns to group by (e.g., ["enumerator"] or ["enumerator", "team"]).
     statscol : str
         Column to compute statistics on.
     stat : str
@@ -1267,9 +1266,10 @@ def compute_enumerator_statistics_overtime(
     Returns
     -------
     pl.DataFrame
-        Pivoted DataFrame with enumerators as rows and time periods as columns.
+        Pivoted DataFrame with enumerators (and teams) as rows and time
+        periods as columns.
     """
-    stats_overtime_df = data.select([date, enumerator, statscol]).clone()
+    stats_overtime_df = data.select([date] + group_by_cols + [statscol]).clone()
 
     # Normalize period values to handle both old and new formats
     period_normalized = period
@@ -1316,24 +1316,24 @@ def compute_enumerator_statistics_overtime(
     # Calculate statistic
     if stat == "missing":
         stats_overtime_res = stats_overtime_df.group_by(
-            ["TIME PERIOD", enumerator], maintain_order=True
+            ["TIME PERIOD"] + group_by_cols, maintain_order=True
         ).agg(pl.col(statscol).is_null().mean().alias("_STAT"))
     elif stat == "25th percentile":
         stats_overtime_res = stats_overtime_df.group_by(
-            ["TIME PERIOD", enumerator], maintain_order=True
+            ["TIME PERIOD"] + group_by_cols, maintain_order=True
         ).agg(pl.col(statscol).quantile(0.25).alias("_STAT"))
     elif stat == "75th percentile":
         stats_overtime_res = stats_overtime_df.group_by(
-            ["TIME PERIOD", enumerator], maintain_order=True
+            ["TIME PERIOD"] + group_by_cols, maintain_order=True
         ).agg(pl.col(statscol).quantile(0.75).alias("_STAT"))
     else:
         stats_overtime_res = stats_overtime_df.group_by(
-            ["TIME PERIOD", enumerator], maintain_order=True
+            ["TIME PERIOD"] + group_by_cols, maintain_order=True
         ).agg(getattr(pl.col(statscol), stat)().alias("_STAT"))
 
     # Pivot to wide format
     stats_overtime_res = stats_overtime_res.pivot(
-        index=enumerator, on="TIME PERIOD", values="_STAT"
+        index=group_by_cols, on="TIME PERIOD", values="_STAT"
     )
 
     return stats_overtime_res
@@ -1844,12 +1844,13 @@ def _render_statistics_selector(
 def _render_enumerator_statistics_table(
     data: pl.DataFrame,
     enumerator: str,
+    team: str | None,
     settings_file: str,
 ) -> None:
-    """Display enumerator statistics table.
+    """Display enumerator statistics table with team support.
 
     Shows configurable summary statistics for selected numeric columns
-    grouped by enumerator.
+    grouped by enumerator (and optionally team).
 
     Parameters
     ----------
@@ -1857,6 +1858,8 @@ def _render_enumerator_statistics_table(
         DataFrame containing survey data.
     enumerator : str
         Enumerator column name.
+    team : str | None
+        Team column name (optional).
     settings_file : str
         Path to settings file for saving/loading configurations.
     """
@@ -1871,8 +1874,12 @@ def _render_enumerator_statistics_table(
     # Load and validate settings using Pydantic
     settings = _load_statistics_settings(settings_file)
 
-    # Get numeric columns excluding enumerator
-    numeric_cols = _get_numeric_columns(data, exclude_cols=[enumerator, "consent_granted_agg_col", "completed_survey_agg_col"])
+    # Build exclusion list for numeric columns
+    exclude_cols = [enumerator, "consent_granted_agg_col", "completed_survey_agg_col"]
+    if team:
+        exclude_cols.append(team)
+
+    numeric_cols = _get_numeric_columns(data, exclude_cols=exclude_cols)
 
     # Render UI in two columns
     col1, col2 = st.columns(2)
@@ -1885,13 +1892,26 @@ def _render_enumerator_statistics_table(
 
     # Compute and display statistics
     if statscols:
+        group_by_cols = [enumerator, team] if team else [enumerator]
         stats_df = compute_enumerator_statistics(
             data=data,
-            enumerator=enumerator,
+            group_by_cols=group_by_cols,
             statscols=statscols,
             stats=stats,
         )
-        st.dataframe(stats_df, hide_index=True, width="stretch")
+
+        # Build column configuration dynamically with pinning
+        if team:
+            column_config = {
+                enumerator: st.column_config.TextColumn("Enumerator", pinned=True),
+                team: st.column_config.TextColumn("Team", pinned=True),
+            }
+        else:
+            column_config = {
+                enumerator: st.column_config.TextColumn("Enumerator", pinned=True),
+            }
+
+        st.dataframe(stats_df, hide_index=True, width="stretch", column_config=column_config)
     else:
         st.info("No columns selected for statistics calculation.", icon=":material/info:")
 
@@ -1899,12 +1919,13 @@ def _render_enumerator_statistics_table(
 def _render_enumerator_statistics(
     data: pl.DataFrame,
     enumerator: str,
+    team: str | None,
     settings_file: str,
 ) -> None:
-    """Display enumerator statistics table.
+    """Display enumerator statistics table with team support.
 
     Shows configurable summary statistics for selected numeric columns
-    grouped by enumerator.
+    grouped by enumerator (and optionally team).
 
     Parameters
     ----------
@@ -1912,6 +1933,8 @@ def _render_enumerator_statistics(
         DataFrame containing survey data.
     enumerator : str
         Enumerator column name.
+    team : str | None
+        Team column name (optional).
     settings_file : str
         Path to settings file for saving/loading configurations.
     """
@@ -1924,7 +1947,7 @@ def _render_enumerator_statistics(
         return
 
     _render_enumerator_statistics_table(
-        data=data, enumerator=enumerator, settings_file=settings_file
+        data=data, enumerator=enumerator, team=team, settings_file=settings_file
     )
 
 
@@ -2094,12 +2117,13 @@ def _render_enumerator_statistics_overtime_table(
     data: pl.DataFrame,
     date: str,
     enumerator: str,
+    team: str | None,
     settings_file: str,
 ) -> None:
-    """Display enumerator statistics over time table.
+    """Display enumerator statistics over time table with team support.
 
     Shows how a specific statistic changes over time periods for each
-    enumerator with configurable time periods and statistics.
+    enumerator (and optionally team) with configurable time periods and statistics.
 
     Parameters
     ----------
@@ -2109,6 +2133,8 @@ def _render_enumerator_statistics_overtime_table(
         Date column name.
     enumerator : str
         Enumerator column name.
+    team : str | None
+        Team column name (optional).
     settings_file : str
         Path to settings file for saving/loading configurations.
     """
@@ -2123,11 +2149,12 @@ def _render_enumerator_statistics_overtime_table(
     # Load and validate settings using Pydantic
     settings = _load_statistics_overtime_settings(settings_file)
 
-    # Get numeric columns excluding enumerator and helper columns
-    numeric_cols = _get_numeric_columns(
-        data,
-        exclude_cols=[enumerator, "consent_granted_agg_col", "completed_survey_agg_col"]
-    )
+    # Build exclusion list for numeric columns
+    exclude_cols = [enumerator, "consent_granted_agg_col", "completed_survey_agg_col"]
+    if team:
+        exclude_cols.append(team)
+
+    numeric_cols = _get_numeric_columns(data, exclude_cols=exclude_cols)
 
     # Render UI in three columns
     col1, col2, col3 = st.columns([0.3, 0.2, 0.5])
@@ -2148,16 +2175,29 @@ def _render_enumerator_statistics_overtime_table(
 
     # Compute and display statistics
     if statscol:
+        group_by_cols = [enumerator, team] if team else [enumerator]
         stats_overtime_df = compute_enumerator_statistics_overtime(
             data=data,
             date=date,
-            enumerator=enumerator,
+            group_by_cols=group_by_cols,
             statscol=statscol,
             stat=stat,
             period=period,
             weekstartday=weekstartday,
         )
-        st.dataframe(stats_overtime_df, hide_index=True, width="stretch")
+
+        # Build column configuration dynamically with pinning
+        if team:
+            column_config = {
+                enumerator: st.column_config.TextColumn("Enumerator", pinned=True),
+                team: st.column_config.TextColumn("Team", pinned=True),
+            }
+        else:
+            column_config = {
+                enumerator: st.column_config.TextColumn("Enumerator", pinned=True),
+            }
+
+        st.dataframe(stats_overtime_df, hide_index=True, width="stretch", column_config=column_config)
     else:
         st.info("No column selected for statistics calculation.", icon=":material/info:")
 
@@ -2166,12 +2206,13 @@ def _render_enumerator_statistics_overtime(
     data: pl.DataFrame,
     date: str,
     enumerator: str,
+    team: str | None,
     settings_file: str,
 ) -> None:
-    """Display enumerator statistics over time table.
+    """Display enumerator statistics over time table with team support.
 
     Shows how a specific statistic changes over time periods for each
-    enumerator with configurable time periods and statistics.
+    enumerator (and optionally team) with configurable time periods and statistics.
 
     Parameters
     ----------
@@ -2181,6 +2222,8 @@ def _render_enumerator_statistics_overtime(
         Date column name.
     enumerator : str
         Enumerator column name.
+    team : str | None
+        Team column name (optional).
     settings_file : str
         Path to settings file for saving/loading configurations.
     """
@@ -2193,7 +2236,7 @@ def _render_enumerator_statistics_overtime(
         return
 
     _render_enumerator_statistics_overtime_table(
-        data=data, date=date, enumerator=enumerator, settings_file=settings_file
+        data=data, date=date, enumerator=enumerator, team=team, settings_file=settings_file
     )
 
 
@@ -2287,6 +2330,7 @@ def enumerator_report(
     _render_enumerator_statistics(
         data_enum_report,
         enumerator_settings.enumerator,
+        enumerator_settings.team,
         setting_file,
     )
 
@@ -2297,5 +2341,6 @@ def enumerator_report(
         data_enum_report,
         enumerator_settings.survey_date,
         enumerator_settings.enumerator,
+        enumerator_settings.team,
         setting_file,
     )
