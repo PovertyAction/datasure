@@ -15,6 +15,7 @@ from datetime import date as dt_date
 from datetime import timedelta
 from typing import Literal
 
+from click import group
 import polars as pl
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
@@ -772,7 +773,7 @@ def compute_enumerator_overview(
 
 @st.cache_data(ttl=300)
 def compute_enumerator_missing_table(
-    data: pl.DataFrame, missing_codes_config: pl.DataFrame, enumerator: str
+    data: pl.DataFrame, missing_codes_config: pl.DataFrame, group_by_col: list[str]
 ) -> pl.DataFrame:
     """Compute missing data statistics per enumerator.
 
@@ -803,12 +804,12 @@ def compute_enumerator_missing_table(
     ])
 
     # Metadata for missing data calculation
-    enum_data_missing = data_for_missing.select([enumerator])
+    enum_data_missing = data_for_missing.select(group_by_col)
 
     # If missing_codes_config is empty, calculate only null missingness
     if missing_codes_config.is_empty():
         # Calculate overall null missingness per enumerator
-        columns_to_check = [col for col in data_for_missing.columns if col != enumerator]
+        columns_to_check = [col for col in data_for_missing.columns if col not in group_by_col]
 
         # Count nulls per row and calculate percentage
         missing_summary = data_for_missing.with_columns([
@@ -821,7 +822,7 @@ def compute_enumerator_missing_table(
         )
 
         # Group by enumerator and calculate mean missingness rate
-        result_df = missing_summary.group_by(enumerator, maintain_order=True).agg(
+        result_df = missing_summary.group_by(group_by_col, maintain_order=True).agg(
             pl.col("% Null values").mean()
         )
 
@@ -837,7 +838,7 @@ def compute_enumerator_missing_table(
     )
 
     # Get columns to check (exclude enumerator column)
-    columns_to_check = [col for col in missing_data_encoded.columns if col != enumerator]
+    columns_to_check = [col for col in missing_data_encoded.columns if col not in group_by_col]
     total_fields = len(columns_to_check)
 
     # Calculate counts for each missing category per row
@@ -870,7 +871,7 @@ def compute_enumerator_missing_table(
 
     # Apply the aggregations
     missing_counts = missing_data_encoded.select([
-        pl.col(enumerator)
+        pl.col(group_by_col)
     ] + agg_expressions)
 
     # Calculate percentages
@@ -910,14 +911,14 @@ def compute_enumerator_missing_table(
 
     # drop enumerator column from missing_with_percentages
     missing_with_percentages = missing_with_percentages.select(
-        [col for col in missing_with_percentages.columns if col != enumerator]
+        [col for col in missing_with_percentages.columns if col not in group_by_col]
     )
     # merge missing_with_percentages with enumerator column
     missing_with_percentages = pl.concat(
         [enum_data_missing, missing_with_percentages], how="horizontal"
     )
 
-    result_df = missing_with_percentages.group_by(enumerator, maintain_order=True).agg(
+    result_df = missing_with_percentages.group_by(group_by_col, maintain_order=True).agg(
         final_agg_expressions
     )
 
@@ -930,6 +931,7 @@ def compute_enumerator_summary(
     data: pl.DataFrame,
     date: str,
     enumerator: str,
+    team: str | None,
     formversion: str | None,
     duration: str | None,
 ) -> pl.DataFrame:
@@ -969,13 +971,14 @@ def compute_enumerator_summary(
     pl.DataFrame
         Comprehensive summary DataFrame with enumerator statistics.
     """
+    group_by_cols = [enumerator, team] if team else [enumerator]
     # Format date column
     df = data.with_columns(
         pl.col(date).dt.strftime("%b %d, %Y").alias(date)
     )
 
     # Basic summary aggregations
-    summary_df = df.group_by(enumerator, maintain_order=True).agg([
+    summary_df = df.group_by(group_by_cols, maintain_order=True).agg([
         pl.col(date).min().alias("first submission"),
         pl.col(date).max().alias("last submission"),
         pl.col(date).count().alias("# submissions"),
@@ -997,30 +1000,30 @@ def compute_enumerator_summary(
         (pl.col(date) >= month_str).alias("submitted_this_month"),
     ])
 
-    lagged_df = df.group_by(enumerator, maintain_order=True).agg([
+    lagged_df = df.group_by(group_by_cols, maintain_order=True).agg([
         pl.col("submitted_today").sum().alias("# submissions today"),
         pl.col("submitted_this_week").sum().alias("# submissions this week"),
         pl.col("submitted_this_month").sum().alias("# submissions this month"),
     ])
 
-    summary_df = summary_df.join(lagged_df, on=enumerator, how="left")
+    summary_df = summary_df.join(lagged_df, on=group_by_cols, how="left")
 
     # Add missing data statistics
     missing_settings_file = load_missing_codes_from_db(project_id)
     enumerator_missing_df = compute_enumerator_missing_table(
-        data, missing_settings_file, enumerator
+        data, missing_settings_file, group_by_cols
     )
-    summary_df = summary_df.join(enumerator_missing_df, on=enumerator, how="left")
+    summary_df = summary_df.join(enumerator_missing_df, on=group_by_cols, how="left")
 
     # Add duration statistics if available
     if duration:
-        duration_df = df.group_by(enumerator, maintain_order=True).agg([
+        duration_df = df.group_by(group_by_cols, maintain_order=True).agg([
             pl.col(duration).min().alias("min duration"),
             pl.col(duration).mean().alias("mean duration"),
             pl.col(duration).median().alias("median duration"),
             pl.col(duration).max().alias("max duration"),
         ])
-        summary_df = summary_df.join(duration_df, on=enumerator, how="left")
+        summary_df = summary_df.join(duration_df, on=group_by_cols, how="left")
 
     # Add form version statistics if available
     if formversion:
@@ -1037,35 +1040,35 @@ def compute_enumerator_summary(
             )
         )
 
-        formdef_outdated_df = df.group_by(enumerator, maintain_order=True).agg(
+        formdef_outdated_df = df.group_by(group_by_cols, maintain_order=True).agg(
             pl.col("outdated_form_version").sum().alias("# of outdated form versions")
         )
 
-        formdef_df = df.group_by(enumerator, maintain_order=True).agg([
+        formdef_df = df.group_by(group_by_cols, maintain_order=True).agg([
             pl.col(formversion).n_unique().alias("# form versions"),
             pl.col(formversion).max().alias("latest form version"),
         ])
 
-        latest_enum_formversion = df.group_by(enumerator, maintain_order=True).agg(
+        latest_enum_formversion = df.group_by(group_by_cols, maintain_order=True).agg(
             pl.col(formversion).max().alias("last form version")
         )
 
-        summary_df = summary_df.join(formdef_df, on=enumerator, how="left")
-        summary_df = summary_df.join(formdef_outdated_df, on=enumerator, how="left")
-        summary_df = summary_df.join(latest_enum_formversion, on=enumerator, how="left")
+        summary_df = summary_df.join(formdef_df, on=group_by_cols, how="left")
+        summary_df = summary_df.join(formdef_outdated_df, on=group_by_cols, how="left")
+        summary_df = summary_df.join(latest_enum_formversion, on=group_by_cols, how="left")
 
     # Add consent statistics if available
 
-    consent_df = df.group_by(enumerator, maintain_order=True).agg(
+    consent_df = df.group_by(group_by_cols, maintain_order=True).agg(
         pl.col("consent_granted_agg_col").mean().alias("% consent")
     )
-    summary_df = summary_df.join(consent_df, on=enumerator, how="left")
+    summary_df = summary_df.join(consent_df, on=group_by_cols, how="left")
 
     # Add outcome statistics if available
-    outcome_df = df.group_by(enumerator, maintain_order=True).agg(
+    outcome_df = df.group_by(group_by_cols, maintain_order=True).agg(
         pl.col("completed_survey_agg_col").mean().alias("% completed survey")
     )
-    summary_df = summary_df.join(outcome_df, on=enumerator, how="left")
+    summary_df = summary_df.join(outcome_df, on=group_by_cols, how="left")
 
     return summary_df
 
@@ -1077,7 +1080,7 @@ def compute_enumerator_summary(
 
 @st.cache_data(ttl=300)
 def compute_enumerator_productivity(
-    data: pl.DataFrame, date: str, enumerator: str, period: str, weekstartday: str
+    data: pl.DataFrame, date: str, group_by_cols: list[str], period: str, weekstartday: str
 ) -> pl.DataFrame:
     """Compute enumerator productivity over time.
 
@@ -1150,13 +1153,13 @@ def compute_enumerator_productivity(
 
     # Count submissions per period and enumerator
     prod_df = prod_df.with_row_index(name="TOKEN KEY")
-    prod_res = prod_df.group_by(["TIME PERIOD", enumerator], maintain_order=True).agg(
+    prod_res = prod_df.group_by(["TIME PERIOD"] + group_by_cols, maintain_order=True).agg(
         pl.col("TOKEN KEY").count().alias("submissions")
     )
 
     # Pivot to wide format
     prod_res = prod_res.pivot(
-        index=enumerator,
+        index=group_by_cols,
         on="TIME PERIOD",
         values="submissions",
     ).fill_null(0)
@@ -1396,6 +1399,7 @@ def _render_enumerator_summary_table(
     data: pl.DataFrame,
     date: str,
     enumerator: str,
+    team: str | None,
     formversion: str | None,
     duration: str | None,
 ) -> None:
@@ -1440,6 +1444,7 @@ def _render_enumerator_summary_table(
         data,
         date,
         enumerator,
+        team,
         formversion,
         duration,
     )
@@ -1490,11 +1495,11 @@ def _render_enumerator_summary_table(
         ],
     }
 
+    # Always include enumerator and # submissions
+    columns_to_show = [enumerator, team, "# submissions"] if team else [enumerator, "# submissions"]
+
     # Filter columns based on selection
     if show_info:
-        # Always include enumerator and # submissions
-        columns_to_show = [enumerator, "# submissions"]
-
         # Add columns from selected categories
         for category in show_info:
             columns_to_show.extend([
@@ -1509,26 +1514,38 @@ def _render_enumerator_summary_table(
         filtered_df = summary_df
 
     # Display using Streamlit's native dataframe display
+    # create column config for enumerator and team conditionally
+    # Build column configuration dynamically
+    column_config = {
+        enumerator: st.column_config.TextColumn("Enumerator", pinned=True),
+    }
+
+    # Add team column if available
+    if team:
+        column_config[team] = st.column_config.TextColumn("Team", pinned=True)
+
+    # Add remaining columns
+    column_config.update({
+        "# submissions": st.column_config.NumberColumn("# of Submissions", format="%d", pinned=True),
+        "# unique dates": st.column_config.NumberColumn("# of Days", format="%d"),
+        "# submissions today": st.column_config.NumberColumn("# submitted Today", format="%d"),
+        "# submissions this week": st.column_config.NumberColumn("# submitted This Week", format="%d"),
+        "# submissions this month": st.column_config.NumberColumn("# submitted This Month", format="%d"),
+        "% Null values": st.column_config.NumberColumn("% Null Values", format="%.2f%%"),
+        "% Total Missing": st.column_config.NumberColumn("% Total Missing", format="%.2f%%"),
+        "% consent": st.column_config.NumberColumn("% Consent", format="%.2f%%"),
+        "% completed survey": st.column_config.NumberColumn("% Completed", format="%.2f%%"),
+        "min duration": st.column_config.NumberColumn("Min Duration (s)", format="%.2f"),
+        "mean duration": st.column_config.NumberColumn("Mean Duration (s)", format="%.2f"),
+        "median duration": st.column_config.NumberColumn("Median Duration (s)", format="%.2f"),
+        "max duration": st.column_config.NumberColumn("Max Duration (s)", format="%.2f"),
+    })
+
     st.dataframe(
         filtered_df,
         hide_index=True,
         width="stretch",
-        column_config={
-            enumerator: st.column_config.TextColumn("Enumerator"),
-            "# submissions": st.column_config.NumberColumn("# of Submissions", format="%d"),
-            "# unique dates": st.column_config.NumberColumn("# of Days", format="%d"),
-            "# submissions today": st.column_config.NumberColumn("# submitted Today", format="%d"),
-            "# submissions this week": st.column_config.NumberColumn("# submitted This Week", format="%d"),
-            "# submissions this month": st.column_config.NumberColumn("# submitted This Month", format="%d"),
-            "% Null values": st.column_config.NumberColumn("% Null Values", format="%.2f%%"),
-            "% Total Missing": st.column_config.NumberColumn("% Total Missing", format="%.2f%%"),
-            "% consent": st.column_config.NumberColumn("% Consent", format="%.2f%%"),
-            "% completed survey": st.column_config.NumberColumn("% Completed", format="%.2f%%"),
-            "min duration": st.column_config.NumberColumn("Min Duration (s)", format="%.2f"),
-            "mean duration": st.column_config.NumberColumn("Mean Duration (s)", format="%.2f"),
-            "median duration": st.column_config.NumberColumn("Median Duration (s)", format="%.2f"),
-            "max duration": st.column_config.NumberColumn("Max Duration (s)", format="%.2f"),
-        },
+        column_config=column_config,
     )
 
 
@@ -1540,6 +1557,7 @@ def _render_enumerator_productivity(
     data: pl.DataFrame,
     date: str,
     enumerator: str,
+    team: str | None,
     settings_file: str,
 ) -> None:
     """Display enumerator productivity table.
@@ -1566,7 +1584,7 @@ def _render_enumerator_productivity(
         return
 
     _render_enumerator_productivity_table(
-        data=data, date=date, enumerator=enumerator, settings_file=settings_file
+        data, date, enumerator, team, settings_file
     )
 
 
@@ -1575,6 +1593,7 @@ def _render_enumerator_productivity_table(
     data: pl.DataFrame,
     date: str,
     enumerator: str,
+    team: str | None,
     settings_file: str,
 ) -> None:
     """Display enumerator productivity table.
@@ -1598,11 +1617,29 @@ def _render_enumerator_productivity_table(
     else:
         weekstartday = "MON"  # Default value, not used for non-weekly periods
 
+
+    group_by_cols = [enumerator, team] if team else [enumerator]
     productivity_df = compute_enumerator_productivity(
-        data=data, date=date, enumerator=enumerator, period=time_period, weekstartday=weekstartday
+        data, date, group_by_cols, time_period, weekstartday
     )
 
-    st.dataframe(productivity_df, hide_index=True, width="stretch")
+    if team:
+        # Build column configuration dynamically
+        column_config = {
+            enumerator: st.column_config.TextColumn("Enumerator", pinned=True),
+            team: st.column_config.TextColumn("Team", pinned=True),
+        }
+    else:
+        column_config = {
+            enumerator: st.column_config.TextColumn("Enumerator", pinned=True),
+        }
+
+    column_config.update({
+        col: st.column_config.NumberColumn(col, format="%d") for col in productivity_df.columns
+        if col not in group_by_cols
+    })
+
+    st.dataframe(productivity_df, hide_index=True, width="stretch", column_config=column_config)
 
 
 def _render_time_period_selector(
@@ -2228,6 +2265,7 @@ def enumerator_report(
         data_enum_report,
         enumerator_settings.survey_date,
         enumerator_settings.enumerator,
+        enumerator_settings.team,
         enumerator_settings.formversion,
         enumerator_settings.duration,
     )
@@ -2239,6 +2277,7 @@ def enumerator_report(
         data_enum_report,
         enumerator_settings.survey_date,
         enumerator_settings.enumerator,
+        enumerator_settings.team,
         setting_file,
     )
 
