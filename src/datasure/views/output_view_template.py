@@ -16,6 +16,7 @@ import streamlit as st
 
 from datasure.checks import (
     duplicates_report,
+    enumerator_report,
     missing_report,
     outliers_report,
     progress_report,
@@ -267,6 +268,7 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
     (
         summary,
         progress,
+        enumerator_stats,
         missing,
         duplicates,
         outliers,
@@ -274,6 +276,7 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
         (
             "Summary",
             "Progress Tracking",
+            "Enumerator Statistics",
             "Missing Values",
             "Duplicates",
             "Outliers & Constraints",
@@ -303,6 +306,24 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             data.page_data,
             config.setting_file,
             progress_config,
+        )
+
+    with enumerator_stats:
+        enumerator_stats_config: dict = {
+            "survey_key": config.survey_key,
+            "survey_id": config.survey_id,
+            "survey_date": config.survey_date,
+            "enumerator": config.enumerator,
+            "formversion": config.formversion,
+            "duration": config.duration,
+            "team": config.team,
+        }
+        enumerator_report(
+            project_id,
+            config.page_name_id,
+            data.page_data,
+            config.setting_file,
+            enumerator_stats_config,
         )
 
     with missing:
