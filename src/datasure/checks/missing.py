@@ -333,7 +333,6 @@ def compute_missing_summary(missing_data: pl.DataFrame) -> MissingSummaryStats:
     )
 
 
-@st.cache_data
 def compute_missing_columns(missing_data: pl.DataFrame, missing_codes_df: pl.DataFrame) -> pd.DataFrame:
     """Compute the summary of missing values in each column.
 

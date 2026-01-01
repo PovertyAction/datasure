@@ -696,8 +696,6 @@ def _create_enum_data_on_settings(
 # Overview Computation Functions
 # =============================================================================
 
-
-@st.cache_data(ttl=300)
 def compute_enumerator_overview(
     data: pl.DataFrame, date: str, enumerator: str, team: str | None
 ) -> EnumeratorOverviewMetrics:
@@ -724,6 +722,8 @@ def compute_enumerator_overview(
     EnumeratorOverviewMetrics
         Overview metrics for enumerators including counts and statistics.
     """
+    if data.is_empty():
+        raise ValueError("Input data is empty. Cannot compute enumerator overview metrics.")
     data = data.sort([enumerator, date])
 
     all_submissions = data.height
@@ -770,7 +770,6 @@ def compute_enumerator_overview(
     )
 
 
-@st.cache_data(ttl=300)
 def compute_enumerator_missing_table(
     data: pl.DataFrame, missing_codes_config: pl.DataFrame, group_by_col: list[str]
 ) -> pl.DataFrame:
@@ -924,7 +923,6 @@ def compute_enumerator_missing_table(
     return result_df
 
 
-@st.cache_data(ttl=300)
 def compute_enumerator_summary(
     project_id: str,
     data: pl.DataFrame,
@@ -1057,17 +1055,18 @@ def compute_enumerator_summary(
         summary_df = summary_df.join(latest_enum_formversion, on=group_by_cols, how="left")
 
     # Add consent statistics if available
-
-    consent_df = df.group_by(group_by_cols, maintain_order=True).agg(
-        pl.col("consent_granted_agg_col").mean().alias("% consent")
-    )
-    summary_df = summary_df.join(consent_df, on=group_by_cols, how="left")
+    if "consent_granted_agg_col" in df.columns:
+        consent_df = df.group_by(group_by_cols, maintain_order=True).agg(
+            pl.col("consent_granted_agg_col").mean().alias("% consent")
+        )
+        summary_df = summary_df.join(consent_df, on=group_by_cols, how="left")
 
     # Add outcome statistics if available
-    outcome_df = df.group_by(group_by_cols, maintain_order=True).agg(
-        pl.col("completed_survey_agg_col").mean().alias("% completed survey")
-    )
-    summary_df = summary_df.join(outcome_df, on=group_by_cols, how="left")
+    if "completed_survey_agg_col" in df.columns:
+        outcome_df = df.group_by(group_by_cols, maintain_order=True).agg(
+            pl.col("completed_survey_agg_col").mean().alias("% completed survey")
+        )
+        summary_df = summary_df.join(outcome_df, on=group_by_cols, how="left")
 
     return summary_df
 
@@ -1077,7 +1076,6 @@ def compute_enumerator_summary(
 # =============================================================================
 
 
-@st.cache_data(ttl=300)
 def compute_enumerator_productivity(
     data: pl.DataFrame, date: str, group_by_cols: list[str], period: str, weekstartday: str
 ) -> pl.DataFrame:
@@ -1229,7 +1227,6 @@ def compute_enumerator_statistics(
     return stats_res
 
 
-@st.cache_data(ttl=300)
 def compute_enumerator_statistics_overtime(
     data: pl.DataFrame,
     date: str,
@@ -2280,6 +2277,13 @@ def enumerator_report(
 
     st.title("Enumerator Report")
 
+    if data.is_empty():
+        st.info(
+            "No data available for the enumerator report. "
+            "Please upload data to proceed."
+        )
+        return
+
     config_settings = EnumeratorSettings(**config)
 
     enumerator_settings = enumerator_report_settings(
@@ -2292,6 +2296,9 @@ def enumerator_report(
         "enumerator_data_with_consent_outcome",
         "intermediate",
     )
+
+    if data_enum_report.is_empty():
+        data_enum_report = data
 
     _render_enumerator_overview_metrics(
         data_enum_report,
