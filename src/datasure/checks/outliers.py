@@ -2693,6 +2693,8 @@ def outliers_report(
 
     string_numeric_cols = list(set(string_columns + numeric_columns))
 
+    st.title("Outliers and Constraints Report")
+
     # Load settings
     config_settings = OutlierSettings(**config)
     outliers_settings = outliers_report_settings(
@@ -2700,7 +2702,7 @@ def outliers_report(
     )
 
     # Outlier columns configuration
-    st.title("Outlier/Constraint Columns Configuration")
+    st.subheader("Outlier/Constraint Columns Configuration")
     _render_outlier_column_actions(project_id, page_name_id, numeric_columns)
 
     # get outlier column config
