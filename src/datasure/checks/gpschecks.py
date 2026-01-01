@@ -58,6 +58,7 @@ class GPSSettings(BaseModel):
 class GPSColumnConfig(BaseModel):
     """Configuration for GPS column setup."""
 
+    alias: str = Field(..., min_length=1, description="Alias for GPS configuration")
     format_type: GPSFormatType = Field(..., description="GPS data format type")
     delimiter: DelimiterType | None = Field(
         None, description="Delimiter for single column GPS data"
@@ -400,6 +401,16 @@ def _add_gps_column(
         )
         gps_config["gps_column"] = gps_column
 
+        # Auto-populate alias with column name
+        default_alias = gps_column if gps_column else ""
+        alias = st.text_input(
+            label="Configuration Alias",
+            value=default_alias,
+            help="A name to identify this GPS configuration. "
+            "Defaults to the GPS column name.",
+        )
+        gps_config["alias"] = alias
+
     else:  # SEPARATE_COLUMNS
         st.info(
             "**Separate Columns Format**: GPS data is stored in separate columns "
@@ -444,6 +455,13 @@ def _add_gps_column(
                 help="Select the column containing accuracy values (optional).",
             )
             gps_config["accuracy_column"] = accuracy_column
+
+        # Alias input for separate columns
+        alias = st.text_input(
+            label="Configuration Alias",
+            help="A name to identify this GPS configuration (required).",
+        )
+        gps_config["alias"] = alias
 
     # Validate configuration
     try:
@@ -500,6 +518,7 @@ def _update_gps_column_config(
 
     # Prepare new configuration
     new_config = {
+        "alias": gps_config.alias,
         "format_type": gps_config.format_type.value,
         "delimiter": gps_config.delimiter.value if gps_config.delimiter else None,
         "gps_column": gps_config.gps_column,
@@ -510,6 +529,7 @@ def _update_gps_column_config(
     }
 
     schema = {
+        "alias": pl.Utf8,
         "format_type": pl.Utf8,
         "delimiter": pl.Utf8,
         "gps_column": pl.Utf8,
@@ -551,6 +571,7 @@ def _render_gps_settings_table(gps_settings: pl.DataFrame) -> None:
             width="stretch",
             hide_index=True,
             column_config={
+                "alias": st.column_config.Column("Alias"),
                 "format_type": st.column_config.Column("Format Type"),
                 "delimiter": st.column_config.Column("Delimiter"),
                 "gps_column": st.column_config.Column("GPS Column"),
@@ -591,15 +612,10 @@ def _delete_gps_column(
                 (
                     pl.col("index").cast(pl.Utf8)
                     + " - "
+                    + pl.col("alias")
+                    + " ("
                     + pl.col("format_type")
-                    + " - "
-                    + pl.coalesce(
-                        pl.col("gps_column"),
-                        pl.concat_str(
-                            [pl.col("latitude_column"), pl.col("longitude_column")],
-                            separator=" / ",
-                        ),
-                    )
+                    + ")"
                 ).alias("composite_index")
             )
 
@@ -637,6 +653,294 @@ def _delete_gps_column(
 # =============================================================================
 # GPS Plotting and Analysis Functions
 # =============================================================================
+
+
+def _parse_gps_data(
+    data: pl.DataFrame,
+    gps_config: dict,
+) -> pl.DataFrame:
+    """Parse GPS data based on configuration.
+
+    Extracts latitude and longitude from either single column (delimited)
+    or separate columns format.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        Input dataframe containing GPS data.
+    gps_config : dict
+        GPS configuration dictionary with format_type, delimiter, and columns.
+
+    Returns
+    -------
+    pl.DataFrame
+        DataFrame with added 'latitude' and 'longitude' columns.
+    """
+    result_df = data.clone()
+
+    if gps_config["format_type"] == GPSFormatType.SINGLE_COLUMN.value:
+        # Single column format - split by delimiter
+        gps_col = gps_config["gps_column"]
+        delimiter = gps_config["delimiter"]
+
+        separator = " " if delimiter == DelimiterType.SPACE.value else ","
+
+        # Split GPS column and extract lat/lon
+        result_df = result_df.with_columns([
+            pl.col(gps_col)
+            .str.split(separator)
+            .list.get(0)
+            .cast(pl.Float64, strict=False)
+            .alias("latitude"),
+            pl.col(gps_col)
+            .str.split(separator)
+            .list.get(1)
+            .cast(pl.Float64, strict=False)
+            .alias("longitude"),
+        ])
+    else:
+        # Separate columns format
+        lat_col = gps_config["latitude_column"]
+        lon_col = gps_config["longitude_column"]
+
+        result_df = result_df.with_columns([
+            pl.col(lat_col).cast(pl.Float64, strict=False).alias("latitude"),
+            pl.col(lon_col).cast(pl.Float64, strict=False).alias("longitude"),
+        ])
+
+    return result_df
+
+
+@st.fragment
+def _render_gps_coordinates(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    survey_key: str,
+    survey_date: str | None,
+    enumerator: str | None,
+) -> None:
+    """Render GPS coordinates visualization with interactive features.
+
+    Allows users to:
+    - Select GPS configuration by alias
+    - Color points by categorical column
+    - Filter points by categorical column
+    - Hover to see ID, Date, and Enumerator name
+
+    Parameters
+    ----------
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page name identifier.
+    data : pl.DataFrame
+        Survey data containing GPS information.
+    survey_key : str
+        Survey key column name.
+    survey_date : str | None
+        Survey date column name.
+    enumerator : str | None
+        Enumerator column name.
+    """
+    st.subheader("GPS Coordinates Visualization")
+
+    # Load GPS configurations
+    gps_settings = duckdb_get_table(
+        project_id,
+        f"gps_columns_{page_name_id}",
+        "logs",
+    )
+
+    if gps_settings.is_empty():
+        st.info(
+            "No GPS configurations found. "
+            "Please add a GPS column configuration in the section above."
+        )
+        return
+
+    # Get list of aliases
+    aliases = gps_settings["alias"].to_list()
+
+    # GPS configuration selection
+    selected_alias = st.selectbox(
+        label="Select GPS Configuration",
+        options=aliases,
+        help="Choose which GPS configuration to visualize.",
+    )
+
+    if not selected_alias:
+        return
+
+    # Get selected configuration
+    selected_config = gps_settings.filter(pl.col("alias") == selected_alias).to_dicts()[
+        0
+    ]
+
+    # Parse GPS data
+    try:
+        parsed_data = _parse_gps_data(data, selected_config)
+    except Exception as e:
+        st.error(f"Error parsing GPS data: {e}")
+        return
+
+    # Drop rows with missing coordinates
+    parsed_data = parsed_data.filter(
+        pl.col("latitude").is_not_null() & pl.col("longitude").is_not_null()
+    )
+
+    if parsed_data.is_empty():
+        st.warning("No valid GPS coordinates found in the data.")
+        return
+
+    # Get categorical columns for coloring and filtering
+    _, string_columns, _, _, _ = get_df_info(parsed_data, cols_only=True)
+    categorical_cols = [None] + string_columns
+
+    # UI controls
+    col1, col2 = st.columns(2)
+
+    with col1:
+        color_by = st.selectbox(
+            label="Color Points By",
+            options=categorical_cols,
+            index=0,
+            help="Select a categorical column to color the GPS points.",
+        )
+
+    with col2:
+        filter_by = st.selectbox(
+            label="Filter Points By",
+            options=categorical_cols,
+            index=0,
+            help="Select a categorical column to filter the GPS points.",
+        )
+
+    # Apply filter if selected
+    filtered_data = parsed_data
+    filter_values = None
+
+    if filter_by:
+        unique_values = (
+            parsed_data[filter_by].unique().drop_nulls().sort().to_list()
+        )
+        filter_values = st.multiselect(
+            label=f"Select {filter_by} values to display",
+            options=unique_values,
+            default=unique_values,
+            help=f"Choose which {filter_by} values to show on the map.",
+        )
+
+        if filter_values:
+            filtered_data = filtered_data.filter(pl.col(filter_by).is_in(filter_values))
+
+    if filtered_data.is_empty():
+        st.warning("No data matches the selected filters.")
+        return
+
+    # Convert to pandas for pydeck
+    plot_df = filtered_data.to_pandas()
+
+    # Generate color palette
+    if color_by:
+        unique_colors = plot_df[color_by].unique()
+        num_colors = len(unique_colors)
+
+        if num_colors <= 10:
+            color_palette = [
+                [31, 119, 180, 160],
+                [255, 127, 14, 160],
+                [44, 160, 44, 160],
+                [214, 39, 40, 160],
+                [148, 103, 189, 160],
+                [140, 86, 75, 160],
+                [227, 119, 194, 160],
+                [127, 127, 127, 160],
+                [188, 189, 34, 160],
+                [23, 190, 207, 160],
+            ][:num_colors]
+        else:
+            cmap = mpl.cm.get_cmap("tab20", num_colors)
+            color_palette = [
+                [int(r * 255), int(g * 255), int(b * 255), 160]
+                for r, g, b, _ in [cmap(i) for i in range(num_colors)]
+            ]
+
+        color_map = {
+            val: color_palette[i % len(color_palette)]
+            for i, val in enumerate(unique_colors)
+        }
+        plot_df["color"] = plot_df[color_by].map(color_map)
+    else:
+        plot_df["color"] = [[31, 119, 180, 160]] * len(plot_df)
+
+    # Prepare map data with tooltips
+    map_data = []
+    for _, row in plot_df.iterrows():
+        tooltip_lines = []
+
+        # Add ID (survey key)
+        if survey_key and survey_key in row:
+            tooltip_lines.append(f"ID: {row[survey_key]}")
+
+        # Add Date
+        if survey_date and survey_date in row:
+            tooltip_lines.append(f"Date: {row[survey_date]}")
+
+        # Add Enumerator
+        if enumerator and enumerator in row:
+            tooltip_lines.append(f"Enumerator: {row[enumerator]}")
+
+        # Add color-by value if selected
+        if color_by:
+            tooltip_lines.append(f"{color_by}: {row[color_by]}")
+
+        # Add coordinates
+        tooltip_lines.append(f"Lat: {row['latitude']:.6f}")
+        tooltip_lines.append(f"Lon: {row['longitude']:.6f}")
+
+        point = {
+            "longitude": float(row["longitude"]),
+            "latitude": float(row["latitude"]),
+            "color": row["color"],
+            "tooltip": "\n".join(tooltip_lines),
+        }
+        map_data.append(point)
+
+    # Calculate map center
+    center_lat = plot_df["latitude"].mean()
+    center_lon = plot_df["longitude"].mean()
+
+    # Create pydeck layer
+    layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=map_data,
+        get_position=["longitude", "latitude"],
+        get_fill_color="color",
+        get_radius=50,
+        radius_scale=6,
+        radius_min_pixels=3,
+        radius_max_pixels=8,
+        pickable=True,
+        auto_highlight=True,
+    )
+
+    view_state = pdk.ViewState(
+        longitude=float(center_lon), latitude=float(center_lat), zoom=10, pitch=0
+    )
+
+    deck = pdk.Deck(
+        layers=[layer],
+        initial_view_state=view_state,
+        tooltip={"text": "{tooltip}"},
+        map_style="mapbox://styles/mapbox/light-v10",
+    )
+
+    # Display the map
+    st.pydeck_chart(deck, height=600, use_container_width=True)
+
+    # Display summary statistics
+    st.caption(f"Displaying {len(plot_df):,} GPS points")
 
 
 # plot gps coordinates on a map
@@ -1103,3 +1407,15 @@ def gpschecks_report(
     st.subheader("GPS Columns Configuration")
     all_columns = list(data.columns)
     _render_gps_column_actions(project_id, page_name_id, all_columns)
+
+    st.write("---")
+
+    # Render GPS coordinates visualization
+    _render_gps_coordinates(
+        project_id,
+        page_name_id,
+        data,
+        config_settings.survey_key,
+        config_settings.survey_date,
+        config_settings.enumerator,
+    )
