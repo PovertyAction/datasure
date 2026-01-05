@@ -13,6 +13,7 @@ from .settings_utils import (
     get_hash_id,
     load_check_settings,
     save_check_settings,
+    save_secrets,
     trigger_save,
 )
 
@@ -32,5 +33,6 @@ __all__ = [
     "get_hash_id",
     "load_check_settings",
     "save_check_settings",
+    "save_secrets",
     "trigger_save",
 ]
