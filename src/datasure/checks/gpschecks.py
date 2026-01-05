@@ -1,9 +1,8 @@
 from enum import Enum
 
-import matplotlib as mpl
 import numpy as np
 import polars as pl
-import pydeck as pdk
+import pydeck
 import streamlit as st
 from geopy.distance import geodesic
 from pydantic import BaseModel, Field, ValidationError, field_validator
@@ -17,8 +16,20 @@ from datasure.utils import (
 )
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.onboarding_utils import demo_output_onboarding
+from datasure.utils.settings_utils import save_secrets
 
 TAB_NAME: str = "gpschecks"
+
+# Initialize pydeck with default Mapbox API key from secrets if available
+# Users can override this in the settings
+try:
+    if "mapbox_custom_key" in st.secrets:
+        pydeck.settings.mapbox_key = st.secrets["mapbox_custom_key"]
+    elif "default_mapbox_api_key" in st.secrets:
+        pydeck.settings.mapbox_key = st.secrets["default_mapbox_api_key"]
+except Exception:
+    # If secrets are not available, pydeck key will be set later from user settings
+    pass
 
 
 # =============================================================================
@@ -53,6 +64,8 @@ class GPSSettings(BaseModel):
     survey_date: str | None = Field(None, description="Survey date column")
     enumerator: str | None = Field(None, description="Enumerator ID column")
     team: str | None = Field(None, description="Team identifier column")
+    mapbox_key_option: str | None = Field(None, description="Mapbox API key option")
+    mapbox_custom_key: str | None = Field(None, description="Custom Mapbox API key")
 
 
 class GPSColumnConfig(BaseModel):
@@ -285,12 +298,74 @@ def gpschecks_report_settings(
                 )
                 save_check_settings(settings_file, TAB_NAME, {"team": team})
 
+        # Mapbox API Key Configuration
+        with st.container(border=True):
+            st.subheader("Mapbox API Key Configuration")
+            st.caption(
+                "Configure your Mapbox API key for map visualizations. "
+                "You can use the default key or provide your own."
+            )
+
+            if "mapbox_custom_key" in st.secrets:
+                mapbox_api_key = st.secrets["mapbox_custom_key"]
+                using_default_key = False
+
+            else:
+                # if mapbox key is not available, fallback on default key
+                mapbox_api_key = st.secrets["default_mapbox_api_key"]
+                using_default_key = True
+
+
+            # Load saved settings
+            saved_key_option = default_settings.mapbox_key_option or "default_api_token"
+
+            options_map = {"default_api_token": ":material/lock_open_right: Default Public Token", "add_api_token": ":material/lock: Add API Token"}
+
+            ko1, ko2 = st.columns([0.3, 0.7])
+            with ko1:
+                mapbox_key_option = st.pills(
+                    "Select Mapbox API Key Option",
+                    options=options_map.keys(),
+                    format_func=lambda x: options_map[x],
+                    default=saved_key_option,
+                    key="mapbox_key_option_gpschecks_pills",
+                    help="Choose to use the default public token or provide your own",
+                    selection_mode="single",
+                    on_change=trigger_save,
+                    kwargs={"state_name": TAB_NAME + "_mapbox_key_option"},
+                )
+                save_check_settings(
+                    settings_file, TAB_NAME, {"mapbox_key_option": mapbox_key_option}
+                )
+
+            with ko2:
+                # Show text input if user wants to add own key
+                mapbox_custom_key = st.text_input(
+                    "Your Mapbox API Key",
+                    value=mapbox_api_key,
+                    type="password",
+                    key="mapbox_custom_key_gpschecks",
+                    help="Enter your Mapbox API key. Get one free at https://account.mapbox.com/",
+                    disabled=mapbox_key_option == "default_api_token",
+                    on_change=trigger_save,
+                    kwargs={"state_name": "mapbox_custom_key"},
+                )
+                save_secrets("mapbox_custom_key", mapbox_custom_key)
+
+                # Set the Mapbox key globally for pydeck
+                if not using_default_key:
+                    st.success("Custom Mapbox API key set successfully.")
+                else:
+                    st.success("Using default Mapbox API key from secrets.")
+
     return GPSSettings(
         survey_key=survey_key,
         survey_id=survey_id,
         survey_date=survey_date,
         enumerator=enumerator,
         team=team,
+        mapbox_key_option=mapbox_key_option,
+        mapbox_custom_key=mapbox_custom_key,
     )
 
 
@@ -719,6 +794,7 @@ def _render_gps_coordinates(
     survey_key: str,
     survey_date: str | None,
     enumerator: str | None,
+    team: str | None,
 ) -> None:
     """Render GPS coordinates visualization with interactive features.
 
@@ -726,7 +802,7 @@ def _render_gps_coordinates(
     - Select GPS configuration by alias
     - Color points by categorical column
     - Filter points by categorical column
-    - Hover to see ID, Date, and Enumerator name
+    - Hover to see ID, Date, Enumerator, Team, and GPS coordinates
 
     Parameters
     ----------
@@ -742,6 +818,8 @@ def _render_gps_coordinates(
         Survey date column name.
     enumerator : str | None
         Enumerator column name.
+    team : str | None
+        Team column name.
     """
     st.subheader("GPS Coordinates Visualization")
 
@@ -762,12 +840,15 @@ def _render_gps_coordinates(
     # Get list of aliases
     aliases = gps_settings["alias"].to_list()
 
-    # GPS configuration selection
-    selected_alias = st.selectbox(
-        label="Select GPS Configuration",
-        options=aliases,
-        help="Choose which GPS configuration to visualize.",
-    )
+    gp1, gp2, gp3 = st.columns([0.4, 0.3, 0.3])
+
+    with gp1:
+        # GPS configuration selection
+        selected_alias = st.selectbox(
+            label="Select GPS Configuration",
+            options=aliases,
+            help="Choose which GPS configuration to visualize.",
+        )
 
     if not selected_alias:
         return
@@ -798,21 +879,19 @@ def _render_gps_coordinates(
     categorical_cols = [None] + string_columns
 
     # UI controls
-    col1, col2 = st.columns(2)
-
-    with col1:
+    with gp2:
         color_by = st.selectbox(
             label="Color Points By",
             options=categorical_cols,
-            index=0,
+            index=None,
             help="Select a categorical column to color the GPS points.",
         )
 
-    with col2:
+    with gp3:
         filter_by = st.selectbox(
             label="Filter Points By",
             options=categorical_cols,
-            index=0,
+            index=None,
             help="Select a categorical column to filter the GPS points.",
         )
 
@@ -838,109 +917,90 @@ def _render_gps_coordinates(
         st.warning("No data matches the selected filters.")
         return
 
-    # Convert to pandas for pydeck
-    plot_df = filtered_data.to_pandas()
+    # Prepare data for pydeck with hover information
+    map_df = filtered_data.select([
+        pl.col("latitude").alias("lat"),
+        pl.col("longitude").alias("lon"),
+    ])
 
-    # Generate color palette
+    # Add key columns for hover tooltips
+    tooltip_fields = []
+    if survey_key:
+        map_df = map_df.with_columns(filtered_data[survey_key].alias("ID"))
+        tooltip_fields.append("ID")
+    if survey_date:
+        map_df = map_df.with_columns(filtered_data[survey_date].alias("Date"))
+        tooltip_fields.append("Date")
+    if enumerator:
+        map_df = map_df.with_columns(filtered_data[enumerator].alias("Enumerator"))
+        tooltip_fields.append("Enumerator")
+    if team:
+        map_df = map_df.with_columns(filtered_data[team].alias("Team"))
+        tooltip_fields.append("Team")
+
+    # Add GPS coordinates to tooltip
+    tooltip_fields.extend(["lat", "lon"])
+
+    # Add color column if coloring by a categorical variable
     if color_by:
-        unique_colors = plot_df[color_by].unique()
-        num_colors = len(unique_colors)
+        map_df = map_df.with_columns(filtered_data[color_by].alias("color_group"))
+        tooltip_fields.append(color_by)
 
-        if num_colors <= 10:
-            color_palette = [
-                [31, 119, 180, 160],
-                [255, 127, 14, 160],
-                [44, 160, 44, 160],
-                [214, 39, 40, 160],
-                [148, 103, 189, 160],
-                [140, 86, 75, 160],
-                [227, 119, 194, 160],
-                [127, 127, 127, 160],
-                [188, 189, 34, 160],
-                [23, 190, 207, 160],
-            ][:num_colors]
-        else:
-            cmap = mpl.cm.get_cmap("tab20", num_colors)
-            color_palette = [
-                [int(r * 255), int(g * 255), int(b * 255), 160]
-                for r, g, b, _ in [cmap(i) for i in range(num_colors)]
-            ]
+    # Convert to pandas for pydeck
+    map_pd = map_df.to_pandas()
 
-        color_map = {
-            val: color_palette[i % len(color_palette)]
-            for i, val in enumerate(unique_colors)
-        }
-        plot_df["color"] = plot_df[color_by].map(color_map)
-    else:
-        plot_df["color"] = [[31, 119, 180, 160]] * len(plot_df)
+    # Create tooltip configuration
+    tooltip_config = {
+        "html": "<br>".join([f"<b>{field}:</b> {{{field}}}" for field in tooltip_fields]),
+        "style": {"backgroundColor": "steelblue", "color": "white"},
+    }
 
-    # Prepare map data with tooltips
-    map_data = []
-    for _, row in plot_df.iterrows():
-        tooltip_lines = []
-
-        # Add ID (survey key)
-        if survey_key and survey_key in row:
-            tooltip_lines.append(f"ID: {row[survey_key]}")
-
-        # Add Date
-        if survey_date and survey_date in row:
-            tooltip_lines.append(f"Date: {row[survey_date]}")
-
-        # Add Enumerator
-        if enumerator and enumerator in row:
-            tooltip_lines.append(f"Enumerator: {row[enumerator]}")
-
-        # Add color-by value if selected
-        if color_by:
-            tooltip_lines.append(f"{color_by}: {row[color_by]}")
-
-        # Add coordinates
-        tooltip_lines.append(f"Lat: {row['latitude']:.6f}")
-        tooltip_lines.append(f"Lon: {row['longitude']:.6f}")
-
-        point = {
-            "longitude": float(row["longitude"]),
-            "latitude": float(row["latitude"]),
-            "color": row["color"],
-            "tooltip": "\n".join(tooltip_lines),
-        }
-        map_data.append(point)
-
-    # Calculate map center
-    center_lat = plot_df["latitude"].mean()
-    center_lon = plot_df["longitude"].mean()
+    # Calculate center coordinates for initial view
+    center_lat = map_pd["lat"].mean()
+    center_lon = map_pd["lon"].mean()
 
     # Create pydeck layer
-    layer = pdk.Layer(
+    layer = pydeck.Layer(
         "ScatterplotLayer",
-        data=map_data,
-        get_position=["longitude", "latitude"],
-        get_fill_color="color",
-        get_radius=50,
-        radius_scale=6,
-        radius_min_pixels=3,
-        radius_max_pixels=8,
+        data=map_pd,
+        get_position=["lon", "lat"],
+        get_radius=100,
+        get_fill_color=[255, 0, 0, 160] if not color_by else None,
         pickable=True,
         auto_highlight=True,
     )
 
-    view_state = pdk.ViewState(
-        longitude=float(center_lon), latitude=float(center_lat), zoom=10, pitch=0
+    # Set initial view state
+    view_state = pydeck.ViewState(
+        latitude=center_lat,
+        longitude=center_lon,
+        zoom=10,
+        pitch=0,
     )
 
-    deck = pdk.Deck(
+    # Get Mapbox API key
+    mapbox_key = pydeck.settings.mapbox_key
+    if not mapbox_key:
+        # Fallback to secrets if not set
+        if "mapbox_custom_key" in st.secrets:
+            mapbox_key = st.secrets["mapbox_custom_key"]
+        elif "default_mapbox_api_key" in st.secrets:
+            mapbox_key = st.secrets["default_mapbox_api_key"]
+
+    # Create deck with explicit API key
+    deck = pydeck.Deck(
         layers=[layer],
         initial_view_state=view_state,
-        tooltip={"text": "{tooltip}"},
-        map_style="mapbox://styles/mapbox/light-v10",
+        tooltip=tooltip_config,
+        map_style="mapbox://styles/mapbox/light-v9",
+        api_keys={"mapbox": mapbox_key} if mapbox_key else None,
     )
 
     # Display the map
-    st.pydeck_chart(deck, height=600, use_container_width=True)
+    st.pydeck_chart(deck, height=600, width="stretch")
 
     # Display summary statistics
-    st.caption(f"Displaying {len(plot_df):,} GPS points")
+    st.caption(f"Displaying {len(map_pd):,} GPS points")
 
 
 # plot gps coordinates on a map
@@ -954,7 +1014,7 @@ def plot_gps_coordinates(
     color_col: str | None,
 ):
     """
-    Plot GPS coordinates on a map, color-coded by a specified column using pydeck.
+    Plot GPS coordinates on a map with hover tooltips using pydeck.
 
     Parameters
     ----------
@@ -981,98 +1041,70 @@ def plot_gps_coordinates(
     # Drop rows with missing coordinates
     plot_df = plot_df.dropna(subset=[gps_lat_col, gps_lon_col])
 
-    # Assign a color to each unique value in color_col
-    unique_values = plot_df[color_col].unique() if color_col else [None]
-    # generate a color palette based on the number of unique values
-    num_colors = len(unique_values) if color_col else 1
-    if num_colors <= 10:
-        color_palette = [
-            [31, 119, 180, 160],
-            [255, 127, 14, 160],
-            [44, 160, 44, 160],
-            [214, 39, 40, 160],
-            [148, 103, 189, 160],
-            [140, 86, 75, 160],
-            [227, 119, 194, 160],
-            [127, 127, 127, 160],
-            [188, 189, 34, 160],
-            [23, 190, 207, 160],
-        ][:num_colors]
-    else:
-        # Use matplot lib colormap for more colors
-        cmap = mpl.cm.get_cmap("tab20", num_colors)
-        color_palette = [
-            [int(r * 255), int(g * 255), int(b * 255), 160]
-            for r, g, b, _ in [cmap(i) for i in range(num_colors)]
-        ]
-    if color_col:
-        color_map = {
-            val: color_palette[i % len(color_palette)]
-            for i, val in enumerate(unique_values)
-        }
-        plot_df["color_value"] = plot_df[color_col].map(color_map)
-    else:
-        # If no color column is specified, use a default color
-        color_map = {None: [31, 119, 180, 160]}
-        plot_df["color_value"] = [color_map[None]] * len(plot_df)
+    # Rename columns for pydeck
+    plot_df = plot_df.rename(columns={gps_lat_col: "lat", gps_lon_col: "lon"})
 
-    # Prepare data for pydeck
-    map_data = []
-    for _, row in plot_df.iterrows():
-        points = {
-            "longitude": float(row[gps_lon_col]),
-            "latitude": float(row[gps_lat_col]),
-            "color": row["color_value"],
-        }
+    # Build tooltip fields
+    tooltip_fields = []
+    if survey_id and survey_id in plot_df.columns:
+        tooltip_fields.append(survey_id)
+    if submissiondate and submissiondate in plot_df.columns:
+        tooltip_fields.append(submissiondate)
+    if enumerator and enumerator in plot_df.columns:
+        tooltip_fields.append(enumerator)
+    tooltip_fields.extend(["lat", "lon"])
+    if color_col and color_col in plot_df.columns:
+        tooltip_fields.append(color_col)
 
-        # Dynamically construct tooltip
-        tooltip_lines = []
+    # Create tooltip configuration
+    tooltip_config = {
+        "html": "<br>".join([f"<b>{field}:</b> {{{field}}}" for field in tooltip_fields]),
+        "style": {"backgroundColor": "steelblue", "color": "white"},
+    }
 
-        if enumerator:
-            tooltip_lines.append(f"Enumerator: {row[enumerator]}")
-        if submissiondate:
-            tooltip_lines.append(f"Submission Date: {row[submissiondate]}")
-        if survey_id:
-            tooltip_lines.append(f"Survey ID: {row[survey_id]}")
-        if color_col:
-            tooltip_lines.append(f"{color_col}: {row[color_col]}")
-        tooltip_lines.append(f"Latitude: {row[gps_lat_col]:.6f}")
-        tooltip_lines.append(f"Longitude: {row[gps_lon_col]:.6f}")
+    # Calculate center coordinates
+    center_lat = plot_df["lat"].mean()
+    center_lon = plot_df["lon"].mean()
 
-        points["tooltip"] = "\n".join(tooltip_lines)
-
-        # Append the point to the map data
-        map_data.append(points)
-
-    # Calculate map center
-    center_lat = plot_df[gps_lat_col].mean()
-    center_lon = plot_df[gps_lon_col].mean()
-
-    layer = pdk.Layer(
+    # Create pydeck layer
+    layer = pydeck.Layer(
         "ScatterplotLayer",
-        data=map_data,
-        get_position=["longitude", "latitude"],
-        get_fill_color="color",
-        get_radius=50,
-        radius_scale=6,
-        radius_min_pixels=3,
-        radius_max_pixels=8,
+        data=plot_df,
+        get_position=["lon", "lat"],
+        get_radius=100,
+        get_fill_color=[255, 0, 0, 160],
         pickable=True,
         auto_highlight=True,
     )
 
-    view_state = pdk.ViewState(
-        longitude=float(center_lon), latitude=float(center_lat), zoom=10, pitch=0
+    # Set initial view state
+    view_state = pydeck.ViewState(
+        latitude=center_lat,
+        longitude=center_lon,
+        zoom=10,
+        pitch=0,
     )
 
-    deck = pdk.Deck(
+    # Get Mapbox API key
+    mapbox_key = pydeck.settings.mapbox_key
+    if not mapbox_key:
+        # Fallback to secrets if not set
+        if "mapbox_custom_key" in st.secrets:
+            mapbox_key = st.secrets["mapbox_custom_key"]
+        elif "default_mapbox_api_key" in st.secrets:
+            mapbox_key = st.secrets["default_mapbox_api_key"]
+
+    # Create deck with explicit API key
+    deck = pydeck.Deck(
         layers=[layer],
         initial_view_state=view_state,
-        tooltip={"text": "{tooltip}"},
-        map_style="mapbox://styles/mapbox/streets-v11",
+        tooltip=tooltip_config,
+        map_style="mapbox://styles/mapbox/light-v9",
+        api_keys={"mapbox": mapbox_key} if mapbox_key else None,
     )
 
-    st.pydeck_chart(deck, height=450, use_container_width=True)
+    # Display the map
+    st.pydeck_chart(deck, height=600, width="stretch")
 
 
 # detect outliers using a clustering column
@@ -1288,67 +1320,78 @@ def plot_clusters_on_map(
     # make a copy of the dataframe
     df = df.copy()
 
-    # Create a clean data structure for pydeck
-    map_data = []
-    for _, row in df.iterrows():
-        point = {
-            # Ensure coordinates are in [longitude, latitude] order for pydeck
-            "longitude": float(row[gps_lon_col]),
-            "latitude": float(row[gps_lat_col]),
-            "outlier_color": [242, 45, 17, 160]
-            if row[outlier_col]
-            else [17, 89, 242, 160],
-        }
+    # Rename columns for pydeck
+    df = df.rename(columns={gps_lat_col: "lat", gps_lon_col: "lon"})
 
-        # Dynamically construct tooltip
-        tooltip_lines = []
+    # Create outlier status column for coloring
+    df["outlier_status"] = df[outlier_col].map({True: "Outlier", False: "Normal"})
 
-        if enumerator:
-            tooltip_lines.append(f"Enumerator: {row[enumerator]}")
-        if submission_date:
-            tooltip_lines.append(f"Date: {row[submission_date]}")
-        if survey_id:
-            tooltip_lines.append(f"Survey ID: {row[survey_id]}")
-        if clustering_col:
-            tooltip_lines.append(f"Cluster: {row[clustering_col]}")
-        else:
-            tooltip_lines.append("Cluster: No Cluster")
-        if outlier_col:
-            tooltip_lines.append(f"Outlier: {row[outlier_col]}")
+    # Build tooltip fields
+    tooltip_fields = []
+    if survey_id and survey_id in df.columns:
+        tooltip_fields.append(survey_id)
+    if submission_date and submission_date in df.columns:
+        tooltip_fields.append(submission_date)
+    if enumerator and enumerator in df.columns:
+        tooltip_fields.append(enumerator)
+    tooltip_fields.extend(["lat", "lon", "outlier_status"])
+    if clustering_col and clustering_col in df.columns:
+        tooltip_fields.append(clustering_col)
 
-        point["tooltip"] = "\n".join(tooltip_lines)
+    # Create tooltip configuration
+    tooltip_config = {
+        "html": "<br>".join([f"<b>{field}:</b> {{{field}}}" for field in tooltip_fields]),
+        "style": {"backgroundColor": "steelblue", "color": "white"},
+    }
 
-        map_data.append(point)
+    # Calculate center coordinates
+    center_lat = df["lat"].mean()
+    center_lon = df["lon"].mean()
 
-    # Calculate map center
-    center_lat = df[gps_lat_col].mean()
-    center_lon = df[gps_lon_col].mean()
+    # Color outliers red, normal points blue
+    df["color"] = df["outlier_status"].apply(
+        lambda x: [255, 0, 0, 160] if x == "Outlier" else [0, 0, 255, 160]
+    )
 
-    layer = pdk.Layer(
+    # Create pydeck layer
+    layer = pydeck.Layer(
         "ScatterplotLayer",
-        data=map_data,
-        get_position=["longitude", "latitude"],
-        get_fill_color="outlier_color",
-        get_radius=50,
-        radius_scale=6,
-        radius_min_pixels=3,
-        radius_max_pixels=8,
+        data=df,
+        get_position=["lon", "lat"],
+        get_radius=100,
+        get_fill_color="color",
         pickable=True,
         auto_highlight=True,
     )
 
-    view_state = pdk.ViewState(
-        longitude=float(center_lon), latitude=float(center_lat), zoom=7, pitch=0
+    # Set initial view state
+    view_state = pydeck.ViewState(
+        latitude=center_lat,
+        longitude=center_lon,
+        zoom=7,
+        pitch=0,
     )
 
-    deck = pdk.Deck(
+    # Get Mapbox API key
+    mapbox_key = pydeck.settings.mapbox_key
+    if not mapbox_key:
+        # Fallback to secrets if not set
+        if "mapbox_custom_key" in st.secrets:
+            mapbox_key = st.secrets["mapbox_custom_key"]
+        elif "default_mapbox_api_key" in st.secrets:
+            mapbox_key = st.secrets["default_mapbox_api_key"]
+
+    # Create deck with explicit API key
+    deck = pydeck.Deck(
         layers=[layer],
         initial_view_state=view_state,
-        tooltip={"text": "{tooltip}"},
-        map_style="mapbox://styles/mapbox/streets-v11",
+        tooltip=tooltip_config,
+        map_style="mapbox://styles/mapbox/light-v9",
+        api_keys={"mapbox": mapbox_key} if mapbox_key else None,
     )
 
-    st.pydeck_chart(deck, height=450, use_container_width=True)
+    # Display the map
+    st.pydeck_chart(deck, height=600, width="stretch")
 
 
 @demo_output_onboarding(TAB_NAME)
@@ -1395,6 +1438,25 @@ def gpschecks_report(
 
     config_settings = GPSSettings(**config)
 
+    # Configure pydeck with appropriate Mapbox API key
+    mapbox_key_option = config_settings.mapbox_key_option
+    mapbox_custom_key = config_settings.mapbox_custom_key
+
+    # Set the appropriate key based on user's preference
+    if mapbox_key_option == "add_api_token" and mapbox_custom_key:
+        # User wants to use their own custom key
+        pydeck.settings.mapbox_key = mapbox_custom_key
+    elif mapbox_key_option == "default_api_token" or not mapbox_key_option:
+        # User wants to use default key or hasn't selected yet
+        if "mapbox_custom_key" in st.secrets:
+            pydeck.settings.mapbox_key = st.secrets["mapbox_custom_key"]
+        elif "default_mapbox_api_key" in st.secrets:
+            pydeck.settings.mapbox_key = st.secrets["default_mapbox_api_key"]
+
+    # If still no key set and custom key is saved, use it
+    if not pydeck.settings.mapbox_key and mapbox_custom_key:
+        pydeck.settings.mapbox_key = mapbox_custom_key
+
     _gpschecks_settings = gpschecks_report_settings(
         project_id,
         setting_file,
@@ -1410,6 +1472,9 @@ def gpschecks_report(
 
     st.write("---")
 
+    mapbox_key = _gpschecks_settings.mapbox_custom_key
+    pydeck.settings.mapbox_key = mapbox_key
+
     # Render GPS coordinates visualization
     _render_gps_coordinates(
         project_id,
@@ -1418,4 +1483,5 @@ def gpschecks_report(
         config_settings.survey_key,
         config_settings.survey_date,
         config_settings.enumerator,
+        config_settings.team,
     )
