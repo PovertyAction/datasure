@@ -1,18 +1,22 @@
-import os
+import re
 from contextlib import suppress
+from enum import Enum
 from typing import Any
 
 import pandas as pd
 import plotly.express as px
+import polars as pl
 import streamlit as st
+from pydantic import BaseModel, Field
 
-from datasure.utils import (
-    get_check_config_settings,
+from datasure.utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.dataframe_utils import get_df_info
+from datasure.utils.onboarding_utils import demo_output_onboarding
+from datasure.utils.settings_utils import (
     load_check_settings,
     save_check_settings,
     trigger_save,
 )
-from datasure.utils.onboarding_utils import demo_output_onboarding
 
 TAB_NAME: str = "backchecks"
 
@@ -25,250 +29,119 @@ NO_BACKCHECK_COLUMNS_SET = "Backcheck columns configuration required. Go to the 
 ##### Backchecks #####
 
 
-@st.cache_data
-def load_default_backcheck_settings(
-    project_id: str, setting_file: str | None, page_num: int
-) -> tuple:
-    """Load default settings for backcheck report.
+class SearchType(str, Enum):
+    """Column search pattern types."""
+
+    EXACT = "exact"
+    STARTSWITH = "startswith"
+    ENDSWITH = "endswith"
+    CONTAINS = "contains"
+    REGEX = "regex"
+
+
+class BackcheckSettings(BaseModel):
+    """Backcheck report settings model."""
+
+    survey_key: str | None = Field(..., description="Column containing survey key")
+    survey_id: str | None = Field(None, description="Column containing survey ID")
+    survey_date: str | None = Field(None, description="Column containing survey date")
+    backcheck_date: str | None = Field(None, description="Column containing backcheck date")
+    enumerator: str | None = Field(None, description="Column containing enumerator")
+    backchecker: str | None = Field(None, description="Column containing back checker")
+    backcheck_target_percent: int = Field(10, description="Target percentage of backchecks")
+    drop_duplicates: bool = Field(True, description="Drop duplicate entries")
+
+
+@st.cache_data(ttl=60)
+def load_default_backchecks_settings(
+    settings_file: str, config: BackcheckSettings
+) -> BackcheckSettings:
+    """Load and merge saved settings with default configuration.
+
+    Loads previously saved backcheck report settings from the settings file
+    and merges them with the provided default configuration. Saved settings
+    take precedence over defaults.
+
+    Cached for 60 seconds to reduce file I/O operations.
 
     Parameters
     ----------
-    project_id : str
-        Project ID.
-    setting_file : str
-        Path to the settings file.
-    page_num : int
-        Page number for the report.
+    settings_file : str
+        Path to the settings file containing saved configurations.
+    config : BackcheckSettings
+        Default configuration to use as fallback for missing settings.
 
     Returns
     -------
-    tuple
-        Default settings for backcheck report.
+    BackcheckSettings
+        Merged settings combining saved and default configurations.
     """
-    # Get config page defaults
-    config = get_check_config_settings(
-        project_id=project_id,
-        page_row_index=page_num - 1,
-    )
-    config_survey_key = config.get("survey_key")
-    config_survey_id = config.get("survey_id")
-    config_survey_date = config.get("survey_date")
-    config_enumerator = config.get("enumerator")
+    saved_settings = load_check_settings(settings_file, TAB_NAME)
 
-    if setting_file and os.path.exists(setting_file):
-        with suppress(Exception):
-            default_settings = (
-                load_check_settings(settings_file=setting_file, check_name="backchecks")
-                or {}
-            )
-        if "default_settings" not in locals():
-            default_settings = {}
-    else:
-        default_settings = {}
+    default_settings: dict = dict(config)
+    default_settings.update(saved_settings)
 
-    return (
-        default_settings.get("date", config_survey_date),
-        default_settings.get("enumerator", config_enumerator),
-        default_settings.get("backchecker"),
-        default_settings.get("survey_id", config_survey_id),
-        default_settings.get("survey_key", config_survey_key),
-        default_settings.get("backcheck_goal", 0),
-        default_settings.get("drop_duplicates", True),
-    )
+    return BackcheckSettings(**default_settings)
 
 
-def _create_selectbox_with_save(
-    label: str,
-    options: list,
-    help_text: str,
-    key: str,
-    default_value: str | None,
-    setting_file: str,
-    setting_key: str,
-    session_state_key: str,
-) -> str:
-    """Create a selectbox with automatic save functionality.
-
-    Consolidates the common pattern of selectbox creation with settings persistence.
-    """
-    default_index = None
-    if default_value and default_value in options:
-        with suppress(ValueError):
-            default_index = options.index(default_value)
-
-    selected = st.selectbox(
-        label,
-        options=options,
-        help=help_text,
-        key=key,
-        index=default_index,
-        on_change=trigger_save,
-        kwargs={"state_name": session_state_key},
-    )
-
-    if st.session_state.get(session_state_key):
-        with suppress(Exception):
-            save_check_settings(
-                settings_file=setting_file,
-                check_name="backchecks",
-                check_settings={setting_key: selected},
-            )
-        st.session_state[session_state_key] = False
-
-    return selected
+# =============================================================================
+# Column Search and Selection Utilities
+# =============================================================================
 
 
-def _handle_meta_settings(
-    survey_cols: pd.Index, date: str | None, setting_file: str
-) -> str:
-    """Handle metadata column settings."""
-    return _create_selectbox_with_save(
-        label="Date",
-        options=survey_cols.tolist(),
-        help_text="Column containing survey date",
-        key="date_backcheck",
-        default_value=date,
-        setting_file=setting_file,
-        setting_key="date",
-        session_state_key="backcheck_date",
-    )
-
-
-def _handle_enum_settings(
-    survey_cols: pd.Index,
-    backcheck_cols_list: pd.Index,
-    enumerator: str | None,
-    backchecker: str | None,
-    setting_file: str,
-) -> tuple[str, str]:
-    """Handle enumerator column settings."""
-    enumerator = _create_selectbox_with_save(
-        label="Enumerator",
-        options=survey_cols.tolist(),
-        help_text="Column containing survey enumerator",
-        key="enumerator_backcheck",
-        default_value=enumerator,
-        setting_file=setting_file,
-        setting_key="enumerator",
-        session_state_key="backcheck_enumerator",
-    )
-
-    backchecker = _create_selectbox_with_save(
-        label="Back Checker",
-        options=backcheck_cols_list.tolist(),
-        help_text="Column containing back check enumerator",
-        key="backchecker_backcheck",
-        default_value=backchecker,
-        setting_file=setting_file,
-        setting_key="backchecker",
-        session_state_key="backcheck_backchecker",
-    )
-
-    return enumerator, backchecker
-
-
-def _handle_agg_settings(
-    survey_cols: pd.Index,
-    survey_id: str | None,
-    survey_key: str | None,
-    setting_file: str,
-) -> tuple[str, str]:
-    """Handle aggregation column settings."""
-    survey_id = _create_selectbox_with_save(
-        label="Survey ID (required)",
-        options=survey_cols.tolist(),
-        help_text="Column containing survey ID",
-        key="surveyid_backcheck",
-        default_value=survey_id,
-        setting_file=setting_file,
-        setting_key="survey_id",
-        session_state_key="backcheck_survey_id",
-    )
-
-    survey_key = _create_selectbox_with_save(
-        label="Survey Key (required)",
-        options=survey_cols.tolist(),
-        help_text="Column containing survey key",
-        key="surveykey_backcheck",
-        default_value=survey_key,
-        setting_file=setting_file,
-        setting_key="survey_key",
-        session_state_key="backcheck_survey_key",
-    )
-
-    return survey_id, survey_key
-
-
-def _handle_tracking_options(
-    setting_file: str,
-    backcheck_goal: int,
-    drop_duplicates: bool,
-    date: str | None,
-    survey_id: str | None,
-) -> tuple[int, bool]:
-    """Handle tracking options settings.
+def expand_col_names(
+    col_names: list[str], pattern: str, search_type: str = "exact"
+) -> list[str]:
+    """Expand column names based on a pattern and search type.
 
     Parameters
     ----------
-    setting_file : str
-        Path to settings file.
-    backcheck_goal : int
-        Current backcheck goal value.
-    drop_duplicates : bool
-        Current drop duplicates setting.
-    date : str | None
-        Date column selection.
-    survey_id : str | None
-        Survey ID column selection.
+    col_names : list[str]
+        List of column names to search in.
+    pattern : str
+        Pattern to match against column names.
+    search_type : str, default="exact"
+        Type of search to perform.
 
     Returns
     -------
-    tuple[int, bool]
-        Selected backcheck goal and drop duplicates setting.
-    """
-    backcheck_goal = st.number_input(
-        "Target number of backchecks",
-        min_value=0,
-        help="Total number of backchecks expected",
-        key="total_goal_backcheck",
-        value=backcheck_goal,
-        on_change=trigger_save,
-        kwargs={"state_name": "backcheck_goal"},
-    )
-    if "backcheck_goal" in st.session_state and st.session_state.backcheck_goal:
-        with suppress(Exception):
-            save_check_settings(
-                settings_file=setting_file,
-                check_name="backchecks",
-                check_settings={"backcheck_goal": backcheck_goal},
-            )
-        st.session_state.backcheck_goal = False
+    list[str]
+        List of column names that match the pattern.
 
-    st.write("How would you like to handle duplicates?")
-    drop_duplicates = st.toggle(
-        label="Drop duplicates",
-        value=drop_duplicates,
-        key="drop_duplicates_backcheck",
-        on_change=trigger_save,
-        kwargs={"state_name": "backcheck_drop_duplicates"},
-    )
-    if drop_duplicates and (not date or not survey_id):
-        st.info(
-            "Please select date and survey id columns to drop duplicates correctly."
+    Raises
+    ------
+    TypeError
+        If input types are invalid.
+    ValueError
+        If search_type is not supported.
+    """
+    if not isinstance(col_names, list):
+        raise TypeError("col_names must be a list of column names.")
+    if not pattern:
+        raise TypeError("pattern must be provided.")
+    if not isinstance(pattern, str):
+        raise TypeError("pattern must be a string.")
+
+    search_funcs = {
+        SearchType.EXACT.value: lambda col: col == pattern,
+        SearchType.STARTSWITH.value: lambda col: col.startswith(pattern),
+        SearchType.ENDSWITH.value: lambda col: col.endswith(pattern),
+        SearchType.CONTAINS.value: lambda col: pattern in col,
+        SearchType.REGEX.value: lambda col: re.match(pattern, col),
+    }
+
+    if search_type not in search_funcs:
+        valid_types = ", ".join(search_funcs.keys())
+        raise ValueError(
+            f"Invalid search_type '{search_type}'. Choose from: {valid_types}."
         )
 
-    if (
-        "backcheck_drop_duplicates" in st.session_state
-        and st.session_state.backcheck_drop_duplicates
-    ):
-        with suppress(Exception):
-            save_check_settings(
-                settings_file=setting_file,
-                check_name="backchecks",
-                check_settings={"drop_duplicates": drop_duplicates},
-            )
-        st.session_state.backcheck_drop_duplicates = False
-    return backcheck_goal, drop_duplicates
+    return [col for col in col_names if search_funcs[search_type](col)]
+
+
+# =============================================================================
+# Backcheck Column Configuration Functions
+# =============================================================================
 
 
 def _get_ok_range_value(ok_range_type: str) -> str:
@@ -776,90 +649,626 @@ def _generate_backchecker_statistics(
     return pd.DataFrame()
 
 
-@demo_output_onboarding(TAB_NAME)
-def backcheck_report_settings(
+def backchecks_report_settings(
     project_id: str,
+    settings_file: str,
     survey_data: pd.DataFrame,
     backcheck_data: pd.DataFrame,
-    setting_file: str,
-    page_num: int,
-) -> tuple:
-    """Load settings for backcheck report.
+    config: BackcheckSettings,
+    survey_categorical_columns: list[str],
+    survey_datetime_columns: list[str],
+    backcheck_categorical_columns: list[str],
+    backcheck_datetime_columns: list[str],
+) -> BackcheckSettings:
+    """Create and render the settings UI for backchecks report configuration.
+
+    This function creates a comprehensive Streamlit UI for configuring
+    backchecks report settings. It includes:
+    - Survey identifiers (key and ID columns)
+    - Survey date column selection
+    - Enumerator and backchecker columns
+    - Tracking options (backcheck goal and duplicate handling)
+
+    Settings are automatically saved to the settings file when changed
+    and loaded from previous sessions if available.
 
     Parameters
     ----------
     project_id : str
-        Project ID.
+        Unique project identifier for database operations.
+    settings_file : str
+        Path to settings file for saving/loading configurations.
     survey_data : pd.DataFrame
-        Survey data.
+        Survey dataset.
     backcheck_data : pd.DataFrame
-        Backcheck data.
-    setting_file : str
-        Path to the settings file.
-    page_num : int
-        Page number for the report.
+        Backcheck dataset.
+    config : BackcheckSettings
+        Default configuration used as fallback values.
+    categorical_columns : list[str]
+        Available categorical columns for selection.
+    datetime_columns : list[str]
+        Available datetime columns for date selection.
 
     Returns
     -------
-    tuple
-        Settings for backcheck report.
+    BackcheckSettings
+        User-configured settings from the UI.
     """
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for backcheck report")
-
-        survey_cols = survey_data.columns
-        backcheck_cols_list = backcheck_data.columns
-        # Use set intersection for better performance
-        common_cols = list(set(survey_data.columns) & set(backcheck_cols_list))
-
-        settings = load_default_backcheck_settings(project_id, setting_file, page_num)
-        (
-            date,
-            enumerator,
-            backchecker,
-            survey_id,
-            survey_key,
-            backcheck_goal,
-            drop_duplicates,
-        ) = settings
-
-        agg_col, enum_col, meta_col = st.columns(spec=3, border=True)
-
-        with meta_col:
-            date = _handle_meta_settings(survey_cols, date, setting_file)
-
-        with enum_col:
-            enumerator, backchecker = _handle_enum_settings(
-                survey_cols, backcheck_cols_list, enumerator, backchecker, setting_file
-            )
-
-        with agg_col:
-            survey_id, survey_key = _handle_agg_settings(
-                survey_cols, survey_id, survey_key, setting_file
-            )
-
         st.write("---")
-        st.markdown("#### Tracking Options")
-        backcheck_goal, drop_duplicates = _handle_tracking_options(
-            setting_file, backcheck_goal, drop_duplicates, date, survey_id
+
+        default_settings = load_default_backchecks_settings(settings_file, config)
+
+        # Survey Identifiers
+        with st.container(border=True):
+            st.subheader("Survey Identifiers")
+            si1, si2, _ = st.columns(3)
+
+            with si1:
+                default_survey_key = default_settings.survey_key
+                default_survey_key_index = (
+                    survey_categorical_columns.index(default_survey_key)
+                    if default_survey_key and default_survey_key in survey_categorical_columns
+                    else None
+                )
+                survey_key = st.selectbox(
+                    "Survey Key (required)",
+                    options=survey_categorical_columns,
+                    key="survey_key_backchecks",
+                    help="Select the column that contains the survey key",
+                    index=default_survey_key_index,
+                    on_change=trigger_save,
+                    kwargs={"state_name": TAB_NAME + "_survey_key"},
+                )
+                save_check_settings(settings_file, TAB_NAME, {"survey_key": survey_key})
+
+            with si2:
+                default_survey_id = default_settings.survey_id
+                default_survey_id_index = (
+                    survey_categorical_columns.index(default_survey_id)
+                    if default_survey_id and default_survey_id in survey_categorical_columns
+                    else None
+                )
+                survey_id = st.selectbox(
+                    "Survey ID (required)",
+                    options=survey_categorical_columns,
+                    help="Select the column that contains the survey ID",
+                    key="survey_id_backchecks",
+                    index=default_survey_id_index,
+                    on_change=trigger_save,
+                    kwargs={"state_name": TAB_NAME + "_survey_id"},
+                )
+                save_check_settings(settings_file, TAB_NAME, {"survey_id": survey_id})
+
+        # Survey Date
+        with st.container(border=True):
+            st.subheader("Survey & BAckcheck Dates")
+
+            sd1, sd2, _ = st.columns(3)
+
+            with sd1:
+                default_survey_date = default_settings.survey_date
+                default_survey_date_index = (
+                    survey_datetime_columns.index(default_survey_date)
+                    if default_survey_date and default_survey_date in survey_datetime_columns
+                    else None
+                )
+
+                survey_date = st.selectbox(
+                    "Survey Date",
+                    options=survey_datetime_columns,
+                    help="Select the column that contains the survey date",
+                    key="survey_date_backchecks",
+                    index=default_survey_date_index,
+                    on_change=trigger_save,
+                    kwargs={"state_name": TAB_NAME + "_survey_date"},
+                )
+                save_check_settings(
+                    settings_file, TAB_NAME, {"survey_date": survey_date}
+                )
+            with sd2:
+                default_backcheck_date = default_settings.survey_date
+                default_backcheck_date_index = (
+                    backcheck_datetime_columns.index(default_backcheck_date)
+                    if default_backcheck_date
+                    and default_backcheck_date in backcheck_datetime_columns
+                    else None
+                )
+
+                backcheck_date = st.selectbox(
+                    "Backcheck Date",
+                    options=backcheck_datetime_columns,
+                    help="Select the column that contains the backcheck date",
+                    key="backcheck_date_backchecks",
+                    index=default_backcheck_date_index,
+                    on_change=trigger_save,
+                    kwargs={"state_name": TAB_NAME + "_backcheck_date"},
+                )
+
+        # Enumerator and Backchecker
+        with st.container(border=True):
+            st.subheader("Staff Identifiers")
+            ec1, ec2, _ = st.columns(3)
+
+            with ec1:
+                default_enumerator = default_settings.enumerator
+                default_enumerator_index = (
+                    survey_categorical_columns.index(default_enumerator)
+                    if default_enumerator and default_enumerator in survey_categorical_columns
+                    else None
+                )
+                enumerator = st.selectbox(
+                    "Enumerator",
+                    options=survey_categorical_columns,
+                    key="enumerator_backchecks",
+                    help="Select the column that contains the enumerator ID",
+                    index=default_enumerator_index,
+                    on_change=trigger_save,
+                    kwargs={"state_name": TAB_NAME + "_enumerator"},
+                )
+                save_check_settings(settings_file, TAB_NAME, {"enumerator": enumerator})
+
+            with ec2:
+                # Get backcheck columns for backchecker selection
+                default_backchecker = default_settings.backchecker
+                default_backchecker_index = (
+                    backcheck_categorical_columns.index(default_backchecker)
+                    if default_backchecker and default_backchecker in backcheck_categorical_columns
+                    else None
+                )
+                backchecker = st.selectbox(
+                    "Back Checker",
+                    options=backcheck_categorical_columns,
+                    key="backchecker_backchecks",
+                    help="Select the column that contains the back checker ID",
+                    index=default_backchecker_index,
+                    on_change=trigger_save,
+                    kwargs={"state_name": TAB_NAME + "_backchecker"},
+                )
+                save_check_settings(
+                    settings_file, TAB_NAME, {"backchecker": backchecker}
+                )
+
+        # Tracking Options
+        with st.container(border=True):
+            st.subheader("Tracking Options")
+
+            to1, _, _ = st.columns(3)
+
+            with to1:
+                default_backcheck_goal = default_settings.backcheck_target_percent
+                backcheck_goal = st.number_input(
+                    "Target number of backchecks",
+                    min_value=0,
+                    help="Total number of backchecks expected",
+                    key="backcheck_goal_backchecks",
+                    value=default_backcheck_goal,
+                    on_change=trigger_save,
+                    kwargs={"state_name": TAB_NAME + "_backcheck_goal"},
+                )
+                save_check_settings(
+                    settings_file, TAB_NAME, {"backcheck_goal": backcheck_goal}
+                )
+
+        # Additional Options
+        with st.container(border=True):
+            st.subheader("Additional Options")
+
+            ao1, _, _ = st.columns(3)
+
+            with ao1:
+                st.write("How would you like to handle duplicates?")
+                default_drop_duplicates = default_settings.drop_duplicates
+                drop_duplicates = st.toggle(
+                    label="Drop duplicates",
+                    value=default_drop_duplicates,
+                    key="drop_duplicates_backchecks",
+                    help="Drop duplicate survey entries (keeps most recent by date)",
+                    on_change=trigger_save,
+                    kwargs={"state_name": TAB_NAME + "_drop_duplicates"},
+                )
+                save_check_settings(
+                    settings_file, TAB_NAME, {"drop_duplicates": drop_duplicates}
+                )
+
+                if drop_duplicates and (not survey_date or not survey_id):
+                    st.info(
+                        "Please select date and survey id columns to drop duplicates correctly."
+                    )
+
+    return BackcheckSettings(
+        survey_key=survey_key,
+        survey_id=survey_id,
+        survey_date=survey_date,
+        backcheck_date=backcheck_date,
+        enumerator=enumerator,
+        backchecker=backchecker,
+        backcheck_goal=backcheck_goal,
+        drop_duplicates=drop_duplicates,
+    )
+
+
+# =============================================================================
+# Backcheck Column Actions - UI Configuration
+# =============================================================================
+
+
+def _render_search_type_selection(
+    common_columns: list[str],
+) -> tuple[str, str | None, list[str], bool]:
+    """Render search type selection UI for backcheck columns.
+
+    Parameters
+    ----------
+    common_columns : list[str]
+        List of columns common to both survey and backcheck data.
+
+    Returns
+    -------
+    tuple[str, str | None, list[str], bool]
+        Search type, pattern, selected columns, and lock_cols flag.
+    """
+    search_type_options = [e.value for e in SearchType]
+    search_type = st.selectbox(
+        label="Search type",
+        options=search_type_options,
+        index=0,
+        help="Select the type of search to perform on the column names.",
+    )
+
+    if search_type == SearchType.EXACT.value:
+        backcheck_cols_sel = st.multiselect(
+            label="Select columns to configure for backcheck",
+            options=common_columns,
+            default=None,
+            help="Select column or group of columns to configure for backcheck comparison.",
+        )
+        pattern, lock_cols = None, None
+        return search_type, pattern, backcheck_cols_sel, lock_cols
+    else:
+        pattern = st.text_input(
+            label="Enter pattern to match column names",
+            placeholder="Enter pattern to match column names",
+            help="Enter the pattern to match column names based on the "
+            "selected search type.",
+        )
+        if pattern:
+            backcheck_cols_patt = expand_col_names(
+                common_columns, pattern, search_type=search_type
+            )
+        else:
+            backcheck_cols_patt = []
+
+        st.write(
+            "**Columns Selected:** ",
+            ", ".join(backcheck_cols_patt) if backcheck_cols_patt else "None",
+        )
+        return search_type, pattern, backcheck_cols_patt, None
+
+
+def _render_backcheck_category_options() -> int:
+    """Render backcheck category selection UI.
+
+    Returns
+    -------
+    int
+        Selected category (1, 2, or 3).
+    """
+    category = st.selectbox(
+        label="Backcheck Category",
+        options=[1, 2, 3],
+        index=0,
+        help="Select the backcheck category for these columns (1 = critical, 2 = important, 3 = optional).",
+    )
+    return category
+
+
+def _render_ok_range_options() -> tuple[str, str]:
+    """Render OK range options UI.
+
+    Returns
+    -------
+    tuple[str, str]
+        OK range type and OK range value.
+    """
+    ok_range_type = st.selectbox(
+        label="OK Range Type",
+        options=["None", "absolute value", "range", "percentage"],
+        index=0,
+        help="Select the type of acceptable range for numeric differences.",
+    )
+    ok_range_value = _get_ok_range_value(ok_range_type)
+    return ok_range_type, ok_range_value
+
+
+def _render_comparison_condition_options() -> tuple[str, str]:
+    """Render comparison condition options UI.
+
+    Returns
+    -------
+    tuple[str, str]
+        Comparison condition type and condition value.
+    """
+    comparison_condition_type = st.selectbox(
+        label="Comparison Condition",
+        options=[
+            "None",
+            "Do not compare missing values or null values",
+            "Do not compare if the values contain:",
+            "Treat these values as the same:",
+        ],
+        index=0,
+        help="Specify any additional comparison conditions.",
+    )
+    comparison_condition_value = _get_comparison_condition(comparison_condition_type)
+    return comparison_condition_type, comparison_condition_value
+
+
+def _render_backchecks_column_actions(
+    project_id: str, page_name_id: str, common_columns: list[str]
+) -> None:
+    """Render the backcheck column configuration UI.
+
+    Parameters
+    ----------
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page name identifier.
+    common_columns : list[str]
+        List of columns common to both survey and backcheck data.
+    """
+    backcheck_settings = duckdb_get_table(
+        project_id,
+        f"backchecks_{page_name_id}",
+        "logs",
+    )
+
+    os1, os2, _ = st.columns([0.4, 0.3, 0.3])
+    with os1:
+        st.button(
+            "Add Backcheck Column",
+            key="add_backcheck_column",
+            help="Add a new backcheck column configuration.",
+            width="stretch",
+            type="primary",
+            on_click=_add_backcheck_column,
+            args=(
+                project_id,
+                page_name_id,
+                common_columns,
+            ),
+        )
+    with os2:
+        _delete_backcheck_column(project_id, page_name_id, backcheck_settings)
+
+    if backcheck_settings.is_empty():
+        st.info(
+            "Use the :material/add: button to add columns for backcheck comparison and the "
+            ":material/delete: button to remove columns."
+        )
+    else:
+        _render_backcheck_settings_table(backcheck_settings)
+
+
+@st.dialog("Add Backcheck Column(s)", width="large")
+def _add_backcheck_column(
+    project_id: str, page_name_id: str, common_columns: list[str]
+) -> None:
+    """Dialog to add a new backcheck column configuration.
+
+    Parameters
+    ----------
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page name identifier.
+    common_columns : list[str]
+        List of columns common to both survey and backcheck data.
+    """
+    # Render search type selection
+    search_type, pattern, backcheck_cols, _lock_cols_initial = (
+        _render_search_type_selection(common_columns)
+    )
+
+    if backcheck_cols:
+        # Render backcheck category
+        category = _render_backcheck_category_options()
+
+        # Render OK range options
+        ok_range_type, ok_range_value = _render_ok_range_options()
+
+        # Render comparison condition options
+        comparison_condition_type, comparison_condition_value = (
+            _render_comparison_condition_options()
         )
 
-        # Add column configuration section
-        bc_column_config_df = _handle_column_configuration(common_cols)
+        button_disabled = not backcheck_cols
 
-        st.write("")
+        if st.button(
+            "Add Backcheck Column Configuration",
+            key="confirm_add_backcheck_column",
+            type="primary",
+            width="stretch",
+            disabled=button_disabled,
+        ):
+            _update_backcheck_column_config(
+                project_id,
+                page_name_id,
+                search_type,
+                pattern,
+                backcheck_cols,
+                category,
+                ok_range_value,
+                comparison_condition_value,
+            )
 
-    return (
-        date,
-        enumerator,
-        backchecker,
-        survey_id,
-        survey_key,
-        backcheck_goal,
-        drop_duplicates,
-        common_cols,
-        bc_column_config_df,
+            st.success("Backcheck column configuration added successfully.")
+            st.rerun()
+
+
+def _update_backcheck_column_config(
+    project_id: str,
+    page_name_id: str,
+    search_type: str,
+    pattern: str | None,
+    backcheck_cols: list[str],
+    category: int,
+    ok_range: str,
+    comparison_condition: str,
+) -> None:
+    """Update the backcheck column configuration in the database.
+
+    Parameters
+    ----------
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page name identifier.
+    search_type : str
+        Search type used.
+    pattern : str | None
+        Pattern for column matching.
+    backcheck_cols : list[str]
+        Selected columns.
+    category : int
+        Backcheck category (1, 2, or 3).
+    ok_range : str
+        OK range value.
+    comparison_condition : str
+        Comparison condition.
+    """
+    # Get existing config
+    existing_config = duckdb_get_table(
+        project_id=project_id,
+        alias=f"backchecks_{page_name_id}",
+        db_name="logs",
     )
+
+    # Prepare new configuration
+    new_config = {
+        "search_type": search_type,
+        "pattern": pattern,
+        "column_name": [backcheck_cols],
+        "category": category,
+        "ok_range": ok_range,
+        "comparison_condition": comparison_condition,
+    }
+
+    schema = {
+        "search_type": pl.Utf8,
+        "pattern": pl.Utf8,
+        "column_name": pl.List(pl.Utf8),
+        "category": pl.Int64,
+        "ok_range": pl.Utf8,
+        "comparison_condition": pl.Utf8,
+    }
+
+    # Append new configuration to existing polars DataFrame
+    new_config_df = pl.DataFrame(new_config, schema=schema)
+    if not existing_config.is_empty():
+        updated_config = pl.concat([existing_config, new_config_df], how="vertical")
+    else:
+        updated_config = new_config_df
+
+    # Save updated configuration back to the database
+    duckdb_save_table(
+        project_id,
+        updated_config,
+        f"backchecks_{page_name_id}",
+        db_name="logs",
+    )
+
+
+def _render_backcheck_settings_table(backcheck_settings: pl.DataFrame) -> None:
+    """Render the backcheck settings table in Streamlit.
+
+    Parameters
+    ----------
+    backcheck_settings : pl.DataFrame
+        Backcheck settings configuration.
+    """
+    with st.expander("Backcheck Column Settings", expanded=False):
+        st.dataframe(
+            backcheck_settings,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "search_type": st.column_config.Column("Search Type"),
+                "pattern": st.column_config.Column("Pattern"),
+                "column_name": st.column_config.Column("Column Name(s)"),
+                "category": st.column_config.NumberColumn("Category"),
+                "ok_range": st.column_config.Column("OK Range"),
+                "comparison_condition": st.column_config.Column("Comparison Condition"),
+            },
+        )
+
+
+def _delete_backcheck_column(
+    project_id: str, page_name_id: str, backcheck_settings: pl.DataFrame
+) -> None:
+    """Render delete backcheck column button and handle deletion.
+
+    Parameters
+    ----------
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page name identifier.
+    backcheck_settings : pl.DataFrame
+        Current backcheck settings.
+    """
+    with st.popover(
+        label=":material/delete: Delete backcheck column",
+        width="stretch",
+    ):
+        st.markdown("#### Remove backcheck columns")
+
+        if backcheck_settings.is_empty():
+            st.info("No backcheck columns have been added yet.")
+        else:
+            backcheck_settings_indexed = backcheck_settings.with_row_index().with_columns(
+                (
+                    pl.col("index").cast(pl.Utf8)
+                    + " - "
+                    + pl.col("search_type")
+                    + " - "
+                    + pl.col("pattern").fill_null("")
+                ).alias("composite_index")
+            )
+
+            unique_index = (
+                backcheck_settings_indexed["composite_index"]
+                .unique(maintain_order=True)
+                .to_list()
+            )
+
+            selected_index = st.selectbox(
+                label="Select backcheck column to remove",
+                options=unique_index,
+                help="Select the backcheck column to remove from the list.",
+            )
+
+            if selected_index:
+                confirm_delete = st.button(
+                    label="Confirm deletion",
+                    type="primary",
+                    width="stretch",
+                )
+                if confirm_delete:
+                    updated_settings = backcheck_settings_indexed.filter(
+                        pl.col("composite_index") != selected_index
+                    ).drop("composite_index", "index")
+
+                    duckdb_save_table(
+                        project_id,
+                        updated_settings,
+                        f"backchecks_{page_name_id}",
+                        "logs",
+                    )
+
+                    st.rerun()
 
 
 def process_duplicate_data(
@@ -1799,127 +2208,82 @@ def display_column_stats(column_stats: pd.DataFrame) -> None:
 @demo_output_onboarding(TAB_NAME)
 def backchecks_report(
     project_id: str,
-    survey_data: pd.DataFrame,
-    backcheck_data: pd.DataFrame,
+    page_name_id: str,
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
     setting_file: str,
-    page_num: int,
+    config: dict,
 ) -> None:
-    """Create a backcheck report for a given survey and backcheck data.
-
-    This function orchestrates the entire backcheck report generation process
-    by coordinating settings, data processing, analysis, and display.
+    """
+    Generate and display backchecks report.
 
     Parameters
     ----------
     project_id : str
-        Project ID for the backcheck report.
-    survey_data : pd.DataFrame
-        Survey data to be used for backcheck report.
-    backcheck_data : pd.DataFrame
-        Backcheck data to be used for backcheck report.
+        Project identifier.
+    page_name_id : str
+        Page name identifier.
+    survey_data : pl.DataFrame
+        Survey data.
+    backcheck_data : pl.DataFrame
+        Backcheck data.
     setting_file : str
         Path to the settings file.
-    page_num : int
-        Page number for the backcheck report.
+    config : dict
+        Configuration dictionary.
     """
-    # Get settings and configuration
+    st.title("Backchecks Report")
+
+    # Convert Polars DataFrames to Pandas for compatibility
+    survey_data_pd = survey_data.to_pandas()
+    backcheck_data_pd = backcheck_data.to_pandas()
+
+    # Get column information for settings UI
     (
-        date,
-        enumerator,
-        backchecker,
-        survey_id,
-        survey_key,
-        backcheck_goal,
-        drop_duplicates,
-        common_cols,
-        bc_column_config_df,
-    ) = backcheck_report_settings(
-        project_id, survey_data, backcheck_data, setting_file, page_num
+        _,
+        survey_string_columns,
+        survey_numeric_columns,
+        survey_datetime_columns,
+        _,
+    ) = get_df_info(survey_data, cols_only=True)
+
+    (
+        _,
+        backcheck_string_columns,
+        backcheck_numeric_columns,
+        backcheck_datetime_columns,
+        _,
+    ) = get_df_info(backcheck_data, cols_only=True)
+
+    # Combine string and numeric columns for categorical options
+    survey_categorical_columns = list(
+        set(survey_string_columns + survey_numeric_columns)
+    )
+    backcheck_categorical_columns = list(
+        set(backcheck_string_columns + backcheck_numeric_columns)
     )
 
-    # Validate requirements
-    if not _validate_backcheck_requirements(survey_key, survey_id, backcheck_data):
-        return
+    # Configure settings
+    config_settings = BackcheckSettings(**config)
+    _settings = backchecks_report_settings(
+        project_id,
+        setting_file,
+        survey_data_pd,
+        backcheck_data_pd,
+        config_settings,
+        survey_categorical_columns,
+        survey_datetime_columns,
+        backcheck_categorical_columns,
+        backcheck_datetime_columns,
+    )
 
-    # Process duplicates if requested
-    if drop_duplicates and survey_id and date:
-        survey_data, backcheck_data = process_duplicate_data(
-            survey_data, backcheck_data, survey_id, date, drop_duplicates
+    # Outlier columns configuration
+    st.subheader("Backchecks Columns Configuration")
+    common_columns = list(
+        set(survey_categorical_columns).intersection(
+            set(backcheck_categorical_columns)
         )
-
-    # Prepare merged dataframes
-    merged_df = _prepare_merged_dataframes(
-        survey_data, backcheck_data, survey_id, enumerator, backchecker, date
     )
+    _render_backchecks_column_actions(project_id, page_name_id, common_columns)
 
-    # Get the individual survey and backcheck dataframes for overview calculations
-    survey_cols_for_merge = _get_merge_columns([survey_id], enumerator, date)
-    survey_df_bc = survey_data[survey_cols_for_merge].add_prefix("_svy_")
-    survey_df_bc.rename(columns={"_svy_" + survey_id: survey_id}, inplace=True)
 
-    backcheck_cols_for_merge = _get_merge_columns([survey_id], backchecker, date)
-    backcheck_df_bc = backcheck_data[backcheck_cols_for_merge].add_prefix("_bc_")
-    backcheck_df_bc.rename(columns={"_bc_" + survey_id: survey_id}, inplace=True)
-
-    # Generate column summaries and comparison data
-    column_category_summary, svy_bc_comparison_df = _generate_backcheck_summaries(
-        bc_column_config_df,
-        survey_data,
-        backcheck_data,
-        survey_id,
-        enumerator,
-        backchecker,
-    )
-
-    # Display overview section
-    display_overview_section(
-        survey_df_bc, backcheck_df_bc, merged_df, enumerator, backcheck_goal
-    )
-
-    # Display category error rates and trends
-    st.subheader("Backcheck category summary")
-    display_category_and_trends(
-        bc_column_config_df,
-        column_category_summary,
-        survey_data,
-        backcheck_data,
-        survey_id,
-        enumerator,
-        backchecker,
-        date,
-    )
-
-    # Display column statistics
-    st.subheader("Column Statistics")
-    display_column_stats(column_category_summary)
-
-    # Generate and display statistics
-    enumerator_statistics = _generate_enumerator_statistics(
-        bc_column_config_df,
-        survey_data,
-        backcheck_data,
-        survey_id,
-        enumerator,
-        backchecker,
-    )
-
-    backchecker_statistics = _generate_backchecker_statistics(
-        bc_column_config_df,
-        survey_data,
-        backcheck_data,
-        survey_id,
-        enumerator,
-        backchecker,
-    )
-
-    # Display statistics tables
-    st.subheader("Statistics Tables")
-    display_statistics_tables(
-        enumerator_statistics=enumerator_statistics,
-        backchecker_statistics=backchecker_statistics,
-        comparison_df=svy_bc_comparison_df,
-        enumerator=enumerator,
-        backchecker=backchecker,
-    )
-
-    st.write("")
