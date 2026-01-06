@@ -1003,6 +1003,246 @@ def _render_gps_coordinates(
     st.caption(f"Displaying {len(map_pd):,} GPS points")
 
 
+@st.fragment
+def _render_gps_outliers_checks(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    survey_key: str,
+    survey_date: str | None,
+    enumerator: str | None,
+) -> None:
+    """Render GPS outliers detection and visualization.
+
+    Allows users to:
+    - Select GPS configuration by alias
+    - Choose outlier detection method (auto or by column)
+    - Configure detection parameters
+    - View outliers on interactive map
+    - Download outliers data
+
+    Parameters
+    ----------
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page name identifier.
+    data : pl.DataFrame
+        Survey data containing GPS information.
+    survey_key : str
+        Survey key column name.
+    survey_date : str | None
+        Survey date column name.
+    enumerator : str | None
+        Enumerator column name.
+    """
+    st.subheader("GPS Outliers Detection")
+
+    # Load GPS configurations
+    gps_settings = duckdb_get_table(
+        project_id,
+        f"gps_columns_{page_name_id}",
+        "logs",
+    )
+
+    if gps_settings is None or gps_settings.is_empty():
+        st.info(
+            "No GPS configurations found. "
+            "Please add a GPS column configuration in the section above."
+        )
+        return
+
+    # Get list of aliases
+    aliases = gps_settings["alias"].to_list()
+
+    go1, go2, go3 = st.columns([0.4, 0.3, 0.3])
+
+    with go1:
+        # GPS configuration selection
+        selected_alias = st.selectbox(
+            label="Select GPS Configuration",
+            options=aliases,
+            key="outlier_gps_config",
+            help="Choose which GPS configuration to use for outlier detection.",
+        )
+
+    if not selected_alias:
+        return
+
+    # Get selected configuration
+    selected_config = gps_settings.filter(pl.col("alias") == selected_alias).to_dicts()[
+        0
+    ]
+
+    # Parse GPS data
+    parsed_data = _parse_gps_data(data, selected_config)
+
+    # Check if GPS data was successfully parsed
+    if "latitude" not in parsed_data.columns or "longitude" not in parsed_data.columns:
+        st.warning("Unable to parse GPS coordinates from the selected configuration.")
+        return
+
+    # Filter out invalid coordinates
+    parsed_data = parsed_data.filter(
+        pl.col("latitude").is_not_null() & pl.col("longitude").is_not_null()
+    )
+
+    if parsed_data.is_empty():
+        st.warning("No valid GPS coordinates found in the data.")
+        return
+
+    # Convert to pandas for outlier detection
+    df_pd = parsed_data.to_pandas()
+
+    # Get categorical columns for clustering
+    _, string_columns, _, _, _ = get_df_info(parsed_data, cols_only=True)
+
+    with go2:
+        # Detection method selection
+        detection_method = st.selectbox(
+            label="Detection Method",
+            options=["Auto-Clustering (LOF)", "Cluster by Column"],
+            key="outlier_detection_method",
+            help="Choose how to detect outliers: automatic or based on a grouping column.",
+        )
+
+    # Configure detection parameters based on method
+    if detection_method == "Auto-Clustering (LOF)":
+        # Check if we have enough data points
+        n_samples = len(df_pd)
+
+        # LOF requires at least 6 points to work properly (min_neighbors=5)
+        if n_samples < 6:
+            st.error(
+                f"❌ Not enough GPS points for Auto-Clustering. "
+                f"Found {n_samples} point(s), need at least 6. "
+                "Please try 'Cluster by Column' method or add more data."
+            )
+            return
+
+        max_neighbors = min(50, n_samples - 1)
+
+        with go3:
+            n_neighbors = st.slider(
+                label="Number of Neighbors",
+                min_value=5,
+                max_value=max_neighbors,
+                value=min(20, max_neighbors),
+                key="outlier_n_neighbors",
+                help="Number of neighbors for Local Outlier Factor algorithm.",
+            )
+
+        contamination = st.slider(
+            label="Expected Outlier Proportion",
+            min_value=0.01,
+            max_value=0.5,
+            value=0.1,
+            step=0.01,
+            key="outlier_contamination",
+            help="Expected proportion of outliers in the data.",
+        )
+
+        # Show warning if data is small
+        if n_samples < 20:
+            st.warning(
+                f"⚠ Only {n_samples} GPS points available. "
+                "LOF works best with larger datasets (recommended: 50+ points)."
+            )
+
+        # Detect outliers using LOF
+        outlier_df = detect_outliers_with_lof(
+            df_pd, "latitude", "longitude", n_neighbors, contamination
+        )
+
+    else:  # Cluster by Column
+        with go3:
+            clustering_col = st.selectbox(
+                label="Clustering Column",
+                options=[None] + string_columns,
+                key="outlier_clustering_col",
+                help="Select a column to group GPS coordinates for outlier detection.",
+            )
+
+        if not clustering_col:
+            st.info("Please select a clustering column to continue.")
+            return
+
+        # Detect outliers using clustering column
+        outlier_df = detect_outliers_with_clusters(
+            df_pd, "latitude", "longitude", clustering_col
+        )
+
+    # Calculate outlier statistics
+    num_outliers = outlier_df["Outlier"].sum()
+    total_points = len(outlier_df)
+    outlier_pct = (num_outliers / total_points * 100) if total_points > 0 else 0
+
+    # Display summary statistics
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total GPS Points", f"{total_points:,}")
+    with col2:
+        st.metric("Outliers Detected", f"{num_outliers:,}")
+    with col3:
+        st.metric("Outlier Percentage", f"{outlier_pct:.2f}%")
+
+    # Display map with outliers
+    st.subheader("Outliers Map")
+    plot_clusters_on_map(
+        outlier_df,
+        "latitude",
+        "longitude",
+        enumerator,
+        survey_date,
+        survey_key,
+        clustering_col if detection_method == "Cluster by Column" else None,
+        "Outlier",
+    )
+
+    # Display outliers data table
+    with st.expander("View Outliers Data", expanded=False):
+        # Filter to show only outliers
+        outliers_only = outlier_df[outlier_df["Outlier"]].copy()
+
+        if not outliers_only.empty:
+            # Select relevant columns
+            display_cols = []
+            if survey_key and survey_key in outliers_only.columns:
+                display_cols.append(survey_key)
+            if survey_date and survey_date in outliers_only.columns:
+                display_cols.append(survey_date)
+            if enumerator and enumerator in outliers_only.columns:
+                display_cols.append(enumerator)
+
+            display_cols.extend(["latitude", "longitude"])
+
+            if detection_method == "Cluster by Column" and clustering_col:
+                if clustering_col in outliers_only.columns:
+                    display_cols.append(clustering_col)
+                if "distance_from_centroid" in outliers_only.columns:
+                    display_cols.append("distance_from_centroid")
+
+            # Show only available columns
+            available_cols = [col for col in display_cols if col in outliers_only.columns]
+
+            st.dataframe(
+                outliers_only[available_cols],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            # Download button
+            csv = outliers_only[available_cols].to_csv(index=False)
+            st.download_button(
+                label="Download Outliers Data",
+                data=csv,
+                file_name=f"gps_outliers_{selected_alias}.csv",
+                mime="text/csv",
+            )
+        else:
+            st.success("No outliers detected!")
+
+
 # plot gps coordinates on a map
 def plot_gps_coordinates(
     df,
@@ -1160,9 +1400,20 @@ def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
 
     # Flag outliers using IQR for each group
     def flag_outliers(group):
+        # Skip outlier detection for groups with too few points
+        if len(group) < 4:
+            group["Outlier"] = False
+            return group
+
         Q1 = group["distance_from_centroid"].quantile(0.25)
         Q3 = group["distance_from_centroid"].quantile(0.75)
         IQR = Q3 - Q1
+
+        # If IQR is 0 (all points at same distance), mark none as outliers
+        if IQR == 0:
+            group["Outlier"] = False
+            return group
+
         lower_bound = Q1 - 1.5 * IQR
         upper_bound = Q3 + 1.5 * IQR
         group["Outlier"] = (group["distance_from_centroid"] < lower_bound) | (
@@ -1204,11 +1455,22 @@ def detect_outliers_with_lof(df, gps_lat_col, gps_lon_col, n_neighbors, contamin
     # Drop rows with missing latitude or longitude values
     df = df.dropna(subset=[gps_lat_col, gps_lon_col])
 
+    # Check if we have enough samples for LOF
+    n_samples = len(df)
+    if n_samples < 2:
+        # Not enough data for outlier detection
+        df["Outlier"] = False
+        return df
+
+    # Adjust n_neighbors if necessary
+    # LOF requires n_neighbors < n_samples
+    adjusted_n_neighbors = min(n_neighbors, n_samples - 1)
+
     # Convert coordinates to a numpy array
     coords = df[[gps_lat_col, gps_lon_col]].values
 
     # Apply Local Outlier Factor
-    lof = LocalOutlierFactor(n_neighbors=n_neighbors, contamination=contamination)
+    lof = LocalOutlierFactor(n_neighbors=adjusted_n_neighbors, contamination=contamination)
     df["Outlier"] = lof.fit_predict(coords) == -1  # LOF assigns -1 to outliers
 
     return df
@@ -1484,4 +1746,16 @@ def gpschecks_report(
         config_settings.survey_date,
         config_settings.enumerator,
         config_settings.team,
+    )
+
+    st.write("---")
+
+    # Render GPS outliers detection
+    _render_gps_outliers_checks(
+        project_id,
+        page_name_id,
+        data,
+        config_settings.survey_key,
+        config_settings.survey_date,
+        config_settings.enumerator,
     )
