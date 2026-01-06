@@ -1246,7 +1246,7 @@ def _render_gps_outliers_checks(
 
             st.dataframe(
                 outliers_only[available_cols],
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
 
@@ -1572,7 +1572,7 @@ def _render_gps_comparison_checks(
 
         st.dataframe(
             display_df,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
