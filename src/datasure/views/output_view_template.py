@@ -449,7 +449,7 @@ def main() -> None:
         st.stop()
 
     # Get project ID from session state
-    project_id = st.session_state.get("st_project_id")
+    project_id = st.session_state["st_project_id"]
 
     # Validate prerequisites and get check log
     check_log = validate_prerequisites(project_id)
