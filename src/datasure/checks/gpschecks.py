@@ -760,28 +760,47 @@ def _parse_gps_data(
 
         separator = " " if delimiter == DelimiterType.SPACE.value else ","
 
-        # Split GPS column and extract lat/lon
-        result_df = result_df.with_columns([
-            pl.col(gps_col)
-            .str.split(separator)
-            .list.get(0)
-            .cast(pl.Float64, strict=False)
-            .alias("latitude"),
-            pl.col(gps_col)
-            .str.split(separator)
-            .list.get(1)
-            .cast(pl.Float64, strict=False)
-            .alias("longitude"),
-        ])
+        # Check if column exists
+        if gps_col not in result_df.columns:
+            # Return empty lat/lon columns if GPS column doesn't exist
+            result_df = result_df.with_columns([
+                pl.lit(None).cast(pl.Float64).alias("latitude"),
+                pl.lit(None).cast(pl.Float64).alias("longitude"),
+            ])
+        else:
+            # Convert to string first (in case column is numeric or other type)
+            # Then split GPS column and extract lat/lon
+            result_df = result_df.with_columns([
+                pl.col(gps_col)
+                .cast(pl.Utf8, strict=False)
+                .str.split(separator)
+                .list.get(0)
+                .cast(pl.Float64, strict=False)
+                .alias("latitude"),
+                pl.col(gps_col)
+                .cast(pl.Utf8, strict=False)
+                .str.split(separator)
+                .list.get(1)
+                .cast(pl.Float64, strict=False)
+                .alias("longitude"),
+            ])
     else:
         # Separate columns format
         lat_col = gps_config["latitude_column"]
         lon_col = gps_config["longitude_column"]
 
-        result_df = result_df.with_columns([
-            pl.col(lat_col).cast(pl.Float64, strict=False).alias("latitude"),
-            pl.col(lon_col).cast(pl.Float64, strict=False).alias("longitude"),
-        ])
+        # Check if columns exist
+        if lat_col not in result_df.columns or lon_col not in result_df.columns:
+            # Return empty lat/lon columns if either column doesn't exist
+            result_df = result_df.with_columns([
+                pl.lit(None).cast(pl.Float64).alias("latitude"),
+                pl.lit(None).cast(pl.Float64).alias("longitude"),
+            ])
+        else:
+            result_df = result_df.with_columns([
+                pl.col(lat_col).cast(pl.Float64, strict=False).alias("latitude"),
+                pl.col(lon_col).cast(pl.Float64, strict=False).alias("longitude"),
+            ])
 
     return result_df
 
@@ -1241,6 +1260,330 @@ def _render_gps_outliers_checks(
             )
         else:
             st.success("No outliers detected!")
+
+
+@st.fragment
+def _render_gps_comparison_checks(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    survey_key: str,
+    survey_date: str | None,
+    enumerator: str | None,
+) -> None:
+    """Render GPS comparison checks between two GPS configurations.
+
+    Allows users to:
+    - Select two GPS configurations to compare
+    - Set a distance threshold for flagging discrepancies
+    - View flagged points on interactive map
+    - Download comparison results
+
+    Parameters
+    ----------
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page name identifier.
+    data : pl.DataFrame
+        Survey data containing GPS information.
+    survey_key : str
+        Survey key column name.
+    survey_date : str | None
+        Survey date column name.
+    enumerator : str | None
+        Enumerator column name.
+    """
+    st.subheader("GPS Coordinates Comparison")
+    st.caption(
+        "Compare GPS coordinates from two different sources and flag discrepancies "
+        "that exceed a specified distance threshold."
+    )
+
+    # Load GPS configurations
+    gps_settings = duckdb_get_table(
+        project_id,
+        f"gps_columns_{page_name_id}",
+        "logs",
+    )
+
+    if gps_settings is None or gps_settings.is_empty():
+        st.info(
+            "No GPS configurations found. "
+            "Please add at least two GPS column configurations in the section above."
+        )
+        return
+
+    # Get list of aliases
+    aliases = gps_settings["alias"].to_list()
+
+    if len(aliases) < 2:
+        st.warning(
+            "⚠ Need at least 2 GPS configurations to compare. "
+            f"Currently have {len(aliases)} configuration(s). "
+            "Please add more GPS column configurations above."
+        )
+        return
+
+    gc1, gc2, gc3 = st.columns([0.3, 0.3, 0.4])
+
+    with gc1:
+        # First GPS configuration selection
+        gps_config_1 = st.selectbox(
+            label="First GPS Configuration",
+            options=aliases,
+            key="comparison_gps_config_1",
+            help="Select the first GPS configuration to compare.",
+        )
+
+    with gc2:
+        # Second GPS configuration selection
+        # Filter out the first selection from options
+        remaining_aliases = [a for a in aliases if a != gps_config_1]
+        gps_config_2 = st.selectbox(
+            label="Second GPS Configuration",
+            options=remaining_aliases,
+            key="comparison_gps_config_2",
+            help="Select the second GPS configuration to compare.",
+        )
+
+    if not gps_config_1 or not gps_config_2:
+        return
+
+    with gc3:
+        # Distance threshold in meters
+        distance_threshold = st.number_input(
+            label="Distance Threshold (meters)",
+            min_value=1,
+            max_value=100000,
+            value=100,
+            step=10,
+            key="comparison_distance_threshold",
+            help="Flag GPS points where the distance between the two configurations exceeds this threshold.",
+        )
+
+    # Get configurations
+    config_1 = gps_settings.filter(pl.col("alias") == gps_config_1).to_dicts()[0]
+    config_2 = gps_settings.filter(pl.col("alias") == gps_config_2).to_dicts()[0]
+
+    # Parse GPS data from both configurations
+    parsed_data_1 = _parse_gps_data(data, config_1)
+    parsed_data_2 = _parse_gps_data(data, config_2)
+
+    # Check if GPS data was successfully parsed
+    if "latitude" not in parsed_data_1.columns or "longitude" not in parsed_data_1.columns:
+        st.warning(f"Unable to parse GPS coordinates from '{gps_config_1}'.")
+        return
+
+    if "latitude" not in parsed_data_2.columns or "longitude" not in parsed_data_2.columns:
+        st.warning(f"Unable to parse GPS coordinates from '{gps_config_2}'.")
+        return
+
+    # Rename columns to distinguish between the two GPS sources
+    parsed_data_1 = parsed_data_1.rename({
+        "latitude": "lat_1",
+        "longitude": "lon_1"
+    })
+    parsed_data_2 = parsed_data_2.rename({
+        "latitude": "lat_2",
+        "longitude": "lon_2"
+    })
+
+    # Merge the two datasets based on survey key
+    if survey_key and survey_key in parsed_data_1.columns and survey_key in parsed_data_2.columns:
+        comparison_data = parsed_data_1.join(
+            parsed_data_2.select([survey_key, "lat_2", "lon_2"]),
+            on=survey_key,
+            how="inner"
+        )
+    else:
+        st.error("Survey key is required to match GPS coordinates between the two configurations.")
+        return
+
+    # Filter out rows with missing coordinates
+    comparison_data = comparison_data.filter(
+        pl.col("lat_1").is_not_null() &
+        pl.col("lon_1").is_not_null() &
+        pl.col("lat_2").is_not_null() &
+        pl.col("lon_2").is_not_null()
+    )
+
+    if comparison_data.is_empty():
+        st.warning("No matching GPS coordinates found between the two configurations.")
+        return
+
+    # Convert to pandas for distance calculation
+    comparison_df = comparison_data.to_pandas()
+
+    # Calculate distance between the two GPS points
+    def calculate_distance(row):
+        try:
+            return geodesic(
+                (row["lat_1"], row["lon_1"]),
+                (row["lat_2"], row["lon_2"])
+            ).meters
+        except Exception:
+            return None
+
+    comparison_df["distance_meters"] = comparison_df.apply(calculate_distance, axis=1)
+
+    # Remove rows where distance couldn't be calculated
+    comparison_df = comparison_df.dropna(subset=["distance_meters"])
+
+    if comparison_df.empty:
+        st.warning("Unable to calculate distances between GPS coordinates.")
+        return
+
+    # Flag points exceeding threshold
+    comparison_df["exceeds_threshold"] = comparison_df["distance_meters"] > distance_threshold
+
+    # Calculate statistics
+    total_points = len(comparison_df)
+    flagged_points = comparison_df["exceeds_threshold"].sum()
+    flagged_pct = (flagged_points / total_points * 100) if total_points > 0 else 0
+    avg_distance = comparison_df["distance_meters"].mean()
+    max_distance = comparison_df["distance_meters"].max()
+
+    # Display summary statistics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Comparisons", f"{total_points:,}")
+    with col2:
+        st.metric("Flagged Points", f"{flagged_points:,}")
+    with col3:
+        st.metric("Average Distance", f"{avg_distance:.1f} m")
+    with col4:
+        st.metric("Max Distance", f"{max_distance:.1f} m")
+
+    if flagged_pct > 0:
+        st.warning(f"⚠ {flagged_pct:.1f}% of GPS points exceed the {distance_threshold}m threshold")
+    else:
+        st.success(f"✓ All GPS points are within {distance_threshold}m of each other")
+
+    # Display comparison map
+    st.subheader("Comparison Map")
+
+    # Prepare data for map visualization
+    # We'll show the first GPS point and color by whether it exceeds threshold
+    map_df = comparison_df.copy()
+    map_df["lat"] = map_df["lat_1"]
+    map_df["lon"] = map_df["lon_1"]
+    map_df["status"] = map_df["exceeds_threshold"].map({
+        True: "Exceeds Threshold",
+        False: "Within Threshold"
+    })
+
+    # Build tooltip fields
+    tooltip_fields = []
+    if survey_key and survey_key in map_df.columns:
+        tooltip_fields.append(survey_key)
+    if survey_date and survey_date in map_df.columns:
+        tooltip_fields.append(survey_date)
+    if enumerator and enumerator in map_df.columns:
+        tooltip_fields.append(enumerator)
+    tooltip_fields.extend(["lat", "lon", "distance_meters", "status"])
+
+    # Create tooltip configuration
+    tooltip_config = {
+        "html": "<br>".join([f"<b>{field}:</b> {{{field}}}" for field in tooltip_fields]),
+        "style": {"backgroundColor": "steelblue", "color": "white"},
+    }
+
+    # Calculate center coordinates
+    center_lat = map_df["lat"].mean()
+    center_lon = map_df["lon"].mean()
+
+    # Color points based on threshold
+    map_df["color"] = map_df["exceeds_threshold"].apply(
+        lambda x: [255, 0, 0, 160] if x else [0, 255, 0, 160]
+    )
+
+    # Create pydeck layer
+    layer = pydeck.Layer(
+        "ScatterplotLayer",
+        data=map_df,
+        get_position=["lon", "lat"],
+        get_radius=100,
+        get_fill_color="color",
+        pickable=True,
+        auto_highlight=True,
+    )
+
+    # Set initial view state
+    view_state = pydeck.ViewState(
+        latitude=center_lat,
+        longitude=center_lon,
+        zoom=10,
+        pitch=0,
+    )
+
+    # Get Mapbox API key
+    mapbox_key = pydeck.settings.mapbox_key
+    if not mapbox_key:
+        if "mapbox_custom_key" in st.secrets:
+            mapbox_key = st.secrets["mapbox_custom_key"]
+        elif "default_mapbox_api_key" in st.secrets:
+            mapbox_key = st.secrets["default_mapbox_api_key"]
+
+    # Create deck
+    deck = pydeck.Deck(
+        layers=[layer],
+        initial_view_state=view_state,
+        tooltip=tooltip_config,
+        map_style="mapbox://styles/mapbox/light-v9",
+        api_keys={"mapbox": mapbox_key} if mapbox_key else None,
+    )
+
+    # Display the map
+    st.pydeck_chart(deck, height=600, width="stretch")
+
+    # Display comparison data table
+    with st.expander("View Comparison Details", expanded=False):
+        # Select relevant columns
+        display_cols = []
+        if survey_key and survey_key in comparison_df.columns:
+            display_cols.append(survey_key)
+        if survey_date and survey_date in comparison_df.columns:
+            display_cols.append(survey_date)
+        if enumerator and enumerator in comparison_df.columns:
+            display_cols.append(enumerator)
+
+        display_cols.extend([
+            "lat_1", "lon_1", "lat_2", "lon_2",
+            "distance_meters", "exceeds_threshold"
+        ])
+
+        # Show only available columns
+        available_cols = [col for col in display_cols if col in comparison_df.columns]
+
+        # Rename columns for better readability
+        display_df = comparison_df[available_cols].copy()
+        display_df = display_df.rename(columns={
+            "lat_1": f"{gps_config_1}_lat",
+            "lon_1": f"{gps_config_1}_lon",
+            "lat_2": f"{gps_config_2}_lat",
+            "lon_2": f"{gps_config_2}_lon",
+            "distance_meters": "Distance (m)",
+            "exceeds_threshold": "Flagged"
+        })
+
+        # Sort by distance descending to show largest discrepancies first
+        display_df = display_df.sort_values("Distance (m)", ascending=False)
+
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        # Download button
+        csv = display_df.to_csv(index=False)
+        st.download_button(
+            label="Download Comparison Data",
+            data=csv,
+            file_name=f"gps_comparison_{gps_config_1}_vs_{gps_config_2}.csv",
+            mime="text/csv",
+        )
 
 
 # plot gps coordinates on a map
@@ -1752,6 +2095,18 @@ def gpschecks_report(
 
     # Render GPS outliers detection
     _render_gps_outliers_checks(
+        project_id,
+        page_name_id,
+        data,
+        config_settings.survey_key,
+        config_settings.survey_date,
+        config_settings.enumerator,
+    )
+
+    st.write("---")
+
+    # Render GPS comparison checks
+    _render_gps_comparison_checks(
         project_id,
         page_name_id,
         data,
