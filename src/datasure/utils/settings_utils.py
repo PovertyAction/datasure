@@ -7,7 +7,6 @@ from pathlib import Path
 
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
-from requests import session
 
 from datasure.utils.config_utils import ConfigurationService
 

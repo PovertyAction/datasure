@@ -7,6 +7,7 @@ import pandas as pd
 import plotly.express as px
 import polars as pl
 import streamlit as st
+from matplotlib import rc
 from pydantic import BaseModel, Field
 
 from datasure.utils import duckdb_get_table, duckdb_save_table
@@ -49,7 +50,26 @@ class BackcheckSettings(BaseModel):
     enumerator: str | None = Field(None, description="Column containing enumerator")
     backchecker: str | None = Field(None, description="Column containing back checker")
     backcheck_target_percent: int = Field(10, description="Target percentage of backchecks")
-    drop_duplicates: bool = Field(True, description="Drop duplicate entries")
+    drop_duplicates_option: str = Field("drop", description="How to handle duplicate entries")
+    no_differences_list: list[str] | None = Field(
+        None,
+        description="List of values that will not be marked as differences",
+    )
+    exclude_values_list: list[str] | None = Field(
+        None,
+        description="List of values to be excluded from backcheck comparisons",
+    )
+    nosymbols_option: bool = Field(
+        False, description="Ignore symbols option for string comparison"
+    )
+
+
+class StrCompareOptions(BaseModel):
+    """String comparison settings for backchecks."""
+
+    case_option: str = Field("none", description="Case sensitivity option")
+    trimspaces_option: bool = Field(False, description="Trim spaces option")
+    nosymbols_option: bool = Field(False, description="Ignore symbols option")
 
 
 @st.cache_data(ttl=60)
@@ -144,13 +164,18 @@ def expand_col_names(
 # =============================================================================
 
 
-def _get_ok_range_value(ok_range_type: str) -> str:
+def _get_ok_range_value(ok_range_type: str) -> list[int | float | None]:
     """Get the OK range value based on the selected type."""
-    if ok_range_type == "absolute value":
-        absolute_ok_range = st.number_input(
-            label="Absolute Value", min_value=0, help="Enter the absolute value"
+    if ok_range_type == "absolute":
+        okr1, okr2 = st.columns(2)
+        okr_neg = okr1.number_input(
+            "Negative Range Value", min_value=0, help="Enter the negative range value"
         )
-        return f"{absolute_ok_range}"
+        okr_pos = okr2.number_input(
+            "Positive Range Value", min_value=0, help="Enter the positive range value"
+        )
+        return [-okr_neg, okr_pos]
+
     elif ok_range_type == "percentage":
         ok_range_percentage = st.number_input(
             "Percentage", min_value=0, help="Enter a percentage value"
@@ -855,27 +880,57 @@ def backchecks_report_settings(
         with st.container(border=True):
             st.subheader("Additional Options")
 
-            ao1, _, _ = st.columns(3)
-
-            with ao1:
+            with st.container(border=True):
+                st.markdown("##### Duplicate Handling")
                 st.write("How would you like to handle duplicates?")
-                default_drop_duplicates = default_settings.drop_duplicates
-                drop_duplicates = st.toggle(
-                    label="Drop duplicates",
-                    value=default_drop_duplicates,
-                    key="drop_duplicates_backchecks",
-                    help="Drop duplicate survey entries (keeps most recent by date)",
+                default_drop_duplicates = default_settings.drop_duplicates_option
+                options_map = {"drop": ":material/remove_selection: Drop All Entries", "first": ":material/first_page: Keep First Entry", "last": ":material/last_page: Keep Last Entry"}
+                drop_duplicates_option = st.pills(
+                    "Select an option for handling duplicates",
+                    options=list(options_map.keys()),
+                    format_func=lambda x: options_map[x],
+                    key="drop_duplicates_option_backchecks",
+                    default=default_drop_duplicates,
                     on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_drop_duplicates"},
+                    kwargs={"state_name": TAB_NAME + "_drop_duplicates_option"},
                 )
                 save_check_settings(
-                    settings_file, TAB_NAME, {"drop_duplicates": drop_duplicates}
+                    settings_file, TAB_NAME, {"drop_duplicates_option": drop_duplicates_option}
                 )
 
-                if drop_duplicates and (not survey_date or not survey_id):
-                    st.info(
-                        "Please select date and survey id columns to drop duplicates correctly."
-                    )
+            with st.container(border=True):
+                st.markdown("##### No differences Settings")
+                st.write("Settings for entries values in backchecks that will not be marked as differences.")
+                no_diff_values = _render_no_differences_settings(settings_file)
+
+                if no_diff_values:
+                    st.info("The following values will not be marked as differences:")
+                    # save into a dataframe for better display
+                    no_diff_df = pl.DataFrame({"Values": no_diff_values})
+                    # configure column to be displayed as a list without index
+                    dc1, _ = st.columns([1, 3])
+                    dc1.dataframe(no_diff_df, hide_index=True, column_config={"Values": st.column_config.ListColumn("Values", help="Values that will not be marked as differences", width="content")})
+                else:
+                    st.warning("No values configured to be excluded from differences.")
+
+            with st.container(border=True):
+                st.markdown("##### Exclude Value Settings")
+                st.write("Settings for entries values in backchecks that will be excluded from backcheck comparisons.")
+                exclude_values = _render_exclude_values_settings(settings_file)
+                if exclude_values:
+                    st.info("The following values will be excluded from backcheck comparisons:")
+                    # save into a dataframe for better display
+                    exclude_df = pl.DataFrame({"Values": exclude_values})
+                    # configure column to be displayed as a list without index
+                    dr1, _ = st.columns([1, 3])
+                    dr1.dataframe(exclude_df, hide_index=True, column_config={"Values": st.column_config.ListColumn("Values", help="Values that will be excluded from backcheck comparisons", width="content")})
+                else:
+                    st.warning("No values configured to be excluded from backcheck comparisons.")
+
+            with st.container(border=True):
+                st.markdown("##### String Comparison Settings")
+                st.write("Settings for string comparison in backcheck comparisons.")
+                string_comp_options: StrCompareOptions = _render_string_comparison_options(settings_file)
 
     return BackcheckSettings(
         survey_key=survey_key,
@@ -885,7 +940,12 @@ def backchecks_report_settings(
         enumerator=enumerator,
         backchecker=backchecker,
         backcheck_goal=backcheck_goal,
-        drop_duplicates=drop_duplicates,
+        drop_duplicates=drop_duplicates_option,
+        no_differences_list=no_diff_values,
+        exclude_values_list=exclude_values,
+        case_option=string_comp_options.case_option,
+        trimspaces_option=string_comp_options.trimspaces_option,
+        nosymbols_option=string_comp_options.nosymbols_option,
     )
 
 
@@ -955,12 +1015,18 @@ def _render_backcheck_category_options() -> int:
     int
         Selected category (1, 2, or 3).
     """
-    category = st.selectbox(
-        label="Backcheck Category",
-        options=[1, 2, 3],
-        index=0,
-        help="Select the backcheck category for these columns (1 = critical, 2 = important, 3 = optional).",
-    )
+    with st.container(border=True):
+        st.markdown("##### Backcheck Category Selection")
+        options_map = {1: ":material/looks_one: Category 1", 2: ":material/looks_two: Category 2", 3: ":material/looks_3: Category 3"}
+
+        category = st.pills(
+            "Select Backcheck Category",
+            options=options_map.keys(),
+            format_func=lambda x: options_map[x],
+            selection_mode="single",
+            default=None,
+            help="Select the backcheck category for the column(s).",
+        )
     return category
 
 
@@ -972,14 +1038,20 @@ def _render_ok_range_options() -> tuple[str, str]:
     tuple[str, str]
         OK range type and OK range value.
     """
-    ok_range_type = st.selectbox(
-        label="OK Range Type",
-        options=["None", "absolute value", "range", "percentage"],
-        index=0,
-        help="Select the type of acceptable range for numeric differences.",
-    )
-    ok_range_value = _get_ok_range_value(ok_range_type)
-    return ok_range_type, ok_range_value
+    with st.container(border=True):
+        st.markdown("##### OK Range Selection")
+        options_map = {"number": "material/123: Absolute Value", "range": ":material/arrow_range: Range", "percentage": ":material/percent: Percentage"}
+        ok_range_type = st.pills(
+            "Select OK Range Type",
+            options=options_map.keys(),
+            format_func=lambda x: options_map[x],
+            selection_mode="single",
+            default="number",
+            help="Select the type of OK range condition for the column(s).",
+            key="ok_range_type_backchecks_pills",
+        )
+        ok_range_value = _get_ok_range_value(ok_range_type)
+        return ok_range_type, ok_range_value
 
 
 def _render_comparison_condition_options() -> tuple[str, str]:
@@ -1004,9 +1076,214 @@ def _render_comparison_condition_options() -> tuple[str, str]:
     comparison_condition_value = _get_comparison_condition(comparison_condition_type)
     return comparison_condition_type, comparison_condition_value
 
+@st.fragment
+def _render_no_differences_settings(settings_file: str) -> list:
+    """Render UI for managing values that won't be considered as discrepancies.
+
+    This function allows users to add or remove values from a list. Values in this
+    list will not be marked as differences during backcheck comparison, regardless
+    of whether they appear in the survey or backcheck data.
+
+    Parameters
+    ----------
+    settings_file : str
+        Path to the settings file.
+    tab_name : str
+        Name of the tab/check (used as key in settings).
+    """
+    saved_settings = load_check_settings(settings_file, TAB_NAME)
+    updated_values = saved_settings.get("no_differences_values", [])
+    ac_col, rc_col, _ = st.columns([0.4, 0.3, 0.3])
+    with ac_col, st.popover("Add Value", type="primary", width="stretch"):
+        new_value = st.text_input(
+            "Enter value to exclude from differences",
+            key="new_no_diff_value_input",
+            help="Enter the value to be excluded from difference checks.",
+        )
+        # validate input and add to list
+        if st.button(
+            "Add Value",
+            key="add_no_diff_value",
+            help="Add the value to the no-differences list.",
+            width="stretch",
+            disabled=not new_value,
+            type="primary",
+            on_click=trigger_save,
+            kwargs={"state_name": TAB_NAME + "_no_differences_values"},
+        ):
+            saved_settings = load_check_settings(settings_file, TAB_NAME)
+            no_diff_values = saved_settings.get("no_differences_values", [])
+            updated_values = no_diff_values.append(new_value) if no_diff_values else [new_value]
+            save_check_settings(
+                settings_file,
+                TAB_NAME,
+                {"no_differences_values": updated_values},
+            )
+            st.rerun()
+
+    with rc_col, st.popover("Remove Value", width="stretch"):
+        saved_settings = load_check_settings(settings_file, TAB_NAME)
+        no_diff_values = saved_settings.get("no_differences_values", [])
+        if not no_diff_values:
+            st.info("No values to remove.")
+        value_to_remove = st.selectbox(
+            "Select value to remove from no-differences list",
+            options=no_diff_values,
+            key="remove_no_diff_value_select",
+            help="Select the value to remove from the no-differences list.",
+            disabled=not no_diff_values,
+        )
+        if st.button(
+            "Remove Value",
+            key="remove_no_diff_value",
+            help="Remove the selected value from the no-differences list.",
+            width="stretch",
+            type="primary",
+            on_click=trigger_save,
+            kwargs={"state_name": TAB_NAME + "_no_differences_value"},
+        ):
+            updated_values = no_diff_values.remove(value_to_remove)
+            save_check_settings(
+                settings_file,
+                TAB_NAME,
+                {"no_differences_values": updated_values},
+            )
+            st.rerun()
+
+    return updated_values
+
+@st.fragment
+def _render_string_comparison_options(settings_file) -> StrCompareOptions:
+    """Render string comparison options UI.
+
+    Returns
+    -------
+    StrCompareOptions
+        Selected string comparison options.
+    """
+    st.markdown("##### String Comparison Options")
+    sok1, sok2, sok3 = st.columns(3)
+    default_settings = load_check_settings(settings_file, TAB_NAME)
+    default_case_setting = default_settings.get("string_case_option", None)
+    options_map = {"lowercase": ":material/lowercase: lowercase", "uppercase": ":material/uppercase: UPPERCASE"}
+    with sok1, st.container(border=True):
+        string_case_option = st.pills(
+            "Convert String Case Before Comparison",
+            options=options_map.keys(),
+            format_func=lambda x: options_map[x],
+            default=default_case_setting,
+            key="string_case_option_backchecks_pills",
+            help="Select how to handle case sensitivity in string comparisons.",
+            selection_mode="single",
+            on_change=trigger_save,
+            kwargs={"state_name": TAB_NAME + "_string_case_option"},
+        )
+        save_check_settings(settings_file, TAB_NAME, {"string_case_option": string_case_option})
+
+    with sok2, st.container(border=True):
+        default_nosymbols_setting = default_settings.get("string_nosymbols_option", False)
+        string_nosymbols_option = st.toggle(
+            label="Ignore Symbols in String Comparison",
+            value=default_nosymbols_setting,
+            key="string_nosymbols_option_backchecks_toggle",
+            help="Toggle to ignore symbols when comparing string values.",
+            on_change=trigger_save,
+            kwargs={"state_name": TAB_NAME + "_string_nosymbols_option"},
+        )
+        save_check_settings(settings_file, TAB_NAME, {"string_nosymbols_option": string_nosymbols_option})
+
+    with sok3, st.container(border=True):
+        default_trimspaces_setting = default_settings.get("string_trimspaces_option", False)
+        string_trimspaces_option = st.toggle(
+            label="Trim Spaces in String Comparison",
+            value=default_trimspaces_setting,
+            key="string_trimspaces_option_backchecks_toggle",
+            help="Toggle to trim leading and trailing spaces when comparing string values.",
+            on_change=trigger_save,
+            kwargs={"state_name": TAB_NAME + "_string_trimspaces_option"},
+        )
+        save_check_settings(
+            settings_file,
+            TAB_NAME,
+            {"string_trimspaces_option": string_trimspaces_option}
+        )
+
+    return StrCompareOptions(
+        case_option=string_case_option,
+        nosymbol_option=string_nosymbols_option,
+        whitespace_option=string_trimspaces_option,
+    )
+
+@st.fragment
+def _render_exclude_values_settings(
+    settings_file: str
+) -> list:
+    """Render UI for managing values to exclude from backcheck comparison."""
+    ac_col, rc_col, _ = st.columns([0.4, 0.3, 0.3])
+    with ac_col, st.popover("Add Exclude Value", type="primary", width="stretch"):
+        new_value = st.text_input(
+            "Enter value to exclude from backcheck comparison",
+            key="new_exclude_value_input",
+            help="Enter the value to be excluded from backcheck comparison.",
+        )
+        # validate input and add to list
+        saved_settings = load_check_settings(settings_file, TAB_NAME)
+        exclude_values = saved_settings.get("exclude_values", [])
+        updated_values = exclude_values
+        if st.button(
+            "Add Exclude Value",
+            key="add_exclude_value",
+            help="Add the value to the exclude list.",
+            width="stretch",
+            disabled=not new_value,
+            type="primary",
+            on_click=trigger_save,
+            kwargs={"state_name": TAB_NAME + "_exclude_values"},
+        ):
+            saved_settings = load_check_settings(settings_file, TAB_NAME)
+            exclude_values = saved_settings.get("exclude_values", [])
+            updated_values = exclude_values.append(new_value) if exclude_values else [new_value]
+            save_check_settings(
+                settings_file,
+                TAB_NAME,
+                {"exclude_values": updated_values},
+            )
+            st.rerun()
+
+    with rc_col, st.popover("Remove Exclude Value", width="stretch"):
+        if not exclude_values:
+            st.info("No values to remove.")
+        value_to_remove = st.selectbox(
+            "Select value to remove from exclude list",
+            options=exclude_values,
+            key="remove_exclude_value_select",
+            help="Select the value to remove from the exclude list.",
+            disabled=not exclude_values,
+        )
+        if st.button(
+            "Remove Exclude Value",
+            key="remove_exclude_value",
+            help="Remove the selected value from the exclude list.",
+            width="stretch",
+            type="primary",
+            on_click=trigger_save,
+            kwargs={"state_name": TAB_NAME + "_exclude_values"},
+        ):
+            saved_settings = load_check_settings(settings_file, TAB_NAME)
+            exclude_values = saved_settings.get("exclude_values", [])
+            if value_to_remove in exclude_values:
+                updated_values = exclude_values.remove(value_to_remove)
+                save_check_settings(
+                    settings_file,
+                    TAB_NAME,
+                    {"exclude_values": updated_values},
+                )
+                st.rerun()
+
+    return updated_values
 
 def _render_backchecks_column_actions(
-    project_id: str, page_name_id: str, common_columns: list[str]
+    project_id: str, page_name_id: str, survey_data, backcheck_data, common_columns: list[str]
 ) -> None:
     """Render the backcheck column configuration UI.
 
@@ -1037,6 +1314,8 @@ def _render_backchecks_column_actions(
             args=(
                 project_id,
                 page_name_id,
+                survey_data,
+                backcheck_data,
                 common_columns,
             ),
         )
@@ -1052,9 +1331,9 @@ def _render_backchecks_column_actions(
         _render_backcheck_settings_table(backcheck_settings)
 
 
-@st.dialog("Add Backcheck Column(s)", width="large")
+@st.dialog("Add Backcheck Column(s)", width="medium")
 def _add_backcheck_column(
-    project_id: str, page_name_id: str, common_columns: list[str]
+    project_id: str, page_name_id: str, survey_data: pl.DataFrame, backcheck_data: pl.DataFrame, common_columns: list[str]
 ) -> None:
     """Dialog to add a new backcheck column configuration.
 
@@ -1077,6 +1356,22 @@ def _add_backcheck_column(
         category = _render_backcheck_category_options()
 
         # Render OK range options
+        # check if category requires ok range ie. it is numeric in both datasets
+        cols_numeric_in_survey = all(
+            pl.col(col).dtype.is_numeric().all()
+            for col in backcheck_cols
+            if col in survey_data.columns
+        )
+
+        cols_numeric_in_backcheck = all(
+            pl.col(col).dtype.is_numeric().all()
+            for col in backcheck_cols
+            if col in backcheck_data.columns
+        )
+
+        if cols_numeric_in_survey and cols_numeric_in_backcheck:
+            ok_range_type, ok_range_value = _render_ok_range_options()
+
         ok_range_type, ok_range_value = _render_ok_range_options()
 
         # Render comparison condition options
@@ -2284,6 +2579,6 @@ def backchecks_report(
             set(backcheck_categorical_columns)
         )
     )
-    _render_backchecks_column_actions(project_id, page_name_id, common_columns)
+    _render_backchecks_column_actions(project_id, page_name_id, survey_data, backcheck_data, common_columns)
 
 
