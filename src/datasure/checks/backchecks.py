@@ -1,7 +1,6 @@
 import re
 from contextlib import suppress
 from enum import Enum
-from turtle import back
 from typing import Any, Literal
 
 import pandas as pd
@@ -1616,6 +1615,7 @@ def compute_backcheck_analysis(
     pl.DataFrame
         Comparison results with columns:
         - survey_key: Survey identifier
+        - survey_key__BCCL: Backcheck identifier
         - column_name: Name of compared column
         - survey_value: Value from survey
         - backcheck_value: Value from backcheck
@@ -1640,13 +1640,38 @@ def compute_backcheck_analysis(
         return pl.DataFrame()
 
     survey_id = backcheck_settings.survey_id
-    if not survey_id or survey_id not in survey_data.columns:
+    if not survey_id or survey_id not in survey_data.columns or survey_id not in backcheck_data.columns:
         return pl.DataFrame()
+
+    # Handle duplicates according to settings
+    drop_duplicates_option = backcheck_settings.drop_duplicates_option
+
+    # Prepare survey data for merge
+    survey_for_merge = survey_data.clone()
+    if drop_duplicates_option == "first":
+        survey_for_merge = survey_for_merge.unique(subset=[survey_id], keep="first")
+    elif drop_duplicates_option == "last":
+        survey_for_merge = survey_for_merge.unique(subset=[survey_id], keep="last")
+    elif drop_duplicates_option == "drop":
+        # Keep only non-duplicate rows
+        duplicates = survey_for_merge.group_by(survey_id).len().filter(pl.col("len") > 1)[survey_id]
+        survey_for_merge = survey_for_merge.filter(~pl.col(survey_id).is_in(duplicates))
+
+    # Prepare backcheck data for merge
+    backcheck_for_merge = backcheck_data.clone()
+    if drop_duplicates_option == "first":
+        backcheck_for_merge = backcheck_for_merge.unique(subset=[survey_id], keep="first")
+    elif drop_duplicates_option == "last":
+        backcheck_for_merge = backcheck_for_merge.unique(subset=[survey_id], keep="last")
+    elif drop_duplicates_option == "drop":
+        # Keep only non-duplicate rows
+        duplicates = backcheck_for_merge.group_by(survey_id).len().filter(pl.col("len") > 1)[survey_id]
+        backcheck_for_merge = backcheck_for_merge.filter(~pl.col(survey_id).is_in(duplicates))
 
     # Merge datasets on survey id. Inner join to keep only matched records and label
     # backcheck columns with suffix __BCCL
-    merged_data = survey_data.join(
-        backcheck_data,
+    merged_data = survey_for_merge.join(
+        backcheck_for_merge,
         on=survey_id,
         how="inner",
         suffix="__BCCL",
@@ -1798,14 +1823,23 @@ def _compare_column_values(
     pl.DataFrame
         Comparison results for this column.
     """
-    # Start with survey key and column values
-    result = data.select([
+    # Start with survey key, backcheck key, and column values
+    # Backcheck key will have __BCCL suffix from the join
+    backcheck_key = f"{survey_key}__BCCL"
+
+    select_cols = [
         pl.col(survey_key),
         pl.lit(survey_col).alias("column_name"),
         pl.col(survey_col).alias("survey_value"),
         pl.col(backcheck_col).alias("backcheck_value"),
         pl.lit(category).alias("category"),
-    ])
+    ]
+
+    # Include backcheck key if it exists in the data
+    if backcheck_key in data.columns:
+        select_cols.insert(1, pl.col(backcheck_key))
+
+    result = data.select(select_cols)
 
     # Convert to string for comparison if needed
     survey_vals = result["survey_value"].cast(pl.Utf8)
@@ -2283,6 +2317,349 @@ def _render_backchecker_productivity_table(
     })
 
     st.dataframe(productivity_df, hide_index=True, use_container_width=True, column_config=column_config)
+
+
+def compute_enumerator_backchecker_stats(
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
+    backcheck_analysis: pl.DataFrame,
+    backcheck_settings: BackcheckSettings,
+    staff_type: str = "enumerator",
+) -> pl.DataFrame:
+    """Compute error rate statistics for enumerators or backcheckers.
+
+    Parameters
+    ----------
+    survey_data : pl.DataFrame
+        Survey dataset.
+    backcheck_data : pl.DataFrame
+        Backcheck dataset.
+    backcheck_analysis : pl.DataFrame
+        Results from compute_backcheck_analysis.
+    backcheck_settings : BackcheckSettings
+        Backcheck settings.
+    staff_type : str
+        Either "enumerator" or "backchecker".
+
+    Returns
+    -------
+    pl.DataFrame
+        Statistics DataFrame with error rates by category.
+    """
+    if backcheck_analysis.is_empty():
+        return pl.DataFrame()
+
+    survey_key = backcheck_settings.survey_key
+    if not survey_key:
+        return pl.DataFrame()
+
+    survey_id = backcheck_settings.survey_id
+    if not survey_id:
+        return pl.DataFrame()
+
+    # Get staff column name and join key
+    if staff_type == "enumerator":
+        staff_col = backcheck_settings.enumerator
+        data_source = survey_data
+        join_key = survey_key  # Enumerators join on survey_key
+    else:  # backchecker
+        staff_col = backcheck_settings.backchecker
+        data_source = backcheck_data
+        join_key = f"{survey_key}__BCCL"  # Backcheckers join on backcheck key
+
+    if not staff_col or staff_col not in data_source.columns:
+        return pl.DataFrame()
+
+    # Check if join key exists in analysis
+    if join_key not in backcheck_analysis.columns:
+        return pl.DataFrame()
+
+    # Get date columns
+    survey_date = backcheck_settings.survey_date
+    backcheck_date = backcheck_settings.backcheck_date
+
+    # Join analysis with staff information
+    # For backcheckers, join on the backcheck key; for enumerators, join on survey key
+    # Remove duplicates from staff_info to avoid duplicate rows
+    if staff_type == "enumerator":
+        staff_info = data_source.select([survey_key, staff_col]).unique(subset=[survey_key])
+        analysis_with_staff = backcheck_analysis.join(staff_info, on=survey_key, how="left")
+    else:
+        # For backcheckers, join backcheck_data with backcheck key
+        staff_info = data_source.select([survey_key, staff_col]).unique(subset=[survey_key])
+        # Rename survey_key to match backcheck key in analysis
+        staff_info = staff_info.rename({survey_key: join_key})
+        analysis_with_staff = backcheck_analysis.join(staff_info, on=join_key, how="left")
+
+    # Add survey date from survey_data (regardless of staff type)
+    if survey_date and survey_date in survey_data.columns:
+        survey_dates = survey_data.select([survey_key, pl.col(survey_date).alias("survey_date_col")]).unique(subset=[survey_key])
+        analysis_with_staff = analysis_with_staff.join(survey_dates, on=survey_key, how="left")
+
+    # Add backcheck date from backcheck_data
+    if backcheck_date and backcheck_date in backcheck_data.columns:
+        bc_dates = backcheck_data.select([survey_key, pl.col(backcheck_date).alias("backcheck_date_col")]).unique(subset=[survey_key])
+        analysis_with_staff = analysis_with_staff.join(bc_dates, on=survey_key, how="left")
+
+    # Calculate statistics by staff and category
+    stats_list = []
+
+    # Filter out rows where staff column is null
+    analysis_with_staff = analysis_with_staff.filter(pl.col(staff_col).is_not_null())
+
+    if analysis_with_staff.is_empty():
+        return pl.DataFrame()
+
+    for staff_name in analysis_with_staff[staff_col].unique().drop_nulls():
+        staff_data = analysis_with_staff.filter(pl.col(staff_col) == staff_name)
+
+        # Initialize stats dict for this staff member
+        staff_stats = {staff_col: staff_name}
+
+        # Overall statistics (across all categories)
+        staff_stats["Surveys"] = staff_data[survey_key].n_unique()
+        staff_stats["Backchecks"] = staff_data[survey_key].n_unique()
+
+        # Calculate average days between survey and backcheck (overall)
+        if (survey_date and backcheck_date and
+            "survey_date_col" in staff_data.columns and
+            "backcheck_date_col" in staff_data.columns):
+            with suppress(Exception):
+                days_diff = (
+                    staff_data
+                    .with_columns([
+                        (pl.col("backcheck_date_col") - pl.col("survey_date_col")).dt.total_days().alias("days_between")
+                    ])
+                    .select(pl.col("days_between").mean())
+                    .item()
+                )
+                staff_stats["Avg Days"] = round(days_diff, 1) if days_diff is not None else 0
+        else:
+            staff_stats["Avg Days"] = 0
+
+        # Initialize totals
+        total_non_missing_survey = 0
+        total_non_missing_backcheck = 0
+        total_compared = 0
+        total_mismatches = 0
+
+        # Calculate statistics by category
+        for category in [1, 2, 3]:
+            cat_data = staff_data.filter(pl.col("category") == category)
+
+            if cat_data.is_empty():
+                # Fill with zeros if no data for this category
+                staff_stats[f"Non-Missing Survey (Cat {category})"] = 0
+                staff_stats[f"Non-Missing Backcheck (Cat {category})"] = 0
+                staff_stats[f"Values Compared (Cat {category})"] = 0
+                staff_stats[f"Mismatches (Cat {category})"] = 0
+                staff_stats[f"Error Rate % (Cat {category})"] = 0.0
+                continue
+
+            # Non-missing values for this category
+            n_non_missing_survey = cat_data.filter(
+                ~pl.col("survey_value").is_null()
+            ).height
+            n_non_missing_backcheck = cat_data.filter(
+                ~pl.col("backcheck_value").is_null()
+            ).height
+
+            # Mismatches for this category
+            n_mismatches = cat_data.filter(
+                pl.col("match_status") == "mismatch"
+            ).height
+
+            # Values compared for this category (excluding missing and excluded)
+            n_cat_compared = cat_data.filter(
+                ~pl.col("match_status").is_in(["missing", "excluded"])
+            ).height
+
+            # Error rate
+            error_rate = (n_mismatches / n_cat_compared * 100) if n_cat_compared > 0 else 0
+
+            # Store category-specific stats
+            staff_stats[f"Non-Missing Survey (Cat {category})"] = n_non_missing_survey
+            staff_stats[f"Non-Missing Backcheck (Cat {category})"] = n_non_missing_backcheck
+            staff_stats[f"Values Compared (Cat {category})"] = n_cat_compared
+            staff_stats[f"Mismatches (Cat {category})"] = n_mismatches
+            staff_stats[f"Error Rate % (Cat {category})"] = round(error_rate, 2)
+
+            # Accumulate totals
+            total_non_missing_survey += n_non_missing_survey
+            total_non_missing_backcheck += n_non_missing_backcheck
+            total_compared += n_cat_compared
+            total_mismatches += n_mismatches
+
+        # Calculate and store totals
+        staff_stats["Non-Missing Survey (Total)"] = total_non_missing_survey
+        staff_stats["Non-Missing Backcheck (Total)"] = total_non_missing_backcheck
+        staff_stats["Values Compared (Total)"] = total_compared
+        staff_stats["Mismatches (Total)"] = total_mismatches
+        total_error_rate = (total_mismatches / total_compared * 100) if total_compared > 0 else 0
+        staff_stats["Error Rate % (Total)"] = round(total_error_rate, 2)
+
+        stats_list.append(staff_stats)
+
+    if not stats_list:
+        return pl.DataFrame()
+
+    return pl.DataFrame(stats_list)
+
+
+def _render_enum_bcer_stats(
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
+    backcheck_analysis: pl.DataFrame,
+    backcheck_settings: BackcheckSettings,
+    settings_file: str,
+) -> None:
+    """Render enumerator and backchecker error rate statistics.
+
+    Displays statistics tables showing error rates by category for either
+    enumerators or backcheckers, with a pills selector to switch between views.
+
+    Parameters
+    ----------
+    survey_data : pl.DataFrame
+        Survey dataset.
+    backcheck_data : pl.DataFrame
+        Backcheck dataset.
+    backcheck_analysis : pl.DataFrame
+        Results from compute_backcheck_analysis.
+    backcheck_settings : BackcheckSettings
+        Backcheck settings.
+    settings_file : str
+        Path to settings file for saving/loading configurations.
+    """
+    if backcheck_analysis.is_empty():
+        st.info("No backcheck analysis results available. Configure backcheck columns in the settings section above.")
+        return
+
+    # Check if required columns are configured
+    enumerator_col = backcheck_settings.enumerator
+    backchecker_col = backcheck_settings.backchecker
+
+    if not enumerator_col and not backchecker_col:
+        st.info(
+            "Enumerator and backchecker columns are required. "
+            "Go to the :material/settings: settings section above to configure them."
+        )
+        return
+
+    _render_enum_bcer_stats_table(
+        survey_data, backcheck_data, backcheck_analysis, backcheck_settings, settings_file
+    )
+
+
+@st.fragment
+def _render_enum_bcer_stats_table(
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
+    backcheck_analysis: pl.DataFrame,
+    backcheck_settings: BackcheckSettings,
+    settings_file: str,
+) -> None:
+    """Render enumerator and backchecker statistics table with pills selector.
+
+    Parameters
+    ----------
+    survey_data : pl.DataFrame
+        Survey dataset.
+    backcheck_data : pl.DataFrame
+        Backcheck dataset.
+    backcheck_analysis : pl.DataFrame
+        Results from compute_backcheck_analysis.
+    backcheck_settings : BackcheckSettings
+        Backcheck settings.
+    settings_file : str
+        Path to settings file for saving/loading configurations.
+    """
+    # Determine available options
+    enumerator_col = backcheck_settings.enumerator
+    backchecker_col = backcheck_settings.backchecker
+
+    options = ["Enumerator", "Backchecker"]
+
+    # Pills selector
+    saved_settings = load_check_settings(settings_file, TAB_NAME) or {}
+    default_view = saved_settings.get("enum_bcer_stats_view", options[0])
+
+    view_selection = st.pills(
+        label="View Statistics",
+        options=options,
+        default=default_view,
+        key="enum_bcer_stats_view_key",
+        help="Select which statistics to view",
+        selection_mode="single",
+        on_change=trigger_save,
+        kwargs={"state_name": TAB_NAME + "_enum_bcer_stats_view"},
+    )
+    save_check_settings(
+        settings_file, TAB_NAME, {"enum_bcer_stats_view": view_selection}
+    )
+
+    # Compute and display statistics
+    staff_type = "enumerator" if view_selection == "Enumerator" else "backchecker"
+    stats_df = compute_enumerator_backchecker_stats(
+        survey_data, backcheck_data, backcheck_analysis, backcheck_settings, staff_type
+    )
+
+    if stats_df.is_empty():
+        st.info(f"No {view_selection.lower()} statistics available.")
+        return
+
+    # Get staff column name for display
+    staff_col = enumerator_col if staff_type == "enumerator" else backchecker_col
+
+    # Configure columns for wide format
+    column_config = {
+        staff_col: st.column_config.TextColumn(view_selection, pinned=True),
+        "Surveys": st.column_config.NumberColumn("Surveys", format="%d"),
+        "Backchecks": st.column_config.NumberColumn("Backchecks", format="%d"),
+        "Avg Days": st.column_config.NumberColumn("Avg Days", format="%.1f"),
+    }
+
+    # Add category-specific columns
+    for category in [1, 2, 3]:
+        column_config[f"Non-Missing Survey (Cat {category})"] = st.column_config.NumberColumn(
+            f"Survey Values (Cat {category})", format="%d"
+        )
+        column_config[f"Non-Missing Backcheck (Cat {category})"] = st.column_config.NumberColumn(
+            f"Backcheck Values (Cat {category})", format="%d"
+        )
+        column_config[f"Values Compared (Cat {category})"] = st.column_config.NumberColumn(
+            f"Compared (Cat {category})", format="%d"
+        )
+        column_config[f"Mismatches (Cat {category})"] = st.column_config.NumberColumn(
+            f"Mismatches (Cat {category})", format="%d"
+        )
+        column_config[f"Error Rate % (Cat {category})"] = st.column_config.NumberColumn(
+            f"Error % (Cat {category})", format="%.2f"
+        )
+
+    # Add total columns
+    column_config["Non-Missing Survey (Total)"] = st.column_config.NumberColumn(
+        "Survey Values (Total)", format="%d"
+    )
+    column_config["Non-Missing Backcheck (Total)"] = st.column_config.NumberColumn(
+        "Backcheck Values (Total)", format="%d"
+    )
+    column_config["Values Compared (Total)"] = st.column_config.NumberColumn(
+        "Compared (Total)", format="%d"
+    )
+    column_config["Mismatches (Total)"] = st.column_config.NumberColumn(
+        "Mismatches (Total)", format="%d"
+    )
+    column_config["Error Rate % (Total)"] = st.column_config.NumberColumn(
+        "Error % (Total)", format="%.2f"
+    )
+
+    st.dataframe(
+        stats_df,
+        hide_index=True,
+        use_container_width=True,
+        column_config=column_config
+    )
 
 
 def process_duplicate_data(
@@ -3312,8 +3689,18 @@ def backchecks_report(
     _render_backcheck_summary(survey_data, backcheck_data, _backcheck_analysis, backcheck_settings)
 
     _render_backchecker_productivity(
-      backcheck_data,
-      backcheck_settings.backcheck_date,
-      backcheck_settings.backchecker,
-      setting_file,
+        backcheck_data,
+        backcheck_settings.backcheck_date,
+        backcheck_settings.backchecker,
+        setting_file,
+    )
+
+    st.subheader("Enumerator Backchecker Error Statistics")
+
+    _render_enum_bcer_stats(
+        survey_data,
+        backcheck_data,
+        _backcheck_analysis,
+        backcheck_settings,
+        setting_file
   )
