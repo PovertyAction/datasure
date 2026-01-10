@@ -1,5 +1,67 @@
 import pandas as pd
 import polars as pl
+from pydantic import BaseModel, Field, validator
+
+class ColumnByType(BaseModel):
+    """Class to hold columns by type."""
+
+    all_columns: list[str] = Field(
+        default_factory=list, description="List of all column names"
+    )
+    string_columns: list[str] = Field(
+        default_factory=list, description="List of string column names"
+    )
+    numeric_columns: list[str] = Field(
+        default_factory=list, description="List of numeric column names"
+    )
+    datetime_columns: list[str] = Field(
+        default_factory=list, description="List of datetime column names"
+    )
+    categorical_columns: list[str] = Field(
+        default_factory=list, description="List of categorical column names"
+    )
+
+    @validator("*", pre=True)
+    def ensure_list(cls, v):
+        if v is None:
+            return []
+        return v
+
+
+
+def get_columns_info(
+        df:pl.DataFrame | pd.DataFrame) -> ColumnByType:
+    """Get columns by type from a DataFrame.
+    PARAMS:
+    -------
+    df: pl.DataFrame | pd.DataFrame : DataFrame to analyze
+    Returns
+    -------
+    ColumnByType: Object containing lists of columns by type
+    """
+    if isinstance(df, pd.DataFrame):  # get info from pandas dataframe
+        all_columns = df.columns.tolist()
+        string_columns = df.select_dtypes(include=["object"]).columns.tolist()
+        numeric_columns = df.select_dtypes(include=["number"]).columns.tolist()
+        datetime_columns = df.select_dtypes(include=["datetime"]).columns.tolist()
+        categorical_columns = df.select_dtypes(
+            include=["category"]
+        ).columns.tolist()
+
+    else:  # get info from polars dataframe
+        all_columns = df.columns
+        string_columns = df.select(pl.col(pl.Utf8)).columns
+        numeric_columns = df.select(pl.col(pl.NUMERIC_DTYPES)).columns
+        datetime_columns = df.select(pl.col(pl.Date, pl.Datetime)).columns
+        categorical_columns = df.select(pl.col(pl.Categorical)).columns
+
+    return ColumnByType(
+        all_columns=all_columns,
+        string_columns=string_columns,
+        numeric_columns=numeric_columns,
+        datetime_columns=datetime_columns,
+        categorical_columns=categorical_columns,
+    )
 
 
 def get_df_info(stats_df: pl.DataFrame | pd.DataFrame, cols_only=False) -> tuple:
