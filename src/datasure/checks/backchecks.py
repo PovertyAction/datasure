@@ -2662,6 +2662,162 @@ def _render_enum_bcer_stats_table(
     )
 
 
+def compute_column_stats(
+    survey_data: pl.DataFrame,
+    backcheck_analysis: pl.DataFrame,
+) -> pl.DataFrame:
+    """Compute statistics for each column in backcheck analysis.
+
+    Parameters
+    ----------
+    survey_data : pl.DataFrame
+        Survey dataset to get data types.
+    backcheck_analysis : pl.DataFrame
+        Results from compute_backcheck_analysis.
+
+    Returns
+    -------
+    pl.DataFrame
+        Statistics DataFrame with one row per column.
+    """
+    if backcheck_analysis.is_empty():
+        return pl.DataFrame()
+
+    # Group by column_name and category to compute statistics
+    stats_list = []
+
+    for col_name in backcheck_analysis["column_name"].unique().drop_nulls():
+        col_data = backcheck_analysis.filter(pl.col("column_name") == col_name)
+
+        # Get category (should be consistent for all rows of this column)
+        category = col_data["category"][0]
+
+        # Get data type from survey_data
+        if col_name in survey_data.columns:
+            dtype = str(survey_data.schema[col_name])
+        else:
+            dtype = "Unknown"
+
+        # Total number of values (all rows for this column)
+        n_values = col_data.height
+
+        # Number of values compared (excluding missing and excluded)
+        n_compared = col_data.filter(
+            ~pl.col("match_status").is_in(["missing", "excluded"])
+        ).height
+
+        # Total mismatches
+        n_mismatches = col_data.filter(
+            pl.col("match_status") == "mismatch"
+        ).height
+
+        # Error rate
+        error_rate = (n_mismatches / n_compared * 100) if n_compared > 0 else 0
+
+        # Collect test results if available
+        test_results_str = ""
+        test_columns = [
+            "ttest_t_statistic", "ttest_p_value",
+            "prtest_z_statistic", "prtest_p_value",
+            "signrank_statistic", "signrank_p_value",
+            "reliability_srv", "reliability_ratio"
+        ]
+
+        # Check if any test columns exist and have non-null values
+        available_tests = []
+        for test_col in test_columns:
+            if test_col in col_data.columns:
+                # Get first non-null value (test results should be same for all rows)
+                test_val = col_data[test_col].drop_nulls().head(1)
+                if len(test_val) > 0:
+                    val = test_val[0]
+                    # Format the test result nicely
+                    if "ttest" in test_col:
+                        if "statistic" in test_col:
+                            available_tests.append(f"T-test: t={val:.3f}")
+                        elif "p_value" in test_col:
+                            available_tests.append(f"p={val:.4f}")
+                    elif "prtest" in test_col:
+                        if "statistic" in test_col:
+                            available_tests.append(f"Prop test: z={val:.3f}")
+                        elif "p_value" in test_col:
+                            available_tests.append(f"p={val:.4f}")
+                    elif "signrank" in test_col:
+                        if "statistic" in test_col:
+                            available_tests.append(f"Sign-rank: W={val:.3f}")
+                        elif "p_value" in test_col:
+                            available_tests.append(f"p={val:.4f}")
+                    elif "reliability_srv" in test_col:
+                        available_tests.append(f"SRV={val:.4f}")
+                    elif "reliability_ratio" in test_col:
+                        available_tests.append(f"Reliability={val:.4f}")
+
+        test_results_str = "; ".join(available_tests) if available_tests else "None"
+
+        stats_list.append({
+            "Column Name": col_name,
+            "Category": category,
+            "Data Type": dtype,
+            "# of Values": n_values,
+            "Values Compared": n_compared,
+            "Mismatches": n_mismatches,
+            "Error Rate (%)": round(error_rate, 2),
+            "Test Results": test_results_str,
+        })
+
+    if not stats_list:
+        return pl.DataFrame()
+
+    return pl.DataFrame(stats_list)
+
+
+def _render_column_stats(
+    survey_data: pl.DataFrame,
+    backcheck_analysis: pl.DataFrame,
+) -> None:
+    """Render column statistics for backcheck analysis.
+
+    Displays a table showing statistics for each column configured
+    for backcheck analysis.
+
+    Parameters
+    ----------
+    survey_data : pl.DataFrame
+        Survey dataset.
+    backcheck_analysis : pl.DataFrame
+        Results from compute_backcheck_analysis.
+    """
+    if backcheck_analysis.is_empty():
+        st.info("No backcheck analysis results available. Configure backcheck columns in the settings section above.")
+        return
+
+    # Compute column statistics
+    stats_df = compute_column_stats(survey_data, backcheck_analysis)
+
+    if stats_df.is_empty():
+        st.info("No column statistics available.")
+        return
+
+    # Configure columns
+    column_config = {
+        "Column Name": st.column_config.TextColumn("Column Name", pinned=True),
+        "Category": st.column_config.NumberColumn("Category", format="%d"),
+        "Data Type": st.column_config.TextColumn("Data Type"),
+        "# of Values": st.column_config.NumberColumn("# of Values", format="%d"),
+        "Values Compared": st.column_config.NumberColumn("Values Compared", format="%d"),
+        "Mismatches": st.column_config.NumberColumn("Mismatches", format="%d"),
+        "Error Rate (%)": st.column_config.NumberColumn("Error Rate (%)", format="%.2f"),
+        "Test Results": st.column_config.TextColumn("Test Results", width="large"),
+    }
+
+    st.dataframe(
+        stats_df,
+        hide_index=True,
+        use_container_width=True,
+        column_config=column_config
+    )
+
+
 def process_duplicate_data(
     survey_data: pd.DataFrame,
     backcheck_data: pd.DataFrame,
@@ -3703,4 +3859,7 @@ def backchecks_report(
         _backcheck_analysis,
         backcheck_settings,
         setting_file
-  )
+    )
+
+    st.subheader("Column Statistics")
+    _render_column_stats(survey_data, _backcheck_analysis)
