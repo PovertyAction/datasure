@@ -2,7 +2,7 @@ import re
 from contextlib import suppress
 from enum import Enum
 from turtle import back
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 import plotly.express as px
@@ -25,6 +25,31 @@ IGNORE_MISSING_VALUES = "ignore_missing_values"
 DO_NOT_COMPARE_VALUES = "Do not compare if the values contain:"
 TREAT_VALUES_AS_SAME = "Treat these values as the same:"
 NO_BACKCHECK_COLUMNS_SET = "Backcheck columns configuration required. Go to the :material/settings: settings section above and configure backcheck columns."
+
+# Weekday constants for productivity analysis
+WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+# Maps weekday names to offset codes used in computation
+WEEKDAY_OFFSET_MAP = {
+    "Monday": "SUN",
+    "Tuesday": "MON",
+    "Wednesday": "TUE",
+    "Thursday": "WED",
+    "Friday": "THU",
+    "Saturday": "FRI",
+    "Sunday": "SAT",
+}
+
+# Maps offset codes to numeric values for week calculations
+WEEKDAY_OFFSET_TO_NUMERIC = {
+    "SUN": 0,
+    "MON": 1,
+    "TUE": 2,
+    "WED": 3,
+    "THU": 4,
+    "FRI": 5,
+    "SAT": 6,
+}
 
 
 ##### Backchecks #####
@@ -58,6 +83,12 @@ class BackcheckSettings(BaseModel):
     exclude_values_list: list[str] | None = Field(
         None,
         description="List of values to be excluded from backcheck comparisons",
+    )
+    case_option: str | None = Field(
+        None, description="Case sensitivity option for string comparison"
+    )
+    trimspaces_option: bool = Field(
+        False, description="Trim spaces option for string comparison"
     )
     nosymbols_option: bool = Field(
         False, description="Ignore symbols option for string comparison"
@@ -1557,6 +1588,703 @@ def _delete_backcheck_column(
                 st.rerun()
 
 
+def compute_backcheck_analysis(
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
+    backcheck_settings: BackcheckSettings,
+    backcheck_column_settings: pl.DataFrame,
+) -> pl.DataFrame:
+    """Compute backcheck comparison analysis for configured columns.
+
+    This function performs the backcheck comparison between survey and backcheck
+    datasets based on the configured settings. It applies global settings from
+    backcheck_settings and column-specific settings from backcheck_column_settings.
+
+    Parameters
+    ----------
+    survey_data : pl.DataFrame
+        Survey dataset.
+    backcheck_data : pl.DataFrame
+        Backcheck dataset.
+    backcheck_settings : BackcheckSettings
+        Global settings for backcheck comparison.
+    backcheck_column_settings : pl.DataFrame
+        Column-specific settings including category, OK ranges, and test options.
+
+    Returns
+    -------
+    pl.DataFrame
+        Comparison results with columns:
+        - survey_key: Survey identifier
+        - column_name: Name of compared column
+        - survey_value: Value from survey
+        - backcheck_value: Value from backcheck
+        - match_status: 'match', 'mismatch', 'excluded', 'no_difference'
+        - difference: Numeric difference (for numeric columns)
+        - within_ok_range: Boolean indicating if within acceptable range
+        - ttest_t_statistic: T-test t-statistic (if configured)
+        - ttest_p_value: T-test p-value (if configured)
+        - prtest_z_statistic: Proportion test z-statistic (if configured)
+        - prtest_p_value: Proportion test p-value (if configured)
+        - signrank_statistic: Wilcoxon signed-rank statistic (if configured)
+        - signrank_p_value: Wilcoxon signed-rank p-value (if configured)
+        - reliability_srv: Simple Response Variance (if configured)
+        - reliability_ratio: Reliability ratio (if configured)
+    """
+    if backcheck_column_settings.is_empty():
+        return pl.DataFrame()
+
+    # Get survey key for merging
+    survey_key = backcheck_settings.survey_key
+    if not survey_key or survey_key not in survey_data.columns:
+        return pl.DataFrame()
+
+    survey_id = backcheck_settings.survey_id
+    if not survey_id or survey_id not in survey_data.columns:
+        return pl.DataFrame()
+
+    # Merge datasets on survey id. Inner join to keep only matched records and label
+    # backcheck columns with suffix __BCCL
+    merged_data = survey_data.join(
+        backcheck_data,
+        on=survey_id,
+        how="inner",
+        suffix="__BCCL",
+    )
+
+    if merged_data.is_empty():
+        return pl.DataFrame()
+
+    # Extract global settings
+    no_diff_list = backcheck_settings.no_differences_list or []
+    exclude_list = backcheck_settings.exclude_values_list or []
+    case_option = backcheck_settings.case_option
+    trim_spaces = backcheck_settings.trimspaces_option
+    no_symbols = backcheck_settings.nosymbols_option
+
+    results = []
+
+    # Process each configured column
+    for row in backcheck_column_settings.iter_rows(named=True):
+        search_type = row["search_type"]
+        pattern = row["pattern"]
+        columns = row["column_name"]
+        category = row["category"]
+        ok_range_type = row.get("ok_range_type")
+        ok_range_values = row.get("ok_range_values")
+        ttest = row.get("ttest", False)
+        prtest = row.get("prtest", False)
+        signrank = row.get("signrank", False)
+        reliability = row.get("reliability", False)
+
+        # Expand columns if pattern-based search
+        if search_type != SearchType.EXACT.value and pattern:
+            survey_cols = [col for col in survey_data.columns if col != survey_key]
+            columns = expand_col_names(survey_cols, pattern, search_type)
+
+        # Process each column
+        for col in columns:
+            if col not in merged_data.columns:
+                continue
+
+            backcheck_col = f"{col}__BCCL"
+            if backcheck_col not in merged_data.columns:
+                continue
+
+            # Compare values for this column
+            col_results = _compare_column_values(
+                merged_data,
+                survey_key,
+                col,
+                backcheck_col,
+                category,
+                ok_range_type,
+                ok_range_values,
+                no_diff_list,
+                exclude_list,
+                case_option,
+                trim_spaces,
+                no_symbols,
+            )
+
+            # Add statistical tests if configured
+            if ttest or prtest or signrank or reliability:
+                test_results = _perform_statistical_tests(
+                    merged_data,
+                    col,
+                    backcheck_col,
+                    ttest,
+                    prtest,
+                    signrank,
+                    reliability,
+                )
+                # Extract test results into separate columns
+                col_results = col_results.with_columns([
+                    pl.lit(test_results.get("ttest", {}).get("t_statistic")).alias("ttest_t_statistic"),
+                    pl.lit(test_results.get("ttest", {}).get("p_value")).alias("ttest_p_value"),
+                    pl.lit(test_results.get("prtest", {}).get("z_statistic")).alias("prtest_z_statistic"),
+                    pl.lit(test_results.get("prtest", {}).get("p_value")).alias("prtest_p_value"),
+                    pl.lit(test_results.get("signrank", {}).get("statistic")).alias("signrank_statistic"),
+                    pl.lit(test_results.get("signrank", {}).get("p_value")).alias("signrank_p_value"),
+                    pl.lit(test_results.get("reliability", {}).get("srv")).alias("reliability_srv"),
+                    pl.lit(test_results.get("reliability", {}).get("reliability_ratio")).alias("reliability_ratio"),
+                ])
+            else:
+                # Add null test result columns to maintain schema consistency
+                col_results = col_results.with_columns([
+                    pl.lit(None).alias("ttest_t_statistic"),
+                    pl.lit(None).alias("ttest_p_value"),
+                    pl.lit(None).alias("prtest_z_statistic"),
+                    pl.lit(None).alias("prtest_p_value"),
+                    pl.lit(None).alias("signrank_statistic"),
+                    pl.lit(None).alias("signrank_p_value"),
+                    pl.lit(None).alias("reliability_srv"),
+                    pl.lit(None).alias("reliability_ratio"),
+                ])
+
+            results.append(col_results)
+
+    # Combine all results
+    if results:
+        return pl.concat(results, how="vertical_relaxed")
+    return pl.DataFrame()
+
+
+def _compare_column_values(
+    data: pl.DataFrame,
+    survey_key: str,
+    survey_col: str,
+    backcheck_col: str,
+    category: int,
+    ok_range_type: str | None,
+    ok_range_values: list[float] | None,
+    no_diff_list: list[str],
+    exclude_list: list[str],
+    case_option: str | None,
+    trim_spaces: bool,
+    no_symbols: bool,
+) -> pl.DataFrame:
+    """Compare values between survey and backcheck for a single column.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        Merged survey and backcheck data.
+    survey_key : str
+        Column name for survey identifier.
+    survey_col : str
+        Survey column name.
+    backcheck_col : str
+        Backcheck column name.
+    category : int
+        Backcheck category (1, 2, or 3).
+    ok_range_type : str | None
+        Type of OK range ('number' or 'percentage').
+    ok_range_values : list[float] | None
+        OK range values [negative, positive].
+    no_diff_list : list[str]
+        Values that won't be marked as differences.
+    exclude_list : list[str]
+        Values to exclude from comparison.
+    case_option : str | None
+        Case sensitivity option ('lowercase', 'uppercase', or None).
+    trim_spaces : bool
+        Whether to trim spaces before comparison.
+    no_symbols : bool
+        Whether to ignore symbols in comparison.
+
+    Returns
+    -------
+    pl.DataFrame
+        Comparison results for this column.
+    """
+    # Start with survey key and column values
+    result = data.select([
+        pl.col(survey_key),
+        pl.lit(survey_col).alias("column_name"),
+        pl.col(survey_col).alias("survey_value"),
+        pl.col(backcheck_col).alias("backcheck_value"),
+        pl.lit(category).alias("category"),
+    ])
+
+    # Convert to string for comparison if needed
+    survey_vals = result["survey_value"].cast(pl.Utf8)
+    backcheck_vals = result["backcheck_value"].cast(pl.Utf8)
+
+    # Apply string preprocessing if configured
+    if case_option == "lowercase":
+        survey_vals = survey_vals.str.to_lowercase()
+        backcheck_vals = backcheck_vals.str.to_lowercase()
+    elif case_option == "uppercase":
+        survey_vals = survey_vals.str.to_uppercase()
+        backcheck_vals = backcheck_vals.str.to_uppercase()
+
+    if trim_spaces:
+        survey_vals = survey_vals.str.strip_chars()
+        backcheck_vals = backcheck_vals.str.strip_chars()
+
+    if no_symbols:
+        # Remove common symbols
+        survey_vals = survey_vals.str.replace_all(r"[^\w\s]", "")
+        backcheck_vals = backcheck_vals.str.replace_all(r"[^\w\s]", "")
+
+    # Determine match status
+    match_status = pl.when(
+        survey_vals.is_in(exclude_list) | backcheck_vals.is_in(exclude_list)
+    ).then(pl.lit("excluded")).when(
+        survey_vals.is_in(no_diff_list) & backcheck_vals.is_in(no_diff_list)
+    ).then(pl.lit("no_difference")).when(
+        survey_vals.is_null() | backcheck_vals.is_null()
+    ).then(pl.lit("missing")).when(
+        survey_vals == backcheck_vals
+    ).then(pl.lit("match")).otherwise(pl.lit("mismatch"))
+
+    result = result.with_columns([match_status.alias("match_status")])
+
+    # Calculate numeric difference and check OK range for numeric columns
+    if data.schema[survey_col].is_numeric() and data.schema[backcheck_col.replace("__BCCL", "")].is_numeric():
+        difference = (
+            pl.col("survey_value").cast(pl.Float64) -
+            pl.col("backcheck_value").cast(pl.Float64)
+        )
+        result = result.with_columns([difference.alias("difference")])
+
+        # Check if within OK range
+        if ok_range_type and ok_range_values and len(ok_range_values) >= 2:
+            ok_range_neg = ok_range_values[0]
+            ok_range_pos = ok_range_values[1]
+
+            if ok_range_type == "percentage":
+                # Calculate percentage difference
+                pct_diff = (difference.abs() / pl.col("survey_value").cast(pl.Float64).abs()) * 100
+                within_range = (pct_diff >= abs(ok_range_neg)) & (pct_diff <= ok_range_pos)
+            else:
+                # Absolute difference
+                within_range = (difference >= ok_range_neg) & (difference <= ok_range_pos)
+
+            result = result.with_columns([within_range.alias("within_ok_range")])
+        else:
+            result = result.with_columns([pl.lit(None).alias("within_ok_range")])
+    else:
+        result = result.with_columns([
+            pl.lit(None).cast(pl.Float64).alias("difference"),
+            pl.lit(None).alias("within_ok_range"),
+        ])
+
+    return result
+
+
+def _perform_statistical_tests(
+    data: pl.DataFrame,
+    survey_col: str,
+    backcheck_col: str,
+    ttest: bool,
+    prtest: bool,
+    signrank: bool,
+    reliability: bool,
+) -> dict[str, Any]:
+    """Perform statistical tests on survey and backcheck data.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        Merged survey and backcheck data.
+    survey_col : str
+        Survey column name.
+    backcheck_col : str
+        Backcheck column name.
+    ttest : bool
+        Whether to perform t-test.
+    prtest : bool
+        Whether to perform proportion test.
+    signrank : bool
+        Whether to perform sign rank test.
+    reliability : bool
+        Whether to calculate reliability metrics.
+
+    Returns
+    -------
+    dict[str, Any]
+        Dictionary of test results.
+    """
+    test_results = {}
+
+    # Convert to pandas for statistical tests
+    df_pd = data.select([survey_col, backcheck_col]).to_pandas()
+    survey_vals = df_pd[survey_col].dropna()
+    backcheck_vals = df_pd[backcheck_col].dropna()
+
+    if len(survey_vals) < 2 or len(backcheck_vals) < 2:
+        return {"error": "Insufficient data for statistical tests"}
+
+    # T-test for numeric data
+    if ttest:
+        with suppress(Exception):
+            from scipy import stats
+            t_stat, p_value = stats.ttest_rel(survey_vals, backcheck_vals)
+            test_results["ttest"] = {
+                "t_statistic": float(t_stat),
+                "p_value": float(p_value),
+            }
+
+    # Proportion test for binary data
+    if prtest:
+        with suppress(Exception):
+            from scipy import stats
+            # Assume binary 0/1 or True/False
+            prop_survey = survey_vals.mean()
+            prop_backcheck = backcheck_vals.mean()
+            n = len(survey_vals)
+            z_stat = (prop_survey - prop_backcheck) / ((prop_survey * (1 - prop_survey) + prop_backcheck * (1 - prop_backcheck)) / n) ** 0.5
+            p_value = 2 * (1 - stats.norm.cdf(abs(z_stat)))
+            test_results["prtest"] = {
+                "z_statistic": float(z_stat),
+                "p_value": float(p_value),
+            }
+
+    # Wilcoxon signed-rank test
+    if signrank:
+        with suppress(Exception):
+            from scipy import stats
+            stat, p_value = stats.wilcoxon(survey_vals, backcheck_vals)
+            test_results["signrank"] = {
+                "statistic": float(stat),
+                "p_value": float(p_value),
+            }
+
+    # Reliability metrics (Simple Response Variance and Reliability Ratio)
+    if reliability:
+        with suppress(Exception):
+            differences = survey_vals - backcheck_vals
+            srv = differences.var() / 2  # Simple Response Variance
+            signal_var = survey_vals.var()
+            reliability_ratio = 1 - (srv / signal_var) if signal_var > 0 else 0
+            test_results["reliability"] = {
+                "srv": float(srv),
+                "reliability_ratio": float(reliability_ratio),
+            }
+
+    return test_results
+
+
+def _render_backcheck_summary(
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
+    backcheck_analysis: pl.DataFrame,
+    backcheck_settings: BackcheckSettings,
+) -> None:
+    """Render summary metrics for backcheck analysis.
+
+    Parameters
+    ----------
+    survey_data : pl.DataFrame
+        Survey dataset.
+    backcheck_data : pl.DataFrame
+        Backcheck dataset.
+    backcheck_analysis : pl.DataFrame
+        Results from compute_backcheck_analysis.
+    backcheck_settings : BackcheckSettings
+        Backcheck settings including enumerator and backchecker columns.
+    """
+    # Calculate basic metrics
+    n_survey_obs = len(survey_data)
+    n_backcheck_obs = len(backcheck_data)
+
+    # Calculate percentage of surveys with backcheck responses
+    # Get unique survey keys that have backchecks
+    survey_key = backcheck_settings.survey_key
+    if survey_key and not backcheck_analysis.is_empty():
+        unique_backchecked_surveys = backcheck_analysis[survey_key].n_unique()
+        backcheck_coverage_pct = (unique_backchecked_surveys / n_survey_obs * 100) if n_survey_obs > 0 else 0
+    else:
+        backcheck_coverage_pct = 0
+
+    # Count unique enumerators and back checkers
+    enumerator_col = backcheck_settings.enumerator
+    backchecker_col = backcheck_settings.backchecker
+
+    if enumerator_col and enumerator_col in survey_data.columns:
+        n_enumerators = survey_data[enumerator_col].n_unique()
+    else:
+        n_enumerators = 0
+
+    if backchecker_col and backchecker_col in backcheck_data.columns:
+        n_backcheckers = backcheck_data[backchecker_col].n_unique()
+    else:
+        n_backcheckers = 0
+
+    # Display metrics in columns
+    uc1, uc2, uc3, _ = st.columns(4)
+    lc1, lc2, _, _ = st.columns(4)
+
+    with uc1, st.container(border=True):
+        st.metric("Survey Observations", f"{n_survey_obs:,}")
+
+    with uc2, st.container(border=True):
+        st.metric("Backcheck Observations", f"{n_backcheck_obs:,}")
+
+    with uc3, st.container(border=True):
+
+        st.metric(
+            "Backcheck Coverage",
+            f"{backcheck_coverage_pct:.1f}%",
+        )
+
+    with lc1, st.container(border=True):
+        st.metric("Total Enumerators", f"{n_enumerators:,}" if n_enumerators > 0 else "N/A")
+
+    with lc2, st.container(border=True):
+        st.metric("Total Back Checkers", f"{n_backcheckers:,}" if n_backcheckers > 0 else "N/A")
+
+
+def compute_backchecker_productivity(
+    data: pl.DataFrame, date: str, group_by_cols: list[str], period: str, weekstartday: str
+) -> pl.DataFrame:
+    """Compute backchecker productivity over time.
+
+    Analyzes backcheck submission counts by backchecker across time periods (daily,
+    weekly, or monthly).
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        DataFrame containing backcheck data.
+    date : str
+        Date column name.
+    group_by_cols : list[str]
+        Columns to group by (e.g., [backchecker]).
+    period : str
+        Time period: "Daily", "Weekly", "Monthly", "Day", "Week", or "Month".
+    weekstartday : str
+        Start day of the week (e.g., "SUN", "MON") for weekly analysis.
+
+    Returns
+    -------
+    pl.DataFrame
+        Pivoted DataFrame with backcheckers as rows and time periods as columns.
+    """
+    prod_df = data.clone()
+
+    # Normalize period values to handle both old and new formats
+    period_normalized = period
+    if period == "Day":
+        period_normalized = "Daily"
+    elif period == "Week":
+        period_normalized = "Weekly"
+    elif period == "Month":
+        period_normalized = "Monthly"
+
+    # Create time period column based on selection with user-friendly formatting
+    if period_normalized == "Daily":
+        # Format as "Jan 1, 2025"
+        prod_df = prod_df.with_columns(
+            pl.col(date).dt.strftime("%b %d, %Y").alias("TIME PERIOD")
+        )
+    elif period_normalized == "Weekly":
+        # Calculate week start and end dates for user-friendly display
+        offset = WEEKDAY_OFFSET_TO_NUMERIC.get(weekstartday, 1)
+
+        # Calculate the week start date (beginning of the week containing this date)
+        # weekday() returns 0=Monday, 6=Sunday
+        prod_df = prod_df.with_columns([
+            # Calculate days since the start of the week
+            ((pl.col(date).dt.weekday() - offset + 7) % 7).alias("_days_since_week_start"),
+        ])
+
+        # Calculate week_start_date by subtracting days_since_week_start
+        prod_df = prod_df.with_columns([
+            (pl.col(date) - pl.duration(days=pl.col("_days_since_week_start"))).alias("_week_start"),
+            (pl.col(date) - pl.duration(days=pl.col("_days_since_week_start")) + pl.duration(days=6)).alias("_week_end"),
+        ])
+
+        # Format as "Jan 1, 2025 to Jan 7, 2025"
+        prod_df = prod_df.with_columns(
+            (pl.col("_week_start").dt.strftime("%b %d, %Y") + " to " + pl.col("_week_end").dt.strftime("%b %d, %Y")).alias("TIME PERIOD")
+        )
+    elif period_normalized == "Monthly":
+        # Format as "January 2025"
+        prod_df = prod_df.with_columns(
+            pl.col(date).dt.strftime("%B %Y").alias("TIME PERIOD")
+        )
+
+    # Count submissions per period and backchecker
+    prod_df = prod_df.with_row_index(name="TOKEN KEY")
+    prod_res = prod_df.group_by(["TIME PERIOD"] + group_by_cols, maintain_order=True).agg(
+        pl.col("TOKEN KEY").count().alias("submissions")
+    )
+
+    # Pivot to wide format
+    prod_res = prod_res.pivot(
+        index=group_by_cols,
+        on="TIME PERIOD",
+        values="submissions",
+    ).fill_null(0)
+
+    return prod_res
+
+
+def _render_time_period_selector_backchecks(
+    settings_file: str,
+) -> Literal["Day", "Week", "Month"]:
+    """Render time period selector widget using pills interface for backchecks.
+
+    Displays a pills widget allowing users to choose the time aggregation period
+    for backchecker productivity analysis (Day, Week, or Month).
+
+    Parameters
+    ----------
+    settings_file : str
+        Path to settings file for saving/loading configurations.
+
+    Returns
+    -------
+    Literal["Day", "Week", "Month"]
+        Selected time period.
+    """
+    options_map = {"Day": ":material/event: Daily", "Week": ":material/date_range: Weekly", "Month": ":material/calendar_month: Monthly"}
+
+    saved_settings = load_check_settings(settings_file, TAB_NAME) or {}
+    default_time_period = saved_settings.get("time_period_backchecker_productivity", "Day")
+
+    with st.container(horizontal_alignment="left"):
+        time_period = st.pills(
+                label="Time Period",
+                options=options_map.keys(),
+                format_func=lambda x: options_map[x],
+                key="time_period_backchecker_productivity_key",
+                default=default_time_period,
+                help="Select time period for aggregating backchecker productivity",
+                selection_mode="single",
+                on_change=trigger_save,
+                kwargs={"state_name": TAB_NAME + "_time_period_backchecker"},
+            )
+        save_check_settings(
+                settings_file, TAB_NAME, {"time_period_backchecker_productivity": time_period}
+            )
+
+    return time_period or "Day"
+
+
+def _render_weekday_selector_backchecks(
+    settings_file: str,
+) -> str:
+    """Render weekday selector widget for backchecker productivity analysis.
+
+    Displays a selectbox allowing users to choose the first day of the week
+    for weekly productivity calculations.
+
+    Parameters
+    ----------
+    settings_file : str
+        Path to settings file for saving/loading configurations.
+
+    Returns
+    -------
+    str
+        Weekday offset code (e.g., "SUN", "MON") for calculations.
+    """
+    saved_settings = load_check_settings(settings_file, TAB_NAME) or {}
+    default_weekstartday_sel = saved_settings.get("weekstartday_backchecker_productivity", "Monday")
+    default_weekstartday_sel_index = WEEKDAY_NAMES.index(default_weekstartday_sel)
+
+    cl1, _ = st.columns([1, 3])
+    with cl1:
+        weekstartday_sel = st.selectbox(
+            label="Select the first day of the week",
+            options=WEEKDAY_NAMES,
+            index=default_weekstartday_sel_index,
+            key="week_start_day_backchecker_productivity_key",
+            help="Select the first day of the week",
+            on_change=trigger_save,
+            kwargs={"state_name": TAB_NAME + "_weekstartday_backchecker"},
+        )
+    save_check_settings(
+        settings_file, TAB_NAME, {"weekstartday_backchecker_productivity": weekstartday_sel}
+    )
+
+    return WEEKDAY_OFFSET_MAP[weekstartday_sel]
+
+
+def _render_backchecker_productivity(
+    data: pl.DataFrame,
+    date: str,
+    backchecker: str,
+    settings_file: str,
+) -> None:
+    """Display backchecker productivity table.
+
+    Shows backcheck submission counts by backchecker over time with configurable
+    time periods (daily, weekly, monthly).
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        DataFrame containing backcheck data.
+    date : str
+        Date column name.
+    backchecker : str
+        Backchecker column name.
+    settings_file : str
+        Path to settings file for saving/loading configurations.
+    """
+    if not (backchecker and date):
+        st.info(
+            "Backchecker productivity requires a date and backchecker column to be selected. "
+            "Go to the :material/settings: settings section above to select them."
+        )
+        return
+
+    _render_backchecker_productivity_table(
+        data, date, backchecker, settings_file
+    )
+
+
+@st.fragment
+def _render_backchecker_productivity_table(
+    data: pl.DataFrame,
+    date: str,
+    backchecker: str,
+    settings_file: str,
+) -> None:
+    """Display backchecker productivity table.
+
+    Shows backcheck submission counts by backchecker over time with configurable
+    time periods (daily, weekly, monthly).
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        DataFrame containing backcheck data.
+    date : str
+        Date column name.
+    backchecker : str
+        Backchecker column name.
+    settings_file : str
+        Path to settings file for saving/loading configurations.
+    """
+    time_period = _render_time_period_selector_backchecks(settings_file)
+    if time_period == "Week":
+        weekstartday = _render_weekday_selector_backchecks(settings_file)
+    else:
+        weekstartday = "MON"  # Default value, not used for non-weekly periods
+
+    group_by_cols = [backchecker]
+    productivity_df = compute_backchecker_productivity(
+        data, date, group_by_cols, time_period, weekstartday
+    )
+
+    column_config = {
+        backchecker: st.column_config.TextColumn("Back Checker", pinned=True),
+    }
+
+    column_config.update({
+        col: st.column_config.NumberColumn(col, format="%d") for col in productivity_df.columns
+        if col not in group_by_cols
+    })
+
+    st.dataframe(productivity_df, hide_index=True, use_container_width=True, column_config=column_config)
+
+
 def process_duplicate_data(
     survey_data: pd.DataFrame,
     backcheck_data: pd.DataFrame,
@@ -2551,7 +3279,7 @@ def backchecks_report(
 
     # Configure settings
     config_settings = BackcheckSettings(**config)
-    _settings = backchecks_report_settings(
+    backcheck_settings = backchecks_report_settings(
         project_id,
         setting_file,
         survey_data_pd,
@@ -2572,4 +3300,20 @@ def backchecks_report(
     )
     _render_backchecks_column_actions(project_id, page_name_id, survey_data, backcheck_data, common_columns)
 
+    # Compute backcheck analysis
+    backcheck_column_settings = duckdb_get_table(
+        project_id,
+        f"backchecks_{page_name_id}",
+        "logs",
+    )
+    _backcheck_analysis = compute_backcheck_analysis(survey_data, backcheck_data, backcheck_settings, backcheck_column_settings)
 
+    st.subheader("Backchecks Summary")
+    _render_backcheck_summary(survey_data, backcheck_data, _backcheck_analysis, backcheck_settings)
+
+    _render_backchecker_productivity(
+      backcheck_data,
+      backcheck_settings.backcheck_date,
+      backcheck_settings.backchecker,
+      setting_file,
+  )
