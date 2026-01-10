@@ -1,13 +1,13 @@
 import re
 from contextlib import suppress
 from enum import Enum
+from turtle import back
 from typing import Any
 
 import pandas as pd
 import plotly.express as px
 import polars as pl
 import streamlit as st
-from matplotlib import rc
 from pydantic import BaseModel, Field
 
 from datasure.utils import duckdb_get_table, duckdb_save_table
@@ -71,6 +71,33 @@ class StrCompareOptions(BaseModel):
     trimspaces_option: bool = Field(False, description="Trim spaces option")
     nosymbols_option: bool = Field(False, description="Ignore symbols option")
 
+class OkRangeValues(BaseModel):
+    """OK range values settings for backchecks."""
+
+    ok_range_neg: float | None = Field(le=0, description="Negative OK range value")
+    ok_range_pos: float | None = Field(ge=0, description="Positive OK range value")
+
+class OkRangeOptions(BaseModel):
+    """OK range settings for backchecks."""
+
+    ok_range_type: str | None = Field(None, description="Type of OK range")
+    ok_range_values: OkRangeValues | None = Field(
+        None, description="Values for OK range"
+    )
+
+class OkRangeType(str, Enum):
+    """OK range types for backchecks."""
+
+    NUMBER = "number"
+    PERCENTAGE = "percentage"
+
+class BackcheckTestOptions(BaseModel):
+    """Backcheck test settings for backchecks."""
+
+    ttest: bool = Field(False, description="Perform t-test")
+    prtest: bool = Field(False, description="Perform proportion test")
+    signrank: bool = Field(False, description="Perform sign rank test")
+    reliability: bool = Field(False, description="Calculate reliability metrics")
 
 @st.cache_data(ttl=60)
 def load_default_backchecks_settings(
@@ -164,121 +191,36 @@ def expand_col_names(
 # =============================================================================
 
 
-def _get_ok_range_value(ok_range_type: str) -> list[int | float | None]:
+def _get_ok_range_value(ok_range_type: OkRangeType) -> OkRangeValues:
     """Get the OK range value based on the selected type."""
-    if ok_range_type == "absolute":
-        okr1, okr2 = st.columns(2)
+    okr1, okr2 = st.columns(2)
+    if ok_range_type == "number":
         okr_neg = okr1.number_input(
-            "Negative Range Value", min_value=0, help="Enter the negative range value"
+            "Negative Range Value", max_value=0.0, value=0.0, step=1.0, help="Enter the negative range value"
         )
         okr_pos = okr2.number_input(
-            "Positive Range Value", min_value=0, help="Enter the positive range value"
-        )
-        return [-okr_neg, okr_pos]
-
-    elif ok_range_type == "percentage":
-        ok_range_percentage = st.number_input(
-            "Percentage", min_value=0, help="Enter a percentage value"
-        )
-        return f"{ok_range_percentage}%"
-    elif ok_range_type == "range":
-        range_min = st.number_input(
-            "Minimum Value",
-            max_value=0,
-            help="Enter the minimum value (less than zero)",
-        )
-        range_max = st.number_input(
-            "Maximum Value",
-            min_value=0,
-            help="Enter the maximum value (greater than zero)",
-        )
-        return f"[{range_min} , {range_max}]"
-    return ""
-
-
-def _get_comparison_condition(compare_condition: str) -> str:
-    """Get the comparison condition based on the selected option."""
-    if compare_condition == "Do not compare if the values contain:":
-        contains_condition = st.text_input(
-            "Enter values not to compare separated by a comma",
-            help="Values not to compare if they contain these values",
-        )
-        return f"{compare_condition}: {contains_condition}"
-    elif compare_condition == "Treat these values as the same:":
-        same_condition = st.text_input(
-            "Enter values separated by a comma",
-            help="Enter values separated by a comma",
-        )
-        return f"{compare_condition}: {same_condition}"
-    elif compare_condition == "Do not compare missing values or null values":
-        return "ignore_missing_values"
-    return ""
-
-
-def _handle_column_configuration(common_cols: list[str]) -> pd.DataFrame:
-    """Handle backcheck column configuration settings."""
-    st.write("---")
-    st.markdown("#### Backcheck Columns Configuration")
-
-    # Initialize session state for table data if not already present
-    if "column_config_data" not in st.session_state:
-        st.session_state.column_config_data = pd.DataFrame(
-            columns=["column", "category", "ok_range", "comparison_condition"]
+            "Positive Range Value", min_value=0.0, value=0.0, step=1.0,  help="Enter the positive range value"
         )
 
-    # Display the table and allow user interaction
-    with st.popover("Add a backcheck column", icon=":material/add:", width="stretch"):
-        column_name = st.selectbox(
-            "column",
-            options=common_cols,
-            help="Select a column to configure",
-            key="column",
+    else:
+        okr_neg = okr1.number_input(
+            "Negative Range Value (%)",
+            min_value=-100.0,
+            max_value=0.0,
+            value=0.0,
+            step=1.0,
+            help="Enter the negative range percentage",
         )
-        column_type = st.selectbox(
-            "category",
-            options=[1, 2, 3],
-            help="Select the backcheck category of the column",
-            key="category",
+        okr_pos = okr2.number_input(
+            "Positive Range Value (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=0.0,
+            step=1.0,
+            help="Enter the positive range percentage",
         )
-        ok_range_type = st.selectbox(
-            "ok_range",
-            options=["None", "absolute value", "range", "percentage"],
-            help="Select the type of range condition",
-            key="ok_range",
-        )
-        ok_range = _get_ok_range_value(ok_range_type)
 
-        compare_condition = st.selectbox(
-            label="comparison_condition",
-            options=[
-                "None",
-                "Do not compare missing values or null values",
-                "Do not compare if the values contain:",
-                "Treat these values as the same:",
-            ],
-            help="Specify any additional conditions",
-            key="comparison_condition",
-        )
-        comparison_condition = _get_comparison_condition(compare_condition)
-
-        if st.button("Add Column"):
-            new_row = {
-                "column": column_name,
-                "category": column_type,
-                "ok_range": ok_range,
-                "comparison_condition": comparison_condition,
-            }
-            st.session_state.column_config_data = pd.concat(
-                [st.session_state.column_config_data, pd.DataFrame([new_row])],
-                ignore_index=True,
-            )
-
-    # Create an editable dataframe
-    return st.data_editor(
-        st.session_state.column_config_data,
-        num_rows="dynamic",
-        width="stretch",
-    )
+    return OkRangeValues(ok_range_neg=okr_neg, ok_range_pos=okr_pos)
 
 
 def _validate_backcheck_requirements(
@@ -1030,7 +972,7 @@ def _render_backcheck_category_options() -> int:
     return category
 
 
-def _render_ok_range_options() -> tuple[str, str]:
+def _render_ok_range_options() -> OkRangeOptions:
     """Render OK range options UI.
 
     Returns
@@ -1040,41 +982,69 @@ def _render_ok_range_options() -> tuple[str, str]:
     """
     with st.container(border=True):
         st.markdown("##### OK Range Selection")
-        options_map = {"number": "material/123: Absolute Value", "range": ":material/arrow_range: Range", "percentage": ":material/percent: Percentage"}
+        options_map = {"number": ":material/123: Value Range", "percentage": ":material/percent: Percentage Range"}
         ok_range_type = st.pills(
             "Select OK Range Type",
             options=options_map.keys(),
             format_func=lambda x: options_map[x],
             selection_mode="single",
-            default="number",
+            default=None,
             help="Select the type of OK range condition for the column(s).",
             key="ok_range_type_backchecks_pills",
         )
-        ok_range_value = _get_ok_range_value(ok_range_type)
-        return ok_range_type, ok_range_value
+        if ok_range_type:
+            ok_range_value: OkRangeValues = _get_ok_range_value(OkRangeType(ok_range_type))
+        else:
+            ok_range_value = OkRangeValues(ok_range_neg=0.0, ok_range_pos=0.0)
 
+    return OkRangeOptions(ok_range_type=ok_range_type, ok_range_value=ok_range_value)
 
-def _render_comparison_condition_options() -> tuple[str, str]:
-    """Render comparison condition options UI.
+def _render_backcheck_test_options(backcheck_category: int) -> BackcheckTestOptions:
+    """Render backcheck test condition selection UI.
 
     Returns
     -------
-    tuple[str, str]
-        Comparison condition type and condition value.
+    str
+        Selected Back Check Test
     """
-    comparison_condition_type = st.selectbox(
-        label="Comparison Condition",
-        options=[
-            "None",
-            "Do not compare missing values or null values",
-            "Do not compare if the values contain:",
-            "Treat these values as the same:",
-        ],
-        index=0,
-        help="Specify any additional comparison conditions.",
-    )
-    comparison_condition_value = _get_comparison_condition(comparison_condition_type)
-    return comparison_condition_type, comparison_condition_value
+    with st.container(border=True):
+        st.markdown("##### Statistical Test")
+        with st.expander("Statisical Test Information", expanded=False):
+            st.write(
+                """
+                Select the statistical test to apply for backcheck comparisons.
+
+                - **ttest**: run paired two-sample mean-comparison tests for values in the back check and survey data.
+                - **prtest**: run two-sample test of equality of proportions in the back check and survey data for dichotmous variables.
+                - **signrank**: run Wilcoxon signed-rank tests for values in the back check and survey data.
+                - **reliability**: calculate the simple response variance (SRV) and reliability ratio for type 2 and 3 variables.
+                """
+            )
+        options_map = {
+            "ttest": "t-test",
+            "prtest": "prtest",
+            "signrank": "sign rank test",
+            "reliability": "reliability analysis",
+        }
+
+        # dont show reliability if category 1 is selected
+        if backcheck_category == 1:
+            options_map.pop("reliability")
+
+        backcheck_test = st.pills(
+            "Select Backcheck Statistical Test",
+            options=options_map.keys(),
+            format_func=lambda x: options_map[x],
+            selection_mode="multi",
+            default="ttest",
+            help="Select the statistical test to apply for backcheck comparisons.",
+            key="backcheck_test_backchecks_pills",
+        )
+
+    return BackcheckTestOptions(ttest="ttest" in backcheck_test,
+                         prtest="prtest" in backcheck_test,
+                         signrank="signrank" in backcheck_test,
+                         reliability="reliability" in backcheck_test)
 
 @st.fragment
 def _render_no_differences_settings(settings_file: str) -> list:
@@ -1113,7 +1083,11 @@ def _render_no_differences_settings(settings_file: str) -> list:
         ):
             saved_settings = load_check_settings(settings_file, TAB_NAME)
             no_diff_values = saved_settings.get("no_differences_values", [])
-            updated_values = no_diff_values.append(new_value) if no_diff_values else [new_value]
+            if no_diff_values:
+                no_diff_values.append(new_value)
+                updated_values = no_diff_values
+            else:
+                updated_values = [new_value]
             save_check_settings(
                 settings_file,
                 TAB_NAME,
@@ -1142,7 +1116,8 @@ def _render_no_differences_settings(settings_file: str) -> list:
             on_click=trigger_save,
             kwargs={"state_name": TAB_NAME + "_no_differences_value"},
         ):
-            updated_values = no_diff_values.remove(value_to_remove)
+            no_diff_values.remove(value_to_remove)
+            updated_values = no_diff_values
             save_check_settings(
                 settings_file,
                 TAB_NAME,
@@ -1242,7 +1217,11 @@ def _render_exclude_values_settings(
         ):
             saved_settings = load_check_settings(settings_file, TAB_NAME)
             exclude_values = saved_settings.get("exclude_values", [])
-            updated_values = exclude_values.append(new_value) if exclude_values else [new_value]
+            if exclude_values:
+                exclude_values.append(new_value)
+                updated_values = exclude_values
+            else:
+                updated_values = [new_value]
             save_check_settings(
                 settings_file,
                 TAB_NAME,
@@ -1272,7 +1251,8 @@ def _render_exclude_values_settings(
             saved_settings = load_check_settings(settings_file, TAB_NAME)
             exclude_values = saved_settings.get("exclude_values", [])
             if value_to_remove in exclude_values:
-                updated_values = exclude_values.remove(value_to_remove)
+                exclude_values.remove(value_to_remove)
+                updated_values = exclude_values
                 save_check_settings(
                     settings_file,
                     TAB_NAME,
@@ -1353,54 +1333,52 @@ def _add_backcheck_column(
 
     if backcheck_cols:
         # Render backcheck category
-        category = _render_backcheck_category_options()
+        backcheck_category = _render_backcheck_category_options()
 
-        # Render OK range options
-        # check if category requires ok range ie. it is numeric in both datasets
-        cols_numeric_in_survey = all(
-            pl.col(col).dtype.is_numeric().all()
-            for col in backcheck_cols
-            if col in survey_data.columns
-        )
+        if backcheck_category:
 
-        cols_numeric_in_backcheck = all(
-            pl.col(col).dtype.is_numeric().all()
-            for col in backcheck_cols
-            if col in backcheck_data.columns
-        )
-
-        if cols_numeric_in_survey and cols_numeric_in_backcheck:
-            ok_range_type, ok_range_value = _render_ok_range_options()
-
-        ok_range_type, ok_range_value = _render_ok_range_options()
-
-        # Render comparison condition options
-        comparison_condition_type, comparison_condition_value = (
-            _render_comparison_condition_options()
-        )
-
-        button_disabled = not backcheck_cols
-
-        if st.button(
-            "Add Backcheck Column Configuration",
-            key="confirm_add_backcheck_column",
-            type="primary",
-            width="stretch",
-            disabled=button_disabled,
-        ):
-            _update_backcheck_column_config(
-                project_id,
-                page_name_id,
-                search_type,
-                pattern,
-                backcheck_cols,
-                category,
-                ok_range_value,
-                comparison_condition_value,
+            # Render OK range options
+            # Check if columns are numeric in both datasets
+            cols_numeric_in_survey = all(
+                survey_data.schema[col].is_numeric()
+                for col in backcheck_cols
+                if col in survey_data.columns
             )
 
-            st.success("Backcheck column configuration added successfully.")
-            st.rerun()
+            cols_numeric_in_backcheck = all(
+                backcheck_data.schema[col].is_numeric()
+                for col in backcheck_cols
+                if col in backcheck_data.columns
+            )
+
+            # Only show OK range options for numeric columns
+            if cols_numeric_in_survey and cols_numeric_in_backcheck:
+                ok_range_options: OkRangeOptions = _render_ok_range_options()
+                backcheck_test_options: BackcheckTestOptions = _render_backcheck_test_options(backcheck_category)
+            else:
+                ok_range_options = OkRangeOptions(ok_range_type=None, ok_range_values=None)
+                backcheck_test_options = BackcheckTestOptions(ttest=False, prtest=False, signrank=False, reliability=False)
+
+            if st.button(
+                "Add Backcheck Column Configuration",
+                key="confirm_add_backcheck_column",
+                type="primary",
+                width="stretch",
+                disabled=not backcheck_cols or not backcheck_category,
+            ):
+                _update_backcheck_column_config(
+                    project_id,
+                    page_name_id,
+                    search_type,
+                    pattern,
+                    backcheck_cols,
+                    backcheck_category,
+                    ok_range_options,
+                    backcheck_test_options,
+                )
+
+                st.success("Backcheck column configuration added successfully.")
+                st.rerun()
 
 
 def _update_backcheck_column_config(
@@ -1409,9 +1387,9 @@ def _update_backcheck_column_config(
     search_type: str,
     pattern: str | None,
     backcheck_cols: list[str],
-    category: int,
-    ok_range: str,
-    comparison_condition: str,
+    backcheck_category: int,
+    ok_range_options: OkRangeOptions,
+    backcheck_test_options: BackcheckTestOptions,
 ) -> None:
     """Update the backcheck column configuration in the database.
 
@@ -1446,9 +1424,13 @@ def _update_backcheck_column_config(
         "search_type": search_type,
         "pattern": pattern,
         "column_name": [backcheck_cols],
-        "category": category,
-        "ok_range": ok_range,
-        "comparison_condition": comparison_condition,
+        "category": backcheck_category,
+        "ok_range_type": ok_range_options.ok_range_type if ok_range_options else None,
+        "ok_range_values": ok_range_options.ok_range_values if ok_range_options else None,
+        "ttest": backcheck_test_options.ttest,
+        "prtest": backcheck_test_options.prtest,
+        "signrank": backcheck_test_options.signrank,
+        "reliability": backcheck_test_options.reliability,
     }
 
     schema = {
@@ -1456,8 +1438,12 @@ def _update_backcheck_column_config(
         "pattern": pl.Utf8,
         "column_name": pl.List(pl.Utf8),
         "category": pl.Int64,
-        "ok_range": pl.Utf8,
-        "comparison_condition": pl.Utf8,
+        "ok_range_type": pl.Utf8,
+        "ok_range_values": pl.List(pl.Float64),
+        "ttest": pl.Boolean,
+        "prtest": pl.Boolean,
+        "signrank": pl.Boolean,
+        "reliability": pl.Boolean,
     }
 
     # Append new configuration to existing polars DataFrame
@@ -1494,8 +1480,12 @@ def _render_backcheck_settings_table(backcheck_settings: pl.DataFrame) -> None:
                 "pattern": st.column_config.Column("Pattern"),
                 "column_name": st.column_config.Column("Column Name(s)"),
                 "category": st.column_config.NumberColumn("Category"),
-                "ok_range": st.column_config.Column("OK Range"),
-                "comparison_condition": st.column_config.Column("Comparison Condition"),
+                "ok_range_type": st.column_config.Column("OK Range Type"),
+                "ok_range_values": st.column_config.Column("OK Range Values"),
+                "ttest": st.column_config.CheckboxColumn("t-test"),
+                "prtest": st.column_config.CheckboxColumn("prtest"),
+                "signrank": st.column_config.CheckboxColumn("Sign Rank Test"),
+                "reliability": st.column_config.CheckboxColumn("Reliability Analysis"),
             },
         )
 
@@ -1545,25 +1535,26 @@ def _delete_backcheck_column(
                 help="Select the backcheck column to remove from the list.",
             )
 
-            if selected_index:
-                confirm_delete = st.button(
-                    label="Confirm deletion",
-                    type="primary",
-                    width="stretch",
+            if st.button(
+                label="Confirm deletion",
+                type="primary",
+                width="stretch",
+                key="confirm_delete_backcheck_column",
+                help="Click to remove the selected backcheck column configuration.",
+                disabled=not selected_index,
+            ):
+                updated_settings = backcheck_settings_indexed.filter(
+                    pl.col("composite_index") != selected_index
+                ).drop("composite_index", "index")
+
+                duckdb_save_table(
+                    project_id,
+                    updated_settings,
+                    f"backchecks_{page_name_id}",
+                    "logs",
                 )
-                if confirm_delete:
-                    updated_settings = backcheck_settings_indexed.filter(
-                        pl.col("composite_index") != selected_index
-                    ).drop("composite_index", "index")
 
-                    duckdb_save_table(
-                        project_id,
-                        updated_settings,
-                        f"backchecks_{page_name_id}",
-                        "logs",
-                    )
-
-                    st.rerun()
+                st.rerun()
 
 
 def process_duplicate_data(
