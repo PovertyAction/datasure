@@ -2817,6 +2817,198 @@ def _render_column_stats(
         column_config=column_config
     )
 
+@st.fragment
+def _render_backcheck_comparison_results(
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
+    backcheck_analysis: pl.DataFrame,
+    backcheck_settings: BackcheckSettings,
+) -> None:
+    """Render detailed backcheck comparison results with filtering options.
+
+    Displays a table showing each individual comparison with options to filter
+    by match status, select specific columns, and add additional data columns.
+
+    Parameters
+    ----------
+    survey_data : pl.DataFrame
+        Survey dataset.
+    backcheck_data : pl.DataFrame
+        Backcheck dataset.
+    backcheck_analysis : pl.DataFrame
+        Results from compute_backcheck_analysis.
+    backcheck_settings : BackcheckSettings
+        Backcheck configuration settings.
+    """
+    if backcheck_analysis.is_empty():
+        st.info("No backcheck comparison results available. Configure backcheck columns in the settings section above.")
+        return
+
+    survey_key = backcheck_settings.survey_key
+    survey_id = backcheck_settings.survey_id
+    backcheck_key = f"{survey_key}__BCCL"
+
+    # Get available columns from backcheck_analysis
+    available_columns = sorted(backcheck_analysis["column_name"].unique().drop_nulls().to_list())
+
+    if not available_columns:
+        st.info("No comparison results available.")
+        return
+
+    # Column filter
+    selected_columns = st.multiselect(
+        "Filter by Columns",
+        options=available_columns,
+        default=available_columns,
+        help="Select which columns to show comparison results for"
+    )
+
+    # Additional columns selection in expander
+    with st.expander("Show Additional Columns", expanded=False):
+        col1, col2 = st.columns(2)
+
+        # Get available additional columns (exclude keys and analysis columns)
+        survey_additional_cols = [
+            col for col in survey_data.columns
+            if col not in [survey_key, survey_id, "column_name", "survey_value", "backcheck_value", "match_status", "category"]
+            and col not in backcheck_analysis.columns
+        ]
+
+        backcheck_additional_cols = [
+            col for col in backcheck_data.columns
+            if col not in [survey_key, survey_id, "column_name", "survey_value", "backcheck_value", "match_status", "category"]
+            and col not in backcheck_analysis.columns
+        ]
+
+        with col1:
+            survey_extra_cols = st.multiselect(
+                "Additional Survey Columns",
+                options=sorted(survey_additional_cols),
+                help="Select additional columns from survey data to display"
+            )
+
+        with col2:
+            backcheck_extra_cols = st.multiselect(
+                "Additional Backcheck Columns",
+                options=sorted(backcheck_additional_cols),
+                help="Select additional columns from backcheck data to display"
+            )
+
+    # Match status filter as pills - placed at top left
+    match_filter = st.pills(
+        "Filter by Match Status",
+        options=["All Results", "Mismatches Only"],
+        default="All Results",
+        selection_mode="single"
+    )
+
+    # Apply filters
+    filtered_data = backcheck_analysis.clone()
+
+    # Filter by match status
+    if match_filter == "Mismatches Only":
+        filtered_data = filtered_data.filter(pl.col("match_status") == "mismatch")
+
+    # Filter by selected columns
+    if selected_columns:
+        filtered_data = filtered_data.filter(pl.col("column_name").is_in(selected_columns))
+
+    if filtered_data.is_empty():
+        st.info("No results match the selected filters.")
+        return
+
+    # Add additional survey columns if requested
+    if survey_extra_cols:
+        # Prepare survey columns with unique names
+        survey_cols_to_add = survey_data.select([survey_key] + survey_extra_cols).unique(subset=[survey_key])
+        # Suffix survey columns to avoid conflicts
+        rename_map = {col: f"{col} (Survey)" for col in survey_extra_cols}
+        survey_cols_to_add = survey_cols_to_add.rename(rename_map)
+        filtered_data = filtered_data.join(survey_cols_to_add, on=survey_key, how="left")
+
+    # Add additional backcheck columns if requested
+    if backcheck_extra_cols and backcheck_key in filtered_data.columns:
+        # Prepare backcheck columns with unique names
+        backcheck_cols_to_add = backcheck_data.select([survey_key] + backcheck_extra_cols).unique(subset=[survey_key])
+        # Rename to match backcheck key and suffix column names
+        backcheck_cols_to_add = backcheck_cols_to_add.rename({survey_key: backcheck_key})
+        rename_map = {col: f"{col} (Backcheck)" for col in backcheck_extra_cols}
+        backcheck_cols_to_add = backcheck_cols_to_add.rename(rename_map)
+        filtered_data = filtered_data.join(backcheck_cols_to_add, on=backcheck_key, how="left")
+
+    # Select only the specific columns to display
+    display_columns = [
+        "column_name",
+        "survey_value",
+        "backcheck_value",
+        "match_status",
+        "category"
+    ]
+
+    # Add survey_id if it exists in the data
+    if survey_id and survey_id in filtered_data.columns:
+        display_columns.insert(0, survey_id)
+
+    # Add survey_key if it exists
+    if survey_key in filtered_data.columns:
+        display_columns.insert(1 if survey_id in display_columns else 0, survey_key)
+
+    # Add backcheck_key if it exists
+    if backcheck_key in filtered_data.columns:
+        display_columns.insert(2 if survey_id in display_columns else 1, backcheck_key)
+
+    # Add any additional columns requested
+    for col in filtered_data.columns:
+        if col not in display_columns and (col.endswith("(Survey)") or col.endswith("(Backcheck)")):
+            display_columns.append(col)
+
+    # Filter to only include columns that exist in the data
+    display_columns = [col for col in display_columns if col in filtered_data.columns]
+
+    # Select only the display columns and remove any completely empty rows
+    filtered_data = filtered_data.select(display_columns)
+
+    # Remove rows where both survey_value and backcheck_value are null
+    filtered_data = filtered_data.filter(
+        ~(pl.col("survey_value").is_null() & pl.col("backcheck_value").is_null())
+    )
+
+    if filtered_data.is_empty():
+        st.info("No results match the selected filters.")
+        return
+
+    # Display record count
+    st.caption(f"Showing {len(filtered_data):,} comparison records")
+
+    # Configure columns for display
+    column_config = {
+        "column_name": st.column_config.TextColumn("Column Name"),
+        "survey_value": st.column_config.TextColumn("Survey Value"),
+        "backcheck_value": st.column_config.TextColumn("Backcheck Value"),
+        "match_status": st.column_config.TextColumn("Match Status"),
+        "category": st.column_config.NumberColumn("Category", format="%d"),
+    }
+
+    # Add survey_id to config if it exists (pinned)
+    if survey_id and survey_id in filtered_data.columns:
+        column_config[survey_id] = st.column_config.TextColumn(survey_id, pinned=True)
+
+    # Add survey_key to config if it exists
+    if survey_key in filtered_data.columns:
+        column_config[survey_key] = st.column_config.TextColumn("Survey Key")
+
+    # Add backcheck key to config if it exists
+    if backcheck_key in filtered_data.columns:
+        column_config[backcheck_key] = st.column_config.TextColumn("Backcheck Key")
+
+    # Display the table
+    st.dataframe(
+        filtered_data,
+        hide_index=True,
+        use_container_width=True,
+        column_config=column_config,
+    )
+
 
 def process_duplicate_data(
     survey_data: pd.DataFrame,
@@ -3863,3 +4055,11 @@ def backchecks_report(
 
     st.subheader("Column Statistics")
     _render_column_stats(survey_data, _backcheck_analysis)
+
+    st.subheader("Comparison Results Details")
+    _render_backcheck_comparison_results(
+        survey_data,
+        backcheck_data,
+        _backcheck_analysis,
+        backcheck_settings
+    )
