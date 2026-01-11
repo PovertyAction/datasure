@@ -39,6 +39,7 @@ def get_df_columns(
     PARAMS:
     -------
     df: pl.DataFrame | pd.DataFrame : DataFrame to analyze
+
     Returns
     -------
     ColumnByType: Object containing lists of columns by type

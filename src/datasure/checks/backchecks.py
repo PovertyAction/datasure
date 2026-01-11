@@ -8,7 +8,7 @@ import polars as pl
 import streamlit as st
 from pydantic import BaseModel, Field
 
-from datasure.utils.dataframe_utils import ColumnByType, get_df_columns
+from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.settings_utils import (
     load_check_settings,

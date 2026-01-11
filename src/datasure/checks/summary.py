@@ -8,7 +8,6 @@ This module provides comprehensive summary functionality with:
 - Pydantic validation for data integrity
 """
 
-import string
 from datetime import date as Date
 from datetime import datetime, timedelta
 from typing import Any
