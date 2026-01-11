@@ -22,6 +22,15 @@ from datasure.connectors.local import (
 )
 
 
+@pytest.fixture(autouse=True)
+def mock_database_functions(monkeypatch):
+    """Override the autouse fixture from conftest.
+
+    Disables database mocking for these tests.
+    """
+    pass
+
+
 class TestValidFileTypes:
     """Test the VALID_FILE_TYPES constant."""
 

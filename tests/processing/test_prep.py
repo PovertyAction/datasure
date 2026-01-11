@@ -22,6 +22,15 @@ from datasure.processing.prep import (
 from datasure.utils.prep_utils import PrepActionResult
 
 
+@pytest.fixture(autouse=True)
+def mock_database_functions(monkeypatch):
+    """Override the autouse fixture from conftest.
+
+    Disables database mocking for these tests.
+    """
+    pass
+
+
 class TestPrepExceptions:
     """Test custom exception classes."""
 

@@ -3,6 +3,17 @@
 import re
 import time
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def mock_database_functions(monkeypatch):
+    """Override the autouse fixture from conftest.
+
+    Disables database mocking for these tests.
+    """
+    pass
+
 
 class TestNumericRegexSecurity:
     """Test cases for numeric extraction regex vulnerability."""

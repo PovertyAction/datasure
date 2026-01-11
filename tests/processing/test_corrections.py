@@ -9,6 +9,15 @@ import pytest
 from datasure.processing.corrections import CorrectionProcessor
 
 
+@pytest.fixture(autouse=True)
+def mock_database_functions(monkeypatch):
+    """Override the autouse fixture from conftest.
+
+    Disables database mocking for these tests.
+    """
+    pass
+
+
 @pytest.fixture
 def sample_data():
     """Sample data for testing."""
@@ -70,6 +79,11 @@ def correction_processor(mock_streamlit):
         patch("datasure.processing.corrections.duckdb_save_table") as mock_save,
     ):
         processor = CorrectionProcessor("test_project")
+        # Clear all caches before each test
+        processor.get_corrected_data.clear()
+        processor.get_correction_log.clear()
+        processor.get_data_summary.clear()
+        processor.get_correction_summary.clear()
         yield processor, mock_get, mock_save
 
 
