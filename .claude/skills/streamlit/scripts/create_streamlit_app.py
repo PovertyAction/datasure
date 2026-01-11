@@ -100,7 +100,7 @@ font = "sans serif"
         config_path.write_text(config_content)
         print(f"✓ Created config at: {config_path}")
 
-    print(f"\nTo run your app:")
+    print("\nTo run your app:")
     print(f"  streamlit run {output_path}")
 
 
