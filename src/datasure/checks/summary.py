@@ -8,6 +8,7 @@ This module provides comprehensive summary functionality with:
 - Pydantic validation for data integrity
 """
 
+import string
 from datetime import date as Date
 from datetime import datetime, timedelta
 from typing import Any
@@ -22,7 +23,7 @@ from dateutil.relativedelta import relativedelta
 from pydantic import BaseModel, Field, field_validator
 
 from datasure.utils.chart_utils import donut_chart2
-from datasure.utils.dataframe_utils import get_df_info
+from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.settings_utils import (
     load_check_settings,
@@ -956,7 +957,7 @@ def compute_summary_data_quality(data: pl.DataFrame, survey_id: str | None) -> t
 
 @demo_output_onboarding(TAB_NAME)
 def summary_settings(
-    data: pl.DataFrame, setting_file: str, config: SummarySettings
+    data: pl.DataFrame, setting_file: str, config: SummarySettings, survey_columns: ColumnByType
 ) -> tuple:
     """Render settings UI and return selected settings.
 
@@ -986,16 +987,15 @@ def summary_settings(
         )
 
         # Get column information
-        _, string_columns, numeric_columns, datetime_columns, _ = get_df_info(
-            data, cols_only=True
-        )
+        datetime_columns = survey_columns.datetime_columns
+        categorical_columns = survey_columns.categorical_columns
 
         st.markdown("#### Survey Identifiers")
         with st.container(border=True):
             si1, _, _ = st.columns(spec=3)
             # Survey ID selection
             with si1:
-                id_col_options = string_columns + numeric_columns
+                id_col_options = categorical_columns
                 default_survey_id_index = (
                     id_col_options.index(default_survey_id)
                     if default_survey_id and default_survey_id in id_col_options
@@ -1372,7 +1372,7 @@ def summary_data_quality(data: pl.DataFrame, survey_id: str | None) -> None:
 
 
 @demo_output_onboarding(TAB_NAME)
-def summary_report(data: pl.DataFrame, setting_file: str, config: dict) -> None:
+def summary_report(data: pl.DataFrame, setting_file: str, config: dict, survey_columns: ColumnByType) -> None:
     """Generate comprehensive summary report.
 
     Parameters
@@ -1387,7 +1387,7 @@ def summary_report(data: pl.DataFrame, setting_file: str, config: dict) -> None:
     # Get settings
     config_settings = SummarySettings(**config)
     survey_date, survey_target, survey_id = summary_settings(
-        data, setting_file, config_settings
+        data, setting_file, config_settings, survey_columns
     )
 
     # Render sections

@@ -12,7 +12,7 @@ import polars as pl
 import streamlit as st
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from datasure.utils.dataframe_utils import get_df_info
+from datasure.utils.dataframe_utils import get_df_columns
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 
 # ============================================================================
@@ -276,11 +276,10 @@ class DatasetService:
             type="pd",
         )
 
-        _, string_columns, numeric_columns, datetime_columns, _ = get_df_info(
-            survey_df, cols_only=True
-        )
-
-        categorical_columns = string_columns + numeric_columns
+        column_info = get_df_columns(survey_df)
+        datetime_columns = column_info.datetime_columns
+        numeric_columns = column_info.numeric_columns
+        categorical_columns = column_info.categorical_columns
 
         return datetime_columns, numeric_columns, categorical_columns
 

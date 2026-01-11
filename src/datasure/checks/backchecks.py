@@ -8,8 +8,8 @@ import polars as pl
 import streamlit as st
 from pydantic import BaseModel, Field
 
-from datasure.utils import duckdb_get_table, duckdb_save_table
-from datasure.utils.dataframe_utils import get_df_info
+from datasure.utils.dataframe_utils import ColumnByType, get_df_columns
+from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.settings_utils import (
     load_check_settings,
     save_check_settings,
@@ -2728,6 +2728,8 @@ def backchecks_report(
     backcheck_data: pl.DataFrame,
     setting_file: str,
     config: dict,
+    survey_columns: ColumnByType,
+    backcheck_columns: ColumnByType,
 ) -> None:
     """
     Generate and display backchecks report.
@@ -2754,29 +2756,11 @@ def backchecks_report(
     backcheck_data_pd = backcheck_data.to_pandas()
 
     # Get column information for settings UI
-    (
-        _,
-        survey_string_columns,
-        survey_numeric_columns,
-        survey_datetime_columns,
-        _,
-    ) = get_df_info(survey_data, cols_only=True)
+    survey_categorical_columns = survey_columns.categorical_columns
+    survey_datetime_columns = survey_columns.datetime_columns
 
-    (
-        _,
-        backcheck_string_columns,
-        backcheck_numeric_columns,
-        backcheck_datetime_columns,
-        _,
-    ) = get_df_info(backcheck_data, cols_only=True)
-
-    # Combine string and numeric columns for categorical options
-    survey_categorical_columns = list(
-        set(survey_string_columns + survey_numeric_columns)
-    )
-    backcheck_categorical_columns = list(
-        set(backcheck_string_columns + backcheck_numeric_columns)
-    )
+    backcheck_categorical_columns = backcheck_columns.categorical_columns
+    backcheck_datetime_columns = backcheck_columns.datetime_columns
 
     # Configure settings
     config_settings = BackcheckSettings(**config)

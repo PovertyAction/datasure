@@ -18,7 +18,7 @@ import streamlit as st
 from pydantic import BaseModel, Field, field_validator
 
 from datasure.utils.chart_utils import donut_chart2
-from datasure.utils.dataframe_utils import get_df_info
+from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.settings_utils import (
     load_check_settings,
@@ -529,8 +529,7 @@ def render_time_period_selector(settings_file: str, tab_name: str) -> Literal["D
     Literal["Day", "Week", "Month"]
         Selected time period for aggregation.
     """
-    _, tp_col = st.columns([0.8, 0.2])
-    with tp_col:
+    with st.container(horizontal_alignment="left"):
 
         options_map = {"Day": ":material/event: Daily", "Week": ":material/date_range: Weekly", "Month": ":material/calendar_month: Monthly"}
 
@@ -1210,6 +1209,9 @@ def _display_chart_and_table(
         percentage_list = attempted_frequency["percentage"].to_list()
         frequency_list = attempted_frequency["frequency"].to_list()
 
+        # Convert attempts to strings for categorical axis
+        num_interviews_str = [str(int(x)) for x in num_interviews_list]
+
         # Create custom hover text
         hover_text = [
             f"<b>{attempts} Attempts</b><br>"
@@ -1224,7 +1226,7 @@ def _display_chart_and_table(
         fig.add_trace(
             go.Bar(
                 x=percentage_list,
-                y=num_interviews_list,
+                y=num_interviews_str,
                 orientation="h",
                 marker_color="#f87171",
                 hovertemplate="%{customdata}<extra></extra>",
@@ -1247,6 +1249,7 @@ def _display_chart_and_table(
             },
             yaxis={
                 "title": "Number of Attempts",
+                "type": "category",
                 "showgrid": False,
                 "gridcolor": "lightgrey",
                 "autorange": "reversed",
@@ -1292,11 +1295,10 @@ def _display_chart_and_table(
 
 @demo_output_onboarding(TAB_NAME)
 def progress_report(
-    project_id: str,
-    page_name_id: str,
     data: pl.DataFrame,
     setting_file: str,
     config: dict,
+    survey_columns: ColumnByType,
 ) -> None:
     """Display comprehensive progress tracking report with multiple sections.
 
@@ -1322,20 +1324,20 @@ def progress_report(
         Path to settings file for configuration persistence.
     config : dict
         Default configuration dictionary to initialize ProgressSettings.
+    survey_columns : ColumnByType
+        Column names categorized by data type.
     """
     # get column info
-    _, string_columns, numeric_columns, datetime_columns, _ = get_df_info(
-        data, cols_only=True
-    )
+    datetime_columns = survey_columns.datetime_columns
+    categorical_columns = survey_columns.categorical_columns
 
-    string_numeric_cols = list(set(string_columns + numeric_columns))
 
     st.title("Progress Tracking")
 
     # Load settings
     config_settings = ProgressSettings(**config)
     progress_settings = progress_report_settings(
-        setting_file, config_settings, string_numeric_cols, datetime_columns
+        setting_file, config_settings, categorical_columns, datetime_columns
     )
 
     st.write("---")

@@ -9,22 +9,23 @@ datasets and checks.
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from turtle import back
 
 import pandas as pd
 import polars as pl
 import streamlit as st
 
-from datasure.checks import (
-    duplicates_report,
-    enumerator_report,
-    gpschecks_report,
-    missing_report,
-    outliers_report,
-    progress_report,
-    summary_report,
-)
+from datasure.checks.backchecks import backchecks_report
+from datasure.checks.duplicates import duplicates_report
+from datasure.checks.enumerator import enumerator_report
+from datasure.checks.gpschecks import gpschecks_report
+from datasure.checks.missing import missing_report
+from datasure.checks.outliers import outliers_report
+from datasure.checks.progress import progress_report
+from datasure.checks.summary import summary_report
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import CheckConfiguration
+from datasure.utils.dataframe_utils import get_df_columns
 from datasure.utils.duckdb_utils import (
     duckdb_get_table,
 )
@@ -274,6 +275,7 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
         outliers,
         gps_checks,
         enumerator_stats,
+        backcheck_analysis,
     ) = st.tabs(
         (
             "Summary",
@@ -283,8 +285,12 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             "Outliers & Constraints",
             "GPS Checks",
             "Enumerator Statistics",
+            "Backcheck Analysis",
         )
     )
+
+    # get columns by type
+    survey_columns = get_df_columns(data.page_data)
 
     # Render each tab
     with summary:
@@ -293,7 +299,7 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             "survey_date": config.survey_date,
             "survey_target": config.survey_target,
         }
-        summary_report(data.page_data, config.setting_file, summary_config)
+        summary_report(data.page_data, config.setting_file, summary_config, survey_columns)
 
     with progress:
         progress_config: dict = {
@@ -304,11 +310,10 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             "survey_target": config.survey_target,
         }
         progress_report(
-            project_id,
-            config.page_name_id,
             data.page_data,
             config.setting_file,
             progress_config,
+            survey_columns,
         )
 
     with missing:
@@ -333,6 +338,7 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             data.page_data,
             config.setting_file,
             duplicates_config,
+            survey_columns,
         )
 
     with outliers:
@@ -349,6 +355,7 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             data.page_data,
             config.setting_file,
             outliers_config,
+            survey_columns,
         )
 
     with gps_checks:
@@ -365,6 +372,7 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             data.page_data,
             config.setting_file,
             gpschecks_config,
+            survey_columns,
         )
 
     with enumerator_stats:
@@ -379,11 +387,37 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
         }
         enumerator_report(
             project_id,
-            config.page_name_id,
             data.page_data,
             config.setting_file,
             enumerator_stats_config,
+            survey_columns,
         )
+
+    with backcheck_analysis:
+        if data.backcheck_data is not None:
+            backcheck_columns = get_df_columns(data.backcheck_data)
+            backcheck_config: dict = {
+                "survey_key": config.survey_key,
+                "survey_id": config.survey_id,
+                "survey_date": config.survey_date,
+                "backcheck_date": config.backcheck_date,
+                "enumerator": config.enumerator,
+                "backchecker": config.backchecker,
+                "backchecker_team": config.backchecker_team,
+                "backcheck_target_percent": config.backcheck_target_percent,
+            }
+            backchecks_report(
+                project_id,
+                config.page_name_id,
+                data.page_data,
+                data.backcheck_data,
+                config.setting_file,
+                backcheck_config,
+                survey_columns,
+                backcheck_columns,
+            )
+        else:
+            st.info("No backcheck data available for analysis.")
 
 
 def validate_prerequisites(project_id: str | None) -> pl.DataFrame:

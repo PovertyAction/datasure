@@ -18,13 +18,13 @@ import polars as pl
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
 
-from datasure.utils import (
-    get_df_info,
+from datasure.utils.dataframe_utils import ColumnByType
+from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.settings_utils import (
     load_check_settings,
     save_check_settings,
     trigger_save,
 )
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 
 TAB_NAME = "duplicates"
 
@@ -2001,6 +2001,7 @@ def duplicates_report(
     data: pl.DataFrame,
     setting_file: str,
     config: dict,
+    survey_columns: ColumnByType,
 ) -> None:
     """Generate a comprehensive duplicates report.
 
@@ -2023,15 +2024,14 @@ def duplicates_report(
     config : dict
         Configuration dictionary for duplicates settings.
     """
-    _, string_columns, numeric_columns, datetime_columns, _ = get_df_info(data, cols_only=True)
-
-    string_numeric_cols = list(set(string_columns + numeric_columns))
+    categorical_columns = survey_columns.categorical_columns
+    datetime_columns = survey_columns.datetime_columns
 
     st.title("Duplicates Report")
 
     config_settings = DuplicatesSettings(**config)
     duplicates_settings = duplicates_report_settings(
-        project_id, setting_file, data, config_settings, string_numeric_cols, datetime_columns
+        project_id, setting_file, data, config_settings, categorical_columns, datetime_columns
     )
 
     filtered_data = duckdb_get_table(

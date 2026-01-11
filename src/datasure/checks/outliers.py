@@ -6,8 +6,6 @@ This module provides comprehensive outlier detection functionality with:
 - Pydantic validation for data integrity
 - Modular, testable architecture
 """
-
-import math
 import re
 from enum import Enum, IntEnum
 from typing import Any
@@ -25,7 +23,7 @@ from pydantic import (
     model_validator,
 )
 
-from datasure.utils.dataframe_utils import get_df_info
+from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.settings_utils import (
@@ -2638,25 +2636,26 @@ def _delete_outlier_column(
                 help="Select the outlier column to remove from the list.",
             )
 
-            if selected_index:
-                confirm_delete = st.button(
-                    label="Confirm deletion",
-                    type="primary",
-                    width="stretch",
+            if st.button(
+                label="Confirm deletion",
+                type="primary",
+                width="stretch",
+                help="Click to confirm deletion of the selected outlier column.",
+                key="confirm_delete_outlier_column",
+                disabled=not selected_index,
+            ):
+                updated_settings = outliers_settings.filter(
+                    pl.col("composite_index") != selected_index
+                ).drop("composite_index")
+
+                duckdb_save_table(
+                    project_id,
+                    updated_settings,
+                    f"outliers_{page_name_id}",
+                    "logs",
                 )
-                if confirm_delete:
-                    updated_settings = outliers_settings.filter(
-                        pl.col("composite_index") != selected_index
-                    ).drop("composite_index")
 
-                    duckdb_save_table(
-                        project_id,
-                        updated_settings,
-                        f"outliers_{page_name_id}",
-                        "logs",
-                    )
-
-                    st.rerun()
+                st.rerun()
 
 
 # =============================================================================
@@ -2670,6 +2669,7 @@ def outliers_report(
     data: pl.DataFrame,
     setting_file: str,
     config: dict,
+    survey_columns: ColumnByType,
 ) -> None:
     """Create a comprehensive outliers report.
 
@@ -2687,18 +2687,16 @@ def outliers_report(
         Configuration dictionary.
     """
     # get column info
-    _, string_columns, numeric_columns, datetime_columns, _ = get_df_info(
-        data, cols_only=True
-    )
-
-    string_numeric_cols = list(set(string_columns + numeric_columns))
+    categorical_columns = survey_columns.categorical_columns
+    datetime_columns = survey_columns.datetime_columns
+    numeric_columns = survey_columns.numeric_columns
 
     st.title("Outliers and Constraints Report")
 
     # Load settings
     config_settings = OutlierSettings(**config)
     outliers_settings = outliers_report_settings(
-        setting_file, config_settings, string_numeric_cols, datetime_columns
+        setting_file, config_settings, categorical_columns, datetime_columns
     )
 
     # Outlier columns configuration
@@ -2718,7 +2716,7 @@ def outliers_report(
     # update lock columns if needed
     outliers_column_config = _update_unlocked_cols(
         outliers_column_config,
-        string_numeric_cols,
+        categorical_columns,
     )
 
     # save updated config

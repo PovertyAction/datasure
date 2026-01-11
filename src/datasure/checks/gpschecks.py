@@ -8,15 +8,15 @@ from geopy.distance import geodesic
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from sklearn.neighbors import LocalOutlierFactor
 
-from datasure.utils import (
-    get_df_info,
-    load_check_settings,
-    save_check_settings,
-    trigger_save,
-)
+from datasure.utils.dataframe_utils import ColumnByType, get_df_columns
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.onboarding_utils import demo_output_onboarding
-from datasure.utils.settings_utils import save_secrets
+from datasure.utils.settings_utils import (
+    load_check_settings,
+    save_check_settings,
+    save_secrets,
+    trigger_save,
+)
 
 TAB_NAME: str = "gpschecks"
 
@@ -894,8 +894,8 @@ def _render_gps_coordinates(
         return
 
     # Get categorical columns for coloring and filtering
-    _, string_columns, _, _, _ = get_df_info(parsed_data, cols_only=True)
-    categorical_cols = [None] + string_columns
+    df_columns: ColumnByType = get_df_columns(parsed_data)
+    categorical_cols = df_columns.categorical_columns
 
     # UI controls
     with gp2:
@@ -1114,7 +1114,8 @@ def _render_gps_outliers_checks(
     df_pd = parsed_data.to_pandas()
 
     # Get categorical columns for clustering
-    _, string_columns, _, _, _ = get_df_info(parsed_data, cols_only=True)
+    df_columns: ColumnByType = get_df_columns(parsed_data)
+    string_columns = df_columns.categorical_columns
 
     with go2:
         # Detection method selection
@@ -1132,10 +1133,10 @@ def _render_gps_outliers_checks(
 
         # LOF requires at least 6 points to work properly (min_neighbors=5)
         if n_samples < 6:
-            st.error(
-                f"❌ Not enough GPS points for Auto-Clustering. "
+            st.warning(
+                f"Not enough GPS points for Auto-Clustering. "
                 f"Found {n_samples} point(s), need at least 6. "
-                "Please try 'Cluster by Column' method or add more data."
+                "Try 'Cluster by Column' method or add more data."
             )
             return
 
@@ -2007,6 +2008,7 @@ def gpschecks_report(
     data: pl.DataFrame,
     setting_file: str,
     config: dict,
+    survey_columns: ColumnByType,
 ) -> None:
     """
     Generate the GPS checks report.
@@ -2030,9 +2032,8 @@ def gpschecks_report(
     """
     st.title("GPS Checks Report")
 
-    _, string_columns, numeric_columns, datetime_columns, _ = get_df_info(data, cols_only=True)
-
-    string_numeric_cols = list(set(string_columns + numeric_columns))
+    categorical_columns = survey_columns.categorical_columns
+    datetime_columns = survey_columns.datetime_columns
 
     if data.is_empty():
         st.info(
@@ -2067,7 +2068,7 @@ def gpschecks_report(
         setting_file,
         data,
         config_settings,
-        string_numeric_cols,
+        categorical_columns,
         datetime_columns,
     )
 
