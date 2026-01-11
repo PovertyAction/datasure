@@ -300,7 +300,7 @@ def gpschecks_report_settings(
 
         # Mapbox API Key Configuration
         with st.container(border=True):
-            st.subheader("Mapbox API Key Configuration")
+            st.subheader("Mapbox API Token Configuration")
             st.caption(
                 "Configure your Mapbox API key for map visualizations. "
                 "You can use the default key or provide your own."

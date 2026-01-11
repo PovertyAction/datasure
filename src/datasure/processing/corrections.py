@@ -4,7 +4,7 @@ from typing import Any
 import polars as pl
 import streamlit as st
 
-from datasure.utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 
 
 class CorrectionProcessor:

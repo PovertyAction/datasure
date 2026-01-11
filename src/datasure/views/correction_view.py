@@ -9,38 +9,41 @@ removed or modified as needed.
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+from unittest.mock import Base
 
 import polars as pl
 import streamlit as st
+from pydantic import BaseModel, Field, validator
 
 from datasure.processing.corrections import CorrectionProcessor
-from datasure.utils import duckdb_get_table, get_check_config_settings
+from datasure.utils.duckdb_utils import duckdb_get_table
 from datasure.utils.navigations_utils import demo_sidebar_help, page_navigation
 from datasure.utils.onboarding_utils import ImportDemoInfo, demo_expander
+from datasure.utils.settings_utils import get_check_config_settings
 
 # DEFINE CONSTANTS FOR CORRECTION
 CORRECTION_ACTIONS = ("modify value", "remove value", "remove row")
 
 
-@dataclass
-class TabConfig:
+class TabConfig(BaseModel):
     """Configuration for a correction tab."""
 
-    page_name: str
-    survey_data_name: str
-    survey_key: str
+    page_name: str = Field(..., description="Name of the page/check")
+    survey_data_name: str = Field(..., description="Name of the survey data alias")
+    survey_key: str = Field(..., description="Name of the survey KEY column")
 
 
-@dataclass
-class CorrectionFormState:
+class CorrectionFormState(BaseModel):
     """State management for correction form inputs."""
 
-    key_value: str
-    action: str
-    column: str | None = None
-    current_value: Any = None
-    new_value: Any = None
-    validation_error: str | None = None
+    key_value: str = Field(..., description="The selected key value for correction")
+    action: str = Field(..., description="The correction action type")
+    column: str | None = Field(None, description="The column to modify (if applicable)")
+    current_value: Any | None = Field(None, description="The current value (if applicable)")
+    new_value: Any | None = Field(None, description="The new value (if applicable)")
+    validation_error: str | None = Field(
+        None, description="Validation error message (if any)"
+    )
 
 
 def load_hfc_config(project_id: str) -> tuple[pl.DataFrame, list[str]]:
@@ -205,23 +208,16 @@ def load_tab_config(project_id: str, tab_index: int) -> TabConfig | None:
     TabConfig | None
         Tab configuration or None if loading fails.
     """
-    try:
-        (
-            page_name,
-            survey_data_name,
-            survey_key,
-            *_,
-        ) = get_check_config_settings(
-            project_id=project_id,
-            page_row_index=tab_index,
-        )
-        return TabConfig(
-            page_name=page_name,
-            survey_data_name=survey_data_name,
-            survey_key=survey_key,
-        )
-    except Exception:
-        return None
+    page_config = get_check_config_settings(
+        project_id=project_id,
+        page_row_index=tab_index,
+    )
+
+    return TabConfig(
+        page_name=page_config.get("page_name"),
+        survey_data_name=page_config.get("survey_data_name"),
+        survey_key=page_config.get("survey_key"),
+    )
 
 
 def validate_prerequisites(project_id: str | None) -> tuple[pl.DataFrame, list[str]]:
@@ -955,7 +951,7 @@ def render_correction_tab(
     tab_index : int
         The index of the tab being rendered.
     """
-    config = load_tab_config(project_id, tab_index)
+    config: TabConfig = load_tab_config(project_id, tab_index)
 
     if not config:
         st.error(f"Error loading configuration for tab {tab_index}")
@@ -1032,10 +1028,10 @@ def main() -> None:
     render_page_header()
 
     # Get project ID from session state
-    project_id: str = st.session_state.get("st_project_id", "")
+    project_id: str = st.session_state["st_project_id"]
 
     # Validate prerequisites
-    _hfc_config_logs, hfc_pages = validate_prerequisites(project_id)
+    _, hfc_pages = validate_prerequisites(project_id)
 
     # Initialize correction processor
     correction_processor = CorrectionProcessor(project_id)
