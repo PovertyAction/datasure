@@ -41,6 +41,15 @@ from datasure.checks.outliers import (
 # ============================================================================
 
 
+@pytest.fixture(autouse=True)
+def mock_database_functions(monkeypatch):
+    """Override the autouse fixture from conftest.
+
+    Disables database mocking for these tests.
+    """
+    pass
+
+
 @pytest.fixture
 def sample_polars_df():
     """Create a sample Polars DataFrame for testing."""
@@ -267,13 +276,14 @@ class TestOutlierStatistics:
             max_value=100.0,
             mean=50.0,
             median=48.0,
-            std=15.0,
+            sd=15.0,
             iqr=25.0,
             lower_bound=10.0,
             upper_bound=90.0,
         )
         assert stats.count == 100
         assert stats.mean == 50.0
+        assert stats.sd == 15.0
 
     def test_alias_std(self):
         """Test that 'sd' alias works for std field."""
