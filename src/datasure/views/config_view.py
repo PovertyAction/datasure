@@ -4,13 +4,13 @@ import sys
 
 import streamlit as st
 
-from datasure.utils import duckdb_get_aliases
 from datasure.utils.config_utils import (
     ConfigurationService,
     add_check_configuration_form,
     remove_check_configuration_form,
     render_configuration_table,
 )
+from datasure.utils.duckdb_utils import duckdb_get_aliases
 from datasure.utils.navigations_utils import (
     add_demo_navigation,
     demo_sidebar_help,

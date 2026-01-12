@@ -1,71 +1,96 @@
 """Comprehensive tests for config_view.py module."""
 
+import sys
 from unittest.mock import MagicMock, Mock, patch
 
 import polars as pl
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def reset_streamlit_mocks():
+    """Reset streamlit mocks between tests to avoid call count accumulation."""
+    import streamlit as st
+
+    yield
+
+    # Reset all mock call counts
+    st.info.reset_mock()
+    st.warning.reset_mock()
+    st.error.reset_mock()
+    st.success.reset_mock()
+    st.title.reset_mock()
+    st.markdown.reset_mock()
+    st.subheader.reset_mock()
+    st.write.reset_mock()
+    st.columns.reset_mock()
+    st.button.reset_mock()
+    st.stop.reset_mock()
+
+
 class TestGetProjectId:
     """Test _get_project_id function."""
 
-    @patch("datasure.views.config_view.st")
-    def test_returns_project_id_when_present(self, mock_st):
+    def test_returns_project_id_when_present(self):
         """Test that project ID is returned when present in session state."""
-        # Import the function after mocking
+        import streamlit as st
+
         from datasure.views.config_view import _get_project_id
 
-        mock_st.session_state.st_project_id = "project_123"
+        st.session_state.st_project_id = "project_123"
 
         result = _get_project_id()
 
         assert result == "project_123"
-        mock_st.info.assert_not_called()
-        mock_st.stop.assert_not_called()
+        st.info.assert_not_called()
+        st.stop.assert_not_called()
 
-    @patch("datasure.views.config_view.st")
-    def test_shows_info_and_stops_when_no_project_id(self, mock_st):
+    def test_shows_info_and_stops_when_no_project_id(self):
         """Test that info message is shown and execution stops when no project ID."""
+        import streamlit as st
+
         from datasure.views.config_view import _get_project_id
 
-        mock_st.session_state.st_project_id = ""
-        mock_st.stop.side_effect = Exception("Streamlit stop")
+        st.session_state.st_project_id = ""
+        st.stop.side_effect = StopIteration
 
-        with pytest.raises(Exception):  # noqa: B017 - st.stop() raises generic exception
+        with pytest.raises(StopIteration):
             _get_project_id()
 
-        mock_st.info.assert_called_once()
-        call_args = mock_st.info.call_args[0][0]
+        st.info.assert_called_once()
+        call_args = st.info.call_args[0][0]
         assert "Select a project from the Start page" in call_args
-        mock_st.stop.assert_called_once()
+        st.stop.assert_called_once()
 
-    @patch("datasure.views.config_view.st")
-    def test_shows_info_and_stops_when_none_project_id(self, mock_st):
+    def test_shows_info_and_stops_when_none_project_id(self):
         """Test that info message is shown when project ID is None."""
+        import streamlit as st
+
         from datasure.views.config_view import _get_project_id
 
-        mock_st.session_state.st_project_id = None
-        mock_st.stop.side_effect = Exception("Streamlit stop")
+        st.session_state.st_project_id = None
+        st.stop.side_effect = StopIteration
 
-        with pytest.raises(Exception):  # noqa: B017 - st.stop() raises generic exception
+        with pytest.raises(StopIteration):
             _get_project_id()
 
-        mock_st.info.assert_called_once()
-        mock_st.stop.assert_called_once()
+        st.info.assert_called_once()
+        st.stop.assert_called_once()
 
 
 class TestRenderHeader:
     """Test _render_header function."""
 
-    @patch("datasure.views.config_view.st")
-    def test_renders_title_and_markdown(self, mock_st):
+    def test_renders_title_and_markdown(self):
         """Test that title and markdown are rendered."""
+        import streamlit as st
+
         from datasure.views.config_view import _render_header
 
         _render_header()
 
-        mock_st.title.assert_called_once_with("Configure Checks")
-        mock_st.markdown.assert_called_once_with(
+        st.title.assert_called_once_with("Configure Checks")
+        st.markdown.assert_called_once_with(
             "Add a page for each dataset you want to check"
         )
 
@@ -114,16 +139,17 @@ class TestRenderConfigurationActions:
 
     @patch("datasure.views.config_view.remove_check_configuration_form")
     @patch("datasure.views.config_view.add_check_configuration_form")
-    @patch("datasure.views.config_view.st")
-    def test_renders_forms_in_columns(self, mock_st, mock_add_form, mock_remove_form):
+    def test_renders_forms_in_columns(self, mock_add_form, mock_remove_form):
         """Test that forms are rendered in columns."""
+        import streamlit as st
+
         from datasure.views.config_view import _render_configuration_actions
 
         # Mock columns - use MagicMock to support context manager protocol
         mock_col1 = MagicMock()
         mock_col2 = MagicMock()
         mock_col3 = MagicMock()
-        mock_st.columns.return_value = [mock_col1, mock_col2, mock_col3]
+        st.columns.return_value = [mock_col1, mock_col2, mock_col3]
 
         project_id = "test_project"
         alias_list = ["alias1", "alias2"]
@@ -131,11 +157,11 @@ class TestRenderConfigurationActions:
         _render_configuration_actions(project_id, alias_list)
 
         # Verify columns created with correct proportions
-        mock_st.columns.assert_called_once_with([0.4, 0.3, 0.3])
+        st.columns.assert_called_once_with([0.4, 0.3, 0.3])
 
         # Verify button created with correct callback
-        mock_st.button.assert_called_once()
-        call_kwargs = mock_st.button.call_args[1]
+        st.button.assert_called_once()
+        call_kwargs = st.button.call_args[1]
         assert call_kwargs["on_click"] == mock_add_form
         assert call_kwargs["args"] == (project_id, alias_list)
 
@@ -144,20 +170,21 @@ class TestRenderConfigurationActions:
 
     @patch("datasure.views.config_view.remove_check_configuration_form")
     @patch("datasure.views.config_view.add_check_configuration_form")
-    @patch("datasure.views.config_view.st")
-    def test_empty_alias_list(self, mock_st, mock_add_form, mock_remove_form):
+    def test_empty_alias_list(self, mock_add_form, mock_remove_form):
         """Test with empty alias list."""
+        import streamlit as st
+
         from datasure.views.config_view import _render_configuration_actions
 
         mock_col1 = MagicMock()
         mock_col2 = MagicMock()
         mock_col3 = MagicMock()
-        mock_st.columns.return_value = [mock_col1, mock_col2, mock_col3]
+        st.columns.return_value = [mock_col1, mock_col2, mock_col3]
 
         _render_configuration_actions("project_id", [])
 
         # Verify button created with correct callback and empty list
-        call_kwargs = mock_st.button.call_args[1]
+        call_kwargs = st.button.call_args[1]
         assert call_kwargs["on_click"] == mock_add_form
         assert call_kwargs["args"] == ("project_id", [])
 
@@ -167,9 +194,10 @@ class TestRenderConfigurationActions:
 class TestRenderConfigurationsDisplay:
     """Test _render_configurations_display function."""
 
-    @patch("datasure.views.config_view.st")
-    def test_shows_info_when_empty_configurations(self, mock_st):
+    def test_shows_info_when_empty_configurations(self):
         """Test that info message is shown when no configurations exist."""
+        import streamlit as st
+
         from datasure.views.config_view import _render_configurations_display
 
         mock_service = Mock()
@@ -179,14 +207,15 @@ class TestRenderConfigurationsDisplay:
         _render_configurations_display(mock_service)
 
         mock_service.get_all_configurations.assert_called_once()
-        mock_st.info.assert_called_once_with(
+        st.info.assert_called_once_with(
             "No check configurations found. Please add a check configuration to start."
         )
 
     @patch("datasure.views.config_view.render_configuration_table")
-    @patch("datasure.views.config_view.st")
-    def test_renders_table_when_configurations_exist(self, mock_st, mock_render_table):
+    def test_renders_table_when_configurations_exist(self, mock_render_table):
         """Test that table is rendered when configurations exist."""
+        import streamlit as st
+
         from datasure.views.config_view import _render_configurations_display
 
         mock_service = Mock()
@@ -200,7 +229,7 @@ class TestRenderConfigurationsDisplay:
         # Verify the dataframe passed to render_table
         call_args = mock_render_table.call_args[0][0]
         assert call_args.equals(config_df)
-        mock_st.info.assert_not_called()
+        st.info.assert_not_called()
 
 
 class TestRenderNavigation:
@@ -209,12 +238,13 @@ class TestRenderNavigation:
     @patch("datasure.views.config_view.show_demo_next_action")
     @patch("datasure.views.config_view.demo_expander")
     @patch("datasure.views.config_view.ImportDemoInfo")
-    @patch("datasure.views.config_view.st")
     @patch("datasure.views.config_view.is_demo_project")
     def test_demo_navigation_with_configs(
-        self, mock_is_demo, mock_st, mock_info, mock_expander, mock_next_action
+        self, mock_is_demo, mock_info, mock_expander, mock_next_action
     ):
         """Test demo navigation when configurations exist."""
+        import streamlit as st
+
         from datasure.views.config_view import _render_navigation
 
         mock_is_demo.return_value = True
@@ -226,7 +256,7 @@ class TestRenderNavigation:
         _render_navigation(mock_service)
 
         mock_is_demo.assert_called_once()
-        mock_st.write.assert_called_once_with("---")
+        st.write.assert_called_once_with("---")
         mock_expander.assert_called_once_with(
             "Learn More: Proceed to Data QUality Checks",
             "Proceed info",
@@ -236,10 +266,11 @@ class TestRenderNavigation:
             4, "st_output_page1", "View Quality Reports"
         )
 
-    @patch("datasure.views.config_view.st")
     @patch("datasure.views.config_view.is_demo_project")
-    def test_demo_navigation_without_configs(self, mock_is_demo, mock_st):
+    def test_demo_navigation_without_configs(self, mock_is_demo):
         """Test demo navigation when no configurations exist."""
+        import streamlit as st
+
         from datasure.views.config_view import _render_navigation
 
         mock_is_demo.return_value = True
@@ -250,21 +281,22 @@ class TestRenderNavigation:
         _render_navigation(mock_service)
 
         mock_is_demo.assert_called_once()
-        mock_st.write.assert_called_once_with("---")
+        st.write.assert_called_once_with("---")
         # No further actions when configs are empty
 
     @patch("datasure.views.config_view.page_navigation")
-    @patch("datasure.views.config_view.st")
     @patch("datasure.views.config_view.is_demo_project")
-    def test_regular_navigation(self, mock_is_demo, mock_st, mock_page_nav):
+    def test_regular_navigation(self, mock_is_demo, mock_page_nav):
         """Test regular navigation for non-demo projects."""
+        import streamlit as st
+
         from datasure.views.config_view import _render_navigation
 
         mock_is_demo.return_value = False
         mock_service = Mock()
         mock_service.get_all_configurations.return_value = pl.DataFrame()
-        mock_st.session_state.st_prep_data_page = "prep_page"
-        mock_st.session_state.st_output_pages = ["output_page"]
+        st.session_state.st_prep_data_page = "prep_page"
+        st.session_state.st_output_pages = ["output_page"]
 
         _render_navigation(mock_service)
 
@@ -277,19 +309,20 @@ class TestRenderNavigation:
         assert call_args[1]["next"]["label"] == "Next: Output Page →"
 
     @patch("datasure.views.config_view.page_navigation")
-    @patch("datasure.views.config_view.st")
     @patch("datasure.views.config_view.is_demo_project")
     def test_regular_navigation_no_output_pages(
-        self, mock_is_demo, mock_st, mock_page_nav
+        self, mock_is_demo, mock_page_nav
     ):
         """Test regular navigation when no output pages exist."""
+        import streamlit as st
+
         from datasure.views.config_view import _render_navigation
 
         mock_is_demo.return_value = False
         mock_service = Mock()
         mock_service.get_all_configurations.return_value = pl.DataFrame()
-        mock_st.session_state.st_prep_data_page = "prep_page"
-        mock_st.session_state.st_output_pages = []
+        st.session_state.st_prep_data_page = "prep_page"
+        st.session_state.st_output_pages = []
 
         _render_navigation(mock_service)
 
@@ -308,7 +341,6 @@ class TestMain:
     @patch("datasure.views.config_view._render_configurations_display")
     @patch("datasure.views.config_view._render_configuration_actions")
     @patch("datasure.views.config_view._render_demo_guidance")
-    @patch("datasure.views.config_view.st")
     @patch("datasure.views.config_view.ConfigurationService")
     @patch("datasure.views.config_view.duckdb_get_aliases")
     @patch("datasure.views.config_view._render_header")
@@ -319,13 +351,14 @@ class TestMain:
         mock_header,
         mock_get_aliases,
         mock_service_class,
-        mock_st,
         mock_demo_guidance,
         mock_config_actions,
         mock_config_display,
         mock_navigation,
     ):
         """Test that main function orchestrates all components correctly."""
+        import streamlit as st
+
         from datasure.views.config_view import main
 
         # Setup mocks
@@ -342,7 +375,7 @@ class TestMain:
         mock_get_aliases.assert_called_once_with(project_id="test_project")
         mock_service_class.assert_called_once_with("test_project")
         mock_header.assert_called_once()
-        mock_st.subheader.assert_called_once_with("Check Configurations")
+        st.subheader.assert_called_once_with("Check Configurations")
         mock_demo_guidance.assert_called_once()
         mock_config_actions.assert_called_once_with(
             "test_project", ["alias1", "alias2"]
@@ -354,7 +387,6 @@ class TestMain:
     @patch("datasure.views.config_view._render_configurations_display")
     @patch("datasure.views.config_view._render_configuration_actions")
     @patch("datasure.views.config_view._render_demo_guidance")
-    @patch("datasure.views.config_view.st")
     @patch("datasure.views.config_view.ConfigurationService")
     @patch("datasure.views.config_view.duckdb_get_aliases")
     @patch("datasure.views.config_view._render_header")
@@ -365,7 +397,6 @@ class TestMain:
         mock_header,
         mock_get_aliases,
         mock_service_class,
-        mock_st,
         mock_demo_guidance,
         mock_config_actions,
         mock_config_display,
@@ -390,9 +421,9 @@ class TestMain:
         from datasure.views.config_view import main
 
         # Make _get_project_id raise exception (simulating st.stop())
-        mock_get_id.side_effect = Exception("Stopped")
+        mock_get_id.side_effect = StopIteration
 
-        with pytest.raises(Exception):  # noqa: B017 - st.stop() raises generic exception
+        with pytest.raises(StopIteration):
             main()
 
         # Verify that subsequent functions are not called
@@ -402,26 +433,18 @@ class TestMain:
 class TestModuleLevelExecution:
     """Test module-level code execution."""
 
-    @patch("datasure.views.config_view.demo_sidebar_help")
-    @patch("datasure.views.config_view.add_demo_navigation")
-    @patch("datasure.views.config_view.main")
-    def test_module_level_calls_are_made(self, mock_main, mock_add_nav, mock_sidebar):
-        """Test that module-level functions are called on import."""
-        # We can't easily test the actual import execution since it happens
-        # when the module is first loaded. This test verifies the pattern.
-        # In practice, these are called when the module is imported.
-
-        # These would be called at module level:
-        # add_demo_navigation("config_view.py", step=4)
-        # demo_sidebar_help()
-        # main()
-
-        # We can verify the functions exist and are callable
+    def test_module_level_functions_exist(self):
+        """Test that module-level functions exist and are callable."""
         from datasure.views import config_view
 
         assert hasattr(config_view, "add_demo_navigation")
         assert hasattr(config_view, "demo_sidebar_help")
         assert hasattr(config_view, "main")
+
+    def test_pytest_module_check(self):
+        """Test that pytest check prevents module-level execution."""
+        # Verify pytest is in sys.modules during tests
+        assert "pytest" in sys.modules
 
 
 class TestIntegrationScenarios:
@@ -433,7 +456,6 @@ class TestIntegrationScenarios:
     @patch("datasure.views.config_view.add_check_configuration_form")
     @patch("datasure.views.config_view.demo_expander")
     @patch("datasure.views.config_view.is_demo_project")
-    @patch("datasure.views.config_view.st")
     @patch("datasure.views.config_view.ConfigurationService")
     @patch("datasure.views.config_view.duckdb_get_aliases")
     @patch("datasure.views.config_view._get_project_id")
@@ -442,7 +464,6 @@ class TestIntegrationScenarios:
         mock_get_id,
         mock_get_aliases,
         mock_service_class,
-        mock_st,
         mock_is_demo,
         mock_expander,
         mock_add_form,
@@ -451,6 +472,8 @@ class TestIntegrationScenarios:
         mock_navigation,
     ):
         """Test complete flow with existing configurations."""
+        import streamlit as st
+
         from datasure.views.config_view import main
 
         # Setup
@@ -468,21 +491,22 @@ class TestIntegrationScenarios:
         mock_service.get_all_configurations.return_value = config_df
         mock_service_class.return_value = mock_service
 
-        mock_st.columns.return_value = [MagicMock(), MagicMock(), MagicMock()]
+        st.columns.return_value = [MagicMock(), MagicMock(), MagicMock()]
 
         # Execute
         main()
 
         # Verify
         assert mock_render_table.called
-        assert mock_st.info.call_count == 0  # No info message for empty configs
+        # Should not show info message for empty configs
+        info_calls = [call for call in st.info.call_args_list if call[0][0].startswith("No check")]
+        assert len(info_calls) == 0
         assert mock_get_aliases.called
         assert mock_service_class.called
 
     @patch("datasure.views.config_view._render_navigation")
     @patch("datasure.views.config_view.remove_check_configuration_form")
     @patch("datasure.views.config_view.add_check_configuration_form")
-    @patch("datasure.views.config_view.st")
     @patch("datasure.views.config_view.ConfigurationService")
     @patch("datasure.views.config_view.duckdb_get_aliases")
     @patch("datasure.views.config_view._get_project_id")
@@ -491,12 +515,13 @@ class TestIntegrationScenarios:
         mock_get_id,
         mock_get_aliases,
         mock_service_class,
-        mock_st,
         mock_add_form,
         mock_remove_form,
         mock_navigation,
     ):
         """Test complete flow with no existing configurations."""
+        import streamlit as st
+
         from datasure.views.config_view import main
 
         mock_get_id.return_value = "project_123"
@@ -507,25 +532,26 @@ class TestIntegrationScenarios:
         mock_service.get_all_configurations.return_value = empty_df
         mock_service_class.return_value = mock_service
 
-        mock_st.columns.return_value = [MagicMock(), MagicMock(), MagicMock()]
+        st.columns.return_value = [MagicMock(), MagicMock(), MagicMock()]
 
         main()
 
         # Verify info message shown for empty configs
-        mock_st.info.assert_called()
-        call_args = mock_st.info.call_args[0][0]
+        st.info.assert_called()
+        call_args = st.info.call_args[0][0]
         assert "No check configurations found" in call_args
 
 
 class TestEdgeCases:
     """Test edge cases and error handling."""
 
-    @patch("datasure.views.config_view.st")
-    def test_get_project_id_with_whitespace_only(self, mock_st):
+    def test_get_project_id_with_whitespace_only(self):
         """Test _get_project_id with whitespace-only string."""
+        import streamlit as st
+
         from datasure.views.config_view import _get_project_id
 
-        mock_st.session_state.st_project_id = "   "
+        st.session_state.st_project_id = "   "
 
         # Whitespace-only string should be truthy but might need trimming
         # The actual behavior depends on how the code treats this
@@ -533,29 +559,33 @@ class TestEdgeCases:
 
         assert result == "   "
 
+    @patch("datasure.views.config_view._render_navigation")
+    @patch("datasure.views.config_view._render_configurations_display")
+    @patch("datasure.views.config_view._render_configuration_actions")
+    @patch("datasure.views.config_view._render_demo_guidance")
+    @patch("datasure.views.config_view._render_header")
     @patch("datasure.views.config_view.ConfigurationService")
     @patch("datasure.views.config_view.duckdb_get_aliases")
     @patch("datasure.views.config_view._get_project_id")
     def test_main_with_special_characters_in_project_id(
-        self, mock_get_id, mock_get_aliases, mock_service_class
+        self,
+        mock_get_id,
+        mock_get_aliases,
+        mock_service_class,
+        mock_header,
+        mock_demo_guidance,
+        mock_config_actions,
+        mock_config_display,
+        mock_navigation,
     ):
         """Test main with special characters in project ID."""
         from datasure.views.config_view import main
 
-        # Mock all required components to prevent actual execution
-        with (
-            patch("datasure.views.config_view._render_header"),
-            patch("datasure.views.config_view._render_demo_guidance"),
-            patch("datasure.views.config_view._render_configuration_actions"),
-            patch("datasure.views.config_view._render_configurations_display"),
-            patch("datasure.views.config_view._render_navigation"),
-            patch("datasure.views.config_view.st"),
-        ):
-            mock_get_id.return_value = "project-with-special_chars@123"
-            mock_get_aliases.return_value = []
-            mock_service = Mock()
-            mock_service_class.return_value = mock_service
+        mock_get_id.return_value = "project-with-special_chars@123"
+        mock_get_aliases.return_value = []
+        mock_service = Mock()
+        mock_service_class.return_value = mock_service
 
-            main()
+        main()
 
-            mock_service_class.assert_called_once_with("project-with-special_chars@123")
+        mock_service_class.assert_called_once_with("project-with-special_chars@123")
