@@ -45,9 +45,9 @@ class TestComputeProgressSummary:
         result = compute_progress_summary(data_pl, 10)
 
         assert isinstance(result, ProgressSummary)
-        assert hasattr(result, 'total_submitted')
-        assert hasattr(result, 'target')
-        assert hasattr(result, 'percentage_completed')
+        assert hasattr(result, "total_submitted")
+        assert hasattr(result, "target")
+        assert hasattr(result, "percentage_completed")
 
     @patch("datasure.checks.progress.st.cache_data", lambda f: f)
     def test_compute_progress_summary_values_with_target(self, sample_dataframe):
@@ -127,9 +127,7 @@ class TestComputeProgressChart:
         valid_consent_count = data_pl.filter(
             pl.col("consent").is_in(consent_vals)
         ).height
-        completed_count = data_pl.filter(
-            pl.col("outcome").is_in(outcome_vals)
-        ).height
+        completed_count = data_pl.filter(pl.col("outcome").is_in(outcome_vals)).height
 
         expected_consent_percentage = (valid_consent_count / total_submitted) * 100
         expected_completion_percentage = (completed_count / total_submitted) * 100
@@ -141,9 +139,7 @@ class TestComputeProgressChart:
     def test_compute_progress_chart_no_consent_col(self, sample_dataframe):
         """Test compute_progress_chart with no consent column."""
         data_pl = pl.from_pandas(sample_dataframe)
-        result = compute_progress_chart(
-            data_pl, None, ["Yes"], "outcome", ["Complete"]
-        )
+        result = compute_progress_chart(data_pl, None, ["Yes"], "outcome", ["Complete"])
 
         assert result[0] == 0  # consent_percentage should be 0
         assert isinstance(
@@ -154,9 +150,7 @@ class TestComputeProgressChart:
     def test_compute_progress_chart_no_outcome_col(self, sample_dataframe):
         """Test compute_progress_chart with no outcome column."""
         data_pl = pl.from_pandas(sample_dataframe)
-        result = compute_progress_chart(
-            data_pl, "consent", ["Yes"], None, ["Complete"]
-        )
+        result = compute_progress_chart(data_pl, "consent", ["Yes"], None, ["Complete"])
 
         assert isinstance(
             result[0], float
@@ -186,9 +180,7 @@ class TestPydanticModels:
     def test_progress_summary_valid(self):
         """Test creating valid ProgressSummary."""
         summary = ProgressSummary(
-            total_submitted=100,
-            target=150,
-            percentage_completed=66.67
+            total_submitted=100, target=150, percentage_completed=66.67
         )
         assert summary.total_submitted == 100
         assert summary.target == 150
@@ -197,9 +189,7 @@ class TestPydanticModels:
     def test_progress_summary_no_target(self):
         """Test ProgressSummary with no target."""
         summary = ProgressSummary(
-            total_submitted=50,
-            target=None,
-            percentage_completed=0.0
+            total_submitted=50, target=None, percentage_completed=0.0
         )
         assert summary.total_submitted == 50
         assert summary.target is None
@@ -211,14 +201,13 @@ class TestPydanticModels:
             ProgressSummary(
                 total_submitted=100,
                 target=50,
-                percentage_completed=150.0  # Over 100%
+                percentage_completed=150.0,  # Over 100%
             )
 
     def test_progress_chart_metrics_valid(self):
         """Test creating valid ProgressChartMetrics."""
         metrics = ProgressChartMetrics(
-            consent_percentage=85.5,
-            completion_percentage=92.3
+            consent_percentage=85.5, completion_percentage=92.3
         )
         assert metrics.consent_percentage == 85.5
         assert metrics.completion_percentage == 92.3
@@ -228,13 +217,13 @@ class TestPydanticModels:
         with pytest.raises(ValidationError):
             ProgressChartMetrics(
                 consent_percentage=-10.0,  # Below 0
-                completion_percentage=50.0
+                completion_percentage=50.0,
             )
 
         with pytest.raises(ValidationError):
             ProgressChartMetrics(
                 consent_percentage=50.0,
-                completion_percentage=105.0  # Above 100
+                completion_percentage=105.0,  # Above 100
             )
 
     def test_attempted_interviews_metrics_valid(self):
@@ -243,7 +232,7 @@ class TestPydanticModels:
             total_submitted=200,
             number_of_unique_ids=180,
             min_attempts=1,
-            max_attempts=5
+            max_attempts=5,
         )
         assert metrics.total_submitted == 200
         assert metrics.number_of_unique_ids == 180
@@ -258,7 +247,7 @@ class TestPydanticModels:
             survey_date="date_col",
             enumerator="enum_col",
             survey_target=1000,
-            target_submissions_per_period=50
+            target_submissions_per_period=50,
         )
         assert settings.survey_key == "key_col"
         assert settings.survey_id == "id_col"
@@ -267,11 +256,7 @@ class TestPydanticModels:
     def test_progress_settings_negative_target(self):
         """Test ProgressSettings rejects negative targets."""
         with pytest.raises(ValidationError):
-            ProgressSettings(
-                survey_key="key",
-                survey_id="id",
-                survey_target=-10
-            )
+            ProgressSettings(survey_key="key", survey_id="id", survey_target=-10)
 
     def test_time_period_config_valid(self):
         """Test creating valid TimePeriodConfig."""
@@ -292,7 +277,7 @@ class TestPydanticModels:
             total_submitted=10,
             number_of_unique_ids=2,
             min_attempts=1,
-            max_attempts=2
+            max_attempts=2,
         )
         assert result.total_submitted == 10
         assert result.number_of_unique_ids == 2
@@ -315,15 +300,17 @@ class TestHelperFunctions:
         """Test _aggregate_attempts_by_survey_id helper."""
         import datetime
 
-        data = pl.DataFrame({
-            "survey_id": ["ID1", "ID1", "ID2", "ID3"],
-            "date": [
-                datetime.datetime(2024, 1, 1),
-                datetime.datetime(2024, 1, 2),
-                datetime.datetime(2024, 1, 3),
-                datetime.datetime(2024, 1, 4),
-            ]
-        })
+        data = pl.DataFrame(
+            {
+                "survey_id": ["ID1", "ID1", "ID2", "ID3"],
+                "date": [
+                    datetime.datetime(2024, 1, 1),
+                    datetime.datetime(2024, 1, 2),
+                    datetime.datetime(2024, 1, 3),
+                    datetime.datetime(2024, 1, 4),
+                ],
+            }
+        )
 
         result = _aggregate_attempts_by_survey_id(data, "survey_id", "date")
 
@@ -337,14 +324,20 @@ class TestHelperFunctions:
         """Test _expand_attempt_dates helper."""
         import datetime
 
-        data = pl.DataFrame({
-            "survey_id": ["ID1", "ID2"],
-            "num_interviews": [2, 3],
-            "attempt_dates": [
-                [datetime.datetime(2024, 1, 1), datetime.datetime(2024, 1, 2)],
-                [datetime.datetime(2024, 1, 3), datetime.datetime(2024, 1, 4), datetime.datetime(2024, 1, 5)]
-            ]
-        })
+        data = pl.DataFrame(
+            {
+                "survey_id": ["ID1", "ID2"],
+                "num_interviews": [2, 3],
+                "attempt_dates": [
+                    [datetime.datetime(2024, 1, 1), datetime.datetime(2024, 1, 2)],
+                    [
+                        datetime.datetime(2024, 1, 3),
+                        datetime.datetime(2024, 1, 4),
+                        datetime.datetime(2024, 1, 5),
+                    ],
+                ],
+            }
+        )
 
         result = _expand_attempt_dates(data)
 
@@ -356,11 +349,13 @@ class TestHelperFunctions:
 
     def test_prepare_display_columns_empty(self):
         """Test _prepare_display_columns with empty display_cols."""
-        data = pl.DataFrame({
-            "survey_id": ["ID1", "ID2", "ID3"],
-            "date": [1, 2, 3],
-            "col1": ["A", "B", "C"]
-        })
+        data = pl.DataFrame(
+            {
+                "survey_id": ["ID1", "ID2", "ID3"],
+                "date": [1, 2, 3],
+                "col1": ["A", "B", "C"],
+            }
+        )
 
         result = _prepare_display_columns(data, "survey_id", "date", [])
 
@@ -370,12 +365,14 @@ class TestHelperFunctions:
 
     def test_prepare_display_columns_with_cols(self):
         """Test _prepare_display_columns with display columns."""
-        data = pl.DataFrame({
-            "survey_id": ["ID1", "ID1", "ID2"],
-            "date": [1, 2, 3],
-            "enum": ["E1", None, "E2"],
-            "team": [None, "T1", "T2"]
-        })
+        data = pl.DataFrame(
+            {
+                "survey_id": ["ID1", "ID1", "ID2"],
+                "date": [1, 2, 3],
+                "enum": ["E1", None, "E2"],
+                "team": [None, "T1", "T2"],
+            }
+        )
 
         result = _prepare_display_columns(data, "survey_id", "date", ["enum", "team"])
 
@@ -386,10 +383,9 @@ class TestHelperFunctions:
 
     def test_compute_summary_stats(self):
         """Test _compute_summary_stats helper."""
-        data = pl.DataFrame({
-            "survey_id": ["ID1", "ID2", "ID3"],
-            "num_interviews": [1, 3, 2]
-        })
+        data = pl.DataFrame(
+            {"survey_id": ["ID1", "ID2", "ID3"], "num_interviews": [1, 3, 2]}
+        )
 
         num_unique, min_attempts, max_attempts = _compute_summary_stats(data)
 
@@ -400,10 +396,12 @@ class TestHelperFunctions:
     @patch("datasure.checks.progress.st.cache_data", lambda f: f)
     def test_compute_average_interviews(self):
         """Test compute_average_interviews function."""
-        period_stats = pl.DataFrame({
-            "time_period": ["2024-01-01", "2024-01-02", "2024-01-03"],
-            "num_interviews": [10, 15, 20]
-        })
+        period_stats = pl.DataFrame(
+            {
+                "time_period": ["2024-01-01", "2024-01-02", "2024-01-03"],
+                "num_interviews": [10, 15, 20],
+            }
+        )
 
         avg = compute_average_interviews(period_stats)
 
@@ -419,15 +417,17 @@ class TestComputeProgressOvertimeUpdated:
         """Test compute_progress_overtime with Day aggregation."""
         import datetime
 
-        data = pl.DataFrame({
-            "date": [
-                datetime.datetime(2024, 1, 1),
-                datetime.datetime(2024, 1, 1),
-                datetime.datetime(2024, 1, 2),
-                datetime.datetime(2024, 1, 2),
-                datetime.datetime(2024, 1, 2),
-            ]
-        })
+        data = pl.DataFrame(
+            {
+                "date": [
+                    datetime.datetime(2024, 1, 1),
+                    datetime.datetime(2024, 1, 1),
+                    datetime.datetime(2024, 1, 2),
+                    datetime.datetime(2024, 1, 2),
+                    datetime.datetime(2024, 1, 2),
+                ]
+            }
+        )
 
         result = compute_progress_overtime(data, "date", "Day")
 
@@ -441,14 +441,16 @@ class TestComputeProgressOvertimeUpdated:
         """Test compute_progress_overtime with Week aggregation."""
         import datetime
 
-        data = pl.DataFrame({
-            "date": [
-                datetime.datetime(2024, 1, 1),
-                datetime.datetime(2024, 1, 3),
-                datetime.datetime(2024, 1, 8),
-                datetime.datetime(2024, 1, 10),
-            ]
-        })
+        data = pl.DataFrame(
+            {
+                "date": [
+                    datetime.datetime(2024, 1, 1),
+                    datetime.datetime(2024, 1, 3),
+                    datetime.datetime(2024, 1, 8),
+                    datetime.datetime(2024, 1, 10),
+                ]
+            }
+        )
 
         result = compute_progress_overtime(data, "date", "Week")
 
@@ -461,14 +463,16 @@ class TestComputeProgressOvertimeUpdated:
         """Test compute_progress_overtime with Month aggregation."""
         import datetime
 
-        data = pl.DataFrame({
-            "date": [
-                datetime.datetime(2024, 1, 5),
-                datetime.datetime(2024, 1, 15),
-                datetime.datetime(2024, 2, 5),
-                datetime.datetime(2024, 2, 20),
-            ]
-        })
+        data = pl.DataFrame(
+            {
+                "date": [
+                    datetime.datetime(2024, 1, 5),
+                    datetime.datetime(2024, 1, 15),
+                    datetime.datetime(2024, 2, 5),
+                    datetime.datetime(2024, 2, 20),
+                ]
+            }
+        )
 
         result = compute_progress_overtime(data, "date", "Month")
 
@@ -480,9 +484,7 @@ class TestComputeProgressOvertimeUpdated:
         """Test compute_progress_overtime rejects invalid period."""
         import datetime
 
-        data = pl.DataFrame({
-            "date": [datetime.datetime(2024, 1, 1)]
-        })
+        data = pl.DataFrame({"date": [datetime.datetime(2024, 1, 1)]})
 
         with pytest.raises(ValidationError):
             compute_progress_overtime(data, "date", "Year")
@@ -496,17 +498,19 @@ class TestComputeAttemptedInterviewsUpdated:
         """Test compute_attempted_interviews basic functionality."""
         import datetime
 
-        data = pl.DataFrame({
-            "survey_id": ["ID1", "ID1", "ID2", "ID3", "ID3", "ID3"],
-            "date": [
-                datetime.datetime(2024, 1, 1),
-                datetime.datetime(2024, 1, 2),
-                datetime.datetime(2024, 1, 3),
-                datetime.datetime(2024, 1, 4),
-                datetime.datetime(2024, 1, 5),
-                datetime.datetime(2024, 1, 6),
-            ]
-        })
+        data = pl.DataFrame(
+            {
+                "survey_id": ["ID1", "ID1", "ID2", "ID3", "ID3", "ID3"],
+                "date": [
+                    datetime.datetime(2024, 1, 1),
+                    datetime.datetime(2024, 1, 2),
+                    datetime.datetime(2024, 1, 3),
+                    datetime.datetime(2024, 1, 4),
+                    datetime.datetime(2024, 1, 5),
+                    datetime.datetime(2024, 1, 6),
+                ],
+            }
+        )
 
         result = compute_attempted_interviews(data, "survey_id", "date", [])
 
@@ -521,16 +525,18 @@ class TestComputeAttemptedInterviewsUpdated:
         """Test compute_attempted_interviews with display columns."""
         import datetime
 
-        data = pl.DataFrame({
-            "survey_id": ["ID1", "ID1", "ID2"],
-            "date": [
-                datetime.datetime(2024, 1, 1),
-                datetime.datetime(2024, 1, 2),
-                datetime.datetime(2024, 1, 3),
-            ],
-            "enumerator": ["E1", "E1", "E2"],
-            "team": ["T1", "T1", "T2"]
-        })
+        data = pl.DataFrame(
+            {
+                "survey_id": ["ID1", "ID1", "ID2"],
+                "date": [
+                    datetime.datetime(2024, 1, 1),
+                    datetime.datetime(2024, 1, 2),
+                    datetime.datetime(2024, 1, 3),
+                ],
+                "enumerator": ["E1", "E1", "E2"],
+                "team": ["T1", "T1", "T2"],
+            }
+        )
 
         result = compute_attempted_interviews(
             data, "survey_id", "date", ["enumerator", "team"]

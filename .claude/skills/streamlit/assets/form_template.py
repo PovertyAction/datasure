@@ -168,10 +168,10 @@ def main():
         st.divider()
 
         # Submit button row
-        col1, col2, col3 = st.columns([1, 1, 2])
+        col1, col2, _ = st.columns([1, 1, 2])
 
         with col1:
-            submitted = st.form_submit_button(
+            submitted = st.form_submit_button(  # noqa: F841
                 "Submit", on_click=handle_form_submit, type="primary"
             )
 
@@ -182,7 +182,7 @@ def main():
             st.rerun()
 
     # Form instructions
-    with st.expander("ℹ️ Form Instructions"):
+    with st.expander("ℹ️ Form Instructions"):  # noqa: RUF001
         st.markdown("""
         **Required Fields:**
         - Name: Your full name

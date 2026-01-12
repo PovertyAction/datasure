@@ -40,7 +40,9 @@ from datasure.checks.backchecks import (
 
 @pytest.fixture(autouse=True)
 def mock_database_functions(monkeypatch):
-    """Override the autouse fixture from conftest to disable database mocking for these tests."""
+    """Override the autouse fixture from conftest to disable database
+    mocking for these tests.
+    """
     # These tests don't use database functions, so we don't need to mock them
     pass
 
@@ -68,56 +70,68 @@ def sample_backcheck_settings():
 @pytest.fixture
 def sample_survey_data_pl():
     """Create sample survey data as Polars DataFrame."""
-    return pl.DataFrame({
-        "survey_id": ["S001", "S002", "S003", "S004", "S005"],
-        "submission_date": [
-            date(2024, 1, 1),
-            date(2024, 1, 2),
-            date(2024, 1, 3),
-            date(2024, 1, 4),
-            date(2024, 1, 5),
-        ],
-        "enumerator": ["E1", "E1", "E2", "E2", "E3"],
-        "age": [25, 30, 35, 28, 32],
-        "income": [50000, 60000, 55000, 52000, 58000],
-        "gender": ["M", "F", "M", "F", "M"],
-        "education": ["High School", "College", "High School", "College", "Graduate"],
-    })
+    return pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002", "S003", "S004", "S005"],
+            "submission_date": [
+                date(2024, 1, 1),
+                date(2024, 1, 2),
+                date(2024, 1, 3),
+                date(2024, 1, 4),
+                date(2024, 1, 5),
+            ],
+            "enumerator": ["E1", "E1", "E2", "E2", "E3"],
+            "age": [25, 30, 35, 28, 32],
+            "income": [50000, 60000, 55000, 52000, 58000],
+            "gender": ["M", "F", "M", "F", "M"],
+            "education": [
+                "High School",
+                "College",
+                "High School",
+                "College",
+                "Graduate",
+            ],
+        }
+    )
 
 
 @pytest.fixture
 def sample_backcheck_data_pl():
     """Create sample backcheck data as Polars DataFrame."""
-    return pl.DataFrame({
-        "survey_id": ["S001", "S002", "S003"],
-        "backcheck_date": [
-            date(2024, 1, 5),
-            date(2024, 1, 6),
-            date(2024, 1, 7),
-        ],
-        "backchecker": ["B1", "B1", "B2"],
-        "age": [25, 31, 35],  # One mismatch (S002)
-        "income": [50000, 60000, 56000],  # One mismatch (S003)
-        "gender": ["M", "F", "M"],
-        "education": ["High School", "College", "High School"],
-    })
+    return pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002", "S003"],
+            "backcheck_date": [
+                date(2024, 1, 5),
+                date(2024, 1, 6),
+                date(2024, 1, 7),
+            ],
+            "backchecker": ["B1", "B1", "B2"],
+            "age": [25, 31, 35],  # One mismatch (S002)
+            "income": [50000, 60000, 56000],  # One mismatch (S003)
+            "gender": ["M", "F", "M"],
+            "education": ["High School", "College", "High School"],
+        }
+    )
 
 
 @pytest.fixture
 def sample_backcheck_column_settings_pl():
     """Create sample column settings as Polars DataFrame."""
-    return pl.DataFrame({
-        "search_type": ["exact", "exact", "exact"],
-        "pattern": ["age", "income", "gender"],
-        "column_name": [["age"], ["income"], ["gender"]],
-        "category": [1, 2, 3],
-        "ok_range_type": ["number", "percentage", None],
-        "ok_range_values": [[-2.0, 2.0], [-10.0, 10.0], None],
-        "ttest": [False, False, False],
-        "prtest": [False, False, False],
-        "signrank": [False, False, False],
-        "reliability": [False, False, False],
-    })
+    return pl.DataFrame(
+        {
+            "search_type": ["exact", "exact", "exact"],
+            "pattern": ["age", "income", "gender"],
+            "column_name": [["age"], ["income"], ["gender"]],
+            "category": [1, 2, 3],
+            "ok_range_type": ["number", "percentage", None],
+            "ok_range_values": [[-2.0, 2.0], [-10.0, 10.0], None],
+            "ttest": [False, False, False],
+            "prtest": [False, False, False],
+            "signrank": [False, False, False],
+            "reliability": [False, False, False],
+        }
+    )
 
 
 @pytest.fixture
@@ -480,32 +494,38 @@ def test_compute_backcheck_analysis_drop_duplicates_first(
 ):
     """Test compute_backcheck_analysis with drop_duplicates_option='first'."""
     # Create data with duplicates
-    survey_data = pl.DataFrame({
-        "survey_id": ["S001", "S001", "S002"],
-        "enumerator": ["E1", "E1", "E2"],
-        "age": [25, 30, 35],
-    })
-    backcheck_data = pl.DataFrame({
-        "survey_id": ["S001", "S002"],
-        "backchecker": ["B1", "B2"],
-        "age": [25, 35],
-    })
+    survey_data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S001", "S002"],
+            "enumerator": ["E1", "E1", "E2"],
+            "age": [25, 30, 35],
+        }
+    )
+    backcheck_data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002"],
+            "backchecker": ["B1", "B2"],
+            "age": [25, 35],
+        }
+    )
 
     settings = sample_backcheck_settings
     settings.drop_duplicates_option = "first"
 
-    col_settings = pl.DataFrame({
-        "search_type": ["exact"],
-        "pattern": ["age"],
-        "column_name": [["age"]],
-        "category": [1],
-        "ok_range_type": [None],
-        "ok_range_values": [None],
-        "ttest": [False],
-        "prtest": [False],
-        "signrank": [False],
-        "reliability": [False],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["age"],
+            "column_name": [["age"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [False],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [False],
+        }
+    )
 
     result = compute_backcheck_analysis(
         survey_data, backcheck_data, settings, col_settings
@@ -519,32 +539,38 @@ def test_compute_backcheck_analysis_drop_duplicates_last(
     sample_backcheck_settings,
 ):
     """Test compute_backcheck_analysis with drop_duplicates_option='last'."""
-    survey_data = pl.DataFrame({
-        "survey_id": ["S001", "S001", "S002"],
-        "enumerator": ["E1", "E1", "E2"],
-        "age": [25, 30, 35],
-    })
-    backcheck_data = pl.DataFrame({
-        "survey_id": ["S001", "S002"],
-        "backchecker": ["B1", "B2"],
-        "age": [30, 35],
-    })
+    survey_data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S001", "S002"],
+            "enumerator": ["E1", "E1", "E2"],
+            "age": [25, 30, 35],
+        }
+    )
+    backcheck_data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002"],
+            "backchecker": ["B1", "B2"],
+            "age": [30, 35],
+        }
+    )
 
     settings = sample_backcheck_settings
     settings.drop_duplicates_option = "last"
 
-    col_settings = pl.DataFrame({
-        "search_type": ["exact"],
-        "pattern": ["age"],
-        "column_name": [["age"]],
-        "category": [1],
-        "ok_range_type": [None],
-        "ok_range_values": [None],
-        "ttest": [False],
-        "prtest": [False],
-        "signrank": [False],
-        "reliability": [False],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["age"],
+            "column_name": [["age"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [False],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [False],
+        }
+    )
 
     result = compute_backcheck_analysis(
         survey_data, backcheck_data, settings, col_settings
@@ -558,32 +584,38 @@ def test_compute_backcheck_analysis_drop_duplicates_drop(
     sample_backcheck_settings,
 ):
     """Test compute_backcheck_analysis with drop_duplicates_option='drop'."""
-    survey_data = pl.DataFrame({
-        "survey_id": ["S001", "S001", "S002"],
-        "enumerator": ["E1", "E1", "E2"],
-        "age": [25, 30, 35],
-    })
-    backcheck_data = pl.DataFrame({
-        "survey_id": ["S002"],
-        "backchecker": ["B2"],
-        "age": [35],
-    })
+    survey_data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S001", "S002"],
+            "enumerator": ["E1", "E1", "E2"],
+            "age": [25, 30, 35],
+        }
+    )
+    backcheck_data = pl.DataFrame(
+        {
+            "survey_id": ["S002"],
+            "backchecker": ["B2"],
+            "age": [35],
+        }
+    )
 
     settings = sample_backcheck_settings
     settings.drop_duplicates_option = "drop"
 
-    col_settings = pl.DataFrame({
-        "search_type": ["exact"],
-        "pattern": ["age"],
-        "column_name": [["age"]],
-        "category": [1],
-        "ok_range_type": [None],
-        "ok_range_values": [None],
-        "ttest": [False],
-        "prtest": [False],
-        "signrank": [False],
-        "reliability": [False],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["age"],
+            "column_name": [["age"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [False],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [False],
+        }
+    )
 
     result = compute_backcheck_analysis(
         survey_data, backcheck_data, settings, col_settings
@@ -598,29 +630,35 @@ def test_compute_backcheck_analysis_no_matching_records(
     sample_backcheck_settings,
 ):
     """Test compute_backcheck_analysis with no matching records."""
-    survey_data = pl.DataFrame({
-        "survey_id": ["S001", "S002"],
-        "enumerator": ["E1", "E2"],
-        "age": [25, 30],
-    })
-    backcheck_data = pl.DataFrame({
-        "survey_id": ["S003", "S004"],
-        "backchecker": ["B1", "B2"],
-        "age": [35, 40],
-    })
+    survey_data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002"],
+            "enumerator": ["E1", "E2"],
+            "age": [25, 30],
+        }
+    )
+    backcheck_data = pl.DataFrame(
+        {
+            "survey_id": ["S003", "S004"],
+            "backchecker": ["B1", "B2"],
+            "age": [35, 40],
+        }
+    )
 
-    col_settings = pl.DataFrame({
-        "search_type": ["exact"],
-        "pattern": ["age"],
-        "column_name": [["age"]],
-        "category": [1],
-        "ok_range_type": [None],
-        "ok_range_values": [None],
-        "ttest": [False],
-        "prtest": [False],
-        "signrank": [False],
-        "reliability": [False],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["age"],
+            "column_name": [["age"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [False],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [False],
+        }
+    )
 
     result = compute_backcheck_analysis(
         survey_data, backcheck_data, sample_backcheck_settings, col_settings
@@ -635,18 +673,20 @@ def test_compute_backcheck_analysis_with_statistical_tests(
     sample_backcheck_settings,
 ):
     """Test compute_backcheck_analysis with statistical tests enabled."""
-    col_settings = pl.DataFrame({
-        "search_type": ["exact"],
-        "pattern": ["age"],
-        "column_name": [["age"]],
-        "category": [1],
-        "ok_range_type": [None],
-        "ok_range_values": [None],
-        "ttest": [True],
-        "prtest": [False],
-        "signrank": [True],
-        "reliability": [True],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["age"],
+            "column_name": [["age"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [True],
+            "prtest": [False],
+            "signrank": [True],
+            "reliability": [True],
+        }
+    )
 
     result = compute_backcheck_analysis(
         sample_survey_data_pl,
@@ -670,18 +710,20 @@ def test_compute_backcheck_analysis_pattern_search(
     sample_backcheck_settings,
 ):
     """Test compute_backcheck_analysis with pattern-based column search."""
-    col_settings = pl.DataFrame({
-        "search_type": ["startswith"],
-        "pattern": ["age"],
-        "column_name": [[]],  # Empty, will be expanded
-        "category": [1],
-        "ok_range_type": [None],
-        "ok_range_values": [None],
-        "ttest": [False],
-        "prtest": [False],
-        "signrank": [False],
-        "reliability": [False],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["startswith"],
+            "pattern": ["age"],
+            "column_name": [[]],  # Empty, will be expanded
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [False],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [False],
+        }
+    )
 
     result = compute_backcheck_analysis(
         sample_survey_data_pl,
@@ -701,16 +743,18 @@ def test_compute_backcheck_analysis_pattern_search(
 
 def test_compute_backchecker_productivity_daily():
     """Test compute_backchecker_productivity with daily period."""
-    data = pl.DataFrame({
-        "backcheck_date": [
-            date(2024, 1, 1),
-            date(2024, 1, 1),
-            date(2024, 1, 2),
-            date(2024, 1, 2),
-            date(2024, 1, 3),
-        ],
-        "backchecker": ["B1", "B1", "B1", "B2", "B2"],
-    })
+    data = pl.DataFrame(
+        {
+            "backcheck_date": [
+                date(2024, 1, 1),
+                date(2024, 1, 1),
+                date(2024, 1, 2),
+                date(2024, 1, 2),
+                date(2024, 1, 3),
+            ],
+            "backchecker": ["B1", "B1", "B1", "B2", "B2"],
+        }
+    )
 
     result = compute_backchecker_productivity(
         data, "backcheck_date", ["backchecker"], "Daily", "SUN"
@@ -722,16 +766,18 @@ def test_compute_backchecker_productivity_daily():
 
 def test_compute_backchecker_productivity_weekly():
     """Test compute_backchecker_productivity with weekly period."""
-    data = pl.DataFrame({
-        "backcheck_date": [
-            date(2024, 1, 1),
-            date(2024, 1, 2),
-            date(2024, 1, 8),
-            date(2024, 1, 9),
-            date(2024, 1, 15),
-        ],
-        "backchecker": ["B1", "B1", "B1", "B2", "B2"],
-    })
+    data = pl.DataFrame(
+        {
+            "backcheck_date": [
+                date(2024, 1, 1),
+                date(2024, 1, 2),
+                date(2024, 1, 8),
+                date(2024, 1, 9),
+                date(2024, 1, 15),
+            ],
+            "backchecker": ["B1", "B1", "B1", "B2", "B2"],
+        }
+    )
 
     result = compute_backchecker_productivity(
         data, "backcheck_date", ["backchecker"], "Weekly", "MON"
@@ -743,16 +789,18 @@ def test_compute_backchecker_productivity_weekly():
 
 def test_compute_backchecker_productivity_monthly():
     """Test compute_backchecker_productivity with monthly period."""
-    data = pl.DataFrame({
-        "backcheck_date": [
-            date(2024, 1, 1),
-            date(2024, 1, 15),
-            date(2024, 2, 1),
-            date(2024, 2, 15),
-            date(2024, 3, 1),
-        ],
-        "backchecker": ["B1", "B1", "B1", "B2", "B2"],
-    })
+    data = pl.DataFrame(
+        {
+            "backcheck_date": [
+                date(2024, 1, 1),
+                date(2024, 1, 15),
+                date(2024, 2, 1),
+                date(2024, 2, 15),
+                date(2024, 3, 1),
+            ],
+            "backchecker": ["B1", "B1", "B1", "B2", "B2"],
+        }
+    )
 
     result = compute_backchecker_productivity(
         data, "backcheck_date", ["backchecker"], "Monthly", "SUN"
@@ -764,10 +812,12 @@ def test_compute_backchecker_productivity_monthly():
 
 def test_compute_backchecker_productivity_legacy_period_names():
     """Test compute_backchecker_productivity with legacy period names."""
-    data = pl.DataFrame({
-        "backcheck_date": [date(2024, 1, 1), date(2024, 1, 2)],
-        "backchecker": ["B1", "B1"],
-    })
+    data = pl.DataFrame(
+        {
+            "backcheck_date": [date(2024, 1, 1), date(2024, 1, 2)],
+            "backchecker": ["B1", "B1"],
+        }
+    )
 
     # Test "Day" -> "Daily"
     result = compute_backchecker_productivity(
@@ -790,14 +840,16 @@ def test_compute_backchecker_productivity_legacy_period_names():
 
 def test_compute_backchecker_productivity_different_weekstarts():
     """Test compute_backchecker_productivity with different week start days."""
-    data = pl.DataFrame({
-        "backcheck_date": [
-            date(2024, 1, 1),
-            date(2024, 1, 2),
-            date(2024, 1, 8),
-        ],
-        "backchecker": ["B1", "B1", "B1"],
-    })
+    data = pl.DataFrame(
+        {
+            "backcheck_date": [
+                date(2024, 1, 1),
+                date(2024, 1, 2),
+                date(2024, 1, 8),
+            ],
+            "backchecker": ["B1", "B1", "B1"],
+        }
+    )
 
     for weekstart in ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]:
         result = compute_backchecker_productivity(
@@ -818,18 +870,20 @@ def test_compute_enumerator_backchecker_stats_enumerator(
 ):
     """Test compute_enumerator_backchecker_stats for enumerators."""
     # First compute analysis results
-    col_settings = pl.DataFrame({
-        "search_type": ["exact"],
-        "pattern": ["age"],
-        "column_name": [["age"]],
-        "category": [1],
-        "ok_range_type": [None],
-        "ok_range_values": [None],
-        "ttest": [False],
-        "prtest": [False],
-        "signrank": [False],
-        "reliability": [False],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["age"],
+            "column_name": [["age"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [False],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [False],
+        }
+    )
 
     analysis = compute_backcheck_analysis(
         sample_survey_data_pl,
@@ -859,18 +913,20 @@ def test_compute_enumerator_backchecker_stats_backchecker(
     sample_backcheck_settings,
 ):
     """Test compute_enumerator_backchecker_stats for backcheckers."""
-    col_settings = pl.DataFrame({
-        "search_type": ["exact"],
-        "pattern": ["age"],
-        "column_name": [["age"]],
-        "category": [1],
-        "ok_range_type": [None],
-        "ok_range_values": [None],
-        "ttest": [False],
-        "prtest": [False],
-        "signrank": [False],
-        "reliability": [False],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["age"],
+            "column_name": [["age"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [False],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [False],
+        }
+    )
 
     analysis = compute_backcheck_analysis(
         sample_survey_data_pl,
@@ -926,18 +982,20 @@ def test_compute_enumerator_backchecker_stats_missing_staff_col(
     sample_backcheck_settings,
 ):
     """Test compute_enumerator_backchecker_stats with missing staff column."""
-    col_settings = pl.DataFrame({
-        "search_type": ["exact"],
-        "pattern": ["age"],
-        "column_name": [["age"]],
-        "category": [1],
-        "ok_range_type": [None],
-        "ok_range_values": [None],
-        "ttest": [False],
-        "prtest": [False],
-        "signrank": [False],
-        "reliability": [False],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["age"],
+            "column_name": [["age"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [False],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [False],
+        }
+    )
 
     analysis = compute_backcheck_analysis(
         sample_survey_data_pl,
@@ -965,32 +1023,38 @@ def test_compute_enumerator_backchecker_stats_with_dates(
     sample_backcheck_settings,
 ):
     """Test compute_enumerator_backchecker_stats with date calculations."""
-    survey_data = pl.DataFrame({
-        "survey_id": ["S001", "S002", "S003"],
-        "submission_date": [date(2024, 1, 1), date(2024, 1, 2), date(2024, 1, 3)],
-        "enumerator": ["E1", "E1", "E2"],
-        "age": [25, 30, 35],
-    })
+    survey_data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002", "S003"],
+            "submission_date": [date(2024, 1, 1), date(2024, 1, 2), date(2024, 1, 3)],
+            "enumerator": ["E1", "E1", "E2"],
+            "age": [25, 30, 35],
+        }
+    )
 
-    backcheck_data = pl.DataFrame({
-        "survey_id": ["S001", "S002", "S003"],
-        "backcheck_date": [date(2024, 1, 5), date(2024, 1, 6), date(2024, 1, 7)],
-        "backchecker": ["B1", "B1", "B2"],
-        "age": [25, 31, 35],
-    })
+    backcheck_data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002", "S003"],
+            "backcheck_date": [date(2024, 1, 5), date(2024, 1, 6), date(2024, 1, 7)],
+            "backchecker": ["B1", "B1", "B2"],
+            "age": [25, 31, 35],
+        }
+    )
 
-    col_settings = pl.DataFrame({
-        "search_type": ["exact"],
-        "pattern": ["age"],
-        "column_name": [["age"]],
-        "category": [1],
-        "ok_range_type": [None],
-        "ok_range_values": [None],
-        "ttest": [False],
-        "prtest": [False],
-        "signrank": [False],
-        "reliability": [False],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["age"],
+            "column_name": [["age"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [False],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [False],
+        }
+    )
 
     analysis = compute_backcheck_analysis(
         survey_data, backcheck_data, sample_backcheck_settings, col_settings
@@ -1010,18 +1074,20 @@ def test_compute_enumerator_backchecker_stats_category_breakdown(
     sample_backcheck_settings,
 ):
     """Test compute_enumerator_backchecker_stats with multiple categories."""
-    col_settings = pl.DataFrame({
-        "search_type": ["exact", "exact", "exact"],
-        "pattern": ["age", "income", "gender"],
-        "column_name": [["age"], ["income"], ["gender"]],
-        "category": [1, 2, 3],
-        "ok_range_type": [None, None, None],
-        "ok_range_values": [None, None, None],
-        "ttest": [False, False, False],
-        "prtest": [False, False, False],
-        "signrank": [False, False, False],
-        "reliability": [False, False, False],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact", "exact", "exact"],
+            "pattern": ["age", "income", "gender"],
+            "column_name": [["age"], ["income"], ["gender"]],
+            "category": [1, 2, 3],
+            "ok_range_type": [None, None, None],
+            "ok_range_values": [None, None, None],
+            "ttest": [False, False, False],
+            "prtest": [False, False, False],
+            "signrank": [False, False, False],
+            "reliability": [False, False, False],
+        }
+    )
 
     analysis = compute_backcheck_analysis(
         sample_survey_data_pl,
@@ -1056,18 +1122,20 @@ def test_compute_column_stats_basic(
     sample_backcheck_settings,
 ):
     """Test compute_column_stats basic functionality."""
-    col_settings = pl.DataFrame({
-        "search_type": ["exact"],
-        "pattern": ["age"],
-        "column_name": [["age"]],
-        "category": [1],
-        "ok_range_type": [None],
-        "ok_range_values": [None],
-        "ttest": [False],
-        "prtest": [False],
-        "signrank": [False],
-        "reliability": [False],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["age"],
+            "column_name": [["age"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [False],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [False],
+        }
+    )
 
     analysis = compute_backcheck_analysis(
         sample_survey_data_pl,
@@ -1102,18 +1170,20 @@ def test_compute_column_stats_with_tests(
     sample_backcheck_settings,
 ):
     """Test compute_column_stats with statistical tests."""
-    col_settings = pl.DataFrame({
-        "search_type": ["exact"],
-        "pattern": ["age"],
-        "column_name": [["age"]],
-        "category": [1],
-        "ok_range_type": [None],
-        "ok_range_values": [None],
-        "ttest": [True],
-        "prtest": [False],
-        "signrank": [True],
-        "reliability": [True],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["age"],
+            "column_name": [["age"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [True],
+            "prtest": [False],
+            "signrank": [True],
+            "reliability": [True],
+        }
+    )
 
     analysis = compute_backcheck_analysis(
         sample_survey_data_pl,
@@ -1136,18 +1206,20 @@ def test_compute_column_stats_multiple_columns(
     sample_backcheck_settings,
 ):
     """Test compute_column_stats with multiple columns."""
-    col_settings = pl.DataFrame({
-        "search_type": ["exact", "exact"],
-        "pattern": ["age", "income"],
-        "column_name": [["age"], ["income"]],
-        "category": [1, 2],
-        "ok_range_type": [None, None],
-        "ok_range_values": [None, None],
-        "ttest": [False, False],
-        "prtest": [False, False],
-        "signrank": [False, False],
-        "reliability": [False, False],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact", "exact"],
+            "pattern": ["age", "income"],
+            "column_name": [["age"], ["income"]],
+            "category": [1, 2],
+            "ok_range_type": [None, None],
+            "ok_range_values": [None, None],
+            "ttest": [False, False],
+            "prtest": [False, False],
+            "signrank": [False, False],
+            "reliability": [False, False],
+        }
+    )
 
     analysis = compute_backcheck_analysis(
         sample_survey_data_pl,
@@ -1169,12 +1241,14 @@ def test_compute_column_stats_multiple_columns(
 
 def test_compare_column_values_exact_match():
     """Test _compare_column_values with exact matches."""
-    data = pl.DataFrame({
-        "survey_id": ["S001", "S002"],
-        "survey_id__BCCL": ["S001", "S002"],
-        "age": [25, 30],
-        "age__BCCL": [25, 30],
-    })
+    data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002"],
+            "survey_id__BCCL": ["S001", "S002"],
+            "age": [25, 30],
+            "age__BCCL": [25, 30],
+        }
+    )
 
     result = _compare_column_values(
         data,
@@ -1196,12 +1270,14 @@ def test_compare_column_values_exact_match():
 
 def test_compare_column_values_mismatch():
     """Test _compare_column_values with mismatches."""
-    data = pl.DataFrame({
-        "survey_id": ["S001", "S002"],
-        "survey_id__BCCL": ["S001", "S002"],
-        "age": [25, 30],
-        "age__BCCL": [26, 31],
-    })
+    data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002"],
+            "survey_id__BCCL": ["S001", "S002"],
+            "age": [25, 30],
+            "age__BCCL": [26, 31],
+        }
+    )
 
     result = _compare_column_values(
         data,
@@ -1223,12 +1299,14 @@ def test_compare_column_values_mismatch():
 
 def test_compare_column_values_missing():
     """Test _compare_column_values with missing values."""
-    data = pl.DataFrame({
-        "survey_id": ["S001", "S002"],
-        "survey_id__BCCL": ["S001", "S002"],
-        "age": [25, None],
-        "age__BCCL": [25, 30],
-    })
+    data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002"],
+            "survey_id__BCCL": ["S001", "S002"],
+            "age": [25, None],
+            "age__BCCL": [25, 30],
+        }
+    )
 
     result = _compare_column_values(
         data,
@@ -1251,12 +1329,14 @@ def test_compare_column_values_missing():
 
 def test_compare_column_values_excluded():
     """Test _compare_column_values with excluded values."""
-    data = pl.DataFrame({
-        "survey_id": ["S001", "S002"],
-        "survey_id__BCCL": ["S001", "S002"],
-        "response": ["yes", "refuse"],
-        "response__BCCL": ["yes", "no"],
-    })
+    data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002"],
+            "survey_id__BCCL": ["S001", "S002"],
+            "response": ["yes", "refuse"],
+            "response__BCCL": ["yes", "no"],
+        }
+    )
 
     result = _compare_column_values(
         data,
@@ -1279,12 +1359,14 @@ def test_compare_column_values_excluded():
 
 def test_compare_column_values_no_difference():
     """Test _compare_column_values with no_differences list."""
-    data = pl.DataFrame({
-        "survey_id": ["S001", "S002"],
-        "survey_id__BCCL": ["S001", "S002"],
-        "response": ["refuse", "yes"],
-        "response__BCCL": ["dk", "no"],
-    })
+    data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002"],
+            "survey_id__BCCL": ["S001", "S002"],
+            "response": ["refuse", "yes"],
+            "response__BCCL": ["dk", "no"],
+        }
+    )
 
     result = _compare_column_values(
         data,
@@ -1307,12 +1389,14 @@ def test_compare_column_values_no_difference():
 
 def test_compare_column_values_case_sensitivity():
     """Test _compare_column_values with case options."""
-    data = pl.DataFrame({
-        "survey_id": ["S001", "S002", "S003"],
-        "survey_id__BCCL": ["S001", "S002", "S003"],
-        "response": ["Yes", "NO", "Maybe"],
-        "response__BCCL": ["yes", "no", "MAYBE"],
-    })
+    data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002", "S003"],
+            "survey_id__BCCL": ["S001", "S002", "S003"],
+            "response": ["Yes", "NO", "Maybe"],
+            "response__BCCL": ["yes", "no", "MAYBE"],
+        }
+    )
 
     # Test lowercase
     result = _compare_column_values(
@@ -1351,12 +1435,14 @@ def test_compare_column_values_case_sensitivity():
 
 def test_compare_column_values_trim_spaces():
     """Test _compare_column_values with trim_spaces option."""
-    data = pl.DataFrame({
-        "survey_id": ["S001"],
-        "survey_id__BCCL": ["S001"],
-        "response": ["  yes  "],
-        "response__BCCL": ["yes"],
-    })
+    data = pl.DataFrame(
+        {
+            "survey_id": ["S001"],
+            "survey_id__BCCL": ["S001"],
+            "response": ["  yes  "],
+            "response__BCCL": ["yes"],
+        }
+    )
 
     result = _compare_column_values(
         data,
@@ -1378,12 +1464,14 @@ def test_compare_column_values_trim_spaces():
 
 def test_compare_column_values_no_symbols():
     """Test _compare_column_values with no_symbols option."""
-    data = pl.DataFrame({
-        "survey_id": ["S001"],
-        "survey_id__BCCL": ["S001"],
-        "response": ["yes!!!"],
-        "response__BCCL": ["yes"],
-    })
+    data = pl.DataFrame(
+        {
+            "survey_id": ["S001"],
+            "survey_id__BCCL": ["S001"],
+            "response": ["yes!!!"],
+            "response__BCCL": ["yes"],
+        }
+    )
 
     result = _compare_column_values(
         data,
@@ -1405,12 +1493,14 @@ def test_compare_column_values_no_symbols():
 
 def test_compare_column_values_numeric_difference():
     """Test _compare_column_values with numeric difference calculation."""
-    data = pl.DataFrame({
-        "survey_id": ["S001", "S002"],
-        "survey_id__BCCL": ["S001", "S002"],
-        "age": [25, 30],
-        "age__BCCL": [23, 35],
-    })
+    data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002"],
+            "survey_id__BCCL": ["S001", "S002"],
+            "age": [25, 30],
+            "age__BCCL": [23, 35],
+        }
+    )
 
     result = _compare_column_values(
         data,
@@ -1434,12 +1524,14 @@ def test_compare_column_values_numeric_difference():
 
 def test_compare_column_values_ok_range_number():
     """Test _compare_column_values with OK range (number)."""
-    data = pl.DataFrame({
-        "survey_id": ["S001", "S002"],
-        "survey_id__BCCL": ["S001", "S002"],
-        "age": [25, 30],
-        "age__BCCL": [26, 40],
-    })
+    data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002"],
+            "survey_id__BCCL": ["S001", "S002"],
+            "age": [25, 30],
+            "age__BCCL": [26, 40],
+        }
+    )
 
     result = _compare_column_values(
         data,
@@ -1462,12 +1554,14 @@ def test_compare_column_values_ok_range_number():
 
 def test_compare_column_values_ok_range_percentage():
     """Test _compare_column_values with OK range (percentage)."""
-    data = pl.DataFrame({
-        "survey_id": ["S001", "S002", "S003"],
-        "survey_id__BCCL": ["S001", "S002", "S003"],
-        "income": [100, 100, 100],
-        "income__BCCL": [110, 120, 105],
-    })
+    data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002", "S003"],
+            "survey_id__BCCL": ["S001", "S002", "S003"],
+            "income": [100, 100, 100],
+            "income__BCCL": [110, 120, 105],
+        }
+    )
 
     result = _compare_column_values(
         data,
@@ -1494,12 +1588,14 @@ def test_compare_column_values_ok_range_percentage():
 
 def test_compare_column_values_non_numeric():
     """Test _compare_column_values with non-numeric columns."""
-    data = pl.DataFrame({
-        "survey_id": ["S001", "S002"],
-        "survey_id__BCCL": ["S001", "S002"],
-        "gender": ["M", "F"],
-        "gender__BCCL": ["M", "M"],
-    })
+    data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002"],
+            "survey_id__BCCL": ["S001", "S002"],
+            "gender": ["M", "F"],
+            "gender__BCCL": ["M", "M"],
+        }
+    )
 
     result = _compare_column_values(
         data,
@@ -1528,10 +1624,12 @@ def test_compare_column_values_non_numeric():
 
 def test_perform_statistical_tests_ttest():
     """Test _perform_statistical_tests with t-test."""
-    data = pl.DataFrame({
-        "age": [25, 30, 35, 28, 32],
-        "age__BCCL": [26, 31, 36, 29, 33],
-    })
+    data = pl.DataFrame(
+        {
+            "age": [25, 30, 35, 28, 32],
+            "age__BCCL": [26, 31, 36, 29, 33],
+        }
+    )
 
     result = _perform_statistical_tests(
         data, "age", "age__BCCL", True, False, False, False
@@ -1544,10 +1642,12 @@ def test_perform_statistical_tests_ttest():
 
 def test_perform_statistical_tests_prtest():
     """Test _perform_statistical_tests with proportion test."""
-    data = pl.DataFrame({
-        "binary": [1, 0, 1, 1, 0] * 20,
-        "binary__BCCL": [1, 1, 1, 0, 0] * 20,
-    })
+    data = pl.DataFrame(
+        {
+            "binary": [1, 0, 1, 1, 0] * 20,
+            "binary__BCCL": [1, 1, 1, 0, 0] * 20,
+        }
+    )
 
     result = _perform_statistical_tests(
         data, "binary", "binary__BCCL", False, True, False, False
@@ -1560,10 +1660,12 @@ def test_perform_statistical_tests_prtest():
 
 def test_perform_statistical_tests_signrank():
     """Test _perform_statistical_tests with sign rank test."""
-    data = pl.DataFrame({
-        "age": [25, 30, 35, 28, 32],
-        "age__BCCL": [26, 31, 36, 29, 33],
-    })
+    data = pl.DataFrame(
+        {
+            "age": [25, 30, 35, 28, 32],
+            "age__BCCL": [26, 31, 36, 29, 33],
+        }
+    )
 
     result = _perform_statistical_tests(
         data, "age", "age__BCCL", False, False, True, False
@@ -1576,10 +1678,12 @@ def test_perform_statistical_tests_signrank():
 
 def test_perform_statistical_tests_reliability():
     """Test _perform_statistical_tests with reliability metrics."""
-    data = pl.DataFrame({
-        "age": [25, 30, 35, 28, 32],
-        "age__BCCL": [26, 31, 36, 29, 33],
-    })
+    data = pl.DataFrame(
+        {
+            "age": [25, 30, 35, 28, 32],
+            "age__BCCL": [26, 31, 36, 29, 33],
+        }
+    )
 
     result = _perform_statistical_tests(
         data, "age", "age__BCCL", False, False, False, True
@@ -1592,10 +1696,12 @@ def test_perform_statistical_tests_reliability():
 
 def test_perform_statistical_tests_all_tests():
     """Test _perform_statistical_tests with all tests enabled."""
-    data = pl.DataFrame({
-        "age": [25, 30, 35, 28, 32],
-        "age__BCCL": [26, 31, 36, 29, 33],
-    })
+    data = pl.DataFrame(
+        {
+            "age": [25, 30, 35, 28, 32],
+            "age__BCCL": [26, 31, 36, 29, 33],
+        }
+    )
 
     result = _perform_statistical_tests(
         data, "age", "age__BCCL", True, True, True, True
@@ -1609,10 +1715,12 @@ def test_perform_statistical_tests_all_tests():
 
 def test_perform_statistical_tests_insufficient_data():
     """Test _perform_statistical_tests with insufficient data."""
-    data = pl.DataFrame({
-        "age": [25],
-        "age__BCCL": [26],
-    })
+    data = pl.DataFrame(
+        {
+            "age": [25],
+            "age__BCCL": [26],
+        }
+    )
 
     result = _perform_statistical_tests(
         data, "age", "age__BCCL", True, False, False, False
@@ -1624,10 +1732,12 @@ def test_perform_statistical_tests_insufficient_data():
 
 def test_perform_statistical_tests_with_nulls():
     """Test _perform_statistical_tests handles null values correctly."""
-    data = pl.DataFrame({
-        "age": [25, 30, None, 28, 32],
-        "age__BCCL": [26, None, 36, 29, 33],
-    })
+    data = pl.DataFrame(
+        {
+            "age": [25, 30, None, 28, 32],
+            "age__BCCL": [26, None, 36, 29, 33],
+        }
+    )
 
     # Should handle nulls gracefully by dropping them
     result = _perform_statistical_tests(
@@ -1653,18 +1763,20 @@ def test_edge_case_empty_dataframes():
         survey_id="survey_id",
     )
 
-    col_settings = pl.DataFrame({
-        "search_type": ["exact"],
-        "pattern": ["age"],
-        "column_name": [["age"]],
-        "category": [1],
-        "ok_range_type": [None],
-        "ok_range_values": [None],
-        "ttest": [False],
-        "prtest": [False],
-        "signrank": [False],
-        "reliability": [False],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["age"],
+            "column_name": [["age"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [False],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [False],
+        }
+    )
 
     result = compute_backcheck_analysis(
         empty_survey, empty_backcheck, settings, col_settings
@@ -1675,32 +1787,38 @@ def test_edge_case_empty_dataframes():
 
 def test_edge_case_all_missing_values():
     """Test handling of all missing values."""
-    survey_data = pl.DataFrame({
-        "survey_id": ["S001", "S002"],
-        "age": [None, None],
-    })
-    backcheck_data = pl.DataFrame({
-        "survey_id": ["S001", "S002"],
-        "age": [None, None],
-    })
+    survey_data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002"],
+            "age": [None, None],
+        }
+    )
+    backcheck_data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002"],
+            "age": [None, None],
+        }
+    )
 
     settings = BackcheckSettings(
         survey_key="survey_id",
         survey_id="survey_id",
     )
 
-    col_settings = pl.DataFrame({
-        "search_type": ["exact"],
-        "pattern": ["age"],
-        "column_name": [["age"]],
-        "category": [1],
-        "ok_range_type": [None],
-        "ok_range_values": [None],
-        "ttest": [False],
-        "prtest": [False],
-        "signrank": [False],
-        "reliability": [False],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["age"],
+            "column_name": [["age"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [False],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [False],
+        }
+    )
 
     result = compute_backcheck_analysis(
         survey_data, backcheck_data, settings, col_settings
@@ -1713,32 +1831,38 @@ def test_edge_case_all_missing_values():
 
 def test_edge_case_single_row():
     """Test handling of single row datasets."""
-    survey_data = pl.DataFrame({
-        "survey_id": ["S001"],
-        "age": [25],
-    })
-    backcheck_data = pl.DataFrame({
-        "survey_id": ["S001"],
-        "age": [26],
-    })
+    survey_data = pl.DataFrame(
+        {
+            "survey_id": ["S001"],
+            "age": [25],
+        }
+    )
+    backcheck_data = pl.DataFrame(
+        {
+            "survey_id": ["S001"],
+            "age": [26],
+        }
+    )
 
     settings = BackcheckSettings(
         survey_key="survey_id",
         survey_id="survey_id",
     )
 
-    col_settings = pl.DataFrame({
-        "search_type": ["exact"],
-        "pattern": ["age"],
-        "column_name": [["age"]],
-        "category": [1],
-        "ok_range_type": [None],
-        "ok_range_values": [None],
-        "ttest": [False],
-        "prtest": [False],
-        "signrank": [False],
-        "reliability": [False],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["age"],
+            "column_name": [["age"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [False],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [False],
+        }
+    )
 
     result = compute_backcheck_analysis(
         survey_data, backcheck_data, settings, col_settings
@@ -1750,32 +1874,38 @@ def test_edge_case_single_row():
 
 def test_edge_case_large_numeric_difference():
     """Test handling of large numeric differences."""
-    survey_data = pl.DataFrame({
-        "survey_id": ["S001"],
-        "income": [1000000],
-    })
-    backcheck_data = pl.DataFrame({
-        "survey_id": ["S001"],
-        "income": [1],
-    })
+    survey_data = pl.DataFrame(
+        {
+            "survey_id": ["S001"],
+            "income": [1000000],
+        }
+    )
+    backcheck_data = pl.DataFrame(
+        {
+            "survey_id": ["S001"],
+            "income": [1],
+        }
+    )
 
     settings = BackcheckSettings(
         survey_key="survey_id",
         survey_id="survey_id",
     )
 
-    col_settings = pl.DataFrame({
-        "search_type": ["exact"],
-        "pattern": ["income"],
-        "column_name": [["income"]],
-        "category": [1],
-        "ok_range_type": [None],
-        "ok_range_values": [None],
-        "ttest": [False],
-        "prtest": [False],
-        "signrank": [False],
-        "reliability": [False],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["income"],
+            "column_name": [["income"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [False],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [False],
+        }
+    )
 
     result = compute_backcheck_analysis(
         survey_data, backcheck_data, settings, col_settings
@@ -1787,14 +1917,18 @@ def test_edge_case_large_numeric_difference():
 
 def test_edge_case_special_characters_in_strings():
     """Test handling of special characters in string comparisons."""
-    survey_data = pl.DataFrame({
-        "survey_id": ["S001"],
-        "comment": ["Hello! @#$%^&*()"],
-    })
-    backcheck_data = pl.DataFrame({
-        "survey_id": ["S001"],
-        "comment": ["Hello @#$%^&*()"],
-    })
+    survey_data = pl.DataFrame(
+        {
+            "survey_id": ["S001"],
+            "comment": ["Hello! @#$%^&*()"],
+        }
+    )
+    backcheck_data = pl.DataFrame(
+        {
+            "survey_id": ["S001"],
+            "comment": ["Hello @#$%^&*()"],
+        }
+    )
 
     settings = BackcheckSettings(
         survey_key="survey_id",
@@ -1802,18 +1936,20 @@ def test_edge_case_special_characters_in_strings():
         nosymbols_option=True,
     )
 
-    col_settings = pl.DataFrame({
-        "search_type": ["exact"],
-        "pattern": ["comment"],
-        "column_name": [["comment"]],
-        "category": [1],
-        "ok_range_type": [None],
-        "ok_range_values": [None],
-        "ttest": [False],
-        "prtest": [False],
-        "signrank": [False],
-        "reliability": [False],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["comment"],
+            "column_name": [["comment"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [False],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [False],
+        }
+    )
 
     result = compute_backcheck_analysis(
         survey_data, backcheck_data, settings, col_settings
@@ -1826,32 +1962,38 @@ def test_edge_case_special_characters_in_strings():
 def test_edge_case_very_long_strings():
     """Test handling of very long strings."""
     long_string = "a" * 10000
-    survey_data = pl.DataFrame({
-        "survey_id": ["S001"],
-        "comment": [long_string],
-    })
-    backcheck_data = pl.DataFrame({
-        "survey_id": ["S001"],
-        "comment": [long_string],
-    })
+    survey_data = pl.DataFrame(
+        {
+            "survey_id": ["S001"],
+            "comment": [long_string],
+        }
+    )
+    backcheck_data = pl.DataFrame(
+        {
+            "survey_id": ["S001"],
+            "comment": [long_string],
+        }
+    )
 
     settings = BackcheckSettings(
         survey_key="survey_id",
         survey_id="survey_id",
     )
 
-    col_settings = pl.DataFrame({
-        "search_type": ["exact"],
-        "pattern": ["comment"],
-        "column_name": [["comment"]],
-        "category": [1],
-        "ok_range_type": [None],
-        "ok_range_values": [None],
-        "ttest": [False],
-        "prtest": [False],
-        "signrank": [False],
-        "reliability": [False],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["comment"],
+            "column_name": [["comment"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [False],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [False],
+        }
+    )
 
     result = compute_backcheck_analysis(
         survey_data, backcheck_data, settings, col_settings
@@ -1872,18 +2014,20 @@ def test_full_backcheck_workflow(
 ):
     """Test complete backcheck workflow from analysis to statistics."""
     # Step 1: Configure columns
-    col_settings = pl.DataFrame({
-        "search_type": ["exact", "exact"],
-        "pattern": ["age", "income"],
-        "column_name": [["age"], ["income"]],
-        "category": [1, 2],
-        "ok_range_type": ["number", "percentage"],
-        "ok_range_values": [[-2.0, 2.0], [-10.0, 10.0]],
-        "ttest": [True, False],
-        "prtest": [False, False],
-        "signrank": [True, False],
-        "reliability": [True, False],
-    })
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact", "exact"],
+            "pattern": ["age", "income"],
+            "column_name": [["age"], ["income"]],
+            "category": [1, 2],
+            "ok_range_type": ["number", "percentage"],
+            "ok_range_values": [[-2.0, 2.0], [-10.0, 10.0]],
+            "ttest": [True, False],
+            "prtest": [False, False],
+            "signrank": [True, False],
+            "reliability": [True, False],
+        }
+    )
 
     # Step 2: Compute analysis
     analysis = compute_backcheck_analysis(

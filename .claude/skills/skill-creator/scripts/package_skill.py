@@ -22,7 +22,8 @@ def package_skill(skill_path, output_dir=None):
 
     Args:
         skill_path: Path to the skill folder
-        output_dir: Optional output directory for the zip file (defaults to current directory)
+        output_dir: Optional output directory for the zip file
+        (defaults to current directory)
 
     Returns
     -------
@@ -77,7 +78,7 @@ def package_skill(skill_path, output_dir=None):
                     print(f"  Added: {arcname}")
 
         print(f"\n✅ Successfully packaged skill to: {zip_filename}")
-        return zip_filename
+        return zip_filename  # noqa: TRY300
 
     except Exception as e:
         print(f"❌ Error creating zip file: {e}")
@@ -85,6 +86,7 @@ def package_skill(skill_path, output_dir=None):
 
 
 def main():
+    """Main entry point for skill packager script."""
     if len(sys.argv) < 2:
         print(
             "Usage: python utils/package_skill.py <path/to/skill-folder> [output-directory]"

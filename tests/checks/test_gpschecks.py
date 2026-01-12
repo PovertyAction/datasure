@@ -264,10 +264,16 @@ def test_gps_column_config_empty_alias():
 
 def test_parse_gps_data_single_column_space_delimiter():
     """Test parsing GPS data from single column with space delimiter."""
-    data = pl.DataFrame({
-        "key": ["A", "B", "C"],
-        "gps": ["6.6018 -0.1870 150.0 4.5", "6.6015 -0.1865 152.0 3.8", "6.6022 -0.1868 148.0 4.2"],
-    })
+    data = pl.DataFrame(
+        {
+            "key": ["A", "B", "C"],
+            "gps": [
+                "6.6018 -0.1870 150.0 4.5",
+                "6.6015 -0.1865 152.0 3.8",
+                "6.6022 -0.1868 148.0 4.2",
+            ],
+        }
+    )
 
     config = {
         "format_type": GPSFormatType.SINGLE_COLUMN.value,
@@ -286,10 +292,12 @@ def test_parse_gps_data_single_column_space_delimiter():
 
 def test_parse_gps_data_single_column_comma_delimiter():
     """Test parsing GPS data from single column with comma delimiter."""
-    data = pl.DataFrame({
-        "key": ["A", "B"],
-        "gps": ["6.6018,-0.1870,150.0,4.5", "6.6015,-0.1865,152.0,3.8"],
-    })
+    data = pl.DataFrame(
+        {
+            "key": ["A", "B"],
+            "gps": ["6.6018,-0.1870,150.0,4.5", "6.6015,-0.1865,152.0,3.8"],
+        }
+    )
 
     config = {
         "format_type": GPSFormatType.SINGLE_COLUMN.value,
@@ -307,11 +315,13 @@ def test_parse_gps_data_single_column_comma_delimiter():
 
 def test_parse_gps_data_separate_columns():
     """Test parsing GPS data from separate columns."""
-    data = pl.DataFrame({
-        "key": ["A", "B", "C"],
-        "lat": [6.6018, 6.6015, 6.6022],
-        "lon": [-0.1870, -0.1865, -0.1868],
-    })
+    data = pl.DataFrame(
+        {
+            "key": ["A", "B", "C"],
+            "lat": [6.6018, 6.6015, 6.6022],
+            "lon": [-0.1870, -0.1865, -0.1868],
+        }
+    )
 
     config = {
         "format_type": GPSFormatType.SEPARATE_COLUMNS.value,
@@ -368,10 +378,12 @@ def test_parse_gps_data_missing_lat_lon_columns():
 
 def test_parse_gps_data_with_null_values():
     """Test parsing GPS data with null/missing values."""
-    data = pl.DataFrame({
-        "key": ["A", "B", "C"],
-        "gps": ["6.6018 -0.1870", None, "6.6022 -0.1868"],
-    })
+    data = pl.DataFrame(
+        {
+            "key": ["A", "B", "C"],
+            "gps": ["6.6018 -0.1870", None, "6.6022 -0.1868"],
+        }
+    )
 
     config = {
         "format_type": GPSFormatType.SINGLE_COLUMN.value,
@@ -388,10 +400,12 @@ def test_parse_gps_data_with_null_values():
 
 def test_parse_gps_data_properly_formatted_string():
     """Test parsing GPS data with properly formatted strings."""
-    data = pl.DataFrame({
-        "key": ["A", "B", "C"],
-        "gps": ["1.23 4.56", "2.34 5.67", "3.45 6.78"],
-    })
+    data = pl.DataFrame(
+        {
+            "key": ["A", "B", "C"],
+            "gps": ["1.23 4.56", "2.34 5.67", "3.45 6.78"],
+        }
+    )
 
     config = {
         "format_type": GPSFormatType.SINGLE_COLUMN.value,
@@ -456,16 +470,19 @@ def test_update_gps_column_config_append_to_existing(mock_save, mock_get):
         "altitude_column": pl.Utf8,
         "accuracy_column": pl.Utf8,
     }
-    existing_config = pl.DataFrame({
-        "alias": ["existing_gps"],
-        "format_type": [GPSFormatType.SINGLE_COLUMN.value],
-        "delimiter": [DelimiterType.COMMA.value],
-        "gps_column": ["old_gps"],
-        "latitude_column": [None],
-        "longitude_column": [None],
-        "altitude_column": [None],
-        "accuracy_column": [None],
-    }, schema=schema)
+    existing_config = pl.DataFrame(
+        {
+            "alias": ["existing_gps"],
+            "format_type": [GPSFormatType.SINGLE_COLUMN.value],
+            "delimiter": [DelimiterType.COMMA.value],
+            "gps_column": ["old_gps"],
+            "latitude_column": [None],
+            "longitude_column": [None],
+            "altitude_column": [None],
+            "accuracy_column": [None],
+        },
+        schema=schema,
+    )
     mock_get.return_value = existing_config
 
     new_config = GPSColumnConfig(
@@ -763,7 +780,9 @@ def test_plot_gps_coordinates(mock_pydeck_chart, mock_pydeck_settings, sample_gp
 
 @patch("datasure.checks.gpschecks.pydeck.settings")
 @patch("datasure.checks.gpschecks.st.pydeck_chart")
-def test_plot_gps_coordinates_with_missing_data(mock_pydeck_chart, mock_pydeck_settings):
+def test_plot_gps_coordinates_with_missing_data(
+    mock_pydeck_chart, mock_pydeck_settings
+):
     """Test GPS coordinates plotting with missing coordinates."""
     # Mock the mapbox_key attribute
     mock_pydeck_settings.mapbox_key = "test_mapbox_key"
@@ -794,7 +813,9 @@ def test_plot_gps_coordinates_with_missing_data(mock_pydeck_chart, mock_pydeck_s
 
 @patch("datasure.checks.gpschecks.pydeck.settings")
 @patch("datasure.checks.gpschecks.st.pydeck_chart")
-def test_plot_clusters_on_map(mock_pydeck_chart, mock_pydeck_settings, sample_gps_data_with_outliers):
+def test_plot_clusters_on_map(
+    mock_pydeck_chart, mock_pydeck_settings, sample_gps_data_with_outliers
+):
     """Test plotting clusters on map with outlier highlighting."""
     # Mock the mapbox_key attribute
     mock_pydeck_settings.mapbox_key = "test_mapbox_key"
@@ -828,7 +849,9 @@ def test_plot_clusters_on_map(mock_pydeck_chart, mock_pydeck_settings, sample_gp
 
 @patch("datasure.checks.gpschecks.pydeck.settings")
 @patch("datasure.checks.gpschecks.st.pydeck_chart")
-def test_plot_clusters_on_map_all_normal_points(mock_pydeck_chart, mock_pydeck_settings, sample_gps_data):
+def test_plot_clusters_on_map_all_normal_points(
+    mock_pydeck_chart, mock_pydeck_settings, sample_gps_data
+):
     """Test plotting clusters when all points are normal (no outliers)."""
     # Mock the mapbox_key attribute
     mock_pydeck_settings.mapbox_key = "test_mapbox_key"
@@ -936,7 +959,9 @@ def test_calculate_gps_accuracy_statistics_missing_values():
 
 @patch("datasure.checks.gpschecks.pydeck.settings")
 @patch("datasure.checks.gpschecks.st.pydeck_chart")
-def test_plot_gps_coordinates_many_unique_values(mock_pydeck_chart, mock_pydeck_settings):
+def test_plot_gps_coordinates_many_unique_values(
+    mock_pydeck_chart, mock_pydeck_settings
+):
     """Test GPS plotting with many unique values for color coding."""
     # Mock the mapbox_key attribute
     mock_pydeck_settings.mapbox_key = "test_mapbox_key"

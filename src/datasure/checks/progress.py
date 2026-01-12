@@ -64,9 +64,7 @@ class AttemptedInterviewsMetrics(BaseModel):
     """Summary metrics for attempted interviews."""
 
     total_submitted: int = Field(ge=0, description="Total number of submissions")
-    number_of_unique_ids: int = Field(
-        ge=0, description="Number of unique survey IDs"
-    )
+    number_of_unique_ids: int = Field(ge=0, description="Number of unique survey IDs")
     min_attempts: int = Field(ge=0, description="Minimum number of attempts")
     max_attempts: int = Field(ge=0, description="Maximum number of attempts")
 
@@ -78,7 +76,9 @@ class ProgressSettings(BaseModel):
     survey_id: str | None = Field(..., min_length=1, description="Survey ID column")
     survey_date: str | None = Field(None, description="Survey date column")
     enumerator: str | None = Field(None, description="Enumerator ID column")
-    survey_target: int | None = Field(None, ge=0, description="Target number of surveys")
+    survey_target: int | None = Field(
+        None, ge=0, description="Target number of surveys"
+    )
     target_submissions_per_period: int | None = Field(
         None, ge=0, description="Target number of submissions per time period"
     )
@@ -90,6 +90,7 @@ class ProgressSettings(BaseModel):
         if v is not None and v < 0:
             raise ValueError("Target must be a positive number")
         return v
+
 
 class TimePeriodConfig(BaseModel):
     """Configuration for time period aggregation."""
@@ -113,7 +114,9 @@ class TimePeriodConfig(BaseModel):
 class AttemptedInterviewsResult(BaseModel):
     """Result model for attempted interviews computation."""
 
-    attempted_interviews: Any = Field(description="DataFrame with attempted interviews data")
+    attempted_interviews: Any = Field(
+        description="DataFrame with attempted interviews data"
+    )
     total_submitted: int = Field(ge=0, description="Total number of submissions")
     number_of_unique_ids: int = Field(ge=0, description="Number of unique survey IDs")
     min_attempts: int = Field(ge=0, description="Minimum number of attempts")
@@ -128,6 +131,7 @@ class AttemptedInterviewsResult(BaseModel):
 # =============================================================================
 # Settings and Configuration Functions
 # =============================================================================
+
 
 @st.cache_data(ttl=60)
 def load_default_settings(
@@ -333,9 +337,10 @@ def progress_report_settings(
         survey_date=survey_date,
         enumerator=enumerator,
         survey_target=target,
-        target_submissions_per_period=target_per_period if target_per_period > 0 else None,
+        target_submissions_per_period=target_per_period
+        if target_per_period > 0
+        else None,
     )
-
 
 
 # =============================================================================
@@ -344,9 +349,7 @@ def progress_report_settings(
 
 
 @st.cache_data
-def compute_progress_summary(
-    data: pl.DataFrame, target: int | None
-) -> ProgressSummary:
+def compute_progress_summary(data: pl.DataFrame, target: int | None) -> ProgressSummary:
     """Compute summary statistics for progress report.
 
     Calculates the total number of submitted surveys and the percentage
@@ -397,9 +400,7 @@ def display_progress_summary(data: pl.DataFrame, target: int | None) -> None:
     target : int | None
         Target number of surveys to collect. If None, shows info messages.
     """
-    progress_summary = compute_progress_summary(
-        data, target
-    )
+    progress_summary = compute_progress_summary(data, target)
 
     mc1, mc2, mc3 = st.columns([0.5, 0.25, 0.25], border=True)
 
@@ -473,23 +474,30 @@ def compute_progress_overtime(
 
     # Create time period column based on selection
     if validated_period == "Day":
-        period_stats = data.select(
-            pl.col(date).cast(pl.Date).alias("time_period")
-        ).group_by("time_period").agg(
-            pl.len().alias("num_interviews")
-        ).sort("time_period")
+        period_stats = (
+            data.select(pl.col(date).cast(pl.Date).alias("time_period"))
+            .group_by("time_period")
+            .agg(pl.len().alias("num_interviews"))
+            .sort("time_period")
+        )
     elif validated_period == "Week":
-        period_stats = data.select(
-            pl.col(date).cast(pl.Date).dt.truncate("1w").alias("time_period")
-        ).group_by("time_period").agg(
-            pl.len().alias("num_interviews")
-        ).sort("time_period")
+        period_stats = (
+            data.select(
+                pl.col(date).cast(pl.Date).dt.truncate("1w").alias("time_period")
+            )
+            .group_by("time_period")
+            .agg(pl.len().alias("num_interviews"))
+            .sort("time_period")
+        )
     elif validated_period == "Month":
-        period_stats = data.select(
-            pl.col(date).cast(pl.Date).dt.truncate("1mo").alias("time_period")
-        ).group_by("time_period").agg(
-            pl.len().alias("num_interviews")
-        ).sort("time_period")
+        period_stats = (
+            data.select(
+                pl.col(date).cast(pl.Date).dt.truncate("1mo").alias("time_period")
+            )
+            .group_by("time_period")
+            .agg(pl.len().alias("num_interviews"))
+            .sort("time_period")
+        )
 
     return period_stats
 
@@ -510,7 +518,10 @@ def compute_average_interviews(period_stats: pl.DataFrame) -> float:
     """
     return period_stats["num_interviews"].mean()
 
-def render_time_period_selector(settings_file: str, tab_name: str) -> Literal["Day", "Week", "Month"]:
+
+def render_time_period_selector(
+    settings_file: str, tab_name: str
+) -> Literal["Day", "Week", "Month"]:
     """Render time period selector UI using Streamlit pills component.
 
     Creates a pills selector allowing users to choose the aggregation period
@@ -530,11 +541,16 @@ def render_time_period_selector(settings_file: str, tab_name: str) -> Literal["D
         Selected time period for aggregation.
     """
     with st.container(horizontal_alignment="left"):
-
-        options_map = {"Day": ":material/event: Daily", "Week": ":material/date_range: Weekly", "Month": ":material/calendar_month: Monthly"}
+        options_map = {
+            "Day": ":material/event: Daily",
+            "Week": ":material/date_range: Weekly",
+            "Month": ":material/calendar_month: Monthly",
+        }
 
         saved_settings = load_check_settings(settings_file, tab_name) or {}
-        default_time_period = saved_settings.get("time_period_progress_overtime_save", "Day")
+        default_time_period = saved_settings.get(
+            "time_period_progress_overtime_save", "Day"
+        )
 
         time_period = st.pills(
             label="Time Period",
@@ -548,11 +564,10 @@ def render_time_period_selector(settings_file: str, tab_name: str) -> Literal["D
             kwargs={"state_name": TAB_NAME + "_time_period"},
         )
 
-        save_check_settings(
-            settings_file, TAB_NAME, {"time_period": time_period}
-        )
+        save_check_settings(settings_file, TAB_NAME, {"time_period": time_period})
 
     return time_period
+
 
 @demo_output_onboarding(TAB_NAME)
 @st.fragment
@@ -673,7 +688,7 @@ def display_progress_overtime(
         },
     )
 
-    st.plotly_chart(fig, theme=None, width='stretch')
+    st.plotly_chart(fig, theme=None, width="stretch")
 
 
 # =============================================================================
@@ -713,7 +728,9 @@ def compute_progress_chart(
 
     # Calculate consent percentage using Polars
     if consent_col and consent_vals:
-        valid_consent_count = data.filter(pl.col(consent_col).is_in(consent_vals)).height
+        valid_consent_count = data.filter(
+            pl.col(consent_col).is_in(consent_vals)
+        ).height
         consent_percentage = (
             (valid_consent_count / total_submitted) * 100 if total_submitted > 0 else 0
         )
@@ -809,7 +826,9 @@ def display_progress_chart(data: pl.DataFrame, setting_file: str) -> None:
         if consent:
             consent_val_options = _get_unique_values(data, consent)
             default_consent_vals = (
-                consent_vals if consent_vals and consent_vals in consent_val_options else None
+                consent_vals
+                if consent_vals and consent_vals in consent_val_options
+                else None
             )
             consent_vals = st.multiselect(
                 label="Select consent values",
@@ -860,7 +879,9 @@ def display_progress_chart(data: pl.DataFrame, setting_file: str) -> None:
         if outcome:
             outcome_val_options = _get_unique_values(data, outcome)
             default_outcome_vals = (
-                outcome_vals if outcome_vals and outcome_vals in outcome_val_options else None
+                outcome_vals
+                if outcome_vals and outcome_vals in outcome_val_options
+                else None
             )
             outcome_vals = st.multiselect(
                 label="Select outcome values",
@@ -901,12 +922,12 @@ def display_progress_chart(data: pl.DataFrame, setting_file: str) -> None:
     with cc1:
         if consent and consent_vals:
             st.markdown("**% consent**")
-            st.pyplot(perc_consent_chart, width='stretch')
+            st.pyplot(perc_consent_chart, width="stretch")
 
     with cc2:
         if outcome and outcome_vals:
             st.markdown("**% completion**")
-            st.pyplot(perc_completion_chart, width='stretch')
+            st.pyplot(perc_completion_chart, width="stretch")
 
 
 # =============================================================================
@@ -933,11 +954,17 @@ def _aggregate_attempts_by_survey_id(
     pl.DataFrame
         Aggregated attempts with num_interviews, last_attempt_date, and attempt_dates
     """
-    return data.group_by(survey_id).agg([
-        pl.len().alias("num_interviews"),
-        pl.col(date).max().alias("last_attempt_date"),
-        pl.col(date).alias("attempt_dates"),
-    ]).sort(survey_id)
+    return (
+        data.group_by(survey_id)
+        .agg(
+            [
+                pl.len().alias("num_interviews"),
+                pl.col(date).max().alias("last_attempt_date"),
+                pl.col(date).alias("attempt_dates"),
+            ]
+        )
+        .sort(survey_id)
+    )
 
 
 def _expand_attempt_dates(attempts_df: pl.DataFrame) -> pl.DataFrame:
@@ -954,15 +981,15 @@ def _expand_attempt_dates(attempts_df: pl.DataFrame) -> pl.DataFrame:
         DataFrame with expanded attempt date columns
     """
     # Get the maximum number of attempts to determine how many columns we need
-    max_attempts = attempts_df.select(
-        pl.col("attempt_dates").list.len().max()
-    ).item()
+    max_attempts = attempts_df.select(pl.col("attempt_dates").list.len().max()).item()
 
     # Explode attempt dates into separate columns
     # Use list.get with default=None to handle lists shorter than max_attempts
     for i in range(max_attempts):
         attempts_df = attempts_df.with_columns(
-            pl.col("attempt_dates").list.get(i, null_on_oob=True).alias(f"Attempt Date {i + 1}")
+            pl.col("attempt_dates")
+            .list.get(i, null_on_oob=True)
+            .alias(f"Attempt Date {i + 1}")
         )
 
     return attempts_df.drop("attempt_dates")
@@ -997,10 +1024,12 @@ def _prepare_display_columns(
     sorted_data = data.select(cols_to_select).sort([survey_id, date])
 
     # Forward fill and backward fill within each group
-    filled_data = sorted_data.with_columns([
-        pl.col(col).forward_fill().backward_fill().over(survey_id)
-        for col in display_cols
-    ])
+    filled_data = sorted_data.with_columns(
+        [
+            pl.col(col).forward_fill().backward_fill().over(survey_id)
+            for col in display_cols
+        ]
+    )
 
     # Keep only one row per survey ID (the first one after sorting)
     return filled_data.unique(subset=[survey_id], keep="first")
@@ -1068,7 +1097,9 @@ def compute_attempted_interviews(
         # Reorder columns: survey_id, num_interviews, last_attempt_date,
         # display_cols, attempt dates
         attempt_date_cols = [
-            col for col in attempted_interviews.columns if col.startswith("Attempt Date")
+            col
+            for col in attempted_interviews.columns
+            if col.startswith("Attempt Date")
         ]
         ordered_cols = (
             [survey_id, "num_interviews", "last_attempt_date"]
@@ -1078,7 +1109,9 @@ def compute_attempted_interviews(
         attempted_interviews = attempted_interviews.select(ordered_cols)
 
     # Step 4: Calculate summary statistics
-    num_unique, min_attempts, max_attempts = _compute_summary_stats(attempted_interviews)
+    num_unique, min_attempts, max_attempts = _compute_summary_stats(
+        attempted_interviews
+    )
 
     return AttemptedInterviewsResult(
         attempted_interviews=attempted_interviews,
@@ -1114,7 +1147,6 @@ def display_attempted_interviews(
         )
         return
 
-
     default_settings = load_check_settings(
         settings_file=setting_file, check_name="progress"
     )
@@ -1139,7 +1171,6 @@ def display_attempted_interviews(
             TAB_NAME,
             {"display_cols": display_cols},
         )
-
 
     # Compute attempted interviews using Polars
     result = compute_attempted_interviews(
@@ -1192,8 +1223,7 @@ def _display_chart_and_table(
     with ai1:
         # Aggregate attempted interviews into frequency counts
         attempted_frequency = (
-            attempted_interviews
-            .group_by("num_interviews")
+            attempted_interviews.group_by("num_interviews")
             .agg(pl.len().alias("frequency"))
             .sort("num_interviews")
         )
@@ -1217,7 +1247,9 @@ def _display_chart_and_table(
             f"<b>{attempts} Attempts</b><br>"
             f"Percentage: {pct:.1f}%<br>"
             f"Frequency: {freq}"
-            for attempts, pct, freq in zip(num_interviews_list, percentage_list, frequency_list, strict=False)
+            for attempts, pct, freq in zip(
+                num_interviews_list, percentage_list, frequency_list, strict=False
+            )
         ]
 
         # Create figure using go.Bar for better control
@@ -1255,7 +1287,7 @@ def _display_chart_and_table(
                 "autorange": "reversed",
             },
         )
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, width="stretch")
 
     with ai2:
         # Convert to pandas for styling (Streamlit doesn't support Polars styling yet)
@@ -1274,7 +1306,7 @@ def _display_chart_and_table(
                 vmin=vmin,
                 vmax=vmax,
             ),
-            width='stretch',
+            width="stretch",
             column_config={
                 survey_id: st.column_config.Column(pinned=True),
                 "num_interviews": st.column_config.Column(
@@ -1330,7 +1362,6 @@ def progress_report(
     # get column info
     datetime_columns = survey_columns.datetime_columns
     categorical_columns = survey_columns.categorical_columns
-
 
     st.title("Progress Tracking")
 

@@ -44,7 +44,9 @@ from datasure.checks.duplicates import (
 
 @pytest.fixture(autouse=True)
 def mock_database_functions(monkeypatch):
-    """Override the autouse fixture from conftest to disable database mocking for these tests."""
+    """Override the autouse fixture from conftest to disable database mocking
+    for these tests.
+    """
     # These tests don't use database functions in the same way
     pass
 
@@ -52,23 +54,25 @@ def mock_database_functions(monkeypatch):
 @pytest.fixture
 def sample_data_pl():
     """Create sample data as Polars DataFrame."""
-    return pl.DataFrame({
-        "survey_id": ["S001", "S002", "S003", "S004", "S005", "S002", "S004"],
-        "survey_key": ["K001", "K002", "K003", "K004", "K005", "K006", "K007"],
-        "survey_date": [
-            datetime.date(2024, 1, 1),
-            datetime.date(2024, 1, 2),
-            datetime.date(2024, 1, 3),
-            datetime.date(2024, 1, 4),
-            datetime.date(2024, 1, 5),
-            datetime.date(2024, 1, 6),
-            datetime.date(2024, 1, 7),
-        ],
-        "enumerator": ["E1", "E1", "E2", "E2", "E3", "E1", "E2"],
-        "age": [25, 30, 35, 28, 32, 30, 28],
-        "income": [50000, 60000, 55000, 52000, 58000, 60000, 52000],
-        "gender": ["M", "F", "M", "F", "M", "F", "F"],
-    })
+    return pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002", "S003", "S004", "S005", "S002", "S004"],
+            "survey_key": ["K001", "K002", "K003", "K004", "K005", "K006", "K007"],
+            "survey_date": [
+                datetime.date(2024, 1, 1),
+                datetime.date(2024, 1, 2),
+                datetime.date(2024, 1, 3),
+                datetime.date(2024, 1, 4),
+                datetime.date(2024, 1, 5),
+                datetime.date(2024, 1, 6),
+                datetime.date(2024, 1, 7),
+            ],
+            "enumerator": ["E1", "E1", "E2", "E2", "E3", "E1", "E2"],
+            "age": [25, 30, 35, 28, 32, 30, 28],
+            "income": [50000, 60000, 55000, 52000, 58000, 60000, 52000],
+            "gender": ["M", "F", "M", "F", "M", "F", "F"],
+        }
+    )
 
 
 @pytest.fixture
@@ -116,7 +120,9 @@ def test_num_condition_enum():
     assert NumCondition.EQUALS.value == "Value is equal"
     assert NumCondition.NOT_EQUALS.value == "Value is not equal"
     assert NumCondition.GREATER_THAN.value == "Value is greater than"
-    assert NumCondition.GREATER_THAN_OR_EQUAL.value == "Value is greater than or equal to"
+    assert (
+        NumCondition.GREATER_THAN_OR_EQUAL.value == "Value is greater than or equal to"
+    )
     assert NumCondition.LESS_THAN.value == "Value is less than"
     assert NumCondition.LESS_THAN_OR_EQUAL.value == "Value is less than or equal to"
     assert NumCondition.INCLUDES.value == "Values includes"
@@ -470,7 +476,9 @@ def test_apply_numeric_condition_greater_than():
 def test_apply_numeric_condition_greater_than_or_equal():
     """Test _apply_numeric_condition with GREATER_THAN_OR_EQUAL."""
     col = pl.col("age")
-    result_expr = _apply_numeric_condition(col, NumCondition.GREATER_THAN_OR_EQUAL.value, 25)
+    result_expr = _apply_numeric_condition(
+        col, NumCondition.GREATER_THAN_OR_EQUAL.value, 25
+    )
     data = pl.DataFrame({"age": [20, 25, 30]})
     result = data.select(result_expr.alias("result"))
     assert result["result"].to_list() == [False, True, True]
@@ -488,7 +496,9 @@ def test_apply_numeric_condition_less_than():
 def test_apply_numeric_condition_less_than_or_equal():
     """Test _apply_numeric_condition with LESS_THAN_OR_EQUAL."""
     col = pl.col("age")
-    result_expr = _apply_numeric_condition(col, NumCondition.LESS_THAN_OR_EQUAL.value, 25)
+    result_expr = _apply_numeric_condition(
+        col, NumCondition.LESS_THAN_OR_EQUAL.value, 25
+    )
     data = pl.DataFrame({"age": [20, 25, 30]})
     result = data.select(result_expr.alias("result"))
     assert result["result"].to_list() == [True, True, False]
@@ -526,13 +536,15 @@ def test_apply_numeric_condition_with_date():
     col = pl.col("date_col")
     date_val = datetime.date(2024, 1, 15)
     result_expr = _apply_numeric_condition(col, NumCondition.EQUALS.value, date_val)
-    data = pl.DataFrame({
-        "date_col": [
-            datetime.date(2024, 1, 14),
-            datetime.date(2024, 1, 15),
-            datetime.date(2024, 1, 16),
-        ]
-    })
+    data = pl.DataFrame(
+        {
+            "date_col": [
+                datetime.date(2024, 1, 14),
+                datetime.date(2024, 1, 15),
+                datetime.date(2024, 1, 16),
+            ]
+        }
+    )
     result = data.select(result_expr.alias("result"))
     assert result["result"].to_list() == [False, True, False]
 
@@ -813,12 +825,14 @@ def test_update_duplicates_column_config(monkeypatch):
 
 def test_ensure_duplicates_column_formats():
     """Test _ensure_duplicates_column_formats function."""
-    data = pl.DataFrame({
-        "search_type": ["exact"],
-        "pattern": [None],
-        "column_name": [["age"]],
-        "locked": [False],
-    })
+    data = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": [None],
+            "column_name": [["age"]],
+            "locked": [False],
+        }
+    )
 
     result = _ensure_duplicates_column_formats(data)
 
@@ -830,12 +844,14 @@ def test_ensure_duplicates_column_formats():
 
 def test_update_unlocked_duplicates_cols():
     """Test _update_unlocked_duplicates_cols function."""
-    config = pl.DataFrame({
-        "search_type": ["startswith", "exact"],
-        "pattern": ["age", None],
-        "column_name": [["age"], ["income"]],
-        "locked": [False, True],
-    })
+    config = pl.DataFrame(
+        {
+            "search_type": ["startswith", "exact"],
+            "pattern": ["age", None],
+            "column_name": [["age"], ["income"]],
+            "locked": [False, True],
+        }
+    )
 
     all_columns = ["age", "age_group", "age_total", "income"]
 
@@ -901,7 +917,9 @@ def test_compute_duplicates_statistics_no_survey_id():
         survey_key=None,
     )
 
-    with pytest.raises(ValueError, match="Either survey_id or survey_key must be provided"):
+    with pytest.raises(
+        ValueError, match="Either survey_id or survey_key must be provided"
+    ):
         compute_duplicates_statistics(data, settings, ["age"])
 
 
@@ -927,15 +945,17 @@ def test_compute_id_duplicates(sample_data_pl):
 
 def test_compute_id_duplicates_no_duplicates():
     """Test compute_id_duplicates with no duplicates."""
-    data = pl.DataFrame({
-        "survey_id": ["S001", "S002", "S003"],
-        "survey_key": ["K001", "K002", "K003"],
-        "survey_date": [
-            datetime.date(2024, 1, 1),
-            datetime.date(2024, 1, 2),
-            datetime.date(2024, 1, 3),
-        ],
-    })
+    data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002", "S003"],
+            "survey_key": ["K001", "K002", "K003"],
+            "survey_date": [
+                datetime.date(2024, 1, 1),
+                datetime.date(2024, 1, 2),
+                datetime.date(2024, 1, 3),
+            ],
+        }
+    )
 
     result = compute_id_duplicates(data, "survey_id", "survey_date", "survey_key")
 
@@ -963,15 +983,17 @@ def test_compute_column_duplicates(sample_data_pl):
 
 def test_compute_column_duplicates_no_duplicates():
     """Test compute_column_duplicates with no duplicates."""
-    data = pl.DataFrame({
-        "survey_id": ["S001", "S002", "S003"],
-        "survey_date": [
-            datetime.date(2024, 1, 1),
-            datetime.date(2024, 1, 2),
-            datetime.date(2024, 1, 3),
-        ],
-        "age": [25, 30, 35],
-    })
+    data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002", "S003"],
+            "survey_date": [
+                datetime.date(2024, 1, 1),
+                datetime.date(2024, 1, 2),
+                datetime.date(2024, 1, 3),
+            ],
+            "age": [25, 30, 35],
+        }
+    )
 
     result = compute_column_duplicates(data, "survey_id", "survey_date", "age")
 
@@ -980,9 +1002,11 @@ def test_compute_column_duplicates_no_duplicates():
 
 def test_compute_column_duplicates_missing_columns():
     """Test compute_column_duplicates with missing optional columns."""
-    data = pl.DataFrame({
-        "age": [25, 30, 30, 35],
-    })
+    data = pl.DataFrame(
+        {
+            "age": [25, 30, 30, 35],
+        }
+    )
 
     result = compute_column_duplicates(data, None, None, "age")
 
@@ -1015,11 +1039,13 @@ def test_edge_case_empty_dataframe():
 
 def test_edge_case_all_duplicates():
     """Test handling when all values are duplicates."""
-    data = pl.DataFrame({
-        "survey_id": ["S001", "S001", "S001"],
-        "survey_key": ["K001", "K002", "K003"],
-        "age": [25, 25, 25],
-    })
+    data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S001", "S001"],
+            "survey_key": ["K001", "K002", "K003"],
+            "age": [25, 25, 25],
+        }
+    )
 
     result = compute_id_duplicates(data, "survey_id", None, "survey_key")
 
@@ -1029,10 +1055,12 @@ def test_edge_case_all_duplicates():
 
 def test_edge_case_single_row():
     """Test handling of single row datasets."""
-    data = pl.DataFrame({
-        "survey_id": ["S001"],
-        "age": [25],
-    })
+    data = pl.DataFrame(
+        {
+            "survey_id": ["S001"],
+            "age": [25],
+        }
+    )
     settings = DuplicatesSettings(
         survey_id="survey_id",
     )
@@ -1045,11 +1073,13 @@ def test_edge_case_single_row():
 
 def test_edge_case_null_values():
     """Test handling of null values in data."""
-    data = pl.DataFrame({
-        "survey_id": ["S001", "S002", None, None],
-        "survey_key": ["K001", "K002", "K003", "K004"],
-        "age": [25, None, None, 30],
-    })
+    data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002", None, None],
+            "survey_key": ["K001", "K002", "K003", "K004"],
+            "age": [25, None, None, 30],
+        }
+    )
 
     result = compute_id_duplicates(data, "survey_id", None, "survey_key")
 

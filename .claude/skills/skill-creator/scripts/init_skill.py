@@ -273,6 +273,7 @@ def init_skill(skill_name, path):
 
 
 def main():
+    """Main entry point for skill initializer script."""
     if len(sys.argv) < 4 or sys.argv[2] != "--path":
         print("Usage: init_skill.py <skill-name> --path <path>")
         print("\nSkill name requirements:")

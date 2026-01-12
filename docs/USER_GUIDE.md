@@ -87,6 +87,7 @@ DataSure follows a 6-step workflow for complete data quality management:
 **Purpose**: Project selection and initialization
 
 **What You'll Do**:
+
 - Create a new project or select an existing one
 - Access the demo mode (recommended for new users)
 - View project dashboard and navigation
@@ -95,6 +96,7 @@ DataSure follows a 6-step workflow for complete data quality management:
 You're working with household survey data from rural communities in India, including demographics, income, land ownership, and living conditions data.
 
 **Key Actions**:
+
 - **Create New Project**: Enter a descriptive project name
 - **Select Existing Project**: Choose from previously created projects
 - **Start Demo**: Launch the interactive tutorial with sample data
@@ -106,6 +108,7 @@ You're working with household survey data from rural communities in India, inclu
 **Purpose**: Load survey data from various sources
 
 **What You'll Do**:
+
 - Connect to data sources
 - Import survey and backcheck datasets
 - Preview imported data
@@ -114,6 +117,7 @@ You're working with household survey data from rural communities in India, inclu
 #### Import Options
 
 ##### Option A: SurveyCTO Integration
+
 1. Click "SurveyCTO" tab
 2. Enter server credentials:
    - **Server Name**: Your SurveyCTO server URL
@@ -127,6 +131,7 @@ You're working with household survey data from rural communities in India, inclu
 5. Click "Import Data"
 
 ##### Option B: CSV/Excel Upload
+
 1. Click "Local Files" tab
 2. Upload file(s):
    - Drag and drop or browse
@@ -140,16 +145,19 @@ You're working with household survey data from rural communities in India, inclu
 #### Preview Imported Data
 
 After import, you'll see:
+
 - **Dataset tabs**: Switch between imported datasets
 - **Column information**: Names, types, counts
 - **Sample data**: First 100 rows preview
 - **Data metrics**: Total rows, columns, missing values
 
 **Demo Data Includes**:
+
 - **Survey Data**: 132 household survey responses
 - **Backcheck Data**: 30 quality control validation records
 
 Both datasets contain realistic data quality issues including:
+
 - Missing data patterns
 - Duplicate household IDs
 - Inconsistent income reporting
@@ -162,6 +170,7 @@ Both datasets contain realistic data quality issues including:
 **Purpose**: Clean and transform data for analysis
 
 **What You'll Do**:
+
 - Transform columns (dates, text, numeric)
 - Add calculated columns
 - Remove problematic data
@@ -170,9 +179,11 @@ Both datasets contain realistic data quality issues including:
 #### Data Preparation Actions
 
 ##### Transform Column
+
 Convert or modify existing column data:
 
 **Available Transformations**:
+
 - **String to Datetime**: Convert text dates to date format
   - Example: "2025-01-15 10:30:00" → datetime object
 - **String to Uppercase**: Convert all text to uppercase
@@ -183,6 +194,7 @@ Convert or modify existing column data:
   - Example: Calculate age from birth year
 
 **Steps**:
+
 1. Select dataset tab
 2. Click "Add data prep step"
 3. Choose "Transform Column"
@@ -193,15 +205,18 @@ Convert or modify existing column data:
 8. Review transformed data
 
 ##### Add Column
+
 Create new calculated or derived columns:
 
 **Use Cases**:
+
 - Add unique identifiers (UUID, sequential IDs)
 - Calculate fields (total income, household density)
 - Generate summary statistics
 - Create categorical groupings
 
 **Steps**:
+
 1. Click "Add data prep step"
 2. Choose "Add Column"
 3. Enter new column name
@@ -209,18 +224,22 @@ Create new calculated or derived columns:
 5. Click "Add"
 
 ##### Remove Column/Row
+
 Delete unnecessary or problematic data:
 
 **Remove Column**:
+
 - Select columns to delete
 - Useful for PII removal, irrelevant fields
 
 **Remove Row**:
+
 - Filter rows based on conditions
 - Remove incomplete surveys
 - Filter out test submissions
 
 **Steps**:
+
 1. Click "Add data prep step"
 2. Choose "Remove Column" or "Remove Row"
 3. Select column(s) or define row filter
@@ -229,6 +248,7 @@ Delete unnecessary or problematic data:
 #### Preparation Log
 
 All preparation steps are tracked:
+
 - Action type
 - Affected columns
 - Timestamp
@@ -252,6 +272,7 @@ Convert `submissiondate` column to datetime format for both survey and backcheck
 **Purpose**: Set up data quality validation rules
 
 **What You'll Do**:
+
 - Create check configurations
 - Map dataset columns to quality checks
 - Connect survey and backcheck data
@@ -260,6 +281,7 @@ Convert `submissiondate` column to datetime format for both survey and backcheck
 #### Creating a Check Configuration
 
 **Steps**:
+
 1. Click ":material/add: Add New Check Configuration"
 2. **Configuration Details**:
    - **Name**: Descriptive name (e.g., "Household Survey Checks")
@@ -289,6 +311,7 @@ Convert `submissiondate` column to datetime format for both survey and backcheck
 #### What Happens Next
 
 DataSure automatically creates a comprehensive quality analysis page with:
+
 - **Summary Report**: Overall data quality metrics
 - **Survey Progress**: Submission trends and targets
 - **Duplicates**: Duplicate record detection
@@ -300,6 +323,7 @@ DataSure automatically creates a comprehensive quality analysis page with:
 - **GPS Checks**: Location data quality
 
 **Demo Configuration**:
+
 - **Name**: "Household Survey Checks"
 - **Survey Dataset**: "demo_survey"
 - **Key Column**: "KEY"
@@ -315,6 +339,7 @@ DataSure automatically creates a comprehensive quality analysis page with:
 **Purpose**: Analyze data quality results and identify issues
 
 **What You'll Do**:
+
 - Navigate through 9 quality check reports
 - Review metrics and visualizations
 - Identify data quality issues
@@ -343,6 +368,7 @@ Each report is accessible from the navigation sidebar after configuration:
 **Purpose**: Fix identified data quality issues
 
 **What You'll Do**:
+
 - Apply corrections to specific records
 - Track correction history
 - Re-run quality checks to verify improvements
@@ -350,14 +376,17 @@ Each report is accessible from the navigation sidebar after configuration:
 #### Correction Actions
 
 ##### Modify Value
+
 Change specific field values:
 
 **Use Cases**:
+
 - Fix typos in IDs
 - Correct miscoded responses
 - Update incorrect dates
 
 **Steps**:
+
 1. Click ":material/add: Add correction"
 2. **Select Key**: Choose record to modify
 3. **Select Action**: "modify value"
@@ -368,14 +397,17 @@ Change specific field values:
 8. Click ":material/check: Apply"
 
 ##### Remove Row
+
 Delete entire survey records:
 
 **Use Cases**:
+
 - Test submissions
 - Duplicate surveys (after investigation)
 - Invalid records
 
 **Steps**:
+
 1. Click ":material/add: Add correction"
 2. **Select Key**: Choose record to remove
 3. **Select Action**: "remove row"
@@ -383,14 +415,17 @@ Delete entire survey records:
 5. Click ":material/check: Apply"
 
 ##### Remove Value
+
 Replace specific value with null/missing:
 
 **Use Cases**:
+
 - Invalid responses
 - Data entry errors
 - Out-of-range values
 
 **Steps**:
+
 1. Click ":material/add: Add correction"
 2. **Select Key**: Choose record
 3. **Select Action**: "remove value"
@@ -401,6 +436,7 @@ Replace specific value with null/missing:
 #### Correction Audit Trail
 
 All corrections are tracked with:
+
 - Record identifier (key)
 - Column modified
 - Original value
@@ -413,6 +449,7 @@ All corrections are tracked with:
 #### Verifying Corrections
 
 After applying corrections:
+
 1. Navigate back to relevant quality report
 2. Click "Refresh" or re-run checks
 3. Verify issue is resolved
@@ -425,6 +462,7 @@ Correcting duplicate household ID:
 **Investigation**: One record has typo, should be "UP015-055"
 
 **Steps**:
+
 1. Go to Corrections page
 2. Click ":material/add: Add correction"
 3. **Select Key**: "uuid:0dk0vt97-786b-250u-34k7-z34615zz820c"
@@ -447,20 +485,26 @@ Correcting duplicate household ID:
 #### Sections
 
 ##### Summary Settings
+
 Configure global parameters:
+
 - **Survey ID**: Main respondent identifier
 - **Survey Date**: Submission date column
 - **Total Expected Interviews**: Target sample size
 
 ##### Data Summary
+
 Quick dataset overview:
+
 - String columns count
 - Numeric columns count
 - Date columns count
 - Total rows
 
 ##### Submission Details
+
 Submission patterns:
+
 - Today's submissions
 - This week's submissions
 - This month's submissions
@@ -468,19 +512,24 @@ Submission patterns:
 - **Submission Trend Chart**: Line chart showing submissions over time
 
 ##### Progress
+
 Collection progress metrics:
+
 - **Progress Bar**: Percentage of target achieved
 - Average submissions per day
 - Average submissions per week
 - Average submissions per month
 
 **Progress by Subgroups**:
+
 - Select categorical column (state, region, enumerator)
 - View progress by category
 - Toggle time intervals (Auto, Daily, Weekly, Monthly)
 
 ##### Data Quality Overview
+
 Key quality metrics:
+
 - % duplicate values on ID column
 - % values flagged as outliers
 - % missing values in dataset
@@ -495,26 +544,34 @@ Key quality metrics:
 #### Sections
 
 ##### Progress Settings
+
 Configure parameters:
+
 - **Survey ID**: Respondent identifier
 - **Date**: Submission date column
 - **Enumerator**: Data collector column
 - **Target Number of Interviews**: Expected total
 
 ##### Progress Summary
+
 High-level metrics:
+
 - Submission progress (%)
 - Target interviews
 - Total submitted interviews
 
 ##### Submission Trends
+
 Visualize collection patterns:
+
 - **Time Interval Toggle**: Day, Week, Month
 - Line chart showing cumulative submissions
 - Identify collection peaks and gaps
 
 ##### Attempted Interviews
+
 Track multiple attempts:
+
 - Total submitted interviews
 - Number of unique IDs
 - Min/Max attempts per respondent
@@ -522,11 +579,14 @@ Track multiple attempts:
 - **Data table**: Attempts by respondent ID
 
 ##### Consent and Completion Progress
+
 Monitor survey completion:
+
 - **Consent Rate**: % who provided consent
 - **Completion Rate**: % who completed survey
 
 **Setup**:
+
 - Consent column and value (e.g., "consent" = "yes")
 - Completion column and value (e.g., "completion_status" = "complete")
 
@@ -539,14 +599,18 @@ Monitor survey completion:
 #### Sections
 
 ##### Duplicates Settings
+
 Configure detection:
+
 - **Survey ID**: Main identifier to check
 - **Survey Key**: Unique key column
 - **Date**: Submission date
 - **Columns**: Additional columns to check for duplicates
 
 ##### Duplicate Statistics
+
 Overview metrics:
+
 - Total duplicates found
 - Resolved duplicates
 - Columns checked
@@ -555,7 +619,9 @@ Overview metrics:
 - Survey ID duplicates count
 
 ##### Duplicate Records Table
+
 Detailed duplicate list:
+
 - Survey ID
 - Duplicate column values
 - Count of duplicates
@@ -563,7 +629,9 @@ Detailed duplicate list:
 - **Filter**: Select additional columns to display
 
 ##### Duplicate Entries for Other Columns
+
 Check duplicates in non-ID columns:
+
 - Phone numbers
 - Addresses
 - ID numbers
@@ -578,20 +646,26 @@ Check duplicates in non-ID columns:
 #### Sections
 
 ##### Missing Data Settings
+
 Configure missing codes:
+
 - **Missing Labels**: Category names (Don't Know, Refused, N/A)
 - **Missing Codes**: Numeric codes (-99, -88, -77)
   - Multiple codes separated by commas
 
 ##### Missing Data Statistics
+
 Overview metrics:
+
 - % overall missing values
 - % columns with missing values
 - % columns with at least one missing
 - % columns with no missing values
 
 ##### Missingness by Column
+
 Detailed column-level analysis:
+
 - Column name
 - Total missing count and %
 - Null values count and %
@@ -602,25 +676,33 @@ Detailed column-level analysis:
 - **Filter slider**: Show columns with minimum % missing
 
 ##### Compare Missing Data Within Groups
+
 Group-level comparison:
+
 - Select grouping column (enumerator, region, state)
 - Select columns to compare
 - Table showing % missing by group
 
 ##### Missingness Over Time
+
 Temporal patterns:
+
 - Select date column
 - Line chart showing % missing over time
 - Identify data quality trends during collection
 
 ##### Nullity Correlation
+
 Missing data relationships:
+
 - Select columns to analyze
 - Heatmap showing correlation of missingness
 - Identify systematic missing patterns
 
 ##### Nullity Matrix
+
 Visual representation:
+
 - Matrix of all records and columns
 - Red blocks: missing values
 - Blue blocks: non-missing values
@@ -637,11 +719,13 @@ Visual representation:
 ##### Outliers Settings
 
 **Admin Settings**:
+
 - Survey ID
 - Survey Key
 - Enumerator ID
 
 **Display Settings**:
+
 - Display columns to show in report
 - Minimum threshold (min non-missing values required)
 
@@ -671,13 +755,17 @@ Click ":material/add: Add Outlier Column":
 - **Soft Maximum** (optional): Values above automatically flagged
 
 ##### Outlier Statistics
+
 Overview metrics:
+
 - Variables checked
 - Outlier variables (columns with outliers)
 - Number of outliers found
 
 ##### Outlier Summaries
+
 Column-level statistics table:
+
 - Column name
 - \# of values (non-missing)
 - \# of outliers
@@ -688,7 +776,9 @@ Column-level statistics table:
 - Lower/Upper bounds
 
 ##### Outlier Details Table
+
 Record-level outlier information:
+
 - Key column
 - Survey ID
 - Enumerator ID
@@ -699,7 +789,9 @@ Record-level outlier information:
 - Detection parameters
 
 ##### Inspect Outlier Columns
+
 Visual analysis:
+
 - Select outlier column to visualize
 - **Statistics display**: All relevant metrics
 - **Box Plot**: Distribution with outliers highlighted
@@ -714,7 +806,9 @@ Visual analysis:
 #### Sections
 
 ##### Enumerator Settings
+
 Configure parameters:
+
 - **Date**: Submission date column
 - **Form Version**: Survey version used
 - **Survey ID**: Respondent identifier
@@ -725,7 +819,9 @@ Configure parameters:
 - **Outcome**: Completion column and value
 
 ##### Enumerator Overview
+
 High-level metrics:
+
 - Total enumerators
 - Total teams
 - Active enumerators (past 7 days)
@@ -734,7 +830,9 @@ High-level metrics:
 - Total submissions
 
 ##### Enumerator Summary Table
+
 Detailed performance by enumerator:
+
 - Enumerator ID
 - First/Last submission dates
 - \# submissions (total, today, this week, this month)
@@ -745,20 +843,26 @@ Detailed performance by enumerator:
 - % completion rate
 
 ##### Enumerator Productivity
+
 Visualize productivity over time:
+
 - Heatmap showing submissions per enumerator
 - Toggle: Day, Week, Month views
 - Identify high/low performers
 
 ##### Enumerator Statistics
+
 Compare statistics by enumerator:
+
 - Select column to analyze
 - Select statistics (count, mean, median, min, max, std, 25th, 75th percentile)
 - Table showing values per enumerator
 - Identify outlier enumerators
 
 ##### Enumerator Statistics Over Time
+
 Temporal performance trends:
+
 - Select column
 - Select statistic
 - Toggle: Day, Week, Month
@@ -774,23 +878,29 @@ Temporal performance trends:
 #### Sections
 
 ##### Descriptive Stats Settings
+
 Configure analysis:
+
 - Select columns (maximum 10)
 - Separate report per column
 
 ##### For Each Selected Column
 
 **Basic Statistics Toggle**:
+
 - ON: Show only count, mean, std, min, 25%, 50%, 75%, max
 - OFF: Show extended statistics
 
 **Table Type Selection**:
+
 1. **One-Way Table**: Single variable distribution
 2. **Two-Way Table**: Cross-tabulation with another variable
 3. **Summary Statistics**: Descriptive statistics only
 
 ##### Visualizations
+
 Depending on data type:
+
 - Histograms (numeric)
 - Bar charts (categorical)
 - Box plots (numeric with groups)
@@ -805,7 +915,9 @@ Depending on data type:
 #### Sections
 
 ##### Back Checks Settings
+
 Configure validation:
+
 - **Survey ID**: Respondent identifier
 - **Survey Key**: Unique row identifier
 - **Enumerator**: Original data collector
@@ -825,19 +937,25 @@ Click ":material/add: Add a back check column":
   - "compare_all": Compare all, including missing
 
 ##### Back Check Trends by Category
+
 Metrics per category:
+
 - Number of columns
 - Number of values compared
 - % discrepancies found
 
 ##### Error Trends
+
 Visualize error rates over time:
+
 - Line chart showing % discrepancies
 - Filter by category
 - Toggle time period (Daily, Weekly, Monthly)
 
 ##### Column Statistics
+
 Detailed column-level validation:
+
 - Column name
 - Data type
 - Category
@@ -846,7 +964,9 @@ Detailed column-level validation:
 - Error rate (%)
 
 ##### Enumerator Statistics
+
 Performance by original enumerator:
+
 - Enumerator ID
 - \# surveys back checked
 - \# values compared
@@ -854,7 +974,9 @@ Performance by original enumerator:
 - Error rate (%)
 
 ##### Back Checker Statistics
+
 Performance by validator:
+
 - Back Checker ID
 - \# surveys validated
 - \# values compared
@@ -862,7 +984,9 @@ Performance by validator:
 - Error rate (%)
 
 ##### Comparison Details
+
 Record-level validation results:
+
 - Survey ID
 - Enumerator
 - Back Checker
@@ -880,41 +1004,52 @@ Record-level validation results:
 #### Sections
 
 ##### GPS Settings
+
 Configure GPS validation:
+
 - **Date**: Submission date
 - **Survey Key**: Unique identifier
 - **Survey ID**: Respondent identifier
 - **Enumerator**: Data collector
 
 **GPS Column Configuration**:
+
 - Toggle "Data contains GPS column(s)"
 
 **Option A: Separate Lat/Lon Columns**:
+
 - Toggle "GPS has latitude and longitude columns"
 - Select latitude column
 - Select longitude column
 - Select accuracy column (optional)
 
 **Option B: Combined GPS Column**:
+
 - Select single GPS column (format: "lat, lon")
 - Select accuracy column (optional)
 
 ##### GPS Overview
+
 Quality metrics:
+
 - Total GPS records
 - Valid coordinates
 - Invalid coordinates
 - Accuracy statistics
 
 ##### GPS Quality Issues
+
 Identify problems:
+
 - Missing coordinates
 - Out-of-range values (lat: -90 to 90, lon: -180 to 180)
 - Low accuracy readings
 - Duplicate locations
 
 ##### GPS Visualization
+
 Map display:
+
 - Interactive map with all GPS points
 - Color-coded by quality
 - Click points for details
@@ -931,6 +1066,7 @@ Demo Mode is an interactive guided tutorial that walks you through all DataSure 
 ### Demo Data
 
 **Survey Dataset** (132 records):
+
 - Household demographics
 - Income and expenditure
 - Land ownership
@@ -938,10 +1074,12 @@ Demo Mode is an interactive guided tutorial that walks you through all DataSure 
 - Living conditions
 
 **Backcheck Dataset** (30 records):
+
 - Quality control validation visits
 - Matched to survey records by household ID
 
 **Intentional Quality Issues**:
+
 - Missing data patterns
 - Duplicate household IDs
 - Income outliers
@@ -957,6 +1095,7 @@ Demo Mode is an interactive guided tutorial that walks you through all DataSure 
 ### Demo Progress Indicator
 
 At the top of each page, see:
+
 - Current step highlighted
 - Completed steps (✓ checkmark)
 - Future steps (grayed out)
@@ -965,6 +1104,7 @@ At the top of each page, see:
 ### Demo Instructions
 
 Look for expandable "**Learn More:**" sections throughout the demo:
+
 - Yellow background containers
 - Step-by-step instructions
 - Best practices
@@ -973,6 +1113,7 @@ Look for expandable "**Learn More:**" sections throughout the demo:
 ### Completing the Demo
 
 After completing all 6 steps:
+
 - Celebration animation (balloons!)
 - Demo completion message
 - Options:
@@ -1094,7 +1235,7 @@ After completing all 6 steps:
 
 - **Documentation**: Full docs at [docs URL]
 - **GitHub Issues**: Report bugs at [GitHub URL]
-- **Email Support**: support@ipa.org
+- **Email Support**: <support@ipa.org>
 
 ### Further Reading
 

@@ -836,7 +836,9 @@ class TestUIComponents:
         df = pl.DataFrame(
             {
                 "id": [1, 2, 3],
-                "date_col": pl.date_range(date(2024, 1, 1), date(2024, 1, 3), "1d", eager=True),
+                "date_col": pl.date_range(
+                    date(2024, 1, 1), date(2024, 1, 3), "1d", eager=True
+                ),
             }
         )
 
@@ -870,7 +872,9 @@ class TestUIComponents:
         df = pl.DataFrame(
             {
                 "id": [1, 2, 3],
-                "date_col": pl.date_range(date(2024, 1, 1), date(2024, 1, 3), "1d", eager=True),
+                "date_col": pl.date_range(
+                    date(2024, 1, 1), date(2024, 1, 3), "1d", eager=True
+                ),
             }
         )
 
@@ -896,7 +900,9 @@ class TestUIComponents:
         df = pl.DataFrame(
             {
                 "id": [1, 2, 3],
-                "date_col": pl.date_range(date(2024, 1, 1), date(2024, 1, 3), "1d", eager=True),
+                "date_col": pl.date_range(
+                    date(2024, 1, 1), date(2024, 1, 3), "1d", eager=True
+                ),
             }
         )
 

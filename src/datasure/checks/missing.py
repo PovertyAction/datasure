@@ -40,7 +40,9 @@ TAB_NAME = "missing"
 class MissingCode(BaseModel):
     """Configuration for a single missing code type."""
 
-    label: str = Field(..., min_length=1, description="Label for the missing value type")
+    label: str = Field(
+        ..., min_length=1, description="Label for the missing value type"
+    )
     codes: list[str] = Field(..., min_length=1, description="List of missing codes")
 
     @field_validator("codes", mode="before")
@@ -62,10 +64,18 @@ class MissingCode(BaseModel):
 class MissingSummaryStats(BaseModel):
     """Summary statistics for missing data."""
 
-    mean_missing_pct: float = Field(ge=0, le=100, description="Mean percentage of missing values")
-    all_missing_pct: float = Field(ge=0, le=100, description="Percentage of columns with all missing")
-    any_missing_pct: float = Field(ge=0, le=100, description="Percentage of columns with any missing")
-    no_missing_pct: float = Field(ge=0, le=100, description="Percentage of columns with no missing")
+    mean_missing_pct: float = Field(
+        ge=0, le=100, description="Mean percentage of missing values"
+    )
+    all_missing_pct: float = Field(
+        ge=0, le=100, description="Percentage of columns with all missing"
+    )
+    any_missing_pct: float = Field(
+        ge=0, le=100, description="Percentage of columns with any missing"
+    )
+    no_missing_pct: float = Field(
+        ge=0, le=100, description="Percentage of columns with no missing"
+    )
 
 
 # =============================================================================
@@ -86,9 +96,9 @@ def _create_binary_missing_indicator(missing_data: pl.DataFrame) -> pl.DataFrame
     pl.DataFrame
         Binary indicator DataFrame (0 or 1).
     """
-    return missing_data.select([
-        (pl.col(col) > 0).cast(pl.Int8).alias(col) for col in missing_data.columns
-    ])
+    return missing_data.select(
+        [(pl.col(col) > 0).cast(pl.Int8).alias(col) for col in missing_data.columns]
+    )
 
 
 def _safe_percentage(numerator: int | float, denominator: int | float) -> float:
@@ -113,6 +123,7 @@ def _safe_percentage(numerator: int | float, denominator: int | float) -> float:
 # Core Computation Functions
 # =============================================================================
 
+
 def _try_convert_code_to_column_type(
     code: str, col_dtype: pl.DataType, col_name: str
 ) -> tuple[Any, bool]:
@@ -130,17 +141,24 @@ def _try_convert_code_to_column_type(
     Returns
     -------
     tuple[Any, bool]
-        A tuple of (converted_value, success). If conversion fails, returns (None, False).
+        A tuple of (converted_value, success). If conversion fails,
+        returns (None, False).
     """
     # Handle numeric types
     if col_dtype in (
-        pl.Int8, pl.Int16, pl.Int32, pl.Int64,
-        pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64
+        pl.Int8,
+        pl.Int16,
+        pl.Int32,
+        pl.Int64,
+        pl.UInt8,
+        pl.UInt16,
+        pl.UInt32,
+        pl.UInt64,
     ):
         try:
             # Try to convert to integer
             converted = int(float(code))  # Handle cases like "-999.0"
-            return converted, True
+            return converted, True  # noqa: TRY300
         except (ValueError, TypeError):
             return None, False
 
@@ -148,7 +166,7 @@ def _try_convert_code_to_column_type(
         try:
             # Try to convert to float
             converted = float(code)
-            return converted, True
+            return converted, True  # noqa: TRY300
         except (ValueError, TypeError):
             return None, False
 
@@ -169,7 +187,9 @@ def _try_convert_code_to_column_type(
     return None, False
 
 
-def _compute_missing_data_paired(data: pl.DataFrame, missing_codes_df: pl.DataFrame) -> pl.DataFrame:
+def _compute_missing_data_paired(
+    data: pl.DataFrame, missing_codes_df: pl.DataFrame
+) -> pl.DataFrame:
     """Compute missing data DataFrame with missing codes applied (paired by label).
 
     Parameters
@@ -227,6 +247,7 @@ def _compute_missing_data_paired(data: pl.DataFrame, missing_codes_df: pl.DataFr
         expressions.append(result.alias(col))
 
     return data.select(expressions)
+
 
 def _get_all_missing_codes(missing_codes_df: pl.DataFrame) -> list[str]:
     """Get all missing codes from the missing codes DataFrame.
@@ -299,20 +320,24 @@ def compute_missing_summary(missing_data: pl.DataFrame) -> MissingSummaryStats:
     n_cols = len(missing_data.columns)
 
     # Vectorized computation: create binary missing indicator for all columns at once
-    missing_indicators = missing_data.select([
-        (pl.col(col) > 0).alias(col) for col in missing_data.columns
-    ])
+    missing_indicators = missing_data.select(
+        [(pl.col(col) > 0).alias(col) for col in missing_data.columns]
+    )
 
     # Calculate statistics using aggregations
-    col_stats = missing_indicators.select([
-        pl.sum_horizontal(pl.all()).alias("total_missing_per_row"),
-        *[pl.col(col).sum().alias(f"missing_count_{col}") for col in missing_indicators.columns]
-    ])
+    col_stats = missing_indicators.select(
+        [
+            pl.sum_horizontal(pl.all()).alias("total_missing_per_row"),
+            *[
+                pl.col(col).sum().alias(f"missing_count_{col}")
+                for col in missing_indicators.columns
+            ],
+        ]
+    )
 
     # Extract missing counts per column
     missing_counts = [
-        col_stats[f"missing_count_{col}"][0]
-        for col in missing_indicators.columns
+        col_stats[f"missing_count_{col}"][0] for col in missing_indicators.columns
     ]
 
     # Calculate percentages
@@ -332,7 +357,9 @@ def compute_missing_summary(missing_data: pl.DataFrame) -> MissingSummaryStats:
     )
 
 
-def compute_missing_columns(missing_data: pl.DataFrame, missing_codes_df: pl.DataFrame) -> pd.DataFrame:
+def compute_missing_columns(
+    missing_data: pl.DataFrame, missing_codes_df: pl.DataFrame
+) -> pd.DataFrame:
     """Compute the summary of missing values in each column.
 
     Uses vectorized Polars operations for efficient computation.
@@ -382,7 +409,7 @@ def compute_missing_columns(missing_data: pl.DataFrame, missing_codes_df: pl.Dat
         }
 
         # Add special code counts
-        for label in missing_code_pairs.keys():
+        for label in missing_code_pairs:
             count = stats[f"{col}_{label}"][0]
             pct = (count / n_rows) * 100
             row[label] = count
@@ -438,7 +465,9 @@ def compute_filtered_missing_columns(
 
 
 @st.cache_data
-def compute_missing_over_time(missing_data: pl.DataFrame, data: pl.DataFrame, select_date_col: str) -> pd.DataFrame:
+def compute_missing_over_time(
+    missing_data: pl.DataFrame, data: pl.DataFrame, select_date_col: str
+) -> pd.DataFrame:
     """Compute the missingness over time based on the selected date column.
 
     Parameters
@@ -468,28 +497,27 @@ def compute_missing_over_time(missing_data: pl.DataFrame, data: pl.DataFrame, se
     n_cols = len(stat_cols)
 
     # Group by date and calculate total missing values (values > 0)
-    missingness_by_date = (
-        missing_with_date
-        .group_by("missingness_trend_date")
-        .agg([
+    missingness_by_date = missing_with_date.group_by("missingness_trend_date").agg(
+        [
             # Count total data points per date (rows * columns)
             (pl.count() * n_cols).alias("total_data_points"),
             # Count total missing values (sum of all values > 0 across all columns)
-            pl.sum_horizontal([
-                (pl.col(col) > 0).sum() for col in stat_cols
-            ]).alias("total_missing")
-        ])
+            pl.sum_horizontal([(pl.col(col) > 0).sum() for col in stat_cols]).alias(
+                "total_missing"
+            ),
+        ]
     )
 
     # Calculate missingness rate
     missingness_by_date = missingness_by_date.with_columns(
-        ((pl.col("total_missing") / pl.col("total_data_points")) * 100).alias("missingness_rate")
+        ((pl.col("total_missing") / pl.col("total_data_points")) * 100).alias(
+            "missingness_rate"
+        )
     )
 
     # Sort by date and convert to pandas for plotting
     result = (
-        missingness_by_date
-        .sort("missingness_trend_date")
+        missingness_by_date.sort("missingness_trend_date")
         .select(["missingness_trend_date", "missingness_rate"])
         .to_pandas()
     )
@@ -499,7 +527,10 @@ def compute_missing_over_time(missing_data: pl.DataFrame, data: pl.DataFrame, se
 
 @st.cache_data
 def compute_missing_compare(
-    missing_data: pl.DataFrame, data: pl.DataFrame, group_by_col: str, compare_cols: list[str]
+    missing_data: pl.DataFrame,
+    data: pl.DataFrame,
+    group_by_col: str,
+    compare_cols: list[str],
 ) -> tuple[pd.DataFrame, float, float]:
     """Compute the missingness comparison between groups.
 
@@ -537,16 +568,14 @@ def compute_missing_compare(
             )
 
             # Calculate % missing (values > 0) for each group
-            col_missing_pct = (
-                missing_with_group
-                .group_by(group_by_col)
-                .agg([
-                    ((pl.col(col) > 0).sum() / pl.count() * 100).alias(col)
-                ])
+            col_missing_pct = missing_with_group.group_by(group_by_col).agg(
+                [((pl.col(col) > 0).sum() / pl.count() * 100).alias(col)]
             )
 
             # Merge into group_counts
-            group_counts = group_counts.join(col_missing_pct, on=group_by_col, how="left")
+            group_counts = group_counts.join(
+                col_missing_pct, on=group_by_col, how="left"
+            )
 
         # Convert to pandas for display
         group_by_data = group_counts.to_pandas().set_index(group_by_col)
@@ -563,7 +592,9 @@ def compute_missing_compare(
 
 
 @st.cache_data
-def compute_missing_correlation(missing_data: pl.DataFrame, null_cols: list[str]) -> pd.DataFrame:
+def compute_missing_correlation(
+    missing_data: pl.DataFrame, null_cols: list[str]
+) -> pd.DataFrame:
     """Compute the correlation of missing data in the dataset.
 
     Parameters
@@ -579,7 +610,9 @@ def compute_missing_correlation(missing_data: pl.DataFrame, null_cols: list[str]
         The correlation of missing data in the dataset.
     """
     # Create binary missing indicator and select relevant columns
-    missing_indicators = _create_binary_missing_indicator(missing_data.select(null_cols))
+    missing_indicators = _create_binary_missing_indicator(
+        missing_data.select(null_cols)
+    )
 
     # Convert to pandas for correlation calculation (pandas has optimized corr())
     nullity_corr = missing_indicators.to_pandas().corr()
@@ -601,7 +634,8 @@ def get_null_list(missing_data: pl.DataFrame, all_cols: bool) -> list[str]:
     missing_data : pl.DataFrame
         The missing data DataFrame where 0 = non-missing, 1+ = missing.
     all_cols : bool
-        If True, return all columns. If False, return only columns with partial missingness.
+        If True, return all columns. If False, return only columns
+        with partial missingness.
 
     Returns
     -------
@@ -613,17 +647,22 @@ def get_null_list(missing_data: pl.DataFrame, all_cols: bool) -> list[str]:
 
     # Vectorized check for partial missingness
     # Aggregate to find columns with both missing (>0) and non-missing (==0) values
-    col_checks = missing_data.select([
-        pl.struct([
-            (pl.col(col) > 0).any().alias("has_missing"),
-            (pl.col(col) == 0).any().alias("has_non_missing"),
-        ]).alias(col)
-        for col in missing_data.columns
-    ])
+    col_checks = missing_data.select(
+        [
+            pl.struct(
+                [
+                    (pl.col(col) > 0).any().alias("has_missing"),
+                    (pl.col(col) == 0).any().alias("has_non_missing"),
+                ]
+            ).alias(col)
+            for col in missing_data.columns
+        ]
+    )
 
     # Extract columns with partial missingness
     partial_missing_cols = [
-        col for col in missing_data.columns
+        col
+        for col in missing_data.columns
         if col_checks[col][0]["has_missing"] and col_checks[col][0]["has_non_missing"]
     ]
 
@@ -673,36 +712,65 @@ def render_missing_codes_table(project_id: str) -> None:
     col1, col2, col3 = st.columns([0.35, 0.35, 0.3])
 
     # Add button
-    with col1, st.popover(":material/add: Add", width='stretch'):
+    with col1, st.popover(":material/add: Add", width="stretch"):
         st.markdown("#### Add Missing Code")
-        st.info("Define a new missing code type. Eg., Don't Know, Refuse to Answer.", icon=":material/info:")
+        st.info(
+            "Define a new missing code type. Eg., Don't Know, Refuse to Answer.",
+            icon=":material/info:",
+        )
         new_label = st.text_input("Label", key="add_label", help="E.g., Don't Know")
-        new_codes = st.text_input("Codes (comma-separated)", key="add_codes", help="E.g., -999, .999")
+        new_codes = st.text_input(
+            "Codes (comma-separated)", key="add_codes", help="E.g., -999, .999"
+        )
 
-        if st.button("Add", key="add_submit", width='stretch', disabled=not new_label or not new_codes):
+        if st.button(
+            "Add",
+            key="add_submit",
+            width="stretch",
+            disabled=not new_label or not new_codes,
+        ):
             add_missing_code(project_id, new_label, new_codes)
             st.success(f"Added '{new_label}'")
             st.rerun()
 
     # Modify button
-    with col2, st.popover(":material/edit: Modify", width='stretch'):
+    with col2, st.popover(":material/edit: Modify", width="stretch"):
         st.markdown("#### Modify Missing Code")
-        st.info("Select and modify an existing missing code type.", icon=":material/info:")
+        st.info(
+            "Select and modify an existing missing code type.", icon=":material/info:"
+        )
         if not missing_codes.is_empty():
             options = missing_codes["label"].to_list()
-            selected_label = st.selectbox("Select code to modify", options=options, key="modify_select")
+            selected_label = st.selectbox(
+                "Select code to modify", options=options, key="modify_select"
+            )
 
             if selected_label:
                 # get existing codes
-                existing_codes = missing_codes.filter(pl.col("label") == selected_label).select("codes")[0, 0]
+                existing_codes = missing_codes.filter(
+                    pl.col("label") == selected_label
+                ).select("codes")[0, 0]
 
                 modified_codes = st.text_input(
-                    "Codes (comma-separated)", value=existing_codes, key="modify_codes", help="E.g., -999, .999"
+                    "Codes (comma-separated)",
+                    value=existing_codes,
+                    key="modify_codes",
+                    help="E.g., -999, .999",
                 )
 
-            if st.button("Modify", key="modify_submit", width='stretch', disabled=not selected_label or not modified_codes):
+            if st.button(
+                "Modify",
+                key="modify_submit",
+                width="stretch",
+                disabled=not selected_label or not modified_codes,
+            ):
                 # replace current code with new code, based on label
-                updated_missing_code = missing_codes.with_columns(pl.when(pl.col("label") == selected_label).then(pl.lit(modified_codes)).otherwise(pl.col("codes")).alias("codes"))
+                updated_missing_code = missing_codes.with_columns(
+                    pl.when(pl.col("label") == selected_label)
+                    .then(pl.lit(modified_codes))
+                    .otherwise(pl.col("codes"))
+                    .alias("codes")
+                )
                 duckdb_save_table(project_id, updated_missing_code, table_name, "logs")
                 st.success(f"Modified '{selected_label}'")
                 st.rerun()
@@ -710,17 +778,31 @@ def render_missing_codes_table(project_id: str) -> None:
             st.info("No missing codes to modify")
 
     # Delete button
-    with col3, st.popover(":material/delete: Delete", width='stretch'):
+    with col3, st.popover(":material/delete: Delete", width="stretch"):
         st.markdown("#### Delete Missing Code")
         if not missing_codes.is_empty():
             options = missing_codes["label"].to_list()
-            selected_label = st.selectbox("Select code to delete", options=options, key="delete_select", index=None)
+            selected_label = st.selectbox(
+                "Select code to delete",
+                options=options,
+                key="delete_select",
+                index=None,
+            )
 
             if selected_label:
-                updated_missing_code = missing_codes.filter(pl.col("label") != selected_label)
+                updated_missing_code = missing_codes.filter(
+                    pl.col("label") != selected_label
+                )
 
-                if st.button("Confirm Delete", key="delete_submit", type="primary", width='stretch'):
-                    duckdb_save_table(project_id, updated_missing_code, table_name, "logs")
+                if st.button(
+                    "Confirm Delete",
+                    key="delete_submit",
+                    type="primary",
+                    width="stretch",
+                ):
+                    duckdb_save_table(
+                        project_id, updated_missing_code, table_name, "logs"
+                    )
                     st.success(f"Deleted '{selected_label}'")
                     st.rerun()
         else:
@@ -729,8 +811,16 @@ def render_missing_codes_table(project_id: str) -> None:
     # Display table in expander
     with st.expander("View Missing Codes Configuration", expanded=True):
         if not missing_codes.is_empty():
-            show_df = missing_codes.select(pl.col("label").alias("Missing Label"), pl.col("codes").alias("Missing Codes"))
-            st.dataframe(show_df, width='stretch', hide_index=True, column_config={"Missing Codes": st.column_config.ListColumn()})
+            show_df = missing_codes.select(
+                pl.col("label").alias("Missing Label"),
+                pl.col("codes").alias("Missing Codes"),
+            )
+            st.dataframe(
+                show_df,
+                width="stretch",
+                hide_index=True,
+                column_config={"Missing Codes": st.column_config.ListColumn()},
+            )
         else:
             st.info("No missing codes configured. Use the Add button to create one.")
 
@@ -782,7 +872,9 @@ def missing_summary(missing_data: pl.DataFrame) -> None:
 
 
 @demo_output_onboarding(TAB_NAME)
-def missing_columns(missing_data: pl.DataFrame, missing_codes_df: pl.DataFrame, setting_file: str) -> None:
+def missing_columns(
+    missing_data: pl.DataFrame, missing_codes_df: pl.DataFrame, setting_file: str
+) -> None:
     """Generate a table showing the percentage of missing values in each column.
 
     Parameters
@@ -796,7 +888,9 @@ def missing_columns(missing_data: pl.DataFrame, missing_codes_df: pl.DataFrame, 
     """
     _, _, _, slider_col = st.columns(4)
 
-    default_settings = load_check_settings(settings_file=setting_file, check_name="missing") or {}
+    default_settings = (
+        load_check_settings(settings_file=setting_file, check_name="missing") or {}
+    )
     mv_threshold = default_settings.get("mv_threshold", 0)
 
     with slider_col:
@@ -811,11 +905,19 @@ def missing_columns(missing_data: pl.DataFrame, missing_codes_df: pl.DataFrame, 
             kwargs={"state_name": "mv_threshold_save"},
         )
         if st.session_state.get("mv_threshold_save"):
-            save_check_settings(settings_file=setting_file, check_name="missing", check_settings={"mv_threshold": mv_threshold})
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="missing",
+                check_settings={"mv_threshold": mv_threshold},
+            )
             st.session_state["mv_threshold_save"] = False
 
-    mv_data = compute_missing_columns(missing_data=missing_data, missing_codes_df=missing_codes_df)
-    mv_data_filtered, perc_cols, vmin_val, vmax_val = compute_filtered_missing_columns(data=mv_data, mv_threshold=mv_threshold)
+    mv_data = compute_missing_columns(
+        missing_data=missing_data, missing_codes_df=missing_codes_df
+    )
+    mv_data_filtered, perc_cols, vmin_val, vmax_val = compute_filtered_missing_columns(
+        data=mv_data, mv_threshold=mv_threshold
+    )
 
     if not mv_data_filtered.empty:
         cmap = sns.light_palette("pink", as_cmap=True)
@@ -823,10 +925,12 @@ def missing_columns(missing_data: pl.DataFrame, missing_codes_df: pl.DataFrame, 
         pd.set_option("styler.render.max_elements", styler_limit)
 
         st.dataframe(
-            mv_data_filtered.style.format(subset=perc_cols, precision=2).background_gradient(
+            mv_data_filtered.style.format(
+                subset=perc_cols, precision=2
+            ).background_gradient(
                 subset=perc_cols, cmap=cmap, axis=1, vmin=vmin_val, vmax=vmax_val
             ),
-            width='stretch',
+            width="stretch",
             hide_index=True,
             column_config={
                 "Column": st.column_config.Column(pinned=True),
@@ -839,7 +943,9 @@ def missing_columns(missing_data: pl.DataFrame, missing_codes_df: pl.DataFrame, 
 
 
 @demo_output_onboarding(TAB_NAME)
-def missing_over_time(missing_data: pl.DataFrame, data: pl.DataFrame, setting_file: str) -> None:
+def missing_over_time(
+    missing_data: pl.DataFrame, data: pl.DataFrame, setting_file: str
+) -> None:
     """Generate a report on missing data over time.
 
     Parameters
@@ -853,20 +959,25 @@ def missing_over_time(missing_data: pl.DataFrame, data: pl.DataFrame, setting_fi
     """
     # Get datetime columns from Polars DataFrame
     date_cols = [
-        col for col in data.columns
-        if data[col].dtype in (pl.Date, pl.Datetime)
+        col for col in data.columns if data[col].dtype in (pl.Date, pl.Datetime)
     ]
 
     if not date_cols:
         st.info("No datetime columns available for time series analysis")
         return
 
-    default_settings = load_check_settings(settings_file=setting_file, check_name="missing") or {}
+    default_settings = (
+        load_check_settings(settings_file=setting_file, check_name="missing") or {}
+    )
     select_date_col = default_settings.get("select_date_col")
 
     dc1, _ = st.columns([0.3, 0.7])
     with dc1:
-        select_date_col_index = date_cols.index(select_date_col) if select_date_col and select_date_col in date_cols else 0
+        select_date_col_index = (
+            date_cols.index(select_date_col)
+            if select_date_col and select_date_col in date_cols
+            else 0
+        )
 
         select_date_col = st.selectbox(
             "Select date column",
@@ -878,25 +989,36 @@ def missing_over_time(missing_data: pl.DataFrame, data: pl.DataFrame, setting_fi
             kwargs={"state_name": "select_date_col_save"},
         )
         if st.session_state.get("select_date_col_save"):
-            save_check_settings(settings_file=setting_file, check_name="missing", check_settings={"select_date_col": select_date_col})
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="missing",
+                check_settings={"select_date_col": select_date_col},
+            )
             st.session_state["select_date_col_save"] = False
 
-    missingness_over_time = compute_missing_over_time(missing_data=missing_data, data=data, select_date_col=select_date_col)
+    missingness_over_time = compute_missing_over_time(
+        missing_data=missing_data, data=data, select_date_col=select_date_col
+    )
 
     fig = px.area(
         missingness_over_time,
         x="missingness_trend_date",
         y="missingness_rate",
         title="Missingness over time",
-        labels={"missingness_trend_date": select_date_col, "missingness_rate": "Missingness rate (%)"},
+        labels={
+            "missingness_trend_date": select_date_col,
+            "missingness_rate": "Missingness rate (%)",
+        },
         color_discrete_sequence=["#e8848b"],
     )
     fig.update_layout(width=1000, height=500, yaxis_range=[0, 100])
-    st.plotly_chart(fig, width='stretch')
+    st.plotly_chart(fig, width="stretch")
 
 
 @demo_output_onboarding(TAB_NAME)
-def missing_compare(missing_data: pl.DataFrame, data: pl.DataFrame, setting_file: str) -> None:
+def missing_compare(
+    missing_data: pl.DataFrame, data: pl.DataFrame, setting_file: str
+) -> None:
     """Generate a report comparing missing data between groups.
 
     Parameters
@@ -913,7 +1035,8 @@ def missing_compare(missing_data: pl.DataFrame, data: pl.DataFrame, setting_file
     with mc_1:
         # Get categorical/string columns from Polars DataFrame
         allowed_cols = [
-            col for col in data.columns
+            col
+            for col in data.columns
             if data[col].dtype in (pl.Utf8, pl.Categorical, pl.String)
         ]
 
@@ -921,9 +1044,15 @@ def missing_compare(missing_data: pl.DataFrame, data: pl.DataFrame, setting_file
             st.warning("No categorical columns available for grouping")
             return
 
-        default_settings = load_check_settings(settings_file=setting_file, check_name="missing") or {}
+        default_settings = (
+            load_check_settings(settings_file=setting_file, check_name="missing") or {}
+        )
         group_by_col = default_settings.get("group_by_col")
-        group_by_col_index = allowed_cols.index(group_by_col) if group_by_col and group_by_col in allowed_cols else 0
+        group_by_col_index = (
+            allowed_cols.index(group_by_col)
+            if group_by_col and group_by_col in allowed_cols
+            else 0
+        )
 
         group_by_col = st.selectbox(
             label="Group by column",
@@ -934,7 +1063,11 @@ def missing_compare(missing_data: pl.DataFrame, data: pl.DataFrame, setting_file
             kwargs={"state_name": "group_by_col_save"},
         )
         if st.session_state.get("group_by_col_save"):
-            save_check_settings(settings_file=setting_file, check_name="missing", check_settings={"group_by_col": group_by_col})
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="missing",
+                check_settings={"group_by_col": group_by_col},
+            )
             st.session_state["group_by_col_save"] = False
 
         allowed_cols = [col for col in data.columns if col != group_by_col]
@@ -950,7 +1083,11 @@ def missing_compare(missing_data: pl.DataFrame, data: pl.DataFrame, setting_file
             kwargs={"state_name": "compare_col_save"},
         )
         if st.session_state.get("compare_col_save"):
-            save_check_settings(settings_file=setting_file, check_name="missing", check_settings={"compare_col": compare_col})
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="missing",
+                check_settings={"compare_col": compare_col},
+            )
             st.session_state["compare_col_save"] = False
 
     if not group_by_col:
@@ -958,11 +1095,14 @@ def missing_compare(missing_data: pl.DataFrame, data: pl.DataFrame, setting_file
         return
 
     group_by_data, vmin_val, vmax_val = compute_missing_compare(
-        missing_data=missing_data, data=data, group_by_col=group_by_col, compare_cols=compare_col
+        missing_data=missing_data,
+        data=data,
+        group_by_col=group_by_col,
+        compare_cols=compare_col,
     )
 
     if not compare_col:
-        st.dataframe(group_by_data, width='stretch')
+        st.dataframe(group_by_data, width="stretch")
     else:
         cmap = sns.light_palette("pink", as_cmap=True)
         styler_limit = group_by_data.shape[0] * group_by_data.shape[1]
@@ -972,8 +1112,10 @@ def missing_compare(missing_data: pl.DataFrame, data: pl.DataFrame, setting_file
             group_by_data.style.format(subset=compare_col, precision=2)
             .format(subset=["values (count)"], thousands=",")
             .format(subset=["values (%)"], precision=2)
-            .background_gradient(subset=compare_col, cmap=cmap, axis=1, vmin=vmin_val, vmax=vmax_val),
-            width='stretch',
+            .background_gradient(
+                subset=compare_col, cmap=cmap, axis=1, vmin=vmin_val, vmax=vmax_val
+            ),
+            width="stretch",
             column_config={
                 "values (count)": st.column_config.Column(pinned=True),
                 "values (%)": st.column_config.Column(pinned=True),
@@ -982,7 +1124,9 @@ def missing_compare(missing_data: pl.DataFrame, data: pl.DataFrame, setting_file
 
 
 @demo_output_onboarding(TAB_NAME)
-def missing_correlation(missing_data: pl.DataFrame, color_map: list, setting_file: str) -> None:
+def missing_correlation(
+    missing_data: pl.DataFrame, color_map: list, setting_file: str
+) -> None:
     """Generate a report on missing data correlation.
 
     Parameters
@@ -997,7 +1141,9 @@ def missing_correlation(missing_data: pl.DataFrame, color_map: list, setting_fil
     mc1, mc2 = st.columns([0.1, 0.9])
 
     with mc1:
-        default_settings = load_check_settings(settings_file=setting_file, check_name="missing") or {}
+        default_settings = (
+            load_check_settings(settings_file=setting_file, check_name="missing") or {}
+        )
         all_cols = default_settings.get("all_cols", False)
 
         all_cols = st.toggle(
@@ -1009,7 +1155,11 @@ def missing_correlation(missing_data: pl.DataFrame, color_map: list, setting_fil
             kwargs={"state_name": "all_cols_save"},
         )
         if st.session_state.get("all_cols_save"):
-            save_check_settings(settings_file=setting_file, check_name="missing", check_settings={"all_cols": all_cols})
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="missing",
+                check_settings={"all_cols": all_cols},
+            )
             st.session_state["all_cols_save"] = False
 
         col_options = get_null_list(missing_data=missing_data, all_cols=all_cols)
@@ -1025,15 +1175,21 @@ def missing_correlation(missing_data: pl.DataFrame, color_map: list, setting_fil
             kwargs={"state_name": "null_cols_sel_save"},
         )
         if st.session_state.get("null_cols_sel_save"):
-            save_check_settings(settings_file=setting_file, check_name="missing", check_settings={"null_cols_sel": null_cols_sel})
+            save_check_settings(
+                settings_file=setting_file,
+                check_name="missing",
+                check_settings={"null_cols_sel": null_cols_sel},
+            )
             st.session_state["null_cols_sel_save"] = False
 
     if null_cols_sel and len(null_cols_sel) > 1:
-        nullity_corr = compute_missing_correlation(missing_data=missing_data, null_cols=null_cols_sel)
+        nullity_corr = compute_missing_correlation(
+            missing_data=missing_data, null_cols=null_cols_sel
+        )
 
         fig = px.imshow(nullity_corr, color_continuous_scale=color_map)
         fig.update_layout(width=1000, height=1000)
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, width="stretch")
     else:
         st.warning("Select at least two columns to calculate correlation")
 
@@ -1054,7 +1210,7 @@ def missing_matrix(missing_data: pl.DataFrame, color_map: list) -> None:
     fig = px.imshow(nullity_matrix, color_continuous_scale=color_map)
     fig.layout.coloraxis.showscale = False
     fig.update_layout(width=1000, height=1000)
-    st.plotly_chart(fig, width='stretch')
+    st.plotly_chart(fig, width="stretch")
 
 
 # =============================================================================
@@ -1063,7 +1219,9 @@ def missing_matrix(missing_data: pl.DataFrame, color_map: list) -> None:
 
 
 @demo_output_onboarding(TAB_NAME)
-def missing_report(project_id: str, page_name: str, data: pl.DataFrame, setting_file: str) -> None:
+def missing_report(
+    project_id: str, page_name: str, data: pl.DataFrame, setting_file: str
+) -> None:
     """Generate a report on missing data in the dataset.
 
     Parameters
@@ -1105,7 +1263,11 @@ def missing_report(project_id: str, page_name: str, data: pl.DataFrame, setting_
 
     st.write("---")
     st.subheader("Missingness by column")
-    missing_columns(missing_data=missing_data, missing_codes_df=missing_codes_df, setting_file=setting_file)
+    missing_columns(
+        missing_data=missing_data,
+        missing_codes_df=missing_codes_df,
+        setting_file=setting_file,
+    )
 
     st.write("---")
     st.subheader("Compare missing data within groups")
@@ -1117,7 +1279,9 @@ def missing_report(project_id: str, page_name: str, data: pl.DataFrame, setting_
 
     st.write("---")
     st.subheader("Nullity correlation")
-    missing_correlation(missing_data=missing_data, color_map=sns_colormap, setting_file=setting_file)
+    missing_correlation(
+        missing_data=missing_data, color_map=sns_colormap, setting_file=setting_file
+    )
 
     st.write("---")
     st.subheader("Nullity matrix")

@@ -1,4 +1,3 @@
-
 from unittest.mock import patch
 
 import numpy as np
@@ -43,20 +42,24 @@ def mock_database_functions(monkeypatch):
 @pytest.fixture
 def sample_missing_codes_polars():
     """Fixture for Polars DataFrame with missing codes."""
-    return pl.DataFrame({
-        "label": ["Don't Know", "Refuse", "Not Applicable"],
-        "codes": ["-999, -998", "-888", "-777, -776, -775"],
-    })
+    return pl.DataFrame(
+        {
+            "label": ["Don't Know", "Refuse", "Not Applicable"],
+            "codes": ["-999, -998", "-888", "-777, -776, -775"],
+        }
+    )
 
 
 @pytest.fixture
 def sample_data_polars():
     """Fixture for Polars DataFrame with sample data."""
-    return pl.DataFrame({
-        "age": [25, None, 35, -999, 45],
-        "gender": [1, 2, None, 2, -888],
-        "income": [50000, 60000, 70000, 80000, 90000],
-    })
+    return pl.DataFrame(
+        {
+            "age": [25, None, 35, -999, 45],
+            "gender": [1, 2, None, 2, -888],
+            "income": [50000, 60000, 70000, 80000, 90000],
+        }
+    )
 
 
 @pytest.fixture
@@ -223,10 +226,12 @@ def test_missing_summary_stats_model_validation():
 
 def test_create_binary_missing_indicator():
     """Test _create_binary_missing_indicator converts to binary."""
-    data = pl.DataFrame({
-        "col1": [0, 1, 2, 0],
-        "col2": [0, 0, 3, 0],
-    })
+    data = pl.DataFrame(
+        {
+            "col1": [0, 1, 2, 0],
+            "col2": [0, 0, 3, 0],
+        }
+    )
 
     result = _create_binary_missing_indicator(data)
 
@@ -281,8 +286,12 @@ def test_try_convert_code_to_column_type_string():
 
 def test_try_convert_code_to_column_type_boolean():
     """Test _try_convert_code_to_column_type with boolean column."""
-    converted_true, success_true = _try_convert_code_to_column_type("true", pl.Boolean, "flag")
-    converted_false, success_false = _try_convert_code_to_column_type("false", pl.Boolean, "flag")
+    converted_true, success_true = _try_convert_code_to_column_type(
+        "true", pl.Boolean, "flag"
+    )
+    converted_false, success_false = _try_convert_code_to_column_type(
+        "false", pl.Boolean, "flag"
+    )
 
     assert success_true is True
     assert converted_true is True
@@ -308,10 +317,12 @@ def test_try_convert_code_to_column_type_date_returns_failure():
 
 def test_get_all_missing_codes():
     """Test _get_all_missing_codes extracts all codes."""
-    missing_codes_df = pl.DataFrame({
-        "label": ["DontKnow", "Refuse"],
-        "codes": ["-999, -998", "-888"],
-    })
+    missing_codes_df = pl.DataFrame(
+        {
+            "label": ["DontKnow", "Refuse"],
+            "codes": ["-999, -998", "-888"],
+        }
+    )
 
     result = _get_all_missing_codes(missing_codes_df)
 
@@ -332,10 +343,12 @@ def test_get_all_missing_codes_empty_df():
 
 def test_get_missing_code_pairs():
     """Test _get_missing_code_pairs creates correct mapping."""
-    missing_codes_df = pl.DataFrame({
-        "label": ["DontKnow", "Refuse"],
-        "codes": ["-999, -998", "-888"],
-    })
+    missing_codes_df = pl.DataFrame(
+        {
+            "label": ["DontKnow", "Refuse"],
+            "codes": ["-999, -998", "-888"],
+        }
+    )
 
     result = _get_missing_code_pairs(missing_codes_df)
 
@@ -346,15 +359,19 @@ def test_get_missing_code_pairs():
 
 def test_compute_missing_data_paired():
     """Test _compute_missing_data_paired marks missing values correctly."""
-    data = pl.DataFrame({
-        "age": [25, None, -999, 45],
-        "gender": [1, -888, None, 2],
-    })
+    data = pl.DataFrame(
+        {
+            "age": [25, None, -999, 45],
+            "gender": [1, -888, None, 2],
+        }
+    )
 
-    missing_codes_df = pl.DataFrame({
-        "label": ["DontKnow", "Refuse"],
-        "codes": ["-999", "-888"],
-    })
+    missing_codes_df = pl.DataFrame(
+        {
+            "label": ["DontKnow", "Refuse"],
+            "codes": ["-999", "-888"],
+        }
+    )
 
     result = _compute_missing_data_paired(data, missing_codes_df)
 
@@ -376,15 +393,19 @@ def test_compute_missing_data_paired():
 
 def test_compute_missing_data_paired_with_datetime():
     """Test _compute_missing_data_paired handles datetime columns."""
-    data = pl.DataFrame({
-        "date": [pl.date(2023, 1, 1), None, pl.date(2023, 1, 3)],
-        "value": [1, -999, 3],
-    })
+    data = pl.DataFrame(
+        {
+            "date": [pl.date(2023, 1, 1), None, pl.date(2023, 1, 3)],
+            "value": [1, -999, 3],
+        }
+    )
 
-    missing_codes_df = pl.DataFrame({
-        "label": ["Missing"],
-        "codes": ["-999"],
-    })
+    missing_codes_df = pl.DataFrame(
+        {
+            "label": ["Missing"],
+            "codes": ["-999"],
+        }
+    )
 
     result = _compute_missing_data_paired(data, missing_codes_df)
 
@@ -408,11 +429,13 @@ def test_compute_missing_data_paired_with_datetime():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_summary_no_missing():
     """Test compute_missing_summary with DataFrame having no missing values."""
-    missing_data = pl.DataFrame({
-        "age": [0, 0, 0, 0],
-        "gender": [0, 0, 0, 0],
-        "income": [0, 0, 0, 0],
-    })
+    missing_data = pl.DataFrame(
+        {
+            "age": [0, 0, 0, 0],
+            "gender": [0, 0, 0, 0],
+            "income": [0, 0, 0, 0],
+        }
+    )
 
     result = compute_missing_summary(missing_data)
 
@@ -426,11 +449,13 @@ def test_compute_missing_summary_no_missing():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_summary_some_missing():
     """Test compute_missing_summary with DataFrame having some missing values."""
-    missing_data = pl.DataFrame({
-        "age": [0, 1, 0, 0],      # 25% missing
-        "gender": [0, 0, 1, 0],   # 25% missing
-        "income": [0, 0, 0, 0],   # 0% missing
-    })
+    missing_data = pl.DataFrame(
+        {
+            "age": [0, 1, 0, 0],  # 25% missing
+            "gender": [0, 0, 1, 0],  # 25% missing
+            "income": [0, 0, 0, 0],  # 0% missing
+        }
+    )
 
     result = compute_missing_summary(missing_data)
 
@@ -447,11 +472,13 @@ def test_compute_missing_summary_some_missing():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_summary_all_missing():
     """Test compute_missing_summary with DataFrame having all missing values."""
-    missing_data = pl.DataFrame({
-        "age": [1, 1, 1, 1],
-        "gender": [2, 2, 2, 2],
-        "income": [1, 2, 1, 2],
-    })
+    missing_data = pl.DataFrame(
+        {
+            "age": [1, 1, 1, 1],
+            "gender": [2, 2, 2, 2],
+            "income": [1, 2, 1, 2],
+        }
+    )
 
     result = compute_missing_summary(missing_data)
 
@@ -465,10 +492,12 @@ def test_compute_missing_summary_all_missing():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_summary_empty_columns():
     """Test compute_missing_summary with DataFrame having empty columns."""
-    missing_data = pl.DataFrame({
-        "age": [],
-        "gender": [],
-    })
+    missing_data = pl.DataFrame(
+        {
+            "age": [],
+            "gender": [],
+        }
+    )
 
     result = compute_missing_summary(missing_data)
 
@@ -483,9 +512,11 @@ def test_compute_missing_summary_empty_columns():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_summary_single_column():
     """Test compute_missing_summary with single column DataFrame."""
-    missing_data = pl.DataFrame({
-        "age": [0, 1, 0, 1, 0],  # 40% missing
-    })
+    missing_data = pl.DataFrame(
+        {
+            "age": [0, 1, 0, 1, 0],  # 40% missing
+        }
+    )
 
     result = compute_missing_summary(missing_data)
 
@@ -502,15 +533,19 @@ def test_compute_missing_summary_single_column():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_columns_basic():
     """Test compute_missing_columns with basic missing values."""
-    missing_data = pl.DataFrame({
-        "age": [0, 1, 2, 0],     # 1 null, 1 DontKnow
-        "gender": [0, 0, 0, 3],  # 1 Refuse
-    })
+    missing_data = pl.DataFrame(
+        {
+            "age": [0, 1, 2, 0],  # 1 null, 1 DontKnow
+            "gender": [0, 0, 0, 3],  # 1 Refuse
+        }
+    )
 
-    missing_codes_df = pl.DataFrame({
-        "label": ["DontKnow", "Refuse"],
-        "codes": ["-999", "-888"],
-    })
+    missing_codes_df = pl.DataFrame(
+        {
+            "label": ["DontKnow", "Refuse"],
+            "codes": ["-999", "-888"],
+        }
+    )
 
     result = compute_missing_columns(missing_data, missing_codes_df)
 
@@ -548,14 +583,24 @@ def test_compute_missing_columns_basic():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_columns_multiple_codes_per_label():
     """Test compute_missing_columns with multiple codes per label."""
-    missing_data = pl.DataFrame({
-        "age": [0, 1, 2, 2, 0],  # 1 null, 2 DontKnow (codes -999 and -998 both map to code 2)
-    })
+    missing_data = pl.DataFrame(
+        {
+            "age": [
+                0,
+                1,
+                2,
+                2,
+                0,
+            ],  # 1 null, 2 DontKnow (codes -999 and -998 both map to code 2)
+        }
+    )
 
-    missing_codes_df = pl.DataFrame({
-        "label": ["DontKnow"],
-        "codes": ["-999, -998"],
-    })
+    missing_codes_df = pl.DataFrame(
+        {
+            "label": ["DontKnow"],
+            "codes": ["-999, -998"],
+        }
+    )
 
     result = compute_missing_columns(missing_data, missing_codes_df)
 
@@ -569,15 +614,19 @@ def test_compute_missing_columns_multiple_codes_per_label():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_columns_no_missing():
     """Test compute_missing_columns with no missing values."""
-    missing_data = pl.DataFrame({
-        "age": [0, 0, 0, 0],
-        "gender": [0, 0, 0, 0],
-    })
+    missing_data = pl.DataFrame(
+        {
+            "age": [0, 0, 0, 0],
+            "gender": [0, 0, 0, 0],
+        }
+    )
 
-    missing_codes_df = pl.DataFrame({
-        "label": ["DontKnow"],
-        "codes": ["-999"],
-    })
+    missing_codes_df = pl.DataFrame(
+        {
+            "label": ["DontKnow"],
+            "codes": ["-999"],
+        }
+    )
 
     result = compute_missing_columns(missing_data, missing_codes_df)
 
@@ -593,13 +642,15 @@ def test_compute_missing_columns_no_missing():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_filtered_missing_columns_basic():
     """Test compute_filtered_missing_columns with basic threshold filtering."""
-    data = pd.DataFrame({
-        "Column": ["A", "B", "C"],
-        "Null Values": [5, 10, 0],
-        "% Null Values": [25.0, 50.0, 0.0],
-        "% Total Missing": [35.0, 80.0, 5.0],
-        "% CustomMissing": [10.0, 30.0, 5.0],
-    })
+    data = pd.DataFrame(
+        {
+            "Column": ["A", "B", "C"],
+            "Null Values": [5, 10, 0],
+            "% Null Values": [25.0, 50.0, 0.0],
+            "% Total Missing": [35.0, 80.0, 5.0],
+            "% CustomMissing": [10.0, 30.0, 5.0],
+        }
+    )
 
     filtered_data, perc_cols, vmin, vmax = compute_filtered_missing_columns(
         data, mv_threshold=40
@@ -618,12 +669,14 @@ def test_compute_filtered_missing_columns_basic():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_filtered_missing_columns_no_match():
     """Test compute_filtered_missing_columns when no columns match threshold."""
-    data = pd.DataFrame({
-        "Column": ["A", "B"],
-        "Null Values": [0, 0],
-        "% Null Values": [0.0, 0.0],
-        "% Total Missing": [10.0, 20.0],
-    })
+    data = pd.DataFrame(
+        {
+            "Column": ["A", "B"],
+            "Null Values": [0, 0],
+            "% Null Values": [0.0, 0.0],
+            "% Total Missing": [10.0, 20.0],
+        }
+    )
 
     filtered_data, perc_cols, vmin, vmax = compute_filtered_missing_columns(
         data, mv_threshold=50
@@ -638,12 +691,14 @@ def test_compute_filtered_missing_columns_no_match():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_filtered_missing_columns_all_match():
     """Test compute_filtered_missing_columns when all columns match threshold."""
-    data = pd.DataFrame({
-        "Column": ["A", "B", "C"],
-        "Null Values": [10, 20, 30],
-        "% Null Values": [50.0, 100.0, 75.0],
-        "% Total Missing": [60.0, 100.0, 80.0],
-    })
+    data = pd.DataFrame(
+        {
+            "Column": ["A", "B", "C"],
+            "Null Values": [10, 20, 30],
+            "% Null Values": [50.0, 100.0, 75.0],
+            "% Total Missing": [60.0, 100.0, 80.0],
+        }
+    )
 
     filtered_data, perc_cols, vmin, vmax = compute_filtered_missing_columns(
         data, mv_threshold=0
@@ -664,21 +719,25 @@ def test_compute_missing_over_time_basic():
     """
     import datetime
 
-    missing_data = pl.DataFrame({
-        "age": [0, 1, 0, 1],
-        "gender": [0, 0, 1, 1],
-    })
+    missing_data = pl.DataFrame(
+        {
+            "age": [0, 1, 0, 1],
+            "gender": [0, 0, 1, 1],
+        }
+    )
 
-    data = pl.DataFrame({
-        "date": [
-            datetime.datetime(2023, 1, 1),
-            datetime.datetime(2023, 1, 1),
-            datetime.datetime(2023, 1, 2),
-            datetime.datetime(2023, 1, 2),
-        ],
-        "age": [25, None, 30, None],
-        "gender": [1, 2, None, None],
-    })
+    data = pl.DataFrame(
+        {
+            "date": [
+                datetime.datetime(2023, 1, 1),
+                datetime.datetime(2023, 1, 1),
+                datetime.datetime(2023, 1, 2),
+                datetime.datetime(2023, 1, 2),
+            ],
+            "age": [25, None, 30, None],
+            "gender": [1, 2, None, None],
+        }
+    )
 
     result = compute_missing_over_time(missing_data, data, "date")
 
@@ -700,20 +759,24 @@ def test_compute_missing_over_time_single_date():
     """
     import datetime
 
-    missing_data = pl.DataFrame({
-        "age": [0, 1, 0],
-        "gender": [0, 0, 1],
-    })
+    missing_data = pl.DataFrame(
+        {
+            "age": [0, 1, 0],
+            "gender": [0, 0, 1],
+        }
+    )
 
-    data = pl.DataFrame({
-        "date": [
-            datetime.datetime(2023, 1, 1),
-            datetime.datetime(2023, 1, 1),
-            datetime.datetime(2023, 1, 1),
-        ],
-        "age": [25, None, 30],
-        "gender": [1, 2, None],
-    })
+    data = pl.DataFrame(
+        {
+            "date": [
+                datetime.datetime(2023, 1, 1),
+                datetime.datetime(2023, 1, 1),
+                datetime.datetime(2023, 1, 1),
+            ],
+            "age": [25, None, 30],
+            "gender": [1, 2, None],
+        }
+    )
 
     result = compute_missing_over_time(missing_data, data, "date")
 
@@ -728,16 +791,20 @@ def test_compute_missing_over_time_single_date():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_compare_basic():
     """Test compute_missing_compare with basic grouping."""
-    missing_data = pl.DataFrame({
-        "age": [0, 1, 0, 1],
-        "income": [0, 0, 1, 1],
-    })
+    missing_data = pl.DataFrame(
+        {
+            "age": [0, 1, 0, 1],
+            "income": [0, 0, 1, 1],
+        }
+    )
 
-    data = pl.DataFrame({
-        "group": ["A", "A", "B", "B"],
-        "age": [25, None, 30, None],
-        "income": [1000, 2000, None, None],
-    })
+    data = pl.DataFrame(
+        {
+            "group": ["A", "A", "B", "B"],
+            "age": [25, None, 30, None],
+            "income": [1000, 2000, None, None],
+        }
+    )
 
     result, vmin, vmax = compute_missing_compare(
         missing_data, data, "group", ["age", "income"]
@@ -764,18 +831,20 @@ def test_compute_missing_compare_basic():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_compare_no_compare_cols():
     """Test compute_missing_compare with no comparison columns."""
-    missing_data = pl.DataFrame({
-        "age": [0, 1, 0, 1],
-    })
-
-    data = pl.DataFrame({
-        "group": ["A", "A", "B", "B"],
-        "age": [25, None, 30, None],
-    })
-
-    result, vmin, vmax = compute_missing_compare(
-        missing_data, data, "group", []
+    missing_data = pl.DataFrame(
+        {
+            "age": [0, 1, 0, 1],
+        }
     )
+
+    data = pl.DataFrame(
+        {
+            "group": ["A", "A", "B", "B"],
+            "age": [25, None, 30, None],
+        }
+    )
+
+    result, vmin, vmax = compute_missing_compare(missing_data, data, "group", [])
 
     assert isinstance(result, pd.DataFrame)
     assert "values (count)" in result.columns
@@ -792,11 +861,13 @@ def test_compute_missing_compare_no_compare_cols():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_correlation_basic():
     """Test compute_missing_correlation with basic correlation."""
-    missing_data = pl.DataFrame({
-        "age": [1, 1, 0, 0, 0],
-        "income": [1, 1, 0, 0, 0],  # Perfect correlation with age
-        "gender": [0, 0, 1, 1, 0],  # Negative correlation
-    })
+    missing_data = pl.DataFrame(
+        {
+            "age": [1, 1, 0, 0, 0],
+            "income": [1, 1, 0, 0, 0],  # Perfect correlation with age
+            "gender": [0, 0, 1, 1, 0],  # Negative correlation
+        }
+    )
 
     result = compute_missing_correlation(missing_data, ["age", "income", "gender"])
 
@@ -815,9 +886,11 @@ def test_compute_missing_correlation_basic():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_correlation_single_column():
     """Test compute_missing_correlation with single column."""
-    missing_data = pl.DataFrame({
-        "age": [1, 0, 1, 0, 1],
-    })
+    missing_data = pl.DataFrame(
+        {
+            "age": [1, 0, 1, 0, 1],
+        }
+    )
 
     result = compute_missing_correlation(missing_data, ["age"])
 
@@ -831,11 +904,13 @@ def test_compute_missing_correlation_single_column():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_get_null_list_all_cols_true():
     """Test get_null_list returns all columns when all_cols=True."""
-    missing_data = pl.DataFrame({
-        "age": [0, 1, 0, 1],
-        "gender": [0, 0, 0, 0],
-        "income": [1, 1, 1, 1],
-    })
+    missing_data = pl.DataFrame(
+        {
+            "age": [0, 1, 0, 1],
+            "gender": [0, 0, 0, 0],
+            "income": [1, 1, 1, 1],
+        }
+    )
 
     result = get_null_list(missing_data, all_cols=True)
 
@@ -849,12 +924,14 @@ def test_get_null_list_all_cols_true():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_get_null_list_partial_missing_only():
     """Test get_null_list returns only partially missing columns."""
-    missing_data = pl.DataFrame({
-        "age": [0, 1, 0, 1],      # Partial missing
-        "gender": [0, 0, 0, 0],   # No missing
-        "income": [1, 1, 1, 1],   # All missing
-        "city": [0, 1, 1, 0],     # Partial missing
-    })
+    missing_data = pl.DataFrame(
+        {
+            "age": [0, 1, 0, 1],  # Partial missing
+            "gender": [0, 0, 0, 0],  # No missing
+            "income": [1, 1, 1, 1],  # All missing
+            "city": [0, 1, 1, 0],  # Partial missing
+        }
+    )
 
     result = get_null_list(missing_data, all_cols=False)
 
@@ -869,9 +946,11 @@ def test_get_null_list_partial_missing_only():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_get_null_list_single_column():
     """Test get_null_list with single column DataFrame."""
-    missing_data = pl.DataFrame({
-        "age": [0, 1, 0, 1],
-    })
+    missing_data = pl.DataFrame(
+        {
+            "age": [0, 1, 0, 1],
+        }
+    )
 
     result = get_null_list(missing_data, all_cols=True)
 
@@ -886,11 +965,13 @@ def test_get_null_list_single_column():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_matrix_basic():
     """Test compute_missing_matrix returns binary matrix."""
-    missing_data = pl.DataFrame({
-        "age": [0, 1, 2, 0],
-        "gender": [0, 0, 1, 3],
-        "income": [0, 0, 0, 0],
-    })
+    missing_data = pl.DataFrame(
+        {
+            "age": [0, 1, 2, 0],
+            "gender": [0, 0, 1, 3],
+            "income": [0, 0, 0, 0],
+        }
+    )
 
     result = compute_missing_matrix(missing_data)
 
@@ -906,10 +987,12 @@ def test_compute_missing_matrix_basic():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_matrix_all_zero():
     """Test compute_missing_matrix with all zero values."""
-    missing_data = pl.DataFrame({
-        "age": [0, 0, 0, 0],
-        "gender": [0, 0, 0, 0],
-    })
+    missing_data = pl.DataFrame(
+        {
+            "age": [0, 0, 0, 0],
+            "gender": [0, 0, 0, 0],
+        }
+    )
 
     result = compute_missing_matrix(missing_data)
 
@@ -921,15 +1004,15 @@ def test_compute_missing_matrix_all_zero():
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_matrix_all_missing():
     """Test compute_missing_matrix with all missing values."""
-    missing_data = pl.DataFrame({
-        "age": [1, 2, 3, 1],
-        "gender": [2, 1, 2, 3],
-    })
+    missing_data = pl.DataFrame(
+        {
+            "age": [1, 2, 3, 1],
+            "gender": [2, 1, 2, 3],
+        }
+    )
 
     result = compute_missing_matrix(missing_data)
 
     assert result.shape == (4, 2)
     assert all(result["age"] == 1)
     assert all(result["gender"] == 1)
-
-

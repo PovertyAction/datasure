@@ -140,7 +140,9 @@ class FilterCondition(BaseModel):
         Whether to treat missing/null values as duplicates.
     """
 
-    condition_col: str = Field(..., min_length=1, description="Column to apply condition on")
+    condition_col: str = Field(
+        ..., min_length=1, description="Column to apply condition on"
+    )
     condition_type: str = Field(..., description="Type of condition to apply")
     condition_value: int | float | str | list | tuple | datetime.date | None = Field(
         ..., description="Value(s) to compare against"
@@ -197,7 +199,9 @@ class DuplicatesSettings(BaseModel):
     survey_id: str | None = Field(..., min_length=1, description="Survey ID column")
     survey_date: str | None = Field(None, description="Survey date column")
     enumerator: str | None = Field(None, description="Enumerator ID column")
-    conditions: dict = Field(default_factory=dict, description="Conditions for duplicates checks")
+    conditions: dict = Field(
+        default_factory=dict, description="Conditions for duplicates checks"
+    )
 
     model_config = {
         "arbitrary_types_allowed": True,
@@ -415,7 +419,9 @@ def duplicates_report_settings(
                 "Configure filters for duplicates checks. These settings help exclude irrelevant records from the duplicates analysis."
             )
 
-            conditions = _render_duplicates_condition_options(project_id, data, settings_file)
+            conditions = _render_duplicates_condition_options(
+                project_id, data, settings_file
+            )
             _filter_data_on_conditions(project_id, data, conditions)
 
     return DuplicatesSettings(
@@ -464,8 +470,8 @@ def expand_col_names(
 
     Examples
     --------
-    >>> columns = ['income_farm', 'income_wage', 'expense_total']
-    >>> expand_col_names(columns, 'income_', 'startswith')
+    >>> columns = ["income_farm", "income_wage", "expense_total"]
+    >>> expand_col_names(columns, "income_", "startswith")
     ['income_farm', 'income_wage']
     """
     if search_type == SearchType.EXACT.value:
@@ -576,12 +582,14 @@ def _add_duplicates_column(
     all_columns : list[str]
         List of all columns available for duplicate checking.
     """
-    search_type, pattern, dup_cols, lock_cols_initial = (
-        _render_search_type_selection(all_columns)
+    search_type, pattern, dup_cols, lock_cols_initial = _render_search_type_selection(
+        all_columns
     )
 
     if dup_cols:
-        lock_cols = _render_column_locking_options(dup_cols, search_type, lock_cols_initial)
+        lock_cols = _render_column_locking_options(
+            dup_cols, search_type, lock_cols_initial
+        )
 
         button_disabled = not dup_cols
         if st.button(
@@ -770,7 +778,8 @@ def _render_duplicates_condition_options(
             default_condition_type = saved_settings.get("condition_type", None)
             default_condition_type_index = (
                 condition_type_options.index(default_condition_type)
-                if default_condition_type and default_condition_type in condition_type_options
+                if default_condition_type
+                and default_condition_type in condition_type_options
                 else 0
             )
             condition_type = st.selectbox(
@@ -782,7 +791,9 @@ def _render_duplicates_condition_options(
                 on_change=trigger_save,
                 kwargs={"state_name": TAB_NAME + "_condition_type"},
             )
-            save_check_settings(settings_file, TAB_NAME, {"condition_type": condition_type})
+            save_check_settings(
+                settings_file, TAB_NAME, {"condition_type": condition_type}
+            )
 
         condition_values = (
             data.select(pl.col(condition_col).unique()).to_series().to_list()
@@ -820,12 +831,17 @@ def _render_duplicates_condition_options(
                     kwargs={"state_name": TAB_NAME + "_condition_value"},
                 )
                 condition_value_dict = {
-                    "condition_value": _serialize_condition_value_for_json(condition_value)
+                    "condition_value": _serialize_condition_value_for_json(
+                        condition_value
+                    )
                 }
 
             elif is_numeric:
                 if not default_condition_value:
-                    default_condition_value = (min(condition_values), max(condition_values))
+                    default_condition_value = (
+                        min(condition_values),
+                        max(condition_values),
+                    )
 
                 if condition_type == NumCondition.IN_RANGE.value:
                     condition_value = st.slider(
@@ -839,8 +855,13 @@ def _render_duplicates_condition_options(
                         kwargs={"state_name": TAB_NAME + "_condition_value"},
                     )
 
-                elif condition_type in [NumCondition.INCLUDES.value, NumCondition.EXCLUDES.value]:
-                    if default_condition_value and not isinstance(default_condition_value, list):
+                elif condition_type in [
+                    NumCondition.INCLUDES.value,
+                    NumCondition.EXCLUDES.value,
+                ]:
+                    if default_condition_value and not isinstance(
+                        default_condition_value, list
+                    ):
                         default_condition_value = [default_condition_value]
                     condition_value = st.multiselect(
                         label="Condition Values",
@@ -852,7 +873,9 @@ def _render_duplicates_condition_options(
                     )
 
                 else:
-                    if default_condition_value and isinstance(default_condition_value, list):
+                    if default_condition_value and isinstance(
+                        default_condition_value, list
+                    ):
                         default_condition_value = default_condition_value[0]
                     else:
                         default_condition_value = None
@@ -868,10 +891,15 @@ def _render_duplicates_condition_options(
 
             else:
                 default_condition_value = saved_settings.get("condition_value", [])
-                if default_condition_value and not isinstance(default_condition_value, list):
+                if default_condition_value and not isinstance(
+                    default_condition_value, list
+                ):
                     default_condition_value = [default_condition_value]
 
-                if condition_type in [StrCondition.INCLUDES.value, StrCondition.EXCLUDES.value]:
+                if condition_type in [
+                    StrCondition.INCLUDES.value,
+                    StrCondition.EXCLUDES.value,
+                ]:
                     condition_value = st.multiselect(
                         label="Condition Values",
                         options=condition_values,
@@ -885,7 +913,8 @@ def _render_duplicates_condition_options(
                 else:
                     default_condition_value_index = (
                         condition_values.index(default_condition_value)
-                        if default_condition_value and default_condition_value in condition_values
+                        if default_condition_value
+                        and default_condition_value in condition_values
                         else 0
                     )
 
@@ -901,7 +930,9 @@ def _render_duplicates_condition_options(
 
             if not condition_value_dict:
                 condition_value_dict = {
-                    "condition_value": _serialize_condition_value_for_json(condition_value)
+                    "condition_value": _serialize_condition_value_for_json(
+                        condition_value
+                    )
                 }
             save_check_settings(settings_file, TAB_NAME, condition_value_dict)
 
@@ -1020,14 +1051,22 @@ def _apply_numeric_condition(
     # Handle date vs datetime comparison by casting datetime columns to date
     if isinstance(value, datetime.date) and not isinstance(value, datetime.datetime):
         col = col.cast(pl.Date)
-    elif condition_type == NumCondition.INCLUDES.value and isinstance(value, list | tuple):
-        if any(isinstance(v, datetime.date) and not isinstance(v, datetime.datetime) for v in value):
+    elif condition_type == NumCondition.INCLUDES.value and isinstance(
+        value, list | tuple
+    ):
+        if any(
+            isinstance(v, datetime.date) and not isinstance(v, datetime.datetime)
+            for v in value
+        ):
             col = col.cast(pl.Date)
     elif (
         condition_type == NumCondition.IN_RANGE.value
         and isinstance(value, list | tuple)
         and len(value) == 2
-        and any(isinstance(v, datetime.date) and not isinstance(v, datetime.datetime) for v in value)
+        and any(
+            isinstance(v, datetime.date) and not isinstance(v, datetime.datetime)
+            for v in value
+        )
     ):
         col = col.cast(pl.Date)
 
@@ -1121,7 +1160,9 @@ def _build_filter_expression(
     string_conditions = [e.value for e in StrCondition]
 
     if condition_type in numeric_conditions:
-        filter_expr = _apply_numeric_condition(col_expr, condition_type, condition_value)
+        filter_expr = _apply_numeric_condition(
+            col_expr, condition_type, condition_value
+        )
     elif condition_type in string_conditions:
         filter_expr = _apply_string_condition(col_expr, condition_type, condition_value)
     else:
@@ -1183,7 +1224,9 @@ def _filter_data_on_conditions(
                     elif isinstance(condition_value, list):
                         with contextlib.suppress(ValueError, TypeError):
                             conditions["condition_value"] = [
-                                datetime.date.fromisoformat(v) if isinstance(v, str) else v
+                                datetime.date.fromisoformat(v)
+                                if isinstance(v, str)
+                                else v
                                 for v in condition_value
                             ]
 
@@ -1198,11 +1241,13 @@ def _filter_data_on_conditions(
                         with contextlib.suppress(ValueError, TypeError):
                             if col_dtype in pl.INTEGER_DTYPES:
                                 conditions["condition_value"] = [
-                                    int(v) if isinstance(v, str) else v for v in condition_value
+                                    int(v) if isinstance(v, str) else v
+                                    for v in condition_value
                                 ]
                             else:
                                 conditions["condition_value"] = [
-                                    float(v) if isinstance(v, str) else v for v in condition_value
+                                    float(v) if isinstance(v, str) else v
+                                    for v in condition_value
                                 ]
 
             try:
@@ -1282,7 +1327,9 @@ def _update_duplicates_column_config(
     new_config_df = pl.DataFrame(new_config, schema=schema)
     if not existing_config.is_empty():
         formatted_existing_config = _ensure_duplicates_column_formats(existing_config)
-        updated_config = pl.concat([formatted_existing_config, new_config_df], how="vertical")
+        updated_config = pl.concat(
+            [formatted_existing_config, new_config_df], how="vertical"
+        )
     else:
         updated_config = new_config_df
 
@@ -1369,14 +1416,16 @@ def _delete_duplicates_column(
         if duplicates_settings.is_empty():
             st.info("No duplicates columns have been added yet.")
         else:
-            duplicates_settings_indexed = duplicates_settings.with_row_index().with_columns(
-                (
-                    pl.col("index").cast(pl.Utf8)
-                    + " - "
-                    + pl.col("search_type")
-                    + " - "
-                    + pl.col("pattern").fill_null("")
-                ).alias("composite_index")
+            duplicates_settings_indexed = (
+                duplicates_settings.with_row_index().with_columns(
+                    (
+                        pl.col("index").cast(pl.Utf8)
+                        + " - "
+                        + pl.col("search_type")
+                        + " - "
+                        + pl.col("pattern").fill_null("")
+                    ).alias("composite_index")
+                )
             )
 
             unique_index = (
@@ -1539,7 +1588,9 @@ def _render_id_duplicates_table(
     with st.expander(":material/clarify: Show more columns in report", expanded=False):
         saved_settings = load_check_settings(settings_file, TAB_NAME)
         default_id_table_display_cols = saved_settings.get("id_table_display_cols", [])
-        display_options = [col for col in data.columns if col not in [survey_id, survey_key]]
+        display_options = [
+            col for col in data.columns if col not in [survey_id, survey_key]
+        ]
         id_table_display_cols = st.multiselect(
             label="Select additional columns to display",
             options=display_options,
@@ -1558,7 +1609,11 @@ def _render_id_duplicates_table(
 
         if id_table_display_cols:
             join_keys = []
-            if survey_id and survey_id in data.columns and survey_id in id_duplicates_data.columns:
+            if (
+                survey_id
+                and survey_id in data.columns
+                and survey_id in id_duplicates_data.columns
+            ):
                 join_keys.append(survey_id)
             if (
                 survey_key
@@ -1578,7 +1633,9 @@ def _render_id_duplicates_table(
                     how="left",
                 ).unique()
             else:
-                st.warning("Cannot join additional columns: required join keys not found in data.")
+                st.warning(
+                    "Cannot join additional columns: required join keys not found in data."
+                )
 
     st.dataframe(
         id_duplicates_data,
@@ -1709,7 +1766,9 @@ def _render_other_duplicates_table(
 
     with st.expander(":material/clarify: Show more columns in report", expanded=False):
         saved_settings = load_check_settings(settings_file, TAB_NAME)
-        default_var_table_display_cols = saved_settings.get(f"{col_checked}_display_cols", [])
+        default_var_table_display_cols = saved_settings.get(
+            f"{col_checked}_display_cols", []
+        )
         display_options = [
             col
             for col in data.columns
@@ -1763,7 +1822,9 @@ def _render_other_duplicates_table(
                     how="left",
                 ).unique()
             else:
-                st.warning("Cannot join additional columns: required join keys not found in data.")
+                st.warning(
+                    "Cannot join additional columns: required join keys not found in data."
+                )
 
     if col_dups_data.is_empty():
         st.info(f"No duplicates found for the column '{col_checked}'.")
@@ -1987,7 +2048,9 @@ def compute_column_duplicates(
 
     var_dups_data = var_dups_data.select(cols_to_select)
 
-    return var_dups_data.sort([f"{dup_col}_dup_count", dup_col], descending=[True, False])
+    return var_dups_data.sort(
+        [f"{dup_col}_dup_count", dup_col], descending=[True, False]
+    )
 
 
 # =============================================================================
@@ -2031,7 +2094,12 @@ def duplicates_report(
 
     config_settings = DuplicatesSettings(**config)
     duplicates_settings = duplicates_report_settings(
-        project_id, setting_file, data, config_settings, categorical_columns, datetime_columns
+        project_id,
+        setting_file,
+        data,
+        config_settings,
+        categorical_columns,
+        datetime_columns,
     )
 
     filtered_data = duckdb_get_table(
@@ -2100,4 +2168,6 @@ def duplicates_report(
         all_dup_cols,
     )
 
-    _render_other_duplicates_table(data, all_dup_cols, duplicates_settings, setting_file)
+    _render_other_duplicates_table(
+        data, all_dup_cols, duplicates_settings, setting_file
+    )

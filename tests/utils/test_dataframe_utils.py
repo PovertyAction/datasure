@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 import pandas as pd
 import polars as pl
-import pytest
 
 from datasure.utils.dataframe_utils import (
     ColumnByType,
@@ -217,7 +216,9 @@ class TestGetDfColumnsPolars:
                     None,
                     datetime(2024, 1, 3),
                 ],
-                "categorical_col": pl.Series(["cat1", "cat2", None], dtype=pl.Categorical),
+                "categorical_col": pl.Series(
+                    ["cat1", "cat2", None], dtype=pl.Categorical
+                ),
             }
         )
 
@@ -553,9 +554,7 @@ class TestStandardizeMissingValues:
 
     def test_preserves_valid_strings(self):
         """Test that valid strings are not modified."""
-        df = pl.DataFrame(
-            {"col1": ["hello", "world", "test", "data"]}
-        )
+        df = pl.DataFrame({"col1": ["hello", "world", "test", "data"]})
 
         result = standardize_missing_values(df)
 

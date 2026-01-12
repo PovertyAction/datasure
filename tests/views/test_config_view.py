@@ -310,9 +310,7 @@ class TestRenderNavigation:
 
     @patch("datasure.views.config_view.page_navigation")
     @patch("datasure.views.config_view.is_demo_project")
-    def test_regular_navigation_no_output_pages(
-        self, mock_is_demo, mock_page_nav
-    ):
+    def test_regular_navigation_no_output_pages(self, mock_is_demo, mock_page_nav):
         """Test regular navigation when no output pages exist."""
         import streamlit as st
 
@@ -499,7 +497,9 @@ class TestIntegrationScenarios:
         # Verify
         assert mock_render_table.called
         # Should not show info message for empty configs
-        info_calls = [call for call in st.info.call_args_list if call[0][0].startswith("No check")]
+        info_calls = [
+            call for call in st.info.call_args_list if call[0][0].startswith("No check")
+        ]
         assert len(info_calls) == 0
         assert mock_get_aliases.called
         assert mock_service_class.called

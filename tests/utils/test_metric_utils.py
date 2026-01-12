@@ -14,9 +14,7 @@ class TestCustomMetric:
         """Test that custom_metric executes without errors."""
         # Setup mock context manager
         mock_context = MagicMock()
-        mock_stylable_container.return_value.__enter__ = Mock(
-            return_value=mock_context
-        )
+        mock_stylable_container.return_value.__enter__ = Mock(return_value=mock_context)
         mock_stylable_container.return_value.__exit__ = Mock(return_value=None)
 
         # Call the function
@@ -31,9 +29,7 @@ class TestCustomMetric:
         """Test that stylable_container is called with correct key."""
         # Setup mock context manager
         mock_context = MagicMock()
-        mock_stylable_container.return_value.__enter__ = Mock(
-            return_value=mock_context
-        )
+        mock_stylable_container.return_value.__enter__ = Mock(return_value=mock_context)
         mock_stylable_container.return_value.__exit__ = Mock(return_value=None)
 
         # Call the function
@@ -50,9 +46,7 @@ class TestCustomMetric:
         """Test that stylable_container is called with correct CSS styles."""
         # Setup mock context manager
         mock_context = MagicMock()
-        mock_stylable_container.return_value.__enter__ = Mock(
-            return_value=mock_context
-        )
+        mock_stylable_container.return_value.__enter__ = Mock(return_value=mock_context)
         mock_stylable_container.return_value.__exit__ = Mock(return_value=None)
 
         # Call the function
@@ -75,9 +69,7 @@ class TestCustomMetric:
         """Test that custom_metric writes expected content."""
         # Setup mock context manager
         mock_context = MagicMock()
-        mock_stylable_container.return_value.__enter__ = Mock(
-            return_value=mock_context
-        )
+        mock_stylable_container.return_value.__enter__ = Mock(return_value=mock_context)
         mock_stylable_container.return_value.__exit__ = Mock(return_value=None)
 
         # Call the function
@@ -113,9 +105,7 @@ class TestCustomMetric:
         """Test that CSS is properly formatted with correct structure."""
         # Setup mock context manager
         mock_context = MagicMock()
-        mock_stylable_container.return_value.__enter__ = Mock(
-            return_value=mock_context
-        )
+        mock_stylable_container.return_value.__enter__ = Mock(return_value=mock_context)
         mock_stylable_container.return_value.__exit__ = Mock(return_value=None)
 
         # Call the function
@@ -138,9 +128,7 @@ class TestCustomMetric:
         """Test that custom_metric returns None."""
         # Setup mock context manager
         mock_context = MagicMock()
-        mock_stylable_container.return_value.__enter__ = Mock(
-            return_value=mock_context
-        )
+        mock_stylable_container.return_value.__enter__ = Mock(return_value=mock_context)
         mock_stylable_container.return_value.__exit__ = Mock(return_value=None)
 
         # Call the function
@@ -155,9 +143,7 @@ class TestCustomMetric:
         """Test that custom_metric can be called multiple times."""
         # Setup mock context manager
         mock_context = MagicMock()
-        mock_stylable_container.return_value.__enter__ = Mock(
-            return_value=mock_context
-        )
+        mock_stylable_container.return_value.__enter__ = Mock(return_value=mock_context)
         mock_stylable_container.return_value.__exit__ = Mock(return_value=None)
 
         # Call the function multiple times
@@ -177,9 +163,7 @@ class TestCustomMetric:
         """Test that stylable_container is called before st.write."""
         # Setup mock context manager
         mock_context = MagicMock()
-        mock_stylable_container.return_value.__enter__ = Mock(
-            return_value=mock_context
-        )
+        mock_stylable_container.return_value.__enter__ = Mock(return_value=mock_context)
         mock_stylable_container.return_value.__exit__ = Mock(return_value=None)
 
         # Track call order
@@ -212,9 +196,7 @@ class TestCustomMetric:
         """Test that CSS contains all expected properties."""
         # Setup mock context manager
         mock_context = MagicMock()
-        mock_stylable_container.return_value.__enter__ = Mock(
-            return_value=mock_context
-        )
+        mock_stylable_container.return_value.__enter__ = Mock(return_value=mock_context)
         mock_stylable_container.return_value.__exit__ = Mock(return_value=None)
 
         # Call the function
@@ -242,9 +224,7 @@ class TestCustomMetric:
         """Test that container key is a string."""
         # Setup mock context manager
         mock_context = MagicMock()
-        mock_stylable_container.return_value.__enter__ = Mock(
-            return_value=mock_context
-        )
+        mock_stylable_container.return_value.__enter__ = Mock(return_value=mock_context)
         mock_stylable_container.return_value.__exit__ = Mock(return_value=None)
 
         # Call the function
@@ -262,9 +242,7 @@ class TestCustomMetric:
         """Test that write message is a string."""
         # Setup mock context manager
         mock_context = MagicMock()
-        mock_stylable_container.return_value.__enter__ = Mock(
-            return_value=mock_context
-        )
+        mock_stylable_container.return_value.__enter__ = Mock(return_value=mock_context)
         mock_stylable_container.return_value.__exit__ = Mock(return_value=None)
 
         # Call the function

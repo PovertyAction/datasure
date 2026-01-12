@@ -346,6 +346,7 @@ def load_missing_codes_from_db(project_id: str) -> pl.DataFrame:
 
     return duckdb_get_table(project_id, table_name, "logs")
 
+
 def save_missing_codes_to_db(project_id: str, new_codes: dict | None = None) -> None:
     """Save missing codes to DuckDB.
 
@@ -422,6 +423,7 @@ def update_missing_code(project_id: str, label: str, codes: str | list[str]) -> 
     ).unnest("codes")
 
     save_missing_codes_to_db(project_id, existing_codes)
+
 
 def delete_missing_code(project_id: str, code_id: str) -> None:
     """Delete a missing code configuration.

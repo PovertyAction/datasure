@@ -971,7 +971,9 @@ class TestConstraintValidation:
 
     def test_constraint_bounds_negative_values(self):
         """Test ConstraintBounds with negative values."""
-        bounds = ConstraintBounds(hard_min=-100, soft_min=-50, soft_max=50, hard_max=100)
+        bounds = ConstraintBounds(
+            hard_min=-100, soft_min=-50, soft_max=50, hard_max=100
+        )
         assert bounds.hard_min == -100
         assert bounds.soft_min == -50
 
@@ -1074,5 +1076,3 @@ class TestExpandColNamesEdgeCases:
         cols = ["col_1", "col_2", "other_1"]
         result = expand_col_names(cols, r"col_\d+", search_type="regex")
         assert result == ["col_1", "col_2"]
-
-

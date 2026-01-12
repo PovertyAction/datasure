@@ -33,9 +33,7 @@ class ColumnByType(BaseModel):
         return v
 
 
-
-def get_df_columns(
-        df:pl.DataFrame | pd.DataFrame) -> ColumnByType:
+def get_df_columns(df: pl.DataFrame | pd.DataFrame) -> ColumnByType:
     """Get columns by type from a DataFrame.
     PARAMS:
     -------
@@ -62,10 +60,18 @@ def get_df_columns(
     else:  # get info from polars dataframe
         all_columns = df.columns
         string_columns = df.select(pl.col(pl.Utf8)).columns
-        integer_columns = df.select(pl.col(pl.Int64, pl.Int32, pl.Int16, pl.Int8)).columns
+        integer_columns = df.select(
+            pl.col(pl.Int64, pl.Int32, pl.Int16, pl.Int8)
+        ).columns
         numeric_columns = df.select(pl.col(pl.NUMERIC_DTYPES)).columns
         datetime_columns = df.select(pl.col(pl.Date, pl.Datetime)).columns
-        categorical_columns = list(set(integer_columns + string_columns + df.select(pl.col(pl.Categorical)).columns))
+        categorical_columns = list(
+            set(
+                integer_columns
+                + string_columns
+                + df.select(pl.col(pl.Categorical)).columns
+            )
+        )
 
     return ColumnByType(
         all_columns=all_columns,
@@ -75,6 +81,7 @@ def get_df_columns(
         datetime_columns=datetime_columns,
         categorical_columns=categorical_columns,
     )
+
 
 def standardize_missing_values(data: pd.DataFrame | pl.DataFrame) -> pl.DataFrame:
     """Convert data to polars dataframe and standardize missing values"""

@@ -298,7 +298,9 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             "survey_date": config.survey_date,
             "survey_target": config.survey_target,
         }
-        summary_report(data.page_data, config.setting_file, summary_config, survey_columns)
+        summary_report(
+            data.page_data, config.setting_file, summary_config, survey_columns
+        )
 
     with progress:
         progress_config: dict = {

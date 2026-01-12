@@ -146,6 +146,7 @@ def load_default_gpschecks_settings(
 
     return GPSSettings(**default_settings)
 
+
 #  gps check settings
 def gpschecks_report_settings(
     project_id: str,
@@ -315,11 +316,13 @@ def gpschecks_report_settings(
                 mapbox_api_key = st.secrets["default_mapbox_api_key"]
                 using_default_key = True
 
-
             # Load saved settings
             saved_key_option = default_settings.mapbox_key_option or "default_api_token"
 
-            options_map = {"default_api_token": ":material/lock_open_right: Default Public Token", "add_api_token": ":material/lock: Add API Token"}
+            options_map = {
+                "default_api_token": ":material/lock_open_right: Default Public Token",
+                "add_api_token": ":material/lock: Add API Token",
+            }
 
             ko1, ko2 = st.columns([0.3, 0.7])
             with ko1:
@@ -425,9 +428,7 @@ def _render_gps_column_actions(
 
 
 @st.dialog("Add GPS Column Configuration", width="medium")
-def _add_gps_column(
-    project_id: str, page_name_id: str, all_columns: list[str]
-) -> None:
+def _add_gps_column(project_id: str, page_name_id: str, all_columns: list[str]) -> None:
     """Dialog to add a new GPS column configuration.
 
     Parameters
@@ -763,27 +764,31 @@ def _parse_gps_data(
         # Check if column exists
         if gps_col not in result_df.columns:
             # Return empty lat/lon columns if GPS column doesn't exist
-            result_df = result_df.with_columns([
-                pl.lit(None).cast(pl.Float64).alias("latitude"),
-                pl.lit(None).cast(pl.Float64).alias("longitude"),
-            ])
+            result_df = result_df.with_columns(
+                [
+                    pl.lit(None).cast(pl.Float64).alias("latitude"),
+                    pl.lit(None).cast(pl.Float64).alias("longitude"),
+                ]
+            )
         else:
             # Convert to string first (in case column is numeric or other type)
             # Then split GPS column and extract lat/lon
-            result_df = result_df.with_columns([
-                pl.col(gps_col)
-                .cast(pl.Utf8, strict=False)
-                .str.split(separator)
-                .list.get(0)
-                .cast(pl.Float64, strict=False)
-                .alias("latitude"),
-                pl.col(gps_col)
-                .cast(pl.Utf8, strict=False)
-                .str.split(separator)
-                .list.get(1)
-                .cast(pl.Float64, strict=False)
-                .alias("longitude"),
-            ])
+            result_df = result_df.with_columns(
+                [
+                    pl.col(gps_col)
+                    .cast(pl.Utf8, strict=False)
+                    .str.split(separator)
+                    .list.get(0)
+                    .cast(pl.Float64, strict=False)
+                    .alias("latitude"),
+                    pl.col(gps_col)
+                    .cast(pl.Utf8, strict=False)
+                    .str.split(separator)
+                    .list.get(1)
+                    .cast(pl.Float64, strict=False)
+                    .alias("longitude"),
+                ]
+            )
     else:
         # Separate columns format
         lat_col = gps_config["latitude_column"]
@@ -792,15 +797,19 @@ def _parse_gps_data(
         # Check if columns exist
         if lat_col not in result_df.columns or lon_col not in result_df.columns:
             # Return empty lat/lon columns if either column doesn't exist
-            result_df = result_df.with_columns([
-                pl.lit(None).cast(pl.Float64).alias("latitude"),
-                pl.lit(None).cast(pl.Float64).alias("longitude"),
-            ])
+            result_df = result_df.with_columns(
+                [
+                    pl.lit(None).cast(pl.Float64).alias("latitude"),
+                    pl.lit(None).cast(pl.Float64).alias("longitude"),
+                ]
+            )
         else:
-            result_df = result_df.with_columns([
-                pl.col(lat_col).cast(pl.Float64, strict=False).alias("latitude"),
-                pl.col(lon_col).cast(pl.Float64, strict=False).alias("longitude"),
-            ])
+            result_df = result_df.with_columns(
+                [
+                    pl.col(lat_col).cast(pl.Float64, strict=False).alias("latitude"),
+                    pl.col(lon_col).cast(pl.Float64, strict=False).alias("longitude"),
+                ]
+            )
 
     return result_df
 
@@ -919,9 +928,7 @@ def _render_gps_coordinates(
     filter_values = None
 
     if filter_by:
-        unique_values = (
-            parsed_data[filter_by].unique().drop_nulls().sort().to_list()
-        )
+        unique_values = parsed_data[filter_by].unique().drop_nulls().sort().to_list()
         filter_values = st.multiselect(
             label=f"Select {filter_by} values to display",
             options=unique_values,
@@ -937,10 +944,12 @@ def _render_gps_coordinates(
         return
 
     # Prepare data for pydeck with hover information
-    map_df = filtered_data.select([
-        pl.col("latitude").alias("lat"),
-        pl.col("longitude").alias("lon"),
-    ])
+    map_df = filtered_data.select(
+        [
+            pl.col("latitude").alias("lat"),
+            pl.col("longitude").alias("lon"),
+        ]
+    )
 
     # Add key columns for hover tooltips
     tooltip_fields = []
@@ -970,7 +979,9 @@ def _render_gps_coordinates(
 
     # Create tooltip configuration
     tooltip_config = {
-        "html": "<br>".join([f"<b>{field}:</b> {{{field}}}" for field in tooltip_fields]),
+        "html": "<br>".join(
+            [f"<b>{field}:</b> {{{field}}}" for field in tooltip_fields]
+        ),
         "style": {"backgroundColor": "steelblue", "color": "white"},
     }
 
@@ -1243,7 +1254,9 @@ def _render_gps_outliers_checks(
                     display_cols.append("distance_from_centroid")
 
             # Show only available columns
-            available_cols = [col for col in display_cols if col in outliers_only.columns]
+            available_cols = [
+                col for col in display_cols if col in outliers_only.columns
+            ]
 
             st.dataframe(
                 outliers_only[available_cols],
@@ -1372,41 +1385,47 @@ def _render_gps_comparison_checks(
     parsed_data_2 = _parse_gps_data(data, config_2)
 
     # Check if GPS data was successfully parsed
-    if "latitude" not in parsed_data_1.columns or "longitude" not in parsed_data_1.columns:
+    if (
+        "latitude" not in parsed_data_1.columns
+        or "longitude" not in parsed_data_1.columns
+    ):
         st.warning(f"Unable to parse GPS coordinates from '{gps_config_1}'.")
         return
 
-    if "latitude" not in parsed_data_2.columns or "longitude" not in parsed_data_2.columns:
+    if (
+        "latitude" not in parsed_data_2.columns
+        or "longitude" not in parsed_data_2.columns
+    ):
         st.warning(f"Unable to parse GPS coordinates from '{gps_config_2}'.")
         return
 
     # Rename columns to distinguish between the two GPS sources
-    parsed_data_1 = parsed_data_1.rename({
-        "latitude": "lat_1",
-        "longitude": "lon_1"
-    })
-    parsed_data_2 = parsed_data_2.rename({
-        "latitude": "lat_2",
-        "longitude": "lon_2"
-    })
+    parsed_data_1 = parsed_data_1.rename({"latitude": "lat_1", "longitude": "lon_1"})
+    parsed_data_2 = parsed_data_2.rename({"latitude": "lat_2", "longitude": "lon_2"})
 
     # Merge the two datasets based on survey key
-    if survey_key and survey_key in parsed_data_1.columns and survey_key in parsed_data_2.columns:
+    if (
+        survey_key
+        and survey_key in parsed_data_1.columns
+        and survey_key in parsed_data_2.columns
+    ):
         comparison_data = parsed_data_1.join(
             parsed_data_2.select([survey_key, "lat_2", "lon_2"]),
             on=survey_key,
-            how="inner"
+            how="inner",
         )
     else:
-        st.error("Survey key is required to match GPS coordinates between the two configurations.")
+        st.error(
+            "Survey key is required to match GPS coordinates between the two configurations."
+        )
         return
 
     # Filter out rows with missing coordinates
     comparison_data = comparison_data.filter(
-        pl.col("lat_1").is_not_null() &
-        pl.col("lon_1").is_not_null() &
-        pl.col("lat_2").is_not_null() &
-        pl.col("lon_2").is_not_null()
+        pl.col("lat_1").is_not_null()
+        & pl.col("lon_1").is_not_null()
+        & pl.col("lat_2").is_not_null()
+        & pl.col("lon_2").is_not_null()
     )
 
     if comparison_data.is_empty():
@@ -1420,8 +1439,7 @@ def _render_gps_comparison_checks(
     def calculate_distance(row):
         try:
             return geodesic(
-                (row["lat_1"], row["lon_1"]),
-                (row["lat_2"], row["lon_2"])
+                (row["lat_1"], row["lon_1"]), (row["lat_2"], row["lon_2"])
             ).meters
         except Exception:
             return None
@@ -1436,7 +1454,9 @@ def _render_gps_comparison_checks(
         return
 
     # Flag points exceeding threshold
-    comparison_df["exceeds_threshold"] = comparison_df["distance_meters"] > distance_threshold
+    comparison_df["exceeds_threshold"] = (
+        comparison_df["distance_meters"] > distance_threshold
+    )
 
     # Calculate statistics
     total_points = len(comparison_df)
@@ -1457,7 +1477,9 @@ def _render_gps_comparison_checks(
         st.metric("Max Distance", f"{max_distance:.1f} m")
 
     if flagged_pct > 0:
-        st.warning(f"⚠ {flagged_pct:.1f}% of GPS points exceed the {distance_threshold}m threshold")
+        st.warning(
+            f"⚠ {flagged_pct:.1f}% of GPS points exceed the {distance_threshold}m threshold"
+        )
     else:
         st.success(f"✓ All GPS points are within {distance_threshold}m of each other")
 
@@ -1469,10 +1491,9 @@ def _render_gps_comparison_checks(
     map_df = comparison_df.copy()
     map_df["lat"] = map_df["lat_1"]
     map_df["lon"] = map_df["lon_1"]
-    map_df["status"] = map_df["exceeds_threshold"].map({
-        True: "Exceeds Threshold",
-        False: "Within Threshold"
-    })
+    map_df["status"] = map_df["exceeds_threshold"].map(
+        {True: "Exceeds Threshold", False: "Within Threshold"}
+    )
 
     # Build tooltip fields
     tooltip_fields = []
@@ -1486,7 +1507,9 @@ def _render_gps_comparison_checks(
 
     # Create tooltip configuration
     tooltip_config = {
-        "html": "<br>".join([f"<b>{field}:</b> {{{field}}}" for field in tooltip_fields]),
+        "html": "<br>".join(
+            [f"<b>{field}:</b> {{{field}}}" for field in tooltip_fields]
+        ),
         "style": {"backgroundColor": "steelblue", "color": "white"},
     }
 
@@ -1549,24 +1572,25 @@ def _render_gps_comparison_checks(
         if enumerator and enumerator in comparison_df.columns:
             display_cols.append(enumerator)
 
-        display_cols.extend([
-            "lat_1", "lon_1", "lat_2", "lon_2",
-            "distance_meters", "exceeds_threshold"
-        ])
+        display_cols.extend(
+            ["lat_1", "lon_1", "lat_2", "lon_2", "distance_meters", "exceeds_threshold"]
+        )
 
         # Show only available columns
         available_cols = [col for col in display_cols if col in comparison_df.columns]
 
         # Rename columns for better readability
         display_df = comparison_df[available_cols].copy()
-        display_df = display_df.rename(columns={
-            "lat_1": f"{gps_config_1}_lat",
-            "lon_1": f"{gps_config_1}_lon",
-            "lat_2": f"{gps_config_2}_lat",
-            "lon_2": f"{gps_config_2}_lon",
-            "distance_meters": "Distance (m)",
-            "exceeds_threshold": "Flagged"
-        })
+        display_df = display_df.rename(
+            columns={
+                "lat_1": f"{gps_config_1}_lat",
+                "lon_1": f"{gps_config_1}_lon",
+                "lat_2": f"{gps_config_2}_lat",
+                "lon_2": f"{gps_config_2}_lon",
+                "distance_meters": "Distance (m)",
+                "exceeds_threshold": "Flagged",
+            }
+        )
 
         # Sort by distance descending to show largest discrepancies first
         display_df = display_df.sort_values("Distance (m)", ascending=False)
@@ -1642,7 +1666,9 @@ def plot_gps_coordinates(
 
     # Create tooltip configuration
     tooltip_config = {
-        "html": "<br>".join([f"<b>{field}:</b> {{{field}}}" for field in tooltip_fields]),
+        "html": "<br>".join(
+            [f"<b>{field}:</b> {{{field}}}" for field in tooltip_fields]
+        ),
         "style": {"backgroundColor": "steelblue", "color": "white"},
     }
 
@@ -1814,7 +1840,9 @@ def detect_outliers_with_lof(df, gps_lat_col, gps_lon_col, n_neighbors, contamin
     coords = df[[gps_lat_col, gps_lon_col]].values
 
     # Apply Local Outlier Factor
-    lof = LocalOutlierFactor(n_neighbors=adjusted_n_neighbors, contamination=contamination)
+    lof = LocalOutlierFactor(
+        n_neighbors=adjusted_n_neighbors, contamination=contamination
+    )
     df["Outlier"] = lof.fit_predict(coords) == -1  # LOF assigns -1 to outliers
 
     return df
@@ -1946,7 +1974,9 @@ def plot_clusters_on_map(
 
     # Create tooltip configuration
     tooltip_config = {
-        "html": "<br>".join([f"<b>{field}:</b> {{{field}}}" for field in tooltip_fields]),
+        "html": "<br>".join(
+            [f"<b>{field}:</b> {{{field}}}" for field in tooltip_fields]
+        ),
         "style": {"backgroundColor": "steelblue", "color": "white"},
     }
 

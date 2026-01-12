@@ -37,7 +37,9 @@ class CorrectionFormState(BaseModel):
     key_value: str = Field(..., description="The selected key value for correction")
     action: str = Field(..., description="The correction action type")
     column: str | None = Field(None, description="The column to modify (if applicable)")
-    current_value: Any | None = Field(None, description="The current value (if applicable)")
+    current_value: Any | None = Field(
+        None, description="The current value (if applicable)"
+    )
     new_value: Any | None = Field(None, description="The new value (if applicable)")
     validation_error: str | None = Field(
         None, description="Validation error message (if any)"

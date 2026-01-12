@@ -56,25 +56,27 @@ def mock_database_functions(monkeypatch):
 def sample_enumerator_data():
     """Create sample enumerator data as Polars DataFrame."""
     today = date.today()
-    return pl.DataFrame({
-        "survey_id": ["S001", "S002", "S003", "S004", "S005", "S006"],
-        "submission_date": [
-            today - timedelta(days=1),
-            today - timedelta(days=2),
-            today - timedelta(days=3),
-            today - timedelta(days=1),
-            today - timedelta(days=8),
-            today,
-        ],
-        "enumerator": ["E1", "E1", "E2", "E2", "E3", "E1"],
-        "team": ["T1", "T1", "T1", "T2", "T2", "T1"],
-        "duration": [3600, 4200, 3800, 4000, 3900, 3700],
-        "formversion": ["v1", "v1", "v2", "v2", "v1", "v2"],
-        "age": [25, 30, 35, 28, 32, 27],
-        "income": [50000, 60000, 55000, 52000, 58000, 51000],
-        "consent_granted_agg_col": [1, 1, 1, 0, 1, 1],
-        "completed_survey_agg_col": [1, 1, 1, 1, 0, 1],
-    })
+    return pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002", "S003", "S004", "S005", "S006"],
+            "submission_date": [
+                today - timedelta(days=1),
+                today - timedelta(days=2),
+                today - timedelta(days=3),
+                today - timedelta(days=1),
+                today - timedelta(days=8),
+                today,
+            ],
+            "enumerator": ["E1", "E1", "E2", "E2", "E3", "E1"],
+            "team": ["T1", "T1", "T1", "T2", "T2", "T1"],
+            "duration": [3600, 4200, 3800, 4000, 3900, 3700],
+            "formversion": ["v1", "v1", "v2", "v2", "v1", "v2"],
+            "age": [25, 30, 35, 28, 32, 27],
+            "income": [50000, 60000, 55000, 52000, 58000, 51000],
+            "consent_granted_agg_col": [1, 1, 1, 0, 1, 1],
+            "completed_survey_agg_col": [1, 1, 1, 1, 0, 1],
+        }
+    )
 
 
 @pytest.fixture
@@ -95,10 +97,12 @@ def sample_enumerator_settings():
 @pytest.fixture
 def sample_missing_codes_config():
     """Create sample missing codes configuration."""
-    return pl.DataFrame({
-        "label": ["Refused", "Don't know"],
-        "codes": ["-99", "-88"],
-    })
+    return pl.DataFrame(
+        {
+            "label": ["Refused", "Don't know"],
+            "codes": ["-99", "-88"],
+        }
+    )
 
 
 @pytest.fixture
@@ -393,6 +397,7 @@ def test_load_default_enumerator_settings_missing_file():
 def test_trigger_success_message():
     """Test _trigger_success_message function."""
     import streamlit as st
+
     st.session_state = {}
 
     _trigger_success_message("test_button")
@@ -401,11 +406,13 @@ def test_trigger_success_message():
 
 def test_create_enum_data_on_settings_with_consent_and_outcome():
     """Test _create_enum_data_on_settings with consent and outcome values."""
-    data = pl.DataFrame({
-        "survey_id": ["S001", "S002", "S003"],
-        "consent": ["yes", "no", "yes"],
-        "outcome": ["completed", "incomplete", "completed"],
-    })
+    data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002", "S003"],
+            "consent": ["yes", "no", "yes"],
+            "outcome": ["completed", "incomplete", "completed"],
+        }
+    )
 
     config = ConsentOutcomeSettings(
         consent="consent",
@@ -430,10 +437,12 @@ def test_create_enum_data_on_settings_with_consent_and_outcome():
 
 def test_create_enum_data_on_settings_without_consent():
     """Test _create_enum_data_on_settings without consent values."""
-    data = pl.DataFrame({
-        "survey_id": ["S001", "S002"],
-        "outcome": ["completed", "completed"],
-    })
+    data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002"],
+            "outcome": ["completed", "completed"],
+        }
+    )
 
     config = ConsentOutcomeSettings(
         consent=None,
@@ -452,10 +461,12 @@ def test_create_enum_data_on_settings_without_consent():
 
 def test_create_enum_data_on_settings_without_outcome():
     """Test _create_enum_data_on_settings without outcome values."""
-    data = pl.DataFrame({
-        "survey_id": ["S001", "S002"],
-        "consent": ["yes", "yes"],
-    })
+    data = pl.DataFrame(
+        {
+            "survey_id": ["S001", "S002"],
+            "consent": ["yes", "yes"],
+        }
+    )
 
     config = ConsentOutcomeSettings(
         consent="consent",
@@ -505,7 +516,9 @@ def test_compute_enumerator_overview_without_team(sample_enumerator_data):
 
 def test_compute_enumerator_overview_empty_data():
     """Test enumerator overview with empty data."""
-    empty_data = pl.DataFrame(schema={"submission_date": pl.Date, "enumerator": pl.Utf8})
+    empty_data = pl.DataFrame(
+        schema={"submission_date": pl.Date, "enumerator": pl.Utf8}
+    )
 
     with pytest.raises(ValueError, match="Input data is empty"):
         compute_enumerator_overview(empty_data, "submission_date", "enumerator", None)
@@ -514,15 +527,17 @@ def test_compute_enumerator_overview_empty_data():
 def test_compute_enumerator_overview_active_enumerators():
     """Test active enumerators calculation."""
     today = date.today()
-    data = pl.DataFrame({
-        "submission_date": [
-            today - timedelta(days=1),
-            today - timedelta(days=10),
-            today,
-        ],
-        "enumerator": ["E1", "E2", "E1"],
-        "team": ["T1", "T1", "T1"],
-    })
+    data = pl.DataFrame(
+        {
+            "submission_date": [
+                today - timedelta(days=1),
+                today - timedelta(days=10),
+                today,
+            ],
+            "enumerator": ["E1", "E2", "E1"],
+            "team": ["T1", "T1", "T1"],
+        }
+    )
 
     result = compute_enumerator_overview(data, "submission_date", "enumerator", "team")
 
@@ -549,7 +564,9 @@ def test_compute_enumerator_missing_table_empty_config(sample_enumerator_data):
     assert "% Null values" in result.columns
 
 
-def test_compute_enumerator_missing_table_with_config(sample_enumerator_data, sample_missing_codes_config):
+def test_compute_enumerator_missing_table_with_config(
+    sample_enumerator_data, sample_missing_codes_config
+):
     """Test missing table with missing codes config."""
     result = compute_enumerator_missing_table(
         sample_enumerator_data, sample_missing_codes_config, ["enumerator"]
@@ -601,7 +618,9 @@ def test_compute_enumerator_summary_basic(mock_load_missing, sample_enumerator_d
 
 
 @patch("datasure.checks.enumerator.load_missing_codes_from_db")
-def test_compute_enumerator_summary_without_team(mock_load_missing, sample_enumerator_data):
+def test_compute_enumerator_summary_without_team(
+    mock_load_missing, sample_enumerator_data
+):
     """Test enumerator summary without team."""
     mock_load_missing.return_value = pl.DataFrame()
 
@@ -621,7 +640,9 @@ def test_compute_enumerator_summary_without_team(mock_load_missing, sample_enume
 
 
 @patch("datasure.checks.enumerator.load_missing_codes_from_db")
-def test_compute_enumerator_summary_without_duration(mock_load_missing, sample_enumerator_data):
+def test_compute_enumerator_summary_without_duration(
+    mock_load_missing, sample_enumerator_data
+):
     """Test enumerator summary without duration."""
     mock_load_missing.return_value = pl.DataFrame()
 
@@ -640,7 +661,9 @@ def test_compute_enumerator_summary_without_duration(mock_load_missing, sample_e
 
 
 @patch("datasure.checks.enumerator.load_missing_codes_from_db")
-def test_compute_enumerator_summary_without_formversion(mock_load_missing, sample_enumerator_data):
+def test_compute_enumerator_summary_without_formversion(
+    mock_load_missing, sample_enumerator_data
+):
     """Test enumerator summary without formversion."""
     mock_load_missing.return_value = pl.DataFrame()
 
@@ -659,7 +682,9 @@ def test_compute_enumerator_summary_without_formversion(mock_load_missing, sampl
 
 
 @patch("datasure.checks.enumerator.load_missing_codes_from_db")
-def test_compute_enumerator_summary_with_consent(mock_load_missing, sample_enumerator_data):
+def test_compute_enumerator_summary_with_consent(
+    mock_load_missing, sample_enumerator_data
+):
     """Test enumerator summary with consent column."""
     mock_load_missing.return_value = pl.DataFrame()
 
@@ -678,7 +703,9 @@ def test_compute_enumerator_summary_with_consent(mock_load_missing, sample_enume
 
 
 @patch("datasure.checks.enumerator.load_missing_codes_from_db")
-def test_compute_enumerator_summary_with_outcome(mock_load_missing, sample_enumerator_data):
+def test_compute_enumerator_summary_with_outcome(
+    mock_load_missing, sample_enumerator_data
+):
     """Test enumerator summary with outcome column."""
     mock_load_missing.return_value = pl.DataFrame()
 
@@ -755,7 +782,11 @@ def test_compute_enumerator_productivity_legacy_period_names(sample_enumerator_d
 def test_compute_enumerator_productivity_with_team(sample_enumerator_data):
     """Test productivity with team grouping."""
     result = compute_enumerator_productivity(
-        sample_enumerator_data, "submission_date", ["enumerator", "team"], "Daily", "SUN"
+        sample_enumerator_data,
+        "submission_date",
+        ["enumerator", "team"],
+        "Daily",
+        "SUN",
     )
 
     assert not result.is_empty()
@@ -767,7 +798,11 @@ def test_compute_enumerator_productivity_different_weekstarts(sample_enumerator_
     """Test productivity with different week start days."""
     for weekstart in ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]:
         result = compute_enumerator_productivity(
-            sample_enumerator_data, "submission_date", ["enumerator"], "Weekly", weekstart
+            sample_enumerator_data,
+            "submission_date",
+            ["enumerator"],
+            "Weekly",
+            weekstart,
         )
         assert not result.is_empty()
 
@@ -802,7 +837,16 @@ def test_compute_enumerator_statistics_all_stats(sample_enumerator_data):
             sample_enumerator_data,
             ["enumerator"],
             ["age"],
-            ["count", "min", "mean", "median", "max", "std", "25th percentile", "75th percentile"],
+            [
+                "count",
+                "min",
+                "mean",
+                "median",
+                "max",
+                "std",
+                "25th percentile",
+                "75th percentile",
+            ],
         )
 
     assert not result.is_empty()
@@ -923,7 +967,9 @@ def test_compute_enumerator_statistics_overtime_missing_stat(sample_enumerator_d
     assert not result.is_empty()
 
 
-def test_compute_enumerator_statistics_overtime_percentile_stats(sample_enumerator_data):
+def test_compute_enumerator_statistics_overtime_percentile_stats(
+    sample_enumerator_data,
+):
     """Test statistics overtime with percentile statistics."""
     result_25th = compute_enumerator_statistics_overtime(
         sample_enumerator_data,
@@ -1011,12 +1057,14 @@ def test_compute_enumerator_statistics_overtime_with_team(sample_enumerator_data
 
 def test_get_numeric_columns():
     """Test _get_numeric_columns helper function."""
-    data = pl.DataFrame({
-        "age": [25, 30, 35],
-        "income": [50000, 60000, 55000],
-        "name": ["Alice", "Bob", "Charlie"],
-        "is_active": [True, False, True],
-    })
+    data = pl.DataFrame(
+        {
+            "age": [25, 30, 35],
+            "income": [50000, 60000, 55000],
+            "name": ["Alice", "Bob", "Charlie"],
+            "is_active": [True, False, True],
+        }
+    )
 
     result = _get_numeric_columns(data)
     assert "age" in result
@@ -1027,11 +1075,13 @@ def test_get_numeric_columns():
 
 def test_get_numeric_columns_with_exclude():
     """Test _get_numeric_columns with exclude list."""
-    data = pl.DataFrame({
-        "age": [25, 30, 35],
-        "income": [50000, 60000, 55000],
-        "duration": [3600, 4200, 3800],
-    })
+    data = pl.DataFrame(
+        {
+            "age": [25, 30, 35],
+            "income": [50000, 60000, 55000],
+            "duration": [3600, 4200, 3800],
+        }
+    )
 
     result = _get_numeric_columns(data, exclude_cols=["duration"])
     assert "age" in result
@@ -1048,10 +1098,12 @@ def test_get_numeric_columns_empty_dataframe():
 
 def test_get_numeric_columns_no_numeric():
     """Test _get_numeric_columns with no numeric columns."""
-    data = pl.DataFrame({
-        "name": ["Alice", "Bob"],
-        "city": ["NYC", "LA"],
-    })
+    data = pl.DataFrame(
+        {
+            "name": ["Alice", "Bob"],
+            "city": ["NYC", "LA"],
+        }
+    )
     result = _get_numeric_columns(data)
     assert result == []
 
@@ -1063,11 +1115,13 @@ def test_get_numeric_columns_no_numeric():
 
 def test_edge_case_single_enumerator():
     """Test handling of single enumerator."""
-    data = pl.DataFrame({
-        "submission_date": [date.today(), date.today() - timedelta(days=1)],
-        "enumerator": ["E1", "E1"],
-        "age": [25, 30],
-    })
+    data = pl.DataFrame(
+        {
+            "submission_date": [date.today(), date.today() - timedelta(days=1)],
+            "enumerator": ["E1", "E1"],
+            "age": [25, 30],
+        }
+    )
 
     result = compute_enumerator_overview(data, "submission_date", "enumerator", None)
     assert result.num_enumerators == 1
@@ -1076,11 +1130,13 @@ def test_edge_case_single_enumerator():
 
 def test_edge_case_all_null_values():
     """Test handling of all null values in column."""
-    data = pl.DataFrame({
-        "submission_date": [date.today(), date.today()],
-        "enumerator": ["E1", "E2"],
-        "age": [None, None],
-    })
+    data = pl.DataFrame(
+        {
+            "submission_date": [date.today(), date.today()],
+            "enumerator": ["E1", "E2"],
+            "age": [None, None],
+        }
+    )
 
     with patch("streamlit.cache_data", lambda ttl: lambda f: f):
         result = compute_enumerator_statistics(
@@ -1097,12 +1153,14 @@ def test_edge_case_all_null_values():
 
 def test_edge_case_single_submission():
     """Test handling of single submission."""
-    data = pl.DataFrame({
-        "submission_date": [date.today()],
-        "enumerator": ["E1"],
-        "team": ["T1"],
-        "age": [25],
-    })
+    data = pl.DataFrame(
+        {
+            "submission_date": [date.today()],
+            "enumerator": ["E1"],
+            "team": ["T1"],
+            "age": [25],
+        }
+    )
 
     result = compute_enumerator_overview(data, "submission_date", "enumerator", "team")
     assert result.all_submissions == 1
@@ -1112,14 +1170,16 @@ def test_edge_case_single_submission():
 def test_edge_case_date_ranges():
     """Test handling of various date ranges."""
     today = date.today()
-    data = pl.DataFrame({
-        "submission_date": [
-            today,
-            today - timedelta(days=365),
-            today - timedelta(days=1000),
-        ],
-        "enumerator": ["E1", "E2", "E3"],
-    })
+    data = pl.DataFrame(
+        {
+            "submission_date": [
+                today,
+                today - timedelta(days=365),
+                today - timedelta(days=1000),
+            ],
+            "enumerator": ["E1", "E2", "E3"],
+        }
+    )
 
     result = compute_enumerator_productivity(
         data, "submission_date", ["enumerator"], "Monthly", "SUN"
@@ -1186,12 +1246,14 @@ def test_full_enumerator_workflow(mock_load_missing, sample_enumerator_data):
 
 def test_enumerator_workflow_with_missing_data():
     """Test enumerator workflow with missing data."""
-    data = pl.DataFrame({
-        "submission_date": [date.today(), date.today() - timedelta(days=1)],
-        "enumerator": ["E1", "E2"],
-        "age": [25, None],
-        "income": [50000, 60000],
-    })
+    data = pl.DataFrame(
+        {
+            "submission_date": [date.today(), date.today() - timedelta(days=1)],
+            "enumerator": ["E1", "E2"],
+            "age": [25, None],
+            "income": [50000, 60000],
+        }
+    )
 
     # Overview should work with missing data
     overview = compute_enumerator_overview(data, "submission_date", "enumerator", None)
@@ -1244,10 +1306,12 @@ def test_consent_outcome_integration(mock_save, sample_enumerator_data):
     )
 
     # Add consent and outcome columns
-    data = sample_enumerator_data.with_columns([
-        pl.lit("yes").alias("consent"),
-        pl.lit("completed").alias("outcome"),
-    ])
+    data = sample_enumerator_data.with_columns(
+        [
+            pl.lit("yes").alias("consent"),
+            pl.lit("completed").alias("outcome"),
+        ]
+    )
 
     # Create enum data with settings
     _create_enum_data_on_settings("test_project", data, config)

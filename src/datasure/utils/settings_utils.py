@@ -13,6 +13,7 @@ from datasure.utils.config_utils import ConfigurationService
 # Try to import toml for writing, use fallback if not available
 try:
     import toml
+
     HAS_TOML = True
 except ImportError:
     HAS_TOML = False
@@ -157,7 +158,7 @@ def _write_toml_simple(data: dict, file_path: Path) -> None:
                 escaped_value = value.replace('"', '\\"')
                 f.write(f'{key} = "{escaped_value}"\n')
             else:
-                f.write(f'{key} = {value}\n')
+                f.write(f"{key} = {value}\n")
 
 
 def save_secrets(secret_name: str, secret_key: str) -> None:
@@ -188,7 +189,10 @@ def save_secrets(secret_name: str, secret_key: str) -> None:
     >>> save_secrets("mapbox_api_key", "pk.ey...")
     >>> # Now accessible via st.secrets["mapbox_api_key"]
     """
-    if "mapbox_custom_key" not in st.session_state or st.session_state["mapbox_custom_key"] is False:
+    if (
+        "mapbox_custom_key" not in st.session_state
+        or st.session_state["mapbox_custom_key"] is False
+    ):
         return
 
     # Determine the secrets file path

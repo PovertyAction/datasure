@@ -455,6 +455,7 @@ def render_backcheck_dataset_selector(
         help="Select the backcheck dataset to check.",
     )
 
+
 @st.fragment
 def render_backcheck_column_selectors(
     datetime_columns: list[str] | None = None,
@@ -570,7 +571,9 @@ def add_check_configuration_form(
         )
 
         # merge survey and backcheck column selection
-        column_selections = dict(survey_column_selections) | dict(backcheck_column_selections)
+        column_selections = dict(survey_column_selections) | dict(
+            backcheck_column_selections
+        )
 
     # Step 6: Submit button
     add_button = st.button(

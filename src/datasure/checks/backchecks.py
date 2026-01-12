@@ -19,7 +19,15 @@ from datasure.utils.settings_utils import (
 TAB_NAME: str = "backchecks"
 
 # Weekday constants for productivity analysis
-WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+WEEKDAY_NAMES = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+]
 
 # Maps weekday names to offset codes used in computation
 WEEKDAY_OFFSET_MAP = {
@@ -47,8 +55,6 @@ WEEKDAY_OFFSET_TO_NUMERIC = {
 ##### Backchecks #####
 
 
-
-
 # ==============================================================================
 # PYDANTIC MODELS AND ENUMS
 # ==============================================================================
@@ -64,18 +70,23 @@ class SearchType(str, Enum):
     REGEX = "regex"
 
 
-
 class BackcheckSettings(BaseModel):
     """Backcheck report settings model."""
 
     survey_key: str | None = Field(..., description="Column containing survey key")
     survey_id: str | None = Field(None, description="Column containing survey ID")
     survey_date: str | None = Field(None, description="Column containing survey date")
-    backcheck_date: str | None = Field(None, description="Column containing backcheck date")
+    backcheck_date: str | None = Field(
+        None, description="Column containing backcheck date"
+    )
     enumerator: str | None = Field(None, description="Column containing enumerator")
     backchecker: str | None = Field(None, description="Column containing back checker")
-    backcheck_target_percent: int = Field(10, description="Target percentage of backchecks")
-    drop_duplicates_option: str = Field("drop", description="How to handle duplicate entries")
+    backcheck_target_percent: int = Field(
+        10, description="Target percentage of backchecks"
+    )
+    drop_duplicates_option: str = Field(
+        "drop", description="How to handle duplicate entries"
+    )
     no_differences_list: list[str] | None = Field(
         None,
         description="List of values that will not be marked as differences",
@@ -95,7 +106,6 @@ class BackcheckSettings(BaseModel):
     )
 
 
-
 class StrCompareOptions(BaseModel):
     """String comparison settings for backchecks."""
 
@@ -104,13 +114,11 @@ class StrCompareOptions(BaseModel):
     nosymbols_option: bool = Field(False, description="Ignore symbols option")
 
 
-
 class OkRangeValues(BaseModel):
     """OK range values settings for backchecks."""
 
     ok_range_neg: float | None = Field(le=0, description="Negative OK range value")
     ok_range_pos: float | None = Field(ge=0, description="Positive OK range value")
-
 
 
 class OkRangeOptions(BaseModel):
@@ -122,13 +130,11 @@ class OkRangeOptions(BaseModel):
     )
 
 
-
 class OkRangeType(str, Enum):
     """OK range types for backchecks."""
 
     NUMBER = "number"
     PERCENTAGE = "percentage"
-
 
 
 class BackcheckTestOptions(BaseModel):
@@ -179,7 +185,6 @@ def load_default_backchecks_settings(
 # =============================================================================
 # Column Search and Selection Utilities
 # =============================================================================
-
 
 
 def expand_col_names(
@@ -237,16 +242,23 @@ def expand_col_names(
 # =============================================================================
 
 
-
 def _get_ok_range_value(ok_range_type: OkRangeType) -> OkRangeValues:
     """Get the OK range value based on the selected type."""
     okr1, okr2 = st.columns(2)
     if ok_range_type == "number":
         okr_neg = okr1.number_input(
-            "Negative Range Value", max_value=0.0, value=0.0, step=1.0, help="Enter the negative range value"
+            "Negative Range Value",
+            max_value=0.0,
+            value=0.0,
+            step=1.0,
+            help="Enter the negative range value",
         )
         okr_pos = okr2.number_input(
-            "Positive Range Value", min_value=0.0, value=0.0, step=1.0,  help="Enter the positive range value"
+            "Positive Range Value",
+            min_value=0.0,
+            value=0.0,
+            step=1.0,
+            help="Enter the positive range value",
         )
 
     else:
@@ -268,9 +280,6 @@ def _get_ok_range_value(ok_range_type: OkRangeType) -> OkRangeValues:
         )
 
     return OkRangeValues(ok_range_neg=okr_neg, ok_range_pos=okr_pos)
-
-
-
 
 
 # ==============================================================================
@@ -331,7 +340,11 @@ def compute_backcheck_analysis(
         return pl.DataFrame()
 
     survey_id = backcheck_settings.survey_id
-    if not survey_id or survey_id not in survey_data.columns or survey_id not in backcheck_data.columns:
+    if (
+        not survey_id
+        or survey_id not in survey_data.columns
+        or survey_id not in backcheck_data.columns
+    ):
         return pl.DataFrame()
 
     # Handle duplicates according to settings
@@ -345,19 +358,33 @@ def compute_backcheck_analysis(
         survey_for_merge = survey_for_merge.unique(subset=[survey_id], keep="last")
     elif drop_duplicates_option == "drop":
         # Keep only non-duplicate rows
-        duplicates = survey_for_merge.group_by(survey_id).len().filter(pl.col("len") > 1)[survey_id]
+        duplicates = (
+            survey_for_merge.group_by(survey_id)
+            .len()
+            .filter(pl.col("len") > 1)[survey_id]
+        )
         survey_for_merge = survey_for_merge.filter(~pl.col(survey_id).is_in(duplicates))
 
     # Prepare backcheck data for merge
     backcheck_for_merge = backcheck_data.clone()
     if drop_duplicates_option == "first":
-        backcheck_for_merge = backcheck_for_merge.unique(subset=[survey_id], keep="first")
+        backcheck_for_merge = backcheck_for_merge.unique(
+            subset=[survey_id], keep="first"
+        )
     elif drop_duplicates_option == "last":
-        backcheck_for_merge = backcheck_for_merge.unique(subset=[survey_id], keep="last")
+        backcheck_for_merge = backcheck_for_merge.unique(
+            subset=[survey_id], keep="last"
+        )
     elif drop_duplicates_option == "drop":
         # Keep only non-duplicate rows
-        duplicates = backcheck_for_merge.group_by(survey_id).len().filter(pl.col("len") > 1)[survey_id]
-        backcheck_for_merge = backcheck_for_merge.filter(~pl.col(survey_id).is_in(duplicates))
+        duplicates = (
+            backcheck_for_merge.group_by(survey_id)
+            .len()
+            .filter(pl.col("len") > 1)[survey_id]
+        )
+        backcheck_for_merge = backcheck_for_merge.filter(
+            ~pl.col(survey_id).is_in(duplicates)
+        )
 
     # Merge datasets on survey id. Inner join to keep only matched records and label
     # backcheck columns with suffix __BCCL
@@ -435,28 +462,48 @@ def compute_backcheck_analysis(
                     reliability,
                 )
                 # Extract test results into separate columns
-                col_results = col_results.with_columns([
-                    pl.lit(test_results.get("ttest", {}).get("t_statistic")).alias("ttest_t_statistic"),
-                    pl.lit(test_results.get("ttest", {}).get("p_value")).alias("ttest_p_value"),
-                    pl.lit(test_results.get("prtest", {}).get("z_statistic")).alias("prtest_z_statistic"),
-                    pl.lit(test_results.get("prtest", {}).get("p_value")).alias("prtest_p_value"),
-                    pl.lit(test_results.get("signrank", {}).get("statistic")).alias("signrank_statistic"),
-                    pl.lit(test_results.get("signrank", {}).get("p_value")).alias("signrank_p_value"),
-                    pl.lit(test_results.get("reliability", {}).get("srv")).alias("reliability_srv"),
-                    pl.lit(test_results.get("reliability", {}).get("reliability_ratio")).alias("reliability_ratio"),
-                ])
+                col_results = col_results.with_columns(
+                    [
+                        pl.lit(test_results.get("ttest", {}).get("t_statistic")).alias(
+                            "ttest_t_statistic"
+                        ),
+                        pl.lit(test_results.get("ttest", {}).get("p_value")).alias(
+                            "ttest_p_value"
+                        ),
+                        pl.lit(test_results.get("prtest", {}).get("z_statistic")).alias(
+                            "prtest_z_statistic"
+                        ),
+                        pl.lit(test_results.get("prtest", {}).get("p_value")).alias(
+                            "prtest_p_value"
+                        ),
+                        pl.lit(test_results.get("signrank", {}).get("statistic")).alias(
+                            "signrank_statistic"
+                        ),
+                        pl.lit(test_results.get("signrank", {}).get("p_value")).alias(
+                            "signrank_p_value"
+                        ),
+                        pl.lit(test_results.get("reliability", {}).get("srv")).alias(
+                            "reliability_srv"
+                        ),
+                        pl.lit(
+                            test_results.get("reliability", {}).get("reliability_ratio")
+                        ).alias("reliability_ratio"),
+                    ]
+                )
             else:
                 # Add null test result columns to maintain schema consistency
-                col_results = col_results.with_columns([
-                    pl.lit(None).alias("ttest_t_statistic"),
-                    pl.lit(None).alias("ttest_p_value"),
-                    pl.lit(None).alias("prtest_z_statistic"),
-                    pl.lit(None).alias("prtest_p_value"),
-                    pl.lit(None).alias("signrank_statistic"),
-                    pl.lit(None).alias("signrank_p_value"),
-                    pl.lit(None).alias("reliability_srv"),
-                    pl.lit(None).alias("reliability_ratio"),
-                ])
+                col_results = col_results.with_columns(
+                    [
+                        pl.lit(None).alias("ttest_t_statistic"),
+                        pl.lit(None).alias("ttest_p_value"),
+                        pl.lit(None).alias("prtest_z_statistic"),
+                        pl.lit(None).alias("prtest_p_value"),
+                        pl.lit(None).alias("signrank_statistic"),
+                        pl.lit(None).alias("signrank_p_value"),
+                        pl.lit(None).alias("reliability_srv"),
+                        pl.lit(None).alias("reliability_ratio"),
+                    ]
+                )
 
             results.append(col_results)
 
@@ -466,9 +513,12 @@ def compute_backcheck_analysis(
     return pl.DataFrame()
 
 
-
 def compute_backchecker_productivity(
-    data: pl.DataFrame, date: str, group_by_cols: list[str], period: str, weekstartday: str
+    data: pl.DataFrame,
+    date: str,
+    group_by_cols: list[str],
+    period: str,
+    weekstartday: str,
 ) -> pl.DataFrame:
     """Compute backchecker productivity over time.
 
@@ -516,20 +566,36 @@ def compute_backchecker_productivity(
 
         # Calculate the week start date (beginning of the week containing this date)
         # weekday() returns 0=Monday, 6=Sunday
-        prod_df = prod_df.with_columns([
-            # Calculate days since the start of the week
-            ((pl.col(date).dt.weekday() - offset + 7) % 7).alias("_days_since_week_start"),
-        ])
+        prod_df = prod_df.with_columns(
+            [
+                # Calculate days since the start of the week
+                ((pl.col(date).dt.weekday() - offset + 7) % 7).alias(
+                    "_days_since_week_start"
+                ),
+            ]
+        )
 
         # Calculate week_start_date by subtracting days_since_week_start
-        prod_df = prod_df.with_columns([
-            (pl.col(date) - pl.duration(days=pl.col("_days_since_week_start"))).alias("_week_start"),
-            (pl.col(date) - pl.duration(days=pl.col("_days_since_week_start")) + pl.duration(days=6)).alias("_week_end"),
-        ])
+        prod_df = prod_df.with_columns(
+            [
+                (
+                    pl.col(date) - pl.duration(days=pl.col("_days_since_week_start"))
+                ).alias("_week_start"),
+                (
+                    pl.col(date)
+                    - pl.duration(days=pl.col("_days_since_week_start"))
+                    + pl.duration(days=6)
+                ).alias("_week_end"),
+            ]
+        )
 
         # Format as "Jan 1, 2025 to Jan 7, 2025"
         prod_df = prod_df.with_columns(
-            (pl.col("_week_start").dt.strftime("%b %d, %Y") + " to " + pl.col("_week_end").dt.strftime("%b %d, %Y")).alias("TIME PERIOD")
+            (
+                pl.col("_week_start").dt.strftime("%b %d, %Y")
+                + " to "
+                + pl.col("_week_end").dt.strftime("%b %d, %Y")
+            ).alias("TIME PERIOD")
         )
     elif period_normalized == "Monthly":
         # Format as "January 2025"
@@ -539,9 +605,9 @@ def compute_backchecker_productivity(
 
     # Count submissions per period and backchecker
     prod_df = prod_df.with_row_index(name="TOKEN KEY")
-    prod_res = prod_df.group_by(["TIME PERIOD"] + group_by_cols, maintain_order=True).agg(
-        pl.col("TOKEN KEY").count().alias("submissions")
-    )
+    prod_res = prod_df.group_by(
+        ["TIME PERIOD"] + group_by_cols, maintain_order=True
+    ).agg(pl.col("TOKEN KEY").count().alias("submissions"))
 
     # Pivot to wide format
     prod_res = prod_res.pivot(
@@ -551,7 +617,6 @@ def compute_backchecker_productivity(
     ).fill_null(0)
 
     return prod_res
-
 
 
 def compute_enumerator_backchecker_stats(
@@ -617,24 +682,40 @@ def compute_enumerator_backchecker_stats(
     # For backcheckers, join on the backcheck key; for enumerators, join on survey key
     # Remove duplicates from staff_info to avoid duplicate rows
     if staff_type == "enumerator":
-        staff_info = data_source.select([survey_key, staff_col]).unique(subset=[survey_key])
-        analysis_with_staff = backcheck_analysis.join(staff_info, on=survey_key, how="left")
+        staff_info = data_source.select([survey_key, staff_col]).unique(
+            subset=[survey_key]
+        )
+        analysis_with_staff = backcheck_analysis.join(
+            staff_info, on=survey_key, how="left"
+        )
     else:
         # For backcheckers, join backcheck_data with backcheck key
-        staff_info = data_source.select([survey_key, staff_col]).unique(subset=[survey_key])
+        staff_info = data_source.select([survey_key, staff_col]).unique(
+            subset=[survey_key]
+        )
         # Rename survey_key to match backcheck key in analysis
         staff_info = staff_info.rename({survey_key: join_key})
-        analysis_with_staff = backcheck_analysis.join(staff_info, on=join_key, how="left")
+        analysis_with_staff = backcheck_analysis.join(
+            staff_info, on=join_key, how="left"
+        )
 
     # Add survey date from survey_data (regardless of staff type)
     if survey_date and survey_date in survey_data.columns:
-        survey_dates = survey_data.select([survey_key, pl.col(survey_date).alias("survey_date_col")]).unique(subset=[survey_key])
-        analysis_with_staff = analysis_with_staff.join(survey_dates, on=survey_key, how="left")
+        survey_dates = survey_data.select(
+            [survey_key, pl.col(survey_date).alias("survey_date_col")]
+        ).unique(subset=[survey_key])
+        analysis_with_staff = analysis_with_staff.join(
+            survey_dates, on=survey_key, how="left"
+        )
 
     # Add backcheck date from backcheck_data
     if backcheck_date and backcheck_date in backcheck_data.columns:
-        bc_dates = backcheck_data.select([survey_key, pl.col(backcheck_date).alias("backcheck_date_col")]).unique(subset=[survey_key])
-        analysis_with_staff = analysis_with_staff.join(bc_dates, on=survey_key, how="left")
+        bc_dates = backcheck_data.select(
+            [survey_key, pl.col(backcheck_date).alias("backcheck_date_col")]
+        ).unique(subset=[survey_key])
+        analysis_with_staff = analysis_with_staff.join(
+            bc_dates, on=survey_key, how="left"
+        )
 
     # Calculate statistics by staff and category
     stats_list = []
@@ -656,19 +737,27 @@ def compute_enumerator_backchecker_stats(
         staff_stats["Backchecks"] = staff_data[survey_key].n_unique()
 
         # Calculate average days between survey and backcheck (overall)
-        if (survey_date and backcheck_date and
-            "survey_date_col" in staff_data.columns and
-            "backcheck_date_col" in staff_data.columns):
+        if (
+            survey_date
+            and backcheck_date
+            and "survey_date_col" in staff_data.columns
+            and "backcheck_date_col" in staff_data.columns
+        ):
             with suppress(Exception):
                 days_diff = (
-                    staff_data
-                    .with_columns([
-                        (pl.col("backcheck_date_col") - pl.col("survey_date_col")).dt.total_days().alias("days_between")
-                    ])
+                    staff_data.with_columns(
+                        [
+                            (pl.col("backcheck_date_col") - pl.col("survey_date_col"))
+                            .dt.total_days()
+                            .alias("days_between")
+                        ]
+                    )
                     .select(pl.col("days_between").mean())
                     .item()
                 )
-                staff_stats["Avg Days"] = round(days_diff, 1) if days_diff is not None else 0
+                staff_stats["Avg Days"] = (
+                    round(days_diff, 1) if days_diff is not None else 0
+                )
         else:
             staff_stats["Avg Days"] = 0
 
@@ -700,9 +789,7 @@ def compute_enumerator_backchecker_stats(
             ).height
 
             # Mismatches for this category
-            n_mismatches = cat_data.filter(
-                pl.col("match_status") == "mismatch"
-            ).height
+            n_mismatches = cat_data.filter(pl.col("match_status") == "mismatch").height
 
             # Values compared for this category (excluding missing and excluded)
             n_cat_compared = cat_data.filter(
@@ -710,11 +797,15 @@ def compute_enumerator_backchecker_stats(
             ).height
 
             # Error rate
-            error_rate = (n_mismatches / n_cat_compared * 100) if n_cat_compared > 0 else 0
+            error_rate = (
+                (n_mismatches / n_cat_compared * 100) if n_cat_compared > 0 else 0
+            )
 
             # Store category-specific stats
             staff_stats[f"Non-Missing Survey (Cat {category})"] = n_non_missing_survey
-            staff_stats[f"Non-Missing Backcheck (Cat {category})"] = n_non_missing_backcheck
+            staff_stats[f"Non-Missing Backcheck (Cat {category})"] = (
+                n_non_missing_backcheck
+            )
             staff_stats[f"Values Compared (Cat {category})"] = n_cat_compared
             staff_stats[f"Mismatches (Cat {category})"] = n_mismatches
             staff_stats[f"Error Rate % (Cat {category})"] = round(error_rate, 2)
@@ -730,7 +821,9 @@ def compute_enumerator_backchecker_stats(
         staff_stats["Non-Missing Backcheck (Total)"] = total_non_missing_backcheck
         staff_stats["Values Compared (Total)"] = total_compared
         staff_stats["Mismatches (Total)"] = total_mismatches
-        total_error_rate = (total_mismatches / total_compared * 100) if total_compared > 0 else 0
+        total_error_rate = (
+            (total_mismatches / total_compared * 100) if total_compared > 0 else 0
+        )
         staff_stats["Error Rate % (Total)"] = round(total_error_rate, 2)
 
         stats_list.append(staff_stats)
@@ -739,7 +832,6 @@ def compute_enumerator_backchecker_stats(
         return pl.DataFrame()
 
     return pl.DataFrame(stats_list)
-
 
 
 def compute_column_stats(
@@ -787,9 +879,7 @@ def compute_column_stats(
         ).height
 
         # Total mismatches
-        n_mismatches = col_data.filter(
-            pl.col("match_status") == "mismatch"
-        ).height
+        n_mismatches = col_data.filter(pl.col("match_status") == "mismatch").height
 
         # Error rate
         error_rate = (n_mismatches / n_compared * 100) if n_compared > 0 else 0
@@ -797,10 +887,14 @@ def compute_column_stats(
         # Collect test results if available
         test_results_str = ""
         test_columns = [
-            "ttest_t_statistic", "ttest_p_value",
-            "prtest_z_statistic", "prtest_p_value",
-            "signrank_statistic", "signrank_p_value",
-            "reliability_srv", "reliability_ratio"
+            "ttest_t_statistic",
+            "ttest_p_value",
+            "prtest_z_statistic",
+            "prtest_p_value",
+            "signrank_statistic",
+            "signrank_p_value",
+            "reliability_srv",
+            "reliability_ratio",
         ]
 
         # Check if any test columns exist and have non-null values
@@ -834,24 +928,23 @@ def compute_column_stats(
 
         test_results_str = "; ".join(available_tests) if available_tests else "None"
 
-        stats_list.append({
-            "Column Name": col_name,
-            "Category": category,
-            "Data Type": dtype,
-            "# of Values": n_values,
-            "Values Compared": n_compared,
-            "Mismatches": n_mismatches,
-            "Error Rate (%)": round(error_rate, 2),
-            "Test Results": test_results_str,
-        })
+        stats_list.append(
+            {
+                "Column Name": col_name,
+                "Category": category,
+                "Data Type": dtype,
+                "# of Values": n_values,
+                "Values Compared": n_compared,
+                "Mismatches": n_mismatches,
+                "Error Rate (%)": round(error_rate, 2),
+                "Test Results": test_results_str,
+            }
+        )
 
     if not stats_list:
         return pl.DataFrame()
 
     return pl.DataFrame(stats_list)
-
-
-
 
 
 # ==============================================================================
@@ -947,24 +1040,28 @@ def _compare_column_values(
         backcheck_vals = backcheck_vals.str.replace_all(r"[^\w\s]", "")
 
     # Determine match status
-    match_status = pl.when(
-        survey_vals.is_in(exclude_list) | backcheck_vals.is_in(exclude_list)
-    ).then(pl.lit("excluded")).when(
-        survey_vals.is_in(no_diff_list) & backcheck_vals.is_in(no_diff_list)
-    ).then(pl.lit("no_difference")).when(
-        survey_vals.is_null() | backcheck_vals.is_null()
-    ).then(pl.lit("missing")).when(
-        survey_vals == backcheck_vals
-    ).then(pl.lit("match")).otherwise(pl.lit("mismatch"))
+    match_status = (
+        pl.when(survey_vals.is_in(exclude_list) | backcheck_vals.is_in(exclude_list))
+        .then(pl.lit("excluded"))
+        .when(survey_vals.is_in(no_diff_list) & backcheck_vals.is_in(no_diff_list))
+        .then(pl.lit("no_difference"))
+        .when(survey_vals.is_null() | backcheck_vals.is_null())
+        .then(pl.lit("missing"))
+        .when(survey_vals == backcheck_vals)
+        .then(pl.lit("match"))
+        .otherwise(pl.lit("mismatch"))
+    )
 
     result = result.with_columns([match_status.alias("match_status")])
 
     # Calculate numeric difference and check OK range for numeric columns
-    if data.schema[survey_col].is_numeric() and data.schema[backcheck_col.replace("__BCCL", "")].is_numeric():
-        difference = (
-            pl.col("survey_value").cast(pl.Float64) -
-            pl.col("backcheck_value").cast(pl.Float64)
-        )
+    if (
+        data.schema[survey_col].is_numeric()
+        and data.schema[backcheck_col.replace("__BCCL", "")].is_numeric()
+    ):
+        difference = pl.col("survey_value").cast(pl.Float64) - pl.col(
+            "backcheck_value"
+        ).cast(pl.Float64)
         result = result.with_columns([difference.alias("difference")])
 
         # Check if within OK range
@@ -974,23 +1071,30 @@ def _compare_column_values(
 
             if ok_range_type == "percentage":
                 # Calculate percentage difference
-                pct_diff = (difference.abs() / pl.col("survey_value").cast(pl.Float64).abs()) * 100
-                within_range = (pct_diff >= abs(ok_range_neg)) & (pct_diff <= ok_range_pos)
+                pct_diff = (
+                    difference.abs() / pl.col("survey_value").cast(pl.Float64).abs()
+                ) * 100
+                within_range = (pct_diff >= abs(ok_range_neg)) & (
+                    pct_diff <= ok_range_pos
+                )
             else:
                 # Absolute difference
-                within_range = (difference >= ok_range_neg) & (difference <= ok_range_pos)
+                within_range = (difference >= ok_range_neg) & (
+                    difference <= ok_range_pos
+                )
 
             result = result.with_columns([within_range.alias("within_ok_range")])
         else:
             result = result.with_columns([pl.lit(None).alias("within_ok_range")])
     else:
-        result = result.with_columns([
-            pl.lit(None).cast(pl.Float64).alias("difference"),
-            pl.lit(None).alias("within_ok_range"),
-        ])
+        result = result.with_columns(
+            [
+                pl.lit(None).cast(pl.Float64).alias("difference"),
+                pl.lit(None).alias("within_ok_range"),
+            ]
+        )
 
     return result
-
 
 
 def _perform_statistical_tests(
@@ -1040,6 +1144,7 @@ def _perform_statistical_tests(
     if ttest:
         with suppress(Exception):
             from scipy import stats
+
             t_stat, p_value = stats.ttest_rel(survey_vals, backcheck_vals)
             test_results["ttest"] = {
                 "t_statistic": float(t_stat),
@@ -1050,11 +1155,18 @@ def _perform_statistical_tests(
     if prtest:
         with suppress(Exception):
             from scipy import stats
+
             # Assume binary 0/1 or True/False
             prop_survey = survey_vals.mean()
             prop_backcheck = backcheck_vals.mean()
             n = len(survey_vals)
-            z_stat = (prop_survey - prop_backcheck) / ((prop_survey * (1 - prop_survey) + prop_backcheck * (1 - prop_backcheck)) / n) ** 0.5
+            z_stat = (prop_survey - prop_backcheck) / (
+                (
+                    prop_survey * (1 - prop_survey)
+                    + prop_backcheck * (1 - prop_backcheck)
+                )
+                / n
+            ) ** 0.5
             p_value = 2 * (1 - stats.norm.cdf(abs(z_stat)))
             test_results["prtest"] = {
                 "z_statistic": float(z_stat),
@@ -1065,6 +1177,7 @@ def _perform_statistical_tests(
     if signrank:
         with suppress(Exception):
             from scipy import stats
+
             stat, p_value = stats.wilcoxon(survey_vals, backcheck_vals)
             test_results["signrank"] = {
                 "statistic": float(stat),
@@ -1086,16 +1199,17 @@ def _perform_statistical_tests(
     return test_results
 
 
-
-
-
 # ==============================================================================
 # COLUMN CONFIGURATION FUNCTIONS
 # ==============================================================================
 
 
 def _render_backchecks_column_actions(
-    project_id: str, page_name_id: str, survey_data, backcheck_data, common_columns: list[str]
+    project_id: str,
+    page_name_id: str,
+    survey_data,
+    backcheck_data,
+    common_columns: list[str],
 ) -> None:
     """Render the backcheck column configuration UI.
 
@@ -1144,11 +1258,12 @@ def _render_backchecks_column_actions(
 
 
 @st.dialog("Add Backcheck Column(s)", width="medium")
-
-
-
 def _add_backcheck_column(
-    project_id: str, page_name_id: str, survey_data: pl.DataFrame, backcheck_data: pl.DataFrame, common_columns: list[str]
+    project_id: str,
+    page_name_id: str,
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
+    common_columns: list[str],
 ) -> None:
     """Dialog to add a new backcheck column configuration.
 
@@ -1171,7 +1286,6 @@ def _add_backcheck_column(
         backcheck_category = _render_backcheck_category_options()
 
         if backcheck_category:
-
             # Render OK range options
             # Check if columns are numeric in both datasets
             cols_numeric_in_survey = all(
@@ -1189,10 +1303,16 @@ def _add_backcheck_column(
             # Only show OK range options for numeric columns
             if cols_numeric_in_survey and cols_numeric_in_backcheck:
                 ok_range_options: OkRangeOptions = _render_ok_range_options()
-                backcheck_test_options: BackcheckTestOptions = _render_backcheck_test_options(backcheck_category)
+                backcheck_test_options: BackcheckTestOptions = (
+                    _render_backcheck_test_options(backcheck_category)
+                )
             else:
-                ok_range_options = OkRangeOptions(ok_range_type=None, ok_range_values=None)
-                backcheck_test_options = BackcheckTestOptions(ttest=False, prtest=False, signrank=False, reliability=False)
+                ok_range_options = OkRangeOptions(
+                    ok_range_type=None, ok_range_values=None
+                )
+                backcheck_test_options = BackcheckTestOptions(
+                    ttest=False, prtest=False, signrank=False, reliability=False
+                )
 
             if st.button(
                 "Add Backcheck Column Configuration",
@@ -1214,7 +1334,6 @@ def _add_backcheck_column(
 
                 st.success("Backcheck column configuration added successfully.")
                 st.rerun()
-
 
 
 def _update_backcheck_column_config(
@@ -1262,7 +1381,9 @@ def _update_backcheck_column_config(
         "column_name": [backcheck_cols],
         "category": backcheck_category,
         "ok_range_type": ok_range_options.ok_range_type if ok_range_options else None,
-        "ok_range_values": ok_range_options.ok_range_values if ok_range_options else None,
+        "ok_range_values": ok_range_options.ok_range_values
+        if ok_range_options
+        else None,
         "ttest": backcheck_test_options.ttest,
         "prtest": backcheck_test_options.prtest,
         "signrank": backcheck_test_options.signrank,
@@ -1298,7 +1419,6 @@ def _update_backcheck_column_config(
     )
 
 
-
 def _delete_backcheck_column(
     project_id: str, page_name_id: str, backcheck_settings: pl.DataFrame
 ) -> None:
@@ -1322,14 +1442,16 @@ def _delete_backcheck_column(
         if backcheck_settings.is_empty():
             st.info("No backcheck columns have been added yet.")
         else:
-            backcheck_settings_indexed = backcheck_settings.with_row_index().with_columns(
-                (
-                    pl.col("index").cast(pl.Utf8)
-                    + " - "
-                    + pl.col("search_type")
-                    + " - "
-                    + pl.col("pattern").fill_null("")
-                ).alias("composite_index")
+            backcheck_settings_indexed = (
+                backcheck_settings.with_row_index().with_columns(
+                    (
+                        pl.col("index").cast(pl.Utf8)
+                        + " - "
+                        + pl.col("search_type")
+                        + " - "
+                        + pl.col("pattern").fill_null("")
+                    ).alias("composite_index")
+                )
             )
 
             unique_index = (
@@ -1366,7 +1488,6 @@ def _delete_backcheck_column(
                 st.rerun()
 
 
-
 def _render_backcheck_settings_table(backcheck_settings: pl.DataFrame) -> None:
     """Render the backcheck settings table in Streamlit.
 
@@ -1393,9 +1514,6 @@ def _render_backcheck_settings_table(backcheck_settings: pl.DataFrame) -> None:
                 "reliability": st.column_config.CheckboxColumn("Reliability Analysis"),
             },
         )
-
-
-
 
 
 # ==============================================================================
@@ -1463,7 +1581,8 @@ def backchecks_report_settings(
                 default_survey_key = default_settings.survey_key
                 default_survey_key_index = (
                     survey_categorical_columns.index(default_survey_key)
-                    if default_survey_key and default_survey_key in survey_categorical_columns
+                    if default_survey_key
+                    and default_survey_key in survey_categorical_columns
                     else None
                 )
                 survey_key = st.selectbox(
@@ -1481,7 +1600,8 @@ def backchecks_report_settings(
                 default_survey_id = default_settings.survey_id
                 default_survey_id_index = (
                     survey_categorical_columns.index(default_survey_id)
-                    if default_survey_id and default_survey_id in survey_categorical_columns
+                    if default_survey_id
+                    and default_survey_id in survey_categorical_columns
                     else None
                 )
                 survey_id = st.selectbox(
@@ -1505,7 +1625,8 @@ def backchecks_report_settings(
                 default_survey_date = default_settings.survey_date
                 default_survey_date_index = (
                     survey_datetime_columns.index(default_survey_date)
-                    if default_survey_date and default_survey_date in survey_datetime_columns
+                    if default_survey_date
+                    and default_survey_date in survey_datetime_columns
                     else None
                 )
 
@@ -1549,7 +1670,8 @@ def backchecks_report_settings(
                 default_enumerator = default_settings.enumerator
                 default_enumerator_index = (
                     survey_categorical_columns.index(default_enumerator)
-                    if default_enumerator and default_enumerator in survey_categorical_columns
+                    if default_enumerator
+                    and default_enumerator in survey_categorical_columns
                     else None
                 )
                 enumerator = st.selectbox(
@@ -1568,7 +1690,8 @@ def backchecks_report_settings(
                 default_backchecker = default_settings.backchecker
                 default_backchecker_index = (
                     backcheck_categorical_columns.index(default_backchecker)
-                    if default_backchecker and default_backchecker in backcheck_categorical_columns
+                    if default_backchecker
+                    and default_backchecker in backcheck_categorical_columns
                     else None
                 )
                 backchecker = st.selectbox(
@@ -1613,7 +1736,11 @@ def backchecks_report_settings(
                 st.markdown("##### Duplicate Handling")
                 st.write("How would you like to handle duplicates?")
                 default_drop_duplicates = default_settings.drop_duplicates_option
-                options_map = {"drop": ":material/remove_selection: Drop All Entries", "first": ":material/first_page: Keep First Entry", "last": ":material/last_page: Keep Last Entry"}
+                options_map = {
+                    "drop": ":material/remove_selection: Drop All Entries",
+                    "first": ":material/first_page: Keep First Entry",
+                    "last": ":material/last_page: Keep Last Entry",
+                }
                 drop_duplicates_option = st.pills(
                     "Select an option for handling duplicates",
                     options=list(options_map.keys()),
@@ -1624,12 +1751,16 @@ def backchecks_report_settings(
                     kwargs={"state_name": TAB_NAME + "_drop_duplicates_option"},
                 )
                 save_check_settings(
-                    settings_file, TAB_NAME, {"drop_duplicates_option": drop_duplicates_option}
+                    settings_file,
+                    TAB_NAME,
+                    {"drop_duplicates_option": drop_duplicates_option},
                 )
 
             with st.container(border=True):
                 st.markdown("##### No differences Settings")
-                st.write("Settings for entries values in backchecks that will not be marked as differences.")
+                st.write(
+                    "Settings for entries values in backchecks that will not be marked as differences."
+                )
                 no_diff_values = _render_no_differences_settings(settings_file)
 
                 if no_diff_values:
@@ -1638,28 +1769,56 @@ def backchecks_report_settings(
                     no_diff_df = pl.DataFrame({"Values": no_diff_values})
                     # configure column to be displayed as a list without index
                     dc1, _ = st.columns([1, 3])
-                    dc1.dataframe(no_diff_df, hide_index=True, column_config={"Values": st.column_config.ListColumn("Values", help="Values that will not be marked as differences", width="content")})
+                    dc1.dataframe(
+                        no_diff_df,
+                        hide_index=True,
+                        column_config={
+                            "Values": st.column_config.ListColumn(
+                                "Values",
+                                help="Values that will not be marked as differences",
+                                width="content",
+                            )
+                        },
+                    )
                 else:
                     st.warning("No values configured to be excluded from differences.")
 
             with st.container(border=True):
                 st.markdown("##### Exclude Value Settings")
-                st.write("Settings for entries values in backchecks that will be excluded from backcheck comparisons.")
+                st.write(
+                    "Settings for entries values in backchecks that will be excluded from backcheck comparisons."
+                )
                 exclude_values = _render_exclude_values_settings(settings_file)
                 if exclude_values:
-                    st.info("The following values will be excluded from backcheck comparisons:")
+                    st.info(
+                        "The following values will be excluded from backcheck comparisons:"
+                    )
                     # save into a dataframe for better display
                     exclude_df = pl.DataFrame({"Values": exclude_values})
                     # configure column to be displayed as a list without index
                     dr1, _ = st.columns([1, 3])
-                    dr1.dataframe(exclude_df, hide_index=True, column_config={"Values": st.column_config.ListColumn("Values", help="Values that will be excluded from backcheck comparisons", width="content")})
+                    dr1.dataframe(
+                        exclude_df,
+                        hide_index=True,
+                        column_config={
+                            "Values": st.column_config.ListColumn(
+                                "Values",
+                                help="Values that will be excluded from backcheck comparisons",
+                                width="content",
+                            )
+                        },
+                    )
                 else:
-                    st.warning("No values configured to be excluded from backcheck comparisons.")
+                    st.warning(
+                        "No values configured to be excluded from backcheck comparisons."
+                    )
 
             with st.container(border=True):
                 st.markdown("##### String Comparison Settings")
                 st.write("Settings for string comparison in backcheck comparisons.")
-                string_comp_options: StrCompareOptions = _render_string_comparison_options(settings_file)
+                string_comp_options: StrCompareOptions = (
+                    _render_string_comparison_options(settings_file)
+                )
 
     return BackcheckSettings(
         survey_key=survey_key,
@@ -1681,7 +1840,6 @@ def backchecks_report_settings(
 # =============================================================================
 # Backcheck Column Actions - UI Configuration
 # =============================================================================
-
 
 
 def _render_search_type_selection(
@@ -1737,7 +1895,6 @@ def _render_search_type_selection(
         return search_type, pattern, backcheck_cols_patt, None
 
 
-
 def _render_backcheck_category_options() -> int:
     """Render backcheck category selection UI.
 
@@ -1748,7 +1905,11 @@ def _render_backcheck_category_options() -> int:
     """
     with st.container(border=True):
         st.markdown("##### Backcheck Category Selection")
-        options_map = {1: ":material/looks_one: Category 1", 2: ":material/looks_two: Category 2", 3: ":material/looks_3: Category 3"}
+        options_map = {
+            1: ":material/looks_one: Category 1",
+            2: ":material/looks_two: Category 2",
+            3: ":material/looks_3: Category 3",
+        }
 
         category = st.pills(
             "Select Backcheck Category",
@@ -1761,7 +1922,6 @@ def _render_backcheck_category_options() -> int:
     return category
 
 
-
 def _render_ok_range_options() -> OkRangeOptions:
     """Render OK range options UI.
 
@@ -1772,7 +1932,10 @@ def _render_ok_range_options() -> OkRangeOptions:
     """
     with st.container(border=True):
         st.markdown("##### OK Range Selection")
-        options_map = {"number": ":material/123: Value Range", "percentage": ":material/percent: Percentage Range"}
+        options_map = {
+            "number": ":material/123: Value Range",
+            "percentage": ":material/percent: Percentage Range",
+        }
         ok_range_type = st.pills(
             "Select OK Range Type",
             options=options_map.keys(),
@@ -1783,12 +1946,13 @@ def _render_ok_range_options() -> OkRangeOptions:
             key="ok_range_type_backchecks_pills",
         )
         if ok_range_type:
-            ok_range_value: OkRangeValues = _get_ok_range_value(OkRangeType(ok_range_type))
+            ok_range_value: OkRangeValues = _get_ok_range_value(
+                OkRangeType(ok_range_type)
+            )
         else:
             ok_range_value = OkRangeValues(ok_range_neg=0.0, ok_range_pos=0.0)
 
     return OkRangeOptions(ok_range_type=ok_range_type, ok_range_value=ok_range_value)
-
 
 
 def _render_backcheck_test_options(backcheck_category: int) -> BackcheckTestOptions:
@@ -1833,15 +1997,15 @@ def _render_backcheck_test_options(backcheck_category: int) -> BackcheckTestOpti
             key="backcheck_test_backchecks_pills",
         )
 
-    return BackcheckTestOptions(ttest="ttest" in backcheck_test,
-                         prtest="prtest" in backcheck_test,
-                         signrank="signrank" in backcheck_test,
-                         reliability="reliability" in backcheck_test)
+    return BackcheckTestOptions(
+        ttest="ttest" in backcheck_test,
+        prtest="prtest" in backcheck_test,
+        signrank="signrank" in backcheck_test,
+        reliability="reliability" in backcheck_test,
+    )
+
 
 @st.fragment
-
-
-
 def _render_no_differences_settings(settings_file: str) -> list:
     """Render UI for managing values that won't be considered as discrepancies.
 
@@ -1922,10 +2086,8 @@ def _render_no_differences_settings(settings_file: str) -> list:
 
     return updated_values
 
+
 @st.fragment
-
-
-
 def _render_string_comparison_options(settings_file) -> StrCompareOptions:
     """Render string comparison options UI.
 
@@ -1938,7 +2100,10 @@ def _render_string_comparison_options(settings_file) -> StrCompareOptions:
     sok1, sok2, sok3 = st.columns(3)
     default_settings = load_check_settings(settings_file, TAB_NAME)
     default_case_setting = default_settings.get("string_case_option", None)
-    options_map = {"lowercase": ":material/lowercase: lowercase", "uppercase": ":material/uppercase: UPPERCASE"}
+    options_map = {
+        "lowercase": ":material/lowercase: lowercase",
+        "uppercase": ":material/uppercase: UPPERCASE",
+    }
     with sok1, st.container(border=True):
         string_case_option = st.pills(
             "Convert String Case Before Comparison",
@@ -1951,10 +2116,14 @@ def _render_string_comparison_options(settings_file) -> StrCompareOptions:
             on_change=trigger_save,
             kwargs={"state_name": TAB_NAME + "_string_case_option"},
         )
-        save_check_settings(settings_file, TAB_NAME, {"string_case_option": string_case_option})
+        save_check_settings(
+            settings_file, TAB_NAME, {"string_case_option": string_case_option}
+        )
 
     with sok2, st.container(border=True):
-        default_nosymbols_setting = default_settings.get("string_nosymbols_option", False)
+        default_nosymbols_setting = default_settings.get(
+            "string_nosymbols_option", False
+        )
         string_nosymbols_option = st.toggle(
             label="Ignore Symbols in String Comparison",
             value=default_nosymbols_setting,
@@ -1963,10 +2132,16 @@ def _render_string_comparison_options(settings_file) -> StrCompareOptions:
             on_change=trigger_save,
             kwargs={"state_name": TAB_NAME + "_string_nosymbols_option"},
         )
-        save_check_settings(settings_file, TAB_NAME, {"string_nosymbols_option": string_nosymbols_option})
+        save_check_settings(
+            settings_file,
+            TAB_NAME,
+            {"string_nosymbols_option": string_nosymbols_option},
+        )
 
     with sok3, st.container(border=True):
-        default_trimspaces_setting = default_settings.get("string_trimspaces_option", False)
+        default_trimspaces_setting = default_settings.get(
+            "string_trimspaces_option", False
+        )
         string_trimspaces_option = st.toggle(
             label="Trim Spaces in String Comparison",
             value=default_trimspaces_setting,
@@ -1978,7 +2153,7 @@ def _render_string_comparison_options(settings_file) -> StrCompareOptions:
         save_check_settings(
             settings_file,
             TAB_NAME,
-            {"string_trimspaces_option": string_trimspaces_option}
+            {"string_trimspaces_option": string_trimspaces_option},
         )
 
     return StrCompareOptions(
@@ -1987,13 +2162,9 @@ def _render_string_comparison_options(settings_file) -> StrCompareOptions:
         whitespace_option=string_trimspaces_option,
     )
 
+
 @st.fragment
-
-
-
-def _render_exclude_values_settings(
-    settings_file: str
-) -> list:
+def _render_exclude_values_settings(settings_file: str) -> list:
     """Render UI for managing values to exclude from backcheck comparison."""
     ac_col, rc_col, _ = st.columns([0.4, 0.3, 0.3])
     with ac_col, st.popover("Add Exclude Value", type="primary", width="stretch"):
@@ -2064,9 +2235,6 @@ def _render_exclude_values_settings(
     return updated_values
 
 
-
-
-
 # ==============================================================================
 # RESULTS DISPLAY RENDER FUNCTIONS
 # ==============================================================================
@@ -2100,7 +2268,9 @@ def _render_backcheck_summary(
     survey_key = backcheck_settings.survey_key
     if survey_key and not backcheck_analysis.is_empty():
         unique_backchecked_surveys = backcheck_analysis[survey_key].n_unique()
-        backcheck_coverage_pct = (unique_backchecked_surveys / n_survey_obs * 100) if n_survey_obs > 0 else 0
+        backcheck_coverage_pct = (
+            (unique_backchecked_surveys / n_survey_obs * 100) if n_survey_obs > 0 else 0
+        )
     else:
         backcheck_coverage_pct = 0
 
@@ -2129,18 +2299,21 @@ def _render_backcheck_summary(
         st.metric("Backcheck Observations", f"{n_backcheck_obs:,}")
 
     with uc3, st.container(border=True):
-
         st.metric(
             "Backcheck Coverage",
             f"{backcheck_coverage_pct:.1f}%",
         )
 
     with lc1, st.container(border=True):
-        st.metric("Total Enumerators", f"{n_enumerators:,}" if n_enumerators > 0 else "N/A")
+        st.metric(
+            "Total Enumerators", f"{n_enumerators:,}" if n_enumerators > 0 else "N/A"
+        )
 
     with lc2, st.container(border=True):
-        st.metric("Total Back Checkers", f"{n_backcheckers:,}" if n_backcheckers > 0 else "N/A")
-
+        st.metric(
+            "Total Back Checkers",
+            f"{n_backcheckers:,}" if n_backcheckers > 0 else "N/A",
+        )
 
 
 def _render_backchecker_productivity(
@@ -2172,15 +2345,10 @@ def _render_backchecker_productivity(
         )
         return
 
-    _render_backchecker_productivity_table(
-        data, date, backchecker, settings_file
-    )
+    _render_backchecker_productivity_table(data, date, backchecker, settings_file)
 
 
 @st.fragment
-
-
-
 def _render_backchecker_productivity_table(
     data: pl.DataFrame,
     date: str,
@@ -2218,13 +2386,20 @@ def _render_backchecker_productivity_table(
         backchecker: st.column_config.TextColumn("Back Checker", pinned=True),
     }
 
-    column_config.update({
-        col: st.column_config.NumberColumn(col, format="%d") for col in productivity_df.columns
-        if col not in group_by_cols
-    })
+    column_config.update(
+        {
+            col: st.column_config.NumberColumn(col, format="%d")
+            for col in productivity_df.columns
+            if col not in group_by_cols
+        }
+    )
 
-    st.dataframe(productivity_df, hide_index=True, use_container_width=True, column_config=column_config)
-
+    st.dataframe(
+        productivity_df,
+        hide_index=True,
+        use_container_width=True,
+        column_config=column_config,
+    )
 
 
 def _render_time_period_selector_backchecks(
@@ -2245,29 +2420,36 @@ def _render_time_period_selector_backchecks(
     Literal["Day", "Week", "Month"]
         Selected time period.
     """
-    options_map = {"Day": ":material/event: Daily", "Week": ":material/date_range: Weekly", "Month": ":material/calendar_month: Monthly"}
+    options_map = {
+        "Day": ":material/event: Daily",
+        "Week": ":material/date_range: Weekly",
+        "Month": ":material/calendar_month: Monthly",
+    }
 
     saved_settings = load_check_settings(settings_file, TAB_NAME) or {}
-    default_time_period = saved_settings.get("time_period_backchecker_productivity", "Day")
+    default_time_period = saved_settings.get(
+        "time_period_backchecker_productivity", "Day"
+    )
 
     with st.container(horizontal_alignment="left"):
         time_period = st.pills(
-                label="Time Period",
-                options=options_map.keys(),
-                format_func=lambda x: options_map[x],
-                key="time_period_backchecker_productivity_key",
-                default=default_time_period,
-                help="Select time period for aggregating backchecker productivity",
-                selection_mode="single",
-                on_change=trigger_save,
-                kwargs={"state_name": TAB_NAME + "_time_period_backchecker"},
-            )
+            label="Time Period",
+            options=options_map.keys(),
+            format_func=lambda x: options_map[x],
+            key="time_period_backchecker_productivity_key",
+            default=default_time_period,
+            help="Select time period for aggregating backchecker productivity",
+            selection_mode="single",
+            on_change=trigger_save,
+            kwargs={"state_name": TAB_NAME + "_time_period_backchecker"},
+        )
         save_check_settings(
-                settings_file, TAB_NAME, {"time_period_backchecker_productivity": time_period}
-            )
+            settings_file,
+            TAB_NAME,
+            {"time_period_backchecker_productivity": time_period},
+        )
 
     return time_period or "Day"
-
 
 
 def _render_weekday_selector_backchecks(
@@ -2289,7 +2471,9 @@ def _render_weekday_selector_backchecks(
         Weekday offset code (e.g., "SUN", "MON") for calculations.
     """
     saved_settings = load_check_settings(settings_file, TAB_NAME) or {}
-    default_weekstartday_sel = saved_settings.get("weekstartday_backchecker_productivity", "Monday")
+    default_weekstartday_sel = saved_settings.get(
+        "weekstartday_backchecker_productivity", "Monday"
+    )
     default_weekstartday_sel_index = WEEKDAY_NAMES.index(default_weekstartday_sel)
 
     cl1, _ = st.columns([1, 3])
@@ -2304,11 +2488,12 @@ def _render_weekday_selector_backchecks(
             kwargs={"state_name": TAB_NAME + "_weekstartday_backchecker"},
         )
     save_check_settings(
-        settings_file, TAB_NAME, {"weekstartday_backchecker_productivity": weekstartday_sel}
+        settings_file,
+        TAB_NAME,
+        {"weekstartday_backchecker_productivity": weekstartday_sel},
     )
 
     return WEEKDAY_OFFSET_MAP[weekstartday_sel]
-
 
 
 def _render_enum_bcer_stats(
@@ -2337,7 +2522,9 @@ def _render_enum_bcer_stats(
         Path to settings file for saving/loading configurations.
     """
     if backcheck_analysis.is_empty():
-        st.info("No backcheck analysis results available. Configure backcheck columns in the settings section above.")
+        st.info(
+            "No backcheck analysis results available. Configure backcheck columns in the settings section above."
+        )
         return
 
     # Check if required columns are configured
@@ -2352,14 +2539,15 @@ def _render_enum_bcer_stats(
         return
 
     _render_enum_bcer_stats_table(
-        survey_data, backcheck_data, backcheck_analysis, backcheck_settings, settings_file
+        survey_data,
+        backcheck_data,
+        backcheck_analysis,
+        backcheck_settings,
+        settings_file,
     )
 
 
 @st.fragment
-
-
-
 def _render_enum_bcer_stats_table(
     survey_data: pl.DataFrame,
     backcheck_data: pl.DataFrame,
@@ -2429,14 +2617,18 @@ def _render_enum_bcer_stats_table(
 
     # Add category-specific columns
     for category in [1, 2, 3]:
-        column_config[f"Non-Missing Survey (Cat {category})"] = st.column_config.NumberColumn(
-            f"Survey Values (Cat {category})", format="%d"
+        column_config[f"Non-Missing Survey (Cat {category})"] = (
+            st.column_config.NumberColumn(
+                f"Survey Values (Cat {category})", format="%d"
+            )
         )
-        column_config[f"Non-Missing Backcheck (Cat {category})"] = st.column_config.NumberColumn(
-            f"Backcheck Values (Cat {category})", format="%d"
+        column_config[f"Non-Missing Backcheck (Cat {category})"] = (
+            st.column_config.NumberColumn(
+                f"Backcheck Values (Cat {category})", format="%d"
+            )
         )
-        column_config[f"Values Compared (Cat {category})"] = st.column_config.NumberColumn(
-            f"Compared (Cat {category})", format="%d"
+        column_config[f"Values Compared (Cat {category})"] = (
+            st.column_config.NumberColumn(f"Compared (Cat {category})", format="%d")
         )
         column_config[f"Mismatches (Cat {category})"] = st.column_config.NumberColumn(
             f"Mismatches (Cat {category})", format="%d"
@@ -2463,12 +2655,8 @@ def _render_enum_bcer_stats_table(
     )
 
     st.dataframe(
-        stats_df,
-        hide_index=True,
-        use_container_width=True,
-        column_config=column_config
+        stats_df, hide_index=True, use_container_width=True, column_config=column_config
     )
-
 
 
 def _render_column_stats(
@@ -2488,7 +2676,9 @@ def _render_column_stats(
         Results from compute_backcheck_analysis.
     """
     if backcheck_analysis.is_empty():
-        st.info("No backcheck analysis results available. Configure backcheck columns in the settings section above.")
+        st.info(
+            "No backcheck analysis results available. Configure backcheck columns in the settings section above."
+        )
         return
 
     # Compute column statistics
@@ -2504,23 +2694,22 @@ def _render_column_stats(
         "Category": st.column_config.NumberColumn("Category", format="%d"),
         "Data Type": st.column_config.TextColumn("Data Type"),
         "# of Values": st.column_config.NumberColumn("# of Values", format="%d"),
-        "Values Compared": st.column_config.NumberColumn("Values Compared", format="%d"),
+        "Values Compared": st.column_config.NumberColumn(
+            "Values Compared", format="%d"
+        ),
         "Mismatches": st.column_config.NumberColumn("Mismatches", format="%d"),
-        "Error Rate (%)": st.column_config.NumberColumn("Error Rate (%)", format="%.2f"),
+        "Error Rate (%)": st.column_config.NumberColumn(
+            "Error Rate (%)", format="%.2f"
+        ),
         "Test Results": st.column_config.TextColumn("Test Results", width="large"),
     }
 
     st.dataframe(
-        stats_df,
-        hide_index=True,
-        use_container_width=True,
-        column_config=column_config
+        stats_df, hide_index=True, use_container_width=True, column_config=column_config
     )
 
+
 @st.fragment
-
-
-
 def _render_backcheck_comparison_results(
     survey_data: pl.DataFrame,
     backcheck_data: pl.DataFrame,
@@ -2544,7 +2733,9 @@ def _render_backcheck_comparison_results(
         Backcheck configuration settings.
     """
     if backcheck_analysis.is_empty():
-        st.info("No backcheck comparison results available. Configure backcheck columns in the settings section above.")
+        st.info(
+            "No backcheck comparison results available. Configure backcheck columns in the settings section above."
+        )
         return
 
     survey_key = backcheck_settings.survey_key
@@ -2552,7 +2743,9 @@ def _render_backcheck_comparison_results(
     backcheck_key = f"{survey_key}__BCCL"
 
     # Get available columns from backcheck_analysis
-    available_columns = sorted(backcheck_analysis["column_name"].unique().drop_nulls().to_list())
+    available_columns = sorted(
+        backcheck_analysis["column_name"].unique().drop_nulls().to_list()
+    )
 
     if not available_columns:
         st.info("No comparison results available.")
@@ -2563,7 +2756,7 @@ def _render_backcheck_comparison_results(
         "Filter by Columns",
         options=available_columns,
         default=available_columns,
-        help="Select which columns to show comparison results for"
+        help="Select which columns to show comparison results for",
     )
 
     # Additional columns selection in expander
@@ -2572,14 +2765,34 @@ def _render_backcheck_comparison_results(
 
         # Get available additional columns (exclude keys and analysis columns)
         survey_additional_cols = [
-            col for col in survey_data.columns
-            if col not in [survey_key, survey_id, "column_name", "survey_value", "backcheck_value", "match_status", "category"]
+            col
+            for col in survey_data.columns
+            if col
+            not in [
+                survey_key,
+                survey_id,
+                "column_name",
+                "survey_value",
+                "backcheck_value",
+                "match_status",
+                "category",
+            ]
             and col not in backcheck_analysis.columns
         ]
 
         backcheck_additional_cols = [
-            col for col in backcheck_data.columns
-            if col not in [survey_key, survey_id, "column_name", "survey_value", "backcheck_value", "match_status", "category"]
+            col
+            for col in backcheck_data.columns
+            if col
+            not in [
+                survey_key,
+                survey_id,
+                "column_name",
+                "survey_value",
+                "backcheck_value",
+                "match_status",
+                "category",
+            ]
             and col not in backcheck_analysis.columns
         ]
 
@@ -2587,14 +2800,14 @@ def _render_backcheck_comparison_results(
             survey_extra_cols = st.multiselect(
                 "Additional Survey Columns",
                 options=sorted(survey_additional_cols),
-                help="Select additional columns from survey data to display"
+                help="Select additional columns from survey data to display",
             )
 
         with col2:
             backcheck_extra_cols = st.multiselect(
                 "Additional Backcheck Columns",
                 options=sorted(backcheck_additional_cols),
-                help="Select additional columns from backcheck data to display"
+                help="Select additional columns from backcheck data to display",
             )
 
     # Match status filter as pills - placed at top left
@@ -2602,7 +2815,7 @@ def _render_backcheck_comparison_results(
         "Filter by Match Status",
         options=["All Results", "Mismatches Only"],
         default="All Results",
-        selection_mode="single"
+        selection_mode="single",
     )
 
     # Apply filters
@@ -2614,7 +2827,9 @@ def _render_backcheck_comparison_results(
 
     # Filter by selected columns
     if selected_columns:
-        filtered_data = filtered_data.filter(pl.col("column_name").is_in(selected_columns))
+        filtered_data = filtered_data.filter(
+            pl.col("column_name").is_in(selected_columns)
+        )
 
     if filtered_data.is_empty():
         st.info("No results match the selected filters.")
@@ -2623,21 +2838,31 @@ def _render_backcheck_comparison_results(
     # Add additional survey columns if requested
     if survey_extra_cols:
         # Prepare survey columns with unique names
-        survey_cols_to_add = survey_data.select([survey_key] + survey_extra_cols).unique(subset=[survey_key])
+        survey_cols_to_add = survey_data.select(
+            [survey_key] + survey_extra_cols
+        ).unique(subset=[survey_key])
         # Suffix survey columns to avoid conflicts
         rename_map = {col: f"{col} (Survey)" for col in survey_extra_cols}
         survey_cols_to_add = survey_cols_to_add.rename(rename_map)
-        filtered_data = filtered_data.join(survey_cols_to_add, on=survey_key, how="left")
+        filtered_data = filtered_data.join(
+            survey_cols_to_add, on=survey_key, how="left"
+        )
 
     # Add additional backcheck columns if requested
     if backcheck_extra_cols and backcheck_key in filtered_data.columns:
         # Prepare backcheck columns with unique names
-        backcheck_cols_to_add = backcheck_data.select([survey_key] + backcheck_extra_cols).unique(subset=[survey_key])
+        backcheck_cols_to_add = backcheck_data.select(
+            [survey_key] + backcheck_extra_cols
+        ).unique(subset=[survey_key])
         # Rename to match backcheck key and suffix column names
-        backcheck_cols_to_add = backcheck_cols_to_add.rename({survey_key: backcheck_key})
+        backcheck_cols_to_add = backcheck_cols_to_add.rename(
+            {survey_key: backcheck_key}
+        )
         rename_map = {col: f"{col} (Backcheck)" for col in backcheck_extra_cols}
         backcheck_cols_to_add = backcheck_cols_to_add.rename(rename_map)
-        filtered_data = filtered_data.join(backcheck_cols_to_add, on=backcheck_key, how="left")
+        filtered_data = filtered_data.join(
+            backcheck_cols_to_add, on=backcheck_key, how="left"
+        )
 
     # Select only the specific columns to display
     display_columns = [
@@ -2645,7 +2870,7 @@ def _render_backcheck_comparison_results(
         "survey_value",
         "backcheck_value",
         "match_status",
-        "category"
+        "category",
     ]
 
     # Add survey_id if it exists in the data
@@ -2662,7 +2887,9 @@ def _render_backcheck_comparison_results(
 
     # Add any additional columns requested
     for col in filtered_data.columns:
-        if col not in display_columns and (col.endswith("(Survey)") or col.endswith("(Backcheck)")):
+        if col not in display_columns and (
+            col.endswith("(Survey)") or col.endswith("(Backcheck)")
+        ):
             display_columns.append(col)
 
     # Filter to only include columns that exist in the data
@@ -2711,9 +2938,6 @@ def _render_backcheck_comparison_results(
         use_container_width=True,
         column_config=column_config,
     )
-
-
-
 
 
 # ==============================================================================
@@ -2779,11 +3003,11 @@ def backchecks_report(
     # Outlier columns configuration
     st.subheader("Backchecks Columns Configuration")
     common_columns = list(
-        set(survey_categorical_columns).intersection(
-            set(backcheck_categorical_columns)
-        )
+        set(survey_categorical_columns).intersection(set(backcheck_categorical_columns))
     )
-    _render_backchecks_column_actions(project_id, page_name_id, survey_data, backcheck_data, common_columns)
+    _render_backchecks_column_actions(
+        project_id, page_name_id, survey_data, backcheck_data, common_columns
+    )
 
     # Compute backcheck analysis
     backcheck_column_settings = duckdb_get_table(
@@ -2791,10 +3015,14 @@ def backchecks_report(
         f"backchecks_{page_name_id}",
         "logs",
     )
-    _backcheck_analysis = compute_backcheck_analysis(survey_data, backcheck_data, backcheck_settings, backcheck_column_settings)
+    _backcheck_analysis = compute_backcheck_analysis(
+        survey_data, backcheck_data, backcheck_settings, backcheck_column_settings
+    )
 
     st.subheader("Backchecks Summary")
-    _render_backcheck_summary(survey_data, backcheck_data, _backcheck_analysis, backcheck_settings)
+    _render_backcheck_summary(
+        survey_data, backcheck_data, _backcheck_analysis, backcheck_settings
+    )
 
     _render_backchecker_productivity(
         backcheck_data,
@@ -2810,7 +3038,7 @@ def backchecks_report(
         backcheck_data,
         _backcheck_analysis,
         backcheck_settings,
-        setting_file
+        setting_file,
     )
 
     st.subheader("Column Statistics")
@@ -2818,9 +3046,5 @@ def backchecks_report(
 
     st.subheader("Comparison Results Details")
     _render_backcheck_comparison_results(
-        survey_data,
-        backcheck_data,
-        _backcheck_analysis,
-        backcheck_settings
+        survey_data, backcheck_data, _backcheck_analysis, backcheck_settings
     )
-

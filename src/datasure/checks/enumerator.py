@@ -76,6 +76,7 @@ class EnumeratorSettings(BaseModel):
     duration_unit: str = Field("default='seconds'", description="Duration unit")
     team: str | None = Field(None, description="Team identifier column")
 
+
 class ConsentOutcomeSettings(BaseModel):
     """Settings for consent and outcome configuration.
 
@@ -124,17 +125,42 @@ class ProductivitySettings(BaseModel):
     @classmethod
     def validate_weekstartday(cls, v: str) -> str:
         """Validate weekstartday is one of the allowed values."""
-        allowed = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        allowed = [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday",
+        ]
         if v not in allowed:
             raise ValueError(f"weekstartday must be one of {allowed}")
         return v
 
 
 # Constants for statistics options
-ALLOWED_STATISTICS = ["count", "min", "mean", "median", "max", "std", "25th percentile", "75th percentile"]
+ALLOWED_STATISTICS = [
+    "count",
+    "min",
+    "mean",
+    "median",
+    "max",
+    "std",
+    "25th percentile",
+    "75th percentile",
+]
 ALLOWED_STATISTICS_OVERTIME = ALLOWED_STATISTICS + ["missing"]
 ALLOWED_TIME_PERIODS = ["Daily", "Weekly", "Monthly"]
-WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+WEEKDAY_NAMES = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+]
 
 # Maps weekday names to offset codes used in computation
 WEEKDAY_OFFSET_MAP = {
@@ -171,7 +197,9 @@ class StatisticsSettings(BaseModel):
     """
 
     statscols: list[str] | None = Field(None, description="Columns for statistics")
-    stats: list[str] = Field(default=["count", "mean"], description="Statistics to compute")
+    stats: list[str] = Field(
+        default=["count", "mean"], description="Statistics to compute"
+    )
 
     @field_validator("stats")
     @classmethod
@@ -179,7 +207,9 @@ class StatisticsSettings(BaseModel):
         """Validate that statistics are from allowed list."""
         for stat in v:
             if stat not in ALLOWED_STATISTICS:
-                raise ValueError(f"Invalid statistic: {stat}. Must be one of {ALLOWED_STATISTICS}")
+                raise ValueError(
+                    f"Invalid statistic: {stat}. Must be one of {ALLOWED_STATISTICS}"
+                )
         return v
 
 
@@ -198,7 +228,9 @@ class StatisticsOvertimeSettings(BaseModel):
         Column to compute statistics on.
     """
 
-    period_overtime: str = Field(default="Daily", description="Time period for analysis")
+    period_overtime: str = Field(
+        default="Daily", description="Time period for analysis"
+    )
     weekstartday: str = Field(default="Monday", description="Week start day")
     stat: str = Field(default="count", description="Statistic to compute")
     statscol: str | None = Field(None, description="Column for statistics")
@@ -208,7 +240,9 @@ class StatisticsOvertimeSettings(BaseModel):
     def validate_period(cls, v: str) -> str:
         """Validate period is from allowed list."""
         if v not in ALLOWED_TIME_PERIODS:
-            raise ValueError(f"Invalid period: {v}. Must be one of {ALLOWED_TIME_PERIODS}")
+            raise ValueError(
+                f"Invalid period: {v}. Must be one of {ALLOWED_TIME_PERIODS}"
+            )
         return v
 
     @field_validator("weekstartday")
@@ -216,7 +250,9 @@ class StatisticsOvertimeSettings(BaseModel):
     def validate_weekstartday(cls, v: str) -> str:
         """Validate weekstartday is from allowed list."""
         if v not in WEEKDAY_NAMES:
-            raise ValueError(f"Invalid weekstartday: {v}. Must be one of {WEEKDAY_NAMES}")
+            raise ValueError(
+                f"Invalid weekstartday: {v}. Must be one of {WEEKDAY_NAMES}"
+            )
         return v
 
     @field_validator("stat")
@@ -224,7 +260,9 @@ class StatisticsOvertimeSettings(BaseModel):
     def validate_stat(cls, v: str) -> str:
         """Validate stat is from allowed list."""
         if v not in ALLOWED_STATISTICS_OVERTIME:
-            raise ValueError(f"Invalid statistic: {v}. Must be one of {ALLOWED_STATISTICS_OVERTIME}")
+            raise ValueError(
+                f"Invalid statistic: {v}. Must be one of {ALLOWED_STATISTICS_OVERTIME}"
+            )
         return v
 
 
@@ -296,6 +334,7 @@ def load_default_enumerator_settings(
     default_settings.update(saved_settings)
 
     return EnumeratorSettings(**default_settings)
+
 
 def enumerator_report_settings(
     project_id: str,
@@ -486,7 +525,9 @@ def enumerator_report_settings(
                     on_change=trigger_save,
                     kwargs={"state_name": TAB_NAME + "_duration_unit"},
                 )
-                save_check_settings(settings_file, TAB_NAME, {"duration_unit": duration_unit})
+                save_check_settings(
+                    settings_file, TAB_NAME, {"duration_unit": duration_unit}
+                )
 
         with st.container(border=True):
             st.subheader("Form Version")
@@ -495,7 +536,8 @@ def enumerator_report_settings(
                 default_formversion = default_settings.formversion
                 default_formversion_index = (
                     categorical_columns.index(default_formversion)
-                    if default_formversion and default_formversion in categorical_columns
+                    if default_formversion
+                    and default_formversion in categorical_columns
                     else None
                 )
                 formversion = st.selectbox(
@@ -507,8 +549,9 @@ def enumerator_report_settings(
                     on_change=trigger_save,
                     kwargs={"state_name": TAB_NAME + "_formversion"},
                 )
-                save_check_settings(settings_file, TAB_NAME, {"formversion": formversion})
-
+                save_check_settings(
+                    settings_file, TAB_NAME, {"formversion": formversion}
+                )
 
         with st.container(border=True):
             st.subheader("Consent and Outcome Settings")
@@ -516,8 +559,13 @@ def enumerator_report_settings(
                 "Configure consent and outcome columns along with their valid values."
             )
 
-            _render_consent_outcome_settings(project_id, data, categorical_columns, settings_file)
-            if "st_apply_consent_outcome_enumerator" in st.session_state and st.session_state["st_apply_consent_outcome_enumerator"]:  # noqa: RUF019
+            _render_consent_outcome_settings(
+                project_id, data, categorical_columns, settings_file
+            )
+            if (
+                "st_apply_consent_outcome_enumerator" in st.session_state
+                and st.session_state["st_apply_consent_outcome_enumerator"]
+            ):  # noqa: RUF019
                 st.success("Consent and outcome settings applied successfully.")
                 st.session_state["st_apply_consent_outcome_enumerator"] = False
 
@@ -531,6 +579,7 @@ def enumerator_report_settings(
         duration=duration,
         duration_unit=duration_unit,
     )
+
 
 @st.fragment
 def _render_consent_outcome_settings(
@@ -630,7 +679,12 @@ def _render_consent_outcome_settings(
         }
         config = ConsentOutcomeSettings(**config_dict)
 
-    if st.button("Apply Consent and Outcome Settings", key="apply_consent_outcome_enumerator", type="primary", width="stretch"):
+    if st.button(
+        "Apply Consent and Outcome Settings",
+        key="apply_consent_outcome_enumerator",
+        type="primary",
+        width="stretch",
+    ):
         _create_enum_data_on_settings(project_id, data, config)
         _trigger_success_message("st_apply_consent_outcome_enumerator")
         st.rerun()
@@ -668,7 +722,10 @@ def _create_enum_data_on_settings(
 
     if config.consent and config.consent_vals:
         enum_data = data.with_columns(
-            pl.col(config.consent).is_in(config.consent_vals).cast(pl.Int32).alias("consent_granted_agg_col")
+            pl.col(config.consent)
+            .is_in(config.consent_vals)
+            .cast(pl.Int32)
+            .alias("consent_granted_agg_col")
         )
     else:
         enum_data = data.with_columns(
@@ -677,7 +734,10 @@ def _create_enum_data_on_settings(
 
     if config.outcome and config.outcome_vals:
         enum_data = enum_data.with_columns(
-            pl.col(config.outcome).is_in(config.outcome_vals).cast(pl.Int32).alias("completed_survey_agg_col")
+            pl.col(config.outcome)
+            .is_in(config.outcome_vals)
+            .cast(pl.Int32)
+            .alias("completed_survey_agg_col")
         )
     else:
         enum_data = enum_data.with_columns(
@@ -692,9 +752,11 @@ def _create_enum_data_on_settings(
         "intermediate",
     )
 
+
 # =============================================================================
 # Overview Computation Functions
 # =============================================================================
+
 
 def compute_enumerator_overview(
     data: pl.DataFrame, date: str, enumerator: str, team: str | None
@@ -723,21 +785,23 @@ def compute_enumerator_overview(
         Overview metrics for enumerators including counts and statistics.
     """
     if data.is_empty():
-        raise ValueError("Input data is empty. Cannot compute enumerator overview metrics.")
+        raise ValueError(
+            "Input data is empty. Cannot compute enumerator overview metrics."
+        )
     data = data.sort([enumerator, date])
 
     all_submissions = data.height
 
     # Calculate daily submissions
     data = data.with_row_index(name="TOKEN KEY")
-    daily_submissions_sum = (
-        data.group_by([date, enumerator])
-        .agg(pl.col("TOKEN KEY").count().alias("count"))
+    daily_submissions_sum = data.group_by([date, enumerator]).agg(
+        pl.col("TOKEN KEY").count().alias("count")
     )
 
     # Calculate active enumerators (past 7 days)
     from datetime import date as dt_date
     from datetime import timedelta
+
     active_date_cut_off = dt_date.today() - timedelta(weeks=1)
 
     daily_submissions_sum = daily_submissions_sum.with_columns(
@@ -797,9 +861,9 @@ def compute_enumerator_missing_table(
     # define columns to exclude from missing data stats
     columns_to_exclude = ["consent_granted_agg_col", "completed_survey_agg_col"]
 
-    data_for_missing = data.select([
-        col for col in data.columns if col not in columns_to_exclude
-    ])
+    data_for_missing = data.select(
+        [col for col in data.columns if col not in columns_to_exclude]
+    )
 
     # Metadata for missing data calculation
     enum_data_missing = data_for_missing.select(group_by_col)
@@ -807,16 +871,22 @@ def compute_enumerator_missing_table(
     # If missing_codes_config is empty, calculate only null missingness
     if missing_codes_config.is_empty():
         # Calculate overall null missingness per enumerator
-        columns_to_check = [col for col in data_for_missing.columns if col not in group_by_col]
+        columns_to_check = [
+            col for col in data_for_missing.columns if col not in group_by_col
+        ]
 
         # Count nulls per row and calculate percentage
-        missing_summary = data_for_missing.with_columns([
-            pl.sum_horizontal([
-                pl.col(col).is_null().cast(pl.Int32) for col in columns_to_check
-            ]).alias("_null_count"),
-            pl.lit(len(columns_to_check)).alias("_total_fields")
-        ]).with_columns(
-            (pl.col("_null_count") / pl.col("_total_fields") * 100).alias("% Null values")
+        missing_summary = data_for_missing.with_columns(
+            [
+                pl.sum_horizontal(
+                    [pl.col(col).is_null().cast(pl.Int32) for col in columns_to_check]
+                ).alias("_null_count"),
+                pl.lit(len(columns_to_check)).alias("_total_fields"),
+            ]
+        ).with_columns(
+            (pl.col("_null_count") / pl.col("_total_fields") * 100).alias(
+                "% Null values"
+            )
         )
 
         # Group by enumerator and calculate mean missingness rate
@@ -836,7 +906,9 @@ def compute_enumerator_missing_table(
     )
 
     # Get columns to check (exclude enumerator column)
-    columns_to_check = [col for col in missing_data_encoded.columns if col not in group_by_col]
+    columns_to_check = [
+        col for col in missing_data_encoded.columns if col not in group_by_col
+    ]
     total_fields = len(columns_to_check)
 
     # Calculate counts for each missing category per row
@@ -844,33 +916,33 @@ def compute_enumerator_missing_table(
 
     # Add null values count (encoded as 1)
     agg_expressions.append(
-        pl.sum_horizontal([
-            (pl.col(col) == 1).cast(pl.Int32) for col in columns_to_check
-        ]).alias("_null_count")
+        pl.sum_horizontal(
+            [(pl.col(col) == 1).cast(pl.Int32) for col in columns_to_check]
+        ).alias("_null_count")
     )
 
     # Add count for each special missing code category (starting from 2)
     for idx, label in enumerate(missing_code_pairs.keys(), start=2):
         agg_expressions.append(
-            pl.sum_horizontal([
-                (pl.col(col) == idx).cast(pl.Int32) for col in columns_to_check
-            ]).alias(f"_{label}_count")
+            pl.sum_horizontal(
+                [(pl.col(col) == idx).cast(pl.Int32) for col in columns_to_check]
+            ).alias(f"_{label}_count")
         )
 
     # Add total missing count (any value > 0)
     agg_expressions.append(
-        pl.sum_horizontal([
-            (pl.col(col) > 0).cast(pl.Int32) for col in columns_to_check
-        ]).alias("_total_missing_count")
+        pl.sum_horizontal(
+            [(pl.col(col) > 0).cast(pl.Int32) for col in columns_to_check]
+        ).alias("_total_missing_count")
     )
 
     # Add total fields count
     agg_expressions.append(pl.lit(total_fields).alias("_total_fields"))
 
     # Apply the aggregations
-    missing_counts = missing_data_encoded.select([
-        pl.col(group_by_col)
-    ] + agg_expressions)
+    missing_counts = missing_data_encoded.select(
+        [pl.col(group_by_col)] + agg_expressions
+    )
 
     # Calculate percentages
     percentage_expressions = []
@@ -883,29 +955,27 @@ def compute_enumerator_missing_table(
     # Special missing code category percentages
     for label in missing_code_pairs:
         percentage_expressions.append(
-            (pl.col(f"_{label}_count") / pl.col("_total_fields") * 100).alias(f"% {label}")
+            (pl.col(f"_{label}_count") / pl.col("_total_fields") * 100).alias(
+                f"% {label}"
+            )
         )
 
     # Total missing percentage
     percentage_expressions.append(
-        (pl.col("_total_missing_count") / pl.col("_total_fields") * 100).alias("% Total Missing")
+        (pl.col("_total_missing_count") / pl.col("_total_fields") * 100).alias(
+            "% Total Missing"
+        )
     )
 
     missing_with_percentages = missing_counts.with_columns(percentage_expressions)
 
     # Group by enumerator and calculate mean percentages
-    final_agg_expressions = [
-        pl.col("% Null values").mean()
-    ]
+    final_agg_expressions = [pl.col("% Null values").mean()]
 
     for label in missing_code_pairs:
-        final_agg_expressions.append(
-            pl.col(f"% {label}").mean()
-        )
+        final_agg_expressions.append(pl.col(f"% {label}").mean())
 
-    final_agg_expressions.append(
-        pl.col("% Total Missing").mean()
-    )
+    final_agg_expressions.append(pl.col("% Total Missing").mean())
 
     # drop enumerator column from missing_with_percentages
     missing_with_percentages = missing_with_percentages.select(
@@ -916,9 +986,9 @@ def compute_enumerator_missing_table(
         [enum_data_missing, missing_with_percentages], how="horizontal"
     )
 
-    result_df = missing_with_percentages.group_by(group_by_col, maintain_order=True).agg(
-        final_agg_expressions
-    )
+    result_df = missing_with_percentages.group_by(
+        group_by_col, maintain_order=True
+    ).agg(final_agg_expressions)
 
     return result_df
 
@@ -970,17 +1040,17 @@ def compute_enumerator_summary(
     """
     group_by_cols = [enumerator, team] if team else [enumerator]
     # Format date column
-    df = data.with_columns(
-        pl.col(date).dt.strftime("%b %d, %Y").alias(date)
-    )
+    df = data.with_columns(pl.col(date).dt.strftime("%b %d, %Y").alias(date))
 
     # Basic summary aggregations
-    summary_df = df.group_by(group_by_cols, maintain_order=True).agg([
-        pl.col(date).min().alias("first submission"),
-        pl.col(date).max().alias("last submission"),
-        pl.col(date).count().alias("# submissions"),
-        pl.col(date).n_unique().alias("# unique dates"),
-    ])
+    summary_df = df.group_by(group_by_cols, maintain_order=True).agg(
+        [
+            pl.col(date).min().alias("first submission"),
+            pl.col(date).max().alias("last submission"),
+            pl.col(date).count().alias("# submissions"),
+            pl.col(date).n_unique().alias("# unique dates"),
+        ]
+    )
 
     # Calculate time-based submissions
     today = dt_date.today()
@@ -991,17 +1061,21 @@ def compute_enumerator_summary(
     week_str = start_of_week.strftime("%b %d, %Y")
     month_str = start_of_month.strftime("%b %d, %Y")
 
-    df = df.with_columns([
-        (pl.col(date) == today_str).alias("submitted_today"),
-        (pl.col(date) >= week_str).alias("submitted_this_week"),
-        (pl.col(date) >= month_str).alias("submitted_this_month"),
-    ])
+    df = df.with_columns(
+        [
+            (pl.col(date) == today_str).alias("submitted_today"),
+            (pl.col(date) >= week_str).alias("submitted_this_week"),
+            (pl.col(date) >= month_str).alias("submitted_this_month"),
+        ]
+    )
 
-    lagged_df = df.group_by(group_by_cols, maintain_order=True).agg([
-        pl.col("submitted_today").sum().alias("# submissions today"),
-        pl.col("submitted_this_week").sum().alias("# submissions this week"),
-        pl.col("submitted_this_month").sum().alias("# submissions this month"),
-    ])
+    lagged_df = df.group_by(group_by_cols, maintain_order=True).agg(
+        [
+            pl.col("submitted_today").sum().alias("# submissions today"),
+            pl.col("submitted_this_week").sum().alias("# submissions this week"),
+            pl.col("submitted_this_month").sum().alias("# submissions this month"),
+        ]
+    )
 
     summary_df = summary_df.join(lagged_df, on=group_by_cols, how="left")
 
@@ -1014,20 +1088,21 @@ def compute_enumerator_summary(
 
     # Add duration statistics if available
     if duration:
-        duration_df = df.group_by(group_by_cols, maintain_order=True).agg([
-            pl.col(duration).min().alias("min duration"),
-            pl.col(duration).mean().alias("mean duration"),
-            pl.col(duration).median().alias("median duration"),
-            pl.col(duration).max().alias("max duration"),
-        ])
+        duration_df = df.group_by(group_by_cols, maintain_order=True).agg(
+            [
+                pl.col(duration).min().alias("min duration"),
+                pl.col(duration).mean().alias("mean duration"),
+                pl.col(duration).median().alias("median duration"),
+                pl.col(duration).max().alias("max duration"),
+            ]
+        )
         summary_df = summary_df.join(duration_df, on=group_by_cols, how="left")
 
     # Add form version statistics if available
     if formversion:
         # Get latest form version per date
-        formdef_outdated = (
-            df.group_by(date, maintain_order=True)
-            .agg(pl.col(formversion).max().alias("latest daily form version"))
+        formdef_outdated = df.group_by(date, maintain_order=True).agg(
+            pl.col(formversion).max().alias("latest daily form version")
         )
 
         df = df.join(formdef_outdated, on=date, how="left")
@@ -1041,10 +1116,12 @@ def compute_enumerator_summary(
             pl.col("outdated_form_version").sum().alias("# of outdated form versions")
         )
 
-        formdef_df = df.group_by(group_by_cols, maintain_order=True).agg([
-            pl.col(formversion).n_unique().alias("# form versions"),
-            pl.col(formversion).max().alias("latest form version"),
-        ])
+        formdef_df = df.group_by(group_by_cols, maintain_order=True).agg(
+            [
+                pl.col(formversion).n_unique().alias("# form versions"),
+                pl.col(formversion).max().alias("latest form version"),
+            ]
+        )
 
         latest_enum_formversion = df.group_by(group_by_cols, maintain_order=True).agg(
             pl.col(formversion).max().alias("last form version")
@@ -1052,7 +1129,9 @@ def compute_enumerator_summary(
 
         summary_df = summary_df.join(formdef_df, on=group_by_cols, how="left")
         summary_df = summary_df.join(formdef_outdated_df, on=group_by_cols, how="left")
-        summary_df = summary_df.join(latest_enum_formversion, on=group_by_cols, how="left")
+        summary_df = summary_df.join(
+            latest_enum_formversion, on=group_by_cols, how="left"
+        )
 
     # Add consent statistics if available
     if "consent_granted_agg_col" in df.columns:
@@ -1077,7 +1156,11 @@ def compute_enumerator_summary(
 
 
 def compute_enumerator_productivity(
-    data: pl.DataFrame, date: str, group_by_cols: list[str], period: str, weekstartday: str
+    data: pl.DataFrame,
+    date: str,
+    group_by_cols: list[str],
+    period: str,
+    weekstartday: str,
 ) -> pl.DataFrame:
     """Compute enumerator productivity over time.
 
@@ -1127,20 +1210,36 @@ def compute_enumerator_productivity(
 
         # Calculate the week start date (beginning of the week containing this date)
         # weekday() returns 0=Monday, 6=Sunday
-        prod_df = prod_df.with_columns([
-            # Calculate days since the start of the week
-            ((pl.col(date).dt.weekday() - offset + 7) % 7).alias("_days_since_week_start"),
-        ])
+        prod_df = prod_df.with_columns(
+            [
+                # Calculate days since the start of the week
+                ((pl.col(date).dt.weekday() - offset + 7) % 7).alias(
+                    "_days_since_week_start"
+                ),
+            ]
+        )
 
         # Calculate week_start_date by subtracting days_since_week_start
-        prod_df = prod_df.with_columns([
-            (pl.col(date) - pl.duration(days=pl.col("_days_since_week_start"))).alias("_week_start"),
-            (pl.col(date) - pl.duration(days=pl.col("_days_since_week_start")) + pl.duration(days=6)).alias("_week_end"),
-        ])
+        prod_df = prod_df.with_columns(
+            [
+                (
+                    pl.col(date) - pl.duration(days=pl.col("_days_since_week_start"))
+                ).alias("_week_start"),
+                (
+                    pl.col(date)
+                    - pl.duration(days=pl.col("_days_since_week_start"))
+                    + pl.duration(days=6)
+                ).alias("_week_end"),
+            ]
+        )
 
         # Format as "Jan 1, 2025 to Jan 7, 2025"
         prod_df = prod_df.with_columns(
-            (pl.col("_week_start").dt.strftime("%b %d, %Y") + " to " + pl.col("_week_end").dt.strftime("%b %d, %Y")).alias("TIME PERIOD")
+            (
+                pl.col("_week_start").dt.strftime("%b %d, %Y")
+                + " to "
+                + pl.col("_week_end").dt.strftime("%b %d, %Y")
+            ).alias("TIME PERIOD")
         )
     elif period_normalized == "Monthly":
         # Format as "January 2025"
@@ -1150,9 +1249,9 @@ def compute_enumerator_productivity(
 
     # Count submissions per period and enumerator
     prod_df = prod_df.with_row_index(name="TOKEN KEY")
-    prod_res = prod_df.group_by(["TIME PERIOD"] + group_by_cols, maintain_order=True).agg(
-        pl.col("TOKEN KEY").count().alias("submissions")
-    )
+    prod_res = prod_df.group_by(
+        ["TIME PERIOD"] + group_by_cols, maintain_order=True
+    ).agg(pl.col("TOKEN KEY").count().alias("submissions"))
 
     # Pivot to wide format
     prod_res = prod_res.pivot(
@@ -1289,20 +1388,36 @@ def compute_enumerator_statistics_overtime(
 
         # Calculate the week start date (beginning of the week containing this date)
         # weekday() returns 0=Monday, 6=Sunday
-        stats_overtime_df = stats_overtime_df.with_columns([
-            # Calculate days since the start of the week
-            ((pl.col(date).dt.weekday() - offset + 7) % 7).alias("_days_since_week_start"),
-        ])
+        stats_overtime_df = stats_overtime_df.with_columns(
+            [
+                # Calculate days since the start of the week
+                ((pl.col(date).dt.weekday() - offset + 7) % 7).alias(
+                    "_days_since_week_start"
+                ),
+            ]
+        )
 
         # Calculate week_start_date by subtracting days_since_week_start
-        stats_overtime_df = stats_overtime_df.with_columns([
-            (pl.col(date) - pl.duration(days=pl.col("_days_since_week_start"))).alias("_week_start"),
-            (pl.col(date) - pl.duration(days=pl.col("_days_since_week_start")) + pl.duration(days=6)).alias("_week_end"),
-        ])
+        stats_overtime_df = stats_overtime_df.with_columns(
+            [
+                (
+                    pl.col(date) - pl.duration(days=pl.col("_days_since_week_start"))
+                ).alias("_week_start"),
+                (
+                    pl.col(date)
+                    - pl.duration(days=pl.col("_days_since_week_start"))
+                    + pl.duration(days=6)
+                ).alias("_week_end"),
+            ]
+        )
 
         # Format as "Jan 1, 2025 to Jan 7, 2025"
         stats_overtime_df = stats_overtime_df.with_columns(
-            (pl.col("_week_start").dt.strftime("%b %d, %Y") + " to " + pl.col("_week_end").dt.strftime("%b %d, %Y")).alias("TIME PERIOD")
+            (
+                pl.col("_week_start").dt.strftime("%b %d, %Y")
+                + " to "
+                + pl.col("_week_end").dt.strftime("%b %d, %Y")
+            ).alias("TIME PERIOD")
         )
     elif period_normalized == "Monthly":
         # Format as "January 2025"
@@ -1367,27 +1482,67 @@ def _render_enumerator_overview_metrics(
         )
         return
 
-    metrics: EnumeratorOverviewMetrics = compute_enumerator_overview(data, date, enumerator, team)
+    metrics: EnumeratorOverviewMetrics = compute_enumerator_overview(
+        data, date, enumerator, team
+    )
 
     tc1, tc2, tc3, tc4 = st.columns(4, border=True)
-    num_enumerators_formatted = f"{metrics.num_enumerators:,}" if isinstance(metrics.num_enumerators, int) else metrics.num_enumerators
-    tc1.metric(r"\# of enumerators", num_enumerators_formatted, help="Total unique enumerators in the dataset")
-    num_teams_formatted = f"{metrics.num_teams:,}" if isinstance(metrics.num_teams, int) else metrics.num_teams
-    tc2.metric(r"\# of teams", num_teams_formatted, help="Total unique teams in the dataset")
+    num_enumerators_formatted = (
+        f"{metrics.num_enumerators:,}"
+        if isinstance(metrics.num_enumerators, int)
+        else metrics.num_enumerators
+    )
+    tc1.metric(
+        r"\# of enumerators",
+        num_enumerators_formatted,
+        help="Total unique enumerators in the dataset",
+    )
+    num_teams_formatted = (
+        f"{metrics.num_teams:,}"
+        if isinstance(metrics.num_teams, int)
+        else metrics.num_teams
+    )
+    tc2.metric(
+        r"\# of teams", num_teams_formatted, help="Total unique teams in the dataset"
+    )
     num_active_enumerators_formatted = f"{metrics.num_active_enumerators:,}"
-    tc3.metric(r"\# of Active enumerators (past 7 days)", num_active_enumerators_formatted, help="Number of enumerators with submissions in the past 7 days")
+    tc3.metric(
+        r"\# of Active enumerators (past 7 days)",
+        num_active_enumerators_formatted,
+        help="Number of enumerators with submissions in the past 7 days",
+    )
     pct_active_enumerators_formatted = f"{metrics.pct_active_enumerators}"
-    tc4.metric("% of active enumerator (past 7 days)", pct_active_enumerators_formatted, help="Percentage of enumerators active in the past 7 days")
+    tc4.metric(
+        "% of active enumerator (past 7 days)",
+        pct_active_enumerators_formatted,
+        help="Percentage of enumerators active in the past 7 days",
+    )
 
     bc1, bc2, bc3, bc4 = st.columns(4, border=True)
     min_submissions_formatted = f"{metrics.min_submissions:,}"
-    bc1.metric("Fewest enumerator submissions", min_submissions_formatted, help="Minimum number of submissions by any enumerator")
+    bc1.metric(
+        "Fewest enumerator submissions",
+        min_submissions_formatted,
+        help="Minimum number of submissions by any enumerator",
+    )
     max_submissions_formatted = f"{metrics.max_submissions:,}"
-    bc2.metric("Highest enumerator submissions", max_submissions_formatted, help="Maximum number of submissions by any enumerator")
+    bc2.metric(
+        "Highest enumerator submissions",
+        max_submissions_formatted,
+        help="Maximum number of submissions by any enumerator",
+    )
     avg_submissions_formatted = f"{metrics.avg_submissions:,}"
-    bc3.metric("Average enumerator submissions", avg_submissions_formatted, help="Average number of submissions per enumerator")
+    bc3.metric(
+        "Average enumerator submissions",
+        avg_submissions_formatted,
+        help="Average number of submissions per enumerator",
+    )
     all_submissions_formatted = f"{metrics.all_submissions:,}"
-    bc4.metric("Total survey submissions", all_submissions_formatted, help="Total number of survey submissions in the dataset")
+    bc4.metric(
+        "Total survey submissions",
+        all_submissions_formatted,
+        help="Total number of survey submissions in the dataset",
+    )
 
 
 @st.fragment
@@ -1446,16 +1601,22 @@ def _render_enumerator_summary_table(
         duration,
     )
 
-    options_map = {"submissions": ":material/arrow_upload_progress: Submissions", "missing": ":material/incomplete_circle: Missing Data", "duration": ":material/timer: Duration", "formversion": ":material/difference: Form Version", "consent_outcome": ":material/check_circle: Consent & Outcome"}
+    options_map = {
+        "submissions": ":material/arrow_upload_progress: Submissions",
+        "missing": ":material/incomplete_circle: Missing Data",
+        "duration": ":material/timer: Duration",
+        "formversion": ":material/difference: Form Version",
+        "consent_outcome": ":material/check_circle: Consent & Outcome",
+    }
     with st.container(horizontal_alignment="left"):
         show_info = st.pills(
-                "Select Summary Information to Display",
-                options=options_map.keys(),
-                format_func=lambda x: options_map[x],
-                key="show_info_enumerator",
-                help="Select which summary information to display in the table",
-                selection_mode="multi",
-            )
+            "Select Summary Information to Display",
+            options=options_map.keys(),
+            format_func=lambda x: options_map[x],
+            key="show_info_enumerator",
+            help="Select which summary information to display in the table",
+            selection_mode="multi",
+        )
 
     # Define column groups
     column_groups = {
@@ -1469,10 +1630,17 @@ def _render_enumerator_summary_table(
             "# submissions this month",
         ],
         "missing": [
-            col for col in summary_df.columns
-            if "%" in col and ("Null" in col or "Missing" in col or any(
-                keyword in col for keyword in ["Don't Know", "Refuse", "Not Applicable"]
-            ))
+            col
+            for col in summary_df.columns
+            if "%" in col
+            and (
+                "Null" in col
+                or "Missing" in col
+                or any(
+                    keyword in col
+                    for keyword in ["Don't Know", "Refuse", "Not Applicable"]
+                )
+            )
         ],
         "duration": [
             "min duration",
@@ -1493,16 +1661,21 @@ def _render_enumerator_summary_table(
     }
 
     # Always include enumerator and # submissions
-    columns_to_show = [enumerator, team, "# submissions"] if team else [enumerator, "# submissions"]
+    columns_to_show = (
+        [enumerator, team, "# submissions"] if team else [enumerator, "# submissions"]
+    )
 
     # Filter columns based on selection
     if show_info:
         # Add columns from selected categories
         for category in show_info:
-            columns_to_show.extend([
-                col for col in column_groups[category]
-                if col in summary_df.columns and col not in columns_to_show
-            ])
+            columns_to_show.extend(
+                [
+                    col
+                    for col in column_groups[category]
+                    if col in summary_df.columns and col not in columns_to_show
+                ]
+            )
 
         # Filter the dataframe
         filtered_df = summary_df.select(columns_to_show)
@@ -1522,21 +1695,45 @@ def _render_enumerator_summary_table(
         column_config[team] = st.column_config.TextColumn("Team", pinned=True)
 
     # Add remaining columns
-    column_config.update({
-        "# submissions": st.column_config.NumberColumn("# of Submissions", format="%d", pinned=True),
-        "# unique dates": st.column_config.NumberColumn("# of Days", format="%d"),
-        "# submissions today": st.column_config.NumberColumn("# submitted Today", format="%d"),
-        "# submissions this week": st.column_config.NumberColumn("# submitted This Week", format="%d"),
-        "# submissions this month": st.column_config.NumberColumn("# submitted This Month", format="%d"),
-        "% Null values": st.column_config.NumberColumn("% Null Values", format="%.2f%%"),
-        "% Total Missing": st.column_config.NumberColumn("% Total Missing", format="%.2f%%"),
-        "% consent": st.column_config.NumberColumn("% Consent", format="%.2f%%"),
-        "% completed survey": st.column_config.NumberColumn("% Completed", format="%.2f%%"),
-        "min duration": st.column_config.NumberColumn("Min Duration (s)", format="%.2f"),
-        "mean duration": st.column_config.NumberColumn("Mean Duration (s)", format="%.2f"),
-        "median duration": st.column_config.NumberColumn("Median Duration (s)", format="%.2f"),
-        "max duration": st.column_config.NumberColumn("Max Duration (s)", format="%.2f"),
-    })
+    column_config.update(
+        {
+            "# submissions": st.column_config.NumberColumn(
+                "# of Submissions", format="%d", pinned=True
+            ),
+            "# unique dates": st.column_config.NumberColumn("# of Days", format="%d"),
+            "# submissions today": st.column_config.NumberColumn(
+                "# submitted Today", format="%d"
+            ),
+            "# submissions this week": st.column_config.NumberColumn(
+                "# submitted This Week", format="%d"
+            ),
+            "# submissions this month": st.column_config.NumberColumn(
+                "# submitted This Month", format="%d"
+            ),
+            "% Null values": st.column_config.NumberColumn(
+                "% Null Values", format="%.2f%%"
+            ),
+            "% Total Missing": st.column_config.NumberColumn(
+                "% Total Missing", format="%.2f%%"
+            ),
+            "% consent": st.column_config.NumberColumn("% Consent", format="%.2f%%"),
+            "% completed survey": st.column_config.NumberColumn(
+                "% Completed", format="%.2f%%"
+            ),
+            "min duration": st.column_config.NumberColumn(
+                "Min Duration (s)", format="%.2f"
+            ),
+            "mean duration": st.column_config.NumberColumn(
+                "Mean Duration (s)", format="%.2f"
+            ),
+            "median duration": st.column_config.NumberColumn(
+                "Median Duration (s)", format="%.2f"
+            ),
+            "max duration": st.column_config.NumberColumn(
+                "Max Duration (s)", format="%.2f"
+            ),
+        }
+    )
 
     st.dataframe(
         filtered_df,
@@ -1549,6 +1746,7 @@ def _render_enumerator_summary_table(
 # =============================================================================
 # Display Functions - Productivity
 # =============================================================================
+
 
 def _render_enumerator_productivity(
     data: pl.DataFrame,
@@ -1580,9 +1778,7 @@ def _render_enumerator_productivity(
         )
         return
 
-    _render_enumerator_productivity_table(
-        data, date, enumerator, team, settings_file
-    )
+    _render_enumerator_productivity_table(data, date, enumerator, team, settings_file)
 
 
 @st.fragment
@@ -1614,7 +1810,6 @@ def _render_enumerator_productivity_table(
     else:
         weekstartday = "MON"  # Default value, not used for non-weekly periods
 
-
     group_by_cols = [enumerator, team] if team else [enumerator]
     productivity_df = compute_enumerator_productivity(
         data, date, group_by_cols, time_period, weekstartday
@@ -1631,12 +1826,17 @@ def _render_enumerator_productivity_table(
             enumerator: st.column_config.TextColumn("Enumerator", pinned=True),
         }
 
-    column_config.update({
-        col: st.column_config.NumberColumn(col, format="%d") for col in productivity_df.columns
-        if col not in group_by_cols
-    })
+    column_config.update(
+        {
+            col: st.column_config.NumberColumn(col, format="%d")
+            for col in productivity_df.columns
+            if col not in group_by_cols
+        }
+    )
 
-    st.dataframe(productivity_df, hide_index=True, width="stretch", column_config=column_config)
+    st.dataframe(
+        productivity_df, hide_index=True, width="stretch", column_config=column_config
+    )
 
 
 def _render_time_period_selector(
@@ -1660,28 +1860,33 @@ def _render_time_period_selector(
     Literal["Day", "Week", "Month"]
         Selected time period.
     """
-    options_map = {"Day": ":material/event: Daily", "Week": ":material/date_range: Weekly", "Month": ":material/calendar_month: Monthly"}
+    options_map = {
+        "Day": ":material/event: Daily",
+        "Week": ":material/date_range: Weekly",
+        "Month": ":material/calendar_month: Monthly",
+    }
 
     saved_settings = load_check_settings(settings_file, tab_name) or {}
-    default_time_period = saved_settings.get("time_period_enumerator_productivity", "Day")
+    default_time_period = saved_settings.get(
+        "time_period_enumerator_productivity", "Day"
+    )
 
     with st.container(horizontal_alignment="left"):
         time_period = st.pills(
-                label="Time Period",
-                options=options_map.keys(),
-                format_func=lambda x: options_map[x],
-                key="time_period_enumerator_productivity_key",
-                default=default_time_period,
-                help="Select time period for aggregating productivity",
-                selection_mode="single",
-                on_change=trigger_save,
-                kwargs={"state_name": tab_name + "_time_period"},
-            )
-        save_check_settings(
-                settings_file, tab_name, {"time_period": time_period}
-            )
+            label="Time Period",
+            options=options_map.keys(),
+            format_func=lambda x: options_map[x],
+            key="time_period_enumerator_productivity_key",
+            default=default_time_period,
+            help="Select time period for aggregating productivity",
+            selection_mode="single",
+            on_change=trigger_save,
+            kwargs={"state_name": tab_name + "_time_period"},
+        )
+        save_check_settings(settings_file, tab_name, {"time_period": time_period})
 
     return time_period or "Day"
+
 
 def _render_weekday_selector(
     settings_file: str,
@@ -1705,7 +1910,9 @@ def _render_weekday_selector(
         Weekday offset code (e.g., "SUN", "MON") for calculations.
     """
     saved_settings = load_check_settings(settings_file, tab_name) or {}
-    default_weekstartday_sel = saved_settings.get("weekstartday_enumerator_productivity", "Monday")
+    default_weekstartday_sel = saved_settings.get(
+        "weekstartday_enumerator_productivity", "Monday"
+    )
     default_weekstartday_sel_index = WEEKDAY_NAMES.index(default_weekstartday_sel)
 
     cl1, _ = st.columns([1, 3])
@@ -1719,9 +1926,7 @@ def _render_weekday_selector(
             on_change=trigger_save,
             kwargs={"state_name": tab_name + "_weekstartday"},
         )
-    save_check_settings(
-        settings_file, tab_name, {"weekstartday": weekstartday_sel}
-    )
+    save_check_settings(settings_file, tab_name, {"weekstartday": weekstartday_sel})
 
     return WEEKDAY_OFFSET_MAP[weekstartday_sel]
 
@@ -1729,6 +1934,7 @@ def _render_weekday_selector(
 # =============================================================================
 # Display Functions - Statistics
 # =============================================================================
+
 
 def _load_statistics_settings(settings_file: str) -> StatisticsSettings:
     """Load and validate statistics settings from file.
@@ -1751,7 +1957,9 @@ def _load_statistics_settings(settings_file: str) -> StatisticsSettings:
         return StatisticsSettings()
 
 
-def _get_numeric_columns(data: pl.DataFrame, exclude_cols: list[str] | None = None) -> list[str]:
+def _get_numeric_columns(
+    data: pl.DataFrame, exclude_cols: list[str] | None = None
+) -> list[str]:
     """Extract numeric column names from DataFrame.
 
     Parameters
@@ -1768,7 +1976,8 @@ def _get_numeric_columns(data: pl.DataFrame, exclude_cols: list[str] | None = No
     """
     exclude_cols = exclude_cols or []
     return [
-        col for col in data.columns
+        col
+        for col in data.columns
         if data[col].dtype in pl.NUMERIC_DTYPES and col not in exclude_cols
     ]
 
@@ -1837,6 +2046,7 @@ def _render_statistics_selector(
     save_check_settings(settings_file, TAB_NAME, {"stats": selected_stats})
     return selected_stats
 
+
 @st.fragment
 def _render_enumerator_statistics_table(
     data: pl.DataFrame,
@@ -1882,7 +2092,9 @@ def _render_enumerator_statistics_table(
     col1, col2 = st.columns(2)
 
     with col1:
-        statscols = _render_column_selector(numeric_cols, settings.statscols, settings_file)
+        statscols = _render_column_selector(
+            numeric_cols, settings.statscols, settings_file
+        )
 
     with col2:
         stats = _render_statistics_selector(settings.stats, settings_file)
@@ -1908,9 +2120,13 @@ def _render_enumerator_statistics_table(
                 enumerator: st.column_config.TextColumn("Enumerator", pinned=True),
             }
 
-        st.dataframe(stats_df, hide_index=True, width="stretch", column_config=column_config)
+        st.dataframe(
+            stats_df, hide_index=True, width="stretch", column_config=column_config
+        )
     else:
-        st.info("No columns selected for statistics calculation.", icon=":material/info:")
+        st.info(
+            "No columns selected for statistics calculation.", icon=":material/info:"
+        )
 
 
 def _render_enumerator_statistics(
@@ -1948,7 +2164,9 @@ def _render_enumerator_statistics(
     )
 
 
-def _load_statistics_overtime_settings(settings_file: str) -> StatisticsOvertimeSettings:
+def _load_statistics_overtime_settings(
+    settings_file: str,
+) -> StatisticsOvertimeSettings:
     """Load and validate statistics overtime settings from file.
 
     Parameters
@@ -1987,7 +2205,11 @@ def _render_period_selector_overtime(
     str
         Selected time period.
     """
-    options_map = {"Day": ":material/event: Daily", "Week": ":material/date_range: Weekly", "Month": ":material/calendar_month: Monthly"}
+    options_map = {
+        "Day": ":material/event: Daily",
+        "Week": ":material/date_range: Weekly",
+        "Month": ":material/calendar_month: Monthly",
+    }
     default_period = "Week"
     period = st.pills(
         label="Select Time Period:",
@@ -2093,7 +2315,9 @@ def _render_column_selector_single(
         Selected column.
     """
     default_col_index = (
-        numeric_cols.index(default_col) if default_col and default_col in numeric_cols else None
+        numeric_cols.index(default_col)
+        if default_col and default_col in numeric_cols
+        else None
     )
 
     statscol = st.selectbox(
@@ -2157,18 +2381,23 @@ def _render_enumerator_statistics_overtime_table(
     col1, col2, col3 = st.columns([0.3, 0.2, 0.5])
 
     with col1:
-        statscol = _render_column_selector_single(numeric_cols, settings.statscol, settings_file)
+        statscol = _render_column_selector_single(
+            numeric_cols, settings.statscol, settings_file
+        )
 
     with col2:
         stat = _render_statistic_selector(settings.stat, settings_file)
 
     with col3:
-        period = _render_period_selector_overtime(settings.period_overtime, settings_file)
+        period = _render_period_selector_overtime(
+            settings.period_overtime, settings_file
+        )
         # Conditionally render weekday selector for weekly period
         weekstartday = "SAT"  # Default
         if period == "Week":
-            weekstartday = _render_weekday_selector_overtime(settings.weekstartday, settings_file)
-
+            weekstartday = _render_weekday_selector_overtime(
+                settings.weekstartday, settings_file
+            )
 
     # Compute and display statistics
     if statscol:
@@ -2194,9 +2423,16 @@ def _render_enumerator_statistics_overtime_table(
                 enumerator: st.column_config.TextColumn("Enumerator", pinned=True),
             }
 
-        st.dataframe(stats_overtime_df, hide_index=True, width="stretch", column_config=column_config)
+        st.dataframe(
+            stats_overtime_df,
+            hide_index=True,
+            width="stretch",
+            column_config=column_config,
+        )
     else:
-        st.info("No column selected for statistics calculation.", icon=":material/info:")
+        st.info(
+            "No column selected for statistics calculation.", icon=":material/info:"
+        )
 
 
 def _render_enumerator_statistics_overtime(
@@ -2233,7 +2469,11 @@ def _render_enumerator_statistics_overtime(
         return
 
     _render_enumerator_statistics_overtime_table(
-        data=data, date=date, enumerator=enumerator, team=team, settings_file=settings_file
+        data=data,
+        date=date,
+        enumerator=enumerator,
+        team=team,
+        settings_file=settings_file,
     )
 
 
@@ -2247,7 +2487,7 @@ def enumerator_report(
     data: pl.DataFrame,
     setting_file: str,
     config: dict,
-    survey_columns: ColumnByType
+    survey_columns: ColumnByType,
 ) -> None:
     """Generate a comprehensive enumerator performance report.
 
@@ -2286,7 +2526,12 @@ def enumerator_report(
     config_settings = EnumeratorSettings(**config)
 
     enumerator_settings = enumerator_report_settings(
-        project_id, setting_file, data, config_settings, categorical_columns, datetime_columns
+        project_id,
+        setting_file,
+        data,
+        config_settings,
+        categorical_columns,
+        datetime_columns,
     )
 
     # get data for enumerator report

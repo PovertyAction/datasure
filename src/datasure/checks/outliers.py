@@ -6,6 +6,7 @@ This module provides comprehensive outlier detection functionality with:
 - Pydantic validation for data integrity
 - Modular, testable architecture
 """
+
 import re
 from enum import Enum, IntEnum
 from typing import Any
@@ -183,6 +184,7 @@ class OutlierStatistics(BaseModel):
         """Pydantic config."""
 
         populate_by_name = True
+
 
 class OutlierColumnConfig(BaseModel):
     """Configuration for a single outlier column check."""
@@ -2509,7 +2511,9 @@ def _update_outlier_column_config(
     new_config_df = pl.DataFrame(new_config, schema=schema)
     if not existing_config.is_empty():
         formatted_existing_config = _ensure_column_formats(existing_config)
-        updated_config = pl.concat([formatted_existing_config, new_config_df], how="vertical")
+        updated_config = pl.concat(
+            [formatted_existing_config, new_config_df], how="vertical"
+        )
     else:
         updated_config = new_config_df
 

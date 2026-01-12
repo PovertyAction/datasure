@@ -31,7 +31,9 @@ def create_app(app_type: str, output_path: Path, app_name: str = "My App"):
     }
 
     if app_type not in templates:
-        msg = f"Unknown app type: {app_type}. Choose from: {', '.join(templates.keys())}"
+        msg = (
+            f"Unknown app type: {app_type}. Choose from: {', '.join(templates.keys())}"
+        )
         raise ValueError(msg)
 
     template_path = templates[app_type]

@@ -956,7 +956,10 @@ def compute_summary_data_quality(data: pl.DataFrame, survey_id: str | None) -> t
 
 @demo_output_onboarding(TAB_NAME)
 def summary_settings(
-    data: pl.DataFrame, setting_file: str, config: SummarySettings, survey_columns: ColumnByType
+    data: pl.DataFrame,
+    setting_file: str,
+    config: SummarySettings,
+    survey_columns: ColumnByType,
 ) -> tuple:
     """Render settings UI and return selected settings.
 
@@ -1371,7 +1374,9 @@ def summary_data_quality(data: pl.DataFrame, survey_id: str | None) -> None:
 
 
 @demo_output_onboarding(TAB_NAME)
-def summary_report(data: pl.DataFrame, setting_file: str, config: dict, survey_columns: ColumnByType) -> None:
+def summary_report(
+    data: pl.DataFrame, setting_file: str, config: dict, survey_columns: ColumnByType
+) -> None:
     """Generate comprehensive summary report.
 
     Parameters
