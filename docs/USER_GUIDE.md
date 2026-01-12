@@ -1,6 +1,6 @@
 # DataSure User Guide
 
-**Version 1.0 - Comprehensive Guide to Survey Data Quality Management**
+**Version 1.0 - Comprehensive Guide to Survey Data Quality Management** #noqa: MD036
 
 ---
 

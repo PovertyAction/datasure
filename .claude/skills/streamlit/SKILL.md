@@ -832,28 +832,28 @@ plotly>=5.0.0
 
 ### Common Issues
 
-**Issue: State not persisting**
+#### Issue: State not persisting
 
 - Solution: Initialize state before first use
 - Check that widget has unique `key` parameter
 
-**Issue: Widget not updating**
+#### Issue: Widget not updating
 
 - Solution: Use `st.rerun()` after state changes
 - Ensure callbacks are properly defined
 
-**Issue: Slow performance**
+#### Issue: Slow performance
 
 - Solution: Add caching to expensive operations
 - Use forms to batch inputs
 - Profile with `@st.cache_data` and monitor cache size
 
-**Issue: Import errors in multi-page apps**
+#### Issue: Import errors in multi-page apps
 
 - Solution: Use absolute imports from package root
 - Ensure `__init__.py` files exist in all directories
 
-**Issue: Asset files not found**
+#### Issue: Asset files not found
 
 - Solution: Use package-relative paths with `Path(__file__)`
 - Test both development and installed package scenarios
