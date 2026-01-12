@@ -68,10 +68,10 @@ class ImportDemoInfo:
         What is Data Preparation?
 
         ##### Data preparation is a crucial step that:
-        - Cleans and standardizes your survey data for data quality analysis
-        - Handles missing values and inconsistencies
-        - Creates new variables for analysis
-        - Removes problematic rows or columns
+        - **Standardizes missing values**: Automatically converts 80+ common missing value representations (NULL, N/A, -999, etc.) to proper null values
+        - **Cleans and transforms data**: Handles text case changes, date conversions, and mathematical operations
+        - **Creates new variables**: Add calculated fields, unique identifiers, or custom columns for analysis
+        - **Removes problematic data**: Delete unnecessary columns or filter out rows with critical data quality issues
 
         ##### For this demo, you can:
         1. **Explore your data**: Alternate between the **demo_survey** and **demo_backcheck**
@@ -79,18 +79,18 @@ class ImportDemoInfo:
         2. **Transform date column**: Add data preparation steps if you want to experiment.
         Do the following:
             - Select the **demo_survey** tab
-            - Click on the "Add data prep step" button
+            - Click on the ":material/add: Add data prep step" button
             - Under "Select Action", choose "Transform Column"
             - For "Select Column to Transform", choose "submissiondate"
-            - For "select function", choose "string to datetime". Note that the functions
+            - For "Select function", choose "string to datetime". Note that the functions
               available depend on the type of column selected.
-            - Click on "Add" to save the preparation step.
+            - Click on ":material/check: Apply" to save the preparation step.
             - Review the "submissiondate" column to see the changes.
         3. **Apply same step to backcheck data**: Select the **demo_backcheck** tab and repeat
-        the same steps to transform the "submissiondate" column there as well.,
+        the same steps to transform the "submissiondate" column there as well.
 
 
-        **Ready to continue?** Preview and data and additional transformations.
+        **Ready to continue?** Preview data and try additional transformations.
     """
 
     PROCEED_TO_CONFIG_INFO: ClassVar[str] = """
@@ -132,24 +132,32 @@ class ImportDemoInfo:
     ADD_CHECK_CONFIG_INFO: ClassVar[str] = """
         ##### Follow these steps to set up data quality checks:
 
-        ##### Step 1: Click "Add new check configuration"
-        - Give it a name like "Household Survey Checks"
+        ##### Step 1: Click ":material/add: Add new check configuration"
+        - A dialog window will appear to guide you through the configuration process
+        - Give your configuration a descriptive name like "Household Survey Checks" (1-20 characters)
 
         ##### Step 2: Select your survey dataset
-        - Choose "demo_survey" (your main household survey data)
+        - Choose "demo_survey" (your main household survey data) from the dropdown
+        - The column selector will automatically refresh to show available columns
 
-        ##### Step 3: Configure key columns:
-        - **Key Column**: Choose "hhid" (Household ID) - this uniquely identifies each survey
-        - **ID Column**: Choose "hhid" as well
+        ##### Step 3: Configure survey key columns:
+        DataSure will categorize your columns by type (datetime, numeric, categorical) to help you choose:
+        - **Key Column**: Choose "KEY" (unique row identifier) - this uniquely identifies each survey record
+        - **ID Column**: Choose "hhid" (Household ID) - identifies each household/respondent
         - **Enumerator Column**: Choose "enum_name" (shows who collected the data)
-        - **Date Column**: Leave blank (demo data doesn't have proper date format)
+        - **Date Column**: Choose "submissiondate" (when the survey was submitted)
+        - **Survey Target** (optional): Enter expected number of interviews (e.g., 200)
 
-        ##### Step 4: Add backcheck dataset
+        ##### Step 4: Add backcheck dataset (optional)
+        - Toggle "Add backcheck dataset" to expand backcheck options
         - **Backcheck Dataset**: Choose "demo_backcheck" (quality control data)
+        - Configure backcheck columns similarly (date, backchecker, target percentage)
 
-        ##### Step 5: Click "Add Check Configuration"
+        ##### Step 5: Click "Submit" to create the configuration
+        - DataSure validates your inputs using Pydantic models for data integrity
+        - If validation passes, a new quality analysis page is automatically created!
 
-        **🎆 What happens next:** DataSure will create a comprehensive quality analysis page!
+        **🎆 What happens next:** DataSure creates a comprehensive quality analysis page with all configured checks!
     """
 
     ADD_PREP_STEPS_INFO: ClassVar[str] = """
@@ -293,28 +301,39 @@ class OnboardingSteps:
 
         ##### What you're doing in this step:
         - Creating a "check configuration" that tells DataSure how to analyze your data
-        - Mapping your data columns to specific quality checks
+        - Mapping your data columns to specific quality checks (using categorized column types)
         - Connecting your survey data with backcheck data for validation
+        - Setting validation rules using Pydantic models for data integrity
 
         ##### Demo Instructions:
-        1. **Click "Add new check configuration"**
-        2. **Name it**: "Household HFCs" or similar
-        3. **Select Survey Dataset**: Choose "demo_survey"
-        4. **Configure Key Columns**:
-            - **Key Column**: "KEY" (unique row identifier for your dataset. If none exists, you can create one during data preparation)
-            - **ID Column**: "hhid" (Unique household identifier)
-            - **Enumerator Column**: "enum_name" (Column indicating who collected the data)
-            - **Date Column**: "submissiondate" (Date when the survey was submitted). If there is no date column, you have to go back and convert the submissiondate column to date format in the data preparation step.
-        5. **Add Backcheck Dataset**: Choose "demo_backcheck"
-        6. **Click "Add Check Configuration"**
+        1. **Click ":material/add: Add new check configuration"**
+            - A dialog window will appear with a step-by-step form
+        2. **Name your configuration**: Enter "Household HFCs" or similar (1-20 characters)
+        3. **Select Survey Dataset**: Choose "demo_survey" from the dropdown
+            - The system will automatically categorize columns by type (datetime, numeric, categorical)
+        4. **Configure Key Columns** (note column categories will be shown):
+            - **Key Column**: "KEY" (unique row identifier) - from categorical columns
+            - **ID Column**: "hhid" (Unique household identifier) - from categorical columns
+            - **Enumerator Column**: "enum_name" (who collected the data) - from categorical columns
+            - **Date Column**: "submissiondate" (submission date) - from datetime columns
+            - **Survey Target** (optional): Enter 200 (expected number of interviews)
+        5. **Add Backcheck Dataset** (optional):
+            - Toggle "Add backcheck dataset" to expand options
+            - **Backcheck Dataset**: Choose "demo_backcheck"
+            - **Backcheck Date**: Choose "submissiondate"
+            - **Backchecker**: Choose "backchecker_name"
+            - **Backcheck Target %**: Enter 10 (percentage of surveys to backcheck)
+        6. **Click "Submit"** to create the configuration
+            - DataSure will validate all inputs
+            - A new output page will be automatically created
 
         ##### What DataSure will analyze:
         - Duplicate household records and missing data patterns
         - Enumerator performance and data collection quality
-        - Statistical outliers and data inconsistencies
+        - Statistical outliers with configurable detection methods (IQR/Standard Deviation)
         - Backcheck validation comparing survey responses to quality control visits
 
-        **🎆 Next step:** View comprehensive quality analysis reports!
+        **🎆 Next step:** View comprehensive quality analysis reports on your new output page!
         """,
     }
 
@@ -669,19 +688,29 @@ class OutputOnboardingInfo:
             "content": """
         ##### Setup for Missing Data Tab
         In this section, you can configure global settings for the missing data tab, you will notice that some settings are pre-filled with default values.
+
+        **Important**: DataSure automatically standardizes 80+ common missing value representations during data preparation, including:
+        - Empty strings and whitespace ("", "   ", "\\t", "\\n")
+        - NULL variants ("NULL", "null", "None", "none")
+        - N/A variants ("N/A", "n/a", "NA", "#N/A")
+        - Common placeholders ("-", "--", ".", "?", "???")
+        - Explicit missing labels ("Missing", "missing", "Unknown", "unknown")
+        - String NaN representations ("NaN", "nan", "NaT")
+
         This tab contains the following settings:
-        - Each row indicates a type of missing data value to check for (e.g., Dont know, No response, N/A, etc.)
+        - Each row indicates a **specific coded missing value type** (e.g., Don't know = -99, Refused = -88, etc.)
         - The **Missing Labels** column allows you to specify custom labels that represent missing data in your dataset. This label will be used in the reports
         to show counts of missing values based on this category.
-        - The **Missing Codes** column allows you to specify value that represent missing data in your dataset. This value will be used calculate the counts of missing values based on this category.
-        Multiple codes can be separated by commas. eg "99,999"
+        - The **Missing Codes** column allows you to specify numeric or text codes that represent missing data in your dataset. This value will be used to calculate the counts of missing values based on this category.
+        Multiple codes can be separated by commas (e.g., "99,999" or "-99,-999")
 
         ##### Instructions for Demo:
-        In a real project, you will want to programme your survey instrument to prevent unintended missing data values specified such as .999 instead of -999.
-        For this demo, .999 was not used as a missing data code. Edit each row to the decimal missing codes.
-        - use the codes -99 for the "Don't Know" row.
-        - use the code -88 for the "Refused to Answer" row.
-        - use the code -77 for the "Not Applicable" row.
+        In a real project, you should standardize your survey programming to use consistent missing data codes (e.g., always use -999, not sometimes .999).
+        For this demo, edit each row to use the following missing codes:
+        - Use the code **-99** for the "Don't Know" row
+        - Use the code **-88** for the "Refused to Answer" row
+        - Use the code **-77** for the "Not Applicable" row
+
         **Next**: Explore the **Missing Data Statistics** section below.
         """,
         },
@@ -790,37 +819,48 @@ class OutputOnboardingInfo:
             "title": "Outliers Settings",
             "content": """
         ##### Setup for Outliers Tab
-        In this section, you can configure global settings for the outliers tab, you will notice that some settings are pre-filled with default values.
+        In this section, you can configure global settings for the outliers tab. DataSure uses Pydantic models for configuration validation to ensure data integrity.
+
         This tab contains the following settings:
-        - Admin Settings:
-            - Survey ID: The main identifier for your survey respondents (e.g., household ID, Respondent ID).
-            - Survey Key: The unique key column for your survey dataset (e.g., KEY). This is different from the Survey ID which identifies unique respondents.
-            - Enumrator ID: The column indicating who collected the data (e.g., enumerator name or ID).
-        - Display Settings:
-            - Display Columns: Select the columns you want to display in the outliers report table.
-            - Minimum Threshold: Set the minimum number of non-missing values required for a column to be included in the outliers analysis.
-            The default is set to 30 when using the IQR method and 20 when using the standard deviation method.
-        - Outlier Columns:
-            - ":material/add: Add Outlier Column": Click this button to add columns for outlier analysis. You can select one or more numeric columns from your dataset to check for outliers.
-            This includes the following options:
-                - Search Type: This specifies how to search for outliers in the selected columns. You can choose between "exact" if you want to find outliers based on specific name of
-                any of the other options to search for column name based on partial matches. eg. using the option "contains" with the search text "land" will return columns such as "land_acre" and "land_rent".
-                - Select Columns to Check for Outliers: Choose one or more numeric columns from your dataset to check for outliers. This will be a text input that allows you to search for column names.
-                - Select Outlier Detection Method: Select the method for identifying outliers (e.g., IQR, Standard Deviation).
-                - Select Multiplier for Outlier Detection: Set the multiplier value for the selected outlier detection method. This value determines the sensitivity of the outlier detection. The default is 1.5 for IQR and 3 for Standard Deviation.
-                - (Optional) Soft Minimum: Set a soft minimum threshold for outlier detection. Values below this threshold will automatically be considered as outliers.
-                - (Optional) Soft Maximum: Set a soft maximum threshold for outlier detection. Values above this threshold will automatically be considered as outliers.
-            - ":material/delete: Button: Click this button to remove an outlier column from the analysis.
+        - **Admin Settings**:
+            - **Survey ID**: The main identifier for your survey respondents (e.g., household ID, Respondent ID).
+            - **Survey Key**: The unique key column for your survey dataset (e.g., KEY). This is different from the Survey ID which identifies unique respondents.
+            - **Enumerator ID**: The column indicating who collected the data (e.g., enumerator name or ID).
+        - **Display Settings**:
+            - **Display Columns**: Select the columns you want to display in the outliers report table.
+            - **Minimum Threshold**: Set the minimum number of non-missing values required for a column to be included in the outliers analysis.
+            The default thresholds are:
+                - **IQR Method**: 20 non-missing values minimum
+                - **Standard Deviation Method**: 30 non-missing values minimum
+        - **Outlier Columns Configuration**:
+            - Click ":material/add: Add Outlier Column" to add columns for outlier analysis. You can select one or more numeric columns from your dataset to check for outliers.
+
+            **Configuration options include**:
+                - **Search Type**: Specifies how to search for columns. Choose from:
+                    - "exact" - Match exact column name
+                    - "contains" - Find columns containing the search text (e.g., "land" finds "land_acre", "land_rent")
+                    - "starts_with" - Match columns starting with search text
+                    - "ends_with" - Match columns ending with search text
+                - **Select Columns to Check for Outliers**: Choose one or more numeric columns from your dataset. Uses text input with search functionality.
+                - **Select Outlier Detection Method**: Choose between:
+                    - **IQR (Interquartile Range)**: Default multiplier 1.5, minimum threshold 20 values
+                    - **SD (Standard Deviation)**: Default multiplier 3.0, minimum threshold 30 values
+                - **Select Multiplier for Outlier Detection**: Set the sensitivity of outlier detection:
+                    - IQR: Common values are 1.5 (default), 2.0, 2.5, 3.0
+                    - SD: Common values are 2.0, 2.5, 3.0 (default), 3.5, 4.0
+                - **(Optional) Soft Minimum**: Set a hard floor - values below this threshold are automatically flagged as outliers
+                - **(Optional) Soft Maximum**: Set a hard ceiling - values above this threshold are automatically flagged as outliers
+            - Click ":material/delete:" button to remove an outlier column from the analysis.
 
         ##### Instructions for Demo:
         For the demo data, add the following outlier columns:
-        - Click on the ":material/add: Add Outlier Column"
-        - For **search type** select "exact"
-        - For **select columns to check for outliers** select "land_acre" and "household_count"
-        - Leave the default settings for the rest of the options.
-        - Click on the "Add Outlier Column" button to add the selected columns to the outliers analysis.
+        1. Click on ":material/add: Add Outlier Column"
+        2. For **search type** select "exact"
+        3. For **select columns to check for outliers** select "land_acre" and "household_count"
+        4. Leave the default settings for the rest (IQR method with 1.5 multiplier)
+        5. Click "Apply" to add the selected columns to the outliers analysis
 
-        (OPTIONALLY) You can add more outlier columns by repeating the steps above.
+        **(OPTIONAL)** Add more outlier columns by repeating the steps above with different search types.
 
         **Next**: Explore the **Outliers Summary** section below.
         """,

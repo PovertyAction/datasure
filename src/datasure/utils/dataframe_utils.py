@@ -27,6 +27,7 @@ class ColumnByType(BaseModel):
 
     @validator("*", pre=True)
     def ensure_list(cls, v):
+        """Convert None values to empty lists."""
         if v is None:
             return []
         return v
@@ -50,8 +51,13 @@ def get_df_columns(
         integer_columns = df.select_dtypes(include=["int"]).columns.tolist()
         numeric_columns = df.select_dtypes(include=["number"]).columns.tolist()
         datetime_columns = df.select_dtypes(include=["datetime"]).columns.tolist()
-        categorical_columns = list(set(integer_columns + string_columns + df.select_dtypes(
-            include=["category"])))
+        categorical_columns = list(
+            set(
+                integer_columns
+                + string_columns
+                + df.select_dtypes(include=["category"]).columns.tolist()
+            )
+        )
 
     else:  # get info from polars dataframe
         all_columns = df.columns

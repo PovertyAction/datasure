@@ -1,3 +1,4 @@
+import contextlib
 import json
 import sys
 from datetime import date, timedelta
@@ -457,15 +458,20 @@ def mock_database_functions(monkeypatch):
     monkeypatch.setattr(
         "datasure.utils.duckdb_utils.duckdb_get_table", mock_duckdb_get_table
     )
-    monkeypatch.setattr("datasure.utils.duckdb_get_table", mock_duckdb_get_table)
 
     # Also directly patch the function used in settings_utils and check modules
-    monkeypatch.setattr(
-        "datasure.utils.settings_utils.get_check_config_settings", mock_config
-    )
-    monkeypatch.setattr(
-        "datasure.checks.backchecks.get_check_config_settings", mock_config
-    )
-    monkeypatch.setattr(
-        "datasure.checks.enumerator.get_check_config_settings", mock_config
-    )
+    # Use contextlib.suppress to avoid errors when attributes don't exist
+    with contextlib.suppress(AttributeError):
+        monkeypatch.setattr(
+            "datasure.utils.settings_utils.get_check_config_settings", mock_config
+        )
+
+    with contextlib.suppress(AttributeError):
+        monkeypatch.setattr(
+            "datasure.checks.backchecks.get_check_config_settings", mock_config
+        )
+
+    with contextlib.suppress(AttributeError):
+        monkeypatch.setattr(
+            "datasure.checks.enumerator.get_check_config_settings", mock_config
+        )
