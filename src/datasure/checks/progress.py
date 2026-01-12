@@ -1244,9 +1244,7 @@ def _display_chart_and_table(
 
         # Create custom hover text
         hover_text = [
-            f"<b>{attempts} Attempts</b><br>"
-            f"Percentage: {pct:.1f}%<br>"
-            f"Frequency: {freq}"
+            f"<b>{attempts} Attempts</b><br>Percentage: {pct:.1f}%<br>Frequency: {freq}"
             for attempts, pct, freq in zip(
                 num_interviews_list, percentage_list, frequency_list, strict=False
             )

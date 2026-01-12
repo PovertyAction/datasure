@@ -562,10 +562,7 @@ def enumerator_report_settings(
             _render_consent_outcome_settings(
                 project_id, data, categorical_columns, settings_file
             )
-            if (
-                "st_apply_consent_outcome_enumerator" in st.session_state
-                and st.session_state["st_apply_consent_outcome_enumerator"]
-            ):  # noqa: RUF019
+            if st.session_state.get("st_apply_consent_outcome_enumerator"):
                 st.success("Consent and outcome settings applied successfully.")
                 st.session_state["st_apply_consent_outcome_enumerator"] = False
 
