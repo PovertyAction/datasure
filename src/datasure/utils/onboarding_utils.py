@@ -68,7 +68,6 @@ class ImportDemoInfo:
         What is Data Preparation?
 
         ##### Data preparation is a crucial step that:
-        - **Standardizes missing values**: Automatically converts 80+ common missing value representations (NULL, N/A, -999, etc.) to proper null values
         - **Cleans and transforms data**: Handles text case changes, date conversions, and mathematical operations
         - **Creates new variables**: Add calculated fields, unique identifiers, or custom columns for analysis
         - **Removes problematic data**: Delete unnecessary columns or filter out rows with critical data quality issues
@@ -134,7 +133,7 @@ class ImportDemoInfo:
 
         ##### Step 1: Click ":material/add: Add new check configuration"
         - A dialog window will appear to guide you through the configuration process
-        - Give your configuration a descriptive name like "Household Survey Checks" (1-20 characters)
+        - Give your configuration a descriptive name like "Household HFCs" (1-20 characters)
 
         ##### Step 2: Select your survey dataset
         - Choose "demo_survey" (your main household survey data) from the dropdown
@@ -145,13 +144,15 @@ class ImportDemoInfo:
         - **Key Column**: Choose "KEY" (unique row identifier) - this uniquely identifies each survey record
         - **ID Column**: Choose "hhid" (Household ID) - identifies each household/respondent
         - **Enumerator Column**: Choose "enum_name" (shows who collected the data)
+        - **Team Column**: Select "team_id" - indicates the team responsible for data collection
+        - **Form Version Column (optional)**: Select "form_version" - indicates the version of the survey form used. Skip for this demo.
+        - **Duration Column**: Select "duration" (time taken to complete survey)
         - **Date Column**: Choose "submissiondate" (when the survey was submitted)
         - **Survey Target** (optional): Enter expected number of interviews (e.g., 200)
 
         ##### Step 4: Add backcheck dataset (optional)
-        - Toggle "Add backcheck dataset" to expand backcheck options
-        - **Backcheck Dataset**: Choose "demo_backcheck" (quality control data)
-        - Configure backcheck columns similarly (date, backchecker, target percentage)
+        - **Backcheck Dataset**: Choose "demo_backcheck" (from your imported backcheck data)
+        - Configure backcheck columns similarly (date: submissiondate, backchecker: bcer_name, backchecker team: team_id, target percentage: 10)
 
         ##### Step 5: Click "Submit" to create the configuration
         - DataSure validates your inputs using Pydantic models for data integrity
@@ -507,7 +508,7 @@ class OutputOnboardingInfo:
 
         ##### Instructions for Demo:
         For the demo, you will explore how to create a table showing progress by subgroups such as enumerator or region.
-        - AT "Progress by" dropdown, select "state" to see submission progress by state.
+        - At "Progress by" dropdown, select "state" to see submission progress by state.
 
         **Optionally**,
         - you can also explore by selecting other categorical columns.
