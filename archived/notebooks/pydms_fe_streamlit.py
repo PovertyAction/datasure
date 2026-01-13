@@ -771,7 +771,7 @@ with tab1:
                     font_size=14,
                 )
 
-                st.plotly_chart(fig, theme="streamlit", use_container_width=True)
+                st.plotly_chart(fig, theme="streamlit", width="stretch")
 
             # Group by date and count number of IDs
             count_by_date = (
@@ -812,7 +812,7 @@ with tab1:
 
                 # Display the table
                 st.write("Detailed Information Table:")
-                st.dataframe(filtered_table, use_container_width=True)
+                st.dataframe(filtered_table, width="stretch")
 
                 # Show the count of filtered results
                 st.write(f"Number of entries shown: {len(filtered_table)}")
@@ -869,7 +869,7 @@ with tab1:
                 xaxis=dict(type="category", categoryorder="category ascending")
             )
             # Show graph
-            st.plotly_chart(fig, theme="streamlit", use_container_width=True)
+            st.plotly_chart(fig, theme="streamlit", width="stretch")
 
         ##### Duplicates #####
         with tab4:
@@ -921,7 +921,7 @@ with tab1:
                 st.dataframe(
                     result,
                     hide_index=True,
-                    use_container_width=True,
+                    width="stretch",
                     column_config={
                         "id": st.column_config.Column(
                             label=id_variable, width="medium"
@@ -1015,7 +1015,7 @@ with tab1:
                     fig.update_layout(xaxis=dict(type="category"))
 
                     # Show the figure
-                    st.plotly_chart(fig, theme="streamlit", use_container_width=True)
+                    st.plotly_chart(fig, theme="streamlit", width="stretch")
                 else:
                     st.warning("No data available for the selected criteria.")
 
@@ -1232,7 +1232,7 @@ with tab1:
                                 st.dataframe(
                                     combined_summary,
                                     hide_index=True,
-                                    use_container_width=True,
+                                    width="stretch",
                                     column_config={
                                         "Enumerator ID": st.column_config.Column(
                                             width="small"
@@ -1282,7 +1282,7 @@ with tab1:
                         st.dataframe(
                             summary,
                             hide_index=True,
-                            use_container_width=True,
+                            width="stretch",
                             column_config={
                                 "Enumerator ID": st.column_config.Column(width="small"),
                                 "Total Interviews": st.column_config.NumberColumn(
@@ -1419,7 +1419,7 @@ with tab1:
                     font=dict(color="red"),
                 )
 
-                st.plotly_chart(fig, theme="streamlit", use_container_width=True)
+                st.plotly_chart(fig, theme="streamlit", width="stretch")
 
         #####  Missing #####
         with tab6:
@@ -1523,7 +1523,7 @@ with tab1:
                         st.dataframe(
                             percentages_df,
                             hide_index=True,
-                            use_container_width=True,
+                            width="stretch",
                             column_config=pct_config,
                         )
 
@@ -1554,7 +1554,7 @@ with tab1:
                         st.dataframe(
                             counts_df,
                             hide_index=True,
-                            use_container_width=True,
+                            width="stretch",
                             column_config=count_config,
                         )
 
@@ -1620,7 +1620,7 @@ with tab1:
                 st.dataframe(
                     table_data,
                     hide_index=True,
-                    use_container_width=True,
+                    width="stretch",
                     column_config={
                         "id": st.column_config.Column("ID", width="small"),
                         "enumid": st.column_config.Column("Enumid", width="small"),
@@ -1666,7 +1666,7 @@ with tab1:
                     )
                 )
 
-                st.plotly_chart(fig, theme="streamlit", use_container_width=True)
+                st.plotly_chart(fig, theme="streamlit", width="stretch")
 
             col1, col2 = st.columns(2)
 
@@ -1789,7 +1789,7 @@ with tab1:
                     st.dataframe(
                         table_data,
                         hide_index=True,
-                        use_container_width=True,
+                        width="stretch",
                         column_config={
                             "id": st.column_config.Column("ID", width="small"),
                             "name_variable": st.column_config.Column("Variable Name"),
@@ -1862,7 +1862,7 @@ with tab1:
                     )
                 )
 
-                st.plotly_chart(fig, theme="streamlit", use_container_width=True)
+                st.plotly_chart(fig, theme="streamlit", width="stretch")
 
         ##### Back Checks #####
         with tab8:
@@ -1987,7 +1987,7 @@ with tab1:
 
                         # Display the general results table
                         st.subheader("General Results")
-                        st.dataframe(enumerator_stats, use_container_width=True)
+                        st.dataframe(enumerator_stats, width="stretch")
 
                     # New tab for "Enumerator Statistics"
                     with tabs[1]:
@@ -2173,7 +2173,7 @@ with tab1:
                         # Display the filtered enumerator statistics table
                         st.dataframe(
                             filtered_enumerator_stats,
-                            use_container_width=True,
+                            width="stretch",
                             column_config={
                                 "Enumerator ID": st.column_config.Column(width="small"),
                                 "Total Surveys": st.column_config.NumberColumn(
@@ -2287,7 +2287,7 @@ with tab1:
                         # Display the filtered backchecker statistics table
                         st.dataframe(
                             filtered_backchecker_stats,
-                            use_container_width=True,
+                            width="stretch",
                             column_config={
                                 "Backchecker ID": st.column_config.Column(
                                     width="medium"
@@ -2384,7 +2384,7 @@ with tab1:
                                 filtered_mismatches = mismatches_df
 
                             # Display the filtered mismatches
-                            st.dataframe(filtered_mismatches, use_container_width=True)
+                            st.dataframe(filtered_mismatches, width="stretch")
 
             else:
                 st.info(

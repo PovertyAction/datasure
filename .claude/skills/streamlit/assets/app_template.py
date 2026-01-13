@@ -63,7 +63,7 @@ def main():
         # Display data
         if show_raw_data:
             st.subheader("Raw Data")
-            st.dataframe(df, use_container_width=True)
+            st.dataframe(df, width="stretch")
 
         # Basic statistics
         st.subheader("Statistics")

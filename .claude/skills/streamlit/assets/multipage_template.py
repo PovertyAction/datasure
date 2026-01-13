@@ -111,11 +111,11 @@ def main():
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("→ Go to Data Page", use_container_width=True):
+        if st.button("→ Go to Data Page", width="stretch"):
             st.switch_page("pages/1_📊_data.py")
 
     with col2:
-        if st.button("→ Go to Analysis Page", use_container_width=True):
+        if st.button("→ Go to Analysis Page", width="stretch"):
             if st.session_state.data_loaded:
                 st.switch_page("pages/2_📈_analysis.py")
             else:

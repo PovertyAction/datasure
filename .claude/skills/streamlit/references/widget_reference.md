@@ -305,7 +305,7 @@ df = pd.DataFrame({
 # Interactive dataframe
 st.dataframe(
     df,
-    use_container_width=True,
+    width="stretch",
     hide_index=False,
     column_config={
         "col1": st.column_config.NumberColumn(
@@ -320,7 +320,7 @@ st.dataframe(
 edited_df = st.data_editor(
     df,
     num_rows="dynamic",  # Allow adding/deleting rows
-    use_container_width=True
+    width="stretch"
 )
 
 # Static table
@@ -401,11 +401,11 @@ st.pyplot(fig)
 
 # Plotly
 fig = px.line(x=[1, 2, 3], y=[1, 4, 9])
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 
 # Altair
 chart = alt.Chart(df).mark_line().encode(x="x", y="y")
-st.altair_chart(chart, use_container_width=True)
+st.altair_chart(chart, width="stretch")
 ```
 
 ### Media
