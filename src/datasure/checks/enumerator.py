@@ -228,9 +228,7 @@ class StatisticsOvertimeSettings(BaseModel):
         Column to compute statistics on.
     """
 
-    period_overtime: str = Field(
-        default="Daily", description="Time period for analysis"
-    )
+    period_overtime: str = Field(default="Week", description="Time period for analysis")
     weekstartday: str = Field(default="Monday", description="Week start day")
     stat: str = Field(default="count", description="Statistic to compute")
     statscol: str | None = Field(None, description="Column for statistics")
@@ -2357,10 +2355,6 @@ def _render_enumerator_statistics_overtime_table(
     """
     # Validate inputs
     if not (enumerator and date):
-        st.info(
-            "Enumerator statistics over time requires a date and enumerator column to be selected. "
-            "Go to the :material/settings: settings section above to select them."
-        )
         return
 
     # Load and validate settings using Pydantic

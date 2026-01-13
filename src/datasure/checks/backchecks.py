@@ -2543,6 +2543,7 @@ def _render_value_list_display(
 
 def _render_additional_options(
     settings_file: str,
+    config: BackcheckSettings,
 ) -> tuple[str, list[str], list[str], StrCompareOptions]:
     """Render additional options section.
 
@@ -2560,9 +2561,11 @@ def _render_additional_options(
     with st.container(border=True):
         st.subheader("Additional Options")
 
+        default_settings = load_default_backchecks_settings(settings_file, config)
+
         # Duplicate handling
         drop_duplicates_option = _render_duplicate_handling(
-            settings_file, load_default_backchecks_settings(settings_file, None)
+            settings_file, default_settings
         )
 
         # No differences settings
@@ -2683,7 +2686,7 @@ def backchecks_report_settings(
             no_diff_values,
             exclude_values,
             string_comp_options,
-        ) = _render_additional_options(settings_file)
+        ) = _render_additional_options(settings_file, config)
 
     return BackcheckSettings(
         survey_key=survey_key,

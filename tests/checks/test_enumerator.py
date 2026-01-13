@@ -302,7 +302,7 @@ def test_statistics_overtime_settings_validation_stat():
 def test_statistics_overtime_settings_defaults():
     """Test StatisticsOvertimeSettings model with defaults."""
     settings = StatisticsOvertimeSettings()
-    assert settings.period_overtime == "Daily"
+    assert settings.period_overtime == "Week"
     assert settings.weekstartday == "Monday"
     assert settings.stat == "count"
     assert settings.statscol is None
