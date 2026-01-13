@@ -2397,7 +2397,7 @@ def _render_backchecker_productivity_table(
     st.dataframe(
         productivity_df,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config=column_config,
     )
 
@@ -2655,7 +2655,7 @@ def _render_enum_bcer_stats_table(
     )
 
     st.dataframe(
-        stats_df, hide_index=True, use_container_width=True, column_config=column_config
+        stats_df, hide_index=True, width="stretch", column_config=column_config
     )
 
 
@@ -2705,7 +2705,7 @@ def _render_column_stats(
     }
 
     st.dataframe(
-        stats_df, hide_index=True, use_container_width=True, column_config=column_config
+        stats_df, hide_index=True, width="stretch", column_config=column_config
     )
 
 
@@ -2935,7 +2935,7 @@ def _render_backcheck_comparison_results(
     st.dataframe(
         filtered_data,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config=column_config,
     )
 
