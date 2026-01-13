@@ -209,6 +209,8 @@ def progress_report_settings(
         # Load default settings
         default_settings = load_default_settings(settings_file, config)
 
+        st.write(default_settings)
+
         # Survey Identifiers
         with st.container(border=True):
             st.subheader("Survey Identifiers")
@@ -548,9 +550,7 @@ def render_time_period_selector(
         }
 
         saved_settings = load_check_settings(settings_file, tab_name) or {}
-        default_time_period = saved_settings.get(
-            "time_period_progress_overtime_save", "Day"
-        )
+        default_time_period = saved_settings.get("time_period", "Day")
 
         time_period = st.pills(
             label="Time Period",
@@ -570,7 +570,6 @@ def render_time_period_selector(
 
 
 @demo_output_onboarding(TAB_NAME)
-@st.fragment
 def display_progress_overtime(
     data: pl.DataFrame,
     date: str | None,
@@ -598,14 +597,6 @@ def display_progress_overtime(
         return
 
     time_period = render_time_period_selector(setting_file, TAB_NAME)
-
-    if st.session_state.get("time_period_progress_overtime_save"):
-        save_check_settings(
-            settings_file=setting_file,
-            check_name="progress",
-            check_settings={"time_period": time_period},
-        )
-        st.session_state["time_period_progress_overtime_save"] = False
 
     period_stats = compute_progress_overtime(
         data=data,
@@ -768,6 +759,120 @@ def _get_unique_values(data: pl.DataFrame, column: str) -> list[Any]:
     return data[column].unique().to_list()
 
 
+def _render_column_value_selection(
+    data: pl.DataFrame,
+    setting_file: str,
+    survey_cols: list[str],
+    default_column: str | None,
+    default_values: list[Any] | None,
+    column_label: str,
+    column_key: str,
+    values_key: str,
+    column_help: str,
+    values_help: str,
+    info_message: str,
+) -> tuple[str | None, list[Any] | None]:
+    """Render column and value selection UI with consistent behavior.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        Survey data containing columns.
+    setting_file : str
+        Path to settings file for saving configurations.
+    survey_cols : list[str]
+        Available column options.
+    default_column : str | None
+        Default selected column.
+    default_values : list[Any] | None
+        Default selected values.
+    column_label : str
+        Label for column selection.
+    column_key : str
+        Streamlit key for column selectbox.
+    values_key : str
+        Streamlit key for values multiselect.
+    column_help : str
+        Help text for column selection.
+    values_help : str
+        Help text for values selection.
+    info_message : str
+        Message to display when no column is selected.
+
+    Returns
+    -------
+    tuple[str | None, list[Any] | None]
+        Selected column and values.
+    """
+    # Column selection
+    column_index = (
+        survey_cols.index(default_column)
+        if default_column and default_column in survey_cols
+        else None
+    )
+    selected_column = st.selectbox(
+        label=column_label,
+        options=survey_cols,
+        help=column_help,
+        key=column_key,
+        index=column_index,
+        on_change=trigger_save,
+        kwargs={"state_name": TAB_NAME + f"_{column_key.split('_')[-1]}"},
+    )
+    save_check_settings(
+        setting_file, TAB_NAME, {column_key.split("_")[-1]: selected_column}
+    )
+
+    # Value selection (only if column is selected)
+    if not selected_column:
+        st.info(info_message)
+        return selected_column, None
+
+    value_options = _get_unique_values(data, selected_column)
+    default_vals = (
+        default_values if default_values and default_values in value_options else None
+    )
+    selected_values = st.multiselect(
+        label=f"Select {column_label.lower()} values",
+        options=value_options,
+        help=values_help,
+        key=values_key,
+        default=default_vals,
+        on_change=trigger_save,
+        kwargs={"state_name": TAB_NAME + f"_{values_key.split('_')[0]}_vals"},
+    )
+    save_check_settings(
+        setting_file, TAB_NAME, {f"{values_key.split('_')[0]}_vals": selected_values}
+    )
+
+    return selected_column, selected_values
+
+
+def _display_chart_if_configured(
+    column: str | None,
+    values: list[Any] | None,
+    percentage: float,
+    chart_title: str,
+) -> None:
+    """Display donut chart if column and values are configured.
+
+    Parameters
+    ----------
+    column : str | None
+        Selected column name.
+    values : list[Any] | None
+        Selected values for the column.
+    percentage : float
+        Percentage value to display in chart.
+    chart_title : str
+        Title to display above the chart.
+    """
+    if column and values:
+        chart = donut_chart2(actual_value=int(percentage))
+        st.markdown(f"**{chart_title}**")
+        st.pyplot(chart, width="stretch")
+
+
 @demo_output_onboarding(TAB_NAME)
 def display_progress_chart(data: pl.DataFrame, setting_file: str) -> None:
     """Display consent and completion progress charts with interactive configuration.
@@ -790,121 +895,42 @@ def display_progress_chart(data: pl.DataFrame, setting_file: str) -> None:
     survey_cols = data.columns
     _, cc1, _, cc2, _ = st.columns([0.1, 0.35, 0.1, 0.35, 0.1])
 
+    # Load default settings
     default_settings = (
         load_check_settings(settings_file=setting_file, check_name="progress") or {}
     )
-    consent, consent_vals, outcome, outcome_vals = (
-        default_settings.get("consent", None),
-        default_settings.get("consent_vals", None),
-        default_settings.get("outcome", None),
-        default_settings.get("outcome_vals", None),
-    )
 
-    # Consent column selection
+    # Consent column and value selection
     with cc1, st.container(border=True):
-        consent_index = (
-            survey_cols.index(consent) if consent and consent in survey_cols else None
+        consent, consent_vals = _render_column_value_selection(
+            data=data,
+            setting_file=setting_file,
+            survey_cols=survey_cols,
+            default_column=default_settings.get("consent"),
+            default_values=default_settings.get("consent_vals"),
+            column_label="Select consent column",
+            column_key="progress_consent_pie_chart",
+            values_key="consent_vals_progress_chart",
+            column_help="Column containing consent information",
+            values_help="Values to consider as valid consent",
+            info_message="Select consent column first and then select consent values to display the chart",
         )
-        consent = st.selectbox(
-            label="Select consent column",
-            options=survey_cols,
-            help="Column containing consent information",
-            key="progress_consent_pie_chart",
-            index=consent_index,
-            on_change=trigger_save,
-            kwargs=({"state_name": "progress_consent_pie_chart_save"}),
-        )
 
-        if st.session_state.get("progress_consent_pie_chart_save"):
-            save_check_settings(
-                settings_file=setting_file,
-                check_name="progress",
-                check_settings={"consent": consent},
-            )
-            st.session_state["progress_consent_pie_chart_save"] = False
-
-        if consent:
-            consent_val_options = _get_unique_values(data, consent)
-            default_consent_vals = (
-                consent_vals
-                if consent_vals and consent_vals in consent_val_options
-                else None
-            )
-            consent_vals = st.multiselect(
-                label="Select consent values",
-                options=consent_val_options,
-                help="Values to consider as valid consent",
-                key="consent_vals_progress_chart",
-                default=default_consent_vals,
-                on_change=trigger_save,
-                kwargs=({"state_name": "consent_vals_progress_chart_save"}),
-            )
-
-            if st.session_state.get("consent_vals_progress_chart_save"):
-                save_check_settings(
-                    settings_file=setting_file,
-                    check_name="progress",
-                    check_settings={"consent_vals": consent_vals},
-                )
-                st.session_state["consent_vals_progress_chart_save"] = False
-        else:
-            st.info(
-                "Select consent column first and then select consent values to display the chart"
-            )
-            consent_vals = None
-
-    # Outcome column selection
+    # Outcome column and value selection
     with cc2, st.container(border=True):
-        outcome_index = (
-            survey_cols.index(outcome) if outcome and outcome in survey_cols else None
+        outcome, outcome_vals = _render_column_value_selection(
+            data=data,
+            setting_file=setting_file,
+            survey_cols=survey_cols,
+            default_column=default_settings.get("outcome"),
+            default_values=default_settings.get("outcome_vals"),
+            column_label="Select outcome column",
+            column_key="outcome_progress_chart",
+            values_key="outcome_vals_progress_chart",
+            column_help="Column containing outcome information",
+            values_help="Values to consider as completed surveys",
+            info_message="Select outcome column first and then select outcome values to display the chart",
         )
-        outcome = st.selectbox(
-            label="Select outcome column",
-            options=survey_cols,
-            help="Column containing outcome information",
-            key="outcome_progress_chart",
-            index=outcome_index,
-            on_change=trigger_save,
-            kwargs=({"state_name": "outcome_progress_chart_save"}),
-        )
-
-        if st.session_state.get("outcome_progress_chart_save"):
-            save_check_settings(
-                settings_file=setting_file,
-                check_name="progress",
-                check_settings={"outcome": outcome},
-            )
-            st.session_state["outcome_progress_chart_save"] = False
-
-        if outcome:
-            outcome_val_options = _get_unique_values(data, outcome)
-            default_outcome_vals = (
-                outcome_vals
-                if outcome_vals and outcome_vals in outcome_val_options
-                else None
-            )
-            outcome_vals = st.multiselect(
-                label="Select outcome values",
-                options=outcome_val_options,
-                help="Values to consider as completed surveys",
-                key="outcome_vals_progress_chart",
-                default=default_outcome_vals,
-                on_change=trigger_save,
-                kwargs=({"state_name": "outcome_vals_progress_chart_save"}),
-            )
-
-            if st.session_state.get("outcome_vals_progress_chart_save"):
-                save_check_settings(
-                    settings_file=setting_file,
-                    check_name="progress",
-                    check_settings={"outcome_vals": outcome_vals},
-                )
-                st.session_state["outcome_vals_progress_chart_save"] = False
-        else:
-            st.info(
-                "Select outcome column first and then select outcome values to display the chart"
-            )
-            outcome_vals = None
 
     # Compute percentages
     consent_percentage, completion_percentage = compute_progress_chart(
@@ -915,19 +941,16 @@ def display_progress_chart(data: pl.DataFrame, setting_file: str) -> None:
         outcome_vals=outcome_vals,
     )
 
-    # Create and display charts
-    perc_consent_chart = donut_chart2(actual_value=int(consent_percentage))
-    perc_completion_chart = donut_chart2(actual_value=int(completion_percentage))
-
+    # Display charts
     with cc1:
-        if consent and consent_vals:
-            st.markdown("**% consent**")
-            st.pyplot(perc_consent_chart, width="stretch")
+        _display_chart_if_configured(
+            consent, consent_vals, consent_percentage, "% consent"
+        )
 
     with cc2:
-        if outcome and outcome_vals:
-            st.markdown("**% completion**")
-            st.pyplot(perc_completion_chart, width="stretch")
+        _display_chart_if_configured(
+            outcome, outcome_vals, completion_percentage, "% completion"
+        )
 
 
 # =============================================================================

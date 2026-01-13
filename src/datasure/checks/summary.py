@@ -742,7 +742,7 @@ def compute_summary_progress_by_col(
         - format_cols: list (columns for formatting)
     """
     # Handle empty data
-    if data.is_empty:
+    if data.is_empty():
         return pd.DataFrame(), 0, 0, []
 
     # Determine time period
@@ -762,24 +762,59 @@ def compute_summary_progress_by_col(
     except Exception as e:
         raise ValueError(f"Column {date} is not a datetime column: {e}") from e
 
-    # Create time period aggregation
+    # Create time period aggregation with user-friendly formatting
     if time_period == "Daily":
-        time_expr = pl.col(date).alias("time period")
+        # Format as "Feb 05, 2026"
+        progress_data = progress_data.with_columns(
+            pl.col(date).dt.strftime("%b %d, %Y").alias("time period")
+        )
     elif time_period == "Weekly":
-        time_expr = pl.col(date).dt.truncate("1w").alias("time period")
+        # Calculate week start and end dates for user-friendly display
+        # Default week starts on Monday (offset 1)
+        offset = 1
+
+        # Calculate the week start date (beginning of the week containing this date)
+        # weekday() returns 0=Monday, 6=Sunday
+        progress_data = progress_data.with_columns(
+            [
+                # Calculate days since the start of the week
+                ((pl.col(date).dt.weekday() - offset + 7) % 7).alias(
+                    "_days_since_week_start"
+                ),
+            ]
+        )
+
+        # Calculate week_start_date by subtracting days_since_week_start
+        progress_data = progress_data.with_columns(
+            [
+                (
+                    pl.col(date) - pl.duration(days=pl.col("_days_since_week_start"))
+                ).alias("_week_start"),
+                (
+                    pl.col(date)
+                    - pl.duration(days=pl.col("_days_since_week_start"))
+                    + pl.duration(days=6)
+                ).alias("_week_end"),
+            ]
+        )
+
+        # Format as "Feb 02, 2025 to Feb 08, 2025"
+        progress_data = progress_data.with_columns(
+            (
+                pl.col("_week_start").dt.strftime("%b %d, %Y")
+                + " to "
+                + pl.col("_week_end").dt.strftime("%b %d, %Y")
+            ).alias("time period")
+        )
     else:  # Monthly
-        time_expr = pl.col(date).dt.truncate("1mo").alias("time period")
+        # Format as "February 2025"
+        progress_data = progress_data.with_columns(
+            pl.col(date).dt.strftime("%B %Y").alias("time period")
+        )
 
     # Aggregate by time period and progress column
-    progress_data = (
-        progress_data.with_columns(time_expr)
-        .group_by(["time period", progress_by_col])
-        .agg(pl.len().alias("count"))
-    )
-
-    # Convert time period to date for display
-    progress_data = progress_data.with_columns(
-        pl.col("time period").cast(pl.Date).alias("time period")
+    progress_data = progress_data.group_by(["time period", progress_by_col]).agg(
+        pl.len().alias("count")
     )
 
     # Pivot the data
@@ -1195,6 +1230,7 @@ def summary_progress(
     _render_progress_by_column(data, date, setting_file)
 
 
+@st.fragment
 def _render_progress_by_column(
     data: pl.DataFrame, date: str, setting_file: str
 ) -> None:
@@ -1247,7 +1283,7 @@ def _render_progress_by_column(
             options=["Auto", "Daily", "Weekly", "Monthly"],
             default=progress_time_period,
             help="Select a time period to compute progress by",
-            key="progress_time_period",
+            key="summary_progress_time_period_pill",
             on_change=trigger_save,
             kwargs={"state_name": TAB_NAME + "_progress_time_period"},
         )
