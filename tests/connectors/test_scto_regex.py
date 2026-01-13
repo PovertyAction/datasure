@@ -119,9 +119,9 @@ class TestProjectIDRegex:
 
             # Should complete very quickly (less than 0.01 seconds)
             execution_time = end_time - start_time
-            assert (
-                execution_time < 0.01
-            ), f"Regex took {execution_time:.6f}s for input: {test_case}"
+            assert execution_time < 0.01, (
+                f"Regex took {execution_time:.6f}s for input: {test_case}"
+            )
 
 
 class TestServerNameRegex:
@@ -245,9 +245,9 @@ class TestServerNameRegex:
 
             # Should complete very quickly (less than 0.01 seconds)
             execution_time = end_time - start_time
-            assert (
-                execution_time < 0.01
-            ), f"Server name regex took {execution_time:.6f}s for input: {test_case}"
+            assert execution_time < 0.01, (
+                f"Server name regex took {execution_time:.6f}s for input: {test_case}"
+            )
 
     def test_server_name_regex_edge_cases(self):
         """Test edge cases for server name validation."""
@@ -386,9 +386,9 @@ class TestEmailRegex:
 
             # Should complete very quickly (less than 0.01 seconds)
             execution_time = end_time - start_time
-            assert (
-                execution_time < 0.01
-            ), f"Email regex took {execution_time:.6f}s for input: {test_case}"
+            assert execution_time < 0.01, (
+                f"Email regex took {execution_time:.6f}s for input: {test_case}"
+            )
 
     def test_email_regex_tld_validation(self):
         """Test TLD (top-level domain) validation."""
@@ -430,15 +430,15 @@ class TestRegexSecurityBestPractices:
 
         # Test project ID regex bounds
         project_id_pattern = r"^[a-z0-9]{8}$"
-        assert re.search(
-            r"\{8\}", project_id_pattern
-        ), "Project ID should have exact length quantifier"
+        assert re.search(r"\{8\}", project_id_pattern), (
+            "Project ID should have exact length quantifier"
+        )
 
         # Test server name regex bounds
         server_pattern = r"^[a-z][a-z0-9]{1,63}$"
-        assert re.search(
-            r"\{1,63\}", server_pattern
-        ), "Server name should have bounded quantifier"
+        assert re.search(r"\{1,63\}", server_pattern), (
+            "Server name should have bounded quantifier"
+        )
 
     def test_anchor_usage(self):
         """Test that regex patterns use proper anchors to prevent partial matching."""
@@ -511,9 +511,9 @@ class TestRegexSecurityBestPractices:
             execution_time = end_time - start_time
 
             # All validations should complete very quickly even with problematic input
-            assert (
-                execution_time < 0.1
-            ), f"Validation took {execution_time:.6f}s for input length: {len(test_input)}"
+            assert execution_time < 0.1, (
+                f"Validation took {execution_time:.6f}s for input length: {len(test_input)}"
+            )
 
     def test_input_sanitization(self):
         """Test that validation properly sanitizes and rejects malicious input."""
