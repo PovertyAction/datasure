@@ -2185,8 +2185,8 @@ def _load_statistics_overtime_settings(
 
 
 def _render_period_selector_overtime(
-    default_period: str,
     settings_file: str,
+    default_period: str = "Week",
 ) -> str:
     """Render time period selection widget.
 
@@ -2207,7 +2207,6 @@ def _render_period_selector_overtime(
         "Week": ":material/date_range: Weekly",
         "Month": ":material/calendar_month: Monthly",
     }
-    default_period = "Week"
     period = st.pills(
         label="Select Time Period:",
         options=options_map.keys(),
@@ -2387,7 +2386,7 @@ def _render_enumerator_statistics_overtime_table(
 
     with col3:
         period = _render_period_selector_overtime(
-            settings.period_overtime, settings_file
+            settings_file, settings.period_overtime
         )
         # Conditionally render weekday selector for weekly period
         weekstartday = "SAT"  # Default
