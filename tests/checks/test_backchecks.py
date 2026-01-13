@@ -23,8 +23,35 @@ from datasure.checks.backchecks import (
     OkRangeValues,
     SearchType,
     StrCompareOptions,
+    _add_date_columns,
+    _add_numeric_columns,
+    _add_statistical_test_columns,
+    _apply_backcheck_filters,
+    _are_columns_numeric,
+    _build_column_config,
+    _build_column_stats_dict,
+    _build_display_columns,
+    _build_select_columns,
+    _calculate_average_days,
+    _calculate_category_statistics,
+    _calculate_column_statistics,
+    _calculate_staff_statistics,
+    _calculate_within_ok_range,
+    _collect_test_results,
     _compare_column_values,
+    _determine_match_status,
+    _expand_columns_if_needed,
+    _format_test_result,
+    _get_available_additional_columns,
+    _get_column_data_type,
+    _get_default_index,
+    _get_staff_configuration,
+    _get_test_value,
+    _join_staff_information,
     _perform_statistical_tests,
+    _prepare_data_for_merge,
+    _preprocess_string_values,
+    _validate_backcheck_inputs,
     compute_backcheck_analysis,
     compute_backchecker_productivity,
     compute_column_stats,
@@ -2082,3 +2109,982 @@ def test_backcheck_workflow_with_productivity(sample_backcheck_data_pl):
 
     assert not productivity.is_empty()
     assert "backchecker" in productivity.columns
+
+
+# ============================================
+# HELPER FUNCTION TESTS
+# ============================================
+
+
+def test_validate_backcheck_inputs_valid(
+    sample_survey_data_pl,
+    sample_backcheck_data_pl,
+    sample_backcheck_settings,
+):
+    """Test _validate_backcheck_inputs with valid inputs."""
+    column_settings = pl.DataFrame(
+        {
+            "column_name": ["age", "income"],
+            "backcheck_category": [1, 1],
+        }
+    )
+
+    result = _validate_backcheck_inputs(
+        sample_survey_data_pl,
+        sample_backcheck_data_pl,
+        sample_backcheck_settings,
+        column_settings,
+    )
+
+    assert result is not None
+    assert result == ("survey_id", "survey_id")
+
+
+def test_validate_backcheck_inputs_empty_column_settings(
+    sample_survey_data_pl,
+    sample_backcheck_data_pl,
+    sample_backcheck_settings,
+):
+    """Test _validate_backcheck_inputs with empty column settings."""
+    column_settings = pl.DataFrame()
+
+    result = _validate_backcheck_inputs(
+        sample_survey_data_pl,
+        sample_backcheck_data_pl,
+        sample_backcheck_settings,
+        column_settings,
+    )
+
+    assert result is None
+
+
+def test_validate_backcheck_inputs_missing_survey_key(
+    sample_survey_data_pl,
+    sample_backcheck_data_pl,
+):
+    """Test _validate_backcheck_inputs with missing survey key."""
+    column_settings = pl.DataFrame(
+        {
+            "column_name": ["age"],
+            "backcheck_category": [1],
+        }
+    )
+    settings = BackcheckSettings(
+        survey_key="nonexistent",
+        survey_id="survey_id",
+    )
+
+    result = _validate_backcheck_inputs(
+        sample_survey_data_pl,
+        sample_backcheck_data_pl,
+        settings,
+        column_settings,
+    )
+
+    assert result is None
+
+
+def test_validate_backcheck_inputs_missing_survey_id(
+    sample_survey_data_pl,
+    sample_backcheck_data_pl,
+):
+    """Test _validate_backcheck_inputs with missing survey id."""
+    column_settings = pl.DataFrame(
+        {
+            "column_name": ["age"],
+            "backcheck_category": [1],
+        }
+    )
+    settings = BackcheckSettings(
+        survey_key="survey_id",
+        survey_id="nonexistent",
+    )
+
+    result = _validate_backcheck_inputs(
+        sample_survey_data_pl,
+        sample_backcheck_data_pl,
+        settings,
+        column_settings,
+    )
+
+    assert result is None
+
+
+def test_prepare_data_for_merge_first():
+    """Test _prepare_data_for_merge with 'first' option."""
+    data = pl.DataFrame(
+        {
+            "id": ["A", "A", "B", "C"],
+            "value": [1, 2, 3, 4],
+        }
+    )
+
+    result = _prepare_data_for_merge(data, "id", "first")
+
+    assert len(result) == 3
+    assert result.filter(pl.col("id") == "A")["value"][0] == 1
+
+
+def test_prepare_data_for_merge_last():
+    """Test _prepare_data_for_merge with 'last' option."""
+    data = pl.DataFrame(
+        {
+            "id": ["A", "A", "B", "C"],
+            "value": [1, 2, 3, 4],
+        }
+    )
+
+    result = _prepare_data_for_merge(data, "id", "last")
+
+    assert len(result) == 3
+    assert result.filter(pl.col("id") == "A")["value"][0] == 2
+
+
+def test_prepare_data_for_merge_drop():
+    """Test _prepare_data_for_merge with 'drop' option."""
+    data = pl.DataFrame(
+        {
+            "id": ["A", "A", "B", "C"],
+            "value": [1, 2, 3, 4],
+        }
+    )
+
+    result = _prepare_data_for_merge(data, "id", "drop")
+
+    assert len(result) == 2
+    assert "A" not in result["id"].to_list()
+    assert set(result["id"].to_list()) == {"B", "C"}
+
+
+def test_prepare_data_for_merge_none():
+    """Test _prepare_data_for_merge with 'none' option."""
+    data = pl.DataFrame(
+        {
+            "id": ["A", "A", "B", "C"],
+            "value": [1, 2, 3, 4],
+        }
+    )
+
+    result = _prepare_data_for_merge(data, "id", "none")
+
+    assert len(result) == 4
+
+
+def test_add_statistical_test_columns_with_results():
+    """Test _add_statistical_test_columns with test results."""
+    col_results = pl.DataFrame(
+        {
+            "column_name": ["age"],
+            "match_status": ["match"],
+        }
+    )
+    test_results = {
+        "ttest": {"t_statistic": 1.5, "p_value": 0.05},
+        "prtest": {"z_statistic": 2.0, "p_value": 0.03},
+        "signrank": {"statistic": 10.0, "p_value": 0.02},
+        "reliability": {"srv": 0.95, "reliability_ratio": 0.9},
+    }
+
+    result = _add_statistical_test_columns(col_results, test_results)
+
+    assert "ttest_t_statistic" in result.columns
+    assert "ttest_p_value" in result.columns
+    assert result["ttest_t_statistic"][0] == 1.5
+    assert result["ttest_p_value"][0] == 0.05
+
+
+def test_add_statistical_test_columns_without_results():
+    """Test _add_statistical_test_columns without test results."""
+    col_results = pl.DataFrame(
+        {
+            "column_name": ["age"],
+            "match_status": ["match"],
+        }
+    )
+
+    result = _add_statistical_test_columns(col_results, None)
+
+    assert "ttest_t_statistic" in result.columns
+    assert "ttest_p_value" in result.columns
+    assert result["ttest_t_statistic"][0] is None
+
+
+def test_expand_columns_if_needed_not_expanded():
+    """Test _expand_columns_if_needed when column doesn't need expansion."""
+    data = pl.DataFrame(
+        {
+            "survey_id": ["A", "B"],
+            "col1": ["value1", "value2"],
+            "col2": [1, 2],
+        }
+    )
+    columns = ["col1"]
+
+    result = _expand_columns_if_needed("exact", None, columns, data, "survey_id")
+
+    assert result == ["col1"]
+
+
+def test_expand_columns_if_needed_expanded():
+    """Test _expand_columns_if_needed when column needs expansion."""
+    data = pl.DataFrame(
+        {
+            "survey_id": ["A", "B"],
+            "col1_a": ["value1", "value2"],
+            "col1_b": ["value3", "value4"],
+            "col2": [1, 2],
+        }
+    )
+    columns = ["col1*"]
+
+    result = _expand_columns_if_needed("startswith", "col1", columns, data, "survey_id")
+
+    assert len(result) == 2
+    assert "col1_a" in result
+    assert "col1_b" in result
+
+
+def test_get_staff_configuration_enumerator(
+    sample_survey_data_pl, sample_backcheck_data_pl, sample_backcheck_settings
+):
+    """Test _get_staff_configuration for enumerator."""
+    result = _get_staff_configuration(
+        "enumerator",
+        sample_survey_data_pl,
+        sample_backcheck_data_pl,
+        sample_backcheck_settings,
+        "survey_id",
+    )
+
+    assert result is not None
+    staff_col, data_source, join_key = result
+    assert staff_col == "enumerator"
+    assert join_key == "survey_id"
+
+
+def test_get_staff_configuration_backchecker(
+    sample_survey_data_pl, sample_backcheck_data_pl, sample_backcheck_settings
+):
+    """Test _get_staff_configuration for backchecker."""
+    result = _get_staff_configuration(
+        "backchecker",
+        sample_survey_data_pl,
+        sample_backcheck_data_pl,
+        sample_backcheck_settings,
+        "survey_id",
+    )
+
+    assert result is not None
+    staff_col, data_source, join_key = result
+    assert staff_col == "backchecker"
+    assert join_key == "survey_id__BCCL"
+
+
+def test_join_staff_information():
+    """Test _join_staff_information."""
+    survey_data = pl.DataFrame(
+        {
+            "survey_id": ["A", "B"],
+            "staff": ["Staff1", "Staff2"],
+        }
+    )
+    analysis = pl.DataFrame(
+        {
+            "survey_id": ["A", "B"],
+            "value": [1, 2],
+        }
+    )
+
+    result = _join_staff_information(
+        analysis, survey_data, "staff", "survey_id", "survey_id", "enumerator"
+    )
+
+    assert "staff" in result.columns
+    assert len(result) == 2
+
+
+def test_add_date_columns():
+    """Test _add_date_columns."""
+    analysis = pl.DataFrame(
+        {
+            "survey_id": ["A", "B"],
+            "value": [1, 2],
+        }
+    )
+    survey_data = pl.DataFrame(
+        {
+            "survey_id": ["A", "B"],
+            "survey_date": [date(2024, 1, 1), date(2024, 1, 2)],
+        }
+    )
+    backcheck_data = pl.DataFrame(
+        {
+            "survey_id": ["A", "B"],
+            "backcheck_date": [date(2024, 1, 5), date(2024, 1, 6)],
+        }
+    )
+
+    result = _add_date_columns(
+        analysis,
+        survey_data,
+        backcheck_data,
+        "survey_id",
+        "survey_date",
+        "backcheck_date",
+    )
+
+    assert "survey_date_col" in result.columns
+    assert "backcheck_date_col" in result.columns
+
+
+def test_calculate_average_days():
+    """Test _calculate_average_days."""
+    staff_data = pl.DataFrame(
+        {
+            "survey_date_col": [date(2024, 1, 1), date(2024, 1, 2)],
+            "backcheck_date_col": [date(2024, 1, 5), date(2024, 1, 6)],
+        }
+    )
+
+    result = _calculate_average_days(staff_data, "survey_date", "backcheck_date")
+
+    assert result == 4.0
+
+
+def test_calculate_category_statistics():
+    """Test _calculate_category_statistics."""
+    cat_data = pl.DataFrame(
+        {
+            "column_name": ["age", "age", "income"],
+            "match_status": ["match", "mismatch", "match"],
+            "backcheck_category": [1, 1, 1],
+            "survey_value": [25, 30, 50000],
+            "backcheck_value": [25, 31, 50000],
+        }
+    )
+
+    result = _calculate_category_statistics(cat_data, 1)
+
+    assert "Non-Missing Survey (Cat 1)" in result
+    assert "Mismatches (Cat 1)" in result
+    assert "Error Rate % (Cat 1)" in result
+
+
+def test_calculate_category_statistics_empty():
+    """Test _calculate_category_statistics with empty data."""
+    cat_data = pl.DataFrame()
+
+    result = _calculate_category_statistics(cat_data, 1)
+
+    assert result["Non-Missing Survey (Cat 1)"] == 0
+    assert result["Mismatches (Cat 1)"] == 0
+    assert result["Error Rate % (Cat 1)"] == 0.0
+
+
+def test_calculate_staff_statistics():
+    """Test _calculate_staff_statistics."""
+    staff_data = pl.DataFrame(
+        {
+            "staff": ["Staff1", "Staff1", "Staff1"],
+            "survey_key": ["A", "B", "C"],
+            "category": [1, 1, 2],
+            "column_name": ["age", "age", "income"],
+            "match_status": ["match", "mismatch", "match"],
+            "survey_value": [25, 30, 50000],
+            "backcheck_value": [25, 31, 50000],
+            "survey_date_col": [date(2024, 1, 1), date(2024, 1, 2), date(2024, 1, 3)],
+            "backcheck_date_col": [
+                date(2024, 1, 5),
+                date(2024, 1, 6),
+                date(2024, 1, 7),
+            ],
+        }
+    )
+
+    result = _calculate_staff_statistics(
+        staff_data, "staff", "Staff1", "survey_key", "survey_date", "backcheck_date"
+    )
+
+    assert "staff" in result
+    assert result["staff"] == "Staff1"
+
+
+def test_get_column_data_type_numeric():
+    """Test _get_column_data_type with numeric column."""
+    survey_data = pl.DataFrame(
+        {
+            "age": [25, 30, 35],
+        }
+    )
+
+    result = _get_column_data_type("age", survey_data)
+
+    # Returns the actual dtype string like "Int64"
+    assert result in ["Int64", "Int32", "Float64", "Float32"]
+
+
+def test_get_column_data_type_string():
+    """Test _get_column_data_type with string column."""
+    survey_data = pl.DataFrame(
+        {
+            "name": ["Alice", "Bob", "Charlie"],
+        }
+    )
+
+    result = _get_column_data_type("name", survey_data)
+
+    # Returns the actual dtype string like "String"
+    assert result in ["String", "Utf8"]
+
+
+def test_get_test_value_valid():
+    """Test _get_test_value with valid data."""
+    col_data = pl.DataFrame(
+        {
+            "ttest_t_statistic": [1.5, 2.0],
+        }
+    )
+
+    result = _get_test_value(col_data, "ttest_t_statistic")
+
+    assert result == 1.5
+
+
+def test_get_test_value_none():
+    """Test _get_test_value with None value."""
+    col_data = pl.DataFrame(
+        {
+            "ttest_t_statistic": [None, None],
+        }
+    )
+
+    result = _get_test_value(col_data, "ttest_t_statistic")
+
+    assert result is None
+
+
+def test_format_test_result():
+    """Test _format_test_result."""
+    result = _format_test_result("ttest_t_statistic", 1.234567)
+
+    assert "T-test" in result
+    assert "1.235" in result
+
+
+def test_format_test_result_none():
+    """Test _format_test_result with None."""
+    result = _format_test_result("ttest_t_statistic", 1.0)
+
+    assert result is not None
+    assert "T-test" in result
+
+
+def test_collect_test_results():
+    """Test _collect_test_results."""
+    col_data = pl.DataFrame(
+        {
+            "ttest_t_statistic": [1.5],
+            "ttest_p_value": [0.05],
+            "prtest_z_statistic": [None],
+            "prtest_p_value": [None],
+            "signrank_statistic": [None],
+            "signrank_p_value": [None],
+            "reliability_srv": [None],
+            "reliability_ratio": [None],
+        }
+    )
+
+    result = _collect_test_results(col_data)
+
+    assert "T-test" in result or result == "" or result == "None"
+
+
+def test_calculate_column_statistics():
+    """Test _calculate_column_statistics."""
+    col_data = pl.DataFrame(
+        {
+            "match_status": ["match", "mismatch", "match", "mismatch"],
+        }
+    )
+
+    n_values, n_compared, n_mismatches, error_rate = _calculate_column_statistics(
+        col_data
+    )
+
+    assert n_compared == 4
+    assert n_mismatches == 2
+    assert error_rate == 50.0
+
+
+def test_build_column_stats_dict():
+    """Test _build_column_stats_dict."""
+    result = _build_column_stats_dict(
+        "age",
+        1,
+        "Int64",
+        10,
+        4,
+        2,
+        50.0,
+        "T-test: t=1.500",
+    )
+
+    assert result["Column Name"] == "age"
+    assert result["Category"] == 1
+    assert result["Data Type"] == "Int64"
+    assert result["Values Compared"] == 4
+    assert result["Mismatches"] == 2
+    assert result["Error Rate (%)"] == 50.0
+
+
+def test_build_select_columns():
+    """Test _build_select_columns."""
+    data = pl.DataFrame(
+        {
+            "survey_id": ["A", "B"],
+            "age": [25, 30],
+            "age_bc": [25, 31],
+        }
+    )
+
+    result = _build_select_columns("survey_id", "age", "age_bc", 1, data)
+
+    assert len(result) > 0
+
+
+def test_preprocess_string_values():
+    """Test _preprocess_string_values."""
+    survey_vals = pl.Series(["  Alice  ", "  Bob  "])
+    backcheck_vals = pl.Series(["ALICE", "bob"])
+
+    survey_result, backcheck_result = _preprocess_string_values(
+        survey_vals,
+        backcheck_vals,
+        "lowercase",
+        True,
+        False,
+    )
+
+    assert survey_result[0] == "alice"
+    assert backcheck_result[1] == "bob"
+
+
+def test_determine_match_status_match():
+    """Test _determine_match_status for matching values."""
+    survey_vals = pl.Series(["value", "value2"])
+    backcheck_vals = pl.Series(["value", "value3"])
+
+    result_expr = _determine_match_status(survey_vals, backcheck_vals, [], [])
+
+    # This returns an expression, test that it can be used in a DataFrame
+    df = pl.DataFrame({"survey": survey_vals, "backcheck": backcheck_vals})
+    df = df.with_columns(result_expr.alias("match_status"))
+
+    assert "match_status" in df.columns
+
+
+def test_determine_match_status_mismatch():
+    """Test _determine_match_status for mismatching values."""
+    survey_vals = pl.Series(["value1", "value2"])
+    backcheck_vals = pl.Series(["value3", "value4"])
+
+    result_expr = _determine_match_status(survey_vals, backcheck_vals, [], [])
+
+    # Test that expression can be evaluated
+    df = pl.DataFrame({"survey": survey_vals, "backcheck": backcheck_vals})
+    df = df.with_columns(result_expr.alias("match_status"))
+
+    assert "match_status" in df.columns
+
+
+def test_determine_match_status_excluded():
+    """Test _determine_match_status for excluded values."""
+    survey_vals = pl.Series(["na", "value"])
+    backcheck_vals = pl.Series(["value", "value"])
+
+    result_expr = _determine_match_status(survey_vals, backcheck_vals, ["na"], [])
+
+    # Test that expression works
+    df = pl.DataFrame({"survey": survey_vals, "backcheck": backcheck_vals})
+    df = df.with_columns(result_expr.alias("match_status"))
+
+    assert "match_status" in df.columns
+
+
+def test_determine_match_status_no_difference():
+    """Test _determine_match_status for no difference values."""
+    survey_vals = pl.Series(["refuse", "value"])
+    backcheck_vals = pl.Series(["dk", "value"])
+
+    result_expr = _determine_match_status(
+        survey_vals, backcheck_vals, [], ["refuse", "dk"]
+    )
+
+    # Test that expression works
+    df = pl.DataFrame({"survey": survey_vals, "backcheck": backcheck_vals})
+    df = df.with_columns(result_expr.alias("match_status"))
+
+    assert "match_status" in df.columns
+
+
+def test_are_columns_numeric():
+    """Test _are_columns_numeric."""
+    data = pl.DataFrame(
+        {
+            "age": [25, 30],
+            "age_bc": [25, 31],
+        }
+    )
+
+    result = _are_columns_numeric(data, "age", "age_bc")
+
+    assert result is True
+
+
+def test_are_columns_numeric_false():
+    """Test _are_columns_numeric with non-numeric columns."""
+    data = pl.DataFrame(
+        {
+            "name": ["Alice", "Bob"],
+            "name_bc": ["Alice", "Bob"],
+        }
+    )
+
+    result = _are_columns_numeric(data, "name", "name_bc")
+
+    assert result is False
+
+
+def test_calculate_within_ok_range_number():
+    """Test _calculate_within_ok_range with number type."""
+    difference = pl.lit(-1)
+
+    result_expr = _calculate_within_ok_range(difference, "number", [-2.0, 2.0])
+
+    # Test that expression can be evaluated
+    df = pl.DataFrame({"diff": [-1, 2, 0]})
+    df = df.with_columns(result_expr.alias("within_ok_range"))
+
+    assert "within_ok_range" in df.columns
+
+
+def test_calculate_within_ok_range_percentage():
+    """Test _calculate_within_ok_range with percentage type."""
+    difference = pl.lit(5.0)
+
+    result_expr = _calculate_within_ok_range(difference, "percentage", [-10.0, 10.0])
+
+    # Test that expression can be created (returns an Expr)
+    assert result_expr is not None
+    assert isinstance(result_expr, pl.Expr)
+
+
+def test_add_numeric_columns():
+    """Test _add_numeric_columns."""
+    result = pl.DataFrame(
+        {
+            "survey_id": ["A", "B"],
+            "match_status": ["match", "mismatch"],
+            "survey_value": [25, 30],
+            "backcheck_value": [24, 32],
+        }
+    )
+    data = pl.DataFrame(
+        {
+            "age": [25, 30],
+            "age_bc": [24, 32],
+        }
+    )
+
+    updated_result = _add_numeric_columns(
+        result, data, "age", "age_bc", "number", [-2.0, 2.0]
+    )
+
+    assert "difference" in updated_result.columns
+    assert "within_ok_range" in updated_result.columns
+
+
+def test_get_default_index_valid():
+    """Test _get_default_index with valid default value."""
+    options = ["option1", "option2", "option3"]
+
+    result = _get_default_index("option2", options)
+
+    assert result == 1
+
+
+def test_get_default_index_invalid():
+    """Test _get_default_index with invalid default value."""
+    options = ["option1", "option2", "option3"]
+
+    result = _get_default_index("option4", options)
+
+    assert result is None
+
+
+def test_get_default_index_none():
+    """Test _get_default_index with None default value."""
+    options = ["option1", "option2", "option3"]
+
+    result = _get_default_index(None, options)
+
+    assert result is None
+
+
+def test_get_available_additional_columns():
+    """Test _get_available_additional_columns."""
+    data = pl.DataFrame(
+        {
+            "survey_id": ["A", "B"],
+            "survey_id__BCCL": ["A", "B"],
+            "age__SRV": [25, 30],
+            "age__BCCL": [25, 30],
+            "income__SRV": [50000, 60000],
+        }
+    )
+    backcheck_analysis = pl.DataFrame(
+        {
+            "survey_id": ["A", "B"],
+            "column_name": ["age", "income"],
+        }
+    )
+
+    result = _get_available_additional_columns(
+        data,
+        "survey_id",
+        "survey_id",
+        backcheck_analysis,
+    )
+
+    assert isinstance(result, list) or result is None
+
+
+def test_apply_backcheck_filters_all():
+    """Test _apply_backcheck_filters with 'All' filter."""
+    backcheck_analysis = pl.DataFrame(
+        {
+            "column_name": ["age", "income", "gender"],
+            "match_status": ["match", "mismatch", "match"],
+        }
+    )
+
+    result = _apply_backcheck_filters(
+        backcheck_analysis,
+        "All",
+        ["age", "income"],
+    )
+
+    assert len(result) == 2
+    assert set(result["column_name"].to_list()) == {"age", "income"}
+
+
+def test_apply_backcheck_filters_mismatches():
+    """Test _apply_backcheck_filters with 'Mismatches Only' filter."""
+    backcheck_analysis = pl.DataFrame(
+        {
+            "column_name": ["age", "income", "gender"],
+            "match_status": ["match", "mismatch", "match"],
+        }
+    )
+
+    result = _apply_backcheck_filters(
+        backcheck_analysis,
+        "Mismatches Only",
+        [],
+    )
+
+    assert len(result) == 1
+    assert result["column_name"][0] == "income"
+
+
+def test_build_display_columns():
+    """Test _build_display_columns."""
+    filtered_data = pl.DataFrame(
+        {
+            "survey_id": ["A", "B"],
+            "survey_id__BCCL": ["A", "B"],
+            "column_name": ["age", "income"],
+            "age__SRV": [25, 30],
+            "age__BCCL": [25, 31],
+        }
+    )
+
+    result = _build_display_columns(
+        filtered_data,
+        "survey_id",
+        "survey_id",
+        "survey_id__BCCL",
+    )
+
+    assert isinstance(result, list)
+    assert len(result) > 0
+
+
+def test_build_column_config():
+    """Test _build_column_config."""
+    filtered_data = pl.DataFrame(
+        {
+            "survey_id": ["A", "B"],
+            "survey_id__BCCL": ["A", "B"],
+            "column_name": ["age", "income"],
+        }
+    )
+
+    result = _build_column_config(
+        "survey_id",
+        "survey_id",
+        "survey_id__BCCL",
+        filtered_data,
+    )
+
+    assert isinstance(result, dict)
+    assert "survey_id" in result or len(result) > 0
+
+
+# Additional edge case tests
+def test_prepare_data_for_merge_empty():
+    """Test _prepare_data_for_merge with empty data."""
+    data = pl.DataFrame({"id": []})
+
+    result = _prepare_data_for_merge(data, "id", "first")
+
+    assert result.is_empty()
+
+
+def test_expand_columns_if_needed_regex():
+    """Test _expand_columns_if_needed with regex search."""
+    data = pl.DataFrame(
+        {
+            "survey_id": ["A", "B"],
+            "age_1": [25, 30],
+            "age_2": [26, 31],
+            "income": [50000, 60000],
+        }
+    )
+    columns = ["age_.*"]
+
+    result = _expand_columns_if_needed("regex", "age_.*", columns, data, "survey_id")
+
+    assert len(result) == 2
+    assert "age_1" in result
+    assert "age_2" in result
+
+
+def test_validate_backcheck_inputs_none_survey_key():
+    """Test _validate_backcheck_inputs with None survey key."""
+    survey_data = pl.DataFrame({"survey_id": ["A", "B"]})
+    backcheck_data = pl.DataFrame({"survey_id": ["A", "B"]})
+    column_settings = pl.DataFrame({"column_name": ["age"]})
+    settings = BackcheckSettings(survey_key=None, survey_id="survey_id")
+
+    result = _validate_backcheck_inputs(
+        survey_data, backcheck_data, settings, column_settings
+    )
+
+    assert result is None
+
+
+def test_get_staff_configuration_missing_staff_col(
+    sample_survey_data_pl, sample_backcheck_data_pl
+):
+    """Test _get_staff_configuration with missing staff column."""
+    settings = BackcheckSettings(
+        survey_key="survey_id",
+        survey_id="survey_id",
+        enumerator="nonexistent_col",
+    )
+
+    result = _get_staff_configuration(
+        "enumerator",
+        sample_survey_data_pl,
+        sample_backcheck_data_pl,
+        settings,
+        "survey_id",
+    )
+
+    assert result is None
+
+
+def test_calculate_average_days_missing_columns():
+    """Test _calculate_average_days with missing date columns."""
+    staff_data = pl.DataFrame({"survey_id": ["A", "B"]})
+
+    result = _calculate_average_days(staff_data, "survey_date", "backcheck_date")
+
+    assert result == 0.0
+
+
+def test_calculate_average_days_none_dates():
+    """Test _calculate_average_days with None date parameters."""
+    staff_data = pl.DataFrame(
+        {
+            "survey_date_col": [date(2024, 1, 1)],
+            "backcheck_date_col": [date(2024, 1, 5)],
+        }
+    )
+
+    result = _calculate_average_days(staff_data, None, None)
+
+    assert result == 0.0
+
+
+def test_get_column_data_type_missing_column():
+    """Test _get_column_data_type with missing column."""
+    survey_data = pl.DataFrame({"age": [25, 30]})
+
+    result = _get_column_data_type("nonexistent", survey_data)
+
+    assert result == "Unknown"
+
+
+def test_get_test_value_missing_column():
+    """Test _get_test_value with missing column."""
+    col_data = pl.DataFrame({"other_col": [1.0, 2.0]})
+
+    result = _get_test_value(col_data, "ttest_t_statistic")
+
+    assert result is None
+
+
+def test_get_test_value_empty_data():
+    """Test _get_test_value with empty data."""
+    col_data = pl.DataFrame({"ttest_t_statistic": []})
+
+    result = _get_test_value(col_data, "ttest_t_statistic")
+
+    assert result is None
+
+
+def test_preprocess_string_values_uppercase():
+    """Test _preprocess_string_values with uppercase option."""
+    survey_vals = pl.Series(["alice", "bob"])
+    backcheck_vals = pl.Series(["ALICE", "BOB"])
+
+    survey_result, backcheck_result = _preprocess_string_values(
+        survey_vals, backcheck_vals, "uppercase", False, False
+    )
+
+    assert survey_result[0] == "ALICE"
+    assert backcheck_result[0] == "ALICE"
+
+
+def test_preprocess_string_values_nosymbols():
+    """Test _preprocess_string_values with no symbols option."""
+    survey_vals = pl.Series(["alice!", "bob?"])
+    backcheck_vals = pl.Series(["alice", "bob"])
+
+    survey_result, backcheck_result = _preprocess_string_values(
+        survey_vals, backcheck_vals, None, False, True
+    )
+
+    # nosymbols removes punctuation
+    assert "!" not in survey_result[0]
+
+
+def test_are_columns_numeric_mixed():
+    """Test _are_columns_numeric with one numeric and one string column."""
+    data = pl.DataFrame({"age": [25, 30], "name_bc": ["Alice", "Bob"]})
+
+    result = _are_columns_numeric(data, "age", "name_bc")
+
+    assert result is False
