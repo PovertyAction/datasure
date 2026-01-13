@@ -16,6 +16,9 @@ if "st_import_data_page" not in st.session_state:
 if "st_prep_data_page" not in st.session_state:
     st.session_state.st_prep_data_page = None
 
+if "st_output_page1" not in st.session_state:
+    st.session_state.st_output_page1 = None
+
 if "st_config_checks_page" not in st.session_state:
     st.session_state.st_config_checks_page = None
 
@@ -97,6 +100,9 @@ else:
             icon=":material/cleaning_services:",
         )
 
+        st.session_state.st_output_page1 = st.session_state.st_output_pages[
+            0
+        ]  # for demo
         st.session_state.st_corr_page = corr_page
 
         # --- NAVIGATION MENU WITH CHECK OUTPUTS AND CORRECTION PAGES--- #
