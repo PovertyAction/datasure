@@ -1017,98 +1017,123 @@ class TestUIComponents:
 
         assert mock_st.columns.called
 
-    @patch("datasure.checks.summary.st")
-    @patch("datasure.checks.summary.load_check_settings")
-    @patch("datasure.checks.summary.save_check_settings")
-    @patch("datasure.checks.summary.trigger_save")
-    @patch("datasure.checks.summary.compute_summary_progress_by_col")
-    @patch("datasure.checks.summary.sns")
-    @patch("datasure.checks.summary.pd")
-    def test_render_progress_by_column(
-        self,
-        mock_pd_module,
-        mock_sns,
-        mock_compute,
-        mock_trigger,
-        mock_save,
-        mock_load,
-        mock_st,
-    ):
+    def test_render_progress_by_column(self):
         """Test _render_progress_by_column UI component."""
-        from datasure.checks.summary import _render_progress_by_column
 
-        # Mock settings
-        mock_load.return_value = {
-            "progress_by_col": "region",
-            "progress_time_period": "Auto",
-        }
+        # Mock st.fragment to be a no-op decorator that returns the function unchanged
+        def mock_fragment(func):
+            return func
 
-        # Mock columns
-        col_mock1 = Mock()
-        col_mock1.__enter__ = Mock(return_value=col_mock1)
-        col_mock1.__exit__ = Mock(return_value=False)
-        col_mock2 = Mock()
-        col_mock2.__enter__ = Mock(return_value=col_mock2)
-        col_mock2.__exit__ = Mock(return_value=False)
-        mock_st.columns.return_value = [col_mock1, col_mock2]
+        with patch("streamlit.fragment", mock_fragment):
+            # Need to reload the module to apply the fragment mock
+            import importlib
 
-        # Mock selectbox and pills
-        mock_st.selectbox.return_value = "region"
-        mock_st.pills.return_value = "Auto"
+            import datasure.checks.summary
 
-        # Mock compute result
-        progress_df = pd.DataFrame({"region": ["A", "B"], "2024-01-01": [10, 20]})
-        mock_compute.return_value = (progress_df, 10, 20, ["2024-01-01"])
+            importlib.reload(datasure.checks.summary)
 
-        # Mock sns and pd
-        mock_cmap = Mock()
-        mock_sns.light_palette.return_value = mock_cmap
+            from datasure.checks.summary import _render_progress_by_column
 
-        df = pd.DataFrame(
-            {
-                "region": ["A", "B", "C"],
-                "date_col": pd.date_range("2024-01-01", periods=3),
-            }
-        )
+            with (
+                patch("datasure.checks.summary.st") as mock_st,
+                patch("datasure.checks.summary.load_check_settings") as mock_load,
+                patch("datasure.checks.summary.save_check_settings"),
+                patch("datasure.checks.summary.trigger_save"),
+                patch(
+                    "datasure.checks.summary.compute_summary_progress_by_col"
+                ) as mock_compute,
+                patch("datasure.checks.summary.sns") as mock_sns,
+                patch("datasure.checks.summary.pd"),
+            ):
+                # Mock settings
+                mock_load.return_value = {
+                    "progress_by_col": "region",
+                    "progress_time_period": "Auto",
+                }
 
-        _render_progress_by_column(df, "date_col", "settings.json")
+                # Mock columns
+                col_mock1 = Mock()
+                col_mock1.__enter__ = Mock(return_value=col_mock1)
+                col_mock1.__exit__ = Mock(return_value=False)
+                col_mock2 = Mock()
+                col_mock2.__enter__ = Mock(return_value=col_mock2)
+                col_mock2.__exit__ = Mock(return_value=False)
+                mock_st.columns.return_value = [col_mock1, col_mock2]
 
-        assert mock_st.selectbox.called
-        assert mock_st.pills.called
-        assert mock_st.dataframe.called
+                # Mock selectbox and pills
+                mock_st.selectbox.return_value = "region"
+                mock_st.pills.return_value = "Auto"
 
-    @patch("datasure.checks.summary.st")
-    @patch("datasure.checks.summary.load_check_settings")
-    def test_render_progress_by_column_no_selection(self, mock_load, mock_st):
+                # Mock compute result
+                progress_df = pd.DataFrame(
+                    {"region": ["A", "B"], "2024-01-01": [10, 20]}
+                )
+                mock_compute.return_value = (progress_df, 10, 20, ["2024-01-01"])
+
+                # Mock sns and pd
+                mock_cmap = Mock()
+                mock_sns.light_palette.return_value = mock_cmap
+
+                df = pd.DataFrame(
+                    {
+                        "region": ["A", "B", "C"],
+                        "date_col": pd.date_range("2024-01-01", periods=3),
+                    }
+                )
+
+                _render_progress_by_column(df, "date_col", "settings.json")
+
+                assert mock_st.selectbox.called
+                assert mock_st.pills.called
+                assert mock_st.dataframe.called
+
+    def test_render_progress_by_column_no_selection(self):
         """Test _render_progress_by_column when no column selected."""
-        from datasure.checks.summary import _render_progress_by_column
 
-        # Mock settings
-        mock_load.return_value = {}
+        # Mock st.fragment to be a no-op decorator that returns the function unchanged
+        def mock_fragment(func):
+            return func
 
-        # Mock columns
-        col_mock1 = Mock()
-        col_mock1.__enter__ = Mock(return_value=col_mock1)
-        col_mock1.__exit__ = Mock(return_value=False)
-        col_mock2 = Mock()
-        col_mock2.__enter__ = Mock(return_value=col_mock2)
-        col_mock2.__exit__ = Mock(return_value=False)
-        mock_st.columns.return_value = [col_mock1, col_mock2]
+        with patch("streamlit.fragment", mock_fragment):
+            # Need to reload the module to apply the fragment mock
+            import importlib
 
-        # Mock selectbox to return None
-        mock_st.selectbox.return_value = None
+            import datasure.checks.summary
 
-        df = pd.DataFrame(
-            {
-                "region": ["A", "B", "C"],
-                "date_col": pd.date_range("2024-01-01", periods=3),
-            }
-        )
+            importlib.reload(datasure.checks.summary)
 
-        _render_progress_by_column(df, "date_col", "settings.json")
+            from datasure.checks.summary import _render_progress_by_column
 
-        # Should return early without calling compute or dataframe
-        assert not mock_st.dataframe.called
+            with (
+                patch("datasure.checks.summary.st") as mock_st,
+                patch("datasure.checks.summary.load_check_settings") as mock_load,
+            ):
+                # Mock settings
+                mock_load.return_value = {}
+
+                # Mock columns
+                col_mock1 = Mock()
+                col_mock1.__enter__ = Mock(return_value=col_mock1)
+                col_mock1.__exit__ = Mock(return_value=False)
+                col_mock2 = Mock()
+                col_mock2.__enter__ = Mock(return_value=col_mock2)
+                col_mock2.__exit__ = Mock(return_value=False)
+                mock_st.columns.return_value = [col_mock1, col_mock2]
+
+                # Mock selectbox to return None
+                mock_st.selectbox.return_value = None
+
+                df = pd.DataFrame(
+                    {
+                        "region": ["A", "B", "C"],
+                        "date_col": pd.date_range("2024-01-01", periods=3),
+                    }
+                )
+
+                _render_progress_by_column(df, "date_col", "settings.json")
+
+                # Should return early without calling compute or dataframe
+                assert not mock_st.dataframe.called
 
     @patch("datasure.checks.summary.st")
     @patch("datasure.checks.summary.summary_settings")
