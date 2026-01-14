@@ -64,12 +64,7 @@ uv tool install datasure
 
 # Launch the application
 datasure
-# Launch the application
-datasure
-# Launch the application
-datasure
-# Launch the application
-datasure
+```
 
 The application will open in your default web browser at `http://localhost:8501`.
 
