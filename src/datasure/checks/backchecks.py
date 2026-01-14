@@ -109,7 +109,7 @@ class BackcheckSettings(BaseModel):
 class StrCompareOptions(BaseModel):
     """String comparison settings for backchecks."""
 
-    case_option: str = Field("none", description="Case sensitivity option")
+    case_option: str | None = Field(None, description="Case sensitivity option")
     trimspaces_option: bool = Field(False, description="Trim spaces option")
     nosymbols_option: bool = Field(False, description="Ignore symbols option")
 
