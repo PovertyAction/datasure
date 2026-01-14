@@ -1275,8 +1275,7 @@ def _render_progress_by_column(
         return
 
     # Time period selection
-    _, pil1 = st.columns([0.80, 0.20])
-    with pil1:
+    with st.container(horizontal_alignment="right"):
         progress_time_period = default_settings.get("progress_time_period", "Auto")
         progress_time_period = st.pills(
             label="Progress time period",
