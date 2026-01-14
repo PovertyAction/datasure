@@ -1,44 +1,67 @@
 """Comprehensive tests for the summary module with 100% code coverage."""
 
+# Standard library imports
 from datetime import date, datetime, timedelta
 from unittest.mock import Mock, patch
 
+# Third-party imports
 import pandas as pd
 import polars as pl
 import pytest
 from dateutil.relativedelta import relativedelta
 from pydantic import ValidationError
 
+# Local application imports
 from datasure.checks.summary import (
+    # Pydantic Models
     DataQualityMetrics,
     DataSummaryMetrics,
     DateRangeCalculator,
     ProgressMetrics,
     SubmissionMetrics,
     SummarySettings,
+    # Private helper functions
     _create_empty_progress_metrics,
     _create_empty_submission_metrics,
+    # Calculation functions
     calculate_data_quality_metrics,
     calculate_data_summary_metrics,
     calculate_percentage_change,
     calculate_progress_metrics,
     calculate_submission_count,
     calculate_submission_metrics,
+    # Backward compatibility wrappers
     compute_summary_data_quality,
     compute_summary_data_summary,
     compute_summary_progress,
     compute_summary_progress_by_col,
     compute_summary_submissions,
+    # Utility functions
     determine_auto_time_period,
     pandas_to_polars,
     polars_to_pandas,
     prepare_date_data,
+    # UI components
+    summary_data_quality,
+    summary_data_summary,
+    summary_progress,
+    summary_settings,
+    summary_submissions,
     validate_and_convert_date_column,
 )
 
 # ============================================================================
 # FIXTURES
 # ============================================================================
+
+
+@pytest.fixture(autouse=True)
+def mock_database_functions(monkeypatch):
+    """Override the autouse fixture from conftest.
+
+    Disables database mocking for these tests.
+    """
+    pass
 
 
 @pytest.fixture
@@ -480,7 +503,8 @@ class TestSubmissionMetricsCalculations:
         """Test backward compatibility wrapper for submissions."""
         # Add proper date column
         df = sample_pandas_df.copy()
-        result = compute_summary_submissions(df, "date")
+        df_pl = pl.from_pandas(df)
+        result = compute_summary_submissions(df_pl, "date")
         assert isinstance(result, tuple)
         assert len(result) == 10
 
@@ -538,7 +562,8 @@ class TestProgressMetricsCalculations:
     def test_compute_summary_progress_backward_compat(self, sample_pandas_df):
         """Test backward compatibility wrapper for progress."""
         df = sample_pandas_df.copy()
-        result = compute_summary_progress(df, "date", target=100)
+        df_pl = pl.from_pandas(df)
+        result = compute_summary_progress(df_pl, "date", target=100)
         assert isinstance(result, tuple)
         assert len(result) == 4
 
@@ -574,7 +599,7 @@ class TestProgressByColumn:
 
     def test_compute_summary_progress_by_col_empty(self):
         """Test progress by column with empty data."""
-        df = pd.DataFrame()
+        df = pl.DataFrame({"date": [], "column": []})
         result = compute_summary_progress_by_col(df, "date", "column", "Auto")
         assert isinstance(result, tuple)
         assert len(result) == 4
@@ -583,32 +608,36 @@ class TestProgressByColumn:
     def test_compute_summary_progress_by_col_auto(self, sample_pandas_df):
         """Test progress by column with auto time period."""
         df = sample_pandas_df.copy()
-        result = compute_summary_progress_by_col(df, "date", "name", "Auto")
+        df_pl = pl.from_pandas(df)
+        result = compute_summary_progress_by_col(df_pl, "date", "name", "Auto")
         assert isinstance(result, tuple)
         assert len(result) == 4
 
     def test_compute_summary_progress_by_col_daily(self, sample_pandas_df):
         """Test progress by column with daily time period."""
         df = sample_pandas_df.copy()
-        result = compute_summary_progress_by_col(df, "date", "name", "Daily")
+        df_pl = pl.from_pandas(df)
+        result = compute_summary_progress_by_col(df_pl, "date", "name", "Daily")
         progress_df, vmin, vmax, format_cols = result
         assert isinstance(progress_df, pd.DataFrame)
 
     def test_compute_summary_progress_by_col_weekly(self, sample_pandas_df):
         """Test progress by column with weekly time period."""
         df = sample_pandas_df.copy()
-        result = compute_summary_progress_by_col(df, "date", "name", "Weekly")
+        df_pl = pl.from_pandas(df)
+        result = compute_summary_progress_by_col(df_pl, "date", "name", "Weekly")
         assert isinstance(result[0], pd.DataFrame)
 
     def test_compute_summary_progress_by_col_monthly(self, sample_pandas_df):
         """Test progress by column with monthly time period."""
         df = sample_pandas_df.copy()
-        result = compute_summary_progress_by_col(df, "date", "name", "Monthly")
+        df_pl = pl.from_pandas(df)
+        result = compute_summary_progress_by_col(df_pl, "date", "name", "Monthly")
         assert isinstance(result[0], pd.DataFrame)
 
     def test_compute_summary_progress_by_col_invalid_date(self):
         """Test progress by column with invalid date column."""
-        df = pd.DataFrame({"text": ["a", "b", "c"], "col": ["x", "y", "z"]})
+        df = pl.DataFrame({"text": ["a", "b", "c"], "col": ["x", "y", "z"]})
         # Polars may handle this differently - it converts but values might be null
         # Test that it still returns a result (even if empty/null)
         result = compute_summary_progress_by_col(df, "text", "col", "Daily")
@@ -656,9 +685,9 @@ class TestDataSummary:
         assert result.date_columns_count > 0
         assert result.total_columns_count == 5
 
-    def test_compute_summary_data_summary_backward_compat(self, sample_pandas_df):
+    def test_compute_summary_data_summary_backward_compat(self, sample_polars_df):
         """Test backward compatibility wrapper for data summary."""
-        result = compute_summary_data_summary(sample_pandas_df)
+        result = compute_summary_data_summary(sample_polars_df)
         assert isinstance(result, tuple)
         assert len(result) == 4
 
@@ -709,9 +738,9 @@ class TestDataQuality:
         assert result.missing_pct == 0.0
         assert result.outliers_pct == 0.0
 
-    def test_compute_summary_data_quality_backward_compat(self, sample_pandas_df):
+    def test_compute_summary_data_quality_backward_compat(self, sample_polars_df):
         """Test backward compatibility wrapper for data quality."""
-        result = compute_summary_data_quality(sample_pandas_df, "id")
+        result = compute_summary_data_quality(sample_polars_df, "id")
         assert isinstance(result, tuple)
         assert len(result) == 4
 
@@ -725,21 +754,26 @@ class TestUIComponents:
     """Test UI component functions with mocked Streamlit."""
 
     @patch("datasure.checks.summary.st")
-    @patch("datasure.checks.summary.get_df_info")
     @patch("datasure.checks.summary.save_check_settings")
     @patch("datasure.checks.summary.trigger_save")
     def test_summary_settings(
         self,
         mock_trigger_save,
         mock_save_settings,
-        mock_get_info,
         mock_st,
     ):
         """Test summary settings UI component."""
-        from datasure.checks.summary import summary_settings
+        # Create ColumnByType object
+        from datasure.utils.dataframe_utils import ColumnByType
 
-        # Setup mocks
-        mock_get_info.return_value = (None, ["id"], [1, 2, 3], ["date_col"], None)
+        survey_columns = ColumnByType(
+            all_columns=["id", "date_col"],
+            string_columns=[],
+            integer_columns=["id"],
+            numeric_columns=["id"],
+            datetime_columns=["date_col"],
+            categorical_columns=["id"],
+        )
 
         # Mock expander and container context managers
         mock_expander = Mock()
@@ -765,14 +799,14 @@ class TestUIComponents:
         mock_st.columns.return_value = [col_mock1, col_mock2, col_mock3]
 
         # Mock selectbox and number_input
-        mock_st.selectbox.side_effect = ["id_col", "date_col"]
+        mock_st.selectbox.side_effect = ["id", "date_col"]
         mock_st.number_input.return_value = 100
 
-        df = pd.DataFrame({"id": [1], "date_col": [date(2024, 1, 1)]})
+        df = pl.DataFrame({"id": [1], "date_col": [date(2024, 1, 1)]})
         config = SummarySettings(
-            survey_id="id_col", survey_date="date_col", survey_target=100
+            survey_id="id", survey_date="date_col", survey_target=100
         )
-        result = summary_settings(df, "settings.json", config)
+        result = summary_settings(df, "settings.json", config, survey_columns)
 
         assert isinstance(result, tuple)
         assert len(result) == 3
@@ -785,8 +819,6 @@ class TestUIComponents:
         self, mock_px, mock_calc, mock_convert, mock_st
     ):
         """Test summary submissions without date column."""
-        from datasure.checks.summary import summary_submissions
-
         df = pd.DataFrame({"id": [1, 2, 3]})
         summary_submissions(df, date=None)
 
@@ -796,17 +828,17 @@ class TestUIComponents:
     @patch("datasure.checks.summary.px")
     def test_summary_submissions_with_date(self, mock_px, mock_st):
         """Test summary submissions with date column."""
-        from datasure.checks.summary import summary_submissions
-
         # Create mock figure
         mock_fig = Mock()
         mock_px.area.return_value = mock_fig
 
         # Create test data with dates
-        df = pd.DataFrame(
+        df = pl.DataFrame(
             {
                 "id": [1, 2, 3],
-                "date_col": pd.date_range("2024-01-01", periods=3),
+                "date_col": pl.date_range(
+                    date(2024, 1, 1), date(2024, 1, 3), "1d", eager=True
+                ),
             }
         )
 
@@ -827,8 +859,6 @@ class TestUIComponents:
         self, mock_render, mock_calc, mock_convert, mock_st
     ):
         """Test summary progress without date column."""
-        from datasure.checks.summary import summary_progress
-
         df = pd.DataFrame({"id": [1, 2, 3]})
         summary_progress(df, date=None, target=100, setting_file="settings.json")
 
@@ -838,13 +868,13 @@ class TestUIComponents:
     @patch("datasure.checks.summary._render_progress_by_column")
     def test_summary_progress_with_date_and_target(self, mock_render, mock_st):
         """Test summary progress with date column and target."""
-        from datasure.checks.summary import summary_progress
-
         # Create test data with dates
-        df = pd.DataFrame(
+        df = pl.DataFrame(
             {
                 "id": [1, 2, 3],
-                "date_col": pd.date_range("2024-01-01", periods=3),
+                "date_col": pl.date_range(
+                    date(2024, 1, 1), date(2024, 1, 3), "1d", eager=True
+                ),
             }
         )
 
@@ -866,13 +896,13 @@ class TestUIComponents:
     @patch("datasure.checks.summary._render_progress_by_column")
     def test_summary_progress_with_date_no_target(self, mock_render, mock_st):
         """Test summary progress with date column but no target."""
-        from datasure.checks.summary import summary_progress
-
         # Create test data with dates
-        df = pd.DataFrame(
+        df = pl.DataFrame(
             {
                 "id": [1, 2, 3],
-                "date_col": pd.date_range("2024-01-01", periods=3),
+                "date_col": pl.date_range(
+                    date(2024, 1, 1), date(2024, 1, 3), "1d", eager=True
+                ),
             }
         )
 
@@ -892,8 +922,6 @@ class TestUIComponents:
     @patch("datasure.checks.summary.calculate_data_summary_metrics")
     def test_summary_data_summary(self, mock_calc, mock_convert, mock_st):
         """Test summary data summary UI component."""
-        from datasure.checks.summary import summary_data_summary
-
         mock_convert.return_value = pl.DataFrame()
         mock_calc.return_value = DataSummaryMetrics(
             string_columns_count=5,
@@ -917,8 +945,6 @@ class TestUIComponents:
         self, mock_plt, mock_chart, mock_calc, mock_convert, mock_st
     ):
         """Test summary data quality UI component."""
-        from datasure.checks.summary import summary_data_quality
-
         mock_convert.return_value = pl.DataFrame()
         mock_calc.return_value = DataQualityMetrics(
             duplicates_pct=2.5,
@@ -991,98 +1017,123 @@ class TestUIComponents:
 
         assert mock_st.columns.called
 
-    @patch("datasure.checks.summary.st")
-    @patch("datasure.checks.summary.load_check_settings")
-    @patch("datasure.checks.summary.save_check_settings")
-    @patch("datasure.checks.summary.trigger_save")
-    @patch("datasure.checks.summary.compute_summary_progress_by_col")
-    @patch("datasure.checks.summary.sns")
-    @patch("datasure.checks.summary.pd")
-    def test_render_progress_by_column(
-        self,
-        mock_pd_module,
-        mock_sns,
-        mock_compute,
-        mock_trigger,
-        mock_save,
-        mock_load,
-        mock_st,
-    ):
+    def test_render_progress_by_column(self):
         """Test _render_progress_by_column UI component."""
-        from datasure.checks.summary import _render_progress_by_column
 
-        # Mock settings
-        mock_load.return_value = {
-            "progress_by_col": "region",
-            "progress_time_period": "Auto",
-        }
+        # Mock st.fragment to be a no-op decorator that returns the function unchanged
+        def mock_fragment(func):
+            return func
 
-        # Mock columns
-        col_mock1 = Mock()
-        col_mock1.__enter__ = Mock(return_value=col_mock1)
-        col_mock1.__exit__ = Mock(return_value=False)
-        col_mock2 = Mock()
-        col_mock2.__enter__ = Mock(return_value=col_mock2)
-        col_mock2.__exit__ = Mock(return_value=False)
-        mock_st.columns.return_value = [col_mock1, col_mock2]
+        with patch("streamlit.fragment", mock_fragment):
+            # Need to reload the module to apply the fragment mock
+            import importlib
 
-        # Mock selectbox and pills
-        mock_st.selectbox.return_value = "region"
-        mock_st.pills.return_value = "Auto"
+            import datasure.checks.summary
 
-        # Mock compute result
-        progress_df = pd.DataFrame({"region": ["A", "B"], "2024-01-01": [10, 20]})
-        mock_compute.return_value = (progress_df, 10, 20, ["2024-01-01"])
+            importlib.reload(datasure.checks.summary)
 
-        # Mock sns and pd
-        mock_cmap = Mock()
-        mock_sns.light_palette.return_value = mock_cmap
+            from datasure.checks.summary import _render_progress_by_column
 
-        df = pd.DataFrame(
-            {
-                "region": ["A", "B", "C"],
-                "date_col": pd.date_range("2024-01-01", periods=3),
-            }
-        )
+            with (
+                patch("datasure.checks.summary.st") as mock_st,
+                patch("datasure.checks.summary.load_check_settings") as mock_load,
+                patch("datasure.checks.summary.save_check_settings"),
+                patch("datasure.checks.summary.trigger_save"),
+                patch(
+                    "datasure.checks.summary.compute_summary_progress_by_col"
+                ) as mock_compute,
+                patch("datasure.checks.summary.sns") as mock_sns,
+                patch("datasure.checks.summary.pd"),
+            ):
+                # Mock settings
+                mock_load.return_value = {
+                    "progress_by_col": "region",
+                    "progress_time_period": "Auto",
+                }
 
-        _render_progress_by_column(df, "date_col", "settings.json")
+                # Mock columns
+                col_mock1 = Mock()
+                col_mock1.__enter__ = Mock(return_value=col_mock1)
+                col_mock1.__exit__ = Mock(return_value=False)
+                col_mock2 = Mock()
+                col_mock2.__enter__ = Mock(return_value=col_mock2)
+                col_mock2.__exit__ = Mock(return_value=False)
+                mock_st.columns.return_value = [col_mock1, col_mock2]
 
-        assert mock_st.selectbox.called
-        assert mock_st.pills.called
-        assert mock_st.dataframe.called
+                # Mock selectbox and pills
+                mock_st.selectbox.return_value = "region"
+                mock_st.pills.return_value = "Auto"
 
-    @patch("datasure.checks.summary.st")
-    @patch("datasure.checks.summary.load_check_settings")
-    def test_render_progress_by_column_no_selection(self, mock_load, mock_st):
+                # Mock compute result
+                progress_df = pd.DataFrame(
+                    {"region": ["A", "B"], "2024-01-01": [10, 20]}
+                )
+                mock_compute.return_value = (progress_df, 10, 20, ["2024-01-01"])
+
+                # Mock sns and pd
+                mock_cmap = Mock()
+                mock_sns.light_palette.return_value = mock_cmap
+
+                df = pd.DataFrame(
+                    {
+                        "region": ["A", "B", "C"],
+                        "date_col": pd.date_range("2024-01-01", periods=3),
+                    }
+                )
+
+                _render_progress_by_column(df, "date_col", "settings.json")
+
+                assert mock_st.selectbox.called
+                assert mock_st.pills.called
+                assert mock_st.dataframe.called
+
+    def test_render_progress_by_column_no_selection(self):
         """Test _render_progress_by_column when no column selected."""
-        from datasure.checks.summary import _render_progress_by_column
 
-        # Mock settings
-        mock_load.return_value = {}
+        # Mock st.fragment to be a no-op decorator that returns the function unchanged
+        def mock_fragment(func):
+            return func
 
-        # Mock columns
-        col_mock1 = Mock()
-        col_mock1.__enter__ = Mock(return_value=col_mock1)
-        col_mock1.__exit__ = Mock(return_value=False)
-        col_mock2 = Mock()
-        col_mock2.__enter__ = Mock(return_value=col_mock2)
-        col_mock2.__exit__ = Mock(return_value=False)
-        mock_st.columns.return_value = [col_mock1, col_mock2]
+        with patch("streamlit.fragment", mock_fragment):
+            # Need to reload the module to apply the fragment mock
+            import importlib
 
-        # Mock selectbox to return None
-        mock_st.selectbox.return_value = None
+            import datasure.checks.summary
 
-        df = pd.DataFrame(
-            {
-                "region": ["A", "B", "C"],
-                "date_col": pd.date_range("2024-01-01", periods=3),
-            }
-        )
+            importlib.reload(datasure.checks.summary)
 
-        _render_progress_by_column(df, "date_col", "settings.json")
+            from datasure.checks.summary import _render_progress_by_column
 
-        # Should return early without calling compute or dataframe
-        assert not mock_st.dataframe.called
+            with (
+                patch("datasure.checks.summary.st") as mock_st,
+                patch("datasure.checks.summary.load_check_settings") as mock_load,
+            ):
+                # Mock settings
+                mock_load.return_value = {}
+
+                # Mock columns
+                col_mock1 = Mock()
+                col_mock1.__enter__ = Mock(return_value=col_mock1)
+                col_mock1.__exit__ = Mock(return_value=False)
+                col_mock2 = Mock()
+                col_mock2.__enter__ = Mock(return_value=col_mock2)
+                col_mock2.__exit__ = Mock(return_value=False)
+                mock_st.columns.return_value = [col_mock1, col_mock2]
+
+                # Mock selectbox to return None
+                mock_st.selectbox.return_value = None
+
+                df = pd.DataFrame(
+                    {
+                        "region": ["A", "B", "C"],
+                        "date_col": pd.date_range("2024-01-01", periods=3),
+                    }
+                )
+
+                _render_progress_by_column(df, "date_col", "settings.json")
+
+                # Should return early without calling compute or dataframe
+                assert not mock_st.dataframe.called
 
     @patch("datasure.checks.summary.st")
     @patch("datasure.checks.summary.summary_settings")
@@ -1100,17 +1151,32 @@ class TestUIComponents:
         mock_st,
     ):
         """Test complete summary report generation."""
+        import polars as pl
+
         from datasure.checks.summary import summary_report
+        from datasure.utils.dataframe_utils import ColumnByType
 
         mock_settings.return_value = ("date_col", 100, "id_col")
 
         df = pd.DataFrame({"id": [1, 2, 3], "date_col": [date(2024, 1, 1)] * 3})
+        # Convert to Polars as expected by the function
+        pl_df = pl.from_pandas(df)
         config = {
             "survey_id": "id_col",
             "survey_date": "date_col",
             "survey_target": 100,
         }
-        summary_report("project_123", df, "settings.json", 1, config)
+        # Create survey_columns
+        survey_columns = ColumnByType(
+            all_columns=["id", "date_col"],
+            string_columns=[],
+            integer_columns=["id"],
+            numeric_columns=["id"],
+            datetime_columns=["date_col"],
+            categorical_columns=["id"],
+        )
+        # Updated signature with survey_columns parameter
+        summary_report(pl_df, "settings.json", config, survey_columns)
 
         mock_settings.assert_called_once()
         mock_data_summary.assert_called_once()

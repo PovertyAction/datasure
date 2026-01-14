@@ -4,13 +4,13 @@ import sys
 
 import streamlit as st
 
-from datasure.utils import duckdb_get_aliases
 from datasure.utils.config_utils import (
     ConfigurationService,
     add_check_configuration_form,
     remove_check_configuration_form,
     render_configuration_table,
 )
+from datasure.utils.duckdb_utils import duckdb_get_aliases
 from datasure.utils.navigations_utils import (
     add_demo_navigation,
     demo_sidebar_help,
@@ -80,7 +80,12 @@ def _render_configuration_actions(project_id: str, alias_list: list[str]) -> Non
     col1, col2, _ = st.columns([0.4, 0.3, 0.3])
 
     with col1:
-        add_check_configuration_form(project_id, alias_list)
+        st.button(
+            ":material/add: Add New Check Configuration",
+            on_click=add_check_configuration_form,
+            args=(project_id, alias_list),
+            width="stretch",
+        )
 
     with col2:
         remove_check_configuration_form(project_id)

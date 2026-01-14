@@ -1,75 +1,85 @@
 import pandas as pd
 import polars as pl
+from pydantic import BaseModel, Field, validator
 
 
-def get_df_info(stats_df: pl.DataFrame | pd.DataFrame, cols_only=False) -> tuple:
-    """Get a description of the DataFrame.
+class ColumnByType(BaseModel):
+    """Class to hold columns by type."""
 
+    all_columns: list[str] = Field(
+        default_factory=list, description="List of all column names"
+    )
+    string_columns: list[str] = Field(
+        default_factory=list, description="List of string column names"
+    )
+    integer_columns: list[str] = Field(
+        default_factory=list, description="List of integer column names"
+    )
+    numeric_columns: list[str] = Field(
+        default_factory=list, description="List of numeric column names"
+    )
+    datetime_columns: list[str] = Field(
+        default_factory=list, description="List of datetime column names"
+    )
+    categorical_columns: list[str] = Field(
+        default_factory=list, description="List of categorical column names"
+    )
+
+    @validator("*", pre=True)
+    def ensure_list(cls, v):
+        """Convert None values to empty lists."""
+        if v is None:
+            return []
+        return v
+
+
+def get_df_columns(df: pl.DataFrame | pd.DataFrame) -> ColumnByType:
+    """Get columns by type from a DataFrame.
     PARAMS:
     -------
-    df: pl.DataFrame | pd.DataFrame : DataFrame to describe
+    df: pl.DataFrame | pd.DataFrame : DataFrame to analyze
 
     Returns
     -------
-    tuple:
-        int: number of rows in the DataFrame
-        int: number of columns in the DataFrame
-        int: number of missing values in the DataFrame
-        float: percentage of missing values in the DataFrame
-        list[str]: list of column names in the DataFrame
-        list[str]: list of string column types in the DataFrame
-        list[str]: list of numeric column types in the DataFrame
-        list[str]: list of datetime column types in the DataFrame
-        list[str]: list of categorical column types in the DataFrame
+    ColumnByType: Object containing lists of columns by type
     """
-    if isinstance(stats_df, pd.DataFrame):  # get info from pandas dataframe
-        all_columns = stats_df.columns.tolist()
-        string_columns = stats_df.select_dtypes(include=["object"]).columns.tolist()
-        numeric_columns = stats_df.select_dtypes(include=["number"]).columns.tolist()
-        datetime_columns = stats_df.select_dtypes(include=["datetime"]).columns.tolist()
-        categorical_columns = stats_df.select_dtypes(
-            include=["category"]
-        ).columns.tolist()
+    if isinstance(df, pd.DataFrame):  # get info from pandas dataframe
+        all_columns = df.columns.tolist()
+        string_columns = df.select_dtypes(include=["object"]).columns.tolist()
+        integer_columns = df.select_dtypes(include=["int"]).columns.tolist()
+        numeric_columns = df.select_dtypes(include=["number"]).columns.tolist()
+        datetime_columns = df.select_dtypes(include=["datetime"]).columns.tolist()
+        categorical_columns = list(
+            set(
+                integer_columns
+                + string_columns
+                + df.select_dtypes(include=["category"]).columns.tolist()
+            )
+        )
 
-        num_rows = stats_df.shape[0]
-        num_columns = stats_df.shape[1]
-        num_missing = stats_df.isna().sum().sum()
-        perc_missing = (num_missing / (num_rows * num_columns)) * 100
     else:  # get info from polars dataframe
-        all_columns = stats_df.columns
-        string_columns = stats_df.select(pl.col(pl.Utf8)).columns
-        numeric_columns = stats_df.select(pl.col(pl.NUMERIC_DTYPES)).columns
-        datetime_columns = stats_df.select(pl.col(pl.Date, pl.Datetime)).columns
-        categorical_columns = stats_df.select(pl.col(pl.Categorical)).columns
-
-        num_rows = stats_df.height
-        num_columns = stats_df.width
-        num_missing = stats_df.null_count().sum()
-        num_missing = num_missing.with_columns(
-            pl.sum_horizontal(pl.all()).alias("row_total")
-        )
-        num_missing = num_missing["row_total"][0]
-        perc_missing = (num_missing / (num_rows * num_columns)) * 100
-
-    if cols_only:
-        return (
-            all_columns,
-            string_columns,
-            numeric_columns,
-            datetime_columns,
-            categorical_columns,
+        all_columns = df.columns
+        string_columns = df.select(pl.col(pl.Utf8)).columns
+        integer_columns = df.select(
+            pl.col(pl.Int64, pl.Int32, pl.Int16, pl.Int8)
+        ).columns
+        numeric_columns = df.select(pl.col(pl.NUMERIC_DTYPES)).columns
+        datetime_columns = df.select(pl.col(pl.Date, pl.Datetime)).columns
+        categorical_columns = list(
+            set(
+                integer_columns
+                + string_columns
+                + df.select(pl.col(pl.Categorical)).columns
+            )
         )
 
-    return (
-        num_rows,
-        num_columns,
-        num_missing,
-        perc_missing,
-        all_columns,
-        string_columns,
-        numeric_columns,
-        datetime_columns,
-        categorical_columns,
+    return ColumnByType(
+        all_columns=all_columns,
+        string_columns=string_columns,
+        integer_columns=integer_columns,
+        numeric_columns=numeric_columns,
+        datetime_columns=datetime_columns,
+        categorical_columns=categorical_columns,
     )
 
 
@@ -118,21 +128,25 @@ def standardize_missing_values(data: pd.DataFrame | pl.DataFrame) -> pl.DataFram
         try:
             # For string columns, also handle whitespace-only strings
             if data[col].dtype == pl.Utf8:
+                # Strip whitespace first
+                data = data.with_columns(pl.col(col).str.strip_chars().alias(col))
+
+                # Replace all missing value representations with null using is_in
                 data = data.with_columns(
-                    [
-                        pl.col(col)
-                        .str.strip_chars()  # Remove leading/trailing whitespace
-                        .replace(
-                            missing_values, None
-                        )  # Replace missing value representations
-                        .map_elements(
-                            lambda x: None if x == "" else x, return_dtype=pl.Utf8
-                        )  # Handle empty strings after stripping
-                    ]
+                    pl.when(pl.col(col).is_in(missing_values))
+                    .then(None)
+                    .otherwise(pl.col(col))
+                    .alias(col)
                 )
             else:
-                # For non-string columns, just replace the missing values
-                data = data.with_columns([pl.col(col).replace(missing_values, None)])
+                # For non-string columns, check if values are in missing_values list
+                # This handles cases where non-string types might have been imported
+                data = data.with_columns(
+                    pl.when(pl.col(col).cast(pl.Utf8).is_in(missing_values))
+                    .then(None)
+                    .otherwise(pl.col(col))
+                    .alias(col)
+                )
         except Exception as e:
             # Log warning but continue processing other columns
             print(

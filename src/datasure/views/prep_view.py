@@ -3,7 +3,7 @@ import polars as pl
 import streamlit as st
 
 from datasure.processing.prep import prep_apply_action
-from datasure.utils.dataframe_utils import get_df_info
+from datasure.utils.dataframe_utils import ColumnByType, get_df_columns
 from datasure.utils.duckdb_utils import (
     duckdb_get_aliases,
     duckdb_get_table,
@@ -173,9 +173,11 @@ class PrepStepHandler:
         self.prep_data = prep_data
         self.step_index = step_index
         self.config = PrepViewConfig()
-        self.all_cols, self.string_cols, self.num_cols, self.date_cols, _ = get_df_info(
-            self.prep_data, cols_only=True
-        )
+        df_columns: ColumnByType = get_df_columns(self.prep_data)
+        self.all_cols: list[str] = df_columns.all_columns
+        self.string_cols: list[str] = df_columns.string_columns
+        self.num_cols: list[str] = df_columns.numeric_columns
+        self.date_cols: list[str] = df_columns.datetime_columns
 
     def add_column_handler(self) -> dict | None:
         """Handle adding new column UI and logic."""
@@ -258,7 +260,7 @@ class PrepStepHandler:
             dp_prep_trf_end = None
             dp_prep_trf_val = None
 
-            if col_type in ["object", "string"]:
+            if col_type == pl.String:
                 dp_prep_trf_func = st.selectbox(
                     label="Select Function",
                     options=config.DP_STR_FUNCS,
@@ -306,7 +308,7 @@ class PrepStepHandler:
                         key=f"st_sb_trf_pattern{i}",
                     )
 
-            elif col_type in ["Int64", "Float64"]:
+            elif self.prep_data[dp_prep_trf_col].dtype.is_numeric():
                 dp_prep_trf_func = st.selectbox(
                     label="Select Function",
                     options=config.DP_NUM_FUNCS,
@@ -324,7 +326,7 @@ class PrepStepHandler:
                         key=f"st_sb_trf_val{i}",
                     )
 
-            elif col_type == "datetime64[ns]":
+            elif col_type == pl.Datetime:
                 dp_prep_trf_func = st.selectbox(
                     label="Select Function",
                     options=config.DP_DATETIME_FUNCS,
@@ -653,46 +655,38 @@ if show_prep_page_info:
     tabs = st.tabs(sorted(alias_list))
     for i, (label, tab) in enumerate(zip(sorted(alias_list), tabs, strict=False)):
         prep_log = duckdb_get_table(
-            project_id=project_id,
-            alias=f"prep_log_{label}",
-            db_name="logs",
-            type="pd",
+            project_id,
+            f"prep_log_{label}",
+            "logs",
         )
 
         prep_data = duckdb_get_table(
-            project_id=project_id,
-            alias=label,
-            db_name="prep",
-            type="pd",
+            project_id,
+            label,
+            "prep",
         )
 
-        if prep_data.empty and prep_log.empty:
+        if prep_data.is_empty() and prep_log.is_empty():
             prep_data = duckdb_get_table(
-                project_id=project_id,
-                alias=label,
-                db_name="raw",
-                type="pd",
+                project_id,
+                label,
+                "raw",
             )
 
             duckdb_save_table(
                 project_id,
                 prep_data,
-                alias=label,
-                db_name="prep",
+                label,
+                "prep",
             )
 
         # count rows, columns, number missing & percent missing
-        (
-            row_count,
-            col_count,
-            miss_count,
-            miss_perc,
-            all_cols,
-            _,
-            _,
-            _,
-            _,
-        ) = get_df_info(prep_data)
+        row_count = prep_data.height
+        col_count = prep_data.width
+        miss_count = prep_data.null_count().sum().sum_horizontal()[0]
+        total_values = row_count * col_count if row_count and col_count else 1
+        miss_perc = (miss_count / total_values) * 100
+        all_cols = prep_data.columns
 
         # display tab features
         with tab:

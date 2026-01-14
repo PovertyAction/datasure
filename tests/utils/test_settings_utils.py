@@ -198,7 +198,8 @@ class TestLoadCheckSettings:
 
         result = load_check_settings(str(settings_file), check_name)
 
-        assert result is None
+        # Returns empty dict when file doesn't exist
+        assert result == {}
 
     def test_load_check_settings_nonexistent_check(self, tmp_path):
         """Test loading settings for non-existent check."""
@@ -211,7 +212,8 @@ class TestLoadCheckSettings:
 
         result = load_check_settings(str(settings_file), "nonexistent_check")
 
-        assert result is None
+        # Returns empty dict when check doesn't exist
+        assert result == {}
 
     def test_load_check_settings_empty_file(self, tmp_path):
         """Test loading settings from empty JSON file."""
@@ -223,7 +225,8 @@ class TestLoadCheckSettings:
 
         result = load_check_settings(str(settings_file), "any_check")
 
-        assert result is None
+        # Returns empty dict when check doesn't exist in file
+        assert result == {}
 
 
 class TestTriggerSave:

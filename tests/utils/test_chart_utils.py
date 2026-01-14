@@ -82,6 +82,77 @@ class TestDonutChart:
 
         plt.close(fig)
 
+    def test_donut_chart_actual_exceeds_target(self):
+        """Test donut chart when actual value exceeds target."""
+        fig = donut_chart(150, 100)
+
+        # Should handle exceeding target correctly
+        assert isinstance(fig, plt.Figure)
+
+        # Check that the figure has one subplot
+        axes = fig.get_axes()
+        assert len(axes) == 1
+
+        plt.close(fig)
+
+    def test_donut_chart_no_title(self):
+        """Test donut chart without title (None)."""
+        fig = donut_chart(60, 100, title=None)
+
+        # Should create chart without title
+        assert isinstance(fig, plt.Figure)
+        axes = fig.get_axes()
+        assert axes[0].get_title() == ""
+
+        plt.close(fig)
+
+    def test_donut_chart_default_colors(self):
+        """Test donut chart with default colors (None)."""
+        fig = donut_chart(75, 100, colors=None)
+
+        # Should use default colors without error
+        assert isinstance(fig, plt.Figure)
+
+        plt.close(fig)
+
+    def test_donut_chart_text_elements(self):
+        """Test that text elements are created correctly."""
+        fig = donut_chart(85, 100, prefix="$", suffix="K", title="Revenue")
+
+        # Verify figure is created with text elements
+        assert isinstance(fig, plt.Figure)
+
+        # Get the axes and check text elements exist
+        axes = fig.get_axes()
+        texts = axes[0].texts
+        assert len(texts) > 0  # Should have center text
+
+        plt.close(fig)
+
+    def test_donut_chart_pie_segments(self):
+        """Test that pie segments are created correctly."""
+        fig = donut_chart(40, 100)
+
+        # Get axes and verify pie chart was created
+        axes = fig.get_axes()
+        patches = axes[0].patches
+        # Should have two pie segments + center circle = 3 patches
+        assert len(patches) == 3
+
+        plt.close(fig)
+
+    def test_donut_chart_single_segment(self):
+        """Test donut chart when actual equals or exceeds target (single segment)."""
+        fig = donut_chart(200, 100)
+
+        # Get axes and verify only one segment exists
+        axes = fig.get_axes()
+        patches = axes[0].patches
+        # Should have one pie segment + center circle = 2 patches
+        assert len(patches) == 2
+
+        plt.close(fig)
+
     @patch("matplotlib.pyplot.Circle")
     @patch("matplotlib.pyplot.axis")
     def test_donut_chart_circle_creation(self, mock_axis, mock_circle):
@@ -187,6 +258,69 @@ class TestDonutChart2:
 
         plt.close(fig)
 
+    def test_donut_chart2_no_title(self):
+        """Test donut_chart2 without title (None)."""
+        fig = donut_chart2(50, 100, title=None)
+
+        # Should create chart without title
+        assert isinstance(fig, plt.Figure)
+        axes = fig.get_axes()
+        assert axes[0].get_title() == ""
+
+        plt.close(fig)
+
+    def test_donut_chart2_percentage_decimal_formatting(self):
+        """Test donut_chart2 formats percentages to 2 decimal places."""
+        fig = donut_chart2(75.678, 100, suffix="%")
+
+        # Should format to 2 decimal places
+        assert isinstance(fig, plt.Figure)
+
+        # Get the axes and check text elements exist
+        axes = fig.get_axes()
+        texts = axes[0].texts
+        assert len(texts) > 0
+
+        plt.close(fig)
+
+    def test_donut_chart2_pie_segments(self):
+        """Test that pie segments are created correctly in donut_chart2."""
+        fig = donut_chart2(60, 100)
+
+        # Get axes and verify pie chart was created
+        axes = fig.get_axes()
+        patches = axes[0].patches
+        # Should have two pie segments + center circle = 3 patches
+        assert len(patches) == 3
+
+        # Verify alpha transparency is set on second pie segment (index 1)
+        assert patches[1].get_alpha() == 0.4
+
+        plt.close(fig)
+
+    def test_donut_chart2_text_elements(self):
+        """Test that text elements are created with correct styling."""
+        fig = donut_chart2(90, 100, prefix="$", suffix="K", title="Sales")
+
+        # Verify figure is created with text elements
+        assert isinstance(fig, plt.Figure)
+
+        # Get the axes and check text elements exist
+        axes = fig.get_axes()
+        texts = axes[0].texts
+        assert len(texts) > 0  # Should have center text
+
+        plt.close(fig)
+
+    def test_donut_chart2_color_defaults(self):
+        """Test donut_chart2 default colors when colours is None."""
+        fig = donut_chart2(55, 100, colours=None)
+
+        # Should use default orange colors
+        assert isinstance(fig, plt.Figure)
+
+        plt.close(fig)
+
     @patch("matplotlib.pyplot.Circle")
     def test_donut_chart2_circle_creation(self, mock_circle):
         """Test that the center circle is created correctly in donut_chart2."""
@@ -286,3 +420,78 @@ class TestChartUtilsIntegration:
         # Clean up
         for chart in charts:
             plt.close(chart)
+
+    def test_donut_chart_color_variations(self):
+        """Test donut chart with various color combinations."""
+        # Test with custom colors
+        fig1 = donut_chart(75, 100, colors=["#FF0000", "#0000FF"])
+        assert isinstance(fig1, plt.Figure)
+
+        # Test with default colors (None)
+        fig2 = donut_chart(75, 100, colors=None)
+        assert isinstance(fig2, plt.Figure)
+
+        plt.close(fig1)
+        plt.close(fig2)
+
+    def test_donut_chart2_with_all_parameters(self):
+        """Test donut_chart2 with all parameters specified."""
+        fig = donut_chart2(
+            actual_value=85,
+            target_value=100,
+            title="Complete Test",
+            prefix="$",
+            suffix="K",
+            colours=["#00FF00", "#FF00FF"],
+        )
+
+        assert isinstance(fig, plt.Figure)
+        axes = fig.get_axes()
+        assert axes[0].get_title() == "Complete Test"
+
+        plt.close(fig)
+
+    def test_donut_chart_with_all_parameters(self):
+        """Test donut_chart with all parameters specified."""
+        fig = donut_chart(
+            actual_value=65,
+            target_value=100,
+            title="Full Test",
+            prefix="€",
+            suffix="M",
+            colors=["#AAAAAA", "#BBBBBB"],
+        )
+
+        assert isinstance(fig, plt.Figure)
+        axes = fig.get_axes()
+        assert axes[0].get_title() == "Full Test"
+
+        plt.close(fig)
+
+    def test_donut_chart_exact_target_match(self):
+        """Test when actual exactly matches target in donut_chart."""
+        fig = donut_chart(100, 100)
+
+        axes = fig.get_axes()
+        patches = axes[0].patches
+        # When actual equals target, remainder is 0
+        # Should have 1 pie segment + center circle
+        assert len(patches) == 2
+
+        plt.close(fig)
+
+    def test_donut_chart2_remainder_zero_alpha(self):
+        """Test donut_chart2 when remainder is zero (actual equals target)."""
+        # When actual equals target, remainder is 0
+        # The alpha setting on line 126 will still execute
+        fig = donut_chart2(100, 100)
+
+        axes = fig.get_axes()
+        patches = axes[0].patches
+        # Still has 2 pie segments (actual and 0 remainder) + center circle = 3 patches
+        assert len(patches) == 3
+
+        # Second pie segment should have alpha set
+        assert patches[1].get_alpha() == 0.4
+
+        plt.close(fig)

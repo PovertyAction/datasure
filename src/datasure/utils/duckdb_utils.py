@@ -94,18 +94,6 @@ def duckdb_save_table(
             )
         else:
             conn.execute(f"CREATE TABLE {table_id} AS SELECT * FROM table_data")
-        table_exists = (
-            conn.execute(
-                f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table_id}'"
-            ).fetchone()[0]
-            > 0
-        )
-        if table_exists:
-            conn.execute(
-                f"CREATE OR REPLACE TABLE {table_id} AS SELECT * FROM table_data"
-            )
-        else:
-            conn.execute(f"CREATE TABLE {table_id} AS SELECT * FROM table_data")
 
 
 def duckdb_get_table(
@@ -322,3 +310,119 @@ def duckdb_table_exists(project_id: str, alias: str, db_name: str) -> bool:
             > 0
         )
         return table_exists
+
+
+# =============================================================================
+# DuckDB Storage Functions for Missing Codes
+# =============================================================================
+
+
+def load_missing_codes_from_db(project_id: str) -> pl.DataFrame:
+    """Load missing codes from DuckDB.
+
+    Parameters
+    ----------
+    project_id : str
+        The project identifier.
+
+    Returns
+    -------
+    list[MissingCode]
+        List of missing code configurations.
+    """
+    table_name = f"missing_codes_{project_id}"
+
+    return duckdb_get_table(project_id, table_name, "logs")
+
+
+def save_missing_codes_to_db(project_id: str, new_codes: dict | None = None) -> None:
+    """Save missing codes to DuckDB.
+
+    Parameters
+    ----------
+    project_id : str
+        The project identifier.
+    missing_codes : list[MissingCode]
+        List of missing code configurations.
+    """
+    table_name = f"missing_codes_{project_id}"
+
+    # get current missing codes from db
+    existing_missing_codes = load_missing_codes_from_db(project_id)
+
+    if new_codes:
+        # append new missing codes dict to pl.DataFrame
+        new_codes_df = pl.DataFrame(new_codes)
+        if existing_missing_codes.is_empty():
+            missing_df = new_codes_df
+        else:
+            missing_df = pl.concat([existing_missing_codes, new_codes_df])
+
+    else:
+        missing_df = existing_missing_codes
+
+    duckdb_save_table(project_id, missing_df, table_name, "logs")
+
+
+def add_missing_code(project_id: str, label: str, codes: str | list[str]) -> None:
+    """Add a new missing code configuration.
+
+    Parameters
+    ----------
+    project_id : str
+        The project identifier.
+    label : str
+        Label for the missing value type.
+    codes : str | list[str]
+        Missing codes (comma-separated string or list).
+    """
+    # check for duplicates
+    existing_codes = load_missing_codes_from_db(project_id)
+    if not existing_codes.is_empty():
+        existing_labels = existing_codes["label"].to_list()
+        if label in existing_labels:
+            raise ValueError(f"Missing code with label '{label}' already exists.")
+
+    new_code = {"label": label, "codes": codes}
+    save_missing_codes_to_db(project_id, new_code)
+
+
+def update_missing_code(project_id: str, label: str, codes: str | list[str]) -> None:
+    """Update an existing missing code configuration.
+
+    Parameters
+    ----------
+    project_id : str
+        The project identifier.
+    code_id : str
+        The ID of the missing code to update.
+    label : str
+        New label for the missing value type.
+    codes : str | list[str]
+        New missing codes.
+    """
+    existing_codes = load_missing_codes_from_db(project_id)
+    # replace the code with matching label in pl.DataFrame
+    existing_codes = existing_codes.with_columns(
+        pl.when(pl.col("label") == label)
+        .then(pl.struct([pl.lit(label).alias("label"), pl.lit(codes).alias("codes")]))
+        .otherwise(pl.struct([pl.col("label"), pl.col("codes")]))
+        .alias("codes")
+    ).unnest("codes")
+
+    save_missing_codes_to_db(project_id, existing_codes)
+
+
+def delete_missing_code(project_id: str, code_id: str) -> None:
+    """Delete a missing code configuration.
+
+    Parameters
+    ----------
+    project_id : str
+        The project identifier.
+    code_id : str
+        The ID of the missing code to delete.
+    """
+    existing_codes = load_missing_codes_from_db(project_id)
+    existing_codes = [mc for mc in existing_codes if mc.id != code_id]
+    save_missing_codes_to_db(project_id, existing_codes)

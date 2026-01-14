@@ -3,11 +3,22 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from datasure.utils.cache_utils import (
     ensure_cache_dir,
     get_cache_base_dir,
     get_cache_path,
 )
+
+
+@pytest.fixture(autouse=True)
+def mock_database_functions(monkeypatch):
+    """Override the autouse fixture from conftest.
+
+    Disables database mocking for these tests.
+    """
+    pass
 
 
 class TestGetCacheBaseDir:

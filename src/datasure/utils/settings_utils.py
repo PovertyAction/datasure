@@ -3,11 +3,24 @@ import json
 import os
 import re
 from functools import lru_cache
+from pathlib import Path
 
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
 
 from datasure.utils.config_utils import ConfigurationService
+
+# Try to import toml for writing, use fallback if not available
+try:
+    import toml
+
+    HAS_TOML = True
+except ImportError:
+    HAS_TOML = False
+    try:
+        import tomllib
+    except ImportError:
+        import tomli as tomllib
 
 
 class ProjectID(BaseModel):
@@ -25,7 +38,6 @@ class ProjectID(BaseModel):
         return v
 
 
-@st.cache_data
 def save_check_settings(
     settings_file: str, check_name: str, check_settings: dict
 ) -> None:
@@ -68,8 +80,7 @@ def save_check_settings(
     st.session_state[state_name] = False
 
 
-# @st.cache_data
-def load_check_settings(settings_file, check_name) -> tuple:
+def load_check_settings(settings_file, check_name) -> dict:
     """Load the settings for a check from a dictionary.
 
     Parameters
@@ -85,11 +96,11 @@ def load_check_settings(settings_file, check_name) -> tuple:
     """
     # check if the file exists
     if not os.path.exists(settings_file):
-        return None
+        return {}
     with open(settings_file) as f:
         settings_dict = json.load(f)
 
-    return settings_dict.get(check_name)
+    return settings_dict.get(check_name, {})
 
 
 def trigger_save(state_name: str):
@@ -125,3 +136,102 @@ def get_check_config_settings(project_id: str, page_row_index: int) -> dict:
     )
 
     return hfc_config_logs if hfc_config_logs else {}
+
+
+def _write_toml_simple(data: dict, file_path: Path) -> None:
+    """Write simple key-value pairs to TOML file.
+
+    This is a fallback writer for when the toml library is not available.
+    Only supports top-level string key-value pairs.
+
+    Parameters
+    ----------
+    data : dict
+        Dictionary of key-value pairs to write.
+    file_path : Path
+        Path to the TOML file.
+    """
+    with open(file_path, "w") as f:
+        for key, value in data.items():
+            # Escape quotes in value
+            if isinstance(value, str):
+                escaped_value = value.replace('"', '\\"')
+                f.write(f'{key} = "{escaped_value}"\n')
+            else:
+                f.write(f"{key} = {value}\n")
+
+
+def save_secrets(secret_name: str, secret_key: str) -> None:
+    """Save a secret to the secrets.toml file.
+
+    This function saves or updates a secret in the Streamlit secrets.toml file,
+    making it accessible via st.secrets. The secrets file is located in the
+    .streamlit directory.
+
+    Parameters
+    ----------
+    secret_name : str
+        The name/key of the secret to save.
+    secret_key : str
+        The value of the secret to save.
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    IOError
+        If there's an error writing to the secrets file.
+
+    Examples
+    --------
+    >>> save_secrets("mapbox_api_key", "pk.ey...")
+    >>> # Now accessible via st.secrets["mapbox_api_key"]
+    """
+    if (
+        "mapbox_custom_key" not in st.session_state
+        or st.session_state["mapbox_custom_key"] is False
+    ):
+        return
+
+    # Determine the secrets file path
+    # Check if running in development (pyproject.toml exists) or production
+    if Path("pyproject.toml").exists():
+        # Development mode - use local .streamlit directory
+        secrets_dir = Path(".streamlit")
+    else:
+        # Production mode - use Streamlit's default secrets location
+        secrets_dir = Path.home() / ".streamlit"
+
+    # Create .streamlit directory if it doesn't exist
+    secrets_dir.mkdir(parents=True, exist_ok=True)
+
+    secrets_file = secrets_dir / "secrets.toml"
+
+    # Load existing secrets or create empty dict
+    secrets_dict = {}
+    if secrets_file.exists():
+        if HAS_TOML:
+            with open(secrets_file) as f:
+                secrets_dict = toml.load(f)
+        else:
+            # Use tomllib for reading (Python 3.11+)
+            with open(secrets_file, "rb") as f:
+                secrets_dict = tomllib.load(f)
+
+    # Update or add the secret
+    secrets_dict[secret_name] = secret_key
+
+    # Write back to secrets.toml
+    if HAS_TOML:
+        with open(secrets_file, "w") as f:
+            toml.dump(secrets_dict, f)
+    else:
+        # Use simple fallback writer
+        _write_toml_simple(secrets_dict, secrets_file)
+
+    # Note: Streamlit will need to be restarted or the page reloaded
+    # for st.secrets to pick up the new values
+    st.rerun()
+    st.session_state["mapbox_custom_key"] = False

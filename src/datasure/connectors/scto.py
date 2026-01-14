@@ -894,9 +894,7 @@ class SurveyCTOUI:
             return credentials  # noqa: TRY300
 
         except KeyError:
-            st.error(
-                "Invalid credentials selected. Please check your credential manager."
-            )
+            st.info("Select SurveyCTO server credentials to proceed.")
             return None
 
     def _render_form_selection(

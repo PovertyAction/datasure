@@ -30,6 +30,15 @@ from datasure.connectors.scto import (
 from datasure.utils.settings_utils import ProjectID
 
 
+@pytest.fixture(autouse=True)
+def mock_database_functions(monkeypatch):
+    """Override the autouse fixture from conftest.
+
+    Disables database mocking for these tests.
+    """
+    pass
+
+
 class TestFormType:
     """Test FormType enum."""
 
