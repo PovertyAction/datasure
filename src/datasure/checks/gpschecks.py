@@ -705,25 +705,25 @@ def _delete_gps_column(
                 help="Select the GPS configuration to remove from the list.",
             )
 
-            if selected_index:
-                confirm_delete = st.button(
-                    label="Confirm deletion",
-                    type="primary",
-                    width="stretch",
+            if st.button(
+                label="Confirm deletion",
+                type="primary",
+                width="stretch",
+                key="confirm_delete_gps_column",
+                disabled=not selected_index,
+            ):
+                updated_settings = gps_settings.filter(
+                    pl.col("composite_index") != selected_index
+                ).drop("composite_index", "index")
+
+                duckdb_save_table(
+                    project_id,
+                    updated_settings,
+                    f"gps_columns_{page_name_id}",
+                    "logs",
                 )
-                if confirm_delete:
-                    updated_settings = gps_settings.filter(
-                        pl.col("composite_index") != selected_index
-                    ).drop("composite_index", "index")
 
-                    duckdb_save_table(
-                        project_id,
-                        updated_settings,
-                        f"gps_columns_{page_name_id}",
-                        "logs",
-                    )
-
-                    st.rerun()
+                st.rerun()
 
 
 # =============================================================================
