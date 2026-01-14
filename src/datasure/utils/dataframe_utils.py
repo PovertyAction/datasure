@@ -128,21 +128,25 @@ def standardize_missing_values(data: pd.DataFrame | pl.DataFrame) -> pl.DataFram
         try:
             # For string columns, also handle whitespace-only strings
             if data[col].dtype == pl.Utf8:
+                # Strip whitespace first
+                data = data.with_columns(pl.col(col).str.strip_chars().alias(col))
+
+                # Replace all missing value representations with null using is_in
                 data = data.with_columns(
-                    [
-                        pl.col(col)
-                        .str.strip_chars()  # Remove leading/trailing whitespace
-                        .replace(
-                            missing_values, None
-                        )  # Replace missing value representations
-                        .str.replace(
-                            "^$", None
-                        )  # Replace empty strings after stripping
-                    ]
+                    pl.when(pl.col(col).is_in(missing_values))
+                    .then(None)
+                    .otherwise(pl.col(col))
+                    .alias(col)
                 )
             else:
-                # For non-string columns, just replace the missing values
-                data = data.with_columns([pl.col(col).replace(missing_values, None)])
+                # For non-string columns, check if values are in missing_values list
+                # This handles cases where non-string types might have been imported
+                data = data.with_columns(
+                    pl.when(pl.col(col).cast(pl.Utf8).is_in(missing_values))
+                    .then(None)
+                    .otherwise(pl.col(col))
+                    .alias(col)
+                )
         except Exception as e:
             # Log warning but continue processing other columns
             print(

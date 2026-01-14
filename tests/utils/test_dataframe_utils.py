@@ -599,6 +599,7 @@ class TestStandardizeMissingValues:
     @patch("builtins.print")
     def test_exception_handling_continues_processing(self, mock_print):
         """Test that exceptions in one column don't stop processing others."""
+        # Create a DataFrame with a column that will cause issues during processing
         df = pl.DataFrame(
             {
                 "col1": ["a", "NULL", "c"],
@@ -606,8 +607,29 @@ class TestStandardizeMissingValues:
             }
         )
 
-        # The function should handle any exceptions gracefully
-        result = standardize_missing_values(df)
+        # Mock the with_columns method to raise an exception for the first call
+        original_with_columns = df.with_columns
+        call_count = [0]
+
+        def mock_with_columns(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise ValueError("Simulated error in column processing")
+            return original_with_columns(*args, **kwargs)
+
+        # Patch the with_columns method
+        with patch.object(
+            pl.DataFrame, "with_columns", side_effect=mock_with_columns
+        ) as _mock_with_columns:
+            # The function should handle any exceptions gracefully
+            result = standardize_missing_values(df)
+
+            # Check that a warning was printed
+            assert mock_print.called
+            assert any(
+                "Warning: Could not standardize missing values" in str(call)
+                for call in mock_print.call_args_list
+            )
 
         assert isinstance(result, pl.DataFrame)
         # At minimum, the DataFrame should be returned
