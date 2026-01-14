@@ -94,18 +94,6 @@ def duckdb_save_table(
             )
         else:
             conn.execute(f"CREATE TABLE {table_id} AS SELECT * FROM table_data")
-        table_exists = (
-            conn.execute(
-                f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table_id}'"
-            ).fetchone()[0]
-            > 0
-        )
-        if table_exists:
-            conn.execute(
-                f"CREATE OR REPLACE TABLE {table_id} AS SELECT * FROM table_data"
-            )
-        else:
-            conn.execute(f"CREATE TABLE {table_id} AS SELECT * FROM table_data")
 
 
 def duckdb_get_table(
