@@ -7,6 +7,7 @@ import pandas as pd
 import polars as pl
 import streamlit as st
 from pydantic import BaseModel, Field
+from scipy import stats
 
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
@@ -1824,8 +1825,6 @@ def _perform_statistical_tests(
     # T-test for numeric data
     if ttest:
         with suppress(Exception):
-            from scipy import stats
-
             t_stat, p_value = stats.ttest_rel(survey_vals, backcheck_vals)
             test_results["ttest"] = {
                 "t_statistic": float(t_stat),
@@ -1835,8 +1834,6 @@ def _perform_statistical_tests(
     # Proportion test for binary data
     if prtest:
         with suppress(Exception):
-            from scipy import stats
-
             # Assume binary 0/1 or True/False
             prop_survey = survey_vals.mean()
             prop_backcheck = backcheck_vals.mean()
@@ -1857,8 +1854,6 @@ def _perform_statistical_tests(
     # Wilcoxon signed-rank test
     if signrank:
         with suppress(Exception):
-            from scipy import stats
-
             stat, p_value = stats.wilcoxon(survey_vals, backcheck_vals)
             test_results["signrank"] = {
                 "statistic": float(stat),
