@@ -135,9 +135,9 @@ def standardize_missing_values(data: pd.DataFrame | pl.DataFrame) -> pl.DataFram
                         .replace(
                             missing_values, None
                         )  # Replace missing value representations
-                        .map_elements(
-                            lambda x: None if x == "" else x, return_dtype=pl.Utf8
-                        )  # Handle empty strings after stripping
+                        .str.replace(
+                            "^$", None
+                        )  # Replace empty strings after stripping
                     ]
                 )
             else:
