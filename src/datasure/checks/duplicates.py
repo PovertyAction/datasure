@@ -911,19 +911,13 @@ def _render_duplicates_condition_options(
                     )
 
                 else:
-                    default_condition_value_index = (
-                        condition_values.index(default_condition_value)
-                        if default_condition_value
-                        and default_condition_value in condition_values
-                        else 0
-                    )
-
-                    condition_value = st.selectbox(
+                    condition_value = st.text_input(
                         label="Condition Value",
-                        options=condition_values,
-                        index=default_condition_value_index,
-                        key="duplicates_condition_value",
-                        help="Select the value to filter the condition column.",
+                        value=default_condition_value
+                        if isinstance(default_condition_value, str)
+                        else None,
+                        key="duplicates_condition_string_value_key",
+                        help="Enter the string value to filter the condition column.",
                         on_change=trigger_save,
                         kwargs={"state_name": TAB_NAME + "_condition_value"},
                     )
