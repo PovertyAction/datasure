@@ -209,8 +209,6 @@ def progress_report_settings(
         # Load default settings
         default_settings = load_default_settings(settings_file, config)
 
-        st.write(default_settings)
-
         # Survey Identifiers
         with st.container(border=True):
             st.subheader("Survey Identifiers")

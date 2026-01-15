@@ -317,6 +317,8 @@ def render_page_name_input() -> str | None:
         "Page Name",
         placeholder="eg. Household HFC, Individual HFC, etc.",
         help="This name will be used to create a new page for the checks.",
+        max_chars=20,
+        key="check_config_page_name_input",
     )
 
 
