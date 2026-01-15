@@ -160,7 +160,6 @@ def test_gps_settings_model():
         survey_date="date_column",
         enumerator="enum_column",
         team="team_column",
-        mapbox_key_option="default_api_token",
         mapbox_custom_key="test_key_123",
     )
 
@@ -169,7 +168,6 @@ def test_gps_settings_model():
     assert settings.survey_date == "date_column"
     assert settings.enumerator == "enum_column"
     assert settings.team == "team_column"
-    assert settings.mapbox_key_option == "default_api_token"
     assert settings.mapbox_custom_key == "test_key_123"
 
 
@@ -597,7 +595,6 @@ def test_load_default_gpschecks_settings_all_fields(mock_load_settings):
         survey_date="date",
         enumerator="enum",
         team="team",
-        mapbox_key_option="default_api_token",
         mapbox_custom_key="test_key",
     )
 
@@ -608,7 +605,6 @@ def test_load_default_gpschecks_settings_all_fields(mock_load_settings):
     assert result.survey_date == "date"
     assert result.enumerator == "enum"
     assert result.team == "team"
-    assert result.mapbox_key_option == "default_api_token"
     assert result.mapbox_custom_key == "test_key"
 
 

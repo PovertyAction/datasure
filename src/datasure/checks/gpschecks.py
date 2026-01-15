@@ -20,17 +20,6 @@ from datasure.utils.settings_utils import (
 
 TAB_NAME: str = "gpschecks"
 
-# Initialize pydeck with default Mapbox API key from secrets if available
-# Users can override this in the settings
-try:
-    if "mapbox_custom_key" in st.secrets:
-        pydeck.settings.mapbox_key = st.secrets["mapbox_custom_key"]
-    elif "default_mapbox_api_key" in st.secrets:
-        pydeck.settings.mapbox_key = st.secrets["default_mapbox_api_key"]
-except Exception:
-    # If secrets are not available, pydeck key will be set later from user settings
-    pass
-
 
 # =============================================================================
 # Enums and Constants
@@ -64,7 +53,6 @@ class GPSSettings(BaseModel):
     survey_date: str | None = Field(None, description="Survey date column")
     enumerator: str | None = Field(None, description="Enumerator ID column")
     team: str | None = Field(None, description="Team identifier column")
-    mapbox_key_option: str | None = Field(None, description="Mapbox API key option")
     mapbox_custom_key: str | None = Field(None, description="Custom Mapbox API key")
 
 
@@ -149,9 +137,7 @@ def load_default_gpschecks_settings(
 
 #  gps check settings
 def gpschecks_report_settings(
-    project_id: str,
     settings_file: str,
-    data: pl.DataFrame,
     config: GPSSettings,
     categorical_columns: list[str],
     datetime_columns: list[str],
@@ -302,64 +288,34 @@ def gpschecks_report_settings(
         # Mapbox API Key Configuration
         with st.container(border=True):
             st.subheader("Mapbox API Token Configuration")
-            st.caption(
-                "Configure your Mapbox API key for map visualizations. "
-                "You can use the default key or provide your own."
-            )
+            st.caption("Configure your Mapbox API key for map visualizations. ")
 
-            if "mapbox_custom_key" in st.secrets:
-                mapbox_api_key = st.secrets["mapbox_custom_key"]
-                using_default_key = False
-
+            if "mapbox_token" in st.secrets:
+                current_mapbox_token = st.secrets["mapbox_token"]
             else:
-                # if mapbox key is not available, fallback on default key
-                mapbox_api_key = st.secrets["default_mapbox_api_key"]
-                using_default_key = True
+                current_mapbox_token = None
 
-            # Load saved settings
-            saved_key_option = default_settings.mapbox_key_option or "default_api_token"
-
-            options_map = {
-                "default_api_token": ":material/lock_open_right: Default Public Token",
-                "add_api_token": ":material/lock: Add API Token",
-            }
-
-            ko1, ko2 = st.columns([0.3, 0.7])
-            with ko1:
-                mapbox_key_option = st.pills(
-                    "Select Mapbox API Key Option",
-                    options=options_map.keys(),
-                    format_func=lambda x: options_map[x],
-                    default=saved_key_option,
-                    key="mapbox_key_option_gpschecks_pills",
-                    help="Choose to use the default public token or provide your own",
-                    selection_mode="single",
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_mapbox_key_option"},
-                )
-                save_check_settings(
-                    settings_file, TAB_NAME, {"mapbox_key_option": mapbox_key_option}
-                )
-
-            with ko2:
-                # Show text input if user wants to add own key
-                mapbox_custom_key = st.text_input(
+            # Show text input if user wants to add own key
+            mt1, mt2 = st.columns([0.7, 0.3])
+            with mt1:
+                mapbox_custom_token = st.text_input(
                     "Your Mapbox API Key",
-                    value=mapbox_api_key,
+                    value=current_mapbox_token,
                     type="password",
-                    key="mapbox_custom_key_gpschecks",
+                    key="mapbox_custom_token_gpschecks",
                     help="Enter your Mapbox API key. Get one free at https://account.mapbox.com/",
-                    disabled=mapbox_key_option == "default_api_token",
-                    on_change=trigger_save,
-                    kwargs={"state_name": "mapbox_custom_key"},
                 )
-                save_secrets("mapbox_custom_key", mapbox_custom_key)
-
-                # Set the Mapbox key globally for pydeck
-                if not using_default_key:
-                    st.success("Custom Mapbox API key set successfully.")
-                else:
-                    st.success("Using default Mapbox API key from secrets.")
+            with mt2:
+                st.write("")
+                if st.button(
+                    "Save Mapbox Token",
+                    key="save_mapbox_token_gpschecks",
+                    type="primary",
+                    width="stretch",
+                    disabled=not mapbox_custom_token,
+                ):
+                    save_secrets("mapbox_token", mapbox_custom_token)
+                    st.success("Mapbox Token saved successfully.")
 
     return GPSSettings(
         survey_key=survey_key,
@@ -367,8 +323,7 @@ def gpschecks_report_settings(
         survey_date=survey_date,
         enumerator=enumerator,
         team=team,
-        mapbox_key_option=mapbox_key_option,
-        mapbox_custom_key=mapbox_custom_key,
+        mapbox_custom_key=mapbox_custom_token,
     )
 
 
@@ -2074,29 +2029,8 @@ def gpschecks_report(
 
     config_settings = GPSSettings(**config)
 
-    # Configure pydeck with appropriate Mapbox API key
-    mapbox_key_option = config_settings.mapbox_key_option
-    mapbox_custom_key = config_settings.mapbox_custom_key
-
-    # Set the appropriate key based on user's preference
-    if mapbox_key_option == "add_api_token" and mapbox_custom_key:
-        # User wants to use their own custom key
-        pydeck.settings.mapbox_key = mapbox_custom_key
-    elif mapbox_key_option == "default_api_token" or not mapbox_key_option:
-        # User wants to use default key or hasn't selected yet
-        if "mapbox_custom_key" in st.secrets:
-            pydeck.settings.mapbox_key = st.secrets["mapbox_custom_key"]
-        elif "default_mapbox_api_key" in st.secrets:
-            pydeck.settings.mapbox_key = st.secrets["default_mapbox_api_key"]
-
-    # If still no key set and custom key is saved, use it
-    if not pydeck.settings.mapbox_key and mapbox_custom_key:
-        pydeck.settings.mapbox_key = mapbox_custom_key
-
     _gpschecks_settings = gpschecks_report_settings(
-        project_id,
         setting_file,
-        data,
         config_settings,
         categorical_columns,
         datetime_columns,
@@ -2108,8 +2042,15 @@ def gpschecks_report(
 
     st.write("---")
 
-    mapbox_key = _gpschecks_settings.mapbox_custom_key
-    pydeck.settings.mapbox_key = mapbox_key
+    mapbox_token = _gpschecks_settings.mapbox_custom_key
+    pydeck.settings.mapbox_key = mapbox_token
+
+    if not mapbox_token:
+        st.warning(
+            "⚠ No Mapbox API key provided. "
+            "Please add a Mapbox API token in the settings to enable map visualizations."
+        )
+        return
 
     # Render GPS coordinates visualization
     _render_gps_coordinates(
