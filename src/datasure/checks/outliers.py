@@ -1146,7 +1146,11 @@ def _process_single_config(
 
     # Compute shared stats for single column or grouped columns
     shared_stats, shared_count = _compute_column_stats(
-        outlier_df_polars, outlier_cols, grouped_cols, outlier_method, outlier_multiplier
+        outlier_df_polars,
+        outlier_cols,
+        grouped_cols,
+        outlier_method,
+        outlier_multiplier,
     )
 
     # Process each column
@@ -1215,9 +1219,7 @@ def compute_outlier_output(
     admin_data_polars = data.select(include_cols)
 
     # Process outlier settings
-    outlier_results_list = _process_outlier_configs(
-        data, column_config, survey_key
-    )
+    outlier_results_list = _process_outlier_configs(data, column_config, survey_key)
 
     return _merge_outlier_results(outlier_results_list, admin_data_polars, survey_key)
 
