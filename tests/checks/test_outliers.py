@@ -23,6 +23,23 @@ from datasure.checks.outliers import (
     OutlierSettings,
     OutlierStatistics,
     SearchType,
+    # Refactored helper functions
+    _add_statistics_columns,
+    _build_include_cols,
+    _build_outlier_expression,
+    _compute_column_stats,
+    _compute_iqr_bounds,
+    _compute_sd_bounds,
+    _compute_single_column_stats,
+    _convert_dataframe_column_to_numeric,
+    _convert_series_to_numeric,
+    _ensure_list,
+    _merge_outlier_results,
+    _process_outlier_configs,
+    _process_single_column_outliers,
+    _process_single_config,
+    _sanitize_df_for_join,
+    _should_expand_row,
     # Statistical functions
     compute_column_outlier_summary,
     compute_constraint_violations,
@@ -1076,3 +1093,578 @@ class TestExpandColNamesEdgeCases:
         cols = ["col_1", "col_2", "other_1"]
         result = expand_col_names(cols, r"col_\d+", search_type="regex")
         assert result == ["col_1", "col_2"]
+
+
+# ============================================================================
+# Tests for Refactored Helper Functions
+# ============================================================================
+
+
+class TestEnsureList:
+    """Test _ensure_list function."""
+
+    def test_string_input(self):
+        """Test converting string to list."""
+        result = _ensure_list("column_name")
+        assert result == ["column_name"]
+
+    def test_list_input(self):
+        """Test list input returns same list."""
+        input_list = ["col1", "col2"]
+        result = _ensure_list(input_list)
+        assert result == ["col1", "col2"]
+
+    def test_tuple_input(self):
+        """Test tuple input converts to list."""
+        result = _ensure_list(("col1", "col2"))
+        assert result == ["col1", "col2"]
+
+    def test_numpy_array_input(self):
+        """Test numpy array input converts to list."""
+        import numpy as np
+
+        result = _ensure_list(np.array(["col1", "col2"]))
+        assert result == ["col1", "col2"]
+
+
+class TestBuildIncludeCols:
+    """Test _build_include_cols function."""
+
+    def test_all_columns_provided(self):
+        """Test with all columns provided."""
+        result = _build_include_cols(
+            survey_key="key",
+            survey_id="id",
+            survey_date="date",
+            enumerator="enum",
+            team="team",
+        )
+        assert result == ["key", "id", "date", "enum", "team"]
+
+    def test_only_survey_key(self):
+        """Test with only survey key provided."""
+        result = _build_include_cols(
+            survey_key="key",
+            survey_id=None,
+            survey_date=None,
+            enumerator=None,
+            team=None,
+        )
+        assert result == ["key"]
+
+    def test_deduplication(self):
+        """Test that duplicate columns are removed."""
+        result = _build_include_cols(
+            survey_key="key",
+            survey_id="key",  # Same as survey_key
+            survey_date="date",
+            enumerator=None,
+            team=None,
+        )
+        assert result == ["key", "date"]
+
+    def test_partial_columns(self):
+        """Test with partial columns provided."""
+        result = _build_include_cols(
+            survey_key="key",
+            survey_id="id",
+            survey_date=None,
+            enumerator="enum",
+            team=None,
+        )
+        assert result == ["key", "id", "enum"]
+
+
+class TestSanitizeDfForJoin:
+    """Test _sanitize_df_for_join function."""
+
+    def test_no_overlapping_columns(self):
+        """Test with no overlapping columns."""
+        main_df = pl.DataFrame({"key": [1], "col1": [10]})
+        join_df = pl.DataFrame({"key": [1], "col2": [20]})
+
+        result = _sanitize_df_for_join(main_df, join_df, "key")
+        assert set(result.columns) == {"key", "col2"}
+
+    def test_overlapping_columns(self):
+        """Test with overlapping columns (excluding join key)."""
+        main_df = pl.DataFrame({"key": [1], "col1": [10], "col2": [15]})
+        join_df = pl.DataFrame({"key": [1], "col1": [20], "col3": [30]})
+
+        result = _sanitize_df_for_join(main_df, join_df, "key")
+        # col1 should be excluded since it's in main_df
+        assert "col1" not in result.columns or result.columns == ["key", "col3"]
+
+    def test_join_key_preserved(self):
+        """Test that join key is always preserved."""
+        main_df = pl.DataFrame({"key": [1], "col1": [10]})
+        join_df = pl.DataFrame({"key": [1], "col2": [20]})
+
+        result = _sanitize_df_for_join(main_df, join_df, "key")
+        assert "key" in result.columns
+
+
+class TestConvertSeriesToNumeric:
+    """Test _convert_series_to_numeric function."""
+
+    def test_already_numeric_int(self):
+        """Test series already numeric (int)."""
+        series = pl.Series([1, 2, 3])
+        result = _convert_series_to_numeric(series)
+        assert result.dtype == pl.Float64
+
+    def test_already_numeric_float(self):
+        """Test series already numeric (float)."""
+        series = pl.Series([1.0, 2.0, 3.0])
+        result = _convert_series_to_numeric(series)
+        assert result.dtype == pl.Float64
+
+    def test_utf8_to_numeric(self):
+        """Test UTF-8 string to numeric conversion."""
+        series = pl.Series(["1.5", "2.5", "3.5"])
+        result = _convert_series_to_numeric(series)
+        assert result.dtype == pl.Float64
+
+
+class TestConvertDataframeColumnToNumeric:
+    """Test _convert_dataframe_column_to_numeric function."""
+
+    def test_already_numeric(self):
+        """Test column already numeric."""
+        df = pl.DataFrame({"col": [1, 2, 3]})
+        result = _convert_dataframe_column_to_numeric(df, "col")
+        assert result["col"].dtype == pl.Float64
+
+    def test_utf8_column(self):
+        """Test UTF-8 column conversion."""
+        df = pl.DataFrame({"col": ["1.5", "2.5", "3.5"]})
+        result = _convert_dataframe_column_to_numeric(df, "col")
+        assert result["col"].dtype == pl.Float64
+
+
+class TestShouldExpandRow:
+    """Test _should_expand_row function."""
+
+    def test_exact_search_type(self):
+        """Test row with exact search type should not expand."""
+        row = {"search_type": "exact", "locked": False}
+        assert _should_expand_row(row) is False
+
+    def test_startswith_unlocked(self):
+        """Test startswith search type unlocked should expand."""
+        row = {"search_type": "startswith", "locked": False}
+        assert _should_expand_row(row) is True
+
+    def test_startswith_locked(self):
+        """Test startswith search type locked should not expand."""
+        row = {"search_type": "startswith", "locked": True}
+        assert _should_expand_row(row) is False
+
+    def test_contains_unlocked(self):
+        """Test contains search type unlocked should expand."""
+        row = {"search_type": "contains", "locked": False}
+        assert _should_expand_row(row) is True
+
+
+class TestComputeIqrBounds:
+    """Test _compute_iqr_bounds function."""
+
+    def test_basic_iqr_bounds(self):
+        """Test basic IQR bounds computation."""
+        series = pl.Series([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+        result = _compute_iqr_bounds(series, 1.5)
+
+        assert isinstance(result, OutlierBounds)
+        assert result.lower_bound < result.upper_bound
+
+    def test_iqr_bounds_with_outlier(self):
+        """Test IQR bounds with extreme values."""
+        series = pl.Series([1, 2, 3, 4, 5, 100])
+        result = _compute_iqr_bounds(series, 1.5)
+
+        # 100 should be outside the upper bound
+        assert result.upper_bound < 100
+
+
+class TestComputeSdBounds:
+    """Test _compute_sd_bounds function."""
+
+    def test_basic_sd_bounds(self):
+        """Test basic SD bounds computation."""
+        series = pl.Series([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+        result = _compute_sd_bounds(series, 3.0)
+
+        assert isinstance(result, OutlierBounds)
+        assert result.lower_bound < result.upper_bound
+
+    def test_sd_bounds_symmetry(self):
+        """Test SD bounds are symmetric around mean."""
+        series = pl.Series([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+        result = _compute_sd_bounds(series, 3.0)
+
+        mean = series.mean()
+        # Bounds should be equidistant from mean
+        assert abs((mean - result.lower_bound) - (result.upper_bound - mean)) < 0.001
+
+
+class TestBuildOutlierExpression:
+    """Test _build_outlier_expression function."""
+
+    def test_value_below_lower_bound(self):
+        """Test expression flags values below lower bound."""
+        df = pl.DataFrame({"col": [1, 50, 100]})
+        expr = _build_outlier_expression("col", 10.0, 90.0)
+        result = df.select(expr.alias("reason"))
+
+        reasons = result["reason"].to_list()
+        assert "below lower bound" in reasons[0]
+        assert reasons[1] == "no outlier"
+        assert "above upper bound" in reasons[2]
+
+    def test_no_outliers(self):
+        """Test expression when all values are within bounds."""
+        df = pl.DataFrame({"col": [20, 50, 80]})
+        expr = _build_outlier_expression("col", 10.0, 90.0)
+        result = df.select(expr.alias("reason"))
+
+        reasons = result["reason"].to_list()
+        assert all(r == "no outlier" for r in reasons)
+
+
+class TestAddStatisticsColumns:
+    """Test _add_statistics_columns function."""
+
+    def test_adds_all_columns(self):
+        """Test that all statistics columns are added."""
+        col_df = pl.DataFrame({"key": [1, 2, 3], "value": [10, 20, 30]})
+        stats = OutlierStatistics(
+            count=3,
+            min_value=10.0,
+            max_value=30.0,
+            mean=20.0,
+            median=20.0,
+            sd=10.0,
+            iqr=10.0,
+            lower_bound=5.0,
+            upper_bound=35.0,
+        )
+
+        result = _add_statistics_columns(
+            col_df, stats, "Interquartile Range (IQR)", 1.5, "test_col"
+        )
+
+        expected_cols = [
+            "min_value",
+            "max_value",
+            "mean",
+            "median",
+            "std",
+            "iqr",
+            "lower_bound",
+            "upper_bound",
+            "outlier_method",
+            "outlier_multiplier",
+            "column name",
+        ]
+        for col in expected_cols:
+            assert col in result.columns
+
+    def test_column_values(self):
+        """Test that column values are correct."""
+        col_df = pl.DataFrame({"key": [1], "value": [10]})
+        stats = OutlierStatistics(
+            count=1,
+            min_value=10.0,
+            max_value=10.0,
+            mean=10.0,
+            median=10.0,
+            sd=0.0,
+            iqr=0.0,
+            lower_bound=10.0,
+            upper_bound=10.0,
+        )
+
+        result = _add_statistics_columns(col_df, stats, "IQR", 1.5, "my_col")
+
+        assert result["column name"][0] == "my_col"
+        assert result["outlier_method"][0] == "IQR"
+        assert result["outlier_multiplier"][0] == 1.5
+
+
+class TestComputeColumnStats:
+    """Test _compute_column_stats function."""
+
+    def test_single_column(self):
+        """Test stats computation for single column."""
+        df = pl.DataFrame({"key": [1, 2, 3], "col1": [10.0, 20.0, 30.0]})
+        stats, count = _compute_column_stats(
+            df, ["col1"], False, "Interquartile Range (IQR)", 1.5
+        )
+
+        assert stats is not None
+        assert isinstance(stats, OutlierStatistics)
+        assert count == 3
+
+    def test_grouped_columns(self):
+        """Test stats computation for grouped columns."""
+        df = pl.DataFrame(
+            {"key": [1, 2, 3], "col1": [10.0, 20.0, 30.0], "col2": [15.0, 25.0, 35.0]}
+        )
+        stats, count = _compute_column_stats(
+            df, ["col1", "col2"], True, "Interquartile Range (IQR)", 1.5
+        )
+
+        assert stats is not None
+        assert isinstance(stats, OutlierStatistics)
+        # Grouped count should be 6 (3 rows x 2 columns)
+        assert count == 6
+
+    def test_ungrouped_multiple_columns(self):
+        """Test stats computation for ungrouped multiple columns returns None."""
+        df = pl.DataFrame(
+            {"key": [1, 2, 3], "col1": [10.0, 20.0, 30.0], "col2": [15.0, 25.0, 35.0]}
+        )
+        stats, count = _compute_column_stats(
+            df, ["col1", "col2"], False, "Interquartile Range (IQR)", 1.5
+        )
+
+        # Should return None to signal per-column computation
+        assert stats is None
+        assert count == 0
+
+
+class TestComputeSingleColumnStats:
+    """Test _compute_single_column_stats function."""
+
+    def test_basic_stats(self):
+        """Test basic single column stats computation."""
+        df = pl.DataFrame({"col": [10.0, 20.0, 30.0, 40.0, 50.0]})
+        stats, count = _compute_single_column_stats(
+            df, "col", "Interquartile Range (IQR)", 1.5
+        )
+
+        assert isinstance(stats, OutlierStatistics)
+        assert count == 5
+        assert stats.mean == 30.0
+
+    def test_with_nulls(self):
+        """Test stats computation with null values."""
+        df = pl.DataFrame({"col": [10.0, None, 30.0, None, 50.0]})
+        stats, count = _compute_single_column_stats(
+            df, "col", "Interquartile Range (IQR)", 1.5
+        )
+
+        assert count == 3  # Only non-null values
+
+
+class TestMergeOutlierResults:
+    """Test _merge_outlier_results function."""
+
+    def test_empty_results_list(self):
+        """Test with empty results list."""
+        admin_df = pl.DataFrame({"key": [1, 2, 3]})
+        result = _merge_outlier_results([], admin_df, "key")
+
+        assert result.is_empty()
+
+    def test_empty_admin_data(self):
+        """Test with empty admin data."""
+        results = [pl.DataFrame({"key": [1], "outlier": ["yes"]})]
+        admin_df = pl.DataFrame()
+        result = _merge_outlier_results(results, admin_df, "key")
+
+        assert not result.is_empty()
+        assert "outlier" in result.columns
+
+    def test_merge_with_admin_data(self):
+        """Test merge with admin data."""
+        # Results must have same schema for concat
+        results = [
+            pl.DataFrame({"key": [1, 2], "outlier": ["yes", "no"]}),
+            pl.DataFrame({"key": [3, 4], "outlier": ["no", "yes"]}),
+        ]
+        admin_df = pl.DataFrame({"key": [1, 2, 3, 4], "name": ["A", "B", "C", "D"]})
+        result = _merge_outlier_results(results, admin_df, "key")
+
+        assert "name" in result.columns
+        assert "outlier" in result.columns
+        assert result.height == 4
+
+
+class TestProcessOutlierConfigs:
+    """Test _process_outlier_configs function."""
+
+    def test_disabled_config_skipped(self):
+        """Test that disabled configurations are skipped."""
+        data = pl.DataFrame({"key": [1, 2], "col1": [10.0, 20.0]})
+        config = pl.DataFrame(
+            {
+                "column_name": [["col1"]],
+                "outlier_enabled": [False],
+                "grouped_columns": [False],
+                "outlier_method": ["Interquartile Range (IQR)"],
+                "outlier_multiplier": [1.5],
+                "outlier_threshold": [2],
+            }
+        )
+
+        results = _process_outlier_configs(data, config, "key")
+        assert results == []
+
+    def test_enabled_config_processed(self):
+        """Test that enabled configurations are processed."""
+        data = pl.DataFrame(
+            {"key": [1, 2, 3, 4, 5], "col1": [10.0, 20.0, 30.0, 40.0, 50.0]}
+        )
+        config = pl.DataFrame(
+            {
+                "column_name": [["col1"]],
+                "outlier_enabled": [True],
+                "grouped_columns": [False],
+                "outlier_method": ["Interquartile Range (IQR)"],
+                "outlier_multiplier": [1.5],
+                "outlier_threshold": [2],
+            }
+        )
+
+        results = _process_outlier_configs(data, config, "key")
+        assert len(results) == 1
+        assert not results[0].is_empty()
+
+
+class TestProcessSingleConfig:
+    """Test _process_single_config function."""
+
+    def test_single_column_config(self):
+        """Test processing single column configuration."""
+        data = pl.DataFrame(
+            {"key": [1, 2, 3, 4, 5], "col1": [10.0, 20.0, 30.0, 40.0, 100.0]}
+        )
+        row = {
+            "column_name": ["col1"],
+            "grouped_columns": False,
+            "outlier_enabled": True,
+            "outlier_method": "Interquartile Range (IQR)",
+            "outlier_multiplier": 1.5,
+            "outlier_threshold": 2,
+        }
+
+        results = _process_single_config(data, row, "key")
+
+        assert len(results) == 1
+        assert "outlier reason" in results[0].columns
+
+    def test_multiple_columns_ungrouped(self):
+        """Test processing multiple ungrouped columns."""
+        data = pl.DataFrame(
+            {
+                "key": [1, 2, 3, 4, 5],
+                "col1": [10.0, 20.0, 30.0, 40.0, 50.0],
+                "col2": [15.0, 25.0, 35.0, 45.0, 55.0],
+            }
+        )
+        row = {
+            "column_name": ["col1", "col2"],
+            "grouped_columns": False,
+            "outlier_enabled": True,
+            "outlier_method": "Interquartile Range (IQR)",
+            "outlier_multiplier": 1.5,
+            "outlier_threshold": 2,
+        }
+
+        results = _process_single_config(data, row, "key")
+
+        # Should return one result per column
+        assert len(results) == 2
+
+    def test_multiple_columns_grouped(self):
+        """Test processing multiple grouped columns."""
+        data = pl.DataFrame(
+            {
+                "key": [1, 2, 3, 4, 5],
+                "col1": [10.0, 20.0, 30.0, 40.0, 50.0],
+                "col2": [15.0, 25.0, 35.0, 45.0, 55.0],
+            }
+        )
+        row = {
+            "column_name": ["col1", "col2"],
+            "grouped_columns": True,
+            "outlier_enabled": True,
+            "outlier_method": "Interquartile Range (IQR)",
+            "outlier_multiplier": 1.5,
+            "outlier_threshold": 2,
+        }
+
+        results = _process_single_config(data, row, "key")
+
+        # Should still return one result per column
+        assert len(results) == 2
+
+
+class TestProcessSingleColumnOutliers:
+    """Test _process_single_column_outliers function."""
+
+    def test_basic_outlier_detection(self):
+        """Test basic outlier detection for single column."""
+        df = pl.DataFrame(
+            {"key": [1, 2, 3, 4, 5], "col": [10.0, 20.0, 30.0, 40.0, 100.0]}
+        )
+        stats = OutlierStatistics(
+            count=5,
+            min_value=10.0,
+            max_value=100.0,
+            mean=40.0,
+            median=30.0,
+            sd=35.0,
+            iqr=20.0,
+            lower_bound=0.0,
+            upper_bound=60.0,
+        )
+
+        result = _process_single_column_outliers(
+            df_polars=df,
+            col="col",
+            survey_key="key",
+            outlier_stats=stats,
+            outlier_method="Interquartile Range (IQR)",
+            outlier_multiplier=1.5,
+            min_threshold=3,
+            non_null_count=5,
+        )
+
+        assert "outlier reason" in result.columns
+        assert "column name" in result.columns
+        assert "column value" in result.columns
+
+        # Check that 100.0 is flagged as outlier
+        outlier_flags = result.filter(pl.col("column value") == 100.0)["outlier reason"]
+        assert "above upper bound" in outlier_flags[0]
+
+    def test_below_threshold(self):
+        """Test when non-null count is below threshold."""
+        df = pl.DataFrame({"key": [1, 2], "col": [10.0, 100.0]})
+        stats = OutlierStatistics(
+            count=2,
+            min_value=10.0,
+            max_value=100.0,
+            mean=55.0,
+            median=55.0,
+            sd=45.0,
+            iqr=45.0,
+            lower_bound=0.0,
+            upper_bound=60.0,
+        )
+
+        result = _process_single_column_outliers(
+            df_polars=df,
+            col="col",
+            survey_key="key",
+            outlier_stats=stats,
+            outlier_method="Interquartile Range (IQR)",
+            outlier_multiplier=1.5,
+            min_threshold=5,  # Higher than non_null_count
+            non_null_count=2,
+        )
+
+        # All should be "no outlier" since count < threshold
+        assert all(r == "no outlier" for r in result["outlier reason"].to_list())
