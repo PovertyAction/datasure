@@ -175,10 +175,10 @@ class OutlierStatistics(BaseModel):
     max_value: float
     mean: float
     median: float
-    sd: float
-    iqr: float
-    lower_bound: float
-    upper_bound: float
+    sd: float | None
+    iqr: float | None
+    lower_bound: float | None
+    upper_bound: float | None
 
     class Config:
         """Pydantic config."""
@@ -530,7 +530,6 @@ def _should_expand_row(row: dict) -> bool:
     return row["search_type"] != SearchType.EXACT.value and not row.get("locked", False)
 
 
-@st.cache_data(hash_funcs={pl.DataFrame: lambda x: None})
 def _update_unlocked_cols(
     column_config: pl.DataFrame,
     col_names: list[str],
@@ -967,6 +966,214 @@ def _process_single_column_outliers(
 # =============================================================================
 
 
+def _compute_column_stats(
+    df_polars: pl.DataFrame,
+    outlier_cols: list[str],
+    grouped_cols: bool,
+    outlier_method: str,
+    outlier_multiplier: float,
+) -> tuple[OutlierStatistics, int]:
+    """Compute outlier statistics for grouped columns.
+
+    Parameters
+    ----------
+    df_polars : pl.DataFrame
+        DataFrame containing the data (with survey_key and outlier columns).
+    outlier_cols : list[str]
+        List of columns to analyze.
+    grouped_cols : bool
+        Whether columns should be analyzed together.
+    outlier_method : str
+        Outlier detection method (IQR or SD).
+    outlier_multiplier : float
+        Multiplier for bounds calculation.
+
+    Returns
+    -------
+    tuple[OutlierStatistics, int]
+        Computed statistics and non-null count.
+    """
+    if len(outlier_cols) == 1 or grouped_cols:
+        if len(outlier_cols) == 1:
+            series = df_polars[outlier_cols[0]]
+        else:
+            series = pl.concat([df_polars[col] for col in outlier_cols])
+
+        non_null_count = series.len() - series.null_count()
+        stats = compute_outlier_stats_polars(
+            series,
+            outlier_type=outlier_method,
+            multiplier=outlier_multiplier,
+        )
+        return stats, non_null_count
+
+    # For non-grouped multiple columns, return None to signal per-column computation
+    return None, 0
+
+
+def _compute_single_column_stats(
+    df_polars: pl.DataFrame,
+    col: str,
+    outlier_method: str,
+    outlier_multiplier: float,
+) -> tuple[OutlierStatistics, int]:
+    """Compute outlier statistics for a single column.
+
+    Parameters
+    ----------
+    df_polars : pl.DataFrame
+        DataFrame containing the data.
+    col : str
+        Column name to analyze.
+    outlier_method : str
+        Outlier detection method.
+    outlier_multiplier : float
+        Multiplier for bounds calculation.
+
+    Returns
+    -------
+    tuple[OutlierStatistics, int]
+        Computed statistics and non-null count.
+    """
+    non_null_count = df_polars.height - df_polars[col].null_count()
+    stats = compute_outlier_stats_polars(
+        df_polars[col],
+        outlier_type=outlier_method,
+        multiplier=outlier_multiplier,
+    )
+    return stats, non_null_count
+
+
+def _merge_outlier_results(
+    outlier_results_list: list[pl.DataFrame],
+    admin_data_polars: pl.DataFrame,
+    survey_key: str,
+) -> pl.DataFrame:
+    """Merge outlier results with admin data.
+
+    Parameters
+    ----------
+    outlier_results_list : list[pl.DataFrame]
+        List of outlier result DataFrames.
+    admin_data_polars : pl.DataFrame
+        Admin data DataFrame.
+    survey_key : str
+        Survey key column name.
+
+    Returns
+    -------
+    pl.DataFrame
+        Merged results or empty DataFrame if no results.
+    """
+    if not outlier_results_list:
+        return pl.DataFrame()
+
+    outlier_results_polars = pl.concat(outlier_results_list)
+
+    if admin_data_polars.is_empty():
+        return outlier_results_polars
+
+    return admin_data_polars.join(
+        outlier_results_polars,
+        on=survey_key,
+        how="left",
+    )
+
+
+def _process_outlier_configs(
+    data: pl.DataFrame,
+    column_config: pl.DataFrame,
+    survey_key: str,
+) -> list[pl.DataFrame]:
+    """Process all outlier configurations and return results.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        DataFrame containing the survey data.
+    column_config : pl.DataFrame
+        DataFrame containing the outlier column configurations.
+    survey_key : str
+        Survey key column name.
+
+    Returns
+    -------
+    list[pl.DataFrame]
+        List of outlier result DataFrames.
+    """
+    outlier_results_list = []
+
+    for row in column_config.iter_rows(named=True):
+        if not row.get("outlier_enabled", False):
+            continue
+
+        results = _process_single_config(data, row, survey_key)
+        outlier_results_list.extend(results)
+
+    return outlier_results_list
+
+
+def _process_single_config(
+    data: pl.DataFrame,
+    row: dict,
+    survey_key: str,
+) -> list[pl.DataFrame]:
+    """Process a single outlier configuration row.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        DataFrame containing the survey data.
+    row : dict
+        Configuration row from column_config.
+    survey_key : str
+        Survey key column name.
+
+    Returns
+    -------
+    list[pl.DataFrame]
+        List of outlier results for this configuration.
+    """
+    # Extract settings with defaults
+    outlier_cols = _ensure_list(row.get("column_name", []))
+    grouped_cols = row.get("grouped_columns", False)
+    outlier_method = row.get("outlier_method", OutlierMethod.IQR.value)
+    threshold = row.get("outlier_threshold", OutlierThresholds.IQR.value)
+    outlier_multiplier = row.get("outlier_multiplier", OutlierMultipliers.IQR.value)
+
+    # Create subset
+    outlier_df_polars = data.select([survey_key, *outlier_cols])
+
+    # Compute shared stats for single column or grouped columns
+    shared_stats, shared_count = _compute_column_stats(
+        outlier_df_polars, outlier_cols, grouped_cols, outlier_method, outlier_multiplier
+    )
+
+    # Process each column
+    results = []
+    for col in outlier_cols:
+        if shared_stats is not None:
+            outlier_stats, non_null_count = shared_stats, shared_count
+        else:
+            outlier_stats, non_null_count = _compute_single_column_stats(
+                outlier_df_polars, col, outlier_method, outlier_multiplier
+            )
+
+        col_result = _process_single_column_outliers(
+            df_polars=outlier_df_polars,
+            col=col,
+            survey_key=survey_key,
+            outlier_stats=outlier_stats,
+            outlier_method=outlier_method,
+            outlier_multiplier=outlier_multiplier,
+            min_threshold=threshold,
+            non_null_count=non_null_count,
+        )
+        results.append(col_result)
+
+    return results
+
+
 def compute_outlier_output(
     data: pl.DataFrame,
     outlier_settings: dict,
@@ -998,96 +1205,21 @@ def compute_outlier_output(
 
     # Build include columns list
     survey_key = outlier_settings.survey_key
-    survey_id = outlier_settings.survey_id
-    survey_date = outlier_settings.survey_date
-    enumerator = outlier_settings.enumerator
-    team = outlier_settings.team
     include_cols = _build_include_cols(
-        survey_key, survey_id, survey_date, enumerator, team
+        survey_key,
+        outlier_settings.survey_id,
+        outlier_settings.survey_date,
+        outlier_settings.enumerator,
+        outlier_settings.team,
     )
-
-    # Select admin data
     admin_data_polars = data.select(include_cols)
 
     # Process outlier settings
-    outlier_results_list = []
-    for row in column_config.iter_rows(named=True):
-        # Check if outlier detection is enabled
-        outlier_enabled = row.get("outlier_enabled", False)
-        if not outlier_enabled:
-            continue
+    outlier_results_list = _process_outlier_configs(
+        data, column_config, survey_key
+    )
 
-        # Extract settings with defaults
-        outlier_cols = _ensure_list(row.get("column_name", []))
-        grouped_cols = row.get("grouped_columns", False)
-        outlier_method = row.get("outlier_method", OutlierMethod.IQR.value)
-        threshold = row.get("outlier_threshold", OutlierThresholds.IQR.value)
-        outlier_multiplier = row.get("outlier_multiplier", OutlierMultipliers.IQR.value)
-
-        # Create subset
-        outlier_df_polars = data.select([survey_key, *outlier_cols])
-
-        # Compute statistics based on grouping
-        if len(outlier_cols) == 1:
-            non_null_count = (
-                outlier_df_polars.height
-                - outlier_df_polars[outlier_cols[0]].null_count()
-            )
-            outlier_stats = compute_outlier_stats_polars(
-                outlier_df_polars[outlier_cols[0]],
-                outlier_type=outlier_method,
-                multiplier=outlier_multiplier,
-            )
-        elif grouped_cols:
-            stacked_series = pl.concat([outlier_df_polars[col] for col in outlier_cols])
-            non_null_count = stacked_series.len() - stacked_series.null_count()
-            outlier_stats = compute_outlier_stats_polars(
-                stacked_series,
-                outlier_type=outlier_method,
-                multiplier=outlier_multiplier,
-            )
-
-        # Process each column
-        for col in outlier_cols:
-            if not grouped_cols:
-                non_null_count = (
-                    outlier_df_polars.height - outlier_df_polars[col].null_count()
-                )
-                outlier_stats = compute_outlier_stats_polars(
-                    outlier_df_polars[col],
-                    outlier_type=outlier_method,
-                    multiplier=outlier_multiplier,
-                )
-
-            col_result = _process_single_column_outliers(
-                df_polars=outlier_df_polars,
-                col=col,
-                survey_key=survey_key,
-                outlier_stats=outlier_stats,
-                outlier_method=outlier_method,
-                outlier_multiplier=outlier_multiplier,
-                min_threshold=threshold,
-                non_null_count=non_null_count,
-            )
-
-            outlier_results_list.append(col_result)
-
-    # Concatenate and merge results
-    if outlier_results_list:
-        outlier_results_polars = pl.concat(outlier_results_list)
-
-        if not admin_data_polars.is_empty():
-            merged_results = admin_data_polars.join(
-                outlier_results_polars,
-                on=survey_key,
-                how="left",
-            )
-        else:
-            merged_results = outlier_results_polars
-
-        return merged_results
-
-    return pl.DataFrame()
+    return _merge_outlier_results(outlier_results_list, admin_data_polars, survey_key)
 
 
 # =============================================================================
@@ -1613,6 +1745,23 @@ def _render_constraint_violations_table(
 
     # show only rows with violations
     violations_df = display_df.filter(pl.col("violation reason") != "no violation")
+
+    # add violation type column ie. "Soft Min", "Soft Max", "Hard Min", "Hard Max"
+    violation_type_expr = (
+        pl.when(pl.col("violation reason").str.contains("below hard minimum"))
+        .then(pl.lit("Hard Min"))
+        .when(pl.col("violation reason").str.contains("below soft minimum"))
+        .then(pl.lit("Soft Min"))
+        .when(pl.col("violation reason").str.contains("above soft maximum"))
+        .then(pl.lit("Soft Max"))
+        .when(pl.col("violation reason").str.contains("above hard maximum"))
+        .then(pl.lit("Hard Max"))
+        .otherwise(pl.lit("Unknown"))
+    )
+
+    violations_df = violations_df.with_columns(
+        violation_type_expr.alias("violation type")
+    )
 
     st.dataframe(violations_df)
 
@@ -2465,8 +2614,8 @@ def _update_outlier_column_config(
     """
     # get existing config
     existing_config = duckdb_get_table(
-        project_id=project_id,
-        alias=f"outliers_{page_name_id}",
+        project_id,
+        f"outliers_{page_name_id}",
         db_name="logs",
     )
 
@@ -2775,15 +2924,6 @@ def outliers_report(
     else:
         # show outlier metrics
         _render_outlier_metrics(outlier_data, outliers_settings)
-
-        # show outlier details table
-        st.subheader("Outlier Details")
-        _render_outlier_table(
-            data,
-            outlier_data,
-            outliers_settings,
-            setting_file,
-        )
 
         # show outlier column inspection
         st.subheader("Inspect Columns")
