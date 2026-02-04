@@ -791,6 +791,174 @@ class PrepProcessor:
         return result_data
 
 
+def _parse_prep_log_to_actions(prep_log_df: pl.DataFrame) -> list[PrepAction]:
+    """Convert a preparation log DataFrame to a list of PrepAction objects.
+
+    Args:
+        prep_log_df: DataFrame containing prep_args column with action data
+
+    Returns
+    -------
+        List of PrepAction objects ready for execution
+    """
+    actions = []
+    for row in prep_log_df.iter_rows(named=True):
+        args = row["prep_args"]
+        if isinstance(args, str):
+            args = ast.literal_eval(args)
+        prep_action = PrepActionResult(**args)
+        actions.append(PrepAction.from_args(prep_action))
+    return actions
+
+
+def _generate_action_description(prep_args: PrepActionResult) -> str:
+    """Generate human-readable description for a prep action.
+
+    Args:
+        prep_args: The preparation action result containing action details
+
+    Returns
+    -------
+        Formatted description string
+    """
+    action_description_map = {
+        "remove column(s)": PrepConfirmationMessages.remove_columns,
+        "remove row(s)": PrepConfirmationMessages.remove_rows,
+        "transform column(s)": PrepConfirmationMessages.transform_columns,
+        "add new column": PrepConfirmationMessages.add_new_column,
+    }
+    description_func = action_description_map.get(prep_args.action)
+    if description_func:
+        return description_func(prep_args)
+    return ""
+
+
+def _convert_prep_args_to_string(df: pl.DataFrame) -> pl.DataFrame:
+    """Convert prep_args column from struct to string for concatenation.
+
+    Args:
+        df: DataFrame with prep_args column
+
+    Returns
+    -------
+        DataFrame with prep_args converted to string
+    """
+    return df.with_columns(
+        pl.col("prep_args").map_elements(
+            lambda x: str(x) if x is not None else None, return_dtype=pl.String
+        )
+    )
+
+
+def _create_log_entry(
+    action: str,
+    description: str,
+    prep_args: PrepActionResult,
+    log_index: int,
+) -> pl.DataFrame:
+    """Create a new log entry DataFrame for a prep action.
+
+    Args:
+        action: The action type string
+        description: Human-readable description
+        prep_args: The preparation action result
+        log_index: Current log size (for action_index)
+
+    Returns
+    -------
+        Single-row DataFrame with the log entry
+    """
+    action_index_val = f"{log_index} - {action} - {description}"
+    return pl.DataFrame(
+        {
+            "action": [action],
+            "description": [description],
+            "prep_args": [prep_args],
+            "action_index": [action_index_val],
+        }
+    )
+
+
+def _append_to_prep_log(
+    existing_log: pl.DataFrame, new_entry: pl.DataFrame
+) -> pl.DataFrame:
+    """Append a new entry to the preparation log.
+
+    Args:
+        existing_log: Current log DataFrame (may be empty)
+        new_entry: New log entry to append
+
+    Returns
+    -------
+        Updated log DataFrame
+    """
+    if existing_log.is_empty():
+        return new_entry
+    existing_log_str = _convert_prep_args_to_string(existing_log)
+    new_entry_str = _convert_prep_args_to_string(new_entry)
+    return pl.concat([existing_log_str, new_entry_str])
+
+
+def _reapply_all_actions(
+    project_id: str,
+    alias: str,
+    prep_log_df: pl.DataFrame,
+    processor: PrepProcessor,
+) -> None:
+    """Re-apply all actions from the log to the raw data.
+
+    Args:
+        project_id: Project identifier
+        alias: Dataset alias
+        prep_log_df: DataFrame containing the preparation log
+        processor: PrepProcessor instance for executing actions
+    """
+    raw_data = duckdb_get_table(project_id, alias, db_name="raw")
+
+    if prep_log_df.is_empty():
+        duckdb_save_table(project_id, raw_data, alias, db_name="prep")
+        return
+
+    existing_actions = _parse_prep_log_to_actions(prep_log_df)
+    result_data = processor.execute_all_actions(raw_data, existing_actions)
+    duckdb_save_table(project_id, result_data, alias, db_name="prep")
+
+
+def _apply_single_action(
+    project_id: str,
+    alias: str,
+    prep_args: PrepActionResult,
+    prep_log_df: pl.DataFrame,
+    processor: PrepProcessor,
+) -> None:
+    """Apply a single new action and update the log.
+
+    Args:
+        project_id: Project identifier
+        alias: Dataset alias
+        prep_args: The preparation action to apply
+        prep_log_df: Current preparation log DataFrame
+        processor: PrepProcessor instance for executing actions
+    """
+    prep_data = duckdb_get_table(project_id, alias, db_name="prep")
+
+    new_action = PrepAction.from_args(prep_args)
+    result_data, updated_prep_args = processor.execute_single_action(
+        prep_data, new_action
+    )
+
+    action = updated_prep_args.action
+    description = _generate_action_description(updated_prep_args)
+
+    new_entry = _create_log_entry(
+        action, description, updated_prep_args, prep_log_df.height
+    )
+    updated_log = _append_to_prep_log(prep_log_df, new_entry)
+
+    duckdb_save_table(project_id, updated_log, f"prep_log_{alias}", db_name="logs")
+    duckdb_save_table(project_id, result_data, alias, db_name="prep")
+
+
 def prep_apply_action(
     project_id: str,
     alias: str,
@@ -798,11 +966,14 @@ def prep_apply_action(
 ) -> None:
     """Apply data preparation action to dataset.
 
+    When prep_args is provided, applies the single new action to the current
+    prepared data and updates the log. When prep_args is None, re-applies all
+    actions from the log to the raw data.
+
     Args:
         project_id: Project identifier
         alias: Dataset alias
-        action: Action type to apply
-        description: Action description
+        prep_args: Optional action to apply. If None, re-applies all logged actions.
 
     Raises
     ------
@@ -810,115 +981,9 @@ def prep_apply_action(
         OperationError: If data operation fails
     """
     processor = PrepProcessor()
-    # Load existing preparation log
-    prep_log_df = duckdb_get_table(
-        project_id,
-        f"prep_log_{alias}",
-        db_name="logs",
-    )
+    prep_log_df = duckdb_get_table(project_id, f"prep_log_{alias}", db_name="logs")
 
-    # run current action if prep_args is provided, else re-apply all actions from log
-    if not prep_args:
-        # Get raw data if re-applying all actions
-        raw_data = duckdb_get_table(
-            project_id,
-            alias,
-            db_name="raw",
-        )
-
-        if prep_log_df.is_empty():
-            # set result data to raw data if no actions in log
-            # return none
-            duckdb_save_table(
-                project_id,
-                raw_data,
-                alias,
-                db_name="prep",
-            )
-            return None
-
-        # Convert to list of actions
-        existing_actions = []
-        for row in prep_log_df.iter_rows(named=True):
-            args = row["prep_args"]
-            # check if args is a string (from JSON) and convert to dict
-            if isinstance(args, str):
-                args = ast.literal_eval(args)
-            prep_action = PrepActionResult(**args)
-            existing_actions.append(PrepAction.from_args(prep_action))
-
-        # apply all existing actions to current prepared data
-        result_data = processor.execute_all_actions(raw_data, existing_actions)
-        # save new prep data
-        duckdb_save_table(
-            project_id,
-            result_data,
-            alias,
-            db_name="prep",
-        )
+    if prep_args is None:
+        _reapply_all_actions(project_id, alias, prep_log_df, processor)
     else:
-        # Get current prepared data
-        prep_data = duckdb_get_table(
-            project_id,
-            alias,
-            db_name="prep",
-        )
-
-        # Apply only the new action
-        new_action = PrepAction.from_args(prep_args)
-        result_data, updated_prep_args = processor.execute_single_action(
-            prep_data, new_action
-        )
-        # Add new action if provided
-        action = updated_prep_args.action
-        if action == "remove column(s)":
-            description = PrepConfirmationMessages.remove_columns(updated_prep_args)
-        elif action == "remove row(s)":
-            description = PrepConfirmationMessages.remove_rows(updated_prep_args)
-        elif action == "transform column(s)":
-            description = PrepConfirmationMessages.transform_columns(updated_prep_args)
-        elif action == "add new column":
-            description = PrepConfirmationMessages.add_new_column(updated_prep_args)
-
-        action_index_val = f"{prep_log_df.height} - {action} - {description}"
-
-        # Update log with new action
-        new_row = pl.DataFrame(
-            {
-                "action": [action],
-                "description": [description],
-                "prep_args": [updated_prep_args],
-                "action_index": [action_index_val],
-            }
-        )
-
-        if prep_log_df.is_empty():
-            updated_log = new_row
-        else:
-            # Convert struct columns to JSON strings for concatenation
-            prep_log_json = prep_log_df.with_columns(
-                pl.col("prep_args").map_elements(
-                    lambda x: str(x) if x is not None else None, return_dtype=pl.String
-                )
-            )
-            new_row_json = new_row.with_columns(
-                pl.col("prep_args").map_elements(
-                    lambda x: str(x) if x is not None else None, return_dtype=pl.String
-                )
-            )
-            updated_log = pl.concat([prep_log_json, new_row_json])
-
-        duckdb_save_table(
-            project_id,
-            updated_log,
-            f"prep_log_{alias}",
-            db_name="logs",
-        )
-
-        # Save updated prepared data
-        duckdb_save_table(
-            project_id,
-            result_data,
-            alias,
-            db_name="prep",
-        )
+        _apply_single_action(project_id, alias, prep_args, prep_log_df, processor)
