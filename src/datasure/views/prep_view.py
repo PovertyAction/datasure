@@ -1,3 +1,5 @@
+from enum import Enum
+
 import pandas as pd
 import polars as pl
 import streamlit as st
@@ -49,64 +51,116 @@ if not show_prep_page_info:
 
 # --- COLUMN METHODS WITH VALUES ---#
 
+class PrepActions(Enum):
+    """Data model for preparation actions."""
+
+    add_column: str = "add new column"
+    transform_column: str = "transform column(s)"
+    remove_column: str = "remove column(s)"
+    remove_row: str = "remove row(s)"
+
+class PrepMethods(Enum):
+    """Data model for preparation methods."""
+
+    row_index: str = "by row index"
+    condition: str = "by condition"
+
+class PrepFunctions(Enum):
+    """Data model for preparation functions."""
+
+    sum: str = "sum"
+    diff: str = "diff"
+    mean: str = "mean"
+    median: str = "median"
+    mode: str = "mode"
+    min: str = "min"
+    max: str = "max"
+    std: str = "std"
+    var: str = "var"
+    first: str = "first"
+    last: str = "last"
+    count: str = "count"
+    nunique: str = "nunique"
+    product: str = "product"
+    quotient: str = "quotient"
+    index: str = "index"
+    uuid: str = "uuid"
+    random: str = "random"
+
+class PrepRowConditions(Enum):
+    """Data model for preparation conditions."""
+
+    equal_to: str = "value is equal to"
+    not_equal_to: str = "value is not equal to"
+    greater_than: str = "value is greater than"
+    less_than: str = "value is less than"
+    greater_than_or_equal_to: str = "value is greater than or equal to"
+    less_than_or_equal_to: str = "value is less than or equal to"
+    between: str = "value is between"
+    not_between: str = "value is not between"
+    like: str = "value is like"
+    not_like: str = "value is not like"
+
 COL_MEDTHODS_WITH_VALUES = (
-    "sum",
-    "diff",
-    "mean",
-    "median",
-    "mode",
-    "min",
-    "max",
-    "std",
-    "var",
-    "first",
-    "last",
-    "count",
-    "nunique",
-    "product",
-    "quotient",
+    PrepFunctions.sum,
+    PrepFunctions.diff,
+    PrepFunctions.mean,
+    PrepFunctions.median,
+    PrepFunctions.mode,
+    PrepFunctions.min,
+    PrepFunctions.max,
+    PrepFunctions.std,
+    PrepFunctions.var,
+    PrepFunctions.first,
+    PrepFunctions.last,
+    PrepFunctions.count,
+    PrepFunctions.nunique,
+    PrepFunctions.product,
+    PrepFunctions.quotient,
 )
 
-COL_MEDTHODS_NO_VALUES = (
-    "index",
-    "uuid",
-    "random",
+
+COL_METHODS_WITHOUT_VALUES = (
+    PrepFunctions.index,
+    PrepFunctions.uuid,
+    PrepFunctions.random,
 )
 
 DEL_ROW_COND_MAX_1 = (
-    "value is equal to",
-    "value is not equal to",
-    "value is greater than",
-    "value is less than",
-    "value is greater than or equal to",
-    "value is less than or equal to",
+    PrepRowConditions.equal_to,
+    PrepRowConditions.not_equal_to,
+    PrepRowConditions.greater_than,
+    PrepRowConditions.less_than,
+    PrepRowConditions.greater_than_or_equal_to,
+    PrepRowConditions.less_than_or_equal_to,
 )
 
 DEL_ROW_COND_NUM_ONLY = (
-    "value is greater than",
-    "value is less than",
-    "value is greater than or equal to",
-    "value is less than or equal to",
-    "value is between",
-    "value is not between",
+    PrepRowConditions.greater_than,
+    PrepRowConditions.less_than,
+    PrepRowConditions.greater_than_or_equal_to,
+    PrepRowConditions.less_than_or_equal_to,
+    PrepRowConditions.between,
+    PrepRowConditions.not_between,
 )
 
 DEL_ROW_COND_STR_ONLY = (
-    "value is like",
-    "value is not like",
+    PrepRowConditions.like,
+    PrepRowConditions.not_like,
 )
 
+
 DEL_COND_USE_VALS = (
-    "value is equal to",
-    "value is not equal to",
-    "value is greater than",
-    "value is less than",
-    "value is greater than or equal to",
+    PrepRowConditions.equal_to,
+    PrepRowConditions.not_equal_to,
+    PrepRowConditions.greater_than,
+    PrepRowConditions.less_than,
+    PrepRowConditions.greater_than_or_equal_to,
 )
 
 DEL_ROW_COND_SAME_TYPE = (
-    "value is between",
-    "value is not between",
+    PrepRowConditions.between,
+    PrepRowConditions.not_between,
 )
 
 
@@ -213,7 +267,8 @@ def _get_column_options_for_condition(
     -------
         Tuple of (column_options, max_selections)
     """
-    max_selections = 1 if condition in DEL_ROW_COND_MAX_1 else len(all_cols)
+    del_conditions = [val.value for val in DEL_ROW_COND_MAX_1]
+    max_selections = 1 if condition in del_conditions else len(all_cols)
 
     if condition in DEL_ROW_COND_NUM_ONLY:
         col_options = num_cols + date_cols
@@ -353,10 +408,10 @@ def _build_remove_rows_value(inputs: "RemoveRowsInputs") -> list | str | None:
     -------
         The appropriate value based on method and condition
     """
-    if inputs.method == "by row index" and inputs.indexes_to_remove:
+    if inputs.method == PrepMethods.row_index.value and inputs.indexes_to_remove:
         return inputs.indexes_to_remove
 
-    if inputs.method != "by condition" or not inputs.condition:
+    if inputs.method != PrepMethods.condition.value or not inputs.condition:
         return None
 
     if not inputs.selected_columns:
@@ -366,7 +421,7 @@ def _build_remove_rows_value(inputs: "RemoveRowsInputs") -> list | str | None:
         return inputs.equality_values
     elif inputs.condition in DEL_ROW_COND_SAME_TYPE:
         return [inputs.min_value, inputs.max_value]
-    elif inputs.condition in ("value is like", "value is not like"):
+    elif inputs.condition in (PrepRowConditions.like, PrepRowConditions.not_like):
         return inputs.pattern_value
 
     return None
@@ -386,17 +441,17 @@ def _build_remove_rows_result(inputs: "RemoveRowsInputs") -> dict:
 
     source_columns = (
         inputs.selected_columns
-        if inputs.method == "by condition" and inputs.selected_columns
+        if inputs.method == PrepMethods.condition.value and inputs.selected_columns
         else []
     )
     condition = (
         inputs.condition
-        if inputs.method == "by condition" and inputs.condition
+        if inputs.method == PrepMethods.condition.value and inputs.condition
         else None
     )
 
     return {
-        "action": "remove row(s)",
+        "action": PrepActions.remove_row.value,
         "column_names": None,
         "affected_count": 0,
         "remaining_count": None,
@@ -578,7 +633,7 @@ def _build_transform_result(
     value = _build_transform_value(inputs)
 
     return {
-        "action": "transform column(s)",
+        "action": PrepActions.transform_column.value,
         "column_names": None,
         "affected_count": 0,
         "remaining_count": None,
@@ -650,7 +705,7 @@ class PrepStepHandler:
             )
 
             return {
-                "action": "add new column",
+                "action": PrepActions.add_column.value,
                 "column_names": dp_prep_add_col,
                 "affected_count": None,
                 "remaining_count": self.prep_data.shape[1] + 1,
@@ -721,7 +776,7 @@ class PrepStepHandler:
         )
 
         return {
-            "action": "remove column(s)",
+            "action": PrepActions.remove_column.value,
             "column_names": None,
             "affected_count": len(dp_prep_del_cols) if dp_prep_del_cols else 0,
             "remaining_count": self.prep_data.shape[1] - len(dp_prep_del_cols)
@@ -754,9 +809,9 @@ class PrepStepHandler:
         inputs = RemoveRowsInputs()
         inputs.method = method
 
-        if method == "by row index":
+        if method == PrepMethods.row_index.value:
             self._render_row_index_inputs(inputs)
-        elif method == "by condition":
+        elif method == PrepMethods.condition.value:
             self._render_condition_inputs(inputs)
 
         return _build_remove_rows_result(inputs)
@@ -844,16 +899,16 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
 
         prep_args = None
 
-        if dp_prep_action == "add new column":
+        if dp_prep_action == PrepActions.add_column.value:
             prep_args = prep_handler.add_column_handler()
 
-        elif dp_prep_action == "transform column(s)":
+        elif dp_prep_action == PrepActions.transform_column.value:
             prep_args = prep_handler.transform_column_handler()
 
-        elif dp_prep_action == "remove column(s)":
+        elif dp_prep_action == PrepActions.remove_column.value:
             prep_args = prep_handler.remove_column_handler()
 
-        elif dp_prep_action == "remove row(s)":
+        elif dp_prep_action == PrepActions.remove_row.value:
             prep_args = prep_handler.remove_rows_handler()
 
         if prep_args is None:

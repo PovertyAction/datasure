@@ -45,20 +45,20 @@ class OperationError(PrepError):
     pass
 
 
-class ActionType(Enum):
+class ActionTypes(str, Enum): #noqa: UP042
     """Supported preparation action types."""
 
-    REMOVE_COLUMNS = "remove column(s)"
-    REMOVE_ROWS = "remove row(s)"
-    TRANSFORM_COLUMNS = "transform column(s)"
-    ADD_NEW_COLUMN = "add new column"
+    remove_columns = "remove column(s)"
+    remove_rows = "remove row(s)"
+    transform_columns = "transform column(s)"
+    add_new_column = "add new column"
 
 
 @dataclass
 class PrepAction:
     """Represents a data preparation action."""
 
-    action_type: ActionType
+    action_type: ActionTypes
     prep_args: PrepActionResult
 
     @classmethod
@@ -66,7 +66,7 @@ class PrepAction:
         """Create PrepAction from string representations."""
         action = prep_args.action
         try:
-            action_type = ActionType(action)
+            action_type = ActionTypes(action)
         except ValueError as e:
             raise ValidationError(f"Unknown action type: {action}") from e
 
@@ -169,7 +169,7 @@ class RemoveColumnsOperation(PrepOperation):
             results = data.drop(columns)
 
             updated_prep_args = {
-                "action": "remove column(s)",
+                "action": ActionTypes.remove_columns,
                 "column_names": None,
                 "affected_count": len(columns),
                 "remaining_count": data.width,
@@ -760,10 +760,10 @@ class PrepProcessor:
     def __init__(self):
         """Initialize processor with operation handlers."""
         self.operation_handlers = {
-            ActionType.REMOVE_COLUMNS: RemoveColumnsOperation(),
-            ActionType.REMOVE_ROWS: RemoveRowsOperation(),
-            ActionType.TRANSFORM_COLUMNS: TransformColumnsOperation(),
-            ActionType.ADD_NEW_COLUMN: AddNewColumnOperation(),
+            ActionTypes.remove_columns: RemoveColumnsOperation(),
+            ActionTypes.remove_rows: RemoveRowsOperation(),
+            ActionTypes.transform_columns: TransformColumnsOperation(),
+            ActionTypes.add_new_column: AddNewColumnOperation(),
         }
 
     def execute_single_action(
@@ -822,10 +822,10 @@ def _generate_action_description(prep_args: PrepActionResult) -> str:
         Formatted description string
     """
     action_description_map = {
-        "remove column(s)": PrepConfirmationMessages.remove_columns,
-        "remove row(s)": PrepConfirmationMessages.remove_rows,
-        "transform column(s)": PrepConfirmationMessages.transform_columns,
-        "add new column": PrepConfirmationMessages.add_new_column,
+        ActionTypes.remove_columns: PrepConfirmationMessages.remove_columns,
+        ActionTypes.remove_rows: PrepConfirmationMessages.remove_rows,
+        ActionTypes.transform_columns: PrepConfirmationMessages.transform_columns,
+        ActionTypes.add_new_column: PrepConfirmationMessages.add_new_column,
     }
     description_func = action_description_map.get(prep_args.action)
     if description_func:
