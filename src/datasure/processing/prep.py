@@ -45,20 +45,68 @@ class OperationError(PrepError):
     pass
 
 
-class ActionTypes(str, Enum): #noqa: UP042
-    """Supported preparation action types."""
+class PrepActions(Enum):
+    """Data model for preparation actions."""
 
-    remove_columns = "remove column(s)"
-    remove_rows = "remove row(s)"
-    transform_columns = "transform column(s)"
-    add_new_column = "add new column"
+    add_column: str = "add new column"
+    transform_column: str = "transform column(s)"
+    remove_column: str = "remove column(s)"
+    remove_row: str = "remove row(s)"
+
+
+class PrepMethods(Enum):
+    """Data model for preparation methods."""
+
+    row_index: str = "by row index"
+    condition: str = "by condition"
+
+
+class PrepFunctions(Enum):
+    """Data model for preparation functions."""
+
+    sum: str = "sum"
+    diff: str = "diff"
+    mean: str = "mean"
+    median: str = "median"
+    mode: str = "mode"
+    min: str = "min"
+    max: str = "max"
+    std: str = "std"
+    var: str = "var"
+    first: str = "first"
+    last: str = "last"
+    count: str = "count"
+    nunique: str = "nunique"
+    product: str = "product"
+    quotient: str = "quotient"
+    index: str = "index"
+    uuid: str = "uuid"
+    random: str = "random"
+    constant: str = "constant"
+
+
+class PrepRowConditions(Enum):
+    """Data model for preparation conditions."""
+
+    missing: str = "value is missing"
+    not_missing: str = "value is not missing"
+    equal_to: str = "value is equal to"
+    not_equal_to: str = "value is not equal to"
+    greater_than: str = "value is greater than"
+    less_than: str = "value is less than"
+    greater_than_or_equal_to: str = "value is greater than or equal to"
+    less_than_or_equal_to: str = "value is less than or equal to"
+    between: str = "value is between"
+    not_between: str = "value is not between"
+    like: str = "value is like"
+    not_like: str = "value is not like"
 
 
 @dataclass
 class PrepAction:
     """Represents a data preparation action."""
 
-    action_type: ActionTypes
+    action_type: PrepActions
     prep_args: PrepActionResult
 
     @classmethod
@@ -66,7 +114,7 @@ class PrepAction:
         """Create PrepAction from string representations."""
         action = prep_args.action
         try:
-            action_type = ActionTypes(action)
+            action_type = PrepActions(action)
         except ValueError as e:
             raise ValidationError(f"Unknown action type: {action}") from e
 
@@ -169,7 +217,7 @@ class RemoveColumnsOperation(PrepOperation):
             results = data.drop(columns)
 
             updated_prep_args = {
-                "action": ActionTypes.remove_columns,
+                "action": PrepActions.remove_column.value,
                 "column_names": None,
                 "affected_count": len(columns),
                 "remaining_count": data.width,
@@ -203,9 +251,9 @@ class RemoveRowsOperation(PrepOperation):
             condition = prep_args.condition
             source_columns = prep_args.source_columns or []
 
-            if method == "by row index":
+            if method == PrepMethods.row_index.value:
                 results = self._remove_by_index(data, value)
-            elif method == "by condition":
+            elif method == PrepMethods.condition.value:
                 results = self._remove_by_condition(
                     data, condition, source_columns, value
                 )
@@ -213,7 +261,7 @@ class RemoveRowsOperation(PrepOperation):
                 raise ValidationError(f"Unknown removal method: {method}")  # noqa: TRY301
 
             updated_prep_args = {
-                "action": "remove row(s)",
+                "action": PrepActions.remove_row.value,
                 "column_names": None,
                 "affected_count": data.height - results.height,
                 "remaining_count": results.height,
@@ -257,27 +305,36 @@ class RemoveRowsOperation(PrepOperation):
         # Parse columns
         self._validate_columns_exist(data, columns)
 
-        if condition == "value is missing":
+        if condition == PrepRowConditions.missing.value:
             return data.filter(~pl.any_horizontal(pl.col(columns).is_null()))
 
-        elif condition == "value is not missing":
+        elif condition == PrepRowConditions.not_missing.value:
             return data.filter(pl.any_horizontal(pl.col(columns).is_null()))
 
-        elif condition in ["value is equal to", "value is not equal to"]:
+        elif condition in [
+            PrepRowConditions.equal_to.value,
+            PrepRowConditions.not_equal_to.value,
+        ]:
             return self._filter_by_equality(data, condition, columns, value)
 
         elif condition in [
-            "value is greater than",
-            "value is greater than or equal to",
-            "value is less than",
-            "value is less than or equal to",
+            PrepRowConditions.greater_than.value,
+            PrepRowConditions.greater_than_or_equal_to.value,
+            PrepRowConditions.less_than.value,
+            PrepRowConditions.less_than_or_equal_to.value,
         ]:
             return self._filter_by_comparison(data, condition, columns, value)
 
-        elif condition in ["value is between", "value is not between"]:
+        elif condition in [
+            PrepRowConditions.between.value,
+            PrepRowConditions.not_between.value,
+        ]:
             return self._filter_by_range(data, condition, columns, value)
 
-        elif condition in ["value is like", "value is not like"]:
+        elif condition in [
+            PrepRowConditions.like.value,
+            PrepRowConditions.not_like.value,
+        ]:
             return self._filter_by_pattern(data, condition, columns, value)
 
         else:
@@ -287,65 +344,93 @@ class RemoveRowsOperation(PrepOperation):
         self, data: pl.DataFrame, condition: str, columns: list[str], value: Any
     ) -> pl.DataFrame:
         """Filter by equality conditions."""
-        if condition == "value is equal to":
+        # Ensure value is a list for is_in() to treat as literal values
+        value_list = value if isinstance(value, list) else [value]
+
+        if condition == PrepRowConditions.not_equal_to.value:
             # Keep rows where value is NOT in the list (remove matching rows)
-            return data.filter(~pl.col(columns).is_in(value))
+            filter_expr = pl.any_horizontal(
+                [pl.col(col).is_in(value_list) for col in columns]
+            )
+            return data.filter(~filter_expr)
         else:
             # Keep rows where value IS in the list (remove non-matching rows)
-            return data.filter(pl.col(columns).is_in(value))
+            filter_expr = pl.any_horizontal(
+                [pl.col(col).is_in(value_list) for col in columns]
+            )
+            return data.filter(filter_expr)
 
     def _filter_by_comparison(
         self, data: pl.DataFrame, condition: str, columns: list[str], value: Any
     ) -> pl.DataFrame:
         """Filter by comparison conditions."""
-        # Inverse logic - we keep rows that don't match the removal condition
-        value_use = (
-            float(value[0])
-            if isinstance(value[0], str) and "." in value
-            else int(value[0])
-        )
-        if condition == "value is greater than":
-            return data.filter(pl.col(columns) <= value_use)
-        elif condition == "value is greater than or equal to":
-            return data.filter(pl.col(columns) < value_use)
-        elif condition == "value is less than":
-            return data.filter(pl.col(columns) >= value_use)
-        elif condition == "value is less than or equal to":
-            return data.filter(pl.col(columns) > value_use)
+        # Handle both single values and lists
+        raw_value = value[0] if isinstance(value, list) else value
+        value_use = float(raw_value)
 
-        return data
+        # Build filter expression for each column
+        if condition == PrepRowConditions.greater_than.value:
+            filter_expr = pl.any_horizontal(
+                [pl.col(col) <= value_use for col in columns]
+            )
+        elif condition == PrepRowConditions.greater_than_or_equal_to.value:
+            filter_expr = pl.any_horizontal(
+                [pl.col(col) < value_use for col in columns]
+            )
+        elif condition == PrepRowConditions.less_than.value:
+            filter_expr = pl.any_horizontal(
+                [pl.col(col) >= value_use for col in columns]
+            )
+        elif condition == PrepRowConditions.less_than_or_equal_to.value:
+            filter_expr = pl.any_horizontal(
+                [pl.col(col) > value_use for col in columns]
+            )
+        else:
+            return data
+
+        return data.filter(filter_expr)
 
     def _filter_by_range(
         self, data: pl.DataFrame, condition: str, columns: list[str], value: Any
     ) -> pl.DataFrame:
         """Filter by range conditions."""
-        if len(value) != MAX_RANGE_VALUES:
+        # Handle both single values and lists for value
+        value_list = value if isinstance(value, list) else [value, value]
+        if len(value_list) != MAX_RANGE_VALUES:
             raise ValidationError(
-                f"Expected {MAX_RANGE_VALUES} values for range, got: {value}"
+                f"Expected {MAX_RANGE_VALUES} values for range, got: {value_list}"
             )
 
         if condition == "value is between":
             # Keep rows outside the range
-            return data.filter(
-                (pl.col(columns) < value[0]) | (pl.col(columns) > value[1])
+            filter_expr = pl.any_horizontal(
+                [
+                    (pl.col(col) < value_list[0]) | (pl.col(col) > value_list[1])
+                    for col in columns
+                ]
             )
         else:
             # Keep rows inside the range
-            return data.filter(
-                (pl.col(columns) >= value[0]) & (pl.col(columns) <= value[1])
+            filter_expr = pl.any_horizontal(
+                [
+                    (pl.col(col) >= value_list[0]) & (pl.col(col) <= value_list[1])
+                    for col in columns
+                ]
             )
+
+        return data.filter(filter_expr)
 
     def _filter_by_pattern(
         self, data: pl.DataFrame, condition: str, columns: list[str], value: str
     ) -> pl.DataFrame:
         """Filter by pattern matching."""
-        if condition == "value is like":
+        if condition == PrepRowConditions.like.value:
             # Keep rows that don't match the pattern
             filter_expr = pl.all_horizontal(
                 [~pl.col(col).str.contains(value) for col in columns]
             )
             return data.filter(filter_expr)
-        elif condition == "value is not like":
+        elif condition == PrepRowConditions.not_like.value:
             # Keep rows that match the pattern
             filter_expr = pl.any_horizontal(
                 [pl.col(col).str.contains(value) for col in columns]
@@ -626,9 +711,13 @@ class AddNewColumnOperation(PrepOperation):
             method = prep_args.method
             source_columns = prep_args.source_columns or [""]
 
-            if method == "constant":
+            if method == PrepFunctions.constant.value:
                 results = self._add_constant_column(data, new_col_name, value_spec)
-            elif method in ["index", "uuid", "random"]:
+            elif method in [
+                PrepFunctions.index.value,
+                PrepFunctions.uuid.value,
+                PrepFunctions.random.value,
+            ]:
                 results = self._add_special_column(data, method, new_col_name)
             else:
                 results = self._add_computed_column(
@@ -636,7 +725,7 @@ class AddNewColumnOperation(PrepOperation):
                 )
 
             updated_prep_args = {
-                "action": "add new column",
+                "action": PrepActions.add_column.value,
                 "column_names": new_col_name,
                 "affected_count": 1,
                 "remaining_count": results.width,
@@ -760,10 +849,10 @@ class PrepProcessor:
     def __init__(self):
         """Initialize processor with operation handlers."""
         self.operation_handlers = {
-            ActionTypes.remove_columns: RemoveColumnsOperation(),
-            ActionTypes.remove_rows: RemoveRowsOperation(),
-            ActionTypes.transform_columns: TransformColumnsOperation(),
-            ActionTypes.add_new_column: AddNewColumnOperation(),
+            PrepActions.remove_column: RemoveColumnsOperation(),
+            PrepActions.remove_row: RemoveRowsOperation(),
+            PrepActions.transform_column: TransformColumnsOperation(),
+            PrepActions.add_column: AddNewColumnOperation(),
         }
 
     def execute_single_action(
@@ -822,10 +911,10 @@ def _generate_action_description(prep_args: PrepActionResult) -> str:
         Formatted description string
     """
     action_description_map = {
-        ActionTypes.remove_columns: PrepConfirmationMessages.remove_columns,
-        ActionTypes.remove_rows: PrepConfirmationMessages.remove_rows,
-        ActionTypes.transform_columns: PrepConfirmationMessages.transform_columns,
-        ActionTypes.add_new_column: PrepConfirmationMessages.add_new_column,
+        PrepActions.remove_column.value: PrepConfirmationMessages.remove_columns,
+        PrepActions.remove_row.value: PrepConfirmationMessages.remove_rows,
+        PrepActions.transform_column.value: PrepConfirmationMessages.transform_columns,
+        PrepActions.add_column.value: PrepConfirmationMessages.add_new_column,
     }
     description_func = action_description_map.get(prep_args.action)
     if description_func:
