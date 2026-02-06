@@ -1,10 +1,14 @@
-from enum import Enum
-
 import pandas as pd
 import polars as pl
 import streamlit as st
 
-from datasure.processing.prep import prep_apply_action
+from datasure.processing.prep import (
+    PrepActions,
+    PrepFunctions,
+    PrepMethods,
+    PrepRowConditions,
+    prep_apply_action,
+)
 from datasure.utils.dataframe_utils import ColumnByType, get_df_columns
 from datasure.utils.duckdb_utils import (
     duckdb_get_aliases,
@@ -51,116 +55,67 @@ if not show_prep_page_info:
 
 # --- COLUMN METHODS WITH VALUES ---#
 
-class PrepActions(Enum):
-    """Data model for preparation actions."""
-
-    add_column: str = "add new column"
-    transform_column: str = "transform column(s)"
-    remove_column: str = "remove column(s)"
-    remove_row: str = "remove row(s)"
-
-class PrepMethods(Enum):
-    """Data model for preparation methods."""
-
-    row_index: str = "by row index"
-    condition: str = "by condition"
-
-class PrepFunctions(Enum):
-    """Data model for preparation functions."""
-
-    sum: str = "sum"
-    diff: str = "diff"
-    mean: str = "mean"
-    median: str = "median"
-    mode: str = "mode"
-    min: str = "min"
-    max: str = "max"
-    std: str = "std"
-    var: str = "var"
-    first: str = "first"
-    last: str = "last"
-    count: str = "count"
-    nunique: str = "nunique"
-    product: str = "product"
-    quotient: str = "quotient"
-    index: str = "index"
-    uuid: str = "uuid"
-    random: str = "random"
-
-class PrepRowConditions(Enum):
-    """Data model for preparation conditions."""
-
-    equal_to: str = "value is equal to"
-    not_equal_to: str = "value is not equal to"
-    greater_than: str = "value is greater than"
-    less_than: str = "value is less than"
-    greater_than_or_equal_to: str = "value is greater than or equal to"
-    less_than_or_equal_to: str = "value is less than or equal to"
-    between: str = "value is between"
-    not_between: str = "value is not between"
-    like: str = "value is like"
-    not_like: str = "value is not like"
-
-COL_MEDTHODS_WITH_VALUES = (
-    PrepFunctions.sum,
-    PrepFunctions.diff,
-    PrepFunctions.mean,
-    PrepFunctions.median,
-    PrepFunctions.mode,
-    PrepFunctions.min,
-    PrepFunctions.max,
-    PrepFunctions.std,
-    PrepFunctions.var,
-    PrepFunctions.first,
-    PrepFunctions.last,
-    PrepFunctions.count,
-    PrepFunctions.nunique,
-    PrepFunctions.product,
-    PrepFunctions.quotient,
+COL_FUNC_WITH_VALUES = (
+    PrepFunctions.sum.value,
+    PrepFunctions.diff.value,
+    PrepFunctions.mean.value,
+    PrepFunctions.median.value,
+    PrepFunctions.mode.value,
+    PrepFunctions.min.value,
+    PrepFunctions.max.value,
+    PrepFunctions.std.value,
+    PrepFunctions.var.value,
+    PrepFunctions.first.value,
+    PrepFunctions.last.value,
+    PrepFunctions.count.value,
+    PrepFunctions.nunique.value,
+    PrepFunctions.product.value,
+    PrepFunctions.quotient.value,
 )
 
 
 COL_METHODS_WITHOUT_VALUES = (
-    PrepFunctions.index,
-    PrepFunctions.uuid,
-    PrepFunctions.random,
+    PrepFunctions.index.value,
+    PrepFunctions.uuid.value,
+    PrepFunctions.random.value,
 )
 
 DEL_ROW_COND_MAX_1 = (
-    PrepRowConditions.equal_to,
-    PrepRowConditions.not_equal_to,
-    PrepRowConditions.greater_than,
-    PrepRowConditions.less_than,
-    PrepRowConditions.greater_than_or_equal_to,
-    PrepRowConditions.less_than_or_equal_to,
+    PrepRowConditions.equal_to.value,
+    PrepRowConditions.not_equal_to.value,
+    PrepRowConditions.greater_than.value,
+    PrepRowConditions.less_than.value,
+    PrepRowConditions.greater_than_or_equal_to.value,
+    PrepRowConditions.less_than_or_equal_to.value,
 )
 
 DEL_ROW_COND_NUM_ONLY = (
-    PrepRowConditions.greater_than,
-    PrepRowConditions.less_than,
-    PrepRowConditions.greater_than_or_equal_to,
-    PrepRowConditions.less_than_or_equal_to,
-    PrepRowConditions.between,
-    PrepRowConditions.not_between,
+    PrepRowConditions.greater_than.value,
+    PrepRowConditions.less_than.value,
+    PrepRowConditions.greater_than_or_equal_to.value,
+    PrepRowConditions.less_than_or_equal_to.value,
+    PrepRowConditions.between.value,
+    PrepRowConditions.not_between.value,
 )
 
 DEL_ROW_COND_STR_ONLY = (
-    PrepRowConditions.like,
-    PrepRowConditions.not_like,
+    PrepRowConditions.like.value,
+    PrepRowConditions.not_like.value,
 )
 
 
 DEL_COND_USE_VALS = (
-    PrepRowConditions.equal_to,
-    PrepRowConditions.not_equal_to,
-    PrepRowConditions.greater_than,
-    PrepRowConditions.less_than,
-    PrepRowConditions.greater_than_or_equal_to,
+    PrepRowConditions.equal_to.value,
+    PrepRowConditions.not_equal_to.value,
+    PrepRowConditions.greater_than.value,
+    PrepRowConditions.less_than.value,
+    PrepRowConditions.greater_than_or_equal_to.value,
+    PrepRowConditions.less_than_or_equal_to.value,
 )
 
 DEL_ROW_COND_SAME_TYPE = (
-    PrepRowConditions.between,
-    PrepRowConditions.not_between,
+    PrepRowConditions.between.value,
+    PrepRowConditions.not_between.value,
 )
 
 
@@ -267,8 +222,7 @@ def _get_column_options_for_condition(
     -------
         Tuple of (column_options, max_selections)
     """
-    del_conditions = [val.value for val in DEL_ROW_COND_MAX_1]
-    max_selections = 1 if condition in del_conditions else len(all_cols)
+    max_selections = 1 if condition in DEL_ROW_COND_MAX_1 else len(all_cols)
 
     if condition in DEL_ROW_COND_NUM_ONLY:
         col_options = num_cols + date_cols
@@ -293,7 +247,7 @@ def _render_equality_value_inputs(
         step_index: Current step index for unique widget keys
     """
     unique_vals = prep_data[inputs.selected_columns[0]].unique().to_list()
-    inputs.equality_values = st.multiselect(
+    inputs.equality_values = st.selectbox(
         label="Select value",
         options=unique_vals,
         help="Select value to compare",
@@ -421,7 +375,10 @@ def _build_remove_rows_value(inputs: "RemoveRowsInputs") -> list | str | None:
         return inputs.equality_values
     elif inputs.condition in DEL_ROW_COND_SAME_TYPE:
         return [inputs.min_value, inputs.max_value]
-    elif inputs.condition in (PrepRowConditions.like, PrepRowConditions.not_like):
+    elif inputs.condition in (
+        PrepRowConditions.like.value,
+        PrepRowConditions.not_like.value,
+    ):
         return inputs.pattern_value
 
     return None
@@ -616,9 +573,7 @@ def _build_transform_value(inputs: TransformInputs) -> list:
     return builder() if builder else []
 
 
-def _build_transform_result(
-    column: str | None, inputs: TransformInputs
-) -> dict:
+def _build_transform_result(column: str | None, inputs: TransformInputs) -> dict:
     """Build the result dictionary for a transform column action.
 
     Args:
@@ -676,15 +631,18 @@ class PrepStepHandler:
                 help="Select method to add new column",
             )
 
-            if dp_prep_add_col_med == "constant":
+            if dp_prep_add_col_med == PrepFunctions.constant.value:
                 dp_prep_add_val = st.text_input(
                     label="Enter value",
                     help="Enter value to add to new column",
                     key=f"st_sb_add_val{self.step_index}",
                 )
 
-            elif dp_prep_add_col_med in COL_MEDTHODS_WITH_VALUES:
-                if dp_prep_add_col_med in ["quotient", "diff"]:
+            elif dp_prep_add_col_med in COL_FUNC_WITH_VALUES:
+                if dp_prep_add_col_med in [
+                    PrepFunctions.quotient.value,
+                    PrepFunctions.diff.value,
+                ]:
                     max_selections = 2
                 else:
                     max_selections = len(self.num_cols)
@@ -697,10 +655,14 @@ class PrepStepHandler:
                 )
 
             # define custom message values
-            value = dp_prep_add_val if dp_prep_add_col_med == "constant" else None
+            value = (
+                dp_prep_add_val
+                if dp_prep_add_col_med == PrepFunctions.constant.value
+                else None
+            )
             source_columns = (
                 dp_prep_add_col_select
-                if dp_prep_add_col_med in COL_MEDTHODS_WITH_VALUES
+                if dp_prep_add_col_med in COL_FUNC_WITH_VALUES
                 else []
             )
 
@@ -847,8 +809,11 @@ class PrepStepHandler:
             return
 
         col_options, max_selections = _get_column_options_for_condition(
-            inputs.condition, self.all_cols, self.num_cols, self.date_cols,
-            self.string_cols
+            inputs.condition,
+            self.all_cols,
+            self.num_cols,
+            self.date_cols,
+            self.string_cols,
         )
 
         inputs.selected_columns = st.multiselect(
@@ -871,14 +836,13 @@ class PrepStepHandler:
             inputs: RemoveRowsInputs object to populate with values
         """
         if inputs.condition in DEL_COND_USE_VALS:
-            _render_equality_value_inputs(
-                self.prep_data, inputs, self.step_index
-            )
+            _render_equality_value_inputs(self.prep_data, inputs, self.step_index)
         elif inputs.condition in DEL_ROW_COND_SAME_TYPE:
-            _render_range_value_inputs(
-                self.prep_data, inputs, self.step_index
-            )
-        elif inputs.condition in ("value is like", "value is not like"):
+            _render_range_value_inputs(self.prep_data, inputs, self.step_index)
+        elif inputs.condition in (
+            PrepRowConditions.like.value,
+            PrepRowConditions.not_like.value,
+        ):
             _render_pattern_value_inputs(inputs, self.step_index)
 
 
@@ -915,19 +879,97 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
             st.warning("Please complete the form to add a new preparation step.")
             return
 
+        disable_add = _is_prep_form_incomplete(dp_prep_action, prep_args)
+
         if st.button(
             label="Add",
             key=f"st_sb_add_confirm{step_index}",
             width="stretch",
             type="primary",
             help="Add the data preparation step to the log",
-            disabled=(not prep_args or not dp_prep_action),
+            disabled=disable_add,
         ):
             # apply action and re-run
             prep_apply_action(project_id, label, PrepActionResult(**prep_args))
 
             st.success("Preparation step added successfully!")
             st.rerun()
+
+
+def _has_none_values(values: list | None) -> bool:
+    """Check if a list is None, empty, or contains None values."""
+    return values is None or not values or any(v is None for v in values)
+
+
+def _is_add_column_incomplete(prep_args: dict) -> bool:
+    """Check if add column action is missing required fields."""
+    if not prep_args.get("column_names"):
+        return True
+    method = prep_args.get("method")
+    if method == PrepFunctions.quotient.value:
+        return (
+            method in COL_FUNC_WITH_VALUES
+            and len(prep_args.get("source_columns", [])) != 2
+        )
+    return method in COL_FUNC_WITH_VALUES and not prep_args.get("source_columns")
+
+
+def _is_transform_column_incomplete(prep_args: dict) -> bool:
+    """Check if transform column action is missing required fields."""
+    if not prep_args.get("source_columns") or not prep_args.get("method"):
+        return True
+
+    return not _has_none_values(prep_args.get("value"))
+
+
+def _is_remove_row_incomplete(prep_args: dict) -> bool:
+    """Check if remove row action is missing required fields."""
+    method = prep_args.get("method")
+
+    if method == PrepMethods.row_index.value:
+        return not prep_args.get("value")
+
+    if method != PrepMethods.condition.value:
+        return True
+
+    condition = prep_args.get("condition")
+    value = prep_args.get("value")
+
+    if condition in DEL_ROW_COND_SAME_TYPE:
+        return _has_none_values(value)
+
+    # DEL_COND_USE_VALS, like, not_like conditions
+    conditions_requiring_value = DEL_COND_USE_VALS + (
+        PrepRowConditions.like.value,
+        PrepRowConditions.not_like.value,
+    )
+    if condition in conditions_requiring_value:
+        return not value
+
+    return False
+
+
+def _is_prep_form_incomplete(action: str, prep_args: dict) -> bool:
+    """Check if the preparation form is incomplete and the Add button should
+    be disabled.
+
+    Args:
+        action: The selected preparation action
+        prep_args: The arguments for the preparation action
+
+    Returns
+    -------
+        True if the form is incomplete (Add button should be disabled), False otherwise
+    """
+    validators = {
+        PrepActions.add_column.value: _is_add_column_incomplete,
+        PrepActions.transform_column.value: _is_transform_column_incomplete,
+        PrepActions.remove_column.value: lambda args: not args.get("source_columns"),
+        PrepActions.remove_row.value: _is_remove_row_incomplete,
+    }
+
+    validator = validators.get(action)
+    return validator(prep_args) if validator else False
 
 
 # --- Remove Preparation Step ---#
