@@ -407,10 +407,14 @@ class TransformColumnsOperation(PrepOperation):
             )
 
             # count the number of non-missing values in the transformed columns
-            null_count = result_data.select(
-                pl.col(source_columns[0]).null_count()
-            ).item()
-            affected_count = data.height - null_count
+            if source_columns[0] in result_data.columns:
+                null_count = result_data.select(
+                    pl.col(source_columns[0]).null_count()
+                ).item()
+                affected_count = data.height - null_count
+            else:
+                # Column was removed (e.g., get_dummies), all rows affected
+                affected_count = data.height
             prep_args = {
                 "action": "transform column(s)",
                 "column_names": None,
@@ -555,8 +559,8 @@ class TransformColumnsOperation(PrepOperation):
             PrepOperations.trim.value: lambda col: col.str.strip_chars(),
             PrepOperations.lower.value: lambda col: col.str.to_lowercase(),
             PrepOperations.upper.value: lambda col: col.str.to_uppercase(),
-            PrepOperations.string_to_number.value: lambda col: col.str.to_numeric(
-                strict=False
+            PrepOperations.string_to_number.value: lambda col: col.cast(
+                pl.Float64, strict=False
             ),
         }
 
@@ -577,7 +581,7 @@ class TransformColumnsOperation(PrepOperation):
 
         # String replacement
         if func_name.startswith("replace by replacing"):
-            return self._apply_string_replace(data, column_name, func_name)
+            return self._apply_string_replace(data, column_name, value)
 
         # Substring extraction
         if func_name == "substring":
@@ -585,7 +589,7 @@ class TransformColumnsOperation(PrepOperation):
 
         # Pattern extraction
         if func_name.startswith("extract pattern"):
-            return self._apply_pattern_extract(data, column_name, func_name)
+            return self._apply_pattern_extract(data, column_name, value)
 
         raise ValidationError(f"Unknown transformation function: {func_name}")
 

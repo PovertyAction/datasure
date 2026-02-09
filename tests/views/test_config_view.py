@@ -12,9 +12,22 @@ def reset_streamlit_mocks():
     """Reset streamlit mocks between tests to avoid call count accumulation."""
     import streamlit as st
 
+    # Reset before test (clears leftover calls from module imports)
+    st.info.reset_mock()
+    st.warning.reset_mock()
+    st.error.reset_mock()
+    st.success.reset_mock()
+    st.title.reset_mock()
+    st.markdown.reset_mock()
+    st.subheader.reset_mock()
+    st.write.reset_mock()
+    st.columns.reset_mock()
+    st.button.reset_mock()
+    st.stop.reset_mock()
+
     yield
 
-    # Reset all mock call counts
+    # Reset after test
     st.info.reset_mock()
     st.warning.reset_mock()
     st.error.reset_mock()

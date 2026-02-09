@@ -156,8 +156,8 @@ class TestPrepDescriptions:
             "substring",
             "replace",
             "strip",
-            "lower",
-            "upper",
+            "lowercase",
+            "uppercase",
             "string to number",
             "string to date",
             "string to datetime",
@@ -180,7 +180,7 @@ class TestPrepDescriptions:
             "round",
             "floor",
             "ceil",
-            "abs",
+            "absolute value",
         ]
 
         for function in expected_functions:
@@ -282,11 +282,14 @@ class TestPrepDescriptions:
         """Test get_description with non-dict category value."""
         descriptions = PrepDescriptions()
 
-        # This tests the isinstance check in get_description
-        # We can't easily trigger this without modifying the class,
-        # but we can test edge cases
-        result = descriptions.get_description("string", "")
-        assert result is None
+        # Monkeypatch a class variable to be a non-dict to trigger line 164
+        original = PrepDescriptions.STRING_FUNCTIONS
+        try:
+            PrepDescriptions.STRING_FUNCTIONS = "not a dict"
+            result = descriptions.get_description("string", "trim")
+            assert result is None
+        finally:
+            PrepDescriptions.STRING_FUNCTIONS = original
 
     def test_get_all_descriptions_structure(self):
         """Test get_all_descriptions method returns expected structure."""
