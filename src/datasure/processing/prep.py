@@ -10,21 +10,25 @@ import hashlib
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from enum import Enum
 from typing import Any
 
 import polars as pl
 import streamlit as st
 
+from datasure.models.enums import (
+    PrepActions,
+    PrepFunctions,
+    PrepMethods,
+    PrepOperations,
+    PrepRowConditions,
+)
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.prep_utils import (
     PrepActionResult,
     PrepConfirmationMessages,
 )
 
-# Constants for validation
-MAX_RANGE_VALUES = 2
-MIN_PARTS_REQUIRED = 2
+# === EXCEPTIONS === #
 
 
 class PrepError(Exception):
@@ -45,61 +49,7 @@ class OperationError(PrepError):
     pass
 
 
-class PrepActions(Enum):
-    """Data model for preparation actions."""
-
-    add_column: str = "add new column"
-    transform_column: str = "transform column(s)"
-    remove_column: str = "remove column(s)"
-    remove_row: str = "remove row(s)"
-
-
-class PrepMethods(Enum):
-    """Data model for preparation methods."""
-
-    row_index: str = "by row index"
-    condition: str = "by condition"
-
-
-class PrepFunctions(Enum):
-    """Data model for preparation functions."""
-
-    sum: str = "sum"
-    diff: str = "diff"
-    mean: str = "mean"
-    median: str = "median"
-    mode: str = "mode"
-    min: str = "min"
-    max: str = "max"
-    std: str = "std"
-    var: str = "var"
-    first: str = "first"
-    last: str = "last"
-    count: str = "count"
-    nunique: str = "nunique"
-    product: str = "product"
-    quotient: str = "quotient"
-    index: str = "index"
-    uuid: str = "uuid"
-    random: str = "random"
-    constant: str = "constant"
-
-
-class PrepRowConditions(Enum):
-    """Data model for preparation conditions."""
-
-    missing: str = "value is missing"
-    not_missing: str = "value is not missing"
-    equal_to: str = "value is equal to"
-    not_equal_to: str = "value is not equal to"
-    greater_than: str = "value is greater than"
-    less_than: str = "value is less than"
-    greater_than_or_equal_to: str = "value is greater than or equal to"
-    less_than_or_equal_to: str = "value is less than or equal to"
-    between: str = "value is between"
-    not_between: str = "value is not between"
-    like: str = "value is like"
-    not_like: str = "value is not like"
+# === DATA MODELS === #
 
 
 @dataclass
@@ -184,6 +134,9 @@ class DescriptionParser:
                 values.append(item)
 
         return values
+
+
+# === OPERATIONS === #
 
 
 class PrepOperation(ABC):
@@ -396,10 +349,8 @@ class RemoveRowsOperation(PrepOperation):
         """Filter by range conditions."""
         # Handle both single values and lists for value
         value_list = value if isinstance(value, list) else [value, value]
-        if len(value_list) != MAX_RANGE_VALUES:
-            raise ValidationError(
-                f"Expected {MAX_RANGE_VALUES} values for range, got: {value_list}"
-            )
+        if len(value_list) != 2:
+            raise ValidationError(f"Expected 2 values for range, got: {value_list}")
 
         if condition == "value is between":
             # Keep rows outside the range
@@ -559,17 +510,17 @@ class TransformColumnsOperation(PrepOperation):
         """Apply specific transformation to column."""
         # DateTime extractions
         datetime_ops = {
-            "day of month": lambda col: col.dt.day(),
-            "day of week": lambda col: col.dt.weekday(),
-            "day of year": lambda col: col.dt.ordinal_day(),
-            "date": lambda col: col.dt.date(),
-            "week of year": lambda col: col.dt.week(),
-            "month of year": lambda col: col.dt.month(),
-            "year": lambda col: col.dt.year(),
-            "quarter of year": lambda col: col.dt.quarter(),
-            "hour": lambda col: col.dt.hour(),
-            "minute": lambda col: col.dt.minute(),
-            "second": lambda col: col.dt.second(),
+            PrepOperations.day_of_month.value: lambda col: col.dt.day(),
+            PrepOperations.day_of_week.value: lambda col: col.dt.weekday(),
+            PrepOperations.day_of_year.value: lambda col: col.dt.ordinal_day(),
+            PrepOperations.date.value: lambda col: col.dt.date(),
+            PrepOperations.week_of_year.value: lambda col: col.dt.week(),
+            PrepOperations.month_of_year.value: lambda col: col.dt.month(),
+            PrepOperations.year.value: lambda col: col.dt.year(),
+            PrepOperations.quarter_of_year.value: lambda col: col.dt.quarter(),
+            PrepOperations.hour.value: lambda col: col.dt.hour(),
+            PrepOperations.minute.value: lambda col: col.dt.minute(),
+            PrepOperations.second.value: lambda col: col.dt.second(),
         }
 
         if func_name in datetime_ops:
@@ -579,10 +530,10 @@ class TransformColumnsOperation(PrepOperation):
 
         # Math operations
         math_ops = {
-            "floor": lambda col: col.floor(),
-            "ceil": lambda col: col.ceil(),
-            "round": lambda col: col.round(0),
-            "abs": lambda col: col.abs(),
+            PrepOperations.floor.value: lambda col: col.floor(),
+            PrepOperations.ceil.value: lambda col: col.ceil(),
+            PrepOperations.round.value: lambda col: col.round(0),
+            PrepOperations.abs.value: lambda col: col.abs(),
         }
 
         if func_name in math_ops:
@@ -591,15 +542,22 @@ class TransformColumnsOperation(PrepOperation):
             )
 
         # Arithmetic operations
-        if func_name in ["add", "subtract", "multiply", "divide"]:
+        if func_name in [
+            PrepOperations.add.value,
+            PrepOperations.subtract.value,
+            PrepOperations.multiply.value,
+            PrepOperations.divide.value,
+        ]:
             return self._apply_arithmetic(data, column_name, func_name, value)
 
         # String operations
         string_ops = {
-            "trim": lambda col: col.str.strip_chars(),
-            "lower": lambda col: col.str.to_lowercase(),
-            "upper": lambda col: col.str.to_uppercase(),
-            "string to number": lambda col: col.str.to_numeric(strict=False),
+            PrepOperations.trim.value: lambda col: col.str.strip_chars(),
+            PrepOperations.lower.value: lambda col: col.str.to_lowercase(),
+            PrepOperations.upper.value: lambda col: col.str.to_uppercase(),
+            PrepOperations.string_to_number.value: lambda col: col.str.to_numeric(
+                strict=False
+            ),
         }
 
         if func_name in string_ops:
@@ -640,10 +598,10 @@ class TransformColumnsOperation(PrepOperation):
     ) -> pl.DataFrame:
         """Apply arithmetic operations."""
         ops = {
-            "add": lambda col, val: col + val,
-            "subtract": lambda col, val: col - val,
-            "multiply": lambda col, val: col * val,
-            "divide": lambda col, val: col / val,
+            PrepOperations.add.value: lambda col, val: col + val,
+            PrepOperations.subtract.value: lambda col, val: col - val,
+            PrepOperations.multiply.value: lambda col, val: col * val,
+            PrepOperations.divide.value: lambda col, val: col / val,
         }
 
         return data.with_columns(
@@ -807,18 +765,20 @@ class AddNewColumnOperation(PrepOperation):
 
         # Aggregation functions
         agg_funcs = {
-            "sum": lambda cols: pl.sum_horizontal(cols),
-            "mean": lambda cols: pl.mean_horizontal(cols),
-            "median": lambda cols: pl.concat_list(cols).list.median(),
-            "max": lambda cols: pl.max_horizontal(cols),
-            "min": lambda cols: pl.min_horizontal(cols),
-            "std": lambda cols: pl.concat_list(cols).list.std(),
-            "var": lambda cols: pl.concat_list(cols).list.var(),
-            "first": lambda cols: pl.concat_list(cols).list.first(),
-            "last": lambda cols: pl.concat_list(cols).list.last(),
-            "count": lambda cols: pl.concat_list(cols).list.len(),
-            "nunique": lambda cols: pl.concat_list(cols).list.unique().list.len(),
-            "product": lambda cols: pl.fold(
+            PrepFunctions.sum.value: lambda cols: pl.sum_horizontal(cols),
+            PrepFunctions.mean.value: lambda cols: pl.mean_horizontal(cols),
+            PrepFunctions.median.value: lambda cols: pl.concat_list(cols).list.median(),
+            PrepFunctions.max.value: lambda cols: pl.max_horizontal(cols),
+            PrepFunctions.min.value: lambda cols: pl.min_horizontal(cols),
+            PrepFunctions.std.value: lambda cols: pl.concat_list(cols).list.std(),
+            PrepFunctions.var.value: lambda cols: pl.concat_list(cols).list.var(),
+            PrepFunctions.first.value: lambda cols: pl.concat_list(cols).list.first(),
+            PrepFunctions.last.value: lambda cols: pl.concat_list(cols).list.last(),
+            PrepFunctions.count.value: lambda cols: pl.concat_list(cols).list.len(),
+            PrepFunctions.nunique.value: lambda cols: pl.concat_list(cols)
+            .list.unique()
+            .list.len(),
+            PrepFunctions.product.value: lambda cols: pl.fold(
                 acc=pl.lit(1), function=lambda acc, x: acc * x, exprs=cols
             ),
         }
@@ -841,6 +801,9 @@ class AddNewColumnOperation(PrepOperation):
                 )
 
         raise ValidationError(f"Unknown aggregation function: {func_name}")
+
+
+# === PROCESSOR === #
 
 
 class PrepProcessor:
@@ -878,6 +841,9 @@ class PrepProcessor:
                 raise OperationError(f"Failed to execute action '{action}': {e}") from e
 
         return result_data
+
+
+# === LOG MANAGEMENT (PRIVATE) === #
 
 
 def _parse_prep_log_to_actions(prep_log_df: pl.DataFrame) -> list[PrepAction]:
@@ -932,11 +898,9 @@ def _convert_prep_args_to_string(df: pl.DataFrame) -> pl.DataFrame:
     -------
         DataFrame with prep_args converted to string
     """
-    return df.with_columns(
-        pl.col("prep_args").map_elements(
-            lambda x: str(x) if x is not None else None, return_dtype=pl.String
-        )
-    )
+    if df.schema["prep_args"] == pl.String:
+        return df
+    return df.with_columns(pl.col("prep_args").struct.json_encode())
 
 
 def _create_log_entry(
@@ -1046,6 +1010,9 @@ def _apply_single_action(
 
     duckdb_save_table(project_id, updated_log, f"prep_log_{alias}", db_name="logs")
     duckdb_save_table(project_id, result_data, alias, db_name="prep")
+
+
+# === PUBLIC API === #
 
 
 def prep_apply_action(

@@ -2,13 +2,20 @@ import pandas as pd
 import polars as pl
 import streamlit as st
 
-from datasure.processing.prep import (
+from datasure.models.enums import (
+    COL_FUNC_WITH_VALUES,
+    DEL_COND_USE_VALS,
+    DEL_ROW_COND_MAX_1,
+    DEL_ROW_COND_NUM_ONLY,
+    DEL_ROW_COND_SAME_TYPE,
+    DEL_ROW_COND_STR_ONLY,
     PrepActions,
     PrepFunctions,
     PrepMethods,
+    PrepOperations,
     PrepRowConditions,
-    prep_apply_action,
 )
+from datasure.processing.prep import prep_apply_action
 from datasure.utils.dataframe_utils import ColumnByType, get_df_columns
 from datasure.utils.duckdb_utils import (
     duckdb_get_aliases,
@@ -32,6 +39,8 @@ from datasure.utils.prep_utils import (
     PrepDescriptions,
 )
 
+# === PAGE GUARDS === #
+
 # Get project id
 project_id: str = st.session_state.st_project_id
 
@@ -51,72 +60,7 @@ if not show_prep_page_info:
     )
     st.stop()
 
-# --- DEFINE CONSTANTS ---#
-
-# --- COLUMN METHODS WITH VALUES ---#
-
-COL_FUNC_WITH_VALUES = (
-    PrepFunctions.sum.value,
-    PrepFunctions.diff.value,
-    PrepFunctions.mean.value,
-    PrepFunctions.median.value,
-    PrepFunctions.mode.value,
-    PrepFunctions.min.value,
-    PrepFunctions.max.value,
-    PrepFunctions.std.value,
-    PrepFunctions.var.value,
-    PrepFunctions.first.value,
-    PrepFunctions.last.value,
-    PrepFunctions.count.value,
-    PrepFunctions.nunique.value,
-    PrepFunctions.product.value,
-    PrepFunctions.quotient.value,
-)
-
-
-COL_METHODS_WITHOUT_VALUES = (
-    PrepFunctions.index.value,
-    PrepFunctions.uuid.value,
-    PrepFunctions.random.value,
-)
-
-DEL_ROW_COND_MAX_1 = (
-    PrepRowConditions.equal_to.value,
-    PrepRowConditions.not_equal_to.value,
-    PrepRowConditions.greater_than.value,
-    PrepRowConditions.less_than.value,
-    PrepRowConditions.greater_than_or_equal_to.value,
-    PrepRowConditions.less_than_or_equal_to.value,
-)
-
-DEL_ROW_COND_NUM_ONLY = (
-    PrepRowConditions.greater_than.value,
-    PrepRowConditions.less_than.value,
-    PrepRowConditions.greater_than_or_equal_to.value,
-    PrepRowConditions.less_than_or_equal_to.value,
-    PrepRowConditions.between.value,
-    PrepRowConditions.not_between.value,
-)
-
-DEL_ROW_COND_STR_ONLY = (
-    PrepRowConditions.like.value,
-    PrepRowConditions.not_like.value,
-)
-
-
-DEL_COND_USE_VALS = (
-    PrepRowConditions.equal_to.value,
-    PrepRowConditions.not_equal_to.value,
-    PrepRowConditions.greater_than.value,
-    PrepRowConditions.less_than.value,
-    PrepRowConditions.greater_than_or_equal_to.value,
-    PrepRowConditions.less_than_or_equal_to.value,
-)
-
-DEL_ROW_COND_SAME_TYPE = (
-    PrepRowConditions.between.value,
-    PrepRowConditions.not_between.value,
-)
+# === CONFIGURATION & DATA CONTAINERS === #
 
 
 class PrepViewConfig:
@@ -151,30 +95,6 @@ class PrepViewConfig:
         self.DP_ROW_CONDITIONS = tuple(self.descriptions.ROW_CONDITIONS.keys())
 
 
-# -- DATA PREP PAGE --#
-# Creates page for data preprocessing
-
-# Add demo navigation and guidance
-add_demo_navigation("prep_view.py", step=3)
-demo_sidebar_help()
-
-st.title("Get Your Data Ready")
-st.write(
-    "Prepare your dataset for Data Quality Checks. Use these tools to transform, add and remove columns and rows in your dataset."
-)
-
-# Demo guidance
-if is_demo_project():
-    demo_expander(
-        "Prepare Your Data for Quality Checks",
-        ImportDemoInfo.get_info_message("prepare_data_info"),
-        expanded=True,
-    )
-
-# Initialize configuration
-config = PrepViewConfig()
-
-
 class TransformInputs:
     """Container for transform column input values."""
 
@@ -200,6 +120,285 @@ class RemoveRowsInputs:
         self.min_value: any = None
         self.max_value: any = None
         self.pattern_value: str | None = None
+
+
+# Initialize configuration
+config = PrepViewConfig()
+
+# === FORM VALIDATION HELPERS === #
+
+
+def _has_none_values(values: list | None) -> bool:
+    """Check if a list is None, empty, or contains None values."""
+    return values is None or not values or any(v is None for v in values)
+
+
+def _is_add_column_incomplete(prep_args: dict) -> bool:
+    """Check if add column action is missing required fields."""
+    if not prep_args.get("column_names"):
+        return True
+    method = prep_args.get("method")
+    if method == PrepFunctions.quotient.value:
+        return (
+            method in COL_FUNC_WITH_VALUES
+            and len(prep_args.get("source_columns", [])) != 2
+        )
+    return method in COL_FUNC_WITH_VALUES and not prep_args.get("source_columns")
+
+
+def _is_transform_column_incomplete(prep_args: dict) -> bool:
+    """Check if transform column action is missing required fields."""
+    if not prep_args.get("source_columns") or not prep_args.get("method"):
+        return True
+
+    value = prep_args.get("value")
+    # No values required (trim, strip, lower, upper, etc.) — complete
+    if not value:
+        return False
+    # Values required — incomplete if any are None or empty string
+    return any(v is None or v == "" for v in value)
+
+
+def _is_remove_row_incomplete(prep_args: dict) -> bool:
+    """Check if remove row action is missing required fields."""
+    method = prep_args.get("method")
+
+    if method == PrepMethods.row_index.value:
+        return not prep_args.get("value")
+
+    if method != PrepMethods.condition.value:
+        return True
+
+    condition = prep_args.get("condition")
+    value = prep_args.get("value")
+
+    if condition in DEL_ROW_COND_SAME_TYPE:
+        return _has_none_values(value)
+
+    # DEL_COND_USE_VALS, like, not_like conditions
+    conditions_requiring_value = DEL_COND_USE_VALS + (
+        PrepRowConditions.like.value,
+        PrepRowConditions.not_like.value,
+    )
+    if condition in conditions_requiring_value:
+        return not value
+
+    return False
+
+
+def _is_prep_form_incomplete(action: str, prep_args: dict) -> bool:
+    """Check if the preparation form is incomplete and the Add button should
+    be disabled.
+
+    Args:
+        action: The selected preparation action
+        prep_args: The arguments for the preparation action
+
+    Returns
+    -------
+        True if the form is incomplete (Add button should be disabled), False otherwise
+    """
+    validators = {
+        PrepActions.add_column.value: _is_add_column_incomplete,
+        PrepActions.transform_column.value: _is_transform_column_incomplete,
+        PrepActions.remove_column.value: lambda args: not args.get("source_columns"),
+        PrepActions.remove_row.value: _is_remove_row_incomplete,
+    }
+
+    validator = validators.get(action)
+    return validator(prep_args) if validator else False
+
+
+# === TRANSFORM COLUMN UI HELPERS === #
+
+
+def _render_string_function_inputs(
+    step_index: int, inputs: TransformInputs
+) -> TransformInputs:
+    """Render UI inputs for string transformation functions.
+
+    Args:
+        step_index: Current step index for unique widget keys
+        inputs: TransformInputs object to populate
+
+    Returns
+    -------
+        Updated TransformInputs with user selections
+    """
+    inputs.func = st.selectbox(
+        label="Select Function",
+        options=config.DP_STR_FUNCS,
+        key=f"st_sb_trf_func{step_index}",
+    )
+
+    if inputs.func == "replace":
+        inputs.old_val = st.text_input(
+            label="Enter value",
+            help="Enter value to replace",
+            key=f"st_sb_trf_val{step_index}",
+        )
+        inputs.new_val = st.text_input(
+            label="Enter new value",
+            help="Enter new value to replace with",
+            key=f"st_sb_trf_new_val{step_index}",
+        )
+    elif inputs.func == "substring":
+        _render_substring_inputs(step_index, inputs)
+    elif inputs.func == "extract pattern":
+        inputs.pattern = st.text_input(
+            label="Enter pattern",
+            help="Enter pattern to extract from column",
+            key=f"st_sb_trf_pattern{step_index}",
+        )
+
+    return inputs
+
+
+def _render_substring_inputs(step_index: int, inputs: TransformInputs) -> None:
+    """Render and validate substring start/end inputs.
+
+    Args:
+        step_index: Current step index for unique widget keys
+        inputs: TransformInputs object to populate with start/end values
+    """
+    start_col, end_col = st.columns(2)
+    with start_col:
+        inputs.start = st.number_input(
+            label="Enter start index",
+            help="Enter start index for substring",
+            key=f"st_sb_trf_start{step_index}",
+            value=None,
+            step=1,
+        )
+    with end_col:
+        inputs.end = st.number_input(
+            label="Enter end index",
+            help="Enter end index for substring",
+            key=f"st_sb_trf_end{step_index}",
+            value=None,
+            step=1,
+        )
+
+    if inputs.start is not None and inputs.end is not None:
+        if inputs.start > inputs.end:
+            st.error("Start index cannot be greater than end index")
+        elif inputs.start == inputs.end:
+            st.error("Start index cannot be equal to end index")
+
+
+def _render_numeric_function_inputs(
+    step_index: int, inputs: TransformInputs
+) -> TransformInputs:
+    """Render UI inputs for numeric transformation functions.
+
+    Args:
+        step_index: Current step index for unique widget keys
+        inputs: TransformInputs object to populate
+
+    Returns
+    -------
+        Updated TransformInputs with user selections
+    """
+    inputs.func = st.selectbox(
+        label="Select Function",
+        options=config.DP_NUM_FUNCS,
+        key=f"st_sb_trf_func{step_index}",
+    )
+
+    arithmetic_ops = (
+        PrepOperations.add.value,
+        PrepOperations.multiply.value,
+        PrepOperations.subtract.value,
+        PrepOperations.divide.value,
+    )
+    if inputs.func in arithmetic_ops:
+        inputs.numeric_val = st.number_input(
+            label="Enter value",
+            help="Enter value to perform operation on column",
+            key=f"st_sb_trf_val{step_index}",
+            value=None,
+        )
+
+    return inputs
+
+
+def _render_datetime_function_inputs(
+    step_index: int, inputs: TransformInputs
+) -> TransformInputs:
+    """Render UI inputs for datetime transformation functions.
+
+    Args:
+        step_index: Current step index for unique widget keys
+        inputs: TransformInputs object to populate
+
+    Returns
+    -------
+        Updated TransformInputs with user selections
+    """
+    inputs.func = st.selectbox(
+        label="Select Function",
+        options=config.DP_DATETIME_FUNCS,
+        key=f"st_sb_trf_func{step_index}",
+    )
+    return inputs
+
+
+def _build_transform_value(inputs: TransformInputs) -> list:
+    """Build the value list from transform inputs based on selected function.
+
+    Args:
+        inputs: TransformInputs containing user selections
+
+    Returns
+    -------
+        List of values appropriate for the selected function
+    """
+    if not inputs.func:
+        return []
+
+    value_builders = {
+        "replace": lambda: [inputs.old_val, inputs.new_val],
+        "extract pattern": lambda: [inputs.pattern],
+        "substring": lambda: [inputs.start, inputs.end],
+        "add": lambda: [inputs.numeric_val],
+        "multiply": lambda: [inputs.numeric_val],
+        "subtract": lambda: [inputs.numeric_val],
+        "divide": lambda: [inputs.numeric_val],
+    }
+
+    builder = value_builders.get(inputs.func)
+    return builder() if builder else []
+
+
+def _build_transform_result(column: str | None, inputs: TransformInputs) -> dict:
+    """Build the result dictionary for a transform column action.
+
+    Args:
+        column: The column being transformed
+        inputs: TransformInputs containing user selections
+
+    Returns
+    -------
+        Dictionary with transform action parameters
+    """
+    source_columns = [column] if column else []
+    value = _build_transform_value(inputs)
+
+    return {
+        "action": PrepActions.transform_column.value,
+        "column_names": None,
+        "affected_count": 0,
+        "remaining_count": None,
+        "value": value,
+        "method": inputs.func,
+        "source_columns": source_columns,
+        "condition": None,
+        "failed_count": 0,
+        "additional_info": None,
+    }
+
+
+# === REMOVE ROWS UI HELPERS === #
 
 
 def _get_column_options_for_condition(
@@ -421,184 +620,7 @@ def _build_remove_rows_result(inputs: "RemoveRowsInputs") -> dict:
     }
 
 
-def _render_string_function_inputs(
-    step_index: int, inputs: TransformInputs
-) -> TransformInputs:
-    """Render UI inputs for string transformation functions.
-
-    Args:
-        step_index: Current step index for unique widget keys
-        inputs: TransformInputs object to populate
-
-    Returns
-    -------
-        Updated TransformInputs with user selections
-    """
-    inputs.func = st.selectbox(
-        label="Select Function",
-        options=config.DP_STR_FUNCS,
-        key=f"st_sb_trf_func{step_index}",
-    )
-
-    if inputs.func == "replace":
-        inputs.old_val = st.text_input(
-            label="Enter value",
-            help="Enter value to replace",
-            key=f"st_sb_trf_val{step_index}",
-        )
-        inputs.new_val = st.text_input(
-            label="Enter new value",
-            help="Enter new value to replace with",
-            key=f"st_sb_trf_new_val{step_index}",
-        )
-    elif inputs.func == "substring":
-        _render_substring_inputs(step_index, inputs)
-    elif inputs.func == "extract pattern":
-        inputs.pattern = st.text_input(
-            label="Enter pattern",
-            help="Enter pattern to extract from column",
-            key=f"st_sb_trf_pattern{step_index}",
-        )
-
-    return inputs
-
-
-def _render_substring_inputs(step_index: int, inputs: TransformInputs) -> None:
-    """Render and validate substring start/end inputs.
-
-    Args:
-        step_index: Current step index for unique widget keys
-        inputs: TransformInputs object to populate with start/end values
-    """
-    start_col, end_col = st.columns(2)
-    with start_col:
-        inputs.start = st.number_input(
-            label="Enter start index",
-            help="Enter start index for substring",
-            key=f"st_sb_trf_start{step_index}",
-            value=0,
-            step=1,
-        )
-    with end_col:
-        inputs.end = st.number_input(
-            label="Enter end index",
-            help="Enter end index for substring",
-            key=f"st_sb_trf_end{step_index}",
-            value=0,
-            step=1,
-        )
-
-    if inputs.start is not None and inputs.end is not None:
-        if inputs.start > inputs.end:
-            st.error("Start index cannot be greater than end index")
-        elif inputs.start == inputs.end:
-            st.error("Start index cannot be equal to end index")
-
-
-def _render_numeric_function_inputs(
-    step_index: int, inputs: TransformInputs
-) -> TransformInputs:
-    """Render UI inputs for numeric transformation functions.
-
-    Args:
-        step_index: Current step index for unique widget keys
-        inputs: TransformInputs object to populate
-
-    Returns
-    -------
-        Updated TransformInputs with user selections
-    """
-    inputs.func = st.selectbox(
-        label="Select Function",
-        options=config.DP_NUM_FUNCS,
-        key=f"st_sb_trf_func{step_index}",
-    )
-
-    arithmetic_ops = ("add", "multiply", "subtract", "divide")
-    if inputs.func in arithmetic_ops:
-        inputs.numeric_val = st.number_input(
-            label="Enter value",
-            help="Enter value to perform operation on column",
-            key=f"st_sb_trf_val{step_index}",
-        )
-
-    return inputs
-
-
-def _render_datetime_function_inputs(
-    step_index: int, inputs: TransformInputs
-) -> TransformInputs:
-    """Render UI inputs for datetime transformation functions.
-
-    Args:
-        step_index: Current step index for unique widget keys
-        inputs: TransformInputs object to populate
-
-    Returns
-    -------
-        Updated TransformInputs with user selections
-    """
-    inputs.func = st.selectbox(
-        label="Select Function",
-        options=config.DP_DATETIME_FUNCS,
-        key=f"st_sb_trf_func{step_index}",
-    )
-    return inputs
-
-
-def _build_transform_value(inputs: TransformInputs) -> list:
-    """Build the value list from transform inputs based on selected function.
-
-    Args:
-        inputs: TransformInputs containing user selections
-
-    Returns
-    -------
-        List of values appropriate for the selected function
-    """
-    if not inputs.func:
-        return []
-
-    value_builders = {
-        "replace": lambda: [inputs.old_val, inputs.new_val],
-        "extract pattern": lambda: [inputs.pattern],
-        "substring": lambda: [inputs.start, inputs.end],
-        "add": lambda: [inputs.numeric_val],
-        "multiply": lambda: [inputs.numeric_val],
-        "subtract": lambda: [inputs.numeric_val],
-        "divide": lambda: [inputs.numeric_val],
-    }
-
-    builder = value_builders.get(inputs.func)
-    return builder() if builder else []
-
-
-def _build_transform_result(column: str | None, inputs: TransformInputs) -> dict:
-    """Build the result dictionary for a transform column action.
-
-    Args:
-        column: The column being transformed
-        inputs: TransformInputs containing user selections
-
-    Returns
-    -------
-        Dictionary with transform action parameters
-    """
-    source_columns = [column] if column else []
-    value = _build_transform_value(inputs)
-
-    return {
-        "action": PrepActions.transform_column.value,
-        "column_names": None,
-        "affected_count": 0,
-        "remaining_count": None,
-        "value": value,
-        "method": inputs.func,
-        "source_columns": source_columns,
-        "condition": None,
-        "failed_count": 0,
-        "additional_info": None,
-    }
+# === PREP STEP HANDLER === #
 
 
 class PrepStepHandler:
@@ -607,7 +629,6 @@ class PrepStepHandler:
     def __init__(self, prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
         self.prep_data = prep_data
         self.step_index = step_index
-        self.config = PrepViewConfig()
         df_columns: ColumnByType = get_df_columns(self.prep_data)
         self.all_cols: list[str] = df_columns.all_columns
         self.string_cols: list[str] = df_columns.string_columns
@@ -626,7 +647,7 @@ class PrepStepHandler:
             # select method to add column
             dp_prep_add_col_med = st.selectbox(
                 label="Select Method",
-                options=self.config.DP_ADD_METHODS,
+                options=config.DP_ADD_METHODS,
                 key=f"st_sb_add_col_method{self.step_index}",
                 help="Select method to add new column",
             )
@@ -846,6 +867,9 @@ class PrepStepHandler:
             _render_pattern_value_inputs(inputs, self.step_index)
 
 
+# === STEP MANAGEMENT === #
+
+
 # --- Add Preparation Step ---#
 def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
     """Add a data preparation step."""
@@ -894,82 +918,6 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
 
             st.success("Preparation step added successfully!")
             st.rerun()
-
-
-def _has_none_values(values: list | None) -> bool:
-    """Check if a list is None, empty, or contains None values."""
-    return values is None or not values or any(v is None for v in values)
-
-
-def _is_add_column_incomplete(prep_args: dict) -> bool:
-    """Check if add column action is missing required fields."""
-    if not prep_args.get("column_names"):
-        return True
-    method = prep_args.get("method")
-    if method == PrepFunctions.quotient.value:
-        return (
-            method in COL_FUNC_WITH_VALUES
-            and len(prep_args.get("source_columns", [])) != 2
-        )
-    return method in COL_FUNC_WITH_VALUES and not prep_args.get("source_columns")
-
-
-def _is_transform_column_incomplete(prep_args: dict) -> bool:
-    """Check if transform column action is missing required fields."""
-    if not prep_args.get("source_columns") or not prep_args.get("method"):
-        return True
-
-    return not _has_none_values(prep_args.get("value"))
-
-
-def _is_remove_row_incomplete(prep_args: dict) -> bool:
-    """Check if remove row action is missing required fields."""
-    method = prep_args.get("method")
-
-    if method == PrepMethods.row_index.value:
-        return not prep_args.get("value")
-
-    if method != PrepMethods.condition.value:
-        return True
-
-    condition = prep_args.get("condition")
-    value = prep_args.get("value")
-
-    if condition in DEL_ROW_COND_SAME_TYPE:
-        return _has_none_values(value)
-
-    # DEL_COND_USE_VALS, like, not_like conditions
-    conditions_requiring_value = DEL_COND_USE_VALS + (
-        PrepRowConditions.like.value,
-        PrepRowConditions.not_like.value,
-    )
-    if condition in conditions_requiring_value:
-        return not value
-
-    return False
-
-
-def _is_prep_form_incomplete(action: str, prep_args: dict) -> bool:
-    """Check if the preparation form is incomplete and the Add button should
-    be disabled.
-
-    Args:
-        action: The selected preparation action
-        prep_args: The arguments for the preparation action
-
-    Returns
-    -------
-        True if the form is incomplete (Add button should be disabled), False otherwise
-    """
-    validators = {
-        PrepActions.add_column.value: _is_add_column_incomplete,
-        PrepActions.transform_column.value: _is_transform_column_incomplete,
-        PrepActions.remove_column.value: lambda args: not args.get("source_columns"),
-        PrepActions.remove_row.value: _is_remove_row_incomplete,
-    }
-
-    validator = validators.get(action)
-    return validator(prep_args) if validator else False
 
 
 # --- Remove Preparation Step ---#
@@ -1039,6 +987,28 @@ def prep_remove_step():
                 # rerun to refresh page
                 st.rerun()
 
+
+# === PAGE LAYOUT === #
+
+# -- DATA PREP PAGE --#
+# Creates page for data preprocessing
+
+# Add demo navigation and guidance
+add_demo_navigation("prep_view.py", step=3)
+demo_sidebar_help()
+
+st.title("Get Your Data Ready")
+st.write(
+    "Prepare your dataset for Data Quality Checks. Use these tools to transform, add and remove columns and rows in your dataset."
+)
+
+# Demo guidance
+if is_demo_project():
+    demo_expander(
+        "Prepare Your Data for Quality Checks",
+        ImportDemoInfo.get_info_message("prepare_data_info"),
+        expanded=True,
+    )
 
 if show_prep_page_info:
     tabs = st.tabs(sorted(alias_list))
