@@ -503,6 +503,210 @@ def _render_column_locking_options(
 
 
 @st.fragment
+def _render_datetime_condition_input(
+    condition_type: str,
+    default_condition_value,
+):
+    """Render date input widget for datetime condition values.
+
+    Parameters
+    ----------
+    condition_type : str
+        The selected condition type.
+    default_condition_value
+        Saved default value to restore.
+
+    Returns
+    -------
+    tuple
+        (condition_value, condition_value_dict) where dict has serialized value.
+    """
+    min_date = DateDefaults().start_date
+    max_date = DateDefaults().end_date
+
+    date_range = (
+        (DateDefaults().default_start_date, DateDefaults().default_end_date)
+        if condition_type in [NumCondition.IN_RANGE.value]
+        else DateDefaults().default_start_date
+    )
+
+    default_condition_value = _validate_duplicates_condition_date_value(
+        default_condition_value, date_range
+    )
+
+    condition_value = st.date_input(
+        value=default_condition_value,
+        min_value=min_date,
+        max_value=max_date,
+        label="Condition Value",
+        key="duplicates_condition_date_value_key",
+        help="Select the date value to filter the condition column.",
+        on_change=trigger_save,
+        kwargs={"state_name": TAB_NAME + "_condition_value"},
+    )
+    condition_value_dict = {
+        "condition_value": _serialize_condition_value_for_json(condition_value)
+    }
+    return condition_value, condition_value_dict
+
+
+def _render_numeric_condition_input(
+    condition_type: str,
+    default_condition_value,
+    condition_values: list,
+):
+    """Render input widget for numeric condition values.
+
+    Parameters
+    ----------
+    condition_type : str
+        The selected condition type.
+    default_condition_value
+        Saved default value to restore.
+    condition_values : list
+        Unique values in the condition column.
+
+    Returns
+    -------
+    The selected condition value.
+    """
+    if not default_condition_value:
+        default_condition_value = (
+            min(condition_values),
+            max(condition_values),
+        )
+
+    if condition_type == NumCondition.IN_RANGE.value:
+        return st.slider(
+            label="Condition Value Range",
+            min_value=min(condition_values),
+            max_value=max(condition_values),
+            value=default_condition_value,
+            key="duplicates_condition_numeric_range_value_key",
+            help="Select the numeric range to filter the condition column.",
+            on_change=trigger_save,
+            kwargs={"state_name": TAB_NAME + "_condition_value"},
+        )
+
+    if condition_type in [NumCondition.INCLUDES.value, NumCondition.EXCLUDES.value]:
+        if not isinstance(default_condition_value, list):
+            default_condition_value = [default_condition_value]
+        return st.multiselect(
+            label="Condition Values",
+            options=condition_values,
+            key="duplicates_condition_numeric_multivalue_key",
+            help="Select the numeric values to filter the condition column.",
+            on_change=trigger_save,
+            kwargs={"state_name": TAB_NAME + "_condition_value"},
+        )
+
+    if isinstance(default_condition_value, list):
+        default_condition_value = default_condition_value[0]
+    else:
+        default_condition_value = None
+
+    return st.number_input(
+        label="Condition Value",
+        value=default_condition_value,
+        key="duplicates_condition_numeric_value_key",
+        help="Enter the numeric value to filter the condition column.",
+        on_change=trigger_save,
+        kwargs={"state_name": TAB_NAME + "_condition_value"},
+    )
+
+
+def _render_string_condition_input(
+    condition_type: str,
+    saved_settings: dict,
+    condition_values: list,
+):
+    """Render input widget for string condition values.
+
+    Parameters
+    ----------
+    condition_type : str
+        The selected condition type.
+    saved_settings : dict
+        Saved settings dictionary.
+    condition_values : list
+        Unique values in the condition column.
+
+    Returns
+    -------
+    The selected condition value.
+    """
+    default_condition_value = saved_settings.get("condition_value", [])
+    if default_condition_value and not isinstance(default_condition_value, list):
+        default_condition_value = [default_condition_value]
+
+    if condition_type in [StrCondition.INCLUDES.value, StrCondition.EXCLUDES.value]:
+        return st.multiselect(
+            label="Condition Values",
+            options=condition_values,
+            default=default_condition_value,
+            key="duplicates_condition_string_multivalue",
+            help="Select the string values to filter the condition column.",
+            on_change=trigger_save,
+            kwargs={"state_name": TAB_NAME + "_condition_value"},
+        )
+
+    return st.text_input(
+        label="Condition Value",
+        value=default_condition_value
+        if isinstance(default_condition_value, str)
+        else None,
+        key="duplicates_condition_string_value_key",
+        help="Enter the string value to filter the condition column.",
+        on_change=trigger_save,
+        kwargs={"state_name": TAB_NAME + "_condition_value"},
+    )
+
+
+def _render_condition_value_input(
+    data: pl.DataFrame,
+    condition_col: str,
+    condition_type: str,
+    saved_settings: dict,
+    condition_values: list,
+) -> tuple:
+    """Render the appropriate condition value input based on column dtype.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        Dataset to analyze.
+    condition_col : str
+        Selected condition column name.
+    condition_type : str
+        The selected condition type.
+    saved_settings : dict
+        Saved settings dictionary.
+    condition_values : list
+        Unique values in the condition column.
+
+    Returns
+    -------
+    tuple
+        (condition_value, condition_value_dict) for saving settings.
+    """
+    default_condition_value = saved_settings.get("condition_value")
+    col_dtype = data[condition_col].dtype
+
+    if col_dtype in pl.DATETIME_DTYPES:
+        return _render_datetime_condition_input(condition_type, default_condition_value)
+
+    if col_dtype in pl.NUMERIC_DTYPES:
+        condition_value = _render_numeric_condition_input(
+            condition_type, default_condition_value, condition_values
+        )
+        return condition_value, {}
+
+    condition_value = _render_string_condition_input(
+        condition_type, saved_settings, condition_values
+    )
+    return condition_value, {}
+
+
 def _render_duplicates_condition_options(
     project_id: str, data: pl.DataFrame, settings_file: str
 ) -> dict:
@@ -567,8 +771,8 @@ def _render_duplicates_condition_options(
         with co2:
             NUMERIC_DTYPES = pl.NUMERIC_DTYPES | pl.DATETIME_DTYPES
             col_is_numeric = data[condition_col].dtype in NUMERIC_DTYPES
-            ConditionType = NumCondition if col_is_numeric else StrCondition
-            condition_type_options = [e.value for e in ConditionType]
+            condition_type = NumCondition if col_is_numeric else StrCondition
+            condition_type_options = [e.value for e in condition_type]
 
             default_condition_type = saved_settings.get("condition_type", None)
             default_condition_type_index = (
@@ -595,127 +799,9 @@ def _render_duplicates_condition_options(
         )
 
         with co3:
-            condition_value_dict = {}
-            default_condition_value = saved_settings.get("condition_value", None)
-
-            is_datetime = data[condition_col].dtype in pl.DATETIME_DTYPES
-            is_numeric = data[condition_col].dtype in pl.NUMERIC_DTYPES
-
-            if is_datetime:
-                min_date = DateDefaults().start_date
-                max_date = DateDefaults().end_date
-
-                date_range = (
-                    (DateDefaults().default_start_date, DateDefaults().default_end_date)
-                    if condition_type in [NumCondition.IN_RANGE.value]
-                    else DateDefaults().default_start_date
-                )
-
-                default_condition_value = _validate_duplicates_condition_date_value(
-                    default_condition_value, date_range
-                )
-
-                condition_value = st.date_input(
-                    value=default_condition_value,
-                    min_value=min_date,
-                    max_value=max_date,
-                    label="Condition Value",
-                    key="duplicates_condition_date_value_key",
-                    help="Select the date value to filter the condition column.",
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_condition_value"},
-                )
-                condition_value_dict = {
-                    "condition_value": _serialize_condition_value_for_json(
-                        condition_value
-                    )
-                }
-
-            elif is_numeric:
-                if not default_condition_value:
-                    default_condition_value = (
-                        min(condition_values),
-                        max(condition_values),
-                    )
-
-                if condition_type == NumCondition.IN_RANGE.value:
-                    condition_value = st.slider(
-                        label="Condition Value Range",
-                        min_value=min(condition_values),
-                        max_value=max(condition_values),
-                        value=default_condition_value,
-                        key="duplicates_condition_numeric_range_value_key",
-                        help="Select the numeric range to filter the condition column.",
-                        on_change=trigger_save,
-                        kwargs={"state_name": TAB_NAME + "_condition_value"},
-                    )
-
-                elif condition_type in [
-                    NumCondition.INCLUDES.value,
-                    NumCondition.EXCLUDES.value,
-                ]:
-                    if default_condition_value and not isinstance(
-                        default_condition_value, list
-                    ):
-                        default_condition_value = [default_condition_value]
-                    condition_value = st.multiselect(
-                        label="Condition Values",
-                        options=condition_values,
-                        key="duplicates_condition_numeric_multivalue_key",
-                        help="Select the numeric values to filter the condition column.",
-                        on_change=trigger_save,
-                        kwargs={"state_name": TAB_NAME + "_condition_value"},
-                    )
-
-                else:
-                    if default_condition_value and isinstance(
-                        default_condition_value, list
-                    ):
-                        default_condition_value = default_condition_value[0]
-                    else:
-                        default_condition_value = None
-
-                    condition_value = st.number_input(
-                        label="Condition Value",
-                        value=default_condition_value,
-                        key="duplicates_condition_numeric_value_key",
-                        help="Enter the numeric value to filter the condition column.",
-                        on_change=trigger_save,
-                        kwargs={"state_name": TAB_NAME + "_condition_value"},
-                    )
-
-            else:
-                default_condition_value = saved_settings.get("condition_value", [])
-                if default_condition_value and not isinstance(
-                    default_condition_value, list
-                ):
-                    default_condition_value = [default_condition_value]
-
-                if condition_type in [
-                    StrCondition.INCLUDES.value,
-                    StrCondition.EXCLUDES.value,
-                ]:
-                    condition_value = st.multiselect(
-                        label="Condition Values",
-                        options=condition_values,
-                        default=default_condition_value,
-                        key="duplicates_condition_string_multivalue",
-                        help="Select the string values to filter the condition column.",
-                        on_change=trigger_save,
-                        kwargs={"state_name": TAB_NAME + "_condition_value"},
-                    )
-
-                else:
-                    condition_value = st.text_input(
-                        label="Condition Value",
-                        value=default_condition_value
-                        if isinstance(default_condition_value, str)
-                        else None,
-                        key="duplicates_condition_string_value_key",
-                        help="Enter the string value to filter the condition column.",
-                        on_change=trigger_save,
-                        kwargs={"state_name": TAB_NAME + "_condition_value"},
-                    )
+            condition_value, condition_value_dict = _render_condition_value_input(
+                data, condition_col, condition_type, saved_settings, condition_values
+            )
 
             if not condition_value_dict:
                 condition_value_dict = {
@@ -808,8 +894,56 @@ def _serialize_condition_value_for_json(
         return value
 
 
+def _is_date_not_datetime(value) -> bool:
+    """Check if a value is a date but not a datetime."""
+    return isinstance(value, datetime.date) and not isinstance(value, datetime.datetime)
+
+
+def _has_date_values(values: list | tuple) -> bool:
+    """Check if any element in a list/tuple is a date (not datetime)."""
+    return any(_is_date_not_datetime(v) for v in values)
+
+
+def _cast_col_for_date_comparison(
+    col: pl.Expr,
+    condition_type: str,
+    value: int | float | list | tuple | datetime.date,
+) -> pl.Expr:
+    """Cast column to Date if the value contains date objects.
+
+    Parameters
+    ----------
+    col : pl.Expr
+        Polars column expression.
+    condition_type : str
+        Type of numeric condition from NumCondition enum.
+    value : int | float | list | tuple | datetime.date
+        Value(s) to compare against.
+
+    Returns
+    -------
+    pl.Expr
+        Column expression, cast to Date if needed.
+    """
+    if _is_date_not_datetime(value):
+        return col.cast(pl.Date)
+
+    if not isinstance(value, list | tuple):
+        return col
+
+    needs_cast = condition_type == NumCondition.INCLUDES.value or (
+        condition_type == NumCondition.IN_RANGE.value and len(value) == 2
+    )
+    if needs_cast and _has_date_values(value):
+        return col.cast(pl.Date)
+
+    return col
+
+
 def _apply_numeric_condition(
-    col: pl.Expr, condition_type: str, value: int | float | list | tuple | datetime.date
+    col: pl.Expr,
+    condition_type: str,
+    value: int | float | list | tuple | datetime.date,
 ) -> pl.Expr:
     """Apply numeric condition to a Polars column expression.
 
@@ -837,49 +971,25 @@ def _apply_numeric_condition(
     automatically cast to date type to ensure all datetime values within
     that date match the condition.
     """
-    # Handle date vs datetime comparison by casting datetime columns to date
-    if isinstance(value, datetime.date) and not isinstance(value, datetime.datetime):
-        col = col.cast(pl.Date)
-    elif condition_type == NumCondition.INCLUDES.value and isinstance(
-        value, list | tuple
-    ):
-        if any(
-            isinstance(v, datetime.date) and not isinstance(v, datetime.datetime)
-            for v in value
-        ):
-            col = col.cast(pl.Date)
-    elif (
-        condition_type == NumCondition.IN_RANGE.value
-        and isinstance(value, list | tuple)
-        and len(value) == 2
-        and any(
-            isinstance(v, datetime.date) and not isinstance(v, datetime.datetime)
-            for v in value
-        )
-    ):
-        col = col.cast(pl.Date)
+    col = _cast_col_for_date_comparison(col, condition_type, value)
 
-    if condition_type == NumCondition.EQUALS.value:
-        return col == value
-    elif condition_type == NumCondition.NOT_EQUALS.value:
-        return col != value
-    elif condition_type == NumCondition.GREATER_THAN.value:
-        return col > value
-    elif condition_type == NumCondition.GREATER_THAN_OR_EQUAL.value:
-        return col >= value
-    elif condition_type == NumCondition.LESS_THAN.value:
-        return col < value
-    elif condition_type == NumCondition.LESS_THAN_OR_EQUAL.value:
-        return col <= value
-    elif condition_type == NumCondition.INCLUDES.value:
-        return col.is_in(value)
-    elif condition_type == NumCondition.EXCLUDES.value:
-        return ~col.is_in(value)
-    elif condition_type == NumCondition.IN_RANGE.value:
-        min_val, max_val = value[0], value[1]
-        return (col >= min_val) & (col <= max_val)
-    else:
+    dispatch = {
+        NumCondition.EQUALS.value: lambda c, v: c == v,
+        NumCondition.NOT_EQUALS.value: lambda c, v: c != v,
+        NumCondition.GREATER_THAN.value: lambda c, v: c > v,
+        NumCondition.GREATER_THAN_OR_EQUAL.value: lambda c, v: c >= v,
+        NumCondition.LESS_THAN.value: lambda c, v: c < v,
+        NumCondition.LESS_THAN_OR_EQUAL.value: lambda c, v: c <= v,
+        NumCondition.INCLUDES.value: lambda c, v: c.is_in(v),
+        NumCondition.EXCLUDES.value: lambda c, v: ~c.is_in(v),
+        NumCondition.IN_RANGE.value: lambda c, v: (c >= v[0]) & (c <= v[1]),
+    }
+
+    handler = dispatch.get(condition_type)
+    if handler is None:
         raise ValueError(f"Unsupported numeric condition type: {condition_type}")
+
+    return handler(col, value)
 
 
 def _apply_string_condition(
@@ -963,6 +1073,92 @@ def _build_filter_expression(
     return filter_expr
 
 
+def _coerce_datetime_value(
+    condition_value: str | list,
+) -> datetime.date | list:
+    """Coerce string condition value(s) to date objects.
+
+    Parameters
+    ----------
+    condition_value : str | list
+        Raw condition value to coerce.
+
+    Returns
+    -------
+    datetime.date | list
+        Coerced value(s), unchanged if coercion fails.
+    """
+    if isinstance(condition_value, str):
+        with contextlib.suppress(ValueError, TypeError):
+            return datetime.date.fromisoformat(condition_value)
+    elif isinstance(condition_value, list):
+        with contextlib.suppress(ValueError, TypeError):
+            return [
+                datetime.date.fromisoformat(v) if isinstance(v, str) else v
+                for v in condition_value
+            ]
+    return condition_value
+
+
+def _coerce_numeric_value(
+    condition_value: str | list,
+    col_dtype: pl.DataType,
+) -> int | float | list:
+    """Coerce string condition value(s) to numeric types.
+
+    Parameters
+    ----------
+    condition_value : str | list
+        Raw condition value to coerce.
+    col_dtype : pl.DataType
+        The Polars data type of the target column.
+
+    Returns
+    -------
+    int | float | list
+        Coerced value(s), unchanged if coercion fails.
+    """
+    cast_fn = int if col_dtype in pl.INTEGER_DTYPES else float
+
+    if isinstance(condition_value, str):
+        with contextlib.suppress(ValueError, TypeError):
+            return cast_fn(condition_value)
+    elif isinstance(condition_value, list):
+        with contextlib.suppress(ValueError, TypeError):
+            return [cast_fn(v) if isinstance(v, str) else v for v in condition_value]
+    return condition_value
+
+
+def _coerce_condition_value(conditions: dict, data: pl.DataFrame) -> None:
+    """Coerce the condition value to match the column's dtype in-place.
+
+    Parameters
+    ----------
+    conditions : dict
+        Conditions dict (mutated in-place).
+    data : pl.DataFrame
+        Dataset used to determine column dtype.
+    """
+    condition_col = conditions["condition_col"]
+    condition_value = conditions.get("condition_value")
+    if not condition_value or condition_col not in data.columns:
+        return
+
+    col_dtype = data[condition_col].dtype
+
+    if col_dtype in pl.DATETIME_DTYPES:
+        conditions["condition_value"] = _coerce_datetime_value(condition_value)
+    elif col_dtype in pl.NUMERIC_DTYPES:
+        conditions["condition_value"] = _coerce_numeric_value(
+            condition_value, col_dtype
+        )
+
+
+def _has_valid_filter_conditions(conditions: dict) -> bool:
+    """Check whether conditions contain enough info to build a filter."""
+    return bool(conditions.get("condition_col") and conditions.get("condition_type"))
+
+
 def _filter_data_on_conditions(
     project_id: str, data: pl.DataFrame, conditions: dict
 ) -> None:
@@ -993,64 +1189,22 @@ def _filter_data_on_conditions(
     ValueError
         If conditions are invalid or condition type is not supported.
     """
-    if not conditions:
+    if not conditions or not _has_valid_filter_conditions(conditions):
         filtered_data = data
     else:
-        condition_col = conditions.get("condition_col")
-        if not condition_col or not conditions.get("condition_type"):
-            filtered_data = data
-        else:
-            condition_value = conditions.get("condition_value")
-            if condition_col and condition_value and condition_col in data.columns:
-                col_dtype = data[condition_col].dtype
+        _coerce_condition_value(conditions, data)
 
-                if col_dtype in pl.DATETIME_DTYPES:
-                    if isinstance(condition_value, str):
-                        with contextlib.suppress(ValueError, TypeError):
-                            conditions["condition_value"] = datetime.date.fromisoformat(
-                                condition_value
-                            )
-                    elif isinstance(condition_value, list):
-                        with contextlib.suppress(ValueError, TypeError):
-                            conditions["condition_value"] = [
-                                datetime.date.fromisoformat(v)
-                                if isinstance(v, str)
-                                else v
-                                for v in condition_value
-                            ]
+        try:
+            validated_condition = FilterCondition(**conditions)
+        except Exception as e:
+            raise ValueError(f"Invalid conditions: {e}") from e
 
-                elif col_dtype in pl.NUMERIC_DTYPES:
-                    if isinstance(condition_value, str):
-                        with contextlib.suppress(ValueError, TypeError):
-                            if col_dtype in pl.INTEGER_DTYPES:
-                                conditions["condition_value"] = int(condition_value)
-                            else:
-                                conditions["condition_value"] = float(condition_value)
-                    elif isinstance(condition_value, list):
-                        with contextlib.suppress(ValueError, TypeError):
-                            if col_dtype in pl.INTEGER_DTYPES:
-                                conditions["condition_value"] = [
-                                    int(v) if isinstance(v, str) else v
-                                    for v in condition_value
-                                ]
-                            else:
-                                conditions["condition_value"] = [
-                                    float(v) if isinstance(v, str) else v
-                                    for v in condition_value
-                                ]
-
-            try:
-                validated_condition = FilterCondition(**conditions)
-            except Exception as e:
-                raise ValueError(f"Invalid conditions: {e}") from e
-
-            try:
-                col_expr = pl.col(validated_condition.condition_col)
-                filter_expr = _build_filter_expression(validated_condition, col_expr)
-                filtered_data = data.filter(filter_expr)
-
-            except Exception as e:
-                raise ValueError(f"Error applying filter: {e}") from e
+        try:
+            col_expr = pl.col(validated_condition.condition_col)
+            filter_expr = _build_filter_expression(validated_condition, col_expr)
+            filtered_data = data.filter(filter_expr)
+        except Exception as e:
+            raise ValueError(f"Error applying filter: {e}") from e
 
     duckdb_save_table(
         project_id,
