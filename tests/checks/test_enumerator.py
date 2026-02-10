@@ -394,14 +394,13 @@ def test_load_default_enumerator_settings_missing_file():
     assert result.enumerator == "default_enum"
 
 
-def test_trigger_success_message():
+@patch("datasure.checks.enumerator.st")
+def test_trigger_success_message(mock_st):
     """Test _trigger_success_message function."""
-    import streamlit as st
-
-    st.session_state = {}
+    mock_st.session_state = {}
 
     _trigger_success_message("test_button")
-    assert st.session_state["test_button"] is True
+    assert mock_st.session_state["test_button"] is True
 
 
 def test_create_enum_data_on_settings_with_consent_and_outcome():

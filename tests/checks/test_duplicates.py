@@ -331,7 +331,11 @@ def test_load_default_duplicates_settings_valid(duplicates_settings_file):
         survey_key="default_key",
         survey_id="default_id",
     )
-    result = load_default_duplicates_settings(duplicates_settings_file, config)
+    # Use __wrapped__ to bypass @st.cache_data decorator which requires
+    # a running Streamlit runtime for spinner/config initialization
+    result = load_default_duplicates_settings.__wrapped__(
+        duplicates_settings_file, config
+    )
 
     # Saved settings should override defaults
     assert result.survey_key == "survey_key"
@@ -345,7 +349,7 @@ def test_load_default_duplicates_settings_missing_file():
         survey_id="default_id",
         enumerator="default_enum",
     )
-    result = load_default_duplicates_settings("nonexistent.json", config)
+    result = load_default_duplicates_settings.__wrapped__("nonexistent.json", config)
 
     # Should return default config when file doesn't exist
     assert result.survey_key == "default_key"

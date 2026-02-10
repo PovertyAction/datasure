@@ -1060,12 +1060,10 @@ class TestAddNewColumnOperation:
         result, _ = op.execute(data, prep_args)
         assert result["idx"].to_list() == [0, 1, 2]
 
-    @patch(
-        "streamlit.session_state",
-        new_callable=lambda: type("", (), {"st_project_id": "test123"}),
-    )
-    def test_add_uuid_column(self, _mock_st):
+    @patch("datasure.processing.prep.st")
+    def test_add_uuid_column(self, mock_st):
         """Test Add uuid column."""
+        mock_st.session_state.st_project_id = "test123"
         op = AddNewColumnOperation()
         data = pl.DataFrame({"a": [1, 2, 3]})
         prep_args = PrepActionResult(
