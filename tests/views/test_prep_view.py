@@ -1,515 +1,1886 @@
-"""Tests for prep_view.py logic patterns."""
+"""Tests for prep_view.py - actual imports with proper mocking."""
 
-from datasure.utils.prep_utils import PrepDescriptions
+import sys
+from unittest.mock import MagicMock, patch
 
+import polars as pl
+import pytest
 
-class TestPrepViewConstants:
-    """Test the constants defined in prep_view.py logic patterns."""
+from datasure.models.enums import (
+    DEL_ROW_COND_MAX_1,
+    DEL_ROW_COND_NUM_ONLY,
+    DEL_ROW_COND_STR_ONLY,
+    PrepActions,
+    PrepFunctions,
+    PrepMethods,
+    PrepRowConditions,
+)
 
-    def test_col_methods_with_values_logic(self):
-        """Test COL_MEDTHODS_WITH_VALUES constant logic pattern."""
-        # Simulate the constants from prep_view.py
-        COL_MEDTHODS_WITH_VALUES = (
-            "sum",
-            "diff",
-            "mean",
-            "median",
-            "mode",
-            "min",
-            "max",
-            "std",
-            "var",
-            "first",
-            "last",
-            "count",
-            "nunique",
-            "product",
-            "quotient",
-        )
+# --- Module import setup ---
+# prep_view.py has module-level Streamlit guards and UI code.
+# We need to set up mocks so the module can import without real DB or UI.
+_st = sys.modules["streamlit"]
+_orig_stop = _st.stop
 
-        # Test that methods requiring column selection are properly categorized
-        methods_needing_columns = set(COL_MEDTHODS_WITH_VALUES)
+# Let module load past the guards
+_st.session_state["st_project_id"] = "test_project"
+_st.stop = MagicMock()
 
-        # These methods should require column selection
-        assert "sum" in methods_needing_columns
-        assert "mean" in methods_needing_columns
-        assert "quotient" in methods_needing_columns
-        assert len(methods_needing_columns) == 15
+# Make st.columns return context-manager-compatible mocks
+_mock_col = MagicMock()
+_mock_col.__enter__ = MagicMock(return_value=_mock_col)
+_mock_col.__exit__ = MagicMock(return_value=False)
+_st.columns = MagicMock(return_value=[_mock_col, _mock_col, _mock_col])
 
-    def test_col_methods_no_values_logic(self):
-        """Test COL_MEDTHODS_NO_VALUES constant logic pattern."""
-        COL_MEDTHODS_NO_VALUES = (
-            "index",
-            "uuid",
-            "random",
-        )
+# Patch duckdb and navigation utilities so module-level UI code doesn't fail
+with (
+    patch("datasure.utils.duckdb_utils.duckdb_get_aliases", return_value=[]),
+    patch("datasure.utils.navigations_utils.page_navigation"),
+    patch("datasure.utils.navigations_utils.add_demo_navigation"),
+    patch("datasure.utils.navigations_utils.demo_sidebar_help"),
+    patch("datasure.utils.navigations_utils.demo_callout"),
+    patch("datasure.utils.navigations_utils.show_demo_next_action"),
+    patch("datasure.utils.onboarding_utils.is_demo_project", return_value=False),
+    patch("datasure.utils.onboarding_utils.demo_expander"),
+):
+    from datasure.views.prep_view import (
+        PrepStepHandler,
+        PrepViewConfig,
+        RemoveRowsInputs,
+        TransformInputs,
+        _build_remove_rows_result,
+        _build_remove_rows_value,
+        _build_transform_result,
+        _build_transform_value,
+        _get_column_options_for_condition,
+        _get_unique_values_from_columns,
+        _has_none_values,
+        _is_add_column_incomplete,
+        _is_prep_form_incomplete,
+        _is_remove_row_incomplete,
+        _is_transform_column_incomplete,
+        _render_datetime_function_inputs,
+        _render_equality_value_inputs,
+        _render_numeric_function_inputs,
+        _render_pattern_value_inputs,
+        _render_range_value_inputs,
+        _render_string_function_inputs,
+        _render_substring_inputs,
+        _validate_column_types_for_range,
+        prep_add_step,
+        prep_remove_step,
+    )
 
-        # Test that methods not requiring column selection are properly categorized
-        methods_no_columns = set(COL_MEDTHODS_NO_VALUES)
-
-        # These methods should not require column selection
-        assert "index" in methods_no_columns
-        assert "uuid" in methods_no_columns
-        assert "random" in methods_no_columns
-        assert len(methods_no_columns) == 3
-
-    def test_row_deletion_conditions_logic(self):
-        """Test row deletion condition constants logic pattern."""
-        DEL_ROW_COND_MAX_1 = (
-            "value is equal to",
-            "value is not equal to",
-            "value is greater than",
-            "value is less than",
-            "value is greater than or equal to",
-            "value is less than or equal to",
-        )
-
-        DEL_ROW_COND_NUM_ONLY = (
-            "value is greater than",
-            "value is less than",
-            "value is greater than or equal to",
-            "value is less than or equal to",
-            "value is between",
-            "value is not between",
-        )
-
-        DEL_ROW_COND_STR_ONLY = (
-            "value is like",
-            "value is not like",
-        )
-
-        # Test condition categorization logic
-        max_1_conditions = set(DEL_ROW_COND_MAX_1)
-        num_conditions = set(DEL_ROW_COND_NUM_ONLY)
-        str_conditions = set(DEL_ROW_COND_STR_ONLY)
-
-        # Numeric and string conditions should not overlap
-        assert num_conditions.isdisjoint(str_conditions)
-
-        # Some numeric conditions should be in max_1 category
-        assert "value is greater than" in max_1_conditions
-        assert "value is greater than" in num_conditions
-
-        # Between conditions should only be numeric
-        assert "value is between" in num_conditions
-        assert "value is between" not in max_1_conditions
+# Restore original stop behavior
+_st.session_state["st_project_id"] = None
+_st.stop = _orig_stop
 
 
-class TestPrepViewConfigLogic:
-    """Test PrepViewConfig class logic patterns."""
-
-    def test_prep_view_config_initialization_logic(self):
-        """Test PrepViewConfig initialization logic pattern."""
-        # Simulate the PrepViewConfig initialization logic
-        descriptions = PrepDescriptions()
-
-        # Simulate tuple creation from descriptions
-        dp_actions = tuple(descriptions.MAIN_ACTIONS.keys())
-        dp_add_methods = tuple(descriptions.ADD_METHODS.keys())
-        dp_del_methods = tuple(descriptions.DEL_METHODS.keys())
-        dp_str_funcs = tuple(descriptions.STRING_FUNCTIONS.keys())
-        dp_num_funcs = tuple(descriptions.NUMERIC_FUNCTIONS.keys())
-        dp_datetime_funcs = tuple(descriptions.DATETIME_FUNCTIONS.keys())
-        dp_row_conditions = tuple(descriptions.ROW_CONDITIONS.keys())
-
-        # Test that configuration tuples are properly created
-        assert isinstance(dp_actions, tuple)
-        assert isinstance(dp_add_methods, tuple)
-        assert isinstance(dp_del_methods, tuple)
-        assert isinstance(dp_str_funcs, tuple)
-        assert isinstance(dp_num_funcs, tuple)
-        assert isinstance(dp_datetime_funcs, tuple)
-        assert isinstance(dp_row_conditions, tuple)
-
-        # Test that tuples contain expected content
-        assert "transform column(s)" in dp_actions
-        assert "add new column" in dp_actions
-        assert "remove column(s)" in dp_actions
-        assert "remove row(s)" in dp_actions
-
-        assert "constant" in dp_add_methods
-        assert "sum" in dp_add_methods
-        assert "index" in dp_add_methods
-
-        assert "trim" in dp_str_funcs
-        assert "replace" in dp_str_funcs
-        assert "lower" in dp_str_funcs
-
-        assert "add" in dp_num_funcs
-        assert "multiply" in dp_num_funcs
-        assert "round" in dp_num_funcs
-
-    def test_config_integration_with_constants_logic(self):
-        """Test configuration integration with constants logic."""
-        # Simulate the constants
-        COL_MEDTHODS_WITH_VALUES = (
-            "sum",
-            "diff",
-            "mean",
-            "median",
-            "mode",
-            "min",
-            "max",
-            "std",
-            "var",
-            "first",
-            "last",
-            "count",
-            "nunique",
-            "product",
-            "quotient",
-        )
-
-        COL_MEDTHODS_NO_VALUES = ("index", "uuid", "random")
-
-        # Simulate config creation
-        descriptions = PrepDescriptions()
-        dp_add_methods = tuple(descriptions.ADD_METHODS.keys())
-
-        # Test integration logic
-        methods_with_values = set(COL_MEDTHODS_WITH_VALUES)
-        methods_without_values = set(COL_MEDTHODS_NO_VALUES)
-        all_add_methods = set(dp_add_methods)
-
-        # Methods should not overlap
-        assert methods_with_values.isdisjoint(methods_without_values)
-
-        # Most methods should be in the configuration
-        categorized_methods = (
-            methods_with_values | methods_without_values | {"constant"}
-        )
-        overlap = categorized_methods & all_add_methods
-        assert len(overlap) >= 15  # Should have good coverage
+# === DATA CLASS TESTS === #
 
 
-class TestPrepStepHandlerLogic:
-    """Test PrepStepHandler class logic patterns."""
+class TestTransformInputs:
+    """Test TransformInputs initialization."""
 
-    def test_add_column_handler_constant_logic(self):
-        """Test add_column_handler constant method logic pattern."""
-        # Simulate the constant method logic
-        dp_prep_add_col = "new_column"
-        dp_prep_add_col_med = "constant"
-        dp_prep_add_val = "test_value"
+    def test_default_init(self):
+        inputs = TransformInputs()
+        assert inputs.func is None
+        assert inputs.old_val is None
+        assert inputs.new_val is None
+        assert inputs.pattern is None
+        assert inputs.start is None
+        assert inputs.end is None
+        assert inputs.numeric_val is None
 
-        # Simulate DataFrame info
-        prep_data_shape = (4, 4)  # 4 rows, 4 columns
+    def test_set_values(self):
+        inputs = TransformInputs()
+        inputs.func = "replace"
+        inputs.old_val = "old"
+        inputs.new_val = "new"
+        assert inputs.func == "replace"
+        assert inputs.old_val == "old"
+        assert inputs.new_val == "new"
 
-        # Simulate the logic from add_column_handler
-        if dp_prep_add_col:
-            if dp_prep_add_col_med == "constant":
-                value = dp_prep_add_val
-                source_columns = []
-            else:
-                value = None
-                source_columns = []
 
-            result = {
-                "action": "add new column",
-                "column_names": dp_prep_add_col,
-                "affected_count": None,
-                "remaining_count": prep_data_shape[1] + 1,
-                "value": value,
-                "method": dp_prep_add_col_med,
-                "source_columns": source_columns,
-                "condition": None,
-                "failed_count": None,
-                "additional_info": None,
-            }
-        else:
-            result = None
+class TestRemoveRowsInputs:
+    """Test RemoveRowsInputs initialization."""
 
-        # Test the logic results
-        assert result is not None
-        assert result["action"] == "add new column"
-        assert result["column_names"] == "new_column"
-        assert result["remaining_count"] == 5  # 4 + 1
-        assert result["value"] == "test_value"
-        assert result["method"] == "constant"
+    def test_default_init(self):
+        inputs = RemoveRowsInputs()
+        assert inputs.method is None
+        assert inputs.condition is None
+        assert inputs.selected_columns == []
+        assert inputs.indexes_to_remove == []
+        assert inputs.equality_values == []
+        assert inputs.min_value is None
+        assert inputs.max_value is None
+        assert inputs.pattern_value is None
+
+
+class TestPrepViewConfig:
+    """Test PrepViewConfig class."""
+
+    def test_init_creates_tuples(self):
+        cfg = PrepViewConfig()
+        assert isinstance(cfg.DP_ACTIONS, tuple)
+        assert isinstance(cfg.DP_ADD_METHODS, tuple)
+        assert isinstance(cfg.DP_DEL_METHODS, tuple)
+        assert isinstance(cfg.DP_FUNCS, tuple)
+        assert isinstance(cfg.DP_STR_FUNCS, tuple)
+        assert isinstance(cfg.DP_NUM_FUNCS, tuple)
+        assert isinstance(cfg.DP_DATETIME_FUNCS, tuple)
+        assert isinstance(cfg.DP_ROW_CONDITIONS, tuple)
+
+    def test_actions_content(self):
+        cfg = PrepViewConfig()
+        assert PrepActions.add_column.value in cfg.DP_ACTIONS
+        assert PrepActions.transform_column.value in cfg.DP_ACTIONS
+        assert PrepActions.remove_column.value in cfg.DP_ACTIONS
+        assert PrepActions.remove_row.value in cfg.DP_ACTIONS
+
+    def test_add_methods_content(self):
+        cfg = PrepViewConfig()
+        assert PrepFunctions.constant.value in cfg.DP_ADD_METHODS
+        assert PrepFunctions.sum.value in cfg.DP_ADD_METHODS
+        assert PrepFunctions.index.value in cfg.DP_ADD_METHODS
+
+    def test_del_methods_content(self):
+        cfg = PrepViewConfig()
+        assert PrepMethods.row_index.value in cfg.DP_DEL_METHODS
+        assert PrepMethods.condition.value in cfg.DP_DEL_METHODS
+
+    def test_descriptions_attribute(self):
+        cfg = PrepViewConfig()
+        assert cfg.descriptions is not None
+        assert len(cfg.DP_STR_FUNCS) > 0
+        assert len(cfg.DP_NUM_FUNCS) > 0
+        assert len(cfg.DP_DATETIME_FUNCS) > 0
+        assert len(cfg.DP_ROW_CONDITIONS) > 0
+
+
+# === VALIDATION FUNCTION TESTS === #
+
+
+class TestHasNoneValues:
+    """Test _has_none_values helper."""
+
+    def test_none_input(self):
+        assert _has_none_values(None) is True
+
+    def test_empty_list(self):
+        assert _has_none_values([]) is True
+
+    def test_list_with_none(self):
+        assert _has_none_values([1, None, 3]) is True
+
+    def test_list_without_none(self):
+        assert _has_none_values([1, 2, 3]) is False
+
+    def test_single_none(self):
+        assert _has_none_values([None]) is True
+
+    def test_single_value(self):
+        assert _has_none_values(["a"]) is False
+
+
+class TestIsAddColumnIncomplete:
+    """Test _is_add_column_incomplete."""
+
+    def test_no_column_name(self):
+        assert _is_add_column_incomplete({"column_names": None}) is True
+        assert _is_add_column_incomplete({"column_names": ""}) is True
+
+    def test_constant_method_complete(self):
+        args = {
+            "column_names": "new_col",
+            "method": PrepFunctions.constant.value,
+        }
+        assert _is_add_column_incomplete(args) is False
+
+    def test_col_func_with_values_no_source(self):
+        args = {
+            "column_names": "new_col",
+            "method": PrepFunctions.sum.value,
+            "source_columns": [],
+        }
+        assert _is_add_column_incomplete(args) is True
+
+    def test_col_func_with_values_has_source(self):
+        args = {
+            "column_names": "new_col",
+            "method": PrepFunctions.sum.value,
+            "source_columns": ["col1", "col2"],
+        }
+        assert _is_add_column_incomplete(args) is False
+
+    def test_quotient_needs_exactly_2_columns(self):
+        args = {
+            "column_names": "new_col",
+            "method": PrepFunctions.quotient.value,
+            "source_columns": ["col1"],
+        }
+        assert _is_add_column_incomplete(args) is True
+
+    def test_quotient_with_2_columns_complete(self):
+        args = {
+            "column_names": "new_col",
+            "method": PrepFunctions.quotient.value,
+            "source_columns": ["col1", "col2"],
+        }
+        assert _is_add_column_incomplete(args) is False
+
+    def test_quotient_with_3_columns_incomplete(self):
+        args = {
+            "column_names": "new_col",
+            "method": PrepFunctions.quotient.value,
+            "source_columns": ["c1", "c2", "c3"],
+        }
+        assert _is_add_column_incomplete(args) is True
+
+    def test_no_values_method_complete(self):
+        args = {
+            "column_names": "new_col",
+            "method": PrepFunctions.index.value,
+        }
+        assert _is_add_column_incomplete(args) is False
+
+    def test_missing_column_names_key(self):
+        assert _is_add_column_incomplete({}) is True
+
+
+class TestIsTransformColumnIncomplete:
+    """Test _is_transform_column_incomplete."""
+
+    def test_no_source_columns(self):
+        assert _is_transform_column_incomplete({"source_columns": []}) is True
+
+    def test_no_method(self):
+        args = {"source_columns": ["col1"], "method": None}
+        assert _is_transform_column_incomplete(args) is True
+
+    def test_no_value_required_complete(self):
+        args = {"source_columns": ["col1"], "method": "trim", "value": []}
+        assert _is_transform_column_incomplete(args) is False
+
+    def test_value_required_all_present(self):
+        args = {
+            "source_columns": ["col1"],
+            "method": "replace",
+            "value": ["old", "new"],
+        }
+        assert _is_transform_column_incomplete(args) is False
+
+    def test_value_required_has_none(self):
+        args = {
+            "source_columns": ["col1"],
+            "method": "replace",
+            "value": ["old", None],
+        }
+        assert _is_transform_column_incomplete(args) is True
+
+    def test_value_required_has_empty_string(self):
+        args = {
+            "source_columns": ["col1"],
+            "method": "replace",
+            "value": ["old", ""],
+        }
+        assert _is_transform_column_incomplete(args) is True
+
+    def test_none_value_means_complete(self):
+        """When value is None (not required), form is complete."""
+        args = {"source_columns": ["col1"], "method": "trim", "value": None}
+        assert _is_transform_column_incomplete(args) is False
+
+    def test_missing_source_columns_key(self):
+        assert _is_transform_column_incomplete({"method": "trim"}) is True
+
+
+class TestIsRemoveRowIncomplete:
+    """Test _is_remove_row_incomplete."""
+
+    def test_row_index_no_value(self):
+        args = {"method": PrepMethods.row_index.value, "value": None}
+        assert _is_remove_row_incomplete(args) is True
+
+    def test_row_index_with_value(self):
+        args = {"method": PrepMethods.row_index.value, "value": ["1", "2"]}
+        assert _is_remove_row_incomplete(args) is False
+
+    def test_unknown_method(self):
+        args = {"method": "unknown"}
+        assert _is_remove_row_incomplete(args) is True
+
+    def test_condition_equal_to_with_value(self):
+        args = {
+            "method": PrepMethods.condition.value,
+            "condition": PrepRowConditions.equal_to.value,
+            "value": "some_val",
+        }
+        assert _is_remove_row_incomplete(args) is False
+
+    def test_condition_equal_to_no_value(self):
+        args = {
+            "method": PrepMethods.condition.value,
+            "condition": PrepRowConditions.equal_to.value,
+            "value": None,
+        }
+        assert _is_remove_row_incomplete(args) is True
+
+    def test_condition_not_equal_to_with_value(self):
+        args = {
+            "method": PrepMethods.condition.value,
+            "condition": PrepRowConditions.not_equal_to.value,
+            "value": "some_val",
+        }
+        assert _is_remove_row_incomplete(args) is False
+
+    def test_condition_not_equal_to_no_value(self):
+        args = {
+            "method": PrepMethods.condition.value,
+            "condition": PrepRowConditions.not_equal_to.value,
+            "value": None,
+        }
+        assert _is_remove_row_incomplete(args) is True
+
+    def test_condition_greater_than_with_value(self):
+        args = {
+            "method": PrepMethods.condition.value,
+            "condition": PrepRowConditions.greater_than.value,
+            "value": 10,
+        }
+        assert _is_remove_row_incomplete(args) is False
+
+    def test_condition_less_than_no_value(self):
+        args = {
+            "method": PrepMethods.condition.value,
+            "condition": PrepRowConditions.less_than.value,
+            "value": None,
+        }
+        assert _is_remove_row_incomplete(args) is True
+
+    def test_condition_between_with_values(self):
+        args = {
+            "method": PrepMethods.condition.value,
+            "condition": PrepRowConditions.between.value,
+            "value": [1, 10],
+        }
+        assert _is_remove_row_incomplete(args) is False
+
+    def test_condition_between_with_none_values(self):
+        args = {
+            "method": PrepMethods.condition.value,
+            "condition": PrepRowConditions.between.value,
+            "value": [None, 10],
+        }
+        assert _is_remove_row_incomplete(args) is True
+
+    def test_condition_not_between_with_values(self):
+        args = {
+            "method": PrepMethods.condition.value,
+            "condition": PrepRowConditions.not_between.value,
+            "value": [5, 20],
+        }
+        assert _is_remove_row_incomplete(args) is False
+
+    def test_condition_like_with_value(self):
+        args = {
+            "method": PrepMethods.condition.value,
+            "condition": PrepRowConditions.like.value,
+            "value": "pattern",
+        }
+        assert _is_remove_row_incomplete(args) is False
+
+    def test_condition_like_no_value(self):
+        args = {
+            "method": PrepMethods.condition.value,
+            "condition": PrepRowConditions.like.value,
+            "value": None,
+        }
+        assert _is_remove_row_incomplete(args) is True
+
+    def test_condition_not_like_with_value(self):
+        args = {
+            "method": PrepMethods.condition.value,
+            "condition": PrepRowConditions.not_like.value,
+            "value": "pat",
+        }
+        assert _is_remove_row_incomplete(args) is False
+
+    def test_condition_not_like_no_value(self):
+        args = {
+            "method": PrepMethods.condition.value,
+            "condition": PrepRowConditions.not_like.value,
+            "value": None,
+        }
+        assert _is_remove_row_incomplete(args) is True
+
+    def test_condition_missing_no_value_needed(self):
+        args = {
+            "method": PrepMethods.condition.value,
+            "condition": PrepRowConditions.missing.value,
+            "value": None,
+        }
+        assert _is_remove_row_incomplete(args) is False
+
+    def test_condition_not_missing_no_value_needed(self):
+        args = {
+            "method": PrepMethods.condition.value,
+            "condition": PrepRowConditions.not_missing.value,
+            "value": None,
+        }
+        assert _is_remove_row_incomplete(args) is False
+
+    def test_row_index_with_empty_value(self):
+        args = {"method": PrepMethods.row_index.value, "value": []}
+        assert _is_remove_row_incomplete(args) is True
+
+
+class TestIsPrepFormIncomplete:
+    """Test _is_prep_form_incomplete dispatcher."""
+
+    def test_add_column_dispatch(self):
+        args = {"column_names": "col", "method": PrepFunctions.constant.value}
+        result = _is_prep_form_incomplete(PrepActions.add_column.value, args)
+        assert result is False
+
+    def test_transform_column_dispatch(self):
+        args = {"source_columns": ["col1"], "method": "trim", "value": []}
+        result = _is_prep_form_incomplete(PrepActions.transform_column.value, args)
+        assert result is False
+
+    def test_remove_column_dispatch_with_columns(self):
+        args = {"source_columns": ["col1"]}
+        result = _is_prep_form_incomplete(PrepActions.remove_column.value, args)
+        assert result is False
+
+    def test_remove_column_dispatch_no_columns(self):
+        args = {"source_columns": []}
+        result = _is_prep_form_incomplete(PrepActions.remove_column.value, args)
+        assert result is True
+
+    def test_remove_row_dispatch(self):
+        args = {"method": PrepMethods.row_index.value, "value": ["1"]}
+        result = _is_prep_form_incomplete(PrepActions.remove_row.value, args)
+        assert result is False
+
+    def test_unknown_action(self):
+        result = _is_prep_form_incomplete("unknown_action", {})
+        assert result is False
+
+    def test_add_column_incomplete(self):
+        args = {"column_names": None}
+        result = _is_prep_form_incomplete(PrepActions.add_column.value, args)
+        assert result is True
+
+    def test_transform_column_incomplete(self):
+        args = {"source_columns": [], "method": None}
+        result = _is_prep_form_incomplete(PrepActions.transform_column.value, args)
+        assert result is True
+
+
+# === BUILDER FUNCTION TESTS === #
+
+
+class TestBuildTransformValue:
+    """Test _build_transform_value."""
+
+    def test_no_func(self):
+        inputs = TransformInputs()
+        assert _build_transform_value(inputs) == []
+
+    def test_replace(self):
+        inputs = TransformInputs()
+        inputs.func = "replace"
+        inputs.old_val = "old"
+        inputs.new_val = "new"
+        assert _build_transform_value(inputs) == ["old", "new"]
+
+    def test_extract_pattern(self):
+        inputs = TransformInputs()
+        inputs.func = "extract pattern"
+        inputs.pattern = r"\d+"
+        assert _build_transform_value(inputs) == [r"\d+"]
+
+    def test_substring(self):
+        inputs = TransformInputs()
+        inputs.func = "substring"
+        inputs.start = 0
+        inputs.end = 5
+        assert _build_transform_value(inputs) == [0, 5]
+
+    def test_add(self):
+        inputs = TransformInputs()
+        inputs.func = "add"
+        inputs.numeric_val = 10.0
+        assert _build_transform_value(inputs) == [10.0]
+
+    def test_multiply(self):
+        inputs = TransformInputs()
+        inputs.func = "multiply"
+        inputs.numeric_val = 2.5
+        assert _build_transform_value(inputs) == [2.5]
+
+    def test_subtract(self):
+        inputs = TransformInputs()
+        inputs.func = "subtract"
+        inputs.numeric_val = 3
+        assert _build_transform_value(inputs) == [3]
+
+    def test_divide(self):
+        inputs = TransformInputs()
+        inputs.func = "divide"
+        inputs.numeric_val = 4
+        assert _build_transform_value(inputs) == [4]
+
+    def test_func_without_values(self):
+        inputs = TransformInputs()
+        inputs.func = "trim"
+        assert _build_transform_value(inputs) == []
+
+    def test_lower(self):
+        inputs = TransformInputs()
+        inputs.func = "lowercase"
+        assert _build_transform_value(inputs) == []
+
+
+class TestBuildTransformResult:
+    """Test _build_transform_result."""
+
+    def test_with_column_and_func(self):
+        inputs = TransformInputs()
+        inputs.func = "trim"
+        result = _build_transform_result("col1", inputs)
+        assert result["action"] == PrepActions.transform_column.value
+        assert result["source_columns"] == ["col1"]
+        assert result["method"] == "trim"
+        assert result["value"] == []
+        assert result["column_names"] is None
+        assert result["affected_count"] == 0
+        assert result["condition"] is None
+        assert result["failed_count"] == 0
+        assert result["additional_info"] is None
+        assert result["remaining_count"] is None
+
+    def test_with_no_column(self):
+        inputs = TransformInputs()
+        inputs.func = "trim"
+        result = _build_transform_result(None, inputs)
         assert result["source_columns"] == []
 
-    def test_add_column_handler_sum_method_logic(self):
-        """Test add_column_handler sum method logic pattern."""
-        # Simulate sum method logic
-        dp_prep_add_col = "sum_column"
-        dp_prep_add_col_med = "sum"
-        dp_prep_add_col_select = ["col1", "col2"]
+    def test_with_replace_values(self):
+        inputs = TransformInputs()
+        inputs.func = "replace"
+        inputs.old_val = "a"
+        inputs.new_val = "b"
+        result = _build_transform_result("col1", inputs)
+        assert result["value"] == ["a", "b"]
+        assert result["method"] == "replace"
 
-        # Simulate constants
-        COL_MEDTHODS_WITH_VALUES = (
-            "sum",
-            "diff",
-            "mean",
-            "median",
-            "mode",
-            "min",
-            "max",
-            "std",
-            "var",
-            "first",
-            "last",
-            "count",
-            "nunique",
-            "product",
-            "quotient",
+    def test_with_numeric_func(self):
+        inputs = TransformInputs()
+        inputs.func = "add"
+        inputs.numeric_val = 5.0
+        result = _build_transform_result("score", inputs)
+        assert result["value"] == [5.0]
+        assert result["source_columns"] == ["score"]
+
+
+# === COLUMN OPTION TESTS === #
+
+
+class TestGetColumnOptionsForCondition:
+    """Test _get_column_options_for_condition."""
+
+    def setup_method(self):
+        self.all_cols = ["a", "b", "c", "d"]
+        self.num_cols = ["a", "b"]
+        self.date_cols = ["c"]
+        self.str_cols = ["d"]
+
+    def test_numeric_condition_returns_num_and_date(self):
+        for cond in DEL_ROW_COND_NUM_ONLY:
+            cols, _ = _get_column_options_for_condition(
+                cond, self.all_cols, self.num_cols, self.date_cols, self.str_cols
+            )
+            assert cols == ["a", "b", "c"]
+
+    def test_string_condition_returns_string_cols(self):
+        for cond in DEL_ROW_COND_STR_ONLY:
+            cols, _ = _get_column_options_for_condition(
+                cond,
+                self.all_cols,
+                self.num_cols,
+                self.date_cols,
+                self.str_cols,
+            )
+            assert cols == ["d"]
+
+    def test_other_condition_returns_all_cols(self):
+        cols, _ = _get_column_options_for_condition(
+            PrepRowConditions.missing.value,
+            self.all_cols,
+            self.num_cols,
+            self.date_cols,
+            self.str_cols,
         )
+        assert cols == self.all_cols
 
-        prep_data_shape = (100, 5)
+    def test_max_1_condition(self):
+        for cond in DEL_ROW_COND_MAX_1:
+            _, max_sel = _get_column_options_for_condition(
+                cond,
+                self.all_cols,
+                self.num_cols,
+                self.date_cols,
+                self.str_cols,
+            )
+            assert max_sel == 1
 
-        # Simulate the logic
-        if dp_prep_add_col:
-            if dp_prep_add_col_med == "constant":
-                value = None  # Would be dp_prep_add_val
-                source_columns = []
-            elif dp_prep_add_col_med in COL_MEDTHODS_WITH_VALUES:
-                value = None
-                source_columns = dp_prep_add_col_select
-            else:
-                value = None
-                source_columns = []
+    def test_non_max1_condition_allows_all(self):
+        _, max_sel = _get_column_options_for_condition(
+            PrepRowConditions.missing.value,
+            self.all_cols,
+            self.num_cols,
+            self.date_cols,
+            self.str_cols,
+        )
+        assert max_sel == len(self.all_cols)
 
-            result = {
-                "action": "add new column",
-                "column_names": dp_prep_add_col,
-                "affected_count": None,
-                "remaining_count": prep_data_shape[1] + 1,
-                "value": value,
-                "method": dp_prep_add_col_med,
-                "source_columns": source_columns,
-                "condition": None,
-                "failed_count": None,
-                "additional_info": None,
-            }
-        else:
-            result = None
+    def test_equal_to_returns_max_1(self):
+        _, max_sel = _get_column_options_for_condition(
+            PrepRowConditions.equal_to.value,
+            self.all_cols,
+            self.num_cols,
+            self.date_cols,
+            self.str_cols,
+        )
+        assert max_sel == 1
 
-        # Test the logic results
-        assert result is not None
-        assert result["method"] == "sum"
-        assert result["source_columns"] == ["col1", "col2"]
+    def test_between_returns_num_and_date(self):
+        cols, _ = _get_column_options_for_condition(
+            PrepRowConditions.between.value,
+            self.all_cols,
+            self.num_cols,
+            self.date_cols,
+            self.str_cols,
+        )
+        assert cols == ["a", "b", "c"]
+
+
+# === POLARS DATAFRAME FUNCTION TESTS === #
+
+
+class TestValidateColumnTypesForRange:
+    """Test _validate_column_types_for_range."""
+
+    def test_empty_columns(self):
+        df = pl.DataFrame({"a": [1, 2], "b": [3, 4]})
+        valid, types = _validate_column_types_for_range(df, [])
+        assert valid is False
+        assert types == set()
+
+    def test_same_type_valid(self):
+        df = pl.DataFrame({"a": [1, 2], "b": [3, 4]})
+        valid, types = _validate_column_types_for_range(df, ["a", "b"])
+        assert valid is True
+        assert len(types) == 1
+
+    def test_different_types_invalid(self):
+        df = pl.DataFrame({"a": [1, 2], "b": ["x", "y"]})
+        valid, types = _validate_column_types_for_range(df, ["a", "b"])
+        assert valid is False
+        assert len(types) == 2
+
+    def test_single_column_valid(self):
+        df = pl.DataFrame({"a": [1, 2]})
+        valid, types = _validate_column_types_for_range(df, ["a"])
+        assert valid is True
+        assert len(types) == 1
+
+
+class TestGetUniqueValuesFromColumns:
+    """Test _get_unique_values_from_columns."""
+
+    def test_single_column(self):
+        df = pl.DataFrame({"a": [3, 1, 2, 1]})
+        result = _get_unique_values_from_columns(df, ["a"])
+        assert result == [1, 2, 3]
+
+    def test_multiple_columns(self):
+        df = pl.DataFrame({"a": [1, 2], "b": [3, 4]})
+        result = _get_unique_values_from_columns(df, ["a", "b"])
+        assert result == [1, 2, 3, 4]
+
+    def test_empty_columns_list(self):
+        df = pl.DataFrame({"a": [1, 2]})
+        result = _get_unique_values_from_columns(df, [])
+        assert result == []
+
+    def test_duplicates_across_columns(self):
+        df = pl.DataFrame({"a": [1, 2], "b": [2, 3]})
+        result = _get_unique_values_from_columns(df, ["a", "b"])
+        assert result == [1, 2, 2, 3]
+
+
+# === REMOVE ROWS BUILDER TESTS === #
+
+
+class TestBuildRemoveRowsValue:
+    """Test _build_remove_rows_value."""
+
+    def test_row_index_with_indexes(self):
+        inputs = RemoveRowsInputs()
+        inputs.method = PrepMethods.row_index.value
+        inputs.indexes_to_remove = ["1", "3", "5"]
+        assert _build_remove_rows_value(inputs) == ["1", "3", "5"]
+
+    def test_row_index_no_indexes(self):
+        inputs = RemoveRowsInputs()
+        inputs.method = PrepMethods.row_index.value
+        assert _build_remove_rows_value(inputs) is None
+
+    def test_not_condition_method(self):
+        inputs = RemoveRowsInputs()
+        inputs.method = "unknown"
+        assert _build_remove_rows_value(inputs) is None
+
+    def test_condition_no_columns(self):
+        inputs = RemoveRowsInputs()
+        inputs.method = PrepMethods.condition.value
+        inputs.condition = PrepRowConditions.equal_to.value
+        assert _build_remove_rows_value(inputs) is None
+
+    def test_condition_equal_to(self):
+        inputs = RemoveRowsInputs()
+        inputs.method = PrepMethods.condition.value
+        inputs.condition = PrepRowConditions.equal_to.value
+        inputs.selected_columns = ["col1"]
+        inputs.equality_values = "test_val"
+        assert _build_remove_rows_value(inputs) == "test_val"
+
+    def test_condition_not_equal_to(self):
+        inputs = RemoveRowsInputs()
+        inputs.method = PrepMethods.condition.value
+        inputs.condition = PrepRowConditions.not_equal_to.value
+        inputs.selected_columns = ["col1"]
+        inputs.equality_values = "test_val"
+        assert _build_remove_rows_value(inputs) == "test_val"
+
+    def test_condition_between(self):
+        inputs = RemoveRowsInputs()
+        inputs.method = PrepMethods.condition.value
+        inputs.condition = PrepRowConditions.between.value
+        inputs.selected_columns = ["col1"]
+        inputs.min_value = 1
+        inputs.max_value = 10
+        assert _build_remove_rows_value(inputs) == [1, 10]
+
+    def test_condition_not_between(self):
+        inputs = RemoveRowsInputs()
+        inputs.method = PrepMethods.condition.value
+        inputs.condition = PrepRowConditions.not_between.value
+        inputs.selected_columns = ["col1"]
+        inputs.min_value = 5
+        inputs.max_value = 20
+        assert _build_remove_rows_value(inputs) == [5, 20]
+
+    def test_condition_like(self):
+        inputs = RemoveRowsInputs()
+        inputs.method = PrepMethods.condition.value
+        inputs.condition = PrepRowConditions.like.value
+        inputs.selected_columns = ["col1"]
+        inputs.pattern_value = "pattern.*"
+        assert _build_remove_rows_value(inputs) == "pattern.*"
+
+    def test_condition_not_like(self):
+        inputs = RemoveRowsInputs()
+        inputs.method = PrepMethods.condition.value
+        inputs.condition = PrepRowConditions.not_like.value
+        inputs.selected_columns = ["col1"]
+        inputs.pattern_value = "pat"
+        assert _build_remove_rows_value(inputs) == "pat"
+
+    def test_condition_missing_returns_none(self):
+        inputs = RemoveRowsInputs()
+        inputs.method = PrepMethods.condition.value
+        inputs.condition = PrepRowConditions.missing.value
+        inputs.selected_columns = ["col1"]
+        assert _build_remove_rows_value(inputs) is None
+
+    def test_condition_not_missing_returns_none(self):
+        inputs = RemoveRowsInputs()
+        inputs.method = PrepMethods.condition.value
+        inputs.condition = PrepRowConditions.not_missing.value
+        inputs.selected_columns = ["col1"]
+        assert _build_remove_rows_value(inputs) is None
+
+    def test_condition_no_condition_set(self):
+        inputs = RemoveRowsInputs()
+        inputs.method = PrepMethods.condition.value
+        inputs.condition = None
+        assert _build_remove_rows_value(inputs) is None
+
+
+class TestBuildRemoveRowsResult:
+    """Test _build_remove_rows_result."""
+
+    def test_row_index_result(self):
+        inputs = RemoveRowsInputs()
+        inputs.method = PrepMethods.row_index.value
+        inputs.indexes_to_remove = ["1", "2"]
+        result = _build_remove_rows_result(inputs)
+        assert result["action"] == PrepActions.remove_row.value
+        assert result["value"] == ["1", "2"]
+        assert result["source_columns"] == []
+        assert result["condition"] is None
+        assert result["failed_count"] is None
+        assert result["additional_info"] is None
+
+    def test_condition_result(self):
+        inputs = RemoveRowsInputs()
+        inputs.method = PrepMethods.condition.value
+        inputs.condition = PrepRowConditions.equal_to.value
+        inputs.selected_columns = ["col1"]
+        inputs.equality_values = "val"
+        result = _build_remove_rows_result(inputs)
+        assert result["action"] == PrepActions.remove_row.value
+        assert result["source_columns"] == ["col1"]
+        assert result["condition"] == PrepRowConditions.equal_to.value
+        assert result["value"] == "val"
+        assert result["method"] == PrepMethods.condition.value
+
+    def test_no_method(self):
+        inputs = RemoveRowsInputs()
+        result = _build_remove_rows_result(inputs)
+        assert result["source_columns"] == []
+        assert result["condition"] is None
         assert result["value"] is None
 
-    def test_add_column_handler_quotient_max_selections_logic(self):
-        """Test add_column_handler quotient method max selections logic."""
-        # Simulate quotient method logic with max selections
-        dp_prep_add_col_med = "quotient"
-        num_cols = ["col1", "col2", "col3", "col4"]
+    def test_condition_no_selected_columns(self):
+        inputs = RemoveRowsInputs()
+        inputs.method = PrepMethods.condition.value
+        inputs.condition = PrepRowConditions.missing.value
+        result = _build_remove_rows_result(inputs)
+        assert result["source_columns"] == []
 
-        # Simulate max_selections logic
-        if dp_prep_add_col_med in ["quotient", "diff"]:
-            max_selections = 2
-        else:
-            max_selections = len(num_cols)
+    def test_condition_with_no_condition_value(self):
+        inputs = RemoveRowsInputs()
+        inputs.method = PrepMethods.condition.value
+        inputs.condition = None
+        inputs.selected_columns = ["col1"]
+        result = _build_remove_rows_result(inputs)
+        assert result["condition"] is None
 
-        # Test the logic
-        assert max_selections == 2
 
-        # Simulate selection validation
-        dp_prep_add_col_select = ["col1", "col2"]
-        is_valid_selection = len(dp_prep_add_col_select) <= max_selections
+# === RENDER FUNCTION TESTS (with st mocking) === #
 
-        assert is_valid_selection is True
 
-    def test_remove_column_handler_logic(self):
-        """Test remove_column_handler logic pattern."""
-        # Simulate remove column logic
-        dp_prep_del_cols = ["col1", "col2"]
-        prep_data_shape = (100, 6)
+class TestRenderStringFunctionInputs:
+    """Test _render_string_function_inputs with mocked streamlit."""
 
-        # Simulate the logic
-        if dp_prep_del_cols:
-            affected_count = len(dp_prep_del_cols)
-            remaining_count = prep_data_shape[1] - len(dp_prep_del_cols)
-        else:
-            affected_count = 0
-            remaining_count = prep_data_shape[1]
+    def test_basic_function_no_extra_inputs(self):
+        _st.selectbox = MagicMock(return_value="trim")
+        inputs = TransformInputs()
+        result = _render_string_function_inputs(0, inputs)
+        assert result.func == "trim"
 
-        result = {
-            "action": "remove column(s)",
-            "column_names": None,
-            "affected_count": affected_count,
-            "remaining_count": remaining_count,
-            "value": None,
-            "method": None,
-            "source_columns": dp_prep_del_cols if dp_prep_del_cols else [],
-            "condition": None,
-            "failed_count": None,
-            "additional_info": None,
+    def test_replace_function(self):
+        _st.selectbox = MagicMock(return_value="replace")
+        _st.text_input = MagicMock(side_effect=["old_val", "new_val"])
+        inputs = TransformInputs()
+        result = _render_string_function_inputs(0, inputs)
+        assert result.func == "replace"
+        assert result.old_val == "old_val"
+        assert result.new_val == "new_val"
+
+    def test_substring_function(self):
+        _st.selectbox = MagicMock(return_value="substring")
+        mock_col = MagicMock()
+        _st.columns = MagicMock(return_value=[mock_col, mock_col])
+        _st.number_input = MagicMock(side_effect=[0, 5])
+        inputs = TransformInputs()
+        result = _render_string_function_inputs(0, inputs)
+        assert result.func == "substring"
+
+    def test_extract_pattern_function(self):
+        _st.selectbox = MagicMock(return_value="extract pattern")
+        _st.text_input = MagicMock(return_value=r"\d+")
+        inputs = TransformInputs()
+        result = _render_string_function_inputs(0, inputs)
+        assert result.func == "extract pattern"
+        assert result.pattern == r"\d+"
+
+    def test_uppercase_function(self):
+        _st.selectbox = MagicMock(return_value="uppercase")
+        inputs = TransformInputs()
+        result = _render_string_function_inputs(0, inputs)
+        assert result.func == "uppercase"
+
+    def test_lowercase_function(self):
+        _st.selectbox = MagicMock(return_value="lowercase")
+        inputs = TransformInputs()
+        result = _render_string_function_inputs(0, inputs)
+        assert result.func == "lowercase"
+
+
+class TestRenderSubstringInputs:
+    """Test _render_substring_inputs."""
+
+    def test_valid_range(self):
+        mock_col = MagicMock()
+        _st.columns = MagicMock(return_value=[mock_col, mock_col])
+        _st.number_input = MagicMock(side_effect=[0, 5])
+        inputs = TransformInputs()
+        _render_substring_inputs(0, inputs)
+        assert inputs.start == 0
+        assert inputs.end == 5
+
+    def test_start_greater_than_end_shows_error(self):
+        mock_col = MagicMock()
+        _st.columns = MagicMock(return_value=[mock_col, mock_col])
+        _st.number_input = MagicMock(side_effect=[5, 2])
+        _st.error = MagicMock()
+        inputs = TransformInputs()
+        _render_substring_inputs(0, inputs)
+        _st.error.assert_called_once()
+
+    def test_start_equals_end_shows_error(self):
+        mock_col = MagicMock()
+        _st.columns = MagicMock(return_value=[mock_col, mock_col])
+        _st.number_input = MagicMock(side_effect=[3, 3])
+        _st.error = MagicMock()
+        inputs = TransformInputs()
+        _render_substring_inputs(0, inputs)
+        _st.error.assert_called_once()
+
+    def test_none_values_no_error(self):
+        mock_col = MagicMock()
+        _st.columns = MagicMock(return_value=[mock_col, mock_col])
+        _st.number_input = MagicMock(side_effect=[None, None])
+        _st.error = MagicMock()
+        inputs = TransformInputs()
+        _render_substring_inputs(0, inputs)
+        _st.error.assert_not_called()
+
+    def test_start_none_end_has_value(self):
+        mock_col = MagicMock()
+        _st.columns = MagicMock(return_value=[mock_col, mock_col])
+        _st.number_input = MagicMock(side_effect=[None, 5])
+        _st.error = MagicMock()
+        inputs = TransformInputs()
+        _render_substring_inputs(0, inputs)
+        _st.error.assert_not_called()
+
+
+class TestRenderNumericFunctionInputs:
+    """Test _render_numeric_function_inputs."""
+
+    def test_add_op(self):
+        _st.selectbox = MagicMock(return_value="add")
+        _st.number_input = MagicMock(return_value=10.0)
+        inputs = TransformInputs()
+        result = _render_numeric_function_inputs(0, inputs)
+        assert result.func == "add"
+        assert result.numeric_val == 10.0
+
+    def test_multiply_op(self):
+        _st.selectbox = MagicMock(return_value="multiply")
+        _st.number_input = MagicMock(return_value=2.0)
+        inputs = TransformInputs()
+        result = _render_numeric_function_inputs(0, inputs)
+        assert result.func == "multiply"
+        assert result.numeric_val == 2.0
+
+    def test_subtract_op(self):
+        _st.selectbox = MagicMock(return_value="subtract")
+        _st.number_input = MagicMock(return_value=3.0)
+        inputs = TransformInputs()
+        result = _render_numeric_function_inputs(0, inputs)
+        assert result.func == "subtract"
+        assert result.numeric_val == 3.0
+
+    def test_divide_op(self):
+        _st.selectbox = MagicMock(return_value="divide")
+        _st.number_input = MagicMock(return_value=4.0)
+        inputs = TransformInputs()
+        result = _render_numeric_function_inputs(0, inputs)
+        assert result.func == "divide"
+        assert result.numeric_val == 4.0
+
+    def test_non_arithmetic_op(self):
+        _st.selectbox = MagicMock(return_value="round")
+        inputs = TransformInputs()
+        result = _render_numeric_function_inputs(0, inputs)
+        assert result.func == "round"
+        assert result.numeric_val is None
+
+    def test_floor_op(self):
+        _st.selectbox = MagicMock(return_value="floor")
+        inputs = TransformInputs()
+        result = _render_numeric_function_inputs(0, inputs)
+        assert result.func == "floor"
+        assert result.numeric_val is None
+
+
+class TestRenderDatetimeFunctionInputs:
+    """Test _render_datetime_function_inputs."""
+
+    def test_returns_inputs_with_func(self):
+        _st.selectbox = MagicMock(return_value="hour")
+        inputs = TransformInputs()
+        result = _render_datetime_function_inputs(0, inputs)
+        assert result.func == "hour"
+
+    def test_minute_func(self):
+        _st.selectbox = MagicMock(return_value="minute")
+        inputs = TransformInputs()
+        result = _render_datetime_function_inputs(0, inputs)
+        assert result.func == "minute"
+
+
+# === RENDER EQUALITY/RANGE/PATTERN VALUE INPUT TESTS === #
+
+
+class TestRenderEqualityValueInputs:
+    """Test _render_equality_value_inputs."""
+
+    def test_renders_selectbox_with_unique_vals(self):
+        df = pl.DataFrame({"name": ["Alice", "Bob", "Alice"]})
+        inputs = RemoveRowsInputs()
+        inputs.selected_columns = ["name"]
+        _st.selectbox = MagicMock(return_value="Alice")
+        _render_equality_value_inputs(df, inputs, 0)
+        assert inputs.equality_values == "Alice"
+        _st.selectbox.assert_called_once()
+
+    def test_numeric_column(self):
+        df = pl.DataFrame({"age": [25, 30, 35]})
+        inputs = RemoveRowsInputs()
+        inputs.selected_columns = ["age"]
+        _st.selectbox = MagicMock(return_value=30)
+        _render_equality_value_inputs(df, inputs, 0)
+        assert inputs.equality_values == 30
+
+
+class TestRenderRangeValueInputs:
+    """Test _render_range_value_inputs."""
+
+    def test_valid_same_type_columns(self):
+        df = pl.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
+        inputs = RemoveRowsInputs()
+        inputs.selected_columns = ["a", "b"]
+        _st.selectbox = MagicMock(side_effect=[1, 6])
+        _st.error = MagicMock()
+        _render_range_value_inputs(df, inputs, 0)
+        assert inputs.min_value == 1
+        assert inputs.max_value == 6
+        _st.error.assert_not_called()
+
+    def test_invalid_mixed_types_shows_error(self):
+        df = pl.DataFrame({"a": [1, 2], "b": [1.5, 2.5]})
+        inputs = RemoveRowsInputs()
+        inputs.selected_columns = ["a", "b"]
+        _st.selectbox = MagicMock(side_effect=[1, 2.5])
+        _st.error = MagicMock()
+        _render_range_value_inputs(df, inputs, 0)
+        _st.error.assert_called_once()
+
+    def test_empty_columns(self):
+        df = pl.DataFrame({"a": [1, 2]})
+        inputs = RemoveRowsInputs()
+        inputs.selected_columns = []
+        _st.selectbox = MagicMock(side_effect=[None, None])
+        _st.error = MagicMock()
+        _render_range_value_inputs(df, inputs, 0)
+        # empty columns => not valid, but no col_types => no error shown
+        _st.error.assert_not_called()
+
+
+class TestRenderPatternValueInputs:
+    """Test _render_pattern_value_inputs."""
+
+    def test_sets_pattern_value(self):
+        inputs = RemoveRowsInputs()
+        _st.text_input = MagicMock(return_value="Al.*")
+        _render_pattern_value_inputs(inputs, 0)
+        assert inputs.pattern_value == "Al.*"
+
+    def test_empty_pattern(self):
+        inputs = RemoveRowsInputs()
+        _st.text_input = MagicMock(return_value="")
+        _render_pattern_value_inputs(inputs, 0)
+        assert inputs.pattern_value == ""
+
+
+# === PREP STEP HANDLER TESTS === #
+
+
+@pytest.fixture()
+def sample_polars_df():
+    """Create a sample polars DataFrame for testing."""
+    return pl.DataFrame(
+        {
+            "name": ["Alice", "Bob", "Charlie"],
+            "age": [25, 30, 35],
+            "score": [90.5, 85.0, 92.3],
+            "date": pl.Series(
+                ["2024-01-01", "2024-02-01", "2024-03-01"]
+            ).str.to_datetime(),
         }
+    )
 
-        # Test the logic results
+
+class TestPrepStepHandler:
+    """Test PrepStepHandler methods."""
+
+    def test_init(self, sample_polars_df):
+        handler = PrepStepHandler(sample_polars_df, step_index=0)
+        assert handler.prep_data is sample_polars_df
+        assert handler.step_index == 0
+        assert "name" in handler.all_cols
+        assert "age" in handler.num_cols
+        assert "name" in handler.string_cols
+
+    def test_init_column_categories(self, sample_polars_df):
+        handler = PrepStepHandler(sample_polars_df, step_index=0)
+        assert "score" in handler.num_cols
+        assert "date" in handler.date_cols
+
+    def test_add_column_handler_no_input(self, sample_polars_df):
+        _st.text_input = MagicMock(return_value="")
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.add_column_handler()
+        assert result is None
+
+    def test_add_column_handler_constant(self, sample_polars_df):
+        _st.text_input = MagicMock(side_effect=["new_col", "constant_val"])
+        _st.selectbox = MagicMock(return_value=PrepFunctions.constant.value)
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.add_column_handler()
+        assert result is not None
+        assert result["action"] == PrepActions.add_column.value
+        assert result["column_names"] == "new_col"
+        assert result["value"] == "constant_val"
+        assert result["method"] == PrepFunctions.constant.value
+        assert result["remaining_count"] == sample_polars_df.shape[1] + 1
+        assert result["condition"] is None
+        assert result["failed_count"] is None
+        assert result["additional_info"] is None
+
+    def test_add_column_handler_sum(self, sample_polars_df):
+        _st.text_input = MagicMock(return_value="sum_col")
+        _st.selectbox = MagicMock(return_value=PrepFunctions.sum.value)
+        _st.multiselect = MagicMock(return_value=["age", "score"])
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.add_column_handler()
+        assert result is not None
+        assert result["method"] == PrepFunctions.sum.value
+        assert result["source_columns"] == ["age", "score"]
+        assert result["value"] is None
+
+    def test_add_column_handler_quotient_max_2(self, sample_polars_df):
+        _st.text_input = MagicMock(return_value="q_col")
+        _st.selectbox = MagicMock(return_value=PrepFunctions.quotient.value)
+        _st.multiselect = MagicMock(return_value=["age", "score"])
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.add_column_handler()
+        assert result is not None
+        call_kwargs = _st.multiselect.call_args[1]
+        assert call_kwargs["max_selections"] == 2
+
+    def test_add_column_handler_diff_max_2(self, sample_polars_df):
+        _st.text_input = MagicMock(return_value="diff_col")
+        _st.selectbox = MagicMock(return_value=PrepFunctions.diff.value)
+        _st.multiselect = MagicMock(return_value=["age", "score"])
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.add_column_handler()
+        assert result is not None
+        call_kwargs = _st.multiselect.call_args[1]
+        assert call_kwargs["max_selections"] == 2
+
+    def test_add_column_handler_no_values_method(self, sample_polars_df):
+        _st.text_input = MagicMock(return_value="idx_col")
+        _st.selectbox = MagicMock(return_value=PrepFunctions.index.value)
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.add_column_handler()
+        assert result is not None
+        assert result["method"] == PrepFunctions.index.value
+        assert result["value"] is None
+        assert result["source_columns"] == []
+
+    def test_add_column_handler_mean(self, sample_polars_df):
+        _st.text_input = MagicMock(return_value="mean_col")
+        _st.selectbox = MagicMock(return_value=PrepFunctions.mean.value)
+        _st.multiselect = MagicMock(return_value=["age", "score"])
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.add_column_handler()
+        assert result is not None
+        assert result["method"] == PrepFunctions.mean.value
+        call_kwargs = _st.multiselect.call_args[1]
+        assert call_kwargs["max_selections"] == len(handler.num_cols)
+
+    def test_transform_column_handler_no_selection(self, sample_polars_df):
+        _st.selectbox = MagicMock(return_value=None)
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.transform_column_handler()
+        assert result is None
+
+    def test_transform_column_handler_string_col(self, sample_polars_df):
+        _st.selectbox = MagicMock(side_effect=["name", "trim"])
+        _st.info = MagicMock()
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.transform_column_handler()
+        assert result is not None
+        assert result["source_columns"] == ["name"]
+        assert result["method"] == "trim"
+
+    def test_transform_column_handler_numeric_col(self, sample_polars_df):
+        _st.selectbox = MagicMock(side_effect=["age", "add"])
+        _st.info = MagicMock()
+        _st.number_input = MagicMock(return_value=5.0)
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.transform_column_handler()
+        assert result is not None
+        assert result["source_columns"] == ["age"]
+
+    def test_transform_column_handler_datetime_col(self, sample_polars_df):
+        _st.selectbox = MagicMock(side_effect=["date", "hour"])
+        _st.info = MagicMock()
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.transform_column_handler()
+        assert result is not None
+        assert result["source_columns"] == ["date"]
+        assert result["method"] == "hour"
+
+    def test_render_transform_inputs_unknown_type(self, sample_polars_df):
+        handler = PrepStepHandler(sample_polars_df, 0)
+        inputs = TransformInputs()
+        result = handler._render_transform_inputs_by_type(pl.Boolean, inputs)
+        assert result.func is None
+
+    def test_render_transform_inputs_float_col(self, sample_polars_df):
+        _st.selectbox = MagicMock(side_effect=["score", "round"])
+        _st.info = MagicMock()
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.transform_column_handler()
+        assert result is not None
+        assert result["source_columns"] == ["score"]
+
+    def test_remove_column_handler_with_selection(self, sample_polars_df):
+        _st.multiselect = MagicMock(return_value=["name", "age"])
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.remove_column_handler()
+        assert result["action"] == PrepActions.remove_column.value
         assert result["affected_count"] == 2
-        assert result["remaining_count"] == 4  # 6 - 2
-        assert result["source_columns"] == ["col1", "col2"]
+        assert result["remaining_count"] == sample_polars_df.shape[1] - 2
+        assert result["source_columns"] == ["name", "age"]
+        assert result["column_names"] is None
+        assert result["value"] is None
+        assert result["method"] is None
+        assert result["condition"] is None
 
-    def test_transform_column_variable_initialization_logic(self):
-        """Test transform_column_handler variable initialization logic."""
-        # Simulate the variable initialization logic that was problematic
-        dp_prep_trf_col = "test_column"
+    def test_remove_column_handler_no_selection(self, sample_polars_df):
+        _st.multiselect = MagicMock(return_value=[])
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.remove_column_handler()
+        assert result["affected_count"] == 0
+        assert result["remaining_count"] == sample_polars_df.shape[1]
+        assert result["source_columns"] == []
 
-        # Simulate the initialization pattern from the fixed code
-        if dp_prep_trf_col:
-            # Initialize variables to avoid UnboundLocalError
-            dp_prep_trf_func = None
-            dp_prep_trf_old_val = None
-            dp_prep_trf_new_val = None
-            dp_prep_trf_pattern = None
-            dp_prep_trf_start = None
-            dp_prep_trf_end = None
-            dp_prep_trf_val = None
+    def test_remove_rows_handler_by_index(self, sample_polars_df):
+        _st.selectbox = MagicMock(return_value=PrepMethods.row_index.value)
+        _st.text_input = MagicMock(return_value="1, 2, 3")
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.remove_rows_handler()
+        assert result["method"] == PrepMethods.row_index.value
+        assert result["value"] == ["1", "2", "3"]
 
-            # Test that all variables are properly initialized
-            assert dp_prep_trf_func is None
-            assert dp_prep_trf_old_val is None
-            assert dp_prep_trf_new_val is None
-            assert dp_prep_trf_pattern is None
-            assert dp_prep_trf_start is None
-            assert dp_prep_trf_end is None
-            assert dp_prep_trf_val is None
+    def test_remove_rows_handler_by_index_empty(self, sample_polars_df):
+        _st.selectbox = MagicMock(return_value=PrepMethods.row_index.value)
+        _st.text_input = MagicMock(return_value="")
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.remove_rows_handler()
+        assert result["method"] == PrepMethods.row_index.value
 
-            # Simulate column type detection
-            col_type = "object"  # Simulated dtype
+    def test_remove_rows_handler_by_condition(self, sample_polars_df):
+        _st.selectbox = MagicMock(
+            side_effect=[
+                PrepMethods.condition.value,
+                PrepRowConditions.equal_to.value,
+                "Alice",
+            ]
+        )
+        _st.multiselect = MagicMock(return_value=["name"])
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.remove_rows_handler()
+        assert result["method"] == PrepMethods.condition.value
 
-            # Simulate function selection based on column type
-            if col_type in ["object", "string"]:
-                dp_prep_trf_func = "trim"  # Example function
-            elif col_type in ["int64", "float64"]:
-                dp_prep_trf_func = "add"
-            elif col_type == "datetime64[ns]":
-                dp_prep_trf_func = "hour"
+    def test_remove_rows_handler_condition_no_condition(self, sample_polars_df):
+        _st.selectbox = MagicMock(side_effect=[PrepMethods.condition.value, None])
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.remove_rows_handler()
+        assert result["condition"] is None
 
-            # Test value assignment logic with null checks
-            if dp_prep_trf_func and dp_prep_trf_func in ["replace"]:
-                value = [dp_prep_trf_old_val, dp_prep_trf_new_val]
-            elif dp_prep_trf_func and dp_prep_trf_func in ["extract pattern"]:
-                value = [dp_prep_trf_pattern]
-            elif dp_prep_trf_func and dp_prep_trf_func in ["substring"]:
-                value = [dp_prep_trf_start, dp_prep_trf_end]
-            elif dp_prep_trf_func and dp_prep_trf_func in [
-                "add",
-                "multiply",
-                "subtract",
-                "divide",
-            ]:
-                value = [dp_prep_trf_val]
-            else:
-                value = []
+    def test_remove_rows_handler_condition_no_columns(self, sample_polars_df):
+        _st.selectbox = MagicMock(
+            side_effect=[
+                PrepMethods.condition.value,
+                PrepRowConditions.missing.value,
+            ]
+        )
+        _st.multiselect = MagicMock(return_value=[])
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.remove_rows_handler()
+        assert result["source_columns"] == []
 
-            # Test that no UnboundLocalError occurs
-            assert dp_prep_trf_func == "trim"
-            assert value == []  # Since trim is not in the conditional checks
+    def test_remove_rows_handler_condition_between(self, sample_polars_df):
+        _st.selectbox = MagicMock(
+            side_effect=[
+                PrepMethods.condition.value,
+                PrepRowConditions.between.value,
+                25,
+                35,
+            ]
+        )
+        _st.multiselect = MagicMock(return_value=["age"])
+        _st.error = MagicMock()
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.remove_rows_handler()
+        assert result["method"] == PrepMethods.condition.value
 
-    def test_column_type_function_mapping_logic(self):
-        """Test column type to function mapping logic pattern."""
-        # Simulate column type detection and function mapping
-        test_cases = [
-            ("object", ["trim", "replace", "lower", "upper"]),
-            ("string", ["trim", "replace", "lower", "upper"]),
-            ("int64", ["add", "multiply", "subtract", "divide"]),
-            ("float64", ["add", "multiply", "subtract", "divide"]),
-            ("datetime64[ns]", ["hour", "day", "month", "year"]),
-        ]
+    def test_remove_rows_handler_condition_like(self, sample_polars_df):
+        _st.selectbox = MagicMock(
+            side_effect=[
+                PrepMethods.condition.value,
+                PrepRowConditions.like.value,
+            ]
+        )
+        _st.multiselect = MagicMock(return_value=["name"])
+        _st.text_input = MagicMock(return_value="Al.*")
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.remove_rows_handler()
+        assert result["method"] == PrepMethods.condition.value
 
-        # Simulate the mapping logic
-        for col_type, expected_functions in test_cases:
-            if col_type in ["object", "string"]:
-                available_functions = ["trim", "replace", "lower", "upper"]
-            elif col_type in ["int64", "float64"]:
-                available_functions = ["add", "multiply", "subtract", "divide"]
-            elif col_type == "datetime64[ns]":
-                available_functions = ["hour", "day", "month", "year"]
-            else:
-                available_functions = []
+    def test_remove_rows_handler_condition_not_like(self, sample_polars_df):
+        _st.selectbox = MagicMock(
+            side_effect=[
+                PrepMethods.condition.value,
+                PrepRowConditions.not_like.value,
+            ]
+        )
+        _st.multiselect = MagicMock(return_value=["name"])
+        _st.text_input = MagicMock(return_value="Bob")
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.remove_rows_handler()
+        assert result["method"] == PrepMethods.condition.value
 
-            # Test mapping logic
-            assert available_functions == expected_functions
+    def test_render_condition_value_inputs_equality(self, sample_polars_df):
+        handler = PrepStepHandler(sample_polars_df, 0)
+        inputs = RemoveRowsInputs()
+        inputs.condition = PrepRowConditions.equal_to.value
+        inputs.selected_columns = ["name"]
+        _st.selectbox = MagicMock(return_value="Alice")
+        handler._render_condition_value_inputs(inputs)
+        assert inputs.equality_values == "Alice"
+
+    def test_render_condition_value_inputs_not_equal(self, sample_polars_df):
+        handler = PrepStepHandler(sample_polars_df, 0)
+        inputs = RemoveRowsInputs()
+        inputs.condition = PrepRowConditions.not_equal_to.value
+        inputs.selected_columns = ["name"]
+        _st.selectbox = MagicMock(return_value="Bob")
+        handler._render_condition_value_inputs(inputs)
+        assert inputs.equality_values == "Bob"
+
+    def test_render_condition_value_inputs_between(self, sample_polars_df):
+        handler = PrepStepHandler(sample_polars_df, 0)
+        inputs = RemoveRowsInputs()
+        inputs.condition = PrepRowConditions.between.value
+        inputs.selected_columns = ["age"]
+        _st.selectbox = MagicMock(side_effect=[25, 35])
+        _st.error = MagicMock()
+        handler._render_condition_value_inputs(inputs)
+        assert inputs.min_value == 25
+        assert inputs.max_value == 35
+
+    def test_render_condition_value_inputs_like(self, sample_polars_df):
+        handler = PrepStepHandler(sample_polars_df, 0)
+        inputs = RemoveRowsInputs()
+        inputs.condition = PrepRowConditions.like.value
+        inputs.selected_columns = ["name"]
+        _st.text_input = MagicMock(return_value="Al.*")
+        handler._render_condition_value_inputs(inputs)
+        assert inputs.pattern_value == "Al.*"
+
+    def test_render_condition_value_inputs_not_like(self, sample_polars_df):
+        handler = PrepStepHandler(sample_polars_df, 0)
+        inputs = RemoveRowsInputs()
+        inputs.condition = PrepRowConditions.not_like.value
+        inputs.selected_columns = ["name"]
+        _st.text_input = MagicMock(return_value="Bob")
+        handler._render_condition_value_inputs(inputs)
+        assert inputs.pattern_value == "Bob"
+
+    def test_render_condition_value_inputs_between_mixed_types(self):
+        df = pl.DataFrame({"a": [1, 2], "b": [1.5, 2.5]})
+        handler = PrepStepHandler(df, 0)
+        inputs = RemoveRowsInputs()
+        inputs.condition = PrepRowConditions.between.value
+        inputs.selected_columns = ["a", "b"]
+        _st.selectbox = MagicMock(side_effect=[1, 2])
+        _st.error = MagicMock()
+        handler._render_condition_value_inputs(inputs)
+        _st.error.assert_called_once()
+
+    def test_render_condition_value_inputs_missing(self, sample_polars_df):
+        """Condition like 'missing' should not render any value inputs."""
+        handler = PrepStepHandler(sample_polars_df, 0)
+        inputs = RemoveRowsInputs()
+        inputs.condition = PrepRowConditions.missing.value
+        inputs.selected_columns = ["name"]
+        _st.selectbox = MagicMock()
+        _st.text_input = MagicMock()
+        handler._render_condition_value_inputs(inputs)
+        # For missing condition, none of the value render methods should be called
+        _st.selectbox.assert_not_called()
+        _st.text_input.assert_not_called()
+
+    def test_render_row_index_inputs_with_text(self, sample_polars_df):
+        handler = PrepStepHandler(sample_polars_df, 0)
+        inputs = RemoveRowsInputs()
+        _st.text_input = MagicMock(return_value="1, 2, 3")
+        handler._render_row_index_inputs(inputs)
+        assert inputs.indexes_to_remove == ["1", "2", "3"]
+
+    def test_render_row_index_inputs_empty(self, sample_polars_df):
+        handler = PrepStepHandler(sample_polars_df, 0)
+        inputs = RemoveRowsInputs()
+        _st.text_input = MagicMock(return_value="")
+        handler._render_row_index_inputs(inputs)
+        assert inputs.indexes_to_remove == []
+
+    def test_render_row_index_inputs_with_range(self, sample_polars_df):
+        handler = PrepStepHandler(sample_polars_df, 0)
+        inputs = RemoveRowsInputs()
+        _st.text_input = MagicMock(return_value="5:-2")
+        handler._render_row_index_inputs(inputs)
+        assert inputs.indexes_to_remove == ["5:-2"]
+
+    def test_render_condition_inputs_with_condition_and_columns(self, sample_polars_df):
+        handler = PrepStepHandler(sample_polars_df, 0)
+        inputs = RemoveRowsInputs()
+        _st.selectbox = MagicMock(
+            side_effect=[PrepRowConditions.equal_to.value, "Alice"]
+        )
+        _st.multiselect = MagicMock(return_value=["name"])
+        handler._render_condition_inputs(inputs)
+        assert inputs.condition == PrepRowConditions.equal_to.value
+        assert inputs.selected_columns == ["name"]
 
 
-class TestPrepViewHelperLogic:
-    """Test helper logic patterns in prep_view.py."""
+# === PREP ADD/REMOVE STEP TESTS === #
 
-    def test_dataframe_shape_calculation_logic(self):
-        """Test DataFrame shape calculation logic patterns."""
-        # Simulate different DataFrame shapes
-        test_shapes = [
-            (100, 5),  # 100 rows, 5 columns
-            (0, 0),  # Empty DataFrame
-            (1, 1),  # Single cell DataFrame
-            (1000, 20),  # Large DataFrame
-        ]
 
-        for _, cols in test_shapes:
-            # Simulate add column operation
-            new_column_count = cols + 1
+class TestPrepAddStep:
+    """Test prep_add_step function."""
 
-            # Simulate remove column operation
-            removed_columns = min(2, cols)  # Remove up to 2 columns
-            remaining_columns = max(0, cols - removed_columns)
+    def test_no_action_selected(self, sample_polars_df):
+        """When no action is selected, should show warning."""
+        mock_popover = MagicMock()
+        mock_popover.__enter__ = MagicMock(return_value=None)
+        mock_popover.__exit__ = MagicMock(return_value=False)
+        _st.popover = MagicMock(return_value=mock_popover)
+        _st.selectbox = MagicMock(return_value=None)
+        _st.info = MagicMock()
+        _st.warning = MagicMock()
 
-            # Test calculations
-            assert new_column_count == cols + 1
-            assert remaining_columns >= 0
-            assert remaining_columns <= cols
+        prep_add_step(sample_polars_df, step_index=0)
+        _st.warning.assert_called()
 
-    def test_step_index_key_generation_logic(self):
-        """Test step index key generation logic pattern."""
-        # Simulate key generation logic
-        step_indices = [0, 1, 5, 42, 100]
+    def test_add_column_action_no_input(self, sample_polars_df):
+        """When add column selected but no column name entered."""
+        mock_popover = MagicMock()
+        mock_popover.__enter__ = MagicMock(return_value=None)
+        mock_popover.__exit__ = MagicMock(return_value=False)
+        _st.popover = MagicMock(return_value=mock_popover)
+        _st.selectbox = MagicMock(return_value=PrepActions.add_column.value)
+        _st.text_input = MagicMock(return_value="")
+        _st.info = MagicMock()
+        _st.warning = MagicMock()
 
-        for step_index in step_indices:
-            # Simulate key generation patterns from the code
-            add_col_key = f"st_sb_add_col{step_index}"
-            add_method_key = f"st_sb_add_col_method{step_index}"
-            add_val_key = f"st_sb_add_val{step_index}"
-            trf_col_key = f"st_sb_trf_col{step_index}"
+        prep_add_step(sample_polars_df, step_index=0)
+        _st.warning.assert_called()
 
-            # Test key uniqueness and format
-            assert add_col_key.endswith(str(step_index))
-            assert add_method_key.endswith(str(step_index))
-            assert add_val_key.endswith(str(step_index))
-            assert trf_col_key.endswith(str(step_index))
+    def test_remove_column_action(self, sample_polars_df):
+        """When remove column selected and columns chosen."""
+        mock_popover = MagicMock()
+        mock_popover.__enter__ = MagicMock(return_value=None)
+        mock_popover.__exit__ = MagicMock(return_value=False)
+        _st.popover = MagicMock(return_value=mock_popover)
+        _st.selectbox = MagicMock(return_value=PrepActions.remove_column.value)
+        _st.multiselect = MagicMock(return_value=["name"])
+        _st.info = MagicMock()
+        _st.button = MagicMock(return_value=False)
 
-            # Test keys are unique for different components
-            keys = [add_col_key, add_method_key, add_val_key, trf_col_key]
-            assert len(keys) == len(set(keys))  # All keys should be unique
+        prep_add_step(sample_polars_df, step_index=0)
+        _st.button.assert_called_once()
 
-    def test_method_categorization_validation_logic(self):
-        """Test method categorization validation logic."""
-        # Simulate method validation logic
-        COL_MEDTHODS_WITH_VALUES = (
-            "sum",
-            "diff",
-            "mean",
-            "median",
-            "mode",
-            "min",
-            "max",
-            "std",
-            "var",
-            "first",
-            "last",
-            "count",
-            "nunique",
-            "product",
-            "quotient",
+    def test_transform_column_action(self, sample_polars_df):
+        """When transform column selected."""
+        mock_popover = MagicMock()
+        mock_popover.__enter__ = MagicMock(return_value=None)
+        mock_popover.__exit__ = MagicMock(return_value=False)
+        _st.popover = MagicMock(return_value=mock_popover)
+        _st.selectbox = MagicMock(
+            side_effect=[PrepActions.transform_column.value, "name", "trim"]
+        )
+        _st.info = MagicMock()
+        _st.button = MagicMock(return_value=False)
+
+        prep_add_step(sample_polars_df, step_index=0)
+
+    def test_remove_row_action(self, sample_polars_df):
+        """When remove row selected."""
+        mock_popover = MagicMock()
+        mock_popover.__enter__ = MagicMock(return_value=None)
+        mock_popover.__exit__ = MagicMock(return_value=False)
+        _st.popover = MagicMock(return_value=mock_popover)
+        _st.selectbox = MagicMock(
+            side_effect=[
+                PrepActions.remove_row.value,
+                PrepMethods.row_index.value,
+            ]
+        )
+        _st.text_input = MagicMock(return_value="1, 2")
+        _st.info = MagicMock()
+        _st.button = MagicMock(return_value=False)
+
+        prep_add_step(sample_polars_df, step_index=0)
+
+    @patch("datasure.views.prep_view.prep_apply_action")
+    def test_add_button_clicked(self, mock_prep_apply, sample_polars_df):
+        """When Add button is clicked with valid data."""
+        import datasure.views.prep_view as pv
+
+        # Set module-level variables needed by prep_add_step
+        pv.project_id = "test_project"
+        pv.label = "test_label"
+
+        mock_popover = MagicMock()
+        mock_popover.__enter__ = MagicMock(return_value=None)
+        mock_popover.__exit__ = MagicMock(return_value=False)
+        _st.popover = MagicMock(return_value=mock_popover)
+        _st.selectbox = MagicMock(return_value=PrepActions.remove_column.value)
+        _st.multiselect = MagicMock(return_value=["name"])
+        _st.info = MagicMock()
+        _st.button = MagicMock(return_value=True)
+        _st.success = MagicMock()
+        _st.rerun = MagicMock()
+
+        prep_add_step(sample_polars_df, step_index=0)
+        mock_prep_apply.assert_called_once()
+        _st.success.assert_called_once()
+        _st.rerun.assert_called_once()
+
+
+class TestModuleLevelPageLayout:
+    """Test the module-level page layout code by reloading the module."""
+
+    def test_page_layout_with_aliases(self):
+        """Reload prep_view with aliases to cover the tab rendering code."""
+        import importlib
+
+        import datasure.views.prep_view as pv_mod
+
+        # Set up session state
+        _st.session_state["st_project_id"] = "test_project"
+        _st.session_state["st_import_data_page"] = "import_page"
+        _st.session_state["st_config_checks_page"] = "config_page"
+        _st.stop = MagicMock()
+
+        # Create sample data for the tab rendering
+        sample_df = pl.DataFrame(
+            {
+                "name": ["Alice", "Bob"],
+                "age": [25, 30],
+            }
+        )
+        # Create a non-empty prep log
+        prep_log_df = pl.DataFrame(
+            {"action": ["add column"], "description": ["Added col1"]}
         )
 
-        COL_MEDTHODS_NO_VALUES = ("index", "uuid", "random")
+        # Mock tab context manager
+        mock_tab = MagicMock()
+        mock_tab.__enter__ = MagicMock(return_value=mock_tab)
+        mock_tab.__exit__ = MagicMock(return_value=False)
+        _st.tabs = MagicMock(return_value=[mock_tab])
 
-        # Test validation logic patterns
-        test_methods = [
-            ("sum", True, False),  # In WITH_VALUES, not in NO_VALUES
-            ("constant", False, False),  # In neither (special case)
-            ("index", False, True),  # In NO_VALUES, not in WITH_VALUES
-            ("unknown", False, False),  # In neither
-        ]
+        # Mock columns with context manager support
+        mock_col = MagicMock()
+        mock_col.__enter__ = MagicMock(return_value=mock_col)
+        mock_col.__exit__ = MagicMock(return_value=False)
+        _st.columns = MagicMock(return_value=[mock_col, mock_col, mock_col])
 
-        for method, expected_with_values, expected_no_values in test_methods:
-            is_with_values = method in COL_MEDTHODS_WITH_VALUES
-            is_no_values = method in COL_MEDTHODS_NO_VALUES
+        # Mock container context manager
+        mock_container = MagicMock()
+        mock_container.__enter__ = MagicMock(return_value=mock_container)
+        mock_container.__exit__ = MagicMock(return_value=False)
+        _st.container = MagicMock(return_value=mock_container)
 
-            assert is_with_values == expected_with_values
-            assert is_no_values == expected_no_values
+        # Mock popover context manager
+        mock_popover = MagicMock()
+        mock_popover.__enter__ = MagicMock(return_value=mock_popover)
+        mock_popover.__exit__ = MagicMock(return_value=False)
+        _st.popover = MagicMock(return_value=mock_popover)
 
-            # Methods should not be in both categories
-            assert not (is_with_values and is_no_values)
+        # Mock UI widgets to prevent execution of action handlers
+        _st.button = MagicMock(return_value=False)
+        _st.selectbox = MagicMock(return_value=None)
+        _st.multiselect = MagicMock(return_value=[])
+
+        with (
+            patch(
+                "datasure.utils.duckdb_utils.duckdb_get_aliases",
+                return_value=["test_data"],
+            ),
+            patch(
+                "datasure.utils.duckdb_utils.duckdb_get_table",
+                side_effect=[
+                    prep_log_df,  # prep_log for tab
+                    sample_df,  # prep_data for tab
+                    prep_log_df,  # prep_log re-fetch in change log
+                    prep_log_df,  # prep_log in prep_remove_step
+                ],
+            ),
+            patch("datasure.utils.duckdb_utils.duckdb_save_table"),
+            patch("datasure.utils.navigations_utils.page_navigation"),
+            patch("datasure.utils.navigations_utils.add_demo_navigation"),
+            patch("datasure.utils.navigations_utils.demo_sidebar_help"),
+            patch("datasure.utils.navigations_utils.demo_callout"),
+            patch("datasure.utils.navigations_utils.show_demo_next_action"),
+            patch(
+                "datasure.utils.onboarding_utils.is_demo_project",
+                return_value=False,
+            ),
+            patch("datasure.utils.onboarding_utils.demo_expander"),
+            patch("datasure.processing.prep.prep_apply_action"),
+        ):
+            importlib.reload(pv_mod)
+
+        # Restore session state
+        _st.session_state["st_project_id"] = None
+        _st.stop = _orig_stop
+
+    def test_page_layout_with_empty_prep_data(self):
+        """Test when prep_data and prep_log are both empty (falls back to raw)."""
+        import importlib
+
+        import datasure.views.prep_view as pv_mod
+
+        _st.session_state["st_project_id"] = "test_project"
+        _st.session_state["st_import_data_page"] = "import_page"
+        _st.session_state["st_config_checks_page"] = "config_page"
+        _st.stop = MagicMock()
+
+        # Empty dataframes (triggers the raw data fallback)
+        empty_df = pl.DataFrame({"name": pl.Series([], dtype=pl.String)})
+        raw_df = pl.DataFrame({"name": ["Alice"], "age": [25]})
+        empty_log = pl.DataFrame(
+            {
+                "action": pl.Series([], dtype=pl.String),
+                "description": pl.Series([], dtype=pl.String),
+            }
+        )
+
+        mock_tab = MagicMock()
+        mock_tab.__enter__ = MagicMock(return_value=mock_tab)
+        mock_tab.__exit__ = MagicMock(return_value=False)
+        _st.tabs = MagicMock(return_value=[mock_tab])
+
+        mock_col = MagicMock()
+        mock_col.__enter__ = MagicMock(return_value=mock_col)
+        mock_col.__exit__ = MagicMock(return_value=False)
+        _st.columns = MagicMock(return_value=[mock_col, mock_col, mock_col])
+
+        mock_container = MagicMock()
+        mock_container.__enter__ = MagicMock(return_value=mock_container)
+        mock_container.__exit__ = MagicMock(return_value=False)
+        _st.container = MagicMock(return_value=mock_container)
+
+        mock_popover = MagicMock()
+        mock_popover.__enter__ = MagicMock(return_value=mock_popover)
+        mock_popover.__exit__ = MagicMock(return_value=False)
+        _st.popover = MagicMock(return_value=mock_popover)
+
+        # Mock UI widgets to prevent execution of action handlers
+        _st.button = MagicMock(return_value=False)
+        _st.selectbox = MagicMock(return_value=None)
+        _st.multiselect = MagicMock(return_value=[])
+
+        with (
+            patch(
+                "datasure.utils.duckdb_utils.duckdb_get_aliases",
+                return_value=["test_data"],
+            ),
+            patch(
+                "datasure.utils.duckdb_utils.duckdb_get_table",
+                side_effect=[
+                    empty_log,  # prep_log
+                    empty_df,  # prep_data (empty)
+                    raw_df,  # raw data fallback
+                    empty_log,  # prep_log in prep_remove_step
+                    empty_log,  # prep_log re-fetch in change log
+                ],
+            ),
+            patch("datasure.utils.duckdb_utils.duckdb_save_table") as mock_save,
+            patch("datasure.utils.navigations_utils.page_navigation"),
+            patch("datasure.utils.navigations_utils.add_demo_navigation"),
+            patch("datasure.utils.navigations_utils.demo_sidebar_help"),
+            patch("datasure.utils.navigations_utils.demo_callout"),
+            patch("datasure.utils.navigations_utils.show_demo_next_action"),
+            patch(
+                "datasure.utils.onboarding_utils.is_demo_project",
+                return_value=False,
+            ),
+            patch("datasure.utils.onboarding_utils.demo_expander"),
+            patch("datasure.processing.prep.prep_apply_action"),
+        ):
+            importlib.reload(pv_mod)
+            # Verify that raw data was saved as prep data
+            mock_save.assert_called()
+
+        _st.session_state["st_project_id"] = None
+        _st.stop = _orig_stop
+
+    def test_page_layout_no_project_id(self):
+        """Test page guard when no project_id is set."""
+        import importlib
+
+        import datasure.views.prep_view as pv_mod
+
+        _st.session_state["st_project_id"] = None
+        _st.stop = MagicMock()
+        _st.info = MagicMock()
+
+        with (
+            patch(
+                "datasure.utils.duckdb_utils.duckdb_get_aliases",
+                return_value=[],
+            ),
+            patch("datasure.utils.navigations_utils.page_navigation"),
+            patch("datasure.utils.navigations_utils.add_demo_navigation"),
+            patch("datasure.utils.navigations_utils.demo_sidebar_help"),
+            patch("datasure.utils.navigations_utils.demo_callout"),
+            patch("datasure.utils.navigations_utils.show_demo_next_action"),
+            patch(
+                "datasure.utils.onboarding_utils.is_demo_project",
+                return_value=False,
+            ),
+            patch("datasure.utils.onboarding_utils.demo_expander"),
+        ):
+            importlib.reload(pv_mod)
+
+        _st.session_state["st_project_id"] = None
+        _st.stop = _orig_stop
+
+
+class TestPrepRemoveStep:
+    """Test prep_remove_step function."""
+
+    @patch("datasure.views.prep_view.duckdb_get_table")
+    def test_empty_prep_log(self, mock_get_table):
+        """When prep log is empty."""
+        import datasure.views.prep_view as pv
+
+        pv.project_id = "test_project"
+        pv.label = "test_label"
+        pv.i = 0
+
+        mock_popover = MagicMock()
+        mock_popover.__enter__ = MagicMock(return_value=None)
+        mock_popover.__exit__ = MagicMock(return_value=False)
+        _st.popover = MagicMock(return_value=mock_popover)
+
+        import pandas as pd
+
+        mock_get_table.return_value = pl.DataFrame({"action": [], "description": []})
+        # to_pandas() is called on the result
+        mock_get_table.return_value = MagicMock()
+        mock_get_table.return_value.to_pandas.return_value = pd.DataFrame(
+            {"action": [], "description": []}
+        )
+        _st.info = MagicMock()
+
+        prep_remove_step()
+        _st.info.assert_called()
+
+    @patch("datasure.views.prep_view.duckdb_get_table")
+    def test_with_prep_log_no_selection(self, mock_get_table):
+        """When prep log has entries but no action selected."""
+        import pandas as pd
+
+        import datasure.views.prep_view as pv
+
+        pv.project_id = "test_project"
+        pv.label = "test_label"
+        pv.i = 0
+
+        mock_popover = MagicMock()
+        mock_popover.__enter__ = MagicMock(return_value=None)
+        mock_popover.__exit__ = MagicMock(return_value=False)
+        _st.popover = MagicMock(return_value=mock_popover)
+
+        mock_get_table.return_value = MagicMock()
+        mock_get_table.return_value.to_pandas.return_value = pd.DataFrame(
+            {
+                "action": ["remove column(s)"],
+                "description": ["Removed col1"],
+            }
+        )
+        _st.warning = MagicMock()
+        _st.selectbox = MagicMock(return_value=None)
+        _st.button = MagicMock(return_value=False)
+
+        prep_remove_step()
+        _st.warning.assert_called()
+
+    @patch("datasure.views.prep_view.prep_apply_action")
+    @patch("datasure.views.prep_view.duckdb_save_table")
+    @patch("datasure.views.prep_view.duckdb_get_table")
+    def test_remove_confirm(self, mock_get_table, mock_save_table, mock_prep_apply):
+        """When remove button clicked with valid selection."""
+        import pandas as pd
+
+        import datasure.views.prep_view as pv
+
+        pv.project_id = "test_project"
+        pv.label = "test_label"
+        pv.i = 0
+
+        mock_popover = MagicMock()
+        mock_popover.__enter__ = MagicMock(return_value=None)
+        mock_popover.__exit__ = MagicMock(return_value=False)
+        _st.popover = MagicMock(return_value=mock_popover)
+
+        log_df = pd.DataFrame(
+            {
+                "action": ["remove column(s)", "add new column"],
+                "description": ["Removed col1", "Added col2"],
+            }
+        )
+        mock_get_table.return_value = MagicMock()
+        mock_get_table.return_value.to_pandas.return_value = log_df
+
+        action_index_val = "0 - remove column(s) - Removed col1"
+        _st.warning = MagicMock()
+        _st.selectbox = MagicMock(return_value=action_index_val)
+        _st.button = MagicMock(return_value=True)
+        _st.success = MagicMock()
+        _st.rerun = MagicMock()
+
+        prep_remove_step()
+        mock_save_table.assert_called_once()
+        mock_prep_apply.assert_called_once()
+        _st.success.assert_called_once()
+        _st.rerun.assert_called_once()
