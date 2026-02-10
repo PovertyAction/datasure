@@ -115,6 +115,9 @@ ignore = [
     "E722",   #bare-exception
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["D102"]  # test methods don't need docstrings
+
 [tool.ruff.lint.pycodestyle]
 max-doc-length = 88
 
