@@ -117,7 +117,7 @@ def load_data_efficiently(filename: str, sheet_name: str | None = None) -> pl.Da
             )
 
         elif file_ext in [".xlsx", ".xls"]:
-            return pl.read_excel(filename, sheet_name=sheet_name)
+            return pl.read_excel(filename, sheet_name=sheet_name, engine="openpyxl")
 
         elif file_ext == ".json":
             # Polars has efficient JSON reading
