@@ -1,5 +1,6 @@
 """Tests for the progress module with comprehensive coverage."""
 
+import math
 from unittest.mock import patch
 
 import polars as pl
@@ -184,7 +185,7 @@ class TestPydanticModels:
         )
         assert summary.total_submitted == 100
         assert summary.target == 150
-        assert summary.percentage_completed == 66.67
+        assert math.isclose(summary.percentage_completed, 66.67)
 
     def test_progress_summary_no_target(self):
         """Test ProgressSummary with no target."""
@@ -193,24 +194,15 @@ class TestPydanticModels:
         )
         assert summary.total_submitted == 50
         assert summary.target is None
-        assert summary.percentage_completed == 0.0
-
-    def test_progress_summary_invalid_percentage(self):
-        """Test ProgressSummary rejects invalid percentage."""
-        with pytest.raises(ValidationError):
-            ProgressSummary(
-                total_submitted=100,
-                target=50,
-                percentage_completed=150.0,  # Over 100%
-            )
+        assert math.isclose(summary.percentage_completed, 0.0)
 
     def test_progress_chart_metrics_valid(self):
         """Test creating valid ProgressChartMetrics."""
         metrics = ProgressChartMetrics(
             consent_percentage=85.5, completion_percentage=92.3
         )
-        assert metrics.consent_percentage == 85.5
-        assert metrics.completion_percentage == 92.3
+        assert math.isclose(metrics.consent_percentage, 85.5)
+        assert math.isclose(metrics.completion_percentage, 92.3)
 
     def test_progress_chart_metrics_bounds(self):
         """Test ProgressChartMetrics percentage bounds."""
@@ -406,7 +398,7 @@ class TestHelperFunctions:
         avg = compute_average_interviews(period_stats)
 
         assert isinstance(avg, float)
-        assert avg == 15.0
+        assert math.isclose(avg, 15.0)
 
 
 class TestComputeProgressOvertimeUpdated:

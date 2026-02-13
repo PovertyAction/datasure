@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "DataSure"
-version = "0.6.0"
+version = "0.7.1rc1"
 description = "IPA Data Management System Dashboard"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -31,9 +31,9 @@ dependencies = [
     "openpyxl>=3.1.5",
     "seaborn>=0.13.2",
     "scikit-learn>=1.5.2",
+    "scipy>=1.17.0",
     "geopy>=2.4.1",
     "requests>=2.32.3",
-    "streamlit-extras>=0.5.5",
     "pyarrow>=16.0.0",
     "opencv-python>=4.11.0.86",
     "matplotlib>=3.10.0",
@@ -43,7 +43,6 @@ dependencies = [
     "pydantic>=2.11.7",
     "keyring>=25.6.0",
     "polars-readstat>=0.5.1",
-    "fastexcel>=0.14.0",
 ]
 
 [project.urls]
@@ -115,6 +114,9 @@ ignore = [
     "RUF005", # Code suggestions
     "E722",   #bare-exception
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["D102"]  # test methods don't need docstrings
 
 [tool.ruff.lint.pycodestyle]
 max-doc-length = 88

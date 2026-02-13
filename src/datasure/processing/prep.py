@@ -10,21 +10,25 @@ import hashlib
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from enum import Enum
 from typing import Any
 
 import polars as pl
 import streamlit as st
 
+from datasure.models.enums import (
+    PrepActions,
+    PrepFunctions,
+    PrepMethods,
+    PrepOperations,
+    PrepRowConditions,
+)
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.prep_utils import (
     PrepActionResult,
     PrepConfirmationMessages,
 )
 
-# Constants for validation
-MAX_RANGE_VALUES = 2
-MIN_PARTS_REQUIRED = 2
+# === EXCEPTIONS === #
 
 
 class PrepError(Exception):
@@ -45,20 +49,14 @@ class OperationError(PrepError):
     pass
 
 
-class ActionType(Enum):
-    """Supported preparation action types."""
-
-    REMOVE_COLUMNS = "remove column(s)"
-    REMOVE_ROWS = "remove row(s)"
-    TRANSFORM_COLUMNS = "transform column(s)"
-    ADD_NEW_COLUMN = "add new column"
+# === DATA MODELS === #
 
 
 @dataclass
 class PrepAction:
     """Represents a data preparation action."""
 
-    action_type: ActionType
+    action_type: PrepActions
     prep_args: PrepActionResult
 
     @classmethod
@@ -66,7 +64,7 @@ class PrepAction:
         """Create PrepAction from string representations."""
         action = prep_args.action
         try:
-            action_type = ActionType(action)
+            action_type = PrepActions(action)
         except ValueError as e:
             raise ValidationError(f"Unknown action type: {action}") from e
 
@@ -138,6 +136,9 @@ class DescriptionParser:
         return values
 
 
+# === OPERATIONS === #
+
+
 class PrepOperation(ABC):
     """Base class for data preparation operations."""
 
@@ -169,7 +170,7 @@ class RemoveColumnsOperation(PrepOperation):
             results = data.drop(columns)
 
             updated_prep_args = {
-                "action": "remove column(s)",
+                "action": PrepActions.remove_column.value,
                 "column_names": None,
                 "affected_count": len(columns),
                 "remaining_count": data.width,
@@ -203,9 +204,9 @@ class RemoveRowsOperation(PrepOperation):
             condition = prep_args.condition
             source_columns = prep_args.source_columns or []
 
-            if method == "by row index":
+            if method == PrepMethods.row_index.value:
                 results = self._remove_by_index(data, value)
-            elif method == "by condition":
+            elif method == PrepMethods.condition.value:
                 results = self._remove_by_condition(
                     data, condition, source_columns, value
                 )
@@ -213,7 +214,7 @@ class RemoveRowsOperation(PrepOperation):
                 raise ValidationError(f"Unknown removal method: {method}")  # noqa: TRY301
 
             updated_prep_args = {
-                "action": "remove row(s)",
+                "action": PrepActions.remove_row.value,
                 "column_names": None,
                 "affected_count": data.height - results.height,
                 "remaining_count": results.height,
@@ -257,27 +258,36 @@ class RemoveRowsOperation(PrepOperation):
         # Parse columns
         self._validate_columns_exist(data, columns)
 
-        if condition == "value is missing":
+        if condition == PrepRowConditions.missing.value:
             return data.filter(~pl.any_horizontal(pl.col(columns).is_null()))
 
-        elif condition == "value is not missing":
+        elif condition == PrepRowConditions.not_missing.value:
             return data.filter(pl.any_horizontal(pl.col(columns).is_null()))
 
-        elif condition in ["value is equal to", "value is not equal to"]:
+        elif condition in [
+            PrepRowConditions.equal_to.value,
+            PrepRowConditions.not_equal_to.value,
+        ]:
             return self._filter_by_equality(data, condition, columns, value)
 
         elif condition in [
-            "value is greater than",
-            "value is greater than or equal to",
-            "value is less than",
-            "value is less than or equal to",
+            PrepRowConditions.greater_than.value,
+            PrepRowConditions.greater_than_or_equal_to.value,
+            PrepRowConditions.less_than.value,
+            PrepRowConditions.less_than_or_equal_to.value,
         ]:
             return self._filter_by_comparison(data, condition, columns, value)
 
-        elif condition in ["value is between", "value is not between"]:
+        elif condition in [
+            PrepRowConditions.between.value,
+            PrepRowConditions.not_between.value,
+        ]:
             return self._filter_by_range(data, condition, columns, value)
 
-        elif condition in ["value is like", "value is not like"]:
+        elif condition in [
+            PrepRowConditions.like.value,
+            PrepRowConditions.not_like.value,
+        ]:
             return self._filter_by_pattern(data, condition, columns, value)
 
         else:
@@ -287,65 +297,91 @@ class RemoveRowsOperation(PrepOperation):
         self, data: pl.DataFrame, condition: str, columns: list[str], value: Any
     ) -> pl.DataFrame:
         """Filter by equality conditions."""
-        if condition == "value is equal to":
+        # Ensure value is a list for is_in() to treat as literal values
+        value_list = value if isinstance(value, list) else [value]
+
+        if condition == PrepRowConditions.not_equal_to.value:
             # Keep rows where value is NOT in the list (remove matching rows)
-            return data.filter(~pl.col(columns).is_in(value))
+            filter_expr = pl.any_horizontal(
+                [pl.col(col).is_in(value_list) for col in columns]
+            )
+            return data.filter(~filter_expr)
         else:
             # Keep rows where value IS in the list (remove non-matching rows)
-            return data.filter(pl.col(columns).is_in(value))
+            filter_expr = pl.any_horizontal(
+                [pl.col(col).is_in(value_list) for col in columns]
+            )
+            return data.filter(filter_expr)
 
     def _filter_by_comparison(
         self, data: pl.DataFrame, condition: str, columns: list[str], value: Any
     ) -> pl.DataFrame:
         """Filter by comparison conditions."""
-        # Inverse logic - we keep rows that don't match the removal condition
-        value_use = (
-            float(value[0])
-            if isinstance(value[0], str) and "." in value
-            else int(value[0])
-        )
-        if condition == "value is greater than":
-            return data.filter(pl.col(columns) <= value_use)
-        elif condition == "value is greater than or equal to":
-            return data.filter(pl.col(columns) < value_use)
-        elif condition == "value is less than":
-            return data.filter(pl.col(columns) >= value_use)
-        elif condition == "value is less than or equal to":
-            return data.filter(pl.col(columns) > value_use)
+        # Handle both single values and lists
+        raw_value = value[0] if isinstance(value, list) else value
+        value_use = float(raw_value)
 
-        return data
+        # Build filter expression for each column
+        if condition == PrepRowConditions.greater_than.value:
+            filter_expr = pl.any_horizontal(
+                [pl.col(col) <= value_use for col in columns]
+            )
+        elif condition == PrepRowConditions.greater_than_or_equal_to.value:
+            filter_expr = pl.any_horizontal(
+                [pl.col(col) < value_use for col in columns]
+            )
+        elif condition == PrepRowConditions.less_than.value:
+            filter_expr = pl.any_horizontal(
+                [pl.col(col) >= value_use for col in columns]
+            )
+        elif condition == PrepRowConditions.less_than_or_equal_to.value:
+            filter_expr = pl.any_horizontal(
+                [pl.col(col) > value_use for col in columns]
+            )
+        else:
+            return data
+
+        return data.filter(filter_expr)
 
     def _filter_by_range(
         self, data: pl.DataFrame, condition: str, columns: list[str], value: Any
     ) -> pl.DataFrame:
         """Filter by range conditions."""
-        if len(value) != MAX_RANGE_VALUES:
-            raise ValidationError(
-                f"Expected {MAX_RANGE_VALUES} values for range, got: {value}"
-            )
+        # Handle both single values and lists for value
+        value_list = value if isinstance(value, list) else [value, value]
+        if len(value_list) != 2:
+            raise ValidationError(f"Expected 2 values for range, got: {value_list}")
 
         if condition == "value is between":
             # Keep rows outside the range
-            return data.filter(
-                (pl.col(columns) < value[0]) | (pl.col(columns) > value[1])
+            filter_expr = pl.any_horizontal(
+                [
+                    (pl.col(col) < value_list[0]) | (pl.col(col) > value_list[1])
+                    for col in columns
+                ]
             )
         else:
             # Keep rows inside the range
-            return data.filter(
-                (pl.col(columns) >= value[0]) & (pl.col(columns) <= value[1])
+            filter_expr = pl.any_horizontal(
+                [
+                    (pl.col(col) >= value_list[0]) & (pl.col(col) <= value_list[1])
+                    for col in columns
+                ]
             )
+
+        return data.filter(filter_expr)
 
     def _filter_by_pattern(
         self, data: pl.DataFrame, condition: str, columns: list[str], value: str
     ) -> pl.DataFrame:
         """Filter by pattern matching."""
-        if condition == "value is like":
+        if condition == PrepRowConditions.like.value:
             # Keep rows that don't match the pattern
             filter_expr = pl.all_horizontal(
                 [~pl.col(col).str.contains(value) for col in columns]
             )
             return data.filter(filter_expr)
-        elif condition == "value is not like":
+        elif condition == PrepRowConditions.not_like.value:
             # Keep rows that match the pattern
             filter_expr = pl.any_horizontal(
                 [pl.col(col).str.contains(value) for col in columns]
@@ -371,10 +407,14 @@ class TransformColumnsOperation(PrepOperation):
             )
 
             # count the number of non-missing values in the transformed columns
-            null_count = result_data.select(
-                pl.col(source_columns[0]).null_count()
-            ).item()
-            affected_count = data.height - null_count
+            if source_columns[0] in result_data.columns:
+                null_count = result_data.select(
+                    pl.col(source_columns[0]).null_count()
+                ).item()
+                affected_count = data.height - null_count
+            else:
+                # Column was removed (e.g., get_dummies), all rows affected
+                affected_count = data.height
             prep_args = {
                 "action": "transform column(s)",
                 "column_names": None,
@@ -474,17 +514,17 @@ class TransformColumnsOperation(PrepOperation):
         """Apply specific transformation to column."""
         # DateTime extractions
         datetime_ops = {
-            "day of month": lambda col: col.dt.day(),
-            "day of week": lambda col: col.dt.weekday(),
-            "day of year": lambda col: col.dt.ordinal_day(),
-            "date": lambda col: col.dt.date(),
-            "week of year": lambda col: col.dt.week(),
-            "month of year": lambda col: col.dt.month(),
-            "year": lambda col: col.dt.year(),
-            "quarter of year": lambda col: col.dt.quarter(),
-            "hour": lambda col: col.dt.hour(),
-            "minute": lambda col: col.dt.minute(),
-            "second": lambda col: col.dt.second(),
+            PrepOperations.day_of_month.value: lambda col: col.dt.day(),
+            PrepOperations.day_of_week.value: lambda col: col.dt.weekday(),
+            PrepOperations.day_of_year.value: lambda col: col.dt.ordinal_day(),
+            PrepOperations.date.value: lambda col: col.dt.date(),
+            PrepOperations.week_of_year.value: lambda col: col.dt.week(),
+            PrepOperations.month_of_year.value: lambda col: col.dt.month(),
+            PrepOperations.year.value: lambda col: col.dt.year(),
+            PrepOperations.quarter_of_year.value: lambda col: col.dt.quarter(),
+            PrepOperations.hour.value: lambda col: col.dt.hour(),
+            PrepOperations.minute.value: lambda col: col.dt.minute(),
+            PrepOperations.second.value: lambda col: col.dt.second(),
         }
 
         if func_name in datetime_ops:
@@ -494,10 +534,10 @@ class TransformColumnsOperation(PrepOperation):
 
         # Math operations
         math_ops = {
-            "floor": lambda col: col.floor(),
-            "ceil": lambda col: col.ceil(),
-            "round": lambda col: col.round(0),
-            "abs": lambda col: col.abs(),
+            PrepOperations.floor.value: lambda col: col.floor(),
+            PrepOperations.ceil.value: lambda col: col.ceil(),
+            PrepOperations.round.value: lambda col: col.round(0),
+            PrepOperations.abs.value: lambda col: col.abs(),
         }
 
         if func_name in math_ops:
@@ -506,15 +546,22 @@ class TransformColumnsOperation(PrepOperation):
             )
 
         # Arithmetic operations
-        if func_name in ["add", "subtract", "multiply", "divide"]:
+        if func_name in [
+            PrepOperations.add.value,
+            PrepOperations.subtract.value,
+            PrepOperations.multiply.value,
+            PrepOperations.divide.value,
+        ]:
             return self._apply_arithmetic(data, column_name, func_name, value)
 
         # String operations
         string_ops = {
-            "trim": lambda col: col.str.strip_chars(),
-            "lower": lambda col: col.str.to_lowercase(),
-            "upper": lambda col: col.str.to_uppercase(),
-            "string to number": lambda col: col.str.to_numeric(strict=False),
+            PrepOperations.trim.value: lambda col: col.str.strip_chars(),
+            PrepOperations.lower.value: lambda col: col.str.to_lowercase(),
+            PrepOperations.upper.value: lambda col: col.str.to_uppercase(),
+            PrepOperations.string_to_number.value: lambda col: col.cast(
+                pl.Float64, strict=False
+            ),
         }
 
         if func_name in string_ops:
@@ -534,7 +581,7 @@ class TransformColumnsOperation(PrepOperation):
 
         # String replacement
         if func_name.startswith("replace by replacing"):
-            return self._apply_string_replace(data, column_name, func_name)
+            return self._apply_string_replace(data, column_name, value)
 
         # Substring extraction
         if func_name == "substring":
@@ -542,7 +589,7 @@ class TransformColumnsOperation(PrepOperation):
 
         # Pattern extraction
         if func_name.startswith("extract pattern"):
-            return self._apply_pattern_extract(data, column_name, func_name)
+            return self._apply_pattern_extract(data, column_name, value)
 
         raise ValidationError(f"Unknown transformation function: {func_name}")
 
@@ -555,10 +602,10 @@ class TransformColumnsOperation(PrepOperation):
     ) -> pl.DataFrame:
         """Apply arithmetic operations."""
         ops = {
-            "add": lambda col, val: col + val,
-            "subtract": lambda col, val: col - val,
-            "multiply": lambda col, val: col * val,
-            "divide": lambda col, val: col / val,
+            PrepOperations.add.value: lambda col, val: col + val,
+            PrepOperations.subtract.value: lambda col, val: col - val,
+            PrepOperations.multiply.value: lambda col, val: col * val,
+            PrepOperations.divide.value: lambda col, val: col / val,
         }
 
         return data.with_columns(
@@ -626,9 +673,13 @@ class AddNewColumnOperation(PrepOperation):
             method = prep_args.method
             source_columns = prep_args.source_columns or [""]
 
-            if method == "constant":
+            if method == PrepFunctions.constant.value:
                 results = self._add_constant_column(data, new_col_name, value_spec)
-            elif method in ["index", "uuid", "random"]:
+            elif method in [
+                PrepFunctions.index.value,
+                PrepFunctions.uuid.value,
+                PrepFunctions.random.value,
+            ]:
                 results = self._add_special_column(data, method, new_col_name)
             else:
                 results = self._add_computed_column(
@@ -636,7 +687,7 @@ class AddNewColumnOperation(PrepOperation):
                 )
 
             updated_prep_args = {
-                "action": "add new column",
+                "action": PrepActions.add_column.value,
                 "column_names": new_col_name,
                 "affected_count": 1,
                 "remaining_count": results.width,
@@ -718,18 +769,20 @@ class AddNewColumnOperation(PrepOperation):
 
         # Aggregation functions
         agg_funcs = {
-            "sum": lambda cols: pl.sum_horizontal(cols),
-            "mean": lambda cols: pl.mean_horizontal(cols),
-            "median": lambda cols: pl.concat_list(cols).list.median(),
-            "max": lambda cols: pl.max_horizontal(cols),
-            "min": lambda cols: pl.min_horizontal(cols),
-            "std": lambda cols: pl.concat_list(cols).list.std(),
-            "var": lambda cols: pl.concat_list(cols).list.var(),
-            "first": lambda cols: pl.concat_list(cols).list.first(),
-            "last": lambda cols: pl.concat_list(cols).list.last(),
-            "count": lambda cols: pl.concat_list(cols).list.len(),
-            "nunique": lambda cols: pl.concat_list(cols).list.unique().list.len(),
-            "product": lambda cols: pl.fold(
+            PrepFunctions.sum.value: lambda cols: pl.sum_horizontal(cols),
+            PrepFunctions.mean.value: lambda cols: pl.mean_horizontal(cols),
+            PrepFunctions.median.value: lambda cols: pl.concat_list(cols).list.median(),
+            PrepFunctions.max.value: lambda cols: pl.max_horizontal(cols),
+            PrepFunctions.min.value: lambda cols: pl.min_horizontal(cols),
+            PrepFunctions.std.value: lambda cols: pl.concat_list(cols).list.std(),
+            PrepFunctions.var.value: lambda cols: pl.concat_list(cols).list.var(),
+            PrepFunctions.first.value: lambda cols: pl.concat_list(cols).list.first(),
+            PrepFunctions.last.value: lambda cols: pl.concat_list(cols).list.last(),
+            PrepFunctions.count.value: lambda cols: pl.concat_list(cols).list.len(),
+            PrepFunctions.nunique.value: lambda cols: pl.concat_list(cols)
+            .list.unique()
+            .list.len(),
+            PrepFunctions.product.value: lambda cols: pl.fold(
                 acc=pl.lit(1), function=lambda acc, x: acc * x, exprs=cols
             ),
         }
@@ -754,16 +807,19 @@ class AddNewColumnOperation(PrepOperation):
         raise ValidationError(f"Unknown aggregation function: {func_name}")
 
 
+# === PROCESSOR === #
+
+
 class PrepProcessor:
     """Main processor for data preparation operations."""
 
     def __init__(self):
         """Initialize processor with operation handlers."""
         self.operation_handlers = {
-            ActionType.REMOVE_COLUMNS: RemoveColumnsOperation(),
-            ActionType.REMOVE_ROWS: RemoveRowsOperation(),
-            ActionType.TRANSFORM_COLUMNS: TransformColumnsOperation(),
-            ActionType.ADD_NEW_COLUMN: AddNewColumnOperation(),
+            PrepActions.remove_column: RemoveColumnsOperation(),
+            PrepActions.remove_row: RemoveRowsOperation(),
+            PrepActions.transform_column: TransformColumnsOperation(),
+            PrepActions.add_column: AddNewColumnOperation(),
         }
 
     def execute_single_action(
@@ -791,6 +847,178 @@ class PrepProcessor:
         return result_data
 
 
+# === LOG MANAGEMENT (PRIVATE) === #
+
+
+def _parse_prep_log_to_actions(prep_log_df: pl.DataFrame) -> list[PrepAction]:
+    """Convert a preparation log DataFrame to a list of PrepAction objects.
+
+    Args:
+        prep_log_df: DataFrame containing prep_args column with action data
+
+    Returns
+    -------
+        List of PrepAction objects ready for execution
+    """
+    actions = []
+    for row in prep_log_df.iter_rows(named=True):
+        args = row["prep_args"]
+        if isinstance(args, str):
+            args = ast.literal_eval(args)
+        prep_action = PrepActionResult(**args)
+        actions.append(PrepAction.from_args(prep_action))
+    return actions
+
+
+def _generate_action_description(prep_args: PrepActionResult) -> str:
+    """Generate human-readable description for a prep action.
+
+    Args:
+        prep_args: The preparation action result containing action details
+
+    Returns
+    -------
+        Formatted description string
+    """
+    action_description_map = {
+        PrepActions.remove_column.value: PrepConfirmationMessages.remove_columns,
+        PrepActions.remove_row.value: PrepConfirmationMessages.remove_rows,
+        PrepActions.transform_column.value: PrepConfirmationMessages.transform_columns,
+        PrepActions.add_column.value: PrepConfirmationMessages.add_new_column,
+    }
+    description_func = action_description_map.get(prep_args.action)
+    if description_func:
+        return description_func(prep_args)
+    return ""
+
+
+def _convert_prep_args_to_string(df: pl.DataFrame) -> pl.DataFrame:
+    """Convert prep_args column from struct to string for concatenation.
+
+    Args:
+        df: DataFrame with prep_args column
+
+    Returns
+    -------
+        DataFrame with prep_args converted to string
+    """
+    if df.schema["prep_args"] == pl.String:
+        return df
+    return df.with_columns(pl.col("prep_args").struct.json_encode())
+
+
+def _create_log_entry(
+    action: str,
+    description: str,
+    prep_args: PrepActionResult,
+    log_index: int,
+) -> pl.DataFrame:
+    """Create a new log entry DataFrame for a prep action.
+
+    Args:
+        action: The action type string
+        description: Human-readable description
+        prep_args: The preparation action result
+        log_index: Current log size (for action_index)
+
+    Returns
+    -------
+        Single-row DataFrame with the log entry
+    """
+    action_index_val = f"{log_index} - {action} - {description}"
+    return pl.DataFrame(
+        {
+            "action": [action],
+            "description": [description],
+            "prep_args": [prep_args],
+            "action_index": [action_index_val],
+        }
+    )
+
+
+def _append_to_prep_log(
+    existing_log: pl.DataFrame, new_entry: pl.DataFrame
+) -> pl.DataFrame:
+    """Append a new entry to the preparation log.
+
+    Args:
+        existing_log: Current log DataFrame (may be empty)
+        new_entry: New log entry to append
+
+    Returns
+    -------
+        Updated log DataFrame
+    """
+    if existing_log.is_empty():
+        return new_entry
+    existing_log_str = _convert_prep_args_to_string(existing_log)
+    new_entry_str = _convert_prep_args_to_string(new_entry)
+    return pl.concat([existing_log_str, new_entry_str])
+
+
+def _reapply_all_actions(
+    project_id: str,
+    alias: str,
+    prep_log_df: pl.DataFrame,
+    processor: PrepProcessor,
+) -> None:
+    """Re-apply all actions from the log to the raw data.
+
+    Args:
+        project_id: Project identifier
+        alias: Dataset alias
+        prep_log_df: DataFrame containing the preparation log
+        processor: PrepProcessor instance for executing actions
+    """
+    raw_data = duckdb_get_table(project_id, alias, db_name="raw")
+
+    if prep_log_df.is_empty():
+        duckdb_save_table(project_id, raw_data, alias, db_name="prep")
+        return
+
+    existing_actions = _parse_prep_log_to_actions(prep_log_df)
+    result_data = processor.execute_all_actions(raw_data, existing_actions)
+    duckdb_save_table(project_id, result_data, alias, db_name="prep")
+
+
+def _apply_single_action(
+    project_id: str,
+    alias: str,
+    prep_args: PrepActionResult,
+    prep_log_df: pl.DataFrame,
+    processor: PrepProcessor,
+) -> None:
+    """Apply a single new action and update the log.
+
+    Args:
+        project_id: Project identifier
+        alias: Dataset alias
+        prep_args: The preparation action to apply
+        prep_log_df: Current preparation log DataFrame
+        processor: PrepProcessor instance for executing actions
+    """
+    prep_data = duckdb_get_table(project_id, alias, db_name="prep")
+
+    new_action = PrepAction.from_args(prep_args)
+    result_data, updated_prep_args = processor.execute_single_action(
+        prep_data, new_action
+    )
+
+    action = updated_prep_args.action
+    description = _generate_action_description(updated_prep_args)
+
+    new_entry = _create_log_entry(
+        action, description, updated_prep_args, prep_log_df.height
+    )
+    updated_log = _append_to_prep_log(prep_log_df, new_entry)
+
+    duckdb_save_table(project_id, updated_log, f"prep_log_{alias}", db_name="logs")
+    duckdb_save_table(project_id, result_data, alias, db_name="prep")
+
+
+# === PUBLIC API === #
+
+
 def prep_apply_action(
     project_id: str,
     alias: str,
@@ -798,11 +1026,14 @@ def prep_apply_action(
 ) -> None:
     """Apply data preparation action to dataset.
 
+    When prep_args is provided, applies the single new action to the current
+    prepared data and updates the log. When prep_args is None, re-applies all
+    actions from the log to the raw data.
+
     Args:
         project_id: Project identifier
         alias: Dataset alias
-        action: Action type to apply
-        description: Action description
+        prep_args: Optional action to apply. If None, re-applies all logged actions.
 
     Raises
     ------
@@ -810,115 +1041,9 @@ def prep_apply_action(
         OperationError: If data operation fails
     """
     processor = PrepProcessor()
-    # Load existing preparation log
-    prep_log_df = duckdb_get_table(
-        project_id,
-        f"prep_log_{alias}",
-        db_name="logs",
-    )
+    prep_log_df = duckdb_get_table(project_id, f"prep_log_{alias}", db_name="logs")
 
-    # run current action if prep_args is provided, else re-apply all actions from log
-    if not prep_args:
-        # Get raw data if re-applying all actions
-        raw_data = duckdb_get_table(
-            project_id,
-            alias,
-            db_name="raw",
-        )
-
-        if prep_log_df.is_empty():
-            # set result data to raw data if no actions in log
-            # return none
-            duckdb_save_table(
-                project_id,
-                raw_data,
-                alias,
-                db_name="prep",
-            )
-            return None
-
-        # Convert to list of actions
-        existing_actions = []
-        for row in prep_log_df.iter_rows(named=True):
-            args = row["prep_args"]
-            # check if args is a string (from JSON) and convert to dict
-            if isinstance(args, str):
-                args = ast.literal_eval(args)
-            prep_action = PrepActionResult(**args)
-            existing_actions.append(PrepAction.from_args(prep_action))
-
-        # apply all existing actions to current prepared data
-        result_data = processor.execute_all_actions(raw_data, existing_actions)
-        # save new prep data
-        duckdb_save_table(
-            project_id,
-            result_data,
-            alias,
-            db_name="prep",
-        )
+    if prep_args is None:
+        _reapply_all_actions(project_id, alias, prep_log_df, processor)
     else:
-        # Get current prepared data
-        prep_data = duckdb_get_table(
-            project_id,
-            alias,
-            db_name="prep",
-        )
-
-        # Apply only the new action
-        new_action = PrepAction.from_args(prep_args)
-        result_data, updated_prep_args = processor.execute_single_action(
-            prep_data, new_action
-        )
-        # Add new action if provided
-        action = updated_prep_args.action
-        if action == "remove column(s)":
-            description = PrepConfirmationMessages.remove_columns(updated_prep_args)
-        elif action == "remove row(s)":
-            description = PrepConfirmationMessages.remove_rows(updated_prep_args)
-        elif action == "transform column(s)":
-            description = PrepConfirmationMessages.transform_columns(updated_prep_args)
-        elif action == "add new column":
-            description = PrepConfirmationMessages.add_new_column(updated_prep_args)
-
-        action_index_val = f"{prep_log_df.height} - {action} - {description}"
-
-        # Update log with new action
-        new_row = pl.DataFrame(
-            {
-                "action": [action],
-                "description": [description],
-                "prep_args": [updated_prep_args],
-                "action_index": [action_index_val],
-            }
-        )
-
-        if prep_log_df.is_empty():
-            updated_log = new_row
-        else:
-            # Convert struct columns to JSON strings for concatenation
-            prep_log_json = prep_log_df.with_columns(
-                pl.col("prep_args").map_elements(
-                    lambda x: str(x) if x is not None else None, return_dtype=pl.String
-                )
-            )
-            new_row_json = new_row.with_columns(
-                pl.col("prep_args").map_elements(
-                    lambda x: str(x) if x is not None else None, return_dtype=pl.String
-                )
-            )
-            updated_log = pl.concat([prep_log_json, new_row_json])
-
-        duckdb_save_table(
-            project_id,
-            updated_log,
-            f"prep_log_{alias}",
-            db_name="logs",
-        )
-
-        # Save updated prepared data
-        duckdb_save_table(
-            project_id,
-            result_data,
-            alias,
-            db_name="prep",
-        )
+        _apply_single_action(project_id, alias, prep_args, prep_log_df, processor)

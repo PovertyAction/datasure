@@ -91,7 +91,8 @@ def get_key_options(data: pl.DataFrame, key_col: str) -> list:
 def get_current_value(
     data: pl.DataFrame, key_col: str, key_value: str, column: str
 ) -> Any:
-    """
+    (
+        """
     Retrieve the current value for a specific key and column.
 
     Parameters
@@ -110,6 +111,8 @@ def get_current_value(
     Any
         The current value, or None if not found.
     """
+        ""
+    )
     try:
         return data.filter(pl.col(key_col) == key_value).select(column)[0, 0]
     except Exception:
@@ -349,12 +352,7 @@ def _render_column_selector(
 
     current_value = get_current_value(corrected_data, key_col, key_value, column)
 
-    st.text_input(
-        label="Current Value",
-        value=str(current_value) if current_value is not None else "",
-        key=f"correction_current_value_{tab_index}",
-        disabled=True,
-    )
+    st.write(f"**Current Value:** {current_value}")
 
     return column, current_value
 

@@ -5,6 +5,7 @@ and Pydantic models for validation and configuration.
 """
 
 import json
+import math
 from datetime import date
 
 import polars as pl
@@ -269,7 +270,7 @@ def test_str_compare_options_model():
 def test_str_compare_options_defaults():
     """Test StrCompareOptions model with default values."""
     options = StrCompareOptions()
-    assert options.case_option == "none"
+    assert options.case_option is None
     assert options.trimspaces_option is False
     assert options.nosymbols_option is False
 
@@ -277,8 +278,8 @@ def test_str_compare_options_defaults():
 def test_ok_range_values_model_valid():
     """Test OkRangeValues model with valid values."""
     values = OkRangeValues(ok_range_neg=-5.0, ok_range_pos=5.0)
-    assert values.ok_range_neg == -5.0
-    assert values.ok_range_pos == 5.0
+    assert math.isclose(values.ok_range_neg, -5.0)
+    assert math.isclose(values.ok_range_pos, 5.0)
 
 
 def test_ok_range_values_model_validation():
@@ -1545,8 +1546,8 @@ def test_compare_column_values_numeric_difference():
     )
 
     assert "difference" in result.columns
-    assert result["difference"][0] == 2.0
-    assert result["difference"][1] == -5.0
+    assert math.isclose(result["difference"][0], 2.0)
+    assert math.isclose(result["difference"][1], -5.0)
 
 
 def test_compare_column_values_ok_range_number():
@@ -2289,8 +2290,8 @@ def test_add_statistical_test_columns_with_results():
 
     assert "ttest_t_statistic" in result.columns
     assert "ttest_p_value" in result.columns
-    assert result["ttest_t_statistic"][0] == 1.5
-    assert result["ttest_p_value"][0] == 0.05
+    assert math.isclose(result["ttest_t_statistic"][0], 1.5)
+    assert math.isclose(result["ttest_p_value"][0], 0.05)
 
 
 def test_add_statistical_test_columns_without_results():
@@ -2357,7 +2358,7 @@ def test_get_staff_configuration_enumerator(
     )
 
     assert result is not None
-    staff_col, data_source, join_key = result
+    staff_col, _, join_key = result
     assert staff_col == "enumerator"
     assert join_key == "survey_id"
 
@@ -2375,7 +2376,7 @@ def test_get_staff_configuration_backchecker(
     )
 
     assert result is not None
-    staff_col, data_source, join_key = result
+    staff_col, _, join_key = result
     assert staff_col == "backchecker"
     assert join_key == "survey_id__BCCL"
 
@@ -2448,7 +2449,7 @@ def test_calculate_average_days():
 
     result = _calculate_average_days(staff_data, "survey_date", "backcheck_date")
 
-    assert result == 4.0
+    assert math.isclose(result, 4.0)
 
 
 def test_calculate_category_statistics():
@@ -2478,7 +2479,7 @@ def test_calculate_category_statistics_empty():
 
     assert result["Non-Missing Survey (Cat 1)"] == 0
     assert result["Mismatches (Cat 1)"] == 0
-    assert result["Error Rate % (Cat 1)"] == 0.0
+    assert math.isclose(result["Error Rate % (Cat 1)"], 0.0)
 
 
 def test_calculate_staff_statistics():
@@ -2547,7 +2548,7 @@ def test_get_test_value_valid():
 
     result = _get_test_value(col_data, "ttest_t_statistic")
 
-    assert result == 1.5
+    assert math.isclose(result, 1.5)
 
 
 def test_get_test_value_none():
@@ -2607,13 +2608,11 @@ def test_calculate_column_statistics():
         }
     )
 
-    n_values, n_compared, n_mismatches, error_rate = _calculate_column_statistics(
-        col_data
-    )
+    _, n_compared, n_mismatches, error_rate = _calculate_column_statistics(col_data)
 
     assert n_compared == 4
     assert n_mismatches == 2
-    assert error_rate == 50.0
+    assert math.isclose(error_rate, 50.0)
 
 
 def test_build_column_stats_dict():
@@ -2634,7 +2633,7 @@ def test_build_column_stats_dict():
     assert result["Data Type"] == "Int64"
     assert result["Values Compared"] == 4
     assert result["Mismatches"] == 2
-    assert result["Error Rate (%)"] == 50.0
+    assert math.isclose(result["Error Rate (%)"], 50.0)
 
 
 def test_build_select_columns():
@@ -3011,7 +3010,7 @@ def test_calculate_average_days_missing_columns():
 
     result = _calculate_average_days(staff_data, "survey_date", "backcheck_date")
 
-    assert result == 0.0
+    assert math.isclose(result, 0.0)
 
 
 def test_calculate_average_days_none_dates():
@@ -3025,7 +3024,7 @@ def test_calculate_average_days_none_dates():
 
     result = _calculate_average_days(staff_data, None, None)
 
-    assert result == 0.0
+    assert math.isclose(result, 0.0)
 
 
 def test_get_column_data_type_missing_column():
@@ -3073,7 +3072,7 @@ def test_preprocess_string_values_nosymbols():
     survey_vals = pl.Series(["alice!", "bob?"])
     backcheck_vals = pl.Series(["alice", "bob"])
 
-    survey_result, backcheck_result = _preprocess_string_values(
+    survey_result, _ = _preprocess_string_values(
         survey_vals, backcheck_vals, None, False, True
     )
 

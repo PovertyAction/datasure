@@ -20,16 +20,65 @@ class MockSessionState(dict):
         self[name] = value
 
 
-@pytest.fixture(scope="session", autouse=True)
-def mock_streamlit_for_views():
-    """Mock streamlit module for all view tests to prevent module-level
-    execution issues.
-    """
-    # Create a comprehensive mock for streamlit
-    st_mock = MagicMock()
+# === Module-level streamlit mock setup ===
+# This MUST happen at module level (not in a fixture) so that it's available
+# during test collection when test modules with module-level imports are loaded.
 
-    # Mock session_state as a dict-like object that supports attribute access
-    st_mock.session_state = MockSessionState(
+# Save the original streamlit module so we can restore it for non-view tests.
+# Replacing sys.modules["streamlit"] globally would break @st.cache_data,
+# @st.fragment, and other decorators in non-view source files.
+_original_streamlit = sys.modules.get("streamlit")
+
+_st_mock = MagicMock()
+
+_st_mock.session_state = MockSessionState(
+    {
+        "st_project_id": None,
+        "st_prep_data_page": None,
+        "st_output_page1": None,
+        "current_page": None,
+    }
+)
+
+# Mock common streamlit functions
+_st_mock.stop = Mock(side_effect=StopIteration)
+_st_mock.info = Mock()
+_st_mock.warning = Mock()
+_st_mock.error = Mock()
+_st_mock.success = Mock()
+_st_mock.title = Mock()
+_st_mock.markdown = Mock()
+_st_mock.subheader = Mock()
+_st_mock.write = Mock()
+_st_mock.columns = Mock(return_value=[Mock(), Mock(), Mock()])
+_st_mock.button = Mock(return_value=False)
+_st_mock.text_input = Mock(return_value="")
+_st_mock.selectbox = Mock(return_value=None)
+_st_mock.multiselect = Mock(return_value=[])
+_st_mock.container = Mock()
+_st_mock.popover = Mock()
+_st_mock.dataframe = Mock()
+_st_mock.number_input = Mock(return_value=None)
+_st_mock.tabs = Mock(return_value=[Mock()])
+
+# Inject mock into sys.modules at module level for collection-time availability.
+# This is needed so that view modules (e.g. prep_view.py) can be imported
+# during test collection without requiring a running Streamlit runtime.
+sys.modules["streamlit"] = _st_mock
+
+
+@pytest.fixture(autouse=True)
+def _use_mock_streamlit():
+    """Swap in mock streamlit for each view test, restore after.
+
+    Also resets session_state to MockSessionState to prevent corruption
+    from tests that replace session_state with a plain dict.
+    """
+    # Install the mock for this view test
+    sys.modules["streamlit"] = _st_mock
+
+    # Reset session state
+    _st_mock.session_state = MockSessionState(
         {
             "st_project_id": None,
             "st_prep_data_page": None,
@@ -38,29 +87,8 @@ def mock_streamlit_for_views():
         }
     )
 
-    # Mock common streamlit functions
-    st_mock.stop = Mock(
-        side_effect=StopIteration
-    )  # Use StopIteration instead of generic Exception
-    st_mock.info = Mock()
-    st_mock.warning = Mock()
-    st_mock.error = Mock()
-    st_mock.success = Mock()
-    st_mock.title = Mock()
-    st_mock.markdown = Mock()
-    st_mock.subheader = Mock()
-    st_mock.write = Mock()
-    st_mock.columns = Mock(return_value=[Mock(), Mock(), Mock()])
-    st_mock.button = Mock(return_value=False)
-    st_mock.text_input = Mock(return_value="")
-    st_mock.selectbox = Mock(return_value=None)
-    st_mock.container = Mock()
-    st_mock.popover = Mock()
-    st_mock.dataframe = Mock()
+    yield _st_mock
 
-    # Inject mock into sys.modules before any view imports
-    sys.modules["streamlit"] = st_mock
-
-    yield st_mock
-
-    # Cleanup not necessary as it's session-scoped
+    # Restore real streamlit after the view test
+    if _original_streamlit is not None:
+        sys.modules["streamlit"] = _original_streamlit

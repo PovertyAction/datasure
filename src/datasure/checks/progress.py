@@ -45,7 +45,7 @@ class ProgressSummary(BaseModel):
         None, ge=0, description="Target number of surveys to collect"
     )
     percentage_completed: float = Field(
-        ge=0, le=100, description="Percentage of target completed"
+        ge=0, description="Percentage of target completed"
     )
 
 
@@ -208,8 +208,6 @@ def progress_report_settings(
 
         # Load default settings
         default_settings = load_default_settings(settings_file, config)
-
-        st.write(default_settings)
 
         # Survey Identifiers
         with st.container(border=True):
@@ -570,6 +568,7 @@ def render_time_period_selector(
 
 
 @demo_output_onboarding(TAB_NAME)
+@st.fragment
 def display_progress_overtime(
     data: pl.DataFrame,
     date: str | None,

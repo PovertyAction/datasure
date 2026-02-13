@@ -2,6 +2,19 @@ import pandas as pd
 import polars as pl
 import streamlit as st
 
+from datasure.models.enums import (
+    COL_FUNC_WITH_VALUES,
+    DEL_COND_USE_VALS,
+    DEL_ROW_COND_MAX_1,
+    DEL_ROW_COND_NUM_ONLY,
+    DEL_ROW_COND_SAME_TYPE,
+    DEL_ROW_COND_STR_ONLY,
+    PrepActions,
+    PrepFunctions,
+    PrepMethods,
+    PrepOperations,
+    PrepRowConditions,
+)
 from datasure.processing.prep import prep_apply_action
 from datasure.utils.dataframe_utils import ColumnByType, get_df_columns
 from datasure.utils.duckdb_utils import (
@@ -26,6 +39,8 @@ from datasure.utils.prep_utils import (
     PrepDescriptions,
 )
 
+# === PAGE GUARDS === #
+
 # Get project id
 project_id: str = st.session_state.st_project_id
 
@@ -45,69 +60,7 @@ if not show_prep_page_info:
     )
     st.stop()
 
-# --- DEFINE CONSTANTS ---#
-
-# --- COLUMN METHODS WITH VALUES ---#
-
-COL_MEDTHODS_WITH_VALUES = (
-    "sum",
-    "diff",
-    "mean",
-    "median",
-    "mode",
-    "min",
-    "max",
-    "std",
-    "var",
-    "first",
-    "last",
-    "count",
-    "nunique",
-    "product",
-    "quotient",
-)
-
-COL_MEDTHODS_NO_VALUES = (
-    "index",
-    "uuid",
-    "random",
-)
-
-DEL_ROW_COND_MAX_1 = (
-    "value is equal to",
-    "value is not equal to",
-    "value is greater than",
-    "value is less than",
-    "value is greater than or equal to",
-    "value is less than or equal to",
-)
-
-DEL_ROW_COND_NUM_ONLY = (
-    "value is greater than",
-    "value is less than",
-    "value is greater than or equal to",
-    "value is less than or equal to",
-    "value is between",
-    "value is not between",
-)
-
-DEL_ROW_COND_STR_ONLY = (
-    "value is like",
-    "value is not like",
-)
-
-DEL_COND_USE_VALS = (
-    "value is equal to",
-    "value is not equal to",
-    "value is greater than",
-    "value is less than",
-    "value is greater than or equal to",
-)
-
-DEL_ROW_COND_SAME_TYPE = (
-    "value is between",
-    "value is not between",
-)
+# === CONFIGURATION & DATA CONTAINERS === #
 
 
 class PrepViewConfig:
@@ -142,28 +95,532 @@ class PrepViewConfig:
         self.DP_ROW_CONDITIONS = tuple(self.descriptions.ROW_CONDITIONS.keys())
 
 
-# -- DATA PREP PAGE --#
-# Creates page for data preprocessing
+class TransformInputs:
+    """Container for transform column input values."""
 
-# Add demo navigation and guidance
-add_demo_navigation("prep_view.py", step=3)
-demo_sidebar_help()
+    def __init__(self):
+        self.func: str | None = None
+        self.old_val: str | None = None
+        self.new_val: str | None = None
+        self.pattern: str | None = None
+        self.start: int | None = None
+        self.end: int | None = None
+        self.numeric_val: float | None = None
 
-st.title("Get Your Data Ready")
-st.write(
-    "Prepare your dataset for Data Quality Checks. Use these tools to transform, add and remove columns and rows in your dataset."
-)
 
-# Demo guidance
-if is_demo_project():
-    demo_expander(
-        "Prepare Your Data for Quality Checks",
-        ImportDemoInfo.get_info_message("prepare_data_info"),
-        expanded=True,
-    )
+class RemoveRowsInputs:
+    """Container for remove rows input values."""
+
+    def __init__(self):
+        self.method: str | None = None
+        self.condition: str | None = None
+        self.selected_columns: list[str] = []
+        self.indexes_to_remove: list[str] = []
+        self.equality_values: list = []
+        self.min_value: any = None
+        self.max_value: any = None
+        self.pattern_value: str | None = None
+
 
 # Initialize configuration
 config = PrepViewConfig()
+
+# === FORM VALIDATION HELPERS === #
+
+
+def _has_none_values(values: list | None) -> bool:
+    """Check if a list is None, empty, or contains None values."""
+    return values is None or not values or any(v is None for v in values)
+
+
+def _is_add_column_incomplete(prep_args: dict) -> bool:
+    """Check if add column action is missing required fields."""
+    if not prep_args.get("column_names"):
+        return True
+    method = prep_args.get("method")
+    if method == PrepFunctions.quotient.value:
+        return (
+            method in COL_FUNC_WITH_VALUES
+            and len(prep_args.get("source_columns", [])) != 2
+        )
+    return method in COL_FUNC_WITH_VALUES and not prep_args.get("source_columns")
+
+
+def _is_transform_column_incomplete(prep_args: dict) -> bool:
+    """Check if transform column action is missing required fields."""
+    if not prep_args.get("source_columns") or not prep_args.get("method"):
+        return True
+
+    value = prep_args.get("value")
+    # No values required (trim, strip, lower, upper, etc.) — complete
+    if not value:
+        return False
+    # Values required — incomplete if any are None or empty string
+    return any(v is None or v == "" for v in value)
+
+
+def _is_remove_row_incomplete(prep_args: dict) -> bool:
+    """Check if remove row action is missing required fields."""
+    method = prep_args.get("method")
+
+    if method == PrepMethods.row_index.value:
+        return not prep_args.get("value")
+
+    if method != PrepMethods.condition.value:
+        return True
+
+    condition = prep_args.get("condition")
+    value = prep_args.get("value")
+
+    if condition in DEL_ROW_COND_SAME_TYPE:
+        return _has_none_values(value)
+
+    # DEL_COND_USE_VALS, like, not_like conditions
+    conditions_requiring_value = DEL_COND_USE_VALS + (
+        PrepRowConditions.like.value,
+        PrepRowConditions.not_like.value,
+    )
+    if condition in conditions_requiring_value:
+        return not value
+
+    return False
+
+
+def _is_prep_form_incomplete(action: str, prep_args: dict) -> bool:
+    """Check if the preparation form is incomplete and the Add button should
+    be disabled.
+
+    Args:
+        action: The selected preparation action
+        prep_args: The arguments for the preparation action
+
+    Returns
+    -------
+        True if the form is incomplete (Add button should be disabled), False otherwise
+    """
+    validators = {
+        PrepActions.add_column.value: _is_add_column_incomplete,
+        PrepActions.transform_column.value: _is_transform_column_incomplete,
+        PrepActions.remove_column.value: lambda args: not args.get("source_columns"),
+        PrepActions.remove_row.value: _is_remove_row_incomplete,
+    }
+
+    validator = validators.get(action)
+    return validator(prep_args) if validator else False
+
+
+# === TRANSFORM COLUMN UI HELPERS === #
+
+
+def _render_string_function_inputs(
+    step_index: int, inputs: TransformInputs
+) -> TransformInputs:
+    """Render UI inputs for string transformation functions.
+
+    Args:
+        step_index: Current step index for unique widget keys
+        inputs: TransformInputs object to populate
+
+    Returns
+    -------
+        Updated TransformInputs with user selections
+    """
+    inputs.func = st.selectbox(
+        label="Select Function",
+        options=config.DP_STR_FUNCS,
+        key=f"st_sb_trf_func{step_index}",
+    )
+
+    if inputs.func == "replace":
+        inputs.old_val = st.text_input(
+            label="Enter value",
+            help="Enter value to replace",
+            key=f"st_sb_trf_val{step_index}",
+        )
+        inputs.new_val = st.text_input(
+            label="Enter new value",
+            help="Enter new value to replace with",
+            key=f"st_sb_trf_new_val{step_index}",
+        )
+    elif inputs.func == "substring":
+        _render_substring_inputs(step_index, inputs)
+    elif inputs.func == "extract pattern":
+        inputs.pattern = st.text_input(
+            label="Enter pattern",
+            help="Enter pattern to extract from column",
+            key=f"st_sb_trf_pattern{step_index}",
+        )
+
+    return inputs
+
+
+def _render_substring_inputs(step_index: int, inputs: TransformInputs) -> None:
+    """Render and validate substring start/end inputs.
+
+    Args:
+        step_index: Current step index for unique widget keys
+        inputs: TransformInputs object to populate with start/end values
+    """
+    start_col, end_col = st.columns(2)
+    with start_col:
+        inputs.start = st.number_input(
+            label="Enter start index",
+            help="Enter start index for substring",
+            key=f"st_sb_trf_start{step_index}",
+            value=None,
+            step=1,
+        )
+    with end_col:
+        inputs.end = st.number_input(
+            label="Enter end index",
+            help="Enter end index for substring",
+            key=f"st_sb_trf_end{step_index}",
+            value=None,
+            step=1,
+        )
+
+    if inputs.start is not None and inputs.end is not None:
+        if inputs.start > inputs.end:
+            st.error("Start index cannot be greater than end index")
+        elif inputs.start == inputs.end:
+            st.error("Start index cannot be equal to end index")
+
+
+def _render_numeric_function_inputs(
+    step_index: int, inputs: TransformInputs
+) -> TransformInputs:
+    """Render UI inputs for numeric transformation functions.
+
+    Args:
+        step_index: Current step index for unique widget keys
+        inputs: TransformInputs object to populate
+
+    Returns
+    -------
+        Updated TransformInputs with user selections
+    """
+    inputs.func = st.selectbox(
+        label="Select Function",
+        options=config.DP_NUM_FUNCS,
+        key=f"st_sb_trf_func{step_index}",
+    )
+
+    arithmetic_ops = (
+        PrepOperations.add.value,
+        PrepOperations.multiply.value,
+        PrepOperations.subtract.value,
+        PrepOperations.divide.value,
+    )
+    if inputs.func in arithmetic_ops:
+        inputs.numeric_val = st.number_input(
+            label="Enter value",
+            help="Enter value to perform operation on column",
+            key=f"st_sb_trf_val{step_index}",
+            value=None,
+        )
+
+    return inputs
+
+
+def _render_datetime_function_inputs(
+    step_index: int, inputs: TransformInputs
+) -> TransformInputs:
+    """Render UI inputs for datetime transformation functions.
+
+    Args:
+        step_index: Current step index for unique widget keys
+        inputs: TransformInputs object to populate
+
+    Returns
+    -------
+        Updated TransformInputs with user selections
+    """
+    inputs.func = st.selectbox(
+        label="Select Function",
+        options=config.DP_DATETIME_FUNCS,
+        key=f"st_sb_trf_func{step_index}",
+    )
+    return inputs
+
+
+def _build_transform_value(inputs: TransformInputs) -> list:
+    """Build the value list from transform inputs based on selected function.
+
+    Args:
+        inputs: TransformInputs containing user selections
+
+    Returns
+    -------
+        List of values appropriate for the selected function
+    """
+    if not inputs.func:
+        return []
+
+    value_builders = {
+        "replace": lambda: [inputs.old_val, inputs.new_val],
+        "extract pattern": lambda: [inputs.pattern],
+        "substring": lambda: [inputs.start, inputs.end],
+        "add": lambda: [inputs.numeric_val],
+        "multiply": lambda: [inputs.numeric_val],
+        "subtract": lambda: [inputs.numeric_val],
+        "divide": lambda: [inputs.numeric_val],
+    }
+
+    builder = value_builders.get(inputs.func)
+    return builder() if builder else []
+
+
+def _build_transform_result(column: str | None, inputs: TransformInputs) -> dict:
+    """Build the result dictionary for a transform column action.
+
+    Args:
+        column: The column being transformed
+        inputs: TransformInputs containing user selections
+
+    Returns
+    -------
+        Dictionary with transform action parameters
+    """
+    source_columns = [column] if column else []
+    value = _build_transform_value(inputs)
+
+    return {
+        "action": PrepActions.transform_column.value,
+        "column_names": None,
+        "affected_count": 0,
+        "remaining_count": None,
+        "value": value,
+        "method": inputs.func,
+        "source_columns": source_columns,
+        "condition": None,
+        "failed_count": 0,
+        "additional_info": None,
+    }
+
+
+# === REMOVE ROWS UI HELPERS === #
+
+
+def _get_column_options_for_condition(
+    condition: str,
+    all_cols: list[str],
+    num_cols: list[str],
+    date_cols: list[str],
+    string_cols: list[str],
+) -> tuple[list[str], int]:
+    """Determine column options and max selections based on condition type.
+
+    Args:
+        condition: The selected row removal condition
+        all_cols: List of all column names
+        num_cols: List of numeric column names
+        date_cols: List of datetime column names
+        string_cols: List of string column names
+
+    Returns
+    -------
+        Tuple of (column_options, max_selections)
+    """
+    max_selections = 1 if condition in DEL_ROW_COND_MAX_1 else len(all_cols)
+
+    if condition in DEL_ROW_COND_NUM_ONLY:
+        col_options = num_cols + date_cols
+    elif condition in DEL_ROW_COND_STR_ONLY:
+        col_options = string_cols
+    else:
+        col_options = all_cols
+
+    return col_options, max_selections
+
+
+def _render_equality_value_inputs(
+    prep_data: pl.DataFrame,
+    inputs: "RemoveRowsInputs",
+    step_index: int,
+) -> None:
+    """Render value selection for equality conditions.
+
+    Args:
+        prep_data: The DataFrame to get unique values from
+        inputs: RemoveRowsInputs object to populate
+        step_index: Current step index for unique widget keys
+    """
+    unique_vals = prep_data[inputs.selected_columns[0]].unique().to_list()
+    inputs.equality_values = st.selectbox(
+        label="Select value",
+        options=unique_vals,
+        help="Select value to compare",
+        key=f"st_sb_del_rows_cond_val{step_index}",
+    )
+
+
+def _validate_column_types_for_range(
+    prep_data: pl.DataFrame, columns: list[str]
+) -> tuple[bool, set]:
+    """Validate that all selected columns have the same data type.
+
+    Args:
+        prep_data: The DataFrame to check column types
+        columns: List of column names to validate
+
+    Returns
+    -------
+        Tuple of (is_valid, set_of_column_types)
+    """
+    if not columns:
+        return False, set()
+    col_types = set(prep_data[columns].dtypes)
+    is_valid = len(col_types) == 1
+    return is_valid, col_types
+
+
+def _get_unique_values_from_columns(
+    prep_data: pl.DataFrame, columns: list[str]
+) -> list:
+    """Get sorted unique values from multiple columns.
+
+    Args:
+        prep_data: The DataFrame to get values from
+        columns: List of column names
+
+    Returns
+    -------
+        Sorted list of unique values across all specified columns
+    """
+    value_options = []
+    for col in columns:
+        value_options.extend(prep_data[col].unique().to_list())
+    return sorted(value_options)
+
+
+def _render_range_value_inputs(
+    prep_data: pl.DataFrame,
+    inputs: "RemoveRowsInputs",
+    step_index: int,
+) -> None:
+    """Render min/max value selection for range conditions.
+
+    Args:
+        prep_data: The DataFrame to get unique values from
+        inputs: RemoveRowsInputs object to populate
+        step_index: Current step index for unique widget keys
+    """
+    is_valid, col_types = _validate_column_types_for_range(
+        prep_data, inputs.selected_columns
+    )
+    disable_inputs = not is_valid
+
+    if not is_valid and col_types:
+        st.error(
+            "All selected columns must be of the same type for this condition. "
+            f"You have selected the following types: {', '.join(str(ct) for ct in col_types)}"
+        )
+
+    value_options = _get_unique_values_from_columns(prep_data, inputs.selected_columns)
+
+    inputs.min_value = st.selectbox(
+        label="Select minimum value",
+        options=value_options,
+        help="Select minimum value to compare",
+        key=f"st_sb_del_rows_cond_val_min{step_index}",
+        disabled=disable_inputs,
+    )
+    inputs.max_value = st.selectbox(
+        label="Select maximum value",
+        options=value_options,
+        help="Select maximum value to compare",
+        key=f"st_sb_del_rows_cond_val_max{step_index}",
+        disabled=disable_inputs,
+    )
+
+
+def _render_pattern_value_inputs(
+    inputs: "RemoveRowsInputs",
+    step_index: int,
+) -> None:
+    """Render pattern input for like/not like conditions.
+
+    Args:
+        inputs: RemoveRowsInputs object to populate
+        step_index: Current step index for unique widget keys
+    """
+    inputs.pattern_value = st.text_input(
+        label="Enter pattern",
+        help="Enter pattern to match. You can use regular expressions",
+        key=f"st_sb_del_rows_cond_val{step_index}",
+    )
+
+
+def _build_remove_rows_value(inputs: "RemoveRowsInputs") -> list | str | None:
+    """Build the value field from remove rows inputs.
+
+    Args:
+        inputs: RemoveRowsInputs containing user selections
+
+    Returns
+    -------
+        The appropriate value based on method and condition
+    """
+    if inputs.method == PrepMethods.row_index.value and inputs.indexes_to_remove:
+        return inputs.indexes_to_remove
+
+    if inputs.method != PrepMethods.condition.value or not inputs.condition:
+        return None
+
+    if not inputs.selected_columns:
+        return None
+
+    if inputs.condition in DEL_COND_USE_VALS:
+        return inputs.equality_values
+    elif inputs.condition in DEL_ROW_COND_SAME_TYPE:
+        return [inputs.min_value, inputs.max_value]
+    elif inputs.condition in (
+        PrepRowConditions.like.value,
+        PrepRowConditions.not_like.value,
+    ):
+        return inputs.pattern_value
+
+    return None
+
+
+def _build_remove_rows_result(inputs: "RemoveRowsInputs") -> dict:
+    """Build the result dictionary for a remove rows action.
+
+    Args:
+        inputs: RemoveRowsInputs containing user selections
+
+    Returns
+    -------
+        Dictionary with remove rows action parameters
+    """
+    value = _build_remove_rows_value(inputs)
+
+    source_columns = (
+        inputs.selected_columns
+        if inputs.method == PrepMethods.condition.value and inputs.selected_columns
+        else []
+    )
+    condition = (
+        inputs.condition
+        if inputs.method == PrepMethods.condition.value and inputs.condition
+        else None
+    )
+
+    return {
+        "action": PrepActions.remove_row.value,
+        "column_names": None,
+        "affected_count": 0,
+        "remaining_count": None,
+        "value": value,
+        "method": inputs.method,
+        "source_columns": source_columns,
+        "condition": condition,
+        "failed_count": None,
+        "additional_info": None,
+    }
+
+
+# === PREP STEP HANDLER === #
 
 
 class PrepStepHandler:
@@ -172,7 +629,6 @@ class PrepStepHandler:
     def __init__(self, prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
         self.prep_data = prep_data
         self.step_index = step_index
-        self.config = PrepViewConfig()
         df_columns: ColumnByType = get_df_columns(self.prep_data)
         self.all_cols: list[str] = df_columns.all_columns
         self.string_cols: list[str] = df_columns.string_columns
@@ -191,20 +647,23 @@ class PrepStepHandler:
             # select method to add column
             dp_prep_add_col_med = st.selectbox(
                 label="Select Method",
-                options=self.config.DP_ADD_METHODS,
+                options=config.DP_ADD_METHODS,
                 key=f"st_sb_add_col_method{self.step_index}",
                 help="Select method to add new column",
             )
 
-            if dp_prep_add_col_med == "constant":
+            if dp_prep_add_col_med == PrepFunctions.constant.value:
                 dp_prep_add_val = st.text_input(
                     label="Enter value",
                     help="Enter value to add to new column",
                     key=f"st_sb_add_val{self.step_index}",
                 )
 
-            elif dp_prep_add_col_med in COL_MEDTHODS_WITH_VALUES:
-                if dp_prep_add_col_med in ["quotient", "diff"]:
+            elif dp_prep_add_col_med in COL_FUNC_WITH_VALUES:
+                if dp_prep_add_col_med in [
+                    PrepFunctions.quotient.value,
+                    PrepFunctions.diff.value,
+                ]:
                     max_selections = 2
                 else:
                     max_selections = len(self.num_cols)
@@ -217,15 +676,19 @@ class PrepStepHandler:
                 )
 
             # define custom message values
-            value = dp_prep_add_val if dp_prep_add_col_med == "constant" else None
+            value = (
+                dp_prep_add_val
+                if dp_prep_add_col_med == PrepFunctions.constant.value
+                else None
+            )
             source_columns = (
                 dp_prep_add_col_select
-                if dp_prep_add_col_med in COL_MEDTHODS_WITH_VALUES
+                if dp_prep_add_col_med in COL_FUNC_WITH_VALUES
                 else []
             )
 
             return {
-                "action": "add new column",
+                "action": PrepActions.add_column.value,
                 "column_names": dp_prep_add_col,
                 "affected_count": None,
                 "remaining_count": self.prep_data.shape[1] + 1,
@@ -240,139 +703,63 @@ class PrepStepHandler:
         return None
 
     def transform_column_handler(self) -> dict | None:
-        """Handle transform column UI and logic."""
-        dp_prep_trf_col = st.selectbox(
+        """Handle transform column UI and logic.
+
+        Renders the column selection and appropriate function inputs based on
+        the selected column's data type (String, Numeric, or Datetime).
+
+        Returns
+        -------
+            Dictionary with transform action parameters, or None if no column selected
+        """
+        selected_column = st.selectbox(
             label="Select column to transform",
             options=self.all_cols,
             key=f"st_sb_trf_col{self.step_index}",
         )
-        if dp_prep_trf_col:
-            # show functions based on column type
-            col_type = self.prep_data[dp_prep_trf_col].dtype
-            st.info(f"Column type: {col_type}")
 
-            # Initialize variables to avoid UnboundLocalError
-            dp_prep_trf_func = None
-            dp_prep_trf_old_val = None
-            dp_prep_trf_new_val = None
-            dp_prep_trf_pattern = None
-            dp_prep_trf_start = None
-            dp_prep_trf_end = None
-            dp_prep_trf_val = None
+        if not selected_column:
+            return None
 
-            if col_type == pl.String:
-                dp_prep_trf_func = st.selectbox(
-                    label="Select Function",
-                    options=config.DP_STR_FUNCS,
-                    key=f"st_sb_trf_func{i}",
-                )
-                if dp_prep_trf_func == "replace":
-                    dp_prep_trf_old_val = st.text_input(
-                        label="Enter value",
-                        help="Enter value to replace",
-                        key=f"st_sb_trf_val{i}",
-                    )
-                    dp_prep_trf_new_val = st.text_input(
-                        label="Enter new value",
-                        help="Enter new value to replace with",
-                        key=f"st_sb_trf_new_val{i}",
-                    )
-                elif dp_prep_trf_func == "substring":
-                    start_col, end_col = st.columns(2)
-                    with start_col:
-                        dp_prep_trf_start = st.number_input(
-                            label="Enter start index",
-                            help="Enter start index for substring",
-                            key=f"st_sb_trf_start{i}",
-                            value=0,
-                            step=1,
-                        )
-                    with end_col:
-                        dp_prep_trf_end = st.number_input(
-                            label="Enter end index",
-                            help="Enter end index for substring",
-                            key=f"st_sb_trf_end{i}",
-                            value=0,
-                            step=1,
-                        )
-                    if dp_prep_trf_start is not None and dp_prep_trf_end is not None:
-                        if dp_prep_trf_start > dp_prep_trf_end:
-                            st.error("Start index cannot be greater than end index")
-                        elif dp_prep_trf_start == dp_prep_trf_end:
-                            st.error("Start index cannot be equal to end index")
+        col_type = self.prep_data[selected_column].dtype
+        st.info(f"Column type: {col_type}")
 
-                elif dp_prep_trf_func == "extract pattern":
-                    dp_prep_trf_pattern = st.text_input(
-                        label="Enter pattern",
-                        help="Enter pattern to extract from column",
-                        key=f"st_sb_trf_pattern{i}",
-                    )
+        inputs = TransformInputs()
+        inputs = self._render_transform_inputs_by_type(col_type, inputs)
 
-            elif self.prep_data[dp_prep_trf_col].dtype.is_numeric():
-                dp_prep_trf_func = st.selectbox(
-                    label="Select Function",
-                    options=config.DP_NUM_FUNCS,
-                    key=f"st_sb_trf_func{i}",
-                )
-                if dp_prep_trf_func in [
-                    "add",
-                    "multiply",
-                    "subtract",
-                    "divide",
-                ]:
-                    dp_prep_trf_val = st.number_input(
-                        label="Enter value",
-                        help="Enter value to perform operation on column",
-                        key=f"st_sb_trf_val{i}",
-                    )
+        return _build_transform_result(selected_column, inputs)
 
-            elif col_type == pl.Datetime:
-                dp_prep_trf_func = st.selectbox(
-                    label="Select Function",
-                    options=config.DP_DATETIME_FUNCS,
-                    key=f"st_sb_trf_func{i}",
-                )
+    def _render_transform_inputs_by_type(
+        self, col_type: pl.DataType, inputs: TransformInputs
+    ) -> TransformInputs:
+        """Render appropriate transform inputs based on column data type.
 
-            source_columns = [dp_prep_trf_col] if dp_prep_trf_col else []
-            if dp_prep_trf_func and dp_prep_trf_func in ["replace"]:
-                value = [dp_prep_trf_old_val, dp_prep_trf_new_val]
-            elif dp_prep_trf_func and dp_prep_trf_func in ["extract pattern"]:
-                value = [dp_prep_trf_pattern]
-            elif dp_prep_trf_func and dp_prep_trf_func in ["substring"]:
-                value = [dp_prep_trf_start, dp_prep_trf_end]
-            elif dp_prep_trf_func and dp_prep_trf_func in [
-                "add",
-                "multiply",
-                "subtract",
-                "divide",
-            ]:
-                value = [dp_prep_trf_val]
-            else:
-                value = []
+        Args:
+            col_type: The Polars data type of the selected column
+            inputs: TransformInputs object to populate
 
-            return {
-                "action": "transform column(s)",
-                "column_names": None,
-                "affected_count": 0,
-                "remaining_count": None,
-                "value": value,
-                "method": dp_prep_trf_func,
-                "source_columns": source_columns,
-                "condition": None,
-                "failed_count": 0,
-                "additional_info": None,
-            }
+        Returns
+        -------
+            Updated TransformInputs with user selections
+        """
+        if col_type == pl.String:
+            return _render_string_function_inputs(self.step_index, inputs)
+        elif col_type == pl.Datetime:
+            return _render_datetime_function_inputs(self.step_index, inputs)
+        elif hasattr(col_type, "is_numeric") and col_type.is_numeric():
+            return _render_numeric_function_inputs(self.step_index, inputs)
+        return inputs
 
     def remove_column_handler(self) -> dict | None:
         """Handle remove column UI and logic."""
         dp_prep_del_cols = st.multiselect(
             label="Select columns to remove",
             options=self.all_cols,
-            key=f"st_sb_del_cols{i}",
+            key=f"st_sb_del_cols{self.step_index}",
         )
 
         return {
-            "action": "remove column(s)",
+            "action": PrepActions.remove_column.value,
             "column_names": None,
             "affected_count": len(dp_prep_del_cols) if dp_prep_del_cols else 0,
             "remaining_count": self.prep_data.shape[1] - len(dp_prep_del_cols)
@@ -387,152 +774,100 @@ class PrepStepHandler:
         }
 
     def remove_rows_handler(self) -> dict | None:
-        """Handle remove rows UI and logic."""
-        indexes_to_remove = []
-        dp_prep_del_rows_cond = None
-        dp_prep_del_rows_cond_cols = None
-        value = None
-        dp_prep_del_rows = st.selectbox(
+        """Handle remove rows UI and logic.
+
+        Renders method selection and appropriate inputs based on the selected
+        removal method (by row index or by condition).
+
+        Returns
+        -------
+            Dictionary with remove rows action parameters
+        """
+        method = st.selectbox(
             label="Select Method",
             options=config.DP_DEL_METHODS,
-            key=f"st_sb_del_rows{i}",
+            key=f"st_sb_del_rows{self.step_index}",
         )
 
-        if dp_prep_del_rows == "by row index":
-            dp_prep_del_rows_idx = st.text_input(
-                label="Enter row index",
-                help="Enter row index to remove eg. 1, 2, 3, -5, 5:-2",
-                key=f"st_sb_del_rows_idx{i}",
-            )
-            if dp_prep_del_rows_idx:
-                indexes_to_remove = dp_prep_del_rows_idx.replace(" ", "").split(",")
+        inputs = RemoveRowsInputs()
+        inputs.method = method
 
-        if dp_prep_del_rows == "by condition":
-            dp_prep_del_rows_cond = st.selectbox(
-                label="Enter condition",
-                options=config.DP_ROW_CONDITIONS,
-                help="Enter condition for removing rows",
-                key=f"st_sb_del_rows_cond{i}",
-            )
-            if dp_prep_del_rows_cond:
-                if dp_prep_del_rows_cond in DEL_ROW_COND_MAX_1:
-                    max_selections = 1
-                else:
-                    max_selections = len(all_cols)
+        if method == PrepMethods.row_index.value:
+            self._render_row_index_inputs(inputs)
+        elif method == PrepMethods.condition.value:
+            self._render_condition_inputs(inputs)
 
-                if dp_prep_del_rows_cond in DEL_ROW_COND_NUM_ONLY:
-                    col_options = self.num_cols + self.date_cols
-                elif dp_prep_del_rows_cond in DEL_ROW_COND_STR_ONLY:
-                    col_options = self.string_cols
-                else:
-                    col_options = self.all_cols
+        return _build_remove_rows_result(inputs)
 
-                dp_prep_del_rows_cond_cols = st.multiselect(
-                    label="Select column to apply conditions to",
-                    options=col_options,
-                    help="Select column to apply conditions to, you may select multiple columns",
-                    key=f"st_sb_del_rows_cond_cols{i}",
-                    max_selections=max_selections,
-                )
+    def _render_row_index_inputs(self, inputs: "RemoveRowsInputs") -> None:
+        """Render UI inputs for removing rows by index.
 
-                if (
-                    dp_prep_del_rows_cond in DEL_COND_USE_VALS
-                    and dp_prep_del_rows_cond_cols
-                ):
-                    # get a list of unique values in select column
-                    unique_vals = (
-                        prep_data[dp_prep_del_rows_cond_cols[0]].unique().tolist()
-                    )
-                    dp_prep_del_rows_cond_val = st.multiselect(
-                        label="Select value",
-                        options=sorted(unique_vals),
-                        help="Select value to compare",
-                        key=f"st_sb_del_rows_cond_val{i}",
-                    )
+        Args:
+            inputs: RemoveRowsInputs object to populate
+        """
+        row_index_text = st.text_input(
+            label="Enter row index",
+            help="Enter row index to remove eg. 1, 2, 3, -5, 5:-2",
+            key=f"st_sb_del_rows_idx{self.step_index}",
+        )
+        if row_index_text:
+            inputs.indexes_to_remove = row_index_text.replace(" ", "").split(",")
 
-                if dp_prep_del_rows_cond in DEL_ROW_COND_SAME_TYPE:
-                    # check that all columns are of the same type
-                    disable_inputs = True
-                    col_types = (
-                        prep_data[dp_prep_del_rows_cond_cols].dtypes.unique().tolist()
-                    )
-                    if len(col_types) > 1:
-                        st.error(
-                            "All selected columns must be of the same type for this condition"
-                        )
-                    else:
-                        disable_inputs = False
+    def _render_condition_inputs(self, inputs: "RemoveRowsInputs") -> None:
+        """Render UI inputs for removing rows by condition.
 
-                    # get a list of unique values in select columns
-                    value_options = []
-                    for col in dp_prep_del_rows_cond_cols:
-                        value_options = prep_data[col].unique().tolist()
-                    dp_prep_del_rows_cond_val_min = st.selectbox(
-                        label="Select minimum value",
-                        options=sorted(value_options),
-                        help="Select minimum value to compare",
-                        key=f"st_sb_del_rows_cond_val_min{i}",
-                        disabled=disable_inputs,
-                    )
-                    dp_prep_del_rows_cond_val_max = st.selectbox(
-                        label="Select maximum value",
-                        options=sorted(value_options),
-                        help="Select maximum value to compare",
-                        key=f"st_sb_del_rows_cond_val_max{i}",
-                        disabled=disable_inputs,
-                    )
+        Args:
+            inputs: RemoveRowsInputs object to populate
+        """
+        inputs.condition = st.selectbox(
+            label="Enter condition",
+            options=config.DP_ROW_CONDITIONS,
+            help="Enter condition for removing rows",
+            key=f"st_sb_del_rows_cond{self.step_index}",
+        )
 
-                if dp_prep_del_rows_cond in [
-                    "value is like",
-                    "value is not like",
-                ]:
-                    dp_prep_del_rows_cond_val = st.text_input(
-                        label="Enter pattern",
-                        help="Enter pattern to match. You can use regular expressions",
-                        key=f"st_sb_del_rows_cond_val{i}",
-                    )
+        if not inputs.condition:
+            return
 
-        # get value
-        if indexes_to_remove and dp_prep_del_rows == "by row index":
-            value = indexes_to_remove
-        elif (
-            dp_prep_del_rows_cond
-            and dp_prep_del_rows_cond_cols
-            and dp_prep_del_rows == "by condition"
+        col_options, max_selections = _get_column_options_for_condition(
+            inputs.condition,
+            self.all_cols,
+            self.num_cols,
+            self.date_cols,
+            self.string_cols,
+        )
+
+        inputs.selected_columns = st.multiselect(
+            label="Select column to apply conditions to",
+            options=col_options,
+            help="Select column to apply conditions to, you may select multiple columns",
+            key=f"st_sb_del_rows_cond_cols{self.step_index}",
+            max_selections=max_selections,
+        )
+
+        if not inputs.selected_columns:
+            return
+
+        self._render_condition_value_inputs(inputs)
+
+    def _render_condition_value_inputs(self, inputs: "RemoveRowsInputs") -> None:
+        """Render value inputs based on the selected condition type.
+
+        Args:
+            inputs: RemoveRowsInputs object to populate with values
+        """
+        if inputs.condition in DEL_COND_USE_VALS:
+            _render_equality_value_inputs(self.prep_data, inputs, self.step_index)
+        elif inputs.condition in DEL_ROW_COND_SAME_TYPE:
+            _render_range_value_inputs(self.prep_data, inputs, self.step_index)
+        elif inputs.condition in (
+            PrepRowConditions.like.value,
+            PrepRowConditions.not_like.value,
         ):
-            if dp_prep_del_rows_cond in DEL_COND_USE_VALS:
-                value = dp_prep_del_rows_cond_val
-            elif dp_prep_del_rows_cond in DEL_ROW_COND_SAME_TYPE:
-                value = [dp_prep_del_rows_cond_val_min, dp_prep_del_rows_cond_val_max]
-            elif dp_prep_del_rows_cond in ["value is like", "value is not like"]:
-                value = dp_prep_del_rows_cond_val
-            else:
-                value = None
+            _render_pattern_value_inputs(inputs, self.step_index)
 
-        # get source columns
-        source_columns = (
-            dp_prep_del_rows_cond_cols
-            if dp_prep_del_rows == "by condition" and dp_prep_del_rows_cond_cols
-            else []
-        )
-        condition = (
-            dp_prep_del_rows_cond
-            if dp_prep_del_rows == "by condition" and dp_prep_del_rows_cond
-            else None
-        )
 
-        return {
-            "action": "remove row(s)",
-            "column_names": None,
-            "affected_count": 0,
-            "remaining_count": None,
-            "value": value,
-            "method": dp_prep_del_rows,
-            "source_columns": source_columns,
-            "condition": condition,
-            "failed_count": None,
-            "additional_info": None,
-        }
+# === STEP MANAGEMENT === #
 
 
 # --- Add Preparation Step ---#
@@ -552,21 +887,23 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
 
         prep_args = None
 
-        if dp_prep_action == "add new column":
+        if dp_prep_action == PrepActions.add_column.value:
             prep_args = prep_handler.add_column_handler()
 
-        elif dp_prep_action == "transform column(s)":
+        elif dp_prep_action == PrepActions.transform_column.value:
             prep_args = prep_handler.transform_column_handler()
 
-        elif dp_prep_action == "remove column(s)":
+        elif dp_prep_action == PrepActions.remove_column.value:
             prep_args = prep_handler.remove_column_handler()
 
-        elif dp_prep_action == "remove row(s)":
+        elif dp_prep_action == PrepActions.remove_row.value:
             prep_args = prep_handler.remove_rows_handler()
 
         if prep_args is None:
             st.warning("Please complete the form to add a new preparation step.")
             return
+
+        disable_add = _is_prep_form_incomplete(dp_prep_action, prep_args)
 
         if st.button(
             label="Add",
@@ -574,7 +911,7 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
             width="stretch",
             type="primary",
             help="Add the data preparation step to the log",
-            disabled=(not prep_args or not dp_prep_action),
+            disabled=disable_add,
         ):
             # apply action and re-run
             prep_apply_action(project_id, label, PrepActionResult(**prep_args))
@@ -650,6 +987,28 @@ def prep_remove_step():
                 # rerun to refresh page
                 st.rerun()
 
+
+# === PAGE LAYOUT === #
+
+# -- DATA PREP PAGE --#
+# Creates page for data preprocessing
+
+# Add demo navigation and guidance
+add_demo_navigation("prep_view.py", step=3)
+demo_sidebar_help()
+
+st.title("Get Your Data Ready")
+st.write(
+    "Prepare your dataset for Data Quality Checks. Use these tools to transform, add and remove columns and rows in your dataset."
+)
+
+# Demo guidance
+if is_demo_project():
+    demo_expander(
+        "Prepare Your Data for Quality Checks",
+        ImportDemoInfo.get_info_message("prepare_data_info"),
+        expanded=True,
+    )
 
 if show_prep_page_info:
     tabs = st.tabs(sorted(alias_list))

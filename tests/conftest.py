@@ -8,11 +8,33 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
+# Save a reference to the real streamlit module before any conftest
+# (e.g. tests/views/conftest.py) can replace it in sys.modules with a mock.
+import streamlit as _real_streamlit_module
+
 # Get the project root directory
 project_root = Path(__file__).parent.parent
 
 # Add the project root to Python path
 sys.path.insert(0, str(project_root))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _ensure_real_streamlit():
+    """Restore real streamlit in sys.modules after test collection.
+
+    The views conftest replaces sys.modules["streamlit"] with a mock at
+    module level so that view source files can be imported during collection
+    without a running Streamlit runtime. This fixture restores the real
+    module before any test runs, preventing contamination of @st.cache_data,
+    @st.fragment, and other decorators in non-view tests.
+
+    The views conftest has its own per-test fixture that swaps the mock back
+    in during each view test.
+    """
+    sys.modules["streamlit"] = _real_streamlit_module
+    yield
+    sys.modules["streamlit"] = _real_streamlit_module
 
 
 @pytest.fixture

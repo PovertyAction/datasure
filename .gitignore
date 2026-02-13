@@ -165,7 +165,7 @@ cython_debug/
 #.idea/
 
 # Secrets
-*secrets.toml
+.streamlit/secrets.toml
 
 /.quarto/
 
