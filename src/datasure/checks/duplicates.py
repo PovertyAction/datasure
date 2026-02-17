@@ -973,6 +973,12 @@ def _apply_numeric_condition(
     """
     col = _cast_col_for_date_comparison(col, condition_type, value)
 
+    if value is None:
+        if condition_type == NumCondition.EQUALS.value:
+            return col.is_null()
+        if condition_type == NumCondition.NOT_EQUALS.value:
+            return col.is_not_null()
+
     dispatch = {
         NumCondition.EQUALS.value: lambda c, v: c == v,
         NumCondition.NOT_EQUALS.value: lambda c, v: c != v,
