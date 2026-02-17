@@ -812,6 +812,9 @@ def compute_summary_progress_by_col(
             pl.col(date).dt.strftime("%B %Y").alias("time period")
         )
 
+    # Drop rows with null time periods (e.g. from invalid date values)
+    progress_data = progress_data.drop_nulls(subset=["time period"])
+
     # Aggregate by time period and progress column
     progress_data = progress_data.group_by(["time period", progress_by_col]).agg(
         pl.len().alias("count")
@@ -820,9 +823,12 @@ def compute_summary_progress_by_col(
     # Pivot the data
     # Convert to pandas for pivoting (Polars pivot is still evolving)
     progress_pd = _polars_to_pandas(progress_data)
-    progress_pd = progress_pd.pivot(
-        index=progress_by_col, columns="time period", values="count"
-    ).fillna(0)
+    if progress_pd.empty:
+        progress_pd = progress_pd.set_index(progress_by_col)
+    else:
+        progress_pd = progress_pd.pivot(
+            index=progress_by_col, columns="time period", values="count"
+        ).fillna(0)
 
     # Calculate heatmap range
     if not progress_pd.empty:

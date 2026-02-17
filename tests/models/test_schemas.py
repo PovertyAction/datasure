@@ -11,13 +11,21 @@ import polars as pl
 import pytest
 from pydantic import ValidationError
 
-from datasure.models.enums import NumCondition, SearchType, StrCondition
+from datasure.models.enums import (
+    DelimiterType,
+    GPSFormatType,
+    NumCondition,
+    SearchType,
+    StrCondition,
+)
 from datasure.models.schemas import (
     DateDefaults,
     DuplicatesColumnConfig,
     DuplicatesSettings,
     DuplicatesStats,
     FilterCondition,
+    GPSColumnConfig,
+    GPSSettings,
 )
 
 # ── DuplicatesColumnConfig ───────────────────────────────────────────
@@ -650,3 +658,168 @@ class TestDateDefaults:
         assert isinstance(defaults.end_date, datetime.date)
         assert isinstance(defaults.default_start_date, datetime.date)
         assert isinstance(defaults.default_end_date, datetime.date)
+
+
+# ── GPSSettings ─────────────────────────────────────────────────────
+
+
+class TestGPSSettings:
+    """Tests for the GPSSettings Pydantic model."""
+
+    def test_valid_minimal(self):
+        """Create GPSSettings with only required survey_key succeeds."""
+        settings = GPSSettings(survey_key="key_col")
+        assert settings.survey_key == "key_col"
+        assert settings.survey_id is None
+        assert settings.survey_date is None
+        assert settings.enumerator is None
+        assert settings.team is None
+        assert settings.mapbox_custom_key is None
+
+    def test_valid_all_fields(self):
+        """Create GPSSettings with all fields populated succeeds."""
+        settings = GPSSettings(
+            survey_key="key_col",
+            survey_id="id_col",
+            survey_date="date_col",
+            enumerator="enum_col",
+            team="team_col",
+            mapbox_custom_key="pk.test123",
+        )
+        assert settings.survey_key == "key_col"
+        assert settings.survey_id == "id_col"
+        assert settings.survey_date == "date_col"
+        assert settings.enumerator == "enum_col"
+        assert settings.team == "team_col"
+        assert settings.mapbox_custom_key == "pk.test123"
+
+    def test_none_survey_key(self):
+        """None survey_key is accepted since field type is str | None."""
+        settings = GPSSettings(survey_key=None)
+        assert settings.survey_key is None
+
+    def test_missing_survey_key_raises(self):
+        """Missing survey_key raises ValidationError (required field)."""
+        with pytest.raises(ValidationError):
+            GPSSettings()
+
+    def test_empty_survey_id_raises(self):
+        """Empty string survey_id raises ValidationError (min_length=1)."""
+        with pytest.raises(ValidationError):
+            GPSSettings(survey_key="key", survey_id="")
+
+
+# ── GPSColumnConfig ─────────────────────────────────────────────────
+
+
+class TestGPSColumnConfig:
+    """Tests for the GPSColumnConfig Pydantic model."""
+
+    def test_valid_single_column_format(self):
+        """Create GPSColumnConfig with single column format succeeds."""
+        config = GPSColumnConfig(
+            alias="gps1",
+            format_type=GPSFormatType.SINGLE_COLUMN,
+            delimiter=DelimiterType.SPACE,
+            gps_column="gps_data",
+        )
+        assert config.alias == "gps1"
+        assert config.format_type == GPSFormatType.SINGLE_COLUMN
+        assert config.delimiter == DelimiterType.SPACE
+        assert config.gps_column == "gps_data"
+
+    def test_valid_separate_columns_format(self):
+        """Create GPSColumnConfig with separate columns format succeeds."""
+        config = GPSColumnConfig(
+            alias="gps2",
+            format_type=GPSFormatType.SEPARATE_COLUMNS,
+            latitude_column="lat",
+            longitude_column="lon",
+            altitude_column="alt",
+            accuracy_column="acc",
+        )
+        assert config.format_type == GPSFormatType.SEPARATE_COLUMNS
+        assert config.latitude_column == "lat"
+        assert config.longitude_column == "lon"
+        assert config.altitude_column == "alt"
+        assert config.accuracy_column == "acc"
+
+    def test_separate_columns_without_optional_fields(self):
+        """Separate columns format without altitude/accuracy succeeds."""
+        config = GPSColumnConfig(
+            alias="gps3",
+            format_type=GPSFormatType.SEPARATE_COLUMNS,
+            latitude_column="lat",
+            longitude_column="lon",
+        )
+        assert config.altitude_column is None
+        assert config.accuracy_column is None
+
+    def test_single_column_missing_delimiter_raises(self):
+        """Single column format with explicit None delimiter raises ValidationError."""
+        with pytest.raises(ValidationError, match="Delimiter is required"):
+            GPSColumnConfig(
+                alias="gps1",
+                format_type=GPSFormatType.SINGLE_COLUMN,
+                delimiter=None,
+                gps_column="gps_data",
+            )
+
+    def test_single_column_missing_gps_column_raises(self):
+        """Single column format with explicit None gps_column raises ValidationError."""
+        with pytest.raises(ValidationError, match="GPS column is required"):
+            GPSColumnConfig(
+                alias="gps1",
+                format_type=GPSFormatType.SINGLE_COLUMN,
+                delimiter=DelimiterType.COMMA,
+                gps_column=None,
+            )
+
+    def test_separate_columns_missing_latitude_raises(self):
+        """Separate columns with None latitude raises ValidationError."""
+        with pytest.raises(ValidationError, match="Latitude Column is required"):
+            GPSColumnConfig(
+                alias="gps1",
+                format_type=GPSFormatType.SEPARATE_COLUMNS,
+                latitude_column=None,
+                longitude_column="lon",
+            )
+
+    def test_separate_columns_missing_longitude_raises(self):
+        """Separate columns with None longitude raises ValidationError."""
+        with pytest.raises(ValidationError, match="Longitude Column is required"):
+            GPSColumnConfig(
+                alias="gps1",
+                format_type=GPSFormatType.SEPARATE_COLUMNS,
+                latitude_column="lat",
+                longitude_column=None,
+            )
+
+    def test_empty_alias_raises(self):
+        """Empty alias raises ValidationError (min_length=1)."""
+        with pytest.raises(ValidationError):
+            GPSColumnConfig(
+                alias="",
+                format_type=GPSFormatType.SINGLE_COLUMN,
+                delimiter=DelimiterType.SPACE,
+                gps_column="gps_data",
+            )
+
+    def test_missing_alias_raises(self):
+        """Missing alias raises ValidationError."""
+        with pytest.raises(ValidationError):
+            GPSColumnConfig(
+                format_type=GPSFormatType.SINGLE_COLUMN,
+                delimiter=DelimiterType.SPACE,
+                gps_column="gps_data",
+            )
+
+    def test_comma_delimiter(self):
+        """Single column format with comma delimiter succeeds."""
+        config = GPSColumnConfig(
+            alias="gps1",
+            format_type=GPSFormatType.SINGLE_COLUMN,
+            delimiter=DelimiterType.COMMA,
+            gps_column="gps_data",
+        )
+        assert config.delimiter == DelimiterType.COMMA
