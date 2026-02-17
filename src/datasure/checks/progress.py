@@ -1179,7 +1179,8 @@ def display_attempted_interviews(
             "Select additional columns to include in the table displaying attempted interviews. "
         )
         display_cols = st.multiselect(
-            label="",
+            label="Additional columns",
+            label_visibility="collapsed",
             options=data.columns,
             help="Columns to display in the attempted interviews report",
             key="attempted_interviews_display_cols",
