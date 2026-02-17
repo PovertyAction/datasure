@@ -32,6 +32,20 @@ TAB_NAME: str = "gpschecks"
 
 MAPBOX_STYLE = "mapbox://styles/mapbox/light-v9"
 
+# Distinct color palette (RGBA) for categorical coloring on maps
+_CATEGORY_COLORS: list[list[int]] = [
+    [31, 119, 180, 200],
+    [255, 127, 14, 200],
+    [44, 160, 44, 200],
+    [214, 39, 40, 200],
+    [148, 103, 189, 200],
+    [140, 86, 75, 200],
+    [227, 119, 194, 200],
+    [127, 127, 127, 200],
+    [188, 189, 34, 200],
+    [23, 190, 207, 200],
+]
+
 
 def _get_mapbox_key() -> str | None:
     """Resolve Mapbox API key from pydeck settings or Streamlit secrets.
@@ -847,7 +861,17 @@ def _build_map_dataframe(
         map_df = map_df.with_columns(data[color_by].alias("color_group"))
         tooltip_fields.append(color_by)
 
-    return map_df.to_pandas(), tooltip_fields
+    map_pd = map_df.to_pandas()
+
+    if color_by:
+        unique_vals = map_pd["color_group"].unique()
+        color_map = {
+            val: _CATEGORY_COLORS[i % len(_CATEGORY_COLORS)]
+            for i, val in enumerate(unique_vals)
+        }
+        map_pd["color"] = map_pd["color_group"].map(color_map)
+
+    return map_pd, tooltip_fields
 
 
 def _render_scatterplot_map(
@@ -883,6 +907,7 @@ def _render_scatterplot_map(
         data=map_pd,
         get_position=["lon", "lat"],
         get_radius=100,
+        radius_min_pixels=5,
         get_fill_color=fill_color,
         pickable=True,
         auto_highlight=True,
@@ -1243,7 +1268,7 @@ def _render_gps_coordinates(
     _render_scatterplot_map(
         map_pd,
         tooltip_fields,
-        fill_color=[255, 0, 0, 160] if not color_by else None,
+        fill_color="color" if color_by else [255, 0, 0, 160],
     )
 
     st.caption(f"Displaying {len(map_pd):,} GPS points")
