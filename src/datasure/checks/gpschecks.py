@@ -1,13 +1,20 @@
-from enum import Enum
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import numpy as np
 import polars as pl
 import pydeck
 import streamlit as st
 from geopy.distance import geodesic
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import ValidationError
 from sklearn.neighbors import LocalOutlierFactor
 
+if TYPE_CHECKING:
+    import pandas as pd
+
+from datasure.models.enums import DelimiterType, GPSFormatType, GPSOutlierMethod
+from datasure.models.schemas import GPSColumnConfig, GPSSettings
 from datasure.utils.dataframe_utils import ColumnByType, get_df_columns
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.onboarding_utils import demo_output_onboarding
@@ -21,86 +28,60 @@ from datasure.utils.settings_utils import (
 TAB_NAME: str = "gpschecks"
 
 
-# =============================================================================
-# Enums and Constants
-# =============================================================================
+## Constants
+
+MAPBOX_STYLE = "mapbox://styles/mapbox/light-v9"
+
+# Distinct color palette (RGBA) for categorical coloring on maps
+_CATEGORY_COLORS: list[list[int]] = [
+    [31, 119, 180, 200],
+    [255, 127, 14, 200],
+    [44, 160, 44, 200],
+    [214, 39, 40, 200],
+    [148, 103, 189, 200],
+    [140, 86, 75, 200],
+    [227, 119, 194, 200],
+    [127, 127, 127, 200],
+    [188, 189, 34, 200],
+    [23, 190, 207, 200],
+]
 
 
-class GPSFormatType(str, Enum):
-    """GPS data format types."""
+def _get_mapbox_key() -> str | None:
+    """Resolve Mapbox API key from pydeck settings or Streamlit secrets.
 
-    SINGLE_COLUMN = "Single Column (delimited)"
-    SEPARATE_COLUMNS = "Separate Columns"
-
-
-class DelimiterType(str, Enum):
-    """Delimiter types for single column GPS data."""
-
-    SPACE = "Space"
-    COMMA = "Comma"
-
-
-# =============================================================================
-# Pydantic Models for Data Validation
-# =============================================================================
-
-
-class GPSSettings(BaseModel):
-    """GPS check settings model."""
-
-    survey_key: str | None = Field(..., description="Survey key column")
-    survey_id: str | None = Field(None, min_length=1, description="Survey ID column")
-    survey_date: str | None = Field(None, description="Survey date column")
-    enumerator: str | None = Field(None, description="Enumerator ID column")
-    team: str | None = Field(None, description="Team identifier column")
-    mapbox_custom_key: str | None = Field(None, description="Custom Mapbox API key")
+    Returns
+    -------
+    str | None
+        Mapbox API key if found, None otherwise.
+    """
+    mapbox_key = pydeck.settings.mapbox_key
+    if mapbox_key:
+        return mapbox_key
+    if "mapbox_custom_key" in st.secrets:
+        return st.secrets["mapbox_custom_key"]
+    if "default_mapbox_api_key" in st.secrets:
+        return st.secrets["default_mapbox_api_key"]
+    return None
 
 
-class GPSColumnConfig(BaseModel):
-    """Configuration for GPS column setup."""
+def _build_tooltip_config(fields: list[str]) -> dict:
+    """Build pydeck tooltip configuration from a list of field names.
 
-    alias: str = Field(..., min_length=1, description="Alias for GPS configuration")
-    format_type: GPSFormatType = Field(..., description="GPS data format type")
-    delimiter: DelimiterType | None = Field(
-        None, description="Delimiter for single column GPS data"
-    )
-    gps_column: str | None = Field(
-        None, description="Column containing delimited GPS data"
-    )
-    latitude_column: str | None = Field(None, description="Latitude column name")
-    longitude_column: str | None = Field(None, description="Longitude column name")
-    altitude_column: str | None = Field(None, description="Altitude column name")
-    accuracy_column: str | None = Field(None, description="Accuracy column name")
+    Parameters
+    ----------
+    fields : list[str]
+        Field names to include in the tooltip.
 
-    @field_validator("delimiter")
-    @classmethod
-    def validate_delimiter(cls, v: DelimiterType | None, info) -> DelimiterType | None:
-        """Validate delimiter is required for single column format."""
-        if info.data.get("format_type") == GPSFormatType.SINGLE_COLUMN and not v:
-            raise ValueError("Delimiter is required for single column format")
-        return v
-
-    @field_validator("gps_column")
-    @classmethod
-    def validate_gps_column(cls, v: str | None, info) -> str | None:
-        """Validate gps_column is required for single column format."""
-        if info.data.get("format_type") == GPSFormatType.SINGLE_COLUMN and not v:
-            raise ValueError("GPS column is required for single column format")
-        return v
-
-    @field_validator("latitude_column", "longitude_column")
-    @classmethod
-    def validate_lat_lon_columns(cls, v: str | None, info) -> str | None:
-        """Validate latitude and longitude are required for separate columns format."""
-        field_name = info.field_name
-        format_type = info.data.get("format_type")
-
-        if format_type == GPSFormatType.SEPARATE_COLUMNS and not v:
-            raise ValueError(
-                f"{field_name.replace('_', ' ').title()} is required "
-                "for separate columns format"
-            )
-        return v
+    Returns
+    -------
+    dict
+        Tooltip configuration for pydeck.
+    """
+    return {
+        "html": "<br>".join([f"<b>{field}:</b> {{{field}}}" for field in fields]),
+        "style": {"backgroundColor": "steelblue", "color": "white"},
+    }
 
 
 @st.cache_data(ttl=60)
@@ -769,6 +750,440 @@ def _parse_gps_data(
     return result_df
 
 
+def _collect_optional_fields(
+    df, field_pairs: list[tuple[str | None, str]]
+) -> list[str]:
+    """Collect field names that are non-None and present in the dataframe.
+
+    Parameters
+    ----------
+    df : pd.DataFrame or pl.DataFrame
+        DataFrame to check column presence against.
+    field_pairs : list[tuple[str | None, str]]
+        Pairs of (column_name, tooltip_label). If column_name is truthy and
+        present in df.columns, tooltip_label is included in the result.
+
+    Returns
+    -------
+    list[str]
+        List of tooltip field names.
+    """
+    fields: list[str] = []
+    for col, label in field_pairs:
+        if col and col in df.columns:
+            fields.append(label)
+    return fields
+
+
+def _apply_category_filter(data: pl.DataFrame, filter_by: str | None) -> pl.DataFrame:
+    """Apply category-based filtering with a multiselect UI.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        Data to filter.
+    filter_by : str | None
+        Column name to filter by, or None to skip filtering.
+
+    Returns
+    -------
+    pl.DataFrame
+        Filtered data (or original data if no filter applied).
+    """
+    if not filter_by:
+        return data
+
+    unique_values = data[filter_by].unique().drop_nulls().sort().to_list()
+    filter_values = st.multiselect(
+        label=f"Select {filter_by} values to display",
+        options=unique_values,
+        default=unique_values,
+        help=f"Choose which {filter_by} values to show on the map.",
+    )
+
+    if filter_values:
+        return data.filter(pl.col(filter_by).is_in(filter_values))
+    return data
+
+
+def _build_map_dataframe(
+    data: pl.DataFrame,
+    survey_key: str | None,
+    survey_date: str | None,
+    enumerator: str | None,
+    team: str | None,
+    color_by: str | None,
+) -> tuple[object, list[str]]:
+    """Build a pandas DataFrame and tooltip fields for pydeck visualization.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        Filtered data with latitude and longitude columns.
+    survey_key : str | None
+        Survey key column name.
+    survey_date : str | None
+        Survey date column name.
+    enumerator : str | None
+        Enumerator column name.
+    team : str | None
+        Team column name.
+    color_by : str | None
+        Column name to color points by.
+
+    Returns
+    -------
+    tuple[pd.DataFrame, list[str]]
+        Pandas DataFrame for pydeck and list of tooltip field names.
+    """
+    map_df = data.select(
+        pl.col("latitude").alias("lat"),
+        pl.col("longitude").alias("lon"),
+    )
+
+    # Map source column -> tooltip alias for hover labels
+    column_aliases = [
+        (survey_key, "ID"),
+        (survey_date, "Date"),
+        (enumerator, "Enumerator"),
+        (team, "Team"),
+    ]
+
+    tooltip_fields: list[str] = []
+    for col, alias in column_aliases:
+        if col:
+            map_df = map_df.with_columns(data[col].alias(alias))
+            tooltip_fields.append(alias)
+
+    tooltip_fields.extend(["lat", "lon"])
+
+    if color_by:
+        map_df = map_df.with_columns(data[color_by].alias("color_group"))
+        tooltip_fields.append(color_by)
+
+    map_pd = map_df.to_pandas()
+
+    if color_by:
+        unique_vals = map_pd["color_group"].unique()
+        color_map = {
+            val: _CATEGORY_COLORS[i % len(_CATEGORY_COLORS)]
+            for i, val in enumerate(unique_vals)
+        }
+        map_pd["color"] = map_pd["color_group"].map(color_map)
+
+    return map_pd, tooltip_fields
+
+
+def _render_scatterplot_map(
+    map_pd,
+    tooltip_fields: list[str],
+    fill_color: list[int] | str | None = None,
+    zoom: int = 10,
+    height: int = 600,
+) -> None:
+    """Render a pydeck scatterplot map in Streamlit.
+
+    Parameters
+    ----------
+    map_pd : pd.DataFrame
+        Pandas DataFrame with 'lat' and 'lon' columns.
+    tooltip_fields : list[str]
+        Field names for the hover tooltip.
+    fill_color : list[int] | str | None
+        Fill color for points. Can be an RGBA list, a column name string,
+        or None for pydeck default.
+    zoom : int
+        Initial zoom level.
+    height : int
+        Chart height in pixels.
+    """
+    tooltip_config = _build_tooltip_config(tooltip_fields)
+
+    center_lat = map_pd["lat"].mean()
+    center_lon = map_pd["lon"].mean()
+
+    layer = pydeck.Layer(
+        "ScatterplotLayer",
+        data=map_pd,
+        get_position=["lon", "lat"],
+        get_radius=100,
+        radius_min_pixels=5,
+        get_fill_color=fill_color,
+        pickable=True,
+        auto_highlight=True,
+    )
+
+    view_state = pydeck.ViewState(
+        latitude=center_lat,
+        longitude=center_lon,
+        zoom=zoom,
+        pitch=0,
+    )
+
+    mapbox_key = _get_mapbox_key()
+
+    deck = pydeck.Deck(
+        layers=[layer],
+        initial_view_state=view_state,
+        tooltip=tooltip_config,
+        map_style=MAPBOX_STYLE,
+        api_keys={"mapbox": mapbox_key} if mapbox_key else None,
+    )
+
+    st.pydeck_chart(deck, height=height, width="stretch")
+
+
+def _load_and_parse_gps_data(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    alias_select_key: str | None = None,
+) -> tuple[pl.DataFrame | None, str | None, pl.DataFrame | None]:
+    """Load GPS configuration, let user select alias, and parse GPS data.
+
+    Parameters
+    ----------
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page name identifier.
+    data : pl.DataFrame
+        Survey data containing GPS information.
+    alias_select_key : str | None
+        Streamlit widget key for the alias selectbox. If None, uses default.
+
+    Returns
+    -------
+    tuple[pl.DataFrame | None, str | None, pl.DataFrame | None]
+        (gps_settings, selected_alias, parsed_data) where any value may be
+        None if a precondition failed (with appropriate UI messages shown).
+    """
+    gps_settings = duckdb_get_table(
+        project_id,
+        f"gps_columns_{page_name_id}",
+        "logs",
+    )
+
+    if gps_settings is None or gps_settings.is_empty():
+        st.info(
+            "No GPS configurations found. "
+            "Please add a GPS column configuration in the section above."
+        )
+        return None, None, None
+
+    aliases = gps_settings["alias"].to_list()
+
+    selectbox_kwargs = {
+        "label": "Select GPS Configuration",
+        "options": aliases,
+    }
+    if alias_select_key:
+        selectbox_kwargs["key"] = alias_select_key
+
+    selected_alias = st.selectbox(**selectbox_kwargs)
+
+    if not selected_alias:
+        return gps_settings, None, None
+
+    selected_config = gps_settings.filter(pl.col("alias") == selected_alias).to_dicts()[
+        0
+    ]
+
+    try:
+        parsed_data = _parse_gps_data(data, selected_config)
+    except Exception as e:
+        st.error(f"Error parsing GPS data: {e}")
+        return gps_settings, selected_alias, None
+
+    if "latitude" not in parsed_data.columns or "longitude" not in parsed_data.columns:
+        st.warning("Unable to parse GPS coordinates from the selected configuration.")
+        return gps_settings, selected_alias, None
+
+    parsed_data = parsed_data.filter(
+        pl.col("latitude").is_not_null() & pl.col("longitude").is_not_null()
+    )
+
+    if parsed_data.is_empty():
+        st.warning("No valid GPS coordinates found in the data.")
+        return gps_settings, selected_alias, None
+
+    return gps_settings, selected_alias, parsed_data
+
+
+def _run_lof_detection(
+    df_pd,
+    n_samples: int,
+    go3_column,
+) -> object | None:
+    """Render LOF detection UI controls and run detection.
+
+    Parameters
+    ----------
+    df_pd : pd.DataFrame
+        Pandas DataFrame with latitude and longitude columns.
+    n_samples : int
+        Number of data points available.
+    go3_column
+        Streamlit column context for the neighbors slider.
+
+    Returns
+    -------
+    pd.DataFrame | None
+        DataFrame with Outlier column, or None if insufficient data.
+    """
+    if n_samples < 6:
+        st.warning(
+            f"Not enough GPS points for Auto-Clustering. "
+            f"Found {n_samples} point(s), need at least 6. "
+            "Try 'Cluster by Column' method or add more data."
+        )
+        return None
+
+    max_neighbors = min(50, n_samples - 1)
+
+    with go3_column:
+        n_neighbors = st.slider(
+            label="Number of Neighbors",
+            min_value=5,
+            max_value=max_neighbors,
+            value=min(20, max_neighbors),
+            key="outlier_n_neighbors",
+            help="Number of neighbors for Local Outlier Factor algorithm.",
+        )
+
+    contamination = st.slider(
+        label="Expected Outlier Proportion",
+        min_value=0.01,
+        max_value=0.5,
+        value=0.1,
+        step=0.01,
+        key="outlier_contamination",
+        help="Expected proportion of outliers in the data.",
+    )
+
+    if n_samples < 20:
+        st.warning(
+            f"Only {n_samples} GPS points available. "
+            "LOF works best with larger datasets (recommended: 50+ points)."
+        )
+
+    return detect_outliers_with_lof(
+        df_pd, "latitude", "longitude", n_neighbors, contamination
+    )
+
+
+def _run_cluster_detection(
+    df_pd,
+    string_columns: list[str],
+    go3_column,
+) -> tuple[object | None, str | None]:
+    """Render cluster detection UI controls and run detection.
+
+    Parameters
+    ----------
+    df_pd : pd.DataFrame
+        Pandas DataFrame with latitude and longitude columns.
+    string_columns : list[str]
+        Available categorical columns for clustering.
+    go3_column
+        Streamlit column context for the clustering column selector.
+
+    Returns
+    -------
+    tuple[pd.DataFrame | None, str | None]
+        (outlier_df, clustering_col) or (None, None) if no column selected.
+    """
+    with go3_column:
+        clustering_col = st.selectbox(
+            label="Clustering Column",
+            options=[None] + string_columns,
+            key="outlier_clustering_col",
+            help="Select a column to group GPS coordinates for outlier detection.",
+        )
+
+    if not clustering_col:
+        st.info("Please select a clustering column to continue.")
+        return None, None
+
+    outlier_df = detect_outliers_with_clusters(
+        df_pd, "latitude", "longitude", clustering_col
+    )
+    return outlier_df, clustering_col
+
+
+def _render_outliers_data_table(
+    outlier_df,
+    selected_alias: str,
+    survey_key: str | None,
+    survey_date: str | None,
+    enumerator: str | None,
+    detection_method: str,
+    clustering_col: str | None,
+) -> None:
+    """Render the outliers data table with download button.
+
+    Parameters
+    ----------
+    outlier_df : pd.DataFrame
+        DataFrame with Outlier boolean column.
+    selected_alias : str
+        Selected GPS configuration alias (used for download filename).
+    survey_key : str | None
+        Survey key column name.
+    survey_date : str | None
+        Survey date column name.
+    enumerator : str | None
+        Enumerator column name.
+    detection_method : str
+        Detection method used.
+    clustering_col : str | None
+        Clustering column name (for cluster method).
+    """
+    with st.expander("View Outliers Data", expanded=False):
+        outliers_only = outlier_df[outlier_df["Outlier"]].copy()
+
+        if outliers_only.empty:
+            st.success("No outliers detected!")
+            return
+
+        display_cols = _collect_optional_fields(
+            outliers_only,
+            [
+                (survey_key, survey_key),
+                (survey_date, survey_date),
+                (enumerator, enumerator),
+            ],
+        )
+        display_cols.extend(["latitude", "longitude"])
+
+        if detection_method == "Cluster by Column" and clustering_col:
+            display_cols.extend(
+                _collect_optional_fields(
+                    outliers_only,
+                    [
+                        (clustering_col, clustering_col),
+                        ("distance_from_centroid", "distance_from_centroid"),
+                    ],
+                )
+            )
+
+        available_cols = [col for col in display_cols if col in outliers_only.columns]
+
+        st.dataframe(
+            outliers_only[available_cols],
+            width="stretch",
+            hide_index=True,
+        )
+
+        csv = outliers_only[available_cols].to_csv(index=False)
+        st.download_button(
+            label="Download Outliers Data",
+            data=csv,
+            file_name=f"gps_outliers_{selected_alias}.csv",
+            mime="text/csv",
+        )
+
+
 @st.fragment
 def _render_gps_coordinates(
     project_id: str,
@@ -806,55 +1221,14 @@ def _render_gps_coordinates(
     """
     st.subheader("GPS Coordinates Visualization")
 
-    # Load GPS configurations
-    gps_settings = duckdb_get_table(
-        project_id,
-        f"gps_columns_{page_name_id}",
-        "logs",
-    )
-
-    if gps_settings.is_empty():
-        st.info(
-            "No GPS configurations found. "
-            "Please add a GPS column configuration in the section above."
-        )
-        return
-
-    # Get list of aliases
-    aliases = gps_settings["alias"].to_list()
-
     gp1, gp2, gp3 = st.columns([0.4, 0.3, 0.3])
 
     with gp1:
-        # GPS configuration selection
-        selected_alias = st.selectbox(
-            label="Select GPS Configuration",
-            options=aliases,
-            help="Choose which GPS configuration to visualize.",
+        _gps_settings, _selected_alias, parsed_data = _load_and_parse_gps_data(
+            project_id, page_name_id, data
         )
 
-    if not selected_alias:
-        return
-
-    # Get selected configuration
-    selected_config = gps_settings.filter(pl.col("alias") == selected_alias).to_dicts()[
-        0
-    ]
-
-    # Parse GPS data
-    try:
-        parsed_data = _parse_gps_data(data, selected_config)
-    except Exception as e:
-        st.error(f"Error parsing GPS data: {e}")
-        return
-
-    # Drop rows with missing coordinates
-    parsed_data = parsed_data.filter(
-        pl.col("latitude").is_not_null() & pl.col("longitude").is_not_null()
-    )
-
-    if parsed_data.is_empty():
-        st.warning("No valid GPS coordinates found in the data.")
+    if parsed_data is None:
         return
 
     # Get categorical columns for coloring and filtering
@@ -879,112 +1253,24 @@ def _render_gps_coordinates(
         )
 
     # Apply filter if selected
-    filtered_data = parsed_data
-    filter_values = None
+    filtered_data = _apply_category_filter(parsed_data, filter_by)
 
-    if filter_by:
-        unique_values = parsed_data[filter_by].unique().drop_nulls().sort().to_list()
-        filter_values = st.multiselect(
-            label=f"Select {filter_by} values to display",
-            options=unique_values,
-            default=unique_values,
-            help=f"Choose which {filter_by} values to show on the map.",
-        )
-
-        if filter_values:
-            filtered_data = filtered_data.filter(pl.col(filter_by).is_in(filter_values))
-
-    if filtered_data.is_empty():
+    if filtered_data is None or filtered_data.is_empty():
         st.warning("No data matches the selected filters.")
         return
 
-    # Prepare data for pydeck with hover information
-    map_df = filtered_data.select(
-        [
-            pl.col("latitude").alias("lat"),
-            pl.col("longitude").alias("lon"),
-        ]
+    # Build map dataframe with tooltip columns
+    map_pd, tooltip_fields = _build_map_dataframe(
+        filtered_data, survey_key, survey_date, enumerator, team, color_by
     )
 
-    # Add key columns for hover tooltips
-    tooltip_fields = []
-    if survey_key:
-        map_df = map_df.with_columns(filtered_data[survey_key].alias("ID"))
-        tooltip_fields.append("ID")
-    if survey_date:
-        map_df = map_df.with_columns(filtered_data[survey_date].alias("Date"))
-        tooltip_fields.append("Date")
-    if enumerator:
-        map_df = map_df.with_columns(filtered_data[enumerator].alias("Enumerator"))
-        tooltip_fields.append("Enumerator")
-    if team:
-        map_df = map_df.with_columns(filtered_data[team].alias("Team"))
-        tooltip_fields.append("Team")
-
-    # Add GPS coordinates to tooltip
-    tooltip_fields.extend(["lat", "lon"])
-
-    # Add color column if coloring by a categorical variable
-    if color_by:
-        map_df = map_df.with_columns(filtered_data[color_by].alias("color_group"))
-        tooltip_fields.append(color_by)
-
-    # Convert to pandas for pydeck
-    map_pd = map_df.to_pandas()
-
-    # Create tooltip configuration
-    tooltip_config = {
-        "html": "<br>".join(
-            [f"<b>{field}:</b> {{{field}}}" for field in tooltip_fields]
-        ),
-        "style": {"backgroundColor": "steelblue", "color": "white"},
-    }
-
-    # Calculate center coordinates for initial view
-    center_lat = map_pd["lat"].mean()
-    center_lon = map_pd["lon"].mean()
-
-    # Create pydeck layer
-    layer = pydeck.Layer(
-        "ScatterplotLayer",
-        data=map_pd,
-        get_position=["lon", "lat"],
-        get_radius=100,
-        get_fill_color=[255, 0, 0, 160] if not color_by else None,
-        pickable=True,
-        auto_highlight=True,
+    # Render the map
+    _render_scatterplot_map(
+        map_pd,
+        tooltip_fields,
+        fill_color="color" if color_by else [255, 0, 0, 160],
     )
 
-    # Set initial view state
-    view_state = pydeck.ViewState(
-        latitude=center_lat,
-        longitude=center_lon,
-        zoom=10,
-        pitch=0,
-    )
-
-    # Get Mapbox API key
-    mapbox_key = pydeck.settings.mapbox_key
-    if not mapbox_key:
-        # Fallback to secrets if not set
-        if "mapbox_custom_key" in st.secrets:
-            mapbox_key = st.secrets["mapbox_custom_key"]
-        elif "default_mapbox_api_key" in st.secrets:
-            mapbox_key = st.secrets["default_mapbox_api_key"]
-
-    # Create deck with explicit API key
-    deck = pydeck.Deck(
-        layers=[layer],
-        initial_view_state=view_state,
-        tooltip=tooltip_config,
-        map_style="mapbox://styles/mapbox/light-v9",
-        api_keys={"mapbox": mapbox_key} if mapbox_key else None,
-    )
-
-    # Display the map
-    st.pydeck_chart(deck, height=600, width="stretch")
-
-    # Display summary statistics
     st.caption(f"Displaying {len(map_pd):,} GPS points")
 
 
@@ -1023,147 +1309,44 @@ def _render_gps_outliers_checks(
     """
     st.subheader("GPS Outliers Detection")
 
-    # Load GPS configurations
-    gps_settings = duckdb_get_table(
-        project_id,
-        f"gps_columns_{page_name_id}",
-        "logs",
-    )
-
-    if gps_settings is None or gps_settings.is_empty():
-        st.info(
-            "No GPS configurations found. "
-            "Please add a GPS column configuration in the section above."
-        )
-        return
-
-    # Get list of aliases
-    aliases = gps_settings["alias"].to_list()
-
     go1, go2, go3 = st.columns([0.4, 0.3, 0.3])
 
     with go1:
-        # GPS configuration selection
-        selected_alias = st.selectbox(
-            label="Select GPS Configuration",
-            options=aliases,
-            key="outlier_gps_config",
-            help="Choose which GPS configuration to use for outlier detection.",
+        _gps_settings, selected_alias, parsed_data = _load_and_parse_gps_data(
+            project_id, page_name_id, data, alias_select_key="outlier_gps_config"
         )
 
-    if not selected_alias:
+    if parsed_data is None:
         return
 
-    # Get selected configuration
-    selected_config = gps_settings.filter(pl.col("alias") == selected_alias).to_dicts()[
-        0
-    ]
-
-    # Parse GPS data
-    parsed_data = _parse_gps_data(data, selected_config)
-
-    # Check if GPS data was successfully parsed
-    if "latitude" not in parsed_data.columns or "longitude" not in parsed_data.columns:
-        st.warning("Unable to parse GPS coordinates from the selected configuration.")
-        return
-
-    # Filter out invalid coordinates
-    parsed_data = parsed_data.filter(
-        pl.col("latitude").is_not_null() & pl.col("longitude").is_not_null()
-    )
-
-    if parsed_data.is_empty():
-        st.warning("No valid GPS coordinates found in the data.")
-        return
-
-    # Convert to pandas for outlier detection
     df_pd = parsed_data.to_pandas()
 
-    # Get categorical columns for clustering
     df_columns: ColumnByType = get_df_columns(parsed_data)
     string_columns = df_columns.categorical_columns
 
     with go2:
-        # Detection method selection
         detection_method = st.selectbox(
             label="Detection Method",
-            options=["Auto-Clustering (LOF)", "Cluster by Column"],
+            options=[item.value for item in GPSOutlierMethod],
             key="outlier_detection_method",
             help="Choose how to detect outliers: automatic or based on a grouping column.",
         )
 
-    # Configure detection parameters based on method
-    if detection_method == "Auto-Clustering (LOF)":
-        # Check if we have enough data points
-        n_samples = len(df_pd)
+    # Run selected detection method
+    clustering_col = None
+    if detection_method == GPSOutlierMethod.auto_lof.value:
+        outlier_df = _run_lof_detection(df_pd, len(df_pd), go3)
+    else:
+        outlier_df, clustering_col = _run_cluster_detection(df_pd, string_columns, go3)
 
-        # LOF requires at least 6 points to work properly (min_neighbors=5)
-        if n_samples < 6:
-            st.warning(
-                f"Not enough GPS points for Auto-Clustering. "
-                f"Found {n_samples} point(s), need at least 6. "
-                "Try 'Cluster by Column' method or add more data."
-            )
-            return
+    if outlier_df is None:
+        return
 
-        max_neighbors = min(50, n_samples - 1)
-
-        with go3:
-            n_neighbors = st.slider(
-                label="Number of Neighbors",
-                min_value=5,
-                max_value=max_neighbors,
-                value=min(20, max_neighbors),
-                key="outlier_n_neighbors",
-                help="Number of neighbors for Local Outlier Factor algorithm.",
-            )
-
-        contamination = st.slider(
-            label="Expected Outlier Proportion",
-            min_value=0.01,
-            max_value=0.5,
-            value=0.1,
-            step=0.01,
-            key="outlier_contamination",
-            help="Expected proportion of outliers in the data.",
-        )
-
-        # Show warning if data is small
-        if n_samples < 20:
-            st.warning(
-                f"⚠ Only {n_samples} GPS points available. "
-                "LOF works best with larger datasets (recommended: 50+ points)."
-            )
-
-        # Detect outliers using LOF
-        outlier_df = detect_outliers_with_lof(
-            df_pd, "latitude", "longitude", n_neighbors, contamination
-        )
-
-    else:  # Cluster by Column
-        with go3:
-            clustering_col = st.selectbox(
-                label="Clustering Column",
-                options=[None] + string_columns,
-                key="outlier_clustering_col",
-                help="Select a column to group GPS coordinates for outlier detection.",
-            )
-
-        if not clustering_col:
-            st.info("Please select a clustering column to continue.")
-            return
-
-        # Detect outliers using clustering column
-        outlier_df = detect_outliers_with_clusters(
-            df_pd, "latitude", "longitude", clustering_col
-        )
-
-    # Calculate outlier statistics
+    # Display summary statistics
     num_outliers = outlier_df["Outlier"].sum()
     total_points = len(outlier_df)
     outlier_pct = (num_outliers / total_points * 100) if total_points > 0 else 0
 
-    # Display summary statistics
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Total GPS Points", f"{total_points:,}")
@@ -1185,53 +1368,294 @@ def _render_gps_outliers_checks(
         "Outlier",
     )
 
-    # Display outliers data table
-    with st.expander("View Outliers Data", expanded=False):
-        # Filter to show only outliers
-        outliers_only = outlier_df[outlier_df["Outlier"]].copy()
-
-        if not outliers_only.empty:
-            # Select relevant columns
-            display_cols = []
-            if survey_key and survey_key in outliers_only.columns:
-                display_cols.append(survey_key)
-            if survey_date and survey_date in outliers_only.columns:
-                display_cols.append(survey_date)
-            if enumerator and enumerator in outliers_only.columns:
-                display_cols.append(enumerator)
-
-            display_cols.extend(["latitude", "longitude"])
-
-            if detection_method == "Cluster by Column" and clustering_col:
-                if clustering_col in outliers_only.columns:
-                    display_cols.append(clustering_col)
-                if "distance_from_centroid" in outliers_only.columns:
-                    display_cols.append("distance_from_centroid")
-
-            # Show only available columns
-            available_cols = [
-                col for col in display_cols if col in outliers_only.columns
-            ]
-
-            st.dataframe(
-                outliers_only[available_cols],
-                width="stretch",
-                hide_index=True,
-            )
-
-            # Download button
-            csv = outliers_only[available_cols].to_csv(index=False)
-            st.download_button(
-                label="Download Outliers Data",
-                data=csv,
-                file_name=f"gps_outliers_{selected_alias}.csv",
-                mime="text/csv",
-            )
-        else:
-            st.success("No outliers detected!")
+    _render_outliers_data_table(
+        outlier_df,
+        selected_alias,
+        survey_key,
+        survey_date,
+        enumerator,
+        detection_method,
+        clustering_col,
+    )
 
 
 @st.fragment
+def _load_comparison_aliases(
+    project_id: str,
+    page_name_id: str,
+) -> list[str] | None:
+    """Load GPS configuration aliases for comparison.
+
+    Returns
+    -------
+    list[str] | None
+        List of aliases if at least 2 exist, otherwise None (with UI messages shown).
+    """
+    gps_settings = duckdb_get_table(
+        project_id,
+        f"gps_columns_{page_name_id}",
+        "logs",
+    )
+
+    if gps_settings is None or gps_settings.is_empty():
+        st.info(
+            "No GPS configurations found. "
+            "Please add at least two GPS column configurations in the section above."
+        )
+        return None
+
+    aliases = gps_settings["alias"].to_list()
+
+    if len(aliases) < 2:
+        st.warning(
+            "⚠ Need at least 2 GPS configurations to compare. "
+            f"Currently have {len(aliases)} configuration(s). "
+            "Please add more GPS column configurations above."
+        )
+        return None
+
+    return aliases
+
+
+def _render_comparison_selectors(
+    aliases: list[str],
+) -> tuple[str, str, int] | None:
+    """Render GPS comparison selection UI widgets.
+
+    Returns
+    -------
+    tuple[str, str, int] | None
+        (gps_config_1, gps_config_2, distance_threshold) or None if selections invalid.
+    """
+    gc1, gc2, gc3 = st.columns([0.3, 0.3, 0.4])
+
+    with gc1:
+        gps_config_1 = st.selectbox(
+            label="First GPS Configuration",
+            options=aliases,
+            key="comparison_gps_config_1",
+            help="Select the first GPS configuration to compare.",
+        )
+
+    with gc2:
+        remaining_aliases = [a for a in aliases if a != gps_config_1]
+        gps_config_2 = st.selectbox(
+            label="Second GPS Configuration",
+            options=remaining_aliases,
+            key="comparison_gps_config_2",
+            help="Select the second GPS configuration to compare.",
+        )
+
+    if not gps_config_1 or not gps_config_2:
+        return None
+
+    with gc3:
+        distance_threshold = st.number_input(
+            label="Distance Threshold (meters)",
+            min_value=1,
+            max_value=100000,
+            value=100,
+            step=10,
+            key="comparison_distance_threshold",
+            help="Flag GPS points where the distance between the two configurations "
+            "exceeds this threshold.",
+        )
+
+    return gps_config_1, gps_config_2, distance_threshold
+
+
+def _has_parsed_coords(parsed_data: pl.DataFrame) -> bool:
+    """Check whether a parsed GPS DataFrame contains latitude and longitude columns."""
+    return "latitude" in parsed_data.columns and "longitude" in parsed_data.columns
+
+
+def _merge_parsed_gps_data(
+    parsed_data_1: pl.DataFrame,
+    parsed_data_2: pl.DataFrame,
+    survey_key: str,
+) -> pl.DataFrame | None:
+    """Merge two parsed GPS datasets on survey key and drop rows with nulls.
+
+    Returns
+    -------
+    pl.DataFrame | None
+        Merged DataFrame with non-null coordinates, or None if merge fails.
+    """
+    renamed_1 = parsed_data_1.rename({"latitude": "lat_1", "longitude": "lon_1"})
+    renamed_2 = parsed_data_2.rename({"latitude": "lat_2", "longitude": "lon_2"})
+
+    if not (
+        survey_key
+        and survey_key in renamed_1.columns
+        and survey_key in renamed_2.columns
+    ):
+        st.error(
+            "Survey key is required to match GPS coordinates "
+            "between the two configurations."
+        )
+        return None
+
+    merged = renamed_1.join(
+        renamed_2.select([survey_key, "lat_2", "lon_2"]),
+        on=survey_key,
+        how="inner",
+    )
+
+    merged = merged.filter(
+        pl.col("lat_1").is_not_null()
+        & pl.col("lon_1").is_not_null()
+        & pl.col("lat_2").is_not_null()
+        & pl.col("lon_2").is_not_null()
+    )
+
+    if merged.is_empty():
+        st.warning("No matching GPS coordinates found between the two configurations.")
+        return None
+
+    return merged
+
+
+def _calculate_comparison_distances(
+    comparison_data: pl.DataFrame,
+) -> pd.DataFrame | None:
+    """Calculate geodesic distances and return a pandas DataFrame.
+
+    Returns
+    -------
+    pd.DataFrame | None
+        DataFrame with ``distance_meters`` column, or None if calculation fails.
+    """
+    comparison_df = comparison_data.to_pandas()
+
+    def _row_distance(row):
+        try:
+            return geodesic(
+                (row["lat_1"], row["lon_1"]), (row["lat_2"], row["lon_2"])
+            ).meters
+        except Exception:
+            return None
+
+    comparison_df["distance_meters"] = comparison_df.apply(_row_distance, axis=1)
+    comparison_df = comparison_df.dropna(subset=["distance_meters"])
+
+    if comparison_df.empty:
+        st.warning("Unable to calculate distances between GPS coordinates.")
+        return None
+
+    return comparison_df
+
+
+def _display_comparison_summary(
+    comparison_df: pd.DataFrame,
+    distance_threshold: int,
+) -> None:
+    """Display summary statistics and threshold status message."""
+    total_points = len(comparison_df)
+    flagged_points = comparison_df["exceeds_threshold"].sum()
+    flagged_pct = (flagged_points / total_points * 100) if total_points > 0 else 0
+    avg_distance = comparison_df["distance_meters"].mean()
+    max_distance = comparison_df["distance_meters"].max()
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Comparisons", f"{total_points:,}")
+    with col2:
+        st.metric("Flagged Points", f"{flagged_points:,}")
+    with col3:
+        st.metric("Average Distance", f"{avg_distance:.1f} m")
+    with col4:
+        st.metric("Max Distance", f"{max_distance:.1f} m")
+
+    if flagged_pct > 0:
+        st.warning(
+            f"⚠ {flagged_pct:.1f}% of GPS points exceed the "
+            f"{distance_threshold}m threshold"
+        )
+    else:
+        st.success(f"✓ All GPS points are within {distance_threshold}m of each other")
+
+
+def _render_comparison_map(
+    comparison_df: pd.DataFrame,
+    survey_key: str,
+    survey_date: str | None,
+    enumerator: str | None,
+) -> None:
+    """Render the comparison scatterplot map."""
+    st.subheader("Comparison Map")
+
+    map_df = comparison_df.copy()
+    map_df["lat"] = map_df["lat_1"]
+    map_df["lon"] = map_df["lon_1"]
+    map_df["status"] = map_df["exceeds_threshold"].map(
+        {True: "Exceeds Threshold", False: "Within Threshold"}
+    )
+
+    tooltip_fields = _collect_optional_fields(
+        map_df,
+        [
+            (survey_key, survey_key),
+            (survey_date, survey_date),
+            (enumerator, enumerator),
+        ],
+    )
+    tooltip_fields.extend(["lat", "lon", "distance_meters", "status"])
+
+    map_df["color"] = map_df["exceeds_threshold"].apply(
+        lambda x: [255, 0, 0, 160] if x else [0, 255, 0, 160]
+    )
+
+    _render_scatterplot_map(map_df, tooltip_fields, fill_color="color")
+
+
+def _render_comparison_details_table(
+    comparison_df: pd.DataFrame,
+    gps_config_1: str,
+    gps_config_2: str,
+    survey_key: str,
+    survey_date: str | None,
+    enumerator: str | None,
+) -> None:
+    """Render the expandable comparison details table with download button."""
+    with st.expander("View Comparison Details", expanded=False):
+        display_cols = _collect_optional_fields(
+            comparison_df,
+            [
+                (survey_key, survey_key),
+                (survey_date, survey_date),
+                (enumerator, enumerator),
+            ],
+        )
+        display_cols.extend(
+            ["lat_1", "lon_1", "lat_2", "lon_2", "distance_meters", "exceeds_threshold"]
+        )
+
+        available_cols = [col for col in display_cols if col in comparison_df.columns]
+
+        display_df = comparison_df[available_cols].copy()
+        display_df = display_df.rename(
+            columns={
+                "lat_1": f"{gps_config_1}_lat",
+                "lon_1": f"{gps_config_1}_lon",
+                "lat_2": f"{gps_config_2}_lat",
+                "lon_2": f"{gps_config_2}_lon",
+                "distance_meters": "Distance (m)",
+                "exceeds_threshold": "Flagged",
+            }
+        )
+        display_df = display_df.sort_values("Distance (m)", ascending=False)
+
+        st.dataframe(display_df, width="stretch", hide_index=True)
+
+        csv = display_df.to_csv(index=False)
+        st.download_button(
+            label="Download Comparison Data",
+            data=csv,
+            file_name=f"gps_comparison_{gps_config_1}_vs_{gps_config_2}.csv",
+            mime="text/csv",
+        )
+
+
 def _render_gps_comparison_checks(
     project_id: str,
     page_name_id: str,
@@ -1269,301 +1693,53 @@ def _render_gps_comparison_checks(
         "that exceed a specified distance threshold."
     )
 
-    # Load GPS configurations
-    gps_settings = duckdb_get_table(
-        project_id,
-        f"gps_columns_{page_name_id}",
-        "logs",
-    )
-
-    if gps_settings is None or gps_settings.is_empty():
-        st.info(
-            "No GPS configurations found. "
-            "Please add at least two GPS column configurations in the section above."
-        )
+    aliases = _load_comparison_aliases(project_id, page_name_id)
+    if aliases is None:
         return
 
-    # Get list of aliases
-    aliases = gps_settings["alias"].to_list()
-
-    if len(aliases) < 2:
-        st.warning(
-            "⚠ Need at least 2 GPS configurations to compare. "
-            f"Currently have {len(aliases)} configuration(s). "
-            "Please add more GPS column configurations above."
-        )
+    selections = _render_comparison_selectors(aliases)
+    if selections is None:
         return
 
-    gc1, gc2, gc3 = st.columns([0.3, 0.3, 0.4])
+    gps_config_1, gps_config_2, distance_threshold = selections
 
-    with gc1:
-        # First GPS configuration selection
-        gps_config_1 = st.selectbox(
-            label="First GPS Configuration",
-            options=aliases,
-            key="comparison_gps_config_1",
-            help="Select the first GPS configuration to compare.",
-        )
-
-    with gc2:
-        # Second GPS configuration selection
-        # Filter out the first selection from options
-        remaining_aliases = [a for a in aliases if a != gps_config_1]
-        gps_config_2 = st.selectbox(
-            label="Second GPS Configuration",
-            options=remaining_aliases,
-            key="comparison_gps_config_2",
-            help="Select the second GPS configuration to compare.",
-        )
-
-    if not gps_config_1 or not gps_config_2:
-        return
-
-    with gc3:
-        # Distance threshold in meters
-        distance_threshold = st.number_input(
-            label="Distance Threshold (meters)",
-            min_value=1,
-            max_value=100000,
-            value=100,
-            step=10,
-            key="comparison_distance_threshold",
-            help="Flag GPS points where the distance between the two configurations exceeds this threshold.",
-        )
-
-    # Get configurations
+    gps_settings = duckdb_get_table(project_id, f"gps_columns_{page_name_id}", "logs")
     config_1 = gps_settings.filter(pl.col("alias") == gps_config_1).to_dicts()[0]
     config_2 = gps_settings.filter(pl.col("alias") == gps_config_2).to_dicts()[0]
 
-    # Parse GPS data from both configurations
     parsed_data_1 = _parse_gps_data(data, config_1)
     parsed_data_2 = _parse_gps_data(data, config_2)
 
-    # Check if GPS data was successfully parsed
-    if (
-        "latitude" not in parsed_data_1.columns
-        or "longitude" not in parsed_data_1.columns
-    ):
+    if not _has_parsed_coords(parsed_data_1):
         st.warning(f"Unable to parse GPS coordinates from '{gps_config_1}'.")
         return
 
-    if (
-        "latitude" not in parsed_data_2.columns
-        or "longitude" not in parsed_data_2.columns
-    ):
+    if not _has_parsed_coords(parsed_data_2):
         st.warning(f"Unable to parse GPS coordinates from '{gps_config_2}'.")
         return
 
-    # Rename columns to distinguish between the two GPS sources
-    parsed_data_1 = parsed_data_1.rename({"latitude": "lat_1", "longitude": "lon_1"})
-    parsed_data_2 = parsed_data_2.rename({"latitude": "lat_2", "longitude": "lon_2"})
-
-    # Merge the two datasets based on survey key
-    if (
-        survey_key
-        and survey_key in parsed_data_1.columns
-        and survey_key in parsed_data_2.columns
-    ):
-        comparison_data = parsed_data_1.join(
-            parsed_data_2.select([survey_key, "lat_2", "lon_2"]),
-            on=survey_key,
-            how="inner",
-        )
-    else:
-        st.error(
-            "Survey key is required to match GPS coordinates between the two configurations."
-        )
+    comparison_data = _merge_parsed_gps_data(parsed_data_1, parsed_data_2, survey_key)
+    if comparison_data is None:
         return
 
-    # Filter out rows with missing coordinates
-    comparison_data = comparison_data.filter(
-        pl.col("lat_1").is_not_null()
-        & pl.col("lon_1").is_not_null()
-        & pl.col("lat_2").is_not_null()
-        & pl.col("lon_2").is_not_null()
-    )
-
-    if comparison_data.is_empty():
-        st.warning("No matching GPS coordinates found between the two configurations.")
+    comparison_df = _calculate_comparison_distances(comparison_data)
+    if comparison_df is None:
         return
 
-    # Convert to pandas for distance calculation
-    comparison_df = comparison_data.to_pandas()
-
-    # Calculate distance between the two GPS points
-    def calculate_distance(row):
-        try:
-            return geodesic(
-                (row["lat_1"], row["lon_1"]), (row["lat_2"], row["lon_2"])
-            ).meters
-        except Exception:
-            return None
-
-    comparison_df["distance_meters"] = comparison_df.apply(calculate_distance, axis=1)
-
-    # Remove rows where distance couldn't be calculated
-    comparison_df = comparison_df.dropna(subset=["distance_meters"])
-
-    if comparison_df.empty:
-        st.warning("Unable to calculate distances between GPS coordinates.")
-        return
-
-    # Flag points exceeding threshold
     comparison_df["exceeds_threshold"] = (
         comparison_df["distance_meters"] > distance_threshold
     )
 
-    # Calculate statistics
-    total_points = len(comparison_df)
-    flagged_points = comparison_df["exceeds_threshold"].sum()
-    flagged_pct = (flagged_points / total_points * 100) if total_points > 0 else 0
-    avg_distance = comparison_df["distance_meters"].mean()
-    max_distance = comparison_df["distance_meters"].max()
-
-    # Display summary statistics
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Total Comparisons", f"{total_points:,}")
-    with col2:
-        st.metric("Flagged Points", f"{flagged_points:,}")
-    with col3:
-        st.metric("Average Distance", f"{avg_distance:.1f} m")
-    with col4:
-        st.metric("Max Distance", f"{max_distance:.1f} m")
-
-    if flagged_pct > 0:
-        st.warning(
-            f"⚠ {flagged_pct:.1f}% of GPS points exceed the {distance_threshold}m threshold"
-        )
-    else:
-        st.success(f"✓ All GPS points are within {distance_threshold}m of each other")
-
-    # Display comparison map
-    st.subheader("Comparison Map")
-
-    # Prepare data for map visualization
-    # We'll show the first GPS point and color by whether it exceeds threshold
-    map_df = comparison_df.copy()
-    map_df["lat"] = map_df["lat_1"]
-    map_df["lon"] = map_df["lon_1"]
-    map_df["status"] = map_df["exceeds_threshold"].map(
-        {True: "Exceeds Threshold", False: "Within Threshold"}
+    _display_comparison_summary(comparison_df, distance_threshold)
+    _render_comparison_map(comparison_df, survey_key, survey_date, enumerator)
+    _render_comparison_details_table(
+        comparison_df,
+        gps_config_1,
+        gps_config_2,
+        survey_key,
+        survey_date,
+        enumerator,
     )
-
-    # Build tooltip fields
-    tooltip_fields = []
-    if survey_key and survey_key in map_df.columns:
-        tooltip_fields.append(survey_key)
-    if survey_date and survey_date in map_df.columns:
-        tooltip_fields.append(survey_date)
-    if enumerator and enumerator in map_df.columns:
-        tooltip_fields.append(enumerator)
-    tooltip_fields.extend(["lat", "lon", "distance_meters", "status"])
-
-    # Create tooltip configuration
-    tooltip_config = {
-        "html": "<br>".join(
-            [f"<b>{field}:</b> {{{field}}}" for field in tooltip_fields]
-        ),
-        "style": {"backgroundColor": "steelblue", "color": "white"},
-    }
-
-    # Calculate center coordinates
-    center_lat = map_df["lat"].mean()
-    center_lon = map_df["lon"].mean()
-
-    # Color points based on threshold
-    map_df["color"] = map_df["exceeds_threshold"].apply(
-        lambda x: [255, 0, 0, 160] if x else [0, 255, 0, 160]
-    )
-
-    # Create pydeck layer
-    layer = pydeck.Layer(
-        "ScatterplotLayer",
-        data=map_df,
-        get_position=["lon", "lat"],
-        get_radius=100,
-        get_fill_color="color",
-        pickable=True,
-        auto_highlight=True,
-    )
-
-    # Set initial view state
-    view_state = pydeck.ViewState(
-        latitude=center_lat,
-        longitude=center_lon,
-        zoom=10,
-        pitch=0,
-    )
-
-    # Get Mapbox API key
-    mapbox_key = pydeck.settings.mapbox_key
-    if not mapbox_key:
-        if "mapbox_custom_key" in st.secrets:
-            mapbox_key = st.secrets["mapbox_custom_key"]
-        elif "default_mapbox_api_key" in st.secrets:
-            mapbox_key = st.secrets["default_mapbox_api_key"]
-
-    # Create deck
-    deck = pydeck.Deck(
-        layers=[layer],
-        initial_view_state=view_state,
-        tooltip=tooltip_config,
-        map_style="mapbox://styles/mapbox/light-v9",
-        api_keys={"mapbox": mapbox_key} if mapbox_key else None,
-    )
-
-    # Display the map
-    st.pydeck_chart(deck, height=600, width="stretch")
-
-    # Display comparison data table
-    with st.expander("View Comparison Details", expanded=False):
-        # Select relevant columns
-        display_cols = []
-        if survey_key and survey_key in comparison_df.columns:
-            display_cols.append(survey_key)
-        if survey_date and survey_date in comparison_df.columns:
-            display_cols.append(survey_date)
-        if enumerator and enumerator in comparison_df.columns:
-            display_cols.append(enumerator)
-
-        display_cols.extend(
-            ["lat_1", "lon_1", "lat_2", "lon_2", "distance_meters", "exceeds_threshold"]
-        )
-
-        # Show only available columns
-        available_cols = [col for col in display_cols if col in comparison_df.columns]
-
-        # Rename columns for better readability
-        display_df = comparison_df[available_cols].copy()
-        display_df = display_df.rename(
-            columns={
-                "lat_1": f"{gps_config_1}_lat",
-                "lon_1": f"{gps_config_1}_lon",
-                "lat_2": f"{gps_config_2}_lat",
-                "lon_2": f"{gps_config_2}_lon",
-                "distance_meters": "Distance (m)",
-                "exceeds_threshold": "Flagged",
-            }
-        )
-
-        # Sort by distance descending to show largest discrepancies first
-        display_df = display_df.sort_values("Distance (m)", ascending=False)
-
-        st.dataframe(
-            display_df,
-            width="stretch",
-            hide_index=True,
-        )
-
-        # Download button
-        csv = display_df.to_csv(index=False)
-        st.download_button(
-            label="Download Comparison Data",
-            data=csv,
-            file_name=f"gps_comparison_{gps_config_1}_vs_{gps_config_2}.csv",
-            mime="text/csv",
-        )
 
 
 # plot gps coordinates on a map
@@ -1601,75 +1777,23 @@ def plot_gps_coordinates(
     None
     """
     plot_df = df.copy(deep=True)
-    # Drop rows with missing coordinates
     plot_df = plot_df.dropna(subset=[gps_lat_col, gps_lon_col])
-
-    # Rename columns for pydeck
     plot_df = plot_df.rename(columns={gps_lat_col: "lat", gps_lon_col: "lon"})
 
     # Build tooltip fields
-    tooltip_fields = []
-    if survey_id and survey_id in plot_df.columns:
-        tooltip_fields.append(survey_id)
-    if submissiondate and submissiondate in plot_df.columns:
-        tooltip_fields.append(submissiondate)
-    if enumerator and enumerator in plot_df.columns:
-        tooltip_fields.append(enumerator)
+    tooltip_fields = _collect_optional_fields(
+        plot_df,
+        [
+            (survey_id, survey_id),
+            (submissiondate, submissiondate),
+            (enumerator, enumerator),
+        ],
+    )
     tooltip_fields.extend(["lat", "lon"])
     if color_col and color_col in plot_df.columns:
         tooltip_fields.append(color_col)
 
-    # Create tooltip configuration
-    tooltip_config = {
-        "html": "<br>".join(
-            [f"<b>{field}:</b> {{{field}}}" for field in tooltip_fields]
-        ),
-        "style": {"backgroundColor": "steelblue", "color": "white"},
-    }
-
-    # Calculate center coordinates
-    center_lat = plot_df["lat"].mean()
-    center_lon = plot_df["lon"].mean()
-
-    # Create pydeck layer
-    layer = pydeck.Layer(
-        "ScatterplotLayer",
-        data=plot_df,
-        get_position=["lon", "lat"],
-        get_radius=100,
-        get_fill_color=[255, 0, 0, 160],
-        pickable=True,
-        auto_highlight=True,
-    )
-
-    # Set initial view state
-    view_state = pydeck.ViewState(
-        latitude=center_lat,
-        longitude=center_lon,
-        zoom=10,
-        pitch=0,
-    )
-
-    # Get Mapbox API key
-    mapbox_key = pydeck.settings.mapbox_key
-    if not mapbox_key:
-        # Fallback to secrets if not set
-        if "mapbox_custom_key" in st.secrets:
-            mapbox_key = st.secrets["mapbox_custom_key"]
-        elif "default_mapbox_api_key" in st.secrets:
-            mapbox_key = st.secrets["default_mapbox_api_key"]
-
-    # Create deck with explicit API key
-    deck = pydeck.Deck(
-        layers=[layer],
-        initial_view_state=view_state,
-        tooltip=tooltip_config,
-        map_style="mapbox://styles/mapbox/light-v9",
-        api_keys={"mapbox": mapbox_key} if mapbox_key else None,
-    )
-
-    # Display the map
-    st.pydeck_chart(deck, height=600, width="stretch")
+    _render_scatterplot_map(plot_df, tooltip_fields, fill_color=[255, 0, 0, 160])
 
 
 # detect outliers using a clustering column
@@ -1906,83 +2030,31 @@ def plot_clusters_on_map(
     -------
     None
     """
-    # make a copy of the dataframe
     df = df.copy()
-
-    # Rename columns for pydeck
     df = df.rename(columns={gps_lat_col: "lat", gps_lon_col: "lon"})
 
     # Create outlier status column for coloring
     df["outlier_status"] = df[outlier_col].map({True: "Outlier", False: "Normal"})
 
     # Build tooltip fields
-    tooltip_fields = []
-    if survey_id and survey_id in df.columns:
-        tooltip_fields.append(survey_id)
-    if submission_date and submission_date in df.columns:
-        tooltip_fields.append(submission_date)
-    if enumerator and enumerator in df.columns:
-        tooltip_fields.append(enumerator)
+    tooltip_fields = _collect_optional_fields(
+        df,
+        [
+            (survey_id, survey_id),
+            (submission_date, submission_date),
+            (enumerator, enumerator),
+        ],
+    )
     tooltip_fields.extend(["lat", "lon", "outlier_status"])
     if clustering_col and clustering_col in df.columns:
         tooltip_fields.append(clustering_col)
-
-    # Create tooltip configuration
-    tooltip_config = {
-        "html": "<br>".join(
-            [f"<b>{field}:</b> {{{field}}}" for field in tooltip_fields]
-        ),
-        "style": {"backgroundColor": "steelblue", "color": "white"},
-    }
-
-    # Calculate center coordinates
-    center_lat = df["lat"].mean()
-    center_lon = df["lon"].mean()
 
     # Color outliers red, normal points blue
     df["color"] = df["outlier_status"].apply(
         lambda x: [255, 0, 0, 160] if x == "Outlier" else [0, 0, 255, 160]
     )
 
-    # Create pydeck layer
-    layer = pydeck.Layer(
-        "ScatterplotLayer",
-        data=df,
-        get_position=["lon", "lat"],
-        get_radius=100,
-        get_fill_color="color",
-        pickable=True,
-        auto_highlight=True,
-    )
-
-    # Set initial view state
-    view_state = pydeck.ViewState(
-        latitude=center_lat,
-        longitude=center_lon,
-        zoom=7,
-        pitch=0,
-    )
-
-    # Get Mapbox API key
-    mapbox_key = pydeck.settings.mapbox_key
-    if not mapbox_key:
-        # Fallback to secrets if not set
-        if "mapbox_custom_key" in st.secrets:
-            mapbox_key = st.secrets["mapbox_custom_key"]
-        elif "default_mapbox_api_key" in st.secrets:
-            mapbox_key = st.secrets["default_mapbox_api_key"]
-
-    # Create deck with explicit API key
-    deck = pydeck.Deck(
-        layers=[layer],
-        initial_view_state=view_state,
-        tooltip=tooltip_config,
-        map_style="mapbox://styles/mapbox/light-v9",
-        api_keys={"mapbox": mapbox_key} if mapbox_key else None,
-    )
-
-    # Display the map
-    st.pydeck_chart(deck, height=600, width="stretch")
+    _render_scatterplot_map(df, tooltip_fields, fill_color="color", zoom=7)
 
 
 @demo_output_onboarding(TAB_NAME)

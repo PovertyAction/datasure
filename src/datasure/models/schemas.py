@@ -12,7 +12,13 @@ import datetime
 import polars as pl
 from pydantic import BaseModel, Field, field_validator
 
-from datasure.models.enums import NumCondition, SearchType, StrCondition
+from datasure.models.enums import (
+    DelimiterType,
+    GPSFormatType,
+    NumCondition,
+    SearchType,
+    StrCondition,
+)
 
 
 class DuplicatesColumnConfig(BaseModel):
@@ -180,3 +186,61 @@ class DateDefaults(BaseModel):
         default=datetime.date.today() + datetime.timedelta(days=30),
         description="Default end date for date input (today)",
     )
+
+
+class GPSSettings(BaseModel):
+    """GPS check settings model."""
+
+    survey_key: str | None = Field(..., description="Survey key column")
+    survey_id: str | None = Field(None, min_length=1, description="Survey ID column")
+    survey_date: str | None = Field(None, description="Survey date column")
+    enumerator: str | None = Field(None, description="Enumerator ID column")
+    team: str | None = Field(None, description="Team identifier column")
+    mapbox_custom_key: str | None = Field(None, description="Custom Mapbox API key")
+
+
+class GPSColumnConfig(BaseModel):
+    """Configuration for GPS column setup."""
+
+    alias: str = Field(..., min_length=1, description="Alias for GPS configuration")
+    format_type: GPSFormatType = Field(..., description="GPS data format type")
+    delimiter: DelimiterType | None = Field(
+        None, description="Delimiter for single column GPS data"
+    )
+    gps_column: str | None = Field(
+        None, description="Column containing delimited GPS data"
+    )
+    latitude_column: str | None = Field(None, description="Latitude column name")
+    longitude_column: str | None = Field(None, description="Longitude column name")
+    altitude_column: str | None = Field(None, description="Altitude column name")
+    accuracy_column: str | None = Field(None, description="Accuracy column name")
+
+    @field_validator("delimiter")
+    @classmethod
+    def validate_delimiter(cls, v: DelimiterType | None, info) -> DelimiterType | None:
+        """Validate delimiter is required for single column format."""
+        if info.data.get("format_type") == GPSFormatType.SINGLE_COLUMN and not v:
+            raise ValueError("Delimiter is required for single column format")
+        return v
+
+    @field_validator("gps_column")
+    @classmethod
+    def validate_gps_column(cls, v: str | None, info) -> str | None:
+        """Validate gps_column is required for single column format."""
+        if info.data.get("format_type") == GPSFormatType.SINGLE_COLUMN and not v:
+            raise ValueError("GPS column is required for single column format")
+        return v
+
+    @field_validator("latitude_column", "longitude_column")
+    @classmethod
+    def validate_lat_lon_columns(cls, v: str | None, info) -> str | None:
+        """Validate latitude and longitude are required for separate columns format."""
+        field_name = info.field_name
+        format_type = info.data.get("format_type")
+
+        if format_type == GPSFormatType.SEPARATE_COLUMNS and not v:
+            raise ValueError(
+                f"{field_name.replace('_', ' ').title()} is required "
+                "for separate columns format"
+            )
+        return v

@@ -136,6 +136,27 @@ class StrCondition(Enum):
     EXCLUDES = "Value does not include"
 
 
+class GPSFormatType(Enum):
+    """GPS data format types."""
+
+    SINGLE_COLUMN = "Single Column (delimited)"
+    SEPARATE_COLUMNS = "Separate Columns"
+
+
+class DelimiterType(Enum):
+    """Delimiter types for single column GPS data."""
+
+    SPACE = "Space"
+    COMMA = "Comma"
+
+
+class GPSOutlierMethod(Enum):
+    """Methods for GPS outlier detection."""
+
+    auto_lof = "Auto-Clustering (LOF)"
+    columns = "Cluster by Column"
+
+
 # === COLUMN FUNCTION CONSTANTS === #
 
 COL_FUNC_WITH_VALUES = (

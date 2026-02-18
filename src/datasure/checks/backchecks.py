@@ -1838,18 +1838,16 @@ def _perform_statistical_tests(
             prop_survey = survey_vals.mean()
             prop_backcheck = backcheck_vals.mean()
             n = len(survey_vals)
-            z_stat = (prop_survey - prop_backcheck) / (
-                (
-                    prop_survey * (1 - prop_survey)
-                    + prop_backcheck * (1 - prop_backcheck)
-                )
-                / n
-            ) ** 0.5
-            p_value = 2 * (1 - stats.norm.cdf(abs(z_stat)))
-            test_results["prtest"] = {
-                "z_statistic": float(z_stat),
-                "p_value": float(p_value),
-            }
+            pooled_var = (
+                prop_survey * (1 - prop_survey) + prop_backcheck * (1 - prop_backcheck)
+            ) / n
+            if pooled_var > 0:
+                z_stat = (prop_survey - prop_backcheck) / pooled_var**0.5
+                p_value = 2 * (1 - stats.norm.cdf(abs(z_stat)))
+                test_results["prtest"] = {
+                    "z_statistic": float(z_stat),
+                    "p_value": float(p_value),
+                }
 
     # Wilcoxon signed-rank test
     if signrank:
