@@ -10,70 +10,15 @@ from pathlib import Path
 
 import polars as pl
 import streamlit as st
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import ValidationError
 
+from datasure.models.schemas import (
+    BackcheckColumnSelectors,
+    CheckConfiguration,
+    SurveyColumnSelections,
+)
 from datasure.utils.dataframe_utils import get_df_columns
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
-
-# ============================================================================
-# PYDANTIC MODELS
-# ============================================================================
-
-
-class CheckConfiguration(BaseModel):
-    """Model for check configuration validation."""
-
-    page_name: str = Field(default=None, min_length=1, max_length=20)
-    survey_data_name: str = Field(default=None, min_length=1)
-    survey_key: str = Field(default=None, min_length=1)
-    survey_id: str = Field(default=None, min_length=1)
-    survey_date: str | None = Field(default=None, min_length=1)
-    enumerator: str | None = Field(default=None, min_length=1)
-    team: str | None = Field(default=None, min_length=1)
-    formversion: str | None = Field(default=None, min_length=1)
-    duration: str | None = Field(default=None, min_length=1)
-    survey_target: int | None = Field(default=None, ge=0)
-    backcheck_data_name: str | None = Field(default=None, min_length=1)
-    backcheck_date: str | None = Field(default=None, min_length=1)
-    backchecker: str | None = Field(default=None, min_length=1)
-    backchecker_team: str | None = Field(default=None, min_length=1)
-    backcheck_target_percent: int | None = Field(default=None, ge=0, le=100)
-    tracking_data_name: str | None = Field(default=None, min_length=1)
-
-    @field_validator("page_name")
-    @classmethod
-    def validate_page_name(cls, v: str) -> str:
-        """Validate page name format."""
-        if not v or not v.strip():
-            raise ValueError("Page name cannot be empty")
-        return v.strip()
-
-    def to_dict(self) -> dict:
-        """Convert model to dictionary for storage."""
-        return self.model_dump()
-
-
-class SurveyColumnSelections(BaseModel):
-    """Model for Survey column selections in the UI."""
-
-    survey_key: str | None = Field(..., min_length=1)
-    survey_id: str | None = Field(default=None, min_length=1)
-    survey_date: str | None = Field(default=None, min_length=1)
-    enumerator: str | None = Field(default=None, min_length=1)
-    team: str | None = Field(default=None, min_length=1)
-    formversion: str | None = Field(default=None, min_length=1)
-    duration: str | None = Field(default=None, min_length=1)
-    survey_target: int | None = Field(default=None, ge=0)
-
-
-class BackcheckColumnSelectors(BaseModel):
-    """Model for back check column selections in UI."""
-
-    backcheck_date: str | None = Field(default=None, min_length=1)
-    backchecker: str | None = Field(default=None, min_length=1)
-    backchecker_team: str | None = Field(default=None, min_length=1)
-    backcheck_target_percent: int | None = Field(default=None, ge=0, le=100)
-
 
 # ============================================================================
 # SERVICE LAYER
@@ -251,6 +196,92 @@ class ConfigurationService:
             return {}
         return config_df.row(row_index, named=True)
 
+    def get_configuration_by_page_name(self, page_name: str) -> dict:
+        """
+        Return configuration info for a given page name.
+
+        Returns
+        -------
+            dict - dict of column names and values, or empty dict if not found
+        """
+        config_df = self.get_all_configurations()
+        if config_df.is_empty():
+            return {}
+        match = config_df.filter(pl.col("page_name") == page_name)
+        if match.is_empty():
+            return {}
+        return match.row(0, named=True)
+
+    def validate_edit_configuration(
+        self, config_data: dict, original_page_name: str
+    ) -> tuple[bool, str | None, CheckConfiguration | None]:
+        """
+        Validate configuration data for an edit operation.
+
+        Allows the page name to remain the same as the original without
+        raising a duplicate error.
+
+        Returns
+        -------
+            tuple: (is_valid, error_message, validated_config)
+        """
+        try:
+            config = CheckConfiguration(**config_data)
+
+            if config.page_name != original_page_name and self.page_name_exists(
+                config.page_name
+            ):
+                return (
+                    False,
+                    f"Page name '{config.page_name}' already exists. Please choose a different name.",
+                    None,
+                )
+
+        except ValidationError as e:
+            error_msg = self._format_validation_error(e)
+            return False, error_msg, None
+        else:
+            return True, None, config
+
+    def update_configuration(
+        self, original_page_name: str, config: CheckConfiguration
+    ) -> bool:
+        """
+        Update an existing check configuration in-place (preserves row order).
+
+        Returns
+        -------
+            bool: True if successful, False otherwise
+        """
+        current_log = self.get_all_configurations()
+
+        if current_log.is_empty():
+            return False
+
+        page_names = current_log["page_name"].to_list()
+        if original_page_name not in page_names:
+            return False
+
+        row_idx = page_names.index(original_page_name)
+        new_row_df = pl.DataFrame([config.to_dict()])
+
+        before = current_log.slice(0, row_idx)
+        after = current_log.slice(row_idx + 1)
+
+        parts = [p for p in [before, new_row_df, after] if not p.is_empty()]
+        updated_log = pl.concat(parts, how="vertical")
+
+        duckdb_save_table(
+            self.project_id,
+            updated_log,
+            alias="check_config",
+            db_name="logs",
+        )
+
+        st.rerun()
+
+        return True
+
 
 class DatasetService:
     """Service for working with datasets and their columns."""
@@ -288,6 +319,43 @@ class DatasetService:
     ) -> list[str]:
         """Get list of aliases excluding specified ones."""
         return sorted([alias for alias in all_aliases if alias not in exclude])
+
+    def validate_key_column(
+        self, dataset_alias: str, column_name: str
+    ) -> tuple[bool, str | None]:
+        """
+        Validate that a column has no missing values and all unique values.
+
+        Returns
+        -------
+            tuple: (is_valid, error_message)
+        """
+        df = duckdb_get_table(
+            project_id=self.project_id,
+            alias=dataset_alias,
+            db_name="prep",
+            type="pd",
+        )
+
+        null_count = int(df[column_name].isna().sum())
+        if null_count > 0:
+            return (
+                False,
+                f"Key column '{column_name}' has {null_count} missing value(s). "
+                "Please select a column with no missing values.",
+            )
+
+        total = len(df)
+        unique_count = int(df[column_name].nunique())
+        if unique_count < total:
+            duplicate_count = total - unique_count
+            return (
+                False,
+                f"Key column '{column_name}' has {duplicate_count} duplicate value(s). "
+                "Please select a column with all unique values.",
+            )
+
+        return True, None
 
 
 # ============================================================================
@@ -346,14 +414,18 @@ def render_survey_column_selectors(
     datetime_columns: list[str] | None = None,
     numeric_columns: list[str] | None = None,
     categorical_columns: list[str] | None = None,
+    project_id: str | None = None,
+    dataset_alias: str | None = None,
 ) -> SurveyColumnSelections:
     """
     Render column selection inputs.
 
     Args:
-        string_columns: List of string column names
-        numeric_columns: List of numeric column names
         datetime_columns: List of datetime column names
+        numeric_columns: List of numeric column names
+        categorical_columns: List of categorical column names
+        project_id: Project ID used to validate the key column against actual data
+        dataset_alias: Dataset alias used to validate the key column against actual data
 
     Returns
     -------
@@ -368,6 +440,13 @@ def render_survey_column_selectors(
             index=None,
             help="Select the column that uniquely identifies each record.",
         )
+
+        if survey_key and project_id and dataset_alias:
+            _key_valid, _key_error = DatasetService(project_id).validate_key_column(
+                dataset_alias, survey_key
+            )
+            if not _key_valid:
+                st.error(_key_error)
 
         survey_id = st.selectbox(
             "Select ID Column (Optional)",
@@ -550,7 +629,11 @@ def add_check_configuration_form(
 
     # Step 4: Survey Column selections
     survey_column_selections = render_survey_column_selectors(
-        datetime_cols, numeric_columns, categorical_cols
+        datetime_cols,
+        numeric_columns,
+        categorical_cols,
+        project_id=project_id,
+        dataset_alias=survey_data_name,
     )
 
     column_selections = dict(survey_column_selections)
@@ -593,6 +676,7 @@ def add_check_configuration_form(
             page_name=page_name,
             survey_data_name=survey_data_name,
             backcheck_data_name=backcheck_data_name,
+            project_id=project_id,
         )
 
 
@@ -602,6 +686,7 @@ def _handle_configuration_submission(
     page_name: str,
     survey_data_name: str,
     backcheck_data_name: str | None,
+    project_id: str,
 ) -> None:
     """
     Handle form submission and save configuration.
@@ -611,7 +696,17 @@ def _handle_configuration_submission(
         page_name: Page name for the configuration
         survey_data_name: Selected survey dataset name
         column_selections: User's column selections
+        project_id: Project ID for key column validation
     """
+    survey_key = column_selections.get("survey_key")
+    if survey_key:
+        is_key_valid, key_error = DatasetService(project_id).validate_key_column(
+            survey_data_name, survey_key
+        )
+        if not is_key_valid:
+            st.error(key_error)
+            return
+
     # Build configuration data
     config_data = {
         "page_name": page_name,
@@ -694,6 +789,13 @@ def remove_check_configuration_form(project_id: str) -> None:
                 st.error("Failed to remove configuration. Please try again.")
 
 
+def _get_index_or_none(value: str | None, options: list[str]) -> int | None:
+    """Return the index of value in options, or None if absent."""
+    if value and value in options:
+        return options.index(value)
+    return None
+
+
 def render_configuration_table(config_df) -> None:
     """
     Render the configuration table display.
@@ -723,3 +825,399 @@ def render_configuration_table(config_df) -> None:
             ),
         },
     )
+
+
+@st.fragment
+def render_survey_column_selectors_edit(
+    datetime_columns: list[str] | None = None,
+    numeric_columns: list[str] | None = None,
+    categorical_columns: list[str] | None = None,
+    defaults: dict | None = None,
+    project_id: str | None = None,
+    dataset_alias: str | None = None,
+) -> SurveyColumnSelections:
+    """
+    Render survey column selection inputs pre-populated with existing values.
+
+    Args:
+        datetime_columns: List of datetime column names
+        numeric_columns: List of numeric column names
+        categorical_columns: List of categorical column names
+        defaults: Dict of current saved values keyed by field name
+        project_id: Project ID used to validate the key column against actual data
+        dataset_alias: Dataset alias used to validate the key column against actual data
+
+    Returns
+    -------
+        SurveyColumnSelections with user selections
+    """
+    defaults = defaults or {}
+    datetime_columns = datetime_columns or []
+    numeric_columns = numeric_columns or []
+    categorical_columns = categorical_columns or []
+
+    with st.container(border=True):
+        st.subheader("Select survey data columns")
+
+        survey_key = st.selectbox(
+            "Select Key Column (Required*)",
+            options=categorical_columns,
+            index=_get_index_or_none(defaults.get("survey_key"), categorical_columns),
+            help="Select the column that uniquely identifies each record.",
+            key="edit_survey_key",
+        )
+
+        if survey_key and project_id and dataset_alias:
+            _key_valid, _key_error = DatasetService(project_id).validate_key_column(
+                dataset_alias, survey_key
+            )
+            if not _key_valid:
+                st.error(_key_error)
+
+        survey_id = st.selectbox(
+            "Select ID Column (Optional)",
+            options=categorical_columns,
+            index=_get_index_or_none(defaults.get("survey_id"), categorical_columns),
+            help="Select the column that contains the ID for each record.",
+            key="edit_survey_id",
+        )
+
+        survey_date = st.selectbox(
+            "Select Date Column (Optional)",
+            options=datetime_columns,
+            index=_get_index_or_none(defaults.get("survey_date"), datetime_columns),
+            help="Select the column that contains the date for each record.",
+            key="edit_survey_date",
+        )
+
+        enumerator = st.selectbox(
+            "Select Enumerator Column (Optional)",
+            options=categorical_columns,
+            index=_get_index_or_none(defaults.get("enumerator"), categorical_columns),
+            help="Select the column that contains the enumerator for each record.",
+            key="edit_enumerator",
+        )
+
+        team = st.selectbox(
+            "Select Team Column (Optional)",
+            options=categorical_columns,
+            index=_get_index_or_none(defaults.get("team"), categorical_columns),
+            help="Select the column that contains the team for each record.",
+            key="edit_team",
+        )
+
+        formversion = st.selectbox(
+            "Select Form Version Column (Optional)",
+            options=numeric_columns,
+            index=_get_index_or_none(defaults.get("formversion"), numeric_columns),
+            help="Select the column that contains the form version for each record.",
+            key="edit_formversion",
+        )
+
+        duration = st.selectbox(
+            "Select Duration Column (Optional)",
+            options=numeric_columns,
+            index=_get_index_or_none(defaults.get("duration"), numeric_columns),
+            help="Select the column that contains the duration for each record.",
+            key="edit_duration",
+        )
+
+        survey_target = st.number_input(
+            "Enter Target Number of responses for the Survey (Optional)",
+            min_value=0,
+            value=defaults.get("survey_target") or 0,
+            step=1,
+            help="Enter the target number of responses for the survey dataset.",
+            key="edit_survey_target",
+        )
+
+        return SurveyColumnSelections(
+            survey_key=survey_key,
+            survey_id=survey_id,
+            survey_date=survey_date,
+            enumerator=enumerator,
+            team=team,
+            formversion=formversion,
+            duration=duration,
+            survey_target=survey_target,
+        )
+
+
+@st.fragment
+def render_backcheck_column_selectors_edit(
+    datetime_columns: list[str] | None = None,
+    categorical_columns: list[str] | None = None,
+    defaults: dict | None = None,
+) -> BackcheckColumnSelectors:
+    """
+    Render backcheck column selection inputs pre-populated with existing values.
+
+    Args:
+        datetime_columns: List of datetime column names
+        categorical_columns: List of categorical column names
+        defaults: Dict of current saved values keyed by field name
+
+    Returns
+    -------
+        BackcheckColumnSelectors with user selections
+    """
+    defaults = defaults or {}
+    datetime_columns = datetime_columns or []
+    categorical_columns = categorical_columns or []
+
+    with st.container(border=True):
+        st.subheader("Select backcheck data columns")
+
+        backcheck_date = st.selectbox(
+            "Select Backcheck Date Column (Optional)",
+            options=datetime_columns,
+            index=_get_index_or_none(defaults.get("backcheck_date"), datetime_columns),
+            help="Select the column that contains the date for each record in backcheck dataset.",
+            key="edit_backcheck_date",
+        )
+
+        backchecker = st.selectbox(
+            "Select Backchecker Column (Optional)",
+            options=categorical_columns,
+            index=_get_index_or_none(defaults.get("backchecker"), categorical_columns),
+            help="Select the column that contains the backchecker for each record in backcheck dataset.",
+            key="edit_backchecker",
+        )
+
+        backchecker_team = st.selectbox(
+            "Select Backchecker Team Column (Optional)",
+            options=categorical_columns,
+            index=_get_index_or_none(
+                defaults.get("backchecker_team"), categorical_columns
+            ),
+            help="Select the column that contains the team for each record in the backcheck dataset.",
+            key="edit_backchecker_team",
+        )
+
+        backcheck_target_percent = st.number_input(
+            "Enter Target Percentage of surveys to be Backchecked (Optional)",
+            min_value=0,
+            max_value=100,
+            value=defaults.get("backcheck_target_percent") or 0,
+            step=1,
+            help="Enter the target percentage of surveys to be backchecked.",
+            key="edit_backcheck_target_percent",
+        )
+
+        return BackcheckColumnSelectors(
+            backcheck_date=backcheck_date,
+            backchecker=backchecker,
+            backchecker_team=backchecker_team,
+            backcheck_target_percent=backcheck_target_percent,
+        )
+
+
+@st.dialog(title="Edit Check Configuration", width="medium")
+def edit_check_configuration_form(
+    project_id: str,
+    alias_list: list[str],
+) -> None:
+    """
+    Render the edit check configuration form.
+
+    Loads the existing configuration for the selected page and pre-populates
+    all fields so users can update any value.
+
+    Args:
+        project_id: Current project ID
+        alias_list: List of available dataset aliases
+    """
+    config_service = ConfigurationService(project_id)
+    dataset_service = DatasetService(project_id)
+
+    page_names = config_service.get_page_names()
+
+    if not page_names:
+        st.info(
+            "No check configurations found. Please add a check configuration first."
+        )
+        return
+
+    # Step 1: Select which configuration to edit
+    selected_page = st.selectbox(
+        "Select Check Configuration to Edit",
+        options=sorted(page_names),
+        index=None,
+        key="edit_config_page_select",
+    )
+
+    if not selected_page:
+        st.info("Select a configuration to edit.")
+        return
+
+    current_config = config_service.get_configuration_by_page_name(selected_page)
+
+    if not current_config:
+        st.error("Could not load configuration. Please try again.")
+        return
+
+    st.divider()
+
+    # Step 2: Page name input (pre-filled, editable)
+    page_name = st.text_input(
+        "Page Name",
+        value=current_config.get("page_name", ""),
+        placeholder="eg. Household HFC, Individual HFC, etc.",
+        help="This name will be used to identify the check page.",
+        max_chars=20,
+        key="edit_check_config_page_name_input",
+    )
+
+    if not page_name:
+        st.info("Enter a page name to continue.")
+        return
+
+    # Step 3: Survey dataset selection (pre-selected)
+    sorted_aliases = sorted(alias_list)
+    current_survey = current_config.get("survey_data_name")
+    survey_dataset_index = _get_index_or_none(current_survey, sorted_aliases)
+
+    survey_data_name = st.selectbox(
+        "Select Survey Dataset",
+        options=sorted_aliases,
+        index=survey_dataset_index,
+        help="Select the survey dataset to check.",
+        key="edit_survey_dataset",
+    )
+
+    if not survey_data_name:
+        return
+
+    # Step 4: Get dataset columns and render survey column selectors
+    datetime_cols, numeric_cols, categorical_cols = dataset_service.get_dataset_columns(
+        survey_data_name
+    )
+
+    survey_column_selections = render_survey_column_selectors_edit(
+        datetime_cols,
+        numeric_cols,
+        categorical_cols,
+        defaults=current_config,
+        project_id=project_id,
+        dataset_alias=survey_data_name,
+    )
+
+    column_selections = dict(survey_column_selections)
+
+    # Step 5: Backcheck dataset selection (pre-selected if present)
+    dataset_service_plain = DatasetService(project_id="")
+    backcheck_options = dataset_service_plain.get_available_aliases_excluding(
+        alias_list, [survey_data_name]
+    )
+
+    current_backcheck = current_config.get("backcheck_data_name")
+    backcheck_dataset_index = _get_index_or_none(current_backcheck, backcheck_options)
+
+    backcheck_data_name = st.selectbox(
+        "Select Backcheck Dataset",
+        options=backcheck_options,
+        index=backcheck_dataset_index,
+        help="Select the backcheck dataset to check.",
+        key="edit_backcheck_dataset",
+    )
+
+    if backcheck_data_name:
+        (
+            bc_datetime_cols,
+            _,
+            bc_categorical_cols,
+        ) = dataset_service.get_dataset_columns(backcheck_data_name)
+
+        backcheck_column_selections = render_backcheck_column_selectors_edit(
+            bc_datetime_cols, bc_categorical_cols, defaults=current_config
+        )
+
+        column_selections = dict(survey_column_selections) | dict(
+            backcheck_column_selections
+        )
+
+    # Step 6: Submit button
+    save_button = st.button(
+        "Save Changes",
+        type="primary",
+        width="stretch",
+        key="edit_check_config_save_btn",
+    )
+
+    if save_button:
+        _handle_edit_configuration_submission(
+            config_service=config_service,
+            original_page_name=selected_page,
+            column_selections=column_selections,
+            page_name=page_name,
+            survey_data_name=survey_data_name,
+            backcheck_data_name=backcheck_data_name,
+            project_id=project_id,
+        )
+
+
+def _handle_edit_configuration_submission(
+    config_service: ConfigurationService,
+    original_page_name: str,
+    column_selections: dict,
+    page_name: str,
+    survey_data_name: str,
+    backcheck_data_name: str | None,
+    project_id: str,
+) -> None:
+    """
+    Handle edit form submission and persist the updated configuration.
+
+    Args:
+        config_service: Configuration service instance
+        original_page_name: The page name before editing (used to locate the row)
+        column_selections: User's updated column selections
+        page_name: New (or unchanged) page name
+        survey_data_name: Selected survey dataset name
+        backcheck_data_name: Selected backcheck dataset name, or None
+        project_id: Project ID for key column validation
+    """
+    survey_key = column_selections.get("survey_key")
+    if survey_key:
+        is_key_valid, key_error = DatasetService(project_id).validate_key_column(
+            survey_data_name, survey_key
+        )
+        if not is_key_valid:
+            st.error(key_error)
+            return
+
+    config_data = {
+        "page_name": page_name,
+        "survey_data_name": survey_data_name,
+        "survey_key": column_selections.get("survey_key"),
+        "survey_id": column_selections.get("survey_id"),
+        "survey_date": column_selections.get("survey_date"),
+        "enumerator": column_selections.get("enumerator"),
+        "team": column_selections.get("team"),
+        "formversion": column_selections.get("formversion"),
+        "duration": column_selections.get("duration"),
+        "survey_target": column_selections.get("survey_target"),
+        "backcheck_data_name": backcheck_data_name,
+        "backcheck_date": column_selections.get("backcheck_date"),
+        "backchecker": column_selections.get("backchecker"),
+        "backchecker_team": column_selections.get("backchecker_team"),
+        "backcheck_target_percent": column_selections.get("backcheck_target_percent"),
+        "tracking_data_name": column_selections.get("tracking_data_name"),
+    }
+
+    is_valid, error_msg, validated_config = config_service.validate_edit_configuration(
+        config_data, original_page_name
+    )
+
+    if not is_valid:
+        st.error(error_msg)
+        return
+
+    if validated_config:
+        success = config_service.update_configuration(
+            original_page_name, validated_config
+        )
+        if success:
+            st.success(f"Check configuration '{page_name}' updated successfully.")
+        else:
+            st.error("Failed to update configuration. Please try again.")
