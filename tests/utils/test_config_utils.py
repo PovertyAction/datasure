@@ -21,12 +21,10 @@ from datasure.utils.config_utils import (
     edit_check_configuration_form,
     remove_check_configuration_form,
     render_backcheck_column_selectors,
-    render_backcheck_column_selectors_edit,
     render_backcheck_dataset_selector,
     render_configuration_table,
     render_page_name_input,
     render_survey_column_selectors,
-    render_survey_column_selectors_edit,
     render_survey_dataset_selector,
 )
 
@@ -2566,7 +2564,7 @@ class TestRenderSurveyColumnSelectorsEditWrapped:
         mock_st.selectbox.return_value = None
         mock_st.number_input.return_value = 0
 
-        result = render_survey_column_selectors_edit.__wrapped__(
+        result = render_survey_column_selectors.__wrapped__(
             datetime_columns=["date1"],
             numeric_columns=["num1"],
             categorical_columns=["col1"],
@@ -2583,7 +2581,7 @@ class TestRenderSurveyColumnSelectorsEditWrapped:
         mock_st.selectbox.return_value = None
         mock_st.number_input.return_value = 0
 
-        render_survey_column_selectors_edit.__wrapped__(
+        render_survey_column_selectors.__wrapped__(
             datetime_columns=["date1"],
             numeric_columns=["num1"],
             categorical_columns=["col1"],
@@ -2603,7 +2601,7 @@ class TestRenderSurveyColumnSelectorsEditWrapped:
         mock_st.number_input.return_value = 10
 
         defaults = {"survey_key": "col1", "survey_target": 10}
-        render_survey_column_selectors_edit.__wrapped__(
+        render_survey_column_selectors.__wrapped__(
             datetime_columns=[],
             numeric_columns=[],
             categorical_columns=["col1"],
@@ -2628,7 +2626,7 @@ class TestRenderSurveyColumnSelectorsEditWrapped:
         mock_ds.validate_key_column.return_value = (False, "Duplicate keys")
         mock_ds_class.return_value = mock_ds
 
-        render_survey_column_selectors_edit.__wrapped__(
+        render_survey_column_selectors.__wrapped__(
             datetime_columns=[],
             numeric_columns=[],
             categorical_columns=["key_col"],
@@ -2648,7 +2646,7 @@ class TestRenderSurveyColumnSelectorsEditWrapped:
         mock_st.selectbox.return_value = None
         mock_st.number_input.return_value = 0
 
-        result = render_survey_column_selectors_edit.__wrapped__(
+        result = render_survey_column_selectors.__wrapped__(
             datetime_columns=None,
             numeric_columns=None,
             categorical_columns=None,
@@ -2670,7 +2668,7 @@ class TestRenderBackcheckColumnSelectorsEditWrapped:
         mock_st.selectbox.return_value = None
         mock_st.number_input.return_value = 0
 
-        result = render_backcheck_column_selectors_edit.__wrapped__(
+        result = render_backcheck_column_selectors.__wrapped__(
             datetime_columns=["date1"],
             categorical_columns=["col1"],
         )
@@ -2686,7 +2684,7 @@ class TestRenderBackcheckColumnSelectorsEditWrapped:
         mock_st.selectbox.return_value = None
         mock_st.number_input.return_value = 0
 
-        render_backcheck_column_selectors_edit.__wrapped__(
+        render_backcheck_column_selectors.__wrapped__(
             datetime_columns=["date1"],
             categorical_columns=["col1"],
         )
@@ -2704,7 +2702,7 @@ class TestRenderBackcheckColumnSelectorsEditWrapped:
         mock_st.number_input.return_value = 15
 
         defaults = {"backcheck_date": "bc_date", "backcheck_target_percent": 15}
-        render_backcheck_column_selectors_edit.__wrapped__(
+        render_backcheck_column_selectors.__wrapped__(
             datetime_columns=["bc_date"],
             categorical_columns=[],
             defaults=defaults,
@@ -2722,7 +2720,7 @@ class TestRenderBackcheckColumnSelectorsEditWrapped:
         mock_st.selectbox.return_value = None
         mock_st.number_input.return_value = 0
 
-        result = render_backcheck_column_selectors_edit.__wrapped__(
+        result = render_backcheck_column_selectors.__wrapped__(
             datetime_columns=None,
             categorical_columns=None,
             defaults=None,
@@ -2906,8 +2904,8 @@ class TestEditCheckConfigurationFormWrapped:
         assert any("Enter a page name to continue" in msg for msg in info_calls)
 
     @patch("datasure.utils.config_utils._handle_edit_configuration_submission")
-    @patch("datasure.utils.config_utils.render_backcheck_column_selectors_edit")
-    @patch("datasure.utils.config_utils.render_survey_column_selectors_edit")
+    @patch("datasure.utils.config_utils.render_backcheck_column_selectors")
+    @patch("datasure.utils.config_utils.render_survey_column_selectors")
     @patch("datasure.utils.config_utils.st")
     @patch("datasure.utils.config_utils.DatasetService")
     @patch("datasure.utils.config_utils.ConfigurationService")
@@ -2979,8 +2977,8 @@ class TestEditCheckConfigurationFormWrapped:
         mock_ds.get_dataset_columns.assert_not_called()
 
     @patch("datasure.utils.config_utils._handle_edit_configuration_submission")
-    @patch("datasure.utils.config_utils.render_backcheck_column_selectors_edit")
-    @patch("datasure.utils.config_utils.render_survey_column_selectors_edit")
+    @patch("datasure.utils.config_utils.render_backcheck_column_selectors")
+    @patch("datasure.utils.config_utils.render_survey_column_selectors")
     @patch("datasure.utils.config_utils.st")
     @patch("datasure.utils.config_utils.DatasetService")
     @patch("datasure.utils.config_utils.ConfigurationService")
@@ -3074,7 +3072,7 @@ class TestRenderSurveyColumnSelectorsEditValidKeyBranch:
         mock_ds.validate_key_column.return_value = (True, None)  # key IS valid
         mock_ds_class.return_value = mock_ds
 
-        render_survey_column_selectors_edit.__wrapped__(
+        render_survey_column_selectors.__wrapped__(
             datetime_columns=[],
             numeric_columns=[],
             categorical_columns=["key_col"],
