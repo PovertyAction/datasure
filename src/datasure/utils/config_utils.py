@@ -21,6 +21,12 @@ from datasure.utils.dataframe_utils import get_df_columns
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 
 # ============================================================================
+# CONSTANTS
+# ============================================================================
+
+PAGE_NAME_STR = "Page Name"
+
+# ============================================================================
 # SERVICE LAYER
 # ============================================================================
 
@@ -382,7 +388,7 @@ def render_page_name_input() -> str | None:
         Page name entered by user or None
     """
     return st.text_input(
-        "Page Name",
+        PAGE_NAME_STR,
         placeholder="eg. Household HFC, Individual HFC, etc.",
         help="This name will be used to create a new page for the checks.",
         max_chars=20,
@@ -809,7 +815,7 @@ def render_configuration_table(config_df) -> None:
         hide_index=True,
         key="check_config_log",
         column_config={
-            "page_name": st.column_config.TextColumn("Page Name"),
+            "page_name": st.column_config.TextColumn(PAGE_NAME_STR),
             "survey_data_name": st.column_config.TextColumn("Survey Dataset"),
             "survey_key": st.column_config.TextColumn("Key Column"),
             "survey_id": st.column_config.TextColumn("ID Column"),
@@ -1060,7 +1066,7 @@ def edit_check_configuration_form(
 
     # Step 2: Page name input (pre-filled, editable)
     page_name = st.text_input(
-        "Page Name",
+        PAGE_NAME_STR,
         value=current_config.get("page_name", ""),
         placeholder="eg. Household HFC, Individual HFC, etc.",
         help="This name will be used to identify the check page.",
