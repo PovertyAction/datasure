@@ -1,7 +1,8 @@
 """Comprehensive tests for configuration utilities module."""
 
-from unittest.mock import Mock, mock_open, patch
+from unittest.mock import MagicMock, Mock, mock_open, patch
 
+import pandas as pd
 import polars as pl
 import pytest
 from pydantic import ValidationError
@@ -13,14 +14,19 @@ from datasure.utils.config_utils import (
     ConfigurationService,
     DatasetService,
     SurveyColumnSelections,
+    _get_index_or_none,
     _handle_configuration_submission,
+    _handle_edit_configuration_submission,
     add_check_configuration_form,
+    edit_check_configuration_form,
     remove_check_configuration_form,
     render_backcheck_column_selectors,
+    render_backcheck_column_selectors_edit,
     render_backcheck_dataset_selector,
     render_configuration_table,
     render_page_name_input,
     render_survey_column_selectors,
+    render_survey_column_selectors_edit,
     render_survey_dataset_selector,
 )
 
@@ -1428,9 +1434,14 @@ class TestRenderBackcheckColumnSelectors:
 class TestHandleConfigurationSubmission:
     """Test _handle_configuration_submission function."""
 
+    @patch("datasure.utils.config_utils.DatasetService")
     @patch("datasure.utils.config_utils.st")
-    def test_successful_submission(self, mock_st):
+    def test_successful_submission(self, mock_st, mock_dataset_service_class):
         """Test successful configuration submission."""
+        mock_dataset_service = Mock()
+        mock_dataset_service.validate_key_column.return_value = (True, None)
+        mock_dataset_service_class.return_value = mock_dataset_service
+
         mock_service = Mock()
         mock_service.validate_configuration.return_value = (
             True,
@@ -1464,6 +1475,7 @@ class TestHandleConfigurationSubmission:
             page_name="Test",
             survey_data_name="survey_1",
             backcheck_data_name="backcheck_1",
+            project_id="test_project",
         )
 
         mock_service.validate_configuration.assert_called_once()
@@ -1472,7 +1484,7 @@ class TestHandleConfigurationSubmission:
 
     @patch("datasure.utils.config_utils.st")
     def test_validation_failure(self, mock_st):
-        """Test handling of validation failure."""
+        """Test handling of validation failure when no survey key."""
         mock_service = Mock()
         mock_service.validate_configuration.return_value = (
             False,
@@ -1486,14 +1498,20 @@ class TestHandleConfigurationSubmission:
             page_name="Test",
             survey_data_name="survey_1",
             backcheck_data_name=None,
+            project_id="test_project",
         )
 
         mock_service.add_configuration.assert_not_called()
         mock_st.error.assert_called_once_with("Validation error message")
 
+    @patch("datasure.utils.config_utils.DatasetService")
     @patch("datasure.utils.config_utils.st")
-    def test_add_configuration_failure(self, mock_st):
+    def test_add_configuration_failure(self, mock_st, mock_dataset_service_class):
         """Test handling of add configuration failure."""
+        mock_dataset_service = Mock()
+        mock_dataset_service.validate_key_column.return_value = (True, None)
+        mock_dataset_service_class.return_value = mock_dataset_service
+
         mock_service = Mock()
         mock_service.validate_configuration.return_value = (
             True,
@@ -1518,11 +1536,60 @@ class TestHandleConfigurationSubmission:
             page_name="Test",
             survey_data_name="survey_1",
             backcheck_data_name=None,
+            project_id="test_project",
         )
 
         mock_st.error.assert_called_once_with(
             "Failed to add configuration. Please try again."
         )
+
+    @patch("datasure.utils.config_utils.DatasetService")
+    @patch("datasure.utils.config_utils.st")
+    def test_invalid_key_column_stops_submission(
+        self, mock_st, mock_dataset_service_class
+    ):
+        """Test that an invalid key column shows error and stops submission."""
+        mock_dataset_service = Mock()
+        mock_dataset_service.validate_key_column.return_value = (
+            False,
+            "Key column 'key' has 2 missing value(s).",
+        )
+        mock_dataset_service_class.return_value = mock_dataset_service
+
+        mock_service = Mock()
+
+        _handle_configuration_submission(
+            config_service=mock_service,
+            column_selections={"survey_key": "key"},
+            page_name="Test",
+            survey_data_name="survey_1",
+            backcheck_data_name=None,
+            project_id="test_project",
+        )
+
+        mock_st.error.assert_called_once_with(
+            "Key column 'key' has 2 missing value(s)."
+        )
+        mock_service.validate_configuration.assert_not_called()
+
+    @patch("datasure.utils.config_utils.st")
+    def test_no_survey_key_skips_key_validation(self, mock_st):
+        """Test that missing survey_key skips DatasetService validation."""
+        mock_service = Mock()
+        mock_service.validate_configuration.return_value = (True, None, Mock())
+        mock_service.add_configuration.return_value = True
+
+        _handle_configuration_submission(
+            config_service=mock_service,
+            column_selections={"survey_id": "id"},
+            page_name="Test",
+            survey_data_name="survey_1",
+            backcheck_data_name=None,
+            project_id="test_project",
+        )
+
+        # validate_configuration still called; no DatasetService interaction
+        mock_service.validate_configuration.assert_called_once()
 
 
 class TestAddCheckConfigurationForm:
@@ -1669,3 +1736,1438 @@ class TestRenderConfigurationTable:
         assert call_args[1]["key"] == "check_config_log"
         assert "column_config" in call_args[1]
         assert "page_name" in call_args[1]["column_config"]
+
+
+# ============================================================================
+# _get_index_or_none TESTS
+# ============================================================================
+
+
+class TestGetIndexOrNone:
+    """Test _get_index_or_none utility function."""
+
+    def test_returns_correct_index_when_found(self):
+        """Test returns 0-based index when value is in options."""
+        assert _get_index_or_none("b", ["a", "b", "c"]) == 1
+
+    def test_returns_zero_for_first_item(self):
+        assert _get_index_or_none("a", ["a", "b", "c"]) == 0
+
+    def test_returns_last_index(self):
+        assert _get_index_or_none("c", ["a", "b", "c"]) == 2
+
+    def test_returns_none_when_value_not_in_options(self):
+        assert _get_index_or_none("z", ["a", "b", "c"]) is None
+
+    def test_returns_none_when_value_is_none(self):
+        assert _get_index_or_none(None, ["a", "b", "c"]) is None
+
+    def test_returns_none_for_empty_options(self):
+        assert _get_index_or_none("a", []) is None
+
+    def test_returns_none_for_empty_string_value(self):
+        """Empty string is falsy so returns None."""
+        assert _get_index_or_none("", ["a", "b"]) is None
+
+
+# ============================================================================
+# ConfigurationService — new method tests
+# ============================================================================
+
+
+def _make_single_config_df() -> pl.DataFrame:
+    """Return a minimal single-row configuration DataFrame."""
+    return pl.DataFrame(
+        [
+            {
+                "page_name": "Existing Page",
+                "survey_data_name": "survey_1",
+                "survey_key": "key",
+                "survey_id": "id",
+                "survey_date": None,
+                "enumerator": None,
+                "team": None,
+                "formversion": None,
+                "duration": None,
+                "survey_target": None,
+                "backcheck_data_name": None,
+                "backcheck_date": None,
+                "backchecker": None,
+                "backchecker_team": None,
+                "backcheck_target_percent": None,
+                "tracking_data_name": None,
+            }
+        ]
+    )
+
+
+def _make_multi_config_df() -> pl.DataFrame:
+    """Return a two-row configuration DataFrame."""
+    row = {
+        "survey_date": None,
+        "enumerator": None,
+        "team": None,
+        "formversion": None,
+        "duration": None,
+        "survey_target": None,
+        "backcheck_data_name": None,
+        "backcheck_date": None,
+        "backchecker": None,
+        "backchecker_team": None,
+        "backcheck_target_percent": None,
+        "tracking_data_name": None,
+    }
+    return pl.DataFrame(
+        [
+            {
+                "page_name": "Page One",
+                "survey_data_name": "survey_1",
+                "survey_key": "key1",
+                "survey_id": "id1",
+                **row,
+            },
+            {
+                "page_name": "Page Two",
+                "survey_data_name": "survey_2",
+                "survey_key": "key2",
+                "survey_id": "id2",
+                **row,
+            },
+        ]
+    )
+
+
+class TestConfigurationServiceGetConfigurationByPageName:
+    """Test ConfigurationService.get_configuration_by_page_name."""
+
+    def test_returns_empty_dict_when_log_is_empty(self):
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=pl.DataFrame())
+        assert service.get_configuration_by_page_name("Any Page") == {}
+
+    def test_returns_config_for_matching_page(self):
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=_make_single_config_df())
+        result = service.get_configuration_by_page_name("Existing Page")
+        assert isinstance(result, dict)
+        assert result["page_name"] == "Existing Page"
+        assert result["survey_data_name"] == "survey_1"
+
+    def test_returns_empty_dict_for_nonexistent_page(self):
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=_make_single_config_df())
+        assert service.get_configuration_by_page_name("Nonexistent") == {}
+
+    def test_returns_correct_row_from_multi_row_df(self):
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=_make_multi_config_df())
+        result = service.get_configuration_by_page_name("Page Two")
+        assert result["page_name"] == "Page Two"
+        assert result["survey_data_name"] == "survey_2"
+        assert result["survey_key"] == "key2"
+
+    def test_is_case_sensitive(self):
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=_make_single_config_df())
+        assert service.get_configuration_by_page_name("existing page") == {}
+
+
+class TestConfigurationServiceValidateEditConfiguration:
+    """Test ConfigurationService.validate_edit_configuration."""
+
+    def test_valid_when_page_name_unchanged(self):
+        """Keeping the same page name as original should not raise duplicate error."""
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=_make_single_config_df())
+
+        config_data = {
+            "page_name": "Existing Page",
+            "survey_data_name": "survey_1",
+            "survey_key": "key",
+            "survey_id": "id",
+            "survey_date": None,
+            "enumerator": None,
+            "backcheck_data_name": None,
+            "backcheck_date": None,
+            "backchecker": None,
+        }
+
+        is_valid, error_msg, config = service.validate_edit_configuration(
+            config_data, "Existing Page"
+        )
+
+        assert is_valid is True
+        assert error_msg is None
+        assert config is not None
+        assert config.page_name == "Existing Page"
+
+    def test_valid_when_new_page_name_is_unique(self):
+        """Renaming to a page name that doesn't exist should be valid."""
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=_make_single_config_df())
+
+        config_data = {
+            "page_name": "Brand New Page",
+            "survey_data_name": "survey_1",
+            "survey_key": "key",
+            "survey_id": "id",
+            "survey_date": None,
+            "enumerator": None,
+            "backcheck_data_name": None,
+            "backcheck_date": None,
+            "backchecker": None,
+        }
+
+        is_valid, error_msg, config = service.validate_edit_configuration(
+            config_data, "Existing Page"
+        )
+
+        assert is_valid is True
+        assert error_msg is None
+        assert config.page_name == "Brand New Page"
+
+    def test_invalid_when_new_name_clashes_with_other_page(self):
+        """Renaming to an already-used page name should fail."""
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=_make_multi_config_df())
+
+        config_data = {
+            "page_name": "Page Two",  # already exists
+            "survey_data_name": "survey_1",
+            "survey_key": "key1",
+            "survey_id": "id1",
+            "survey_date": None,
+            "enumerator": None,
+            "backcheck_data_name": None,
+            "backcheck_date": None,
+            "backchecker": None,
+        }
+
+        is_valid, error_msg, config = service.validate_edit_configuration(
+            config_data, "Page One"
+        )
+
+        assert is_valid is False
+        assert "already exists" in error_msg
+        assert config is None
+
+    def test_invalid_when_config_data_fails_pydantic_validation(self):
+        """Invalid config data (e.g. empty page name) should fail."""
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=pl.DataFrame())
+
+        config_data = {
+            "page_name": "",  # fails min_length validation
+            "survey_data_name": "survey_1",
+            "survey_key": "key",
+            "survey_id": "id",
+            "survey_date": None,
+            "enumerator": None,
+            "backcheck_data_name": None,
+            "backcheck_date": None,
+            "backchecker": None,
+        }
+
+        is_valid, error_msg, config = service.validate_edit_configuration(
+            config_data, "Any Page"
+        )
+
+        assert is_valid is False
+        assert error_msg is not None
+        assert config is None
+
+
+class TestConfigurationServiceUpdateConfiguration:
+    """Test ConfigurationService.update_configuration."""
+
+    @pytest.fixture
+    def new_config(self):
+        return CheckConfiguration(
+            page_name="Updated Page",
+            survey_data_name="survey_1",
+            survey_key="key1",
+            survey_id="id1",
+            survey_date=None,
+            enumerator=None,
+            team=None,
+            formversion=None,
+            duration=None,
+            survey_target=None,
+            backcheck_data_name=None,
+            backcheck_date=None,
+            backchecker=None,
+            backchecker_team=None,
+            backcheck_target_percent=None,
+            tracking_data_name=None,
+        )
+
+    def test_returns_false_when_log_is_empty(self, new_config):
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=pl.DataFrame())
+        assert service.update_configuration("Page One", new_config) is False
+
+    def test_returns_false_when_page_name_not_found(self, new_config):
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=_make_single_config_df())
+        assert service.update_configuration("Nonexistent Page", new_config) is False
+
+    @patch("datasure.utils.config_utils.st")
+    @patch("datasure.utils.config_utils.duckdb_save_table")
+    def test_updates_single_row_successfully(self, mock_save, mock_st, new_config):
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=_make_single_config_df())
+
+        result = service.update_configuration("Existing Page", new_config)
+
+        assert result is True
+        mock_save.assert_called_once()
+        saved_df = mock_save.call_args[0][1]
+        assert len(saved_df) == 1
+        assert saved_df["page_name"][0] == "Updated Page"
+
+    @patch("datasure.utils.config_utils.st")
+    @patch("datasure.utils.config_utils.duckdb_save_table")
+    def test_updates_first_row_and_preserves_rest(self, mock_save, mock_st, new_config):
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=_make_multi_config_df())
+
+        result = service.update_configuration("Page One", new_config)
+
+        assert result is True
+        saved_df = mock_save.call_args[0][1]
+        assert len(saved_df) == 2
+        assert saved_df["page_name"][0] == "Updated Page"
+        assert saved_df["page_name"][1] == "Page Two"
+
+    @patch("datasure.utils.config_utils.st")
+    @patch("datasure.utils.config_utils.duckdb_save_table")
+    def test_updates_last_row_and_preserves_rest(self, mock_save, mock_st):
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=_make_multi_config_df())
+
+        updated = CheckConfiguration(
+            page_name="Updated Page Two",
+            survey_data_name="survey_2",
+            survey_key="key2",
+            survey_id="id2",
+            survey_date=None,
+            enumerator=None,
+            team=None,
+            formversion=None,
+            duration=None,
+            survey_target=None,
+            backcheck_data_name=None,
+            backcheck_date=None,
+            backchecker=None,
+            backchecker_team=None,
+            backcheck_target_percent=None,
+            tracking_data_name=None,
+        )
+
+        result = service.update_configuration("Page Two", updated)
+
+        assert result is True
+        saved_df = mock_save.call_args[0][1]
+        assert len(saved_df) == 2
+        assert saved_df["page_name"][0] == "Page One"
+        assert saved_df["page_name"][1] == "Updated Page Two"
+
+    @patch("datasure.utils.config_utils.st")
+    @patch("datasure.utils.config_utils.duckdb_save_table")
+    def test_calls_st_rerun_on_success(self, mock_save, mock_st, new_config):
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=_make_single_config_df())
+
+        service.update_configuration("Existing Page", new_config)
+
+        mock_st.rerun.assert_called_once()
+
+    @patch("datasure.utils.config_utils.st")
+    @patch("datasure.utils.config_utils.duckdb_save_table")
+    def test_saves_with_correct_project_id_and_alias(
+        self, mock_save, mock_st, new_config
+    ):
+        service = ConfigurationService("my_project")
+        service.get_all_configurations = Mock(return_value=_make_single_config_df())
+
+        service.update_configuration("Existing Page", new_config)
+
+        call_args = mock_save.call_args
+        assert call_args[0][0] == "my_project"
+        assert call_args[1]["alias"] == "check_config"
+        assert call_args[1]["db_name"] == "logs"
+
+
+# ============================================================================
+# DatasetService.validate_key_column TESTS
+# ============================================================================
+
+
+class TestDatasetServiceValidateKeyColumn:
+    """Test DatasetService.validate_key_column."""
+
+    @patch("datasure.utils.config_utils.duckdb_get_table")
+    def test_valid_key_column(self, mock_get_table):
+        """Unique, non-null column passes validation."""
+        mock_df = pd.DataFrame({"key_col": ["a", "b", "c", "d"]})
+        mock_get_table.return_value = mock_df
+
+        service = DatasetService("test_project")
+        is_valid, error = service.validate_key_column("survey_1", "key_col")
+
+        assert is_valid is True
+        assert error is None
+
+    @patch("datasure.utils.config_utils.duckdb_get_table")
+    def test_invalid_when_column_has_nulls(self, mock_get_table):
+        """Column with missing values fails validation."""
+        mock_df = pd.DataFrame({"key_col": ["a", None, "c", "d"]})
+        mock_get_table.return_value = mock_df
+
+        service = DatasetService("test_project")
+        is_valid, error = service.validate_key_column("survey_1", "key_col")
+
+        assert is_valid is False
+        assert "missing value" in error
+        assert "key_col" in error
+        assert "1" in error  # 1 null
+
+    @patch("datasure.utils.config_utils.duckdb_get_table")
+    def test_invalid_when_column_has_duplicates(self, mock_get_table):
+        """Column with duplicate values fails validation."""
+        mock_df = pd.DataFrame({"key_col": ["a", "b", "a", "d"]})
+        mock_get_table.return_value = mock_df
+
+        service = DatasetService("test_project")
+        is_valid, error = service.validate_key_column("survey_1", "key_col")
+
+        assert is_valid is False
+        assert "duplicate value" in error
+        assert "key_col" in error
+        assert "1" in error  # 1 duplicate
+
+    @patch("datasure.utils.config_utils.duckdb_get_table")
+    def test_invalid_when_multiple_nulls(self, mock_get_table):
+        """Reports the correct null count in the error message."""
+        mock_df = pd.DataFrame({"key_col": [None, None, "c"]})
+        mock_get_table.return_value = mock_df
+
+        service = DatasetService("test_project")
+        is_valid, error = service.validate_key_column("survey_1", "key_col")
+
+        assert is_valid is False
+        assert "2" in error
+
+    @patch("datasure.utils.config_utils.duckdb_get_table")
+    def test_calls_duckdb_with_correct_args(self, mock_get_table):
+        """Verifies duckdb_get_table is called with expected parameters."""
+        mock_df = pd.DataFrame({"key_col": ["a", "b"]})
+        mock_get_table.return_value = mock_df
+
+        service = DatasetService("proj_123")
+        service.validate_key_column("my_survey", "key_col")
+
+        mock_get_table.assert_called_once_with(
+            project_id="proj_123",
+            alias="my_survey",
+            db_name="prep",
+            type="pd",
+        )
+
+
+# ============================================================================
+# _handle_edit_configuration_submission TESTS
+# ============================================================================
+
+
+class TestHandleEditConfigurationSubmission:
+    """Test _handle_edit_configuration_submission function."""
+
+    @patch("datasure.utils.config_utils.DatasetService")
+    @patch("datasure.utils.config_utils.st")
+    def test_successful_update(self, mock_st, mock_dataset_service_class):
+        """Full happy path: key valid, config valid, update succeeds."""
+        mock_ds = Mock()
+        mock_ds.validate_key_column.return_value = (True, None)
+        mock_dataset_service_class.return_value = mock_ds
+
+        mock_service = Mock()
+        mock_service.validate_edit_configuration.return_value = (
+            True,
+            None,
+            CheckConfiguration(
+                page_name="Test",
+                survey_data_name="survey_1",
+                survey_key="key",
+                survey_id="id",
+                survey_date=None,
+                enumerator=None,
+                backcheck_data_name=None,
+                backcheck_date=None,
+                backchecker=None,
+            ),
+        )
+        mock_service.update_configuration.return_value = True
+
+        _handle_edit_configuration_submission(
+            config_service=mock_service,
+            original_page_name="Old Name",
+            column_selections={"survey_key": "key"},
+            page_name="Test",
+            survey_data_name="survey_1",
+            backcheck_data_name=None,
+            project_id="test_project",
+        )
+
+        mock_service.validate_edit_configuration.assert_called_once()
+        mock_service.update_configuration.assert_called_once_with(
+            "Old Name", mock_service.validate_edit_configuration.return_value[2]
+        )
+        mock_st.success.assert_called_once()
+
+    @patch("datasure.utils.config_utils.DatasetService")
+    @patch("datasure.utils.config_utils.st")
+    def test_stops_when_key_column_invalid(self, mock_st, mock_dataset_service_class):
+        """An invalid key column shows an error and stops processing."""
+        mock_ds = Mock()
+        mock_ds.validate_key_column.return_value = (
+            False,
+            "Key column 'key' has 3 duplicate value(s).",
+        )
+        mock_dataset_service_class.return_value = mock_ds
+
+        mock_service = Mock()
+
+        _handle_edit_configuration_submission(
+            config_service=mock_service,
+            original_page_name="Old Name",
+            column_selections={"survey_key": "key"},
+            page_name="Test",
+            survey_data_name="survey_1",
+            backcheck_data_name=None,
+            project_id="test_project",
+        )
+
+        mock_st.error.assert_called_once_with(
+            "Key column 'key' has 3 duplicate value(s)."
+        )
+        mock_service.validate_edit_configuration.assert_not_called()
+
+    @patch("datasure.utils.config_utils.st")
+    def test_stops_when_edit_validation_fails(self, mock_st):
+        """Failed config validation shows error and skips update."""
+        mock_service = Mock()
+        mock_service.validate_edit_configuration.return_value = (
+            False,
+            "Page name 'Test' already exists.",
+            None,
+        )
+
+        _handle_edit_configuration_submission(
+            config_service=mock_service,
+            original_page_name="Old Name",
+            column_selections={},
+            page_name="Test",
+            survey_data_name="survey_1",
+            backcheck_data_name=None,
+            project_id="test_project",
+        )
+
+        mock_service.update_configuration.assert_not_called()
+        mock_st.error.assert_called_once_with("Page name 'Test' already exists.")
+
+    @patch("datasure.utils.config_utils.DatasetService")
+    @patch("datasure.utils.config_utils.st")
+    def test_shows_error_when_update_fails(self, mock_st, mock_dataset_service_class):
+        """A failed update shows an appropriate error message."""
+        mock_ds = Mock()
+        mock_ds.validate_key_column.return_value = (True, None)
+        mock_dataset_service_class.return_value = mock_ds
+
+        mock_service = Mock()
+        mock_service.validate_edit_configuration.return_value = (
+            True,
+            None,
+            CheckConfiguration(
+                page_name="Test",
+                survey_data_name="survey_1",
+                survey_key="key",
+                survey_id="id",
+                survey_date=None,
+                enumerator=None,
+                backcheck_data_name=None,
+                backcheck_date=None,
+                backchecker=None,
+            ),
+        )
+        mock_service.update_configuration.return_value = False
+
+        _handle_edit_configuration_submission(
+            config_service=mock_service,
+            original_page_name="Old Name",
+            column_selections={"survey_key": "key"},
+            page_name="Test",
+            survey_data_name="survey_1",
+            backcheck_data_name=None,
+            project_id="test_project",
+        )
+
+        mock_st.error.assert_called_once_with(
+            "Failed to update configuration. Please try again."
+        )
+
+    @patch("datasure.utils.config_utils.st")
+    def test_no_survey_key_skips_key_validation(self, mock_st):
+        """When no survey_key is present, DatasetService is not invoked."""
+        mock_service = Mock()
+        mock_service.validate_edit_configuration.return_value = (True, None, Mock())
+        mock_service.update_configuration.return_value = True
+
+        _handle_edit_configuration_submission(
+            config_service=mock_service,
+            original_page_name="Old Name",
+            column_selections={"survey_id": "id"},
+            page_name="Test",
+            survey_data_name="survey_1",
+            backcheck_data_name=None,
+            project_id="test_project",
+        )
+
+        mock_service.validate_edit_configuration.assert_called_once()
+
+    @patch("datasure.utils.config_utils.st")
+    def test_builds_config_data_from_column_selections(self, mock_st):
+        """Config data passed to validate_edit_configuration includes all selections."""
+        mock_service = Mock()
+        mock_service.validate_edit_configuration.return_value = (False, "err", None)
+
+        _handle_edit_configuration_submission(
+            config_service=mock_service,
+            original_page_name="Old Name",
+            column_selections={
+                "survey_id": "id_col",
+                "survey_date": "date_col",
+                "enumerator": "enum_col",
+                "backcheck_date": "bc_date_col",
+            },
+            page_name="New Name",
+            survey_data_name="survey_1",
+            backcheck_data_name="bc_1",
+            project_id="test_project",
+        )
+
+        call_kwargs = mock_service.validate_edit_configuration.call_args
+        config_data = call_kwargs[0][0]
+        assert config_data["page_name"] == "New Name"
+        assert config_data["survey_data_name"] == "survey_1"
+        assert config_data["backcheck_data_name"] == "bc_1"
+        assert config_data["survey_id"] == "id_col"
+        assert config_data["survey_date"] == "date_col"
+        assert config_data["enumerator"] == "enum_col"
+        original_passed = call_kwargs[0][1]
+        assert original_passed == "Old Name"
+
+
+# ============================================================================
+# @st.fragment function tests (called via __wrapped__ to bypass decorator)
+# ============================================================================
+
+
+def _make_mock_st_for_fragment():
+    """Return a mock streamlit with container context manager support."""
+    mock_st = MagicMock()
+    mock_container = MagicMock()
+    mock_container.__enter__ = Mock(return_value=mock_container)
+    mock_container.__exit__ = Mock(return_value=False)
+    mock_st.container.return_value = mock_container
+    mock_st.selectbox.return_value = None
+    mock_st.number_input.return_value = 0
+    return mock_st
+
+
+class TestRenderSurveyColumnSelectorsWrapped:
+    """Test render_survey_column_selectors inner body via __wrapped__."""
+
+    @patch("datasure.utils.config_utils.st")
+    def test_returns_survey_column_selections_instance(self, mock_st):
+        mock_container = MagicMock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        mock_st.selectbox.return_value = None
+        mock_st.number_input.return_value = 0
+
+        result = render_survey_column_selectors.__wrapped__(
+            datetime_columns=["date1"],
+            numeric_columns=["num1"],
+            categorical_columns=["col1"],
+        )
+
+        assert isinstance(result, SurveyColumnSelections)
+
+    @patch("datasure.utils.config_utils.st")
+    def test_renders_all_selectboxes_and_number_input(self, mock_st):
+        mock_container = MagicMock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        mock_st.selectbox.return_value = None
+        mock_st.number_input.return_value = 0
+
+        render_survey_column_selectors.__wrapped__(
+            datetime_columns=["date1"],
+            numeric_columns=["num1"],
+            categorical_columns=["col1"],
+        )
+
+        assert mock_st.selectbox.call_count == 7
+        assert mock_st.number_input.call_count == 1
+        mock_st.subheader.assert_called_once_with("Select survey data columns")
+
+    @patch("datasure.utils.config_utils.st")
+    def test_populates_selections_from_st_return_values(self, mock_st):
+        mock_container = MagicMock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        mock_st.selectbox.side_effect = [
+            "key_col",
+            "id_col",
+            "date_col",
+            "enum_col",
+            "team_col",
+            "ver_col",
+            "dur_col",
+        ]
+        mock_st.number_input.return_value = 50
+
+        result = render_survey_column_selectors.__wrapped__(
+            datetime_columns=["date_col"],
+            numeric_columns=["ver_col", "dur_col"],
+            categorical_columns=["key_col", "id_col", "enum_col", "team_col"],
+        )
+
+        assert result.survey_key == "key_col"
+        assert result.survey_id == "id_col"
+        assert result.survey_date == "date_col"
+        assert result.enumerator == "enum_col"
+        assert result.survey_target == 50
+
+    @patch("datasure.utils.config_utils.DatasetService")
+    @patch("datasure.utils.config_utils.st")
+    def test_validates_key_column_when_provided(self, mock_st, mock_ds_class):
+        """Calls DatasetService.validate_key_column when key and context are present."""
+        mock_container = MagicMock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        mock_st.selectbox.side_effect = ["key_col", None, None, None, None, None, None]
+        mock_st.number_input.return_value = 0
+
+        mock_ds = Mock()
+        mock_ds.validate_key_column.return_value = (False, "Key has duplicates")
+        mock_ds_class.return_value = mock_ds
+
+        render_survey_column_selectors.__wrapped__(
+            datetime_columns=[],
+            numeric_columns=[],
+            categorical_columns=["key_col"],
+            project_id="proj",
+            dataset_alias="survey_1",
+        )
+
+        mock_ds.validate_key_column.assert_called_once_with("survey_1", "key_col")
+        mock_st.error.assert_called_once_with("Key has duplicates")
+
+    @patch("datasure.utils.config_utils.st")
+    def test_handles_none_column_lists(self, mock_st):
+        mock_container = MagicMock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        mock_st.selectbox.return_value = None
+        mock_st.number_input.return_value = 0
+
+        result = render_survey_column_selectors.__wrapped__(
+            datetime_columns=None,
+            numeric_columns=None,
+            categorical_columns=None,
+        )
+
+        assert isinstance(result, SurveyColumnSelections)
+
+
+class TestRenderBackcheckColumnSelectorsWrapped:
+    """Test render_backcheck_column_selectors inner body via __wrapped__."""
+
+    @patch("datasure.utils.config_utils.st")
+    def test_returns_backcheck_column_selectors_instance(self, mock_st):
+        mock_container = MagicMock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        mock_st.selectbox.return_value = None
+        mock_st.number_input.return_value = 0
+
+        result = render_backcheck_column_selectors.__wrapped__(
+            datetime_columns=["date1"],
+            categorical_columns=["col1"],
+        )
+
+        assert isinstance(result, BackcheckColumnSelectors)
+
+    @patch("datasure.utils.config_utils.st")
+    def test_renders_three_selectboxes_and_number_input(self, mock_st):
+        mock_container = MagicMock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        mock_st.selectbox.return_value = None
+        mock_st.number_input.return_value = 0
+
+        render_backcheck_column_selectors.__wrapped__(
+            datetime_columns=["date1"],
+            categorical_columns=["col1"],
+        )
+
+        assert mock_st.selectbox.call_count == 3
+        assert mock_st.number_input.call_count == 1
+        mock_st.subheader.assert_called_once_with("Select backcheck data columns")
+
+    @patch("datasure.utils.config_utils.st")
+    def test_populates_fields_from_st_return_values(self, mock_st):
+        mock_container = MagicMock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        mock_st.selectbox.side_effect = ["bc_date", "bc_checker", "bc_team"]
+        mock_st.number_input.return_value = 20
+
+        result = render_backcheck_column_selectors.__wrapped__(
+            datetime_columns=["bc_date"],
+            categorical_columns=["bc_checker", "bc_team"],
+        )
+
+        assert result.backcheck_date == "bc_date"
+        assert result.backchecker == "bc_checker"
+        assert result.backchecker_team == "bc_team"
+        assert result.backcheck_target_percent == 20
+
+
+class TestRenderSurveyColumnSelectorsEditWrapped:
+    """Test render_survey_column_selectors_edit inner body via __wrapped__."""
+
+    @patch("datasure.utils.config_utils.st")
+    def test_returns_survey_column_selections_instance(self, mock_st):
+        mock_container = MagicMock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        mock_st.selectbox.return_value = None
+        mock_st.number_input.return_value = 0
+
+        result = render_survey_column_selectors_edit.__wrapped__(
+            datetime_columns=["date1"],
+            numeric_columns=["num1"],
+            categorical_columns=["col1"],
+        )
+
+        assert isinstance(result, SurveyColumnSelections)
+
+    @patch("datasure.utils.config_utils.st")
+    def test_renders_all_selectboxes_and_number_input(self, mock_st):
+        mock_container = MagicMock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        mock_st.selectbox.return_value = None
+        mock_st.number_input.return_value = 0
+
+        render_survey_column_selectors_edit.__wrapped__(
+            datetime_columns=["date1"],
+            numeric_columns=["num1"],
+            categorical_columns=["col1"],
+        )
+
+        assert mock_st.selectbox.call_count == 7
+        assert mock_st.number_input.call_count == 1
+
+    @patch("datasure.utils.config_utils.st")
+    def test_uses_defaults_for_index_selection(self, mock_st):
+        """Verifies _get_index_or_none is used for pre-population."""
+        mock_container = MagicMock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        mock_st.selectbox.return_value = "col1"
+        mock_st.number_input.return_value = 10
+
+        defaults = {"survey_key": "col1", "survey_target": 10}
+        render_survey_column_selectors_edit.__wrapped__(
+            datetime_columns=[],
+            numeric_columns=[],
+            categorical_columns=["col1"],
+            defaults=defaults,
+        )
+
+        # First selectbox call should use index=0 (col1 is at index 0)
+        first_call_kwargs = mock_st.selectbox.call_args_list[0][1]
+        assert first_call_kwargs["index"] == 0
+
+    @patch("datasure.utils.config_utils.DatasetService")
+    @patch("datasure.utils.config_utils.st")
+    def test_validates_key_column_when_provided(self, mock_st, mock_ds_class):
+        mock_container = MagicMock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        mock_st.selectbox.side_effect = ["key_col", None, None, None, None, None, None]
+        mock_st.number_input.return_value = 0
+
+        mock_ds = Mock()
+        mock_ds.validate_key_column.return_value = (False, "Duplicate keys")
+        mock_ds_class.return_value = mock_ds
+
+        render_survey_column_selectors_edit.__wrapped__(
+            datetime_columns=[],
+            numeric_columns=[],
+            categorical_columns=["key_col"],
+            project_id="proj",
+            dataset_alias="survey_1",
+        )
+
+        mock_ds.validate_key_column.assert_called_once_with("survey_1", "key_col")
+        mock_st.error.assert_called_once_with("Duplicate keys")
+
+    @patch("datasure.utils.config_utils.st")
+    def test_handles_none_defaults_and_columns(self, mock_st):
+        mock_container = MagicMock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        mock_st.selectbox.return_value = None
+        mock_st.number_input.return_value = 0
+
+        result = render_survey_column_selectors_edit.__wrapped__(
+            datetime_columns=None,
+            numeric_columns=None,
+            categorical_columns=None,
+            defaults=None,
+        )
+
+        assert isinstance(result, SurveyColumnSelections)
+
+
+class TestRenderBackcheckColumnSelectorsEditWrapped:
+    """Test render_backcheck_column_selectors_edit inner body via __wrapped__."""
+
+    @patch("datasure.utils.config_utils.st")
+    def test_returns_backcheck_column_selectors_instance(self, mock_st):
+        mock_container = MagicMock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        mock_st.selectbox.return_value = None
+        mock_st.number_input.return_value = 0
+
+        result = render_backcheck_column_selectors_edit.__wrapped__(
+            datetime_columns=["date1"],
+            categorical_columns=["col1"],
+        )
+
+        assert isinstance(result, BackcheckColumnSelectors)
+
+    @patch("datasure.utils.config_utils.st")
+    def test_renders_three_selectboxes_and_number_input(self, mock_st):
+        mock_container = MagicMock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        mock_st.selectbox.return_value = None
+        mock_st.number_input.return_value = 0
+
+        render_backcheck_column_selectors_edit.__wrapped__(
+            datetime_columns=["date1"],
+            categorical_columns=["col1"],
+        )
+
+        assert mock_st.selectbox.call_count == 3
+        assert mock_st.number_input.call_count == 1
+
+    @patch("datasure.utils.config_utils.st")
+    def test_uses_defaults_for_pre_population(self, mock_st):
+        mock_container = MagicMock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        mock_st.selectbox.return_value = "bc_date"
+        mock_st.number_input.return_value = 15
+
+        defaults = {"backcheck_date": "bc_date", "backcheck_target_percent": 15}
+        render_backcheck_column_selectors_edit.__wrapped__(
+            datetime_columns=["bc_date"],
+            categorical_columns=[],
+            defaults=defaults,
+        )
+
+        first_call_kwargs = mock_st.selectbox.call_args_list[0][1]
+        assert first_call_kwargs["index"] == 0  # bc_date is at index 0
+
+    @patch("datasure.utils.config_utils.st")
+    def test_handles_none_columns_and_defaults(self, mock_st):
+        mock_container = MagicMock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        mock_st.selectbox.return_value = None
+        mock_st.number_input.return_value = 0
+
+        result = render_backcheck_column_selectors_edit.__wrapped__(
+            datetime_columns=None,
+            categorical_columns=None,
+            defaults=None,
+        )
+
+        assert isinstance(result, BackcheckColumnSelectors)
+
+
+# ============================================================================
+# @st.dialog function tests (called via __wrapped__ to bypass decorator)
+# ============================================================================
+
+
+class TestAddCheckConfigurationFormWrapped:
+    """Test add_check_configuration_form inner body via __wrapped__."""
+
+    @patch("datasure.utils.config_utils.render_page_name_input")
+    @patch("datasure.utils.config_utils.st")
+    @patch("datasure.utils.config_utils.ConfigurationService")
+    @patch("datasure.utils.config_utils.DatasetService")
+    def test_shows_info_when_no_page_name(
+        self, mock_ds_class, mock_cs_class, mock_st, mock_render_name
+    ):
+        """Early return with info when page name is empty."""
+        mock_render_name.return_value = ""
+
+        add_check_configuration_form.__wrapped__("project_id", ["survey_1"])
+
+        mock_st.info.assert_called_once_with("Enter a page name to continue")
+
+    @patch("datasure.utils.config_utils.render_page_name_input")
+    @patch("datasure.utils.config_utils.st")
+    @patch("datasure.utils.config_utils.ConfigurationService")
+    def test_shows_error_when_page_name_already_exists(
+        self, mock_cs_class, mock_st, mock_render_name
+    ):
+        """Shows duplicate-page-name error and returns early."""
+        mock_render_name.return_value = "Existing Page"
+
+        mock_service = Mock()
+        mock_service.validate_configuration.return_value = (
+            False,
+            "Page name 'Existing Page' already exists. Please choose a different name.",
+            None,
+        )
+        mock_cs_class.return_value = mock_service
+
+        add_check_configuration_form.__wrapped__("project_id", ["survey_1"])
+
+        mock_st.error.assert_called_once()
+        error_msg = mock_st.error.call_args[0][0]
+        assert "already exists" in error_msg
+
+    @patch("datasure.utils.config_utils.render_page_name_input")
+    @patch("datasure.utils.config_utils.st")
+    @patch("datasure.utils.config_utils.ConfigurationService")
+    def test_returns_early_when_no_survey_dataset_selected(
+        self, mock_cs_class, mock_st, mock_render_name
+    ):
+        """Returns early when no survey dataset is chosen."""
+        mock_render_name.return_value = "New Page"
+        mock_st.selectbox.return_value = None  # No dataset selected
+
+        mock_service = Mock()
+        mock_service.validate_configuration.return_value = (True, None, Mock())
+        mock_cs_class.return_value = mock_service
+
+        add_check_configuration_form.__wrapped__("project_id", ["survey_1"])
+
+        # DatasetService.get_dataset_columns should not be called
+        mock_st.button.assert_not_called()
+
+    @patch("datasure.utils.config_utils._handle_configuration_submission")
+    @patch("datasure.utils.config_utils.render_backcheck_column_selectors")
+    @patch("datasure.utils.config_utils.render_survey_column_selectors")
+    @patch("datasure.utils.config_utils.render_backcheck_dataset_selector")
+    @patch("datasure.utils.config_utils.render_survey_dataset_selector")
+    @patch("datasure.utils.config_utils.render_page_name_input")
+    @patch("datasure.utils.config_utils.st")
+    @patch("datasure.utils.config_utils.DatasetService")
+    @patch("datasure.utils.config_utils.ConfigurationService")
+    def test_calls_handle_submission_when_add_button_clicked(
+        self,
+        mock_cs_class,
+        mock_ds_class,
+        mock_st,
+        mock_render_name,
+        mock_render_survey_selector,
+        mock_render_backcheck_selector,
+        mock_render_survey_cols,
+        mock_render_backcheck_cols,
+        mock_handle_submission,
+    ):
+        """Calls _handle_configuration_submission when add button is clicked."""
+        mock_render_name.return_value = "New Page"
+
+        mock_service = Mock()
+        mock_service.validate_configuration.return_value = (True, None, Mock())
+        mock_cs_class.return_value = mock_service
+
+        mock_ds = Mock()
+        mock_ds.get_dataset_columns.return_value = ([], [], [])
+        mock_ds_class.return_value = mock_ds
+
+        mock_render_survey_selector.return_value = "survey_1"
+        mock_render_backcheck_selector.return_value = None
+
+        survey_cols = SurveyColumnSelections(survey_key="key")
+        mock_render_survey_cols.return_value = survey_cols
+        mock_st.button.return_value = True  # Add button clicked
+
+        add_check_configuration_form.__wrapped__("project_id", ["survey_1"])
+
+        mock_handle_submission.assert_called_once()
+
+
+class TestEditCheckConfigurationFormWrapped:
+    """Test edit_check_configuration_form inner body via __wrapped__."""
+
+    @patch("datasure.utils.config_utils.st")
+    @patch("datasure.utils.config_utils.ConfigurationService")
+    def test_shows_info_when_no_configurations_exist(self, mock_cs_class, mock_st):
+        """Shows info and returns early when no pages exist."""
+        mock_service = Mock()
+        mock_service.get_page_names.return_value = []
+        mock_cs_class.return_value = mock_service
+
+        edit_check_configuration_form.__wrapped__("project_id", ["survey_1"])
+
+        mock_st.info.assert_called_once()
+        info_msg = mock_st.info.call_args[0][0]
+        assert "No check configurations found" in info_msg
+
+    @patch("datasure.utils.config_utils.st")
+    @patch("datasure.utils.config_utils.ConfigurationService")
+    def test_shows_info_when_no_page_selected(self, mock_cs_class, mock_st):
+        """Shows select-prompt info when selectbox returns None."""
+        mock_service = Mock()
+        mock_service.get_page_names.return_value = ["Page One"]
+        mock_cs_class.return_value = mock_service
+        mock_st.selectbox.return_value = None
+
+        edit_check_configuration_form.__wrapped__("project_id", ["survey_1"])
+
+        info_calls = [c[0][0] for c in mock_st.info.call_args_list]
+        assert any("Select a configuration to edit" in msg for msg in info_calls)
+
+    @patch("datasure.utils.config_utils.st")
+    @patch("datasure.utils.config_utils.ConfigurationService")
+    def test_shows_error_when_config_load_fails(self, mock_cs_class, mock_st):
+        """Shows error when get_configuration_by_page_name returns empty dict."""
+        mock_service = Mock()
+        mock_service.get_page_names.return_value = ["Page One"]
+        mock_service.get_configuration_by_page_name.return_value = {}
+        mock_cs_class.return_value = mock_service
+        mock_st.selectbox.return_value = "Page One"
+
+        edit_check_configuration_form.__wrapped__("project_id", ["survey_1"])
+
+        mock_st.error.assert_called_once()
+        assert "Could not load configuration" in mock_st.error.call_args[0][0]
+
+    @patch("datasure.utils.config_utils.st")
+    @patch("datasure.utils.config_utils.ConfigurationService")
+    def test_returns_early_when_page_name_cleared(self, mock_cs_class, mock_st):
+        """Returns early when user clears the page-name text input."""
+        mock_service = Mock()
+        mock_service.get_page_names.return_value = ["Page One"]
+        mock_service.get_configuration_by_page_name.return_value = {
+            "page_name": "Page One",
+            "survey_data_name": "survey_1",
+        }
+        mock_cs_class.return_value = mock_service
+        # First selectbox → page selection; text_input → empty
+        mock_st.selectbox.return_value = "Page One"
+        mock_st.text_input.return_value = ""
+
+        edit_check_configuration_form.__wrapped__("project_id", ["survey_1"])
+
+        info_calls = [c[0][0] for c in mock_st.info.call_args_list]
+        assert any("Enter a page name to continue" in msg for msg in info_calls)
+
+    @patch("datasure.utils.config_utils._handle_edit_configuration_submission")
+    @patch("datasure.utils.config_utils.render_backcheck_column_selectors_edit")
+    @patch("datasure.utils.config_utils.render_survey_column_selectors_edit")
+    @patch("datasure.utils.config_utils.st")
+    @patch("datasure.utils.config_utils.DatasetService")
+    @patch("datasure.utils.config_utils.ConfigurationService")
+    def test_calls_handle_edit_submission_when_save_clicked(
+        self,
+        mock_cs_class,
+        mock_ds_class,
+        mock_st,
+        mock_render_survey_edit,
+        mock_render_bc_edit,
+        mock_handle,
+    ):
+        """Calls _handle_edit_configuration_submission when save button clicked."""
+        mock_service = Mock()
+        mock_service.get_page_names.return_value = ["Page One"]
+        mock_service.get_configuration_by_page_name.return_value = {
+            "page_name": "Page One",
+            "survey_data_name": "survey_1",
+            "backcheck_data_name": None,
+        }
+        mock_cs_class.return_value = mock_service
+
+        mock_ds = Mock()
+        mock_ds.get_dataset_columns.return_value = ([], [], [])
+        mock_ds.get_available_aliases_excluding.return_value = []
+        mock_ds_class.return_value = mock_ds
+
+        # selectbox calls: page_select, survey_dataset, backcheck_dataset
+        mock_st.selectbox.side_effect = ["Page One", "survey_1", None]
+        mock_st.text_input.return_value = "Page One"
+        mock_st.button.return_value = True  # Save clicked
+        mock_st.divider = Mock()
+
+        survey_cols = SurveyColumnSelections(survey_key="key")
+        mock_render_survey_edit.return_value = survey_cols
+
+        edit_check_configuration_form.__wrapped__("project_id", ["survey_1"])
+
+        mock_handle.assert_called_once()
+
+    @patch("datasure.utils.config_utils.st")
+    @patch("datasure.utils.config_utils.DatasetService")
+    @patch("datasure.utils.config_utils.ConfigurationService")
+    def test_returns_early_when_no_survey_dataset_selected(
+        self, mock_cs_class, mock_ds_class, mock_st
+    ):
+        """Returns early when the survey dataset selectbox returns None."""
+        mock_service = Mock()
+        mock_service.get_page_names.return_value = ["Page One"]
+        mock_service.get_configuration_by_page_name.return_value = {
+            "page_name": "Page One",
+            "survey_data_name": "survey_1",
+            "backcheck_data_name": None,
+        }
+        mock_cs_class.return_value = mock_service
+
+        mock_ds = Mock()
+        mock_ds_class.return_value = mock_ds
+
+        mock_st.selectbox.side_effect = [
+            "Page One",
+            None,
+        ]  # page selected, dataset None
+        mock_st.text_input.return_value = "Page One"
+        mock_st.divider = Mock()
+
+        edit_check_configuration_form.__wrapped__("project_id", ["survey_1"])
+
+        mock_ds.get_dataset_columns.assert_not_called()
+
+    @patch("datasure.utils.config_utils._handle_edit_configuration_submission")
+    @patch("datasure.utils.config_utils.render_backcheck_column_selectors_edit")
+    @patch("datasure.utils.config_utils.render_survey_column_selectors_edit")
+    @patch("datasure.utils.config_utils.st")
+    @patch("datasure.utils.config_utils.DatasetService")
+    @patch("datasure.utils.config_utils.ConfigurationService")
+    def test_handles_backcheck_dataset_when_selected(
+        self,
+        mock_cs_class,
+        mock_ds_class,
+        mock_st,
+        mock_render_survey_edit,
+        mock_render_bc_edit,
+        mock_handle,
+    ):
+        """When backcheck dataset is selected, renders backcheck column selectors."""
+        mock_service = Mock()
+        mock_service.get_page_names.return_value = ["Page One"]
+        mock_service.get_configuration_by_page_name.return_value = {
+            "page_name": "Page One",
+            "survey_data_name": "survey_1",
+            "backcheck_data_name": "bc_1",
+        }
+        mock_cs_class.return_value = mock_service
+
+        mock_ds = Mock()
+        mock_ds.get_dataset_columns.return_value = ([], [], [])
+        mock_ds.get_available_aliases_excluding.return_value = ["bc_1"]
+        mock_ds_class.return_value = mock_ds
+
+        # page_select, survey_dataset, backcheck_dataset
+        mock_st.selectbox.side_effect = ["Page One", "survey_1", "bc_1"]
+        mock_st.text_input.return_value = "Page One"
+        mock_st.button.return_value = False
+        mock_st.divider = Mock()
+
+        survey_cols = SurveyColumnSelections(survey_key="key")
+        mock_render_survey_edit.return_value = survey_cols
+        bc_cols = BackcheckColumnSelectors()
+        mock_render_bc_edit.return_value = bc_cols
+
+        edit_check_configuration_form.__wrapped__("project_id", ["survey_1", "bc_1"])
+
+        mock_render_bc_edit.assert_called_once()
+
+
+# ============================================================================
+# Branch-coverage gap fill: remaining edge cases
+# ============================================================================
+
+
+class TestRenderSurveyColumnSelectorsValidKeyBranch:
+    """Cover the 'key is valid' branch inside render_survey_column_selectors."""
+
+    @patch("datasure.utils.config_utils.DatasetService")
+    @patch("datasure.utils.config_utils.st")
+    def test_no_error_shown_when_key_is_valid(self, mock_st, mock_ds_class):
+        mock_container = MagicMock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        mock_st.selectbox.side_effect = ["key_col", None, None, None, None, None, None]
+        mock_st.number_input.return_value = 0
+
+        mock_ds = Mock()
+        mock_ds.validate_key_column.return_value = (True, None)  # key IS valid
+        mock_ds_class.return_value = mock_ds
+
+        render_survey_column_selectors.__wrapped__(
+            datetime_columns=[],
+            numeric_columns=[],
+            categorical_columns=["key_col"],
+            project_id="proj",
+            dataset_alias="survey_1",
+        )
+
+        mock_st.error.assert_not_called()
+
+
+class TestRenderSurveyColumnSelectorsEditValidKeyBranch:
+    """Cover the 'key is valid' branch inside render_survey_column_selectors_edit."""
+
+    @patch("datasure.utils.config_utils.DatasetService")
+    @patch("datasure.utils.config_utils.st")
+    def test_no_error_shown_when_key_is_valid(self, mock_st, mock_ds_class):
+        mock_container = MagicMock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        mock_st.selectbox.side_effect = ["key_col", None, None, None, None, None, None]
+        mock_st.number_input.return_value = 0
+
+        mock_ds = Mock()
+        mock_ds.validate_key_column.return_value = (True, None)  # key IS valid
+        mock_ds_class.return_value = mock_ds
+
+        render_survey_column_selectors_edit.__wrapped__(
+            datetime_columns=[],
+            numeric_columns=[],
+            categorical_columns=["key_col"],
+            project_id="proj",
+            dataset_alias="survey_1",
+        )
+
+        mock_st.error.assert_not_called()
+
+
+class TestAddCheckConfigurationFormBackcheckBranch:
+    """Cover the backcheck-selected branch in add_check_configuration_form."""
+
+    @patch("datasure.utils.config_utils._handle_configuration_submission")
+    @patch("datasure.utils.config_utils.render_backcheck_column_selectors")
+    @patch("datasure.utils.config_utils.render_survey_column_selectors")
+    @patch("datasure.utils.config_utils.render_backcheck_dataset_selector")
+    @patch("datasure.utils.config_utils.render_survey_dataset_selector")
+    @patch("datasure.utils.config_utils.render_page_name_input")
+    @patch("datasure.utils.config_utils.st")
+    @patch("datasure.utils.config_utils.DatasetService")
+    @patch("datasure.utils.config_utils.ConfigurationService")
+    def test_renders_backcheck_selectors_when_dataset_selected(
+        self,
+        mock_cs_class,
+        mock_ds_class,
+        mock_st,
+        mock_render_name,
+        mock_render_survey_selector,
+        mock_render_backcheck_selector,
+        mock_render_survey_cols,
+        mock_render_bc_cols,
+        mock_handle,
+    ):
+        mock_render_name.return_value = "New Page"
+
+        mock_service = Mock()
+        mock_service.validate_configuration.return_value = (True, None, Mock())
+        mock_cs_class.return_value = mock_service
+
+        mock_ds = Mock()
+        mock_ds.get_dataset_columns.return_value = ([], [], [])
+        mock_ds_class.return_value = mock_ds
+
+        mock_render_survey_selector.return_value = "survey_1"
+        mock_render_backcheck_selector.return_value = "bc_1"  # backcheck selected
+
+        survey_cols = SurveyColumnSelections(survey_key="key")
+        mock_render_survey_cols.return_value = survey_cols
+        bc_cols = BackcheckColumnSelectors()
+        mock_render_bc_cols.return_value = bc_cols
+
+        mock_st.button.return_value = False  # Add button not clicked
+
+        add_check_configuration_form.__wrapped__("project_id", ["survey_1", "bc_1"])
+
+        mock_render_bc_cols.assert_called_once()
+
+
+class TestHandleSubmissionNoneConfigBranch:
+    """Cover the 'validated_config is None when is_valid is True' edge branches."""
+
+    @patch("datasure.utils.config_utils.st")
+    def test_does_not_call_add_when_config_is_none(self, mock_st):
+        """When validate returns (True, None, None), add_configuration is not called."""
+        mock_service = Mock()
+        mock_service.validate_configuration.return_value = (True, None, None)
+
+        _handle_configuration_submission(
+            config_service=mock_service,
+            column_selections={},
+            page_name="Test",
+            survey_data_name="survey_1",
+            backcheck_data_name=None,
+            project_id="test_project",
+        )
+
+        mock_service.add_configuration.assert_not_called()
+
+    @patch("datasure.utils.config_utils.st")
+    def test_edit_does_not_call_update_when_config_is_none(self, mock_st):
+        """When validate_edit returns (True, None, None), update is not called."""
+        mock_service = Mock()
+        mock_service.validate_edit_configuration.return_value = (True, None, None)
+
+        _handle_edit_configuration_submission(
+            config_service=mock_service,
+            original_page_name="Old Name",
+            column_selections={},
+            page_name="Test",
+            survey_data_name="survey_1",
+            backcheck_data_name=None,
+            project_id="test_project",
+        )
+
+        mock_service.update_configuration.assert_not_called()

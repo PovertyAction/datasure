@@ -151,8 +151,11 @@ class TestRenderConfigurationActions:
     """Test _render_configuration_actions function."""
 
     @patch("datasure.views.config_view.remove_check_configuration_form")
+    @patch("datasure.views.config_view.edit_check_configuration_form")
     @patch("datasure.views.config_view.add_check_configuration_form")
-    def test_renders_forms_in_columns(self, mock_add_form, mock_remove_form):
+    def test_renders_forms_in_columns(
+        self, mock_add_form, mock_edit_form, mock_remove_form
+    ):
         """Test that forms are rendered in columns."""
         import streamlit as st
 
@@ -172,18 +175,24 @@ class TestRenderConfigurationActions:
         # Verify columns created with correct proportions
         st.columns.assert_called_once_with([0.4, 0.3, 0.3])
 
-        # Verify button created with correct callback
-        st.button.assert_called_once()
-        call_kwargs = st.button.call_args[1]
-        assert call_kwargs["on_click"] == mock_add_form
-        assert call_kwargs["args"] == (project_id, alias_list)
+        # Verify two buttons created (add + edit)
+        assert st.button.call_count == 2
+        add_call_kwargs = st.button.call_args_list[0][1]
+        assert add_call_kwargs["on_click"] == mock_add_form
+        assert add_call_kwargs["args"] == (project_id, alias_list)
+        assert add_call_kwargs["type"] == "primary"
+
+        edit_call_kwargs = st.button.call_args_list[1][1]
+        assert edit_call_kwargs["on_click"] == mock_edit_form
+        assert edit_call_kwargs["args"] == (project_id, alias_list)
 
         # Verify remove form called with correct parameter
         mock_remove_form.assert_called_once_with(project_id)
 
     @patch("datasure.views.config_view.remove_check_configuration_form")
+    @patch("datasure.views.config_view.edit_check_configuration_form")
     @patch("datasure.views.config_view.add_check_configuration_form")
-    def test_empty_alias_list(self, mock_add_form, mock_remove_form):
+    def test_empty_alias_list(self, mock_add_form, mock_edit_form, mock_remove_form):
         """Test with empty alias list."""
         import streamlit as st
 
@@ -196,12 +205,37 @@ class TestRenderConfigurationActions:
 
         _render_configuration_actions("project_id", [])
 
-        # Verify button created with correct callback and empty list
-        call_kwargs = st.button.call_args[1]
-        assert call_kwargs["on_click"] == mock_add_form
-        assert call_kwargs["args"] == ("project_id", [])
+        # Verify two buttons created
+        assert st.button.call_count == 2
+
+        # Verify add button callback and args
+        add_call_kwargs = st.button.call_args_list[0][1]
+        assert add_call_kwargs["on_click"] == mock_add_form
+        assert add_call_kwargs["args"] == ("project_id", [])
+
+        # Verify edit button callback and args
+        edit_call_kwargs = st.button.call_args_list[1][1]
+        assert edit_call_kwargs["on_click"] == mock_edit_form
+        assert edit_call_kwargs["args"] == ("project_id", [])
 
         mock_remove_form.assert_called_once_with("project_id")
+
+    @patch("datasure.views.config_view.remove_check_configuration_form")
+    @patch("datasure.views.config_view.edit_check_configuration_form")
+    @patch("datasure.views.config_view.add_check_configuration_form")
+    def test_edit_button_label(self, mock_add_form, mock_edit_form, mock_remove_form):
+        """Test that edit button has correct label."""
+        import streamlit as st
+
+        from datasure.views.config_view import _render_configuration_actions
+
+        st.columns.return_value = [MagicMock(), MagicMock(), MagicMock()]
+
+        _render_configuration_actions("project_id", ["alias1"])
+
+        edit_call_args = st.button.call_args_list[1]
+        assert ":material/edit:" in edit_call_args[0][0]
+        assert "Edit Check Configuration" in edit_call_args[0][0]
 
 
 class TestRenderConfigurationsDisplay:
