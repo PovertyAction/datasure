@@ -7,6 +7,7 @@ import streamlit as st
 from datasure.utils.config_utils import (
     ConfigurationService,
     add_check_configuration_form,
+    edit_check_configuration_form,
     remove_check_configuration_form,
     render_configuration_table,
 )
@@ -77,7 +78,7 @@ def _render_configuration_actions(project_id: str, alias_list: list[str]) -> Non
         project_id: Current project ID
         alias_list: List of available dataset aliases
     """
-    col1, col2, _ = st.columns([0.4, 0.3, 0.3])
+    col1, col2, col3 = st.columns([0.4, 0.3, 0.3])
 
     with col1:
         st.button(
@@ -85,9 +86,18 @@ def _render_configuration_actions(project_id: str, alias_list: list[str]) -> Non
             on_click=add_check_configuration_form,
             args=(project_id, alias_list),
             width="stretch",
+            type="primary",
         )
 
     with col2:
+        st.button(
+            ":material/edit: Edit Check Configuration",
+            on_click=edit_check_configuration_form,
+            args=(project_id, alias_list),
+            width="stretch",
+        )
+
+    with col3:
         remove_check_configuration_form(project_id)
 
 

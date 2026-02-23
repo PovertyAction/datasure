@@ -188,6 +188,11 @@ class DateDefaults(BaseModel):
     )
 
 
+# ============================================================================
+# GPS CHECK PAGE MODELS
+# ============================================================================
+
+
 class GPSSettings(BaseModel):
     """GPS check settings model."""
 
@@ -244,3 +249,63 @@ class GPSColumnConfig(BaseModel):
                 "for separate columns format"
             )
         return v
+
+
+## ============================================================================
+# CHECK CONFIGURATION MODELS
+# =============================================================================
+
+
+class CheckConfiguration(BaseModel):
+    """Model for check configuration validation."""
+
+    page_name: str = Field(default=None, min_length=1, max_length=20)
+    survey_data_name: str = Field(default=None, min_length=1)
+    survey_key: str = Field(default=None, min_length=1)
+    survey_id: str = Field(default=None, min_length=1)
+    survey_date: str | None = Field(default=None, min_length=1)
+    enumerator: str | None = Field(default=None, min_length=1)
+    team: str | None = Field(default=None, min_length=1)
+    formversion: str | None = Field(default=None, min_length=1)
+    duration: str | None = Field(default=None, min_length=1)
+    survey_target: int | None = Field(default=None, ge=0)
+    backcheck_data_name: str | None = Field(default=None, min_length=1)
+    backcheck_date: str | None = Field(default=None, min_length=1)
+    backchecker: str | None = Field(default=None, min_length=1)
+    backchecker_team: str | None = Field(default=None, min_length=1)
+    backcheck_target_percent: int | None = Field(default=None, ge=0, le=100)
+    tracking_data_name: str | None = Field(default=None, min_length=1)
+
+    @field_validator("page_name")
+    @classmethod
+    def validate_page_name(cls, v: str) -> str:
+        """Validate page name format."""
+        if not v or not v.strip():
+            raise ValueError("Page name cannot be empty")
+        return v.strip()
+
+    def to_dict(self) -> dict:
+        """Convert model to dictionary for storage."""
+        return self.model_dump()
+
+
+class SurveyColumnSelections(BaseModel):
+    """Model for Survey column selections in the UI."""
+
+    survey_key: str | None = Field(..., min_length=1)
+    survey_id: str | None = Field(default=None, min_length=1)
+    survey_date: str | None = Field(default=None, min_length=1)
+    enumerator: str | None = Field(default=None, min_length=1)
+    team: str | None = Field(default=None, min_length=1)
+    formversion: str | None = Field(default=None, min_length=1)
+    duration: str | None = Field(default=None, min_length=1)
+    survey_target: int | None = Field(default=None, ge=0)
+
+
+class BackcheckColumnSelectors(BaseModel):
+    """Model for back check column selections in UI."""
+
+    backcheck_date: str | None = Field(default=None, min_length=1)
+    backchecker: str | None = Field(default=None, min_length=1)
+    backchecker_team: str | None = Field(default=None, min_length=1)
+    backcheck_target_percent: int | None = Field(default=None, ge=0, le=100)

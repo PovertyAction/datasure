@@ -19,6 +19,8 @@ from datasure.models.enums import (
     StrCondition,
 )
 from datasure.models.schemas import (
+    BackcheckColumnSelectors,
+    CheckConfiguration,
     DateDefaults,
     DuplicatesColumnConfig,
     DuplicatesSettings,
@@ -26,6 +28,7 @@ from datasure.models.schemas import (
     FilterCondition,
     GPSColumnConfig,
     GPSSettings,
+    SurveyColumnSelections,
 )
 
 # ── DuplicatesColumnConfig ───────────────────────────────────────────
@@ -823,3 +826,314 @@ class TestGPSColumnConfig:
             gps_column="gps_data",
         )
         assert config.delimiter == DelimiterType.COMMA
+
+
+# ── CheckConfiguration ───────────────────────────────────────────────
+
+
+class TestCheckConfiguration:
+    """Tests for the CheckConfiguration Pydantic model."""
+
+    def test_valid_minimal(self):
+        """Create CheckConfiguration with required fields only succeeds."""
+        config = CheckConfiguration(
+            page_name="Page1",
+            survey_data_name="survey_data",
+            survey_key="key_col",
+            survey_id="id_col",
+        )
+        assert config.page_name == "Page1"
+        assert config.survey_data_name == "survey_data"
+        assert config.survey_key == "key_col"
+        assert config.survey_id == "id_col"
+        assert config.survey_date is None
+        assert config.enumerator is None
+        assert config.team is None
+        assert config.formversion is None
+        assert config.duration is None
+        assert config.survey_target is None
+        assert config.backcheck_data_name is None
+        assert config.tracking_data_name is None
+
+    def test_valid_all_fields(self):
+        """Create CheckConfiguration with all fields populated succeeds."""
+        config = CheckConfiguration(
+            page_name="Household",
+            survey_data_name="hh_data",
+            survey_key="uuid",
+            survey_id="hhid",
+            survey_date="submission_date",
+            enumerator="enum_id",
+            team="team_id",
+            formversion="version",
+            duration="duration_col",
+            survey_target=500,
+            backcheck_data_name="bc_data",
+            backcheck_date="bc_date",
+            backchecker="bc_id",
+            backchecker_team="bc_team",
+            backcheck_target_percent=20,
+            tracking_data_name="track_data",
+        )
+        assert config.survey_date == "submission_date"
+        assert config.enumerator == "enum_id"
+        assert config.survey_target == 500
+        assert config.backcheck_data_name == "bc_data"
+        assert config.backcheck_target_percent == 20
+        assert config.tracking_data_name == "track_data"
+
+    def test_validate_page_name_strips_whitespace(self):
+        """validate_page_name strips leading/trailing whitespace."""
+        config = CheckConfiguration(
+            page_name="  Page1  ",
+            survey_data_name="data",
+            survey_key="key",
+            survey_id="id",
+        )
+        assert config.page_name == "Page1"
+
+    def test_validate_page_name_empty_raises(self):
+        """validate_page_name with empty string raises ValidationError."""
+        with pytest.raises(ValidationError):
+            CheckConfiguration(
+                page_name="",
+                survey_data_name="data",
+                survey_key="key",
+                survey_id="id",
+            )
+
+    def test_validate_page_name_whitespace_only_raises(self):
+        """validate_page_name with whitespace-only string raises ValidationError."""
+        with pytest.raises(ValidationError, match="Page name cannot be empty"):
+            CheckConfiguration(
+                page_name="   ",
+                survey_data_name="data",
+                survey_key="key",
+                survey_id="id",
+            )
+
+    def test_page_name_max_length_raises(self):
+        """page_name exceeding max_length=20 raises ValidationError."""
+        with pytest.raises(ValidationError):
+            CheckConfiguration(
+                page_name="A" * 21,
+                survey_data_name="data",
+                survey_key="key",
+                survey_id="id",
+            )
+
+    def test_page_name_exactly_20_chars(self):
+        """page_name of exactly 20 characters succeeds."""
+        config = CheckConfiguration(
+            page_name="A" * 20,
+            survey_data_name="data",
+            survey_key="key",
+            survey_id="id",
+        )
+        assert len(config.page_name) == 20
+
+    def test_survey_target_zero(self):
+        """survey_target=0 passes the ge=0 constraint."""
+        config = CheckConfiguration(
+            page_name="P1",
+            survey_data_name="data",
+            survey_key="key",
+            survey_id="id",
+            survey_target=0,
+        )
+        assert config.survey_target == 0
+
+    def test_survey_target_negative_raises(self):
+        """Negative survey_target raises ValidationError (ge=0)."""
+        with pytest.raises(ValidationError):
+            CheckConfiguration(
+                page_name="P1",
+                survey_data_name="data",
+                survey_key="key",
+                survey_id="id",
+                survey_target=-1,
+            )
+
+    def test_backcheck_target_percent_boundaries(self):
+        """backcheck_target_percent 0 and 100 pass boundary constraints."""
+        for val in (0, 100):
+            config = CheckConfiguration(
+                page_name="P1",
+                survey_data_name="data",
+                survey_key="key",
+                survey_id="id",
+                backcheck_target_percent=val,
+            )
+            assert config.backcheck_target_percent == val
+
+    def test_backcheck_target_percent_over_100_raises(self):
+        """backcheck_target_percent > 100 raises ValidationError (le=100)."""
+        with pytest.raises(ValidationError):
+            CheckConfiguration(
+                page_name="P1",
+                survey_data_name="data",
+                survey_key="key",
+                survey_id="id",
+                backcheck_target_percent=101,
+            )
+
+    def test_to_dict_returns_dict(self):
+        """to_dict() returns a plain dictionary of the model fields."""
+        config = CheckConfiguration(
+            page_name="DictPage",
+            survey_data_name="data",
+            survey_key="key",
+            survey_id="id",
+            survey_target=10,
+        )
+        result = config.to_dict()
+        assert isinstance(result, dict)
+        assert result["page_name"] == "DictPage"
+        assert result["survey_target"] == 10
+        assert result["survey_date"] is None
+
+    def test_to_dict_contains_all_fields(self):
+        """to_dict() contains all model field keys."""
+        config = CheckConfiguration(
+            page_name="P1",
+            survey_data_name="data",
+            survey_key="key",
+            survey_id="id",
+        )
+        result = config.to_dict()
+        expected_keys = {
+            "page_name",
+            "survey_data_name",
+            "survey_key",
+            "survey_id",
+            "survey_date",
+            "enumerator",
+            "team",
+            "formversion",
+            "duration",
+            "survey_target",
+            "backcheck_data_name",
+            "backcheck_date",
+            "backchecker",
+            "backchecker_team",
+            "backcheck_target_percent",
+            "tracking_data_name",
+        }
+        assert expected_keys == set(result.keys())
+
+
+# ── SurveyColumnSelections ───────────────────────────────────────────
+
+
+class TestSurveyColumnSelections:
+    """Tests for the SurveyColumnSelections Pydantic model."""
+
+    def test_valid_minimal(self):
+        """Create SurveyColumnSelections with required survey_key succeeds."""
+        sel = SurveyColumnSelections(survey_key="key_col")
+        assert sel.survey_key == "key_col"
+        assert sel.survey_id is None
+        assert sel.survey_date is None
+        assert sel.enumerator is None
+        assert sel.team is None
+        assert sel.formversion is None
+        assert sel.duration is None
+        assert sel.survey_target is None
+
+    def test_valid_all_fields(self):
+        """Create SurveyColumnSelections with all fields populated succeeds."""
+        sel = SurveyColumnSelections(
+            survey_key="key",
+            survey_id="id",
+            survey_date="date",
+            enumerator="enum",
+            team="team",
+            formversion="version",
+            duration="dur",
+            survey_target=200,
+        )
+        assert sel.survey_id == "id"
+        assert sel.survey_date == "date"
+        assert sel.enumerator == "enum"
+        assert sel.team == "team"
+        assert sel.formversion == "version"
+        assert sel.duration == "dur"
+        assert sel.survey_target == 200
+
+    def test_none_survey_key_accepted(self):
+        """None survey_key is accepted since type is str | None."""
+        sel = SurveyColumnSelections(survey_key=None)
+        assert sel.survey_key is None
+
+    def test_missing_survey_key_raises(self):
+        """Missing survey_key raises ValidationError (required field)."""
+        with pytest.raises(ValidationError):
+            SurveyColumnSelections()
+
+    def test_empty_string_survey_id_raises(self):
+        """Empty string survey_id raises ValidationError (min_length=1)."""
+        with pytest.raises(ValidationError):
+            SurveyColumnSelections(survey_key="key", survey_id="")
+
+    def test_survey_target_zero(self):
+        """survey_target=0 passes the ge=0 constraint."""
+        sel = SurveyColumnSelections(survey_key="key", survey_target=0)
+        assert sel.survey_target == 0
+
+    def test_survey_target_negative_raises(self):
+        """Negative survey_target raises ValidationError (ge=0)."""
+        with pytest.raises(ValidationError):
+            SurveyColumnSelections(survey_key="key", survey_target=-1)
+
+
+# ── BackcheckColumnSelectors ─────────────────────────────────────────
+
+
+class TestBackcheckColumnSelectors:
+    """Tests for the BackcheckColumnSelectors Pydantic model."""
+
+    def test_valid_defaults(self):
+        """Create BackcheckColumnSelectors with no args uses None defaults."""
+        sel = BackcheckColumnSelectors()
+        assert sel.backcheck_date is None
+        assert sel.backchecker is None
+        assert sel.backchecker_team is None
+        assert sel.backcheck_target_percent is None
+
+    def test_valid_all_fields(self):
+        """Create BackcheckColumnSelectors with all fields succeeds."""
+        sel = BackcheckColumnSelectors(
+            backcheck_date="bc_date",
+            backchecker="bc_id",
+            backchecker_team="bc_team",
+            backcheck_target_percent=15,
+        )
+        assert sel.backcheck_date == "bc_date"
+        assert sel.backchecker == "bc_id"
+        assert sel.backchecker_team == "bc_team"
+        assert sel.backcheck_target_percent == 15
+
+    def test_backcheck_target_percent_zero(self):
+        """backcheck_target_percent=0 passes ge=0 constraint."""
+        sel = BackcheckColumnSelectors(backcheck_target_percent=0)
+        assert sel.backcheck_target_percent == 0
+
+    def test_backcheck_target_percent_100(self):
+        """backcheck_target_percent=100 passes le=100 constraint."""
+        sel = BackcheckColumnSelectors(backcheck_target_percent=100)
+        assert sel.backcheck_target_percent == 100
+
+    def test_backcheck_target_percent_over_100_raises(self):
+        """backcheck_target_percent > 100 raises ValidationError (le=100)."""
+        with pytest.raises(ValidationError):
+            BackcheckColumnSelectors(backcheck_target_percent=101)
+
+    def test_backcheck_target_percent_negative_raises(self):
+        """Negative backcheck_target_percent raises ValidationError (ge=0)."""
+        with pytest.raises(ValidationError):
+            BackcheckColumnSelectors(backcheck_target_percent=-1)
+
+    def test_empty_string_backcheck_date_raises(self):
+        """Empty string backcheck_date raises ValidationError (min_length=1)."""
+        with pytest.raises(ValidationError):
+            BackcheckColumnSelectors(backcheck_date="")
