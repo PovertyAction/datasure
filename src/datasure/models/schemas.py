@@ -273,7 +273,7 @@ class CheckConfiguration(BaseModel):
     backcheck_date: str | None = Field(default=None, min_length=1)
     backchecker: str | None = Field(default=None, min_length=1)
     backchecker_team: str | None = Field(default=None, min_length=1)
-    backcheck_target_percent: int | None = Field(default=None, ge=0, le=100)
+    backcheck_target_percent: float | None = Field(default=None, ge=0, le=100)
     tracking_data_name: str | None = Field(default=None, min_length=1)
 
     @field_validator("page_name")
