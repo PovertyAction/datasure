@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "DataSure"
-version = "0.8.0"
+version = "0.8.1"
 description = "IPA Data Management System Dashboard"
 readme = "README.md"
 license = { file = "LICENSE" }
