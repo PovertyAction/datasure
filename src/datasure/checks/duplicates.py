@@ -2064,19 +2064,22 @@ def duplicates_report(
     st.write("---")
     st.title("ID Duplicates")
 
-    id_duplicates_data = compute_id_duplicates(
-        data,
-        duplicates_settings.survey_id,
-        duplicates_settings.survey_date,
-        duplicates_settings.survey_key,
-    )
-    _render_id_duplicates_metrics(id_duplicates_data, config_settings)
-    _render_id_duplicates_table(
-        data,
-        id_duplicates_data,
-        duplicates_settings,
-        setting_file,
-    )
+    if not duplicates_settings.survey_id:
+        st.info("Survey ID column is not configured for duplicates check.")
+    else:
+        id_duplicates_data = compute_id_duplicates(
+            data,
+            duplicates_settings.survey_id,
+            duplicates_settings.survey_date,
+            duplicates_settings.survey_key,
+        )
+        _render_id_duplicates_metrics(id_duplicates_data, config_settings)
+        _render_id_duplicates_table(
+            data,
+            id_duplicates_data,
+            duplicates_settings,
+            setting_file,
+        )
 
     # Duplicates column configuration
     st.write("---")
