@@ -262,7 +262,7 @@ class CheckConfiguration(BaseModel):
     page_name: str = Field(default=None, min_length=1, max_length=20)
     survey_data_name: str = Field(default=None, min_length=1)
     survey_key: str = Field(default=None, min_length=1)
-    survey_id: str = Field(default=None, min_length=1)
+    survey_id: str | None = Field(default=None, min_length=1)
     survey_date: str | None = Field(default=None, min_length=1)
     enumerator: str | None = Field(default=None, min_length=1)
     team: str | None = Field(default=None, min_length=1)
