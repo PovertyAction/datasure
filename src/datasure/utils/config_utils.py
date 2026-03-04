@@ -26,6 +26,39 @@ from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 
 PAGE_NAME_STR = "Page Name"
 
+# Canonical schema for check configuration DataFrames.
+# All columns are String except survey_target (Int32) and
+# backcheck_target_percent (Float32).
+CONFIG_SCHEMA: dict[str, pl.DataType] = {
+    "page_name": pl.String,
+    "survey_data_name": pl.String,
+    "survey_key": pl.String,
+    "survey_id": pl.String,
+    "survey_date": pl.String,
+    "enumerator": pl.String,
+    "team": pl.String,
+    "formversion": pl.String,
+    "duration": pl.String,
+    "survey_target": pl.Int32,
+    "backcheck_data_name": pl.String,
+    "backcheck_date": pl.String,
+    "backchecker": pl.String,
+    "backchecker_team": pl.String,
+    "backcheck_target_percent": pl.Float32,
+    "tracking_data_name": pl.String,
+}
+
+
+def _apply_config_schema(df: pl.DataFrame) -> pl.DataFrame:
+    """Cast a config DataFrame to the canonical CONFIG_SCHEMA types."""
+    casts = [
+        pl.col(col).cast(dtype)
+        for col, dtype in CONFIG_SCHEMA.items()
+        if col in df.columns
+    ]
+    return df.with_columns(casts) if casts else df
+
+
 # ============================================================================
 # SERVICE LAYER
 # ============================================================================
@@ -126,11 +159,12 @@ class ConfigurationService:
         """
         current_log = self.get_all_configurations()
 
-        new_config_df = pl.DataFrame([config.to_dict()])
+        new_config_df = _apply_config_schema(pl.DataFrame([config.to_dict()]))
 
         if current_log.is_empty():
             config_log = new_config_df
         else:
+            current_log = _apply_config_schema(current_log)
             config_log = pl.concat([current_log, new_config_df], how="vertical")
 
         duckdb_save_table(
@@ -269,7 +303,8 @@ class ConfigurationService:
             return False
 
         row_idx = page_names.index(original_page_name)
-        new_row_df = pl.DataFrame([config.to_dict()])
+        new_row_df = _apply_config_schema(pl.DataFrame([config.to_dict()]))
+        current_log = _apply_config_schema(current_log)
 
         before = current_log.slice(0, row_idx)
         after = current_log.slice(row_idx + 1)
@@ -621,11 +656,16 @@ def render_backcheck_column_selectors(
             key=f"{key_prefix}backchecker_team",
         )
 
+        backcheck_target_percent_defaults = defaults.get("backcheck_target_percent")
+        if backcheck_target_percent_defaults and isinstance(
+            backcheck_target_percent_defaults, float
+        ):
+            backcheck_target_percent_defaults = int(backcheck_target_percent_defaults)
         backcheck_target_percent = st.number_input(
             "Enter Target Percentage of surveys to be Backchecked (Optional)",
             min_value=0,
             max_value=100,
-            value=defaults.get("backcheck_target_percent") or 0,
+            value=backcheck_target_percent_defaults or 0,
             step=1,
             help="Enter the target percentage of surveys to be backchecked.",
             key=f"{key_prefix}backcheck_target_percent",
