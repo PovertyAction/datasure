@@ -656,11 +656,16 @@ def render_backcheck_column_selectors(
             key=f"{key_prefix}backchecker_team",
         )
 
+        backcheck_target_percent_defaults = defaults.get("backcheck_target_percent")
+        if backcheck_target_percent_defaults and isinstance(
+            backcheck_target_percent_defaults, float
+        ):
+            backcheck_target_percent_defaults = int(backcheck_target_percent_defaults)
         backcheck_target_percent = st.number_input(
             "Enter Target Percentage of surveys to be Backchecked (Optional)",
             min_value=0,
             max_value=100,
-            value=defaults.get("backcheck_target_percent") or 0,
+            value=backcheck_target_percent_defaults or 0,
             step=1,
             help="Enter the target percentage of surveys to be backchecked.",
             key=f"{key_prefix}backcheck_target_percent",
