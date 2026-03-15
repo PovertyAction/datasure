@@ -1,6 +1,6 @@
 import pandas as pd
 import polars as pl
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class ColumnByType(BaseModel):
@@ -25,7 +25,7 @@ class ColumnByType(BaseModel):
         default_factory=list, description="List of categorical column names"
     )
 
-    @validator("*", pre=True)
+    @field_validator("*")
     def ensure_list(cls, v):
         """Convert None values to empty lists."""
         if v is None:
@@ -155,3 +155,140 @@ def standardize_missing_values(data: pd.DataFrame | pl.DataFrame) -> pl.DataFram
             continue
 
     return data
+
+
+def sanitize_df_for_join(
+    main_df: pl.DataFrame,
+    join_df: pl.DataFrame,
+    join_key: str,
+) -> pl.DataFrame:
+    """Sanitize join DataFrame to avoid column name conflicts.
+
+    Parameters
+    ----------
+    main_df : pl.DataFrame
+        Main DataFrame.
+    join_df : pl.DataFrame
+        DataFrame to join.
+    join_key : str
+        Column name to join on.
+
+    Returns
+    -------
+    pl.DataFrame
+        Sanitized join DataFrame.
+    """
+    main_cols = main_df.columns
+    join_cols = join_df.columns
+
+    sanitized_cols = [
+        col for col in join_cols if col not in main_cols or col == join_key
+    ]
+
+    return join_df.select(sanitized_cols)
+
+
+def convert_series_to_numeric(series: pl.Series) -> pl.Series:
+    """Convert a Polars Series to numeric type.
+
+    Parameters
+    ----------
+    series : pl.Series
+        Series to convert.
+
+    Returns
+    -------
+    pl.Series
+        Converted series.
+
+    Raises
+    ------
+    ValueError
+        If conversion fails.
+    """
+    if series.dtype in pl.NUMERIC_DTYPES:
+        return series.cast(pl.Float64)
+
+    try:
+        if series.dtype == pl.Utf8:
+            return series.str.to_decimal().cast(pl.Float64, strict=False)
+        return series.cast(pl.Float64, strict=False)
+    except Exception as e:
+        raise ValueError(
+            f"Could not convert Series to numeric: {e}, keeping as {series.dtype}"
+        ) from e
+
+
+def convert_dataframe_column_to_numeric(df: pl.DataFrame, column: str) -> pl.DataFrame:
+    """Convert a DataFrame column to numeric type.
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        DataFrame containing the column.
+    column : str
+        Column name to convert.
+
+    Returns
+    -------
+    pl.DataFrame
+        DataFrame with converted column.
+
+    Raises
+    ------
+    ValueError
+        If conversion fails.
+    """
+    if df[column].dtype in pl.NUMERIC_DTYPES:
+        return df.with_columns(pl.col(column).cast(pl.Float64).alias(column))
+
+    try:
+        if df[column].dtype == pl.Utf8:
+            return df.with_columns(
+                pl.col(column)
+                .str.to_decimal()
+                .cast(pl.Float64, strict=False)
+                .alias(column)
+            )
+        return df.with_columns(
+            pl.col(column).cast(pl.Float64, strict=False).alias(column)
+        )
+    except Exception as e:
+        raise ValueError(
+            f"Could not convert column '{column}' to numeric: {e}, keeping as {df[column].dtype}"
+        ) from e
+
+
+def safe_to_numeric(
+    data: pl.DataFrame | pl.Series, column: str | None = None
+) -> pl.DataFrame | pl.Series:
+    """Safely convert columns to numeric, keeping original if conversion fails.
+
+    Parameters
+    ----------
+    data : pl.DataFrame | pl.Series
+        Data to convert.
+    column : str | None
+        Column name to convert (required for DataFrames).
+
+    Returns
+    -------
+    pl.DataFrame | pl.Series
+        Converted data.
+
+    Raises
+    ------
+    ValueError
+        If conversion fails or invalid inputs provided.
+    TypeError
+        If input is not a Polars DataFrame or Series.
+    """
+    if isinstance(data, pl.Series):
+        return convert_series_to_numeric(data)
+
+    if isinstance(data, pl.DataFrame):
+        if not column:
+            raise ValueError("Column is required with dataframes")
+        return convert_dataframe_column_to_numeric(data, column)
+
+    raise TypeError("Input data must be a Polars DataFrame or Series.")

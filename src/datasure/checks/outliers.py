@@ -24,7 +24,11 @@ from pydantic import (
     model_validator,
 )
 
-from datasure.utils.dataframe_utils import ColumnByType
+from datasure.utils.dataframe_utils import (
+    ColumnByType,
+    safe_to_numeric,
+    sanitize_df_for_join,
+)
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.settings_utils import (
@@ -290,145 +294,6 @@ def _build_include_cols(
         if col and col not in include_cols:
             include_cols.append(col)
     return include_cols
-
-
-def _sanitize_df_for_join(
-    main_df: pl.DataFrame,
-    join_df: pl.DataFrame,
-    join_key: str,
-) -> pl.DataFrame:
-    """Sanitize join DataFrame to avoid column name conflicts.
-
-    Parameters
-    ----------
-    main_df : pl.DataFrame
-        Main DataFrame.
-    join_df : pl.DataFrame
-        DataFrame to join.
-    join_key : str
-        Column name to join on.
-
-    Returns
-    -------
-    pl.DataFrame
-        Sanitized join DataFrame.
-    """
-    main_cols = main_df.columns
-    join_cols = join_df.columns
-
-    sanitized_cols = [
-        col for col in join_cols if col not in main_cols or col == join_key
-    ]
-
-    return join_df.select(sanitized_cols)
-
-
-def _convert_series_to_numeric(series: pl.Series) -> pl.Series:
-    """Convert a Polars Series to numeric type.
-
-    Parameters
-    ----------
-    series : pl.Series
-        Series to convert.
-
-    Returns
-    -------
-    pl.Series
-        Converted series.
-
-    Raises
-    ------
-    ValueError
-        If conversion fails.
-    """
-    if series.dtype in pl.NUMERIC_DTYPES:
-        # Cast to Float64 for consistency in concatenation
-        return series.cast(pl.Float64)
-
-    try:
-        if series.dtype == pl.Utf8:
-            return series.str.to_decimal().cast(pl.Float64, strict=False)
-        return series.cast(pl.Float64, strict=False)
-    except Exception as e:
-        raise ValueError(
-            f"Could not convert Series to numeric: {e}, keeping as {series.dtype}"
-        ) from e
-
-
-def _convert_dataframe_column_to_numeric(df: pl.DataFrame, column: str) -> pl.DataFrame:
-    """Convert a DataFrame column to numeric type.
-
-    Parameters
-    ----------
-    df : pl.DataFrame
-        DataFrame containing the column.
-    column : str
-        Column name to convert.
-
-    Returns
-    -------
-    pl.DataFrame
-        DataFrame with converted column.
-
-    Raises
-    ------
-    ValueError
-        If conversion fails.
-    """
-    if df[column].dtype in pl.NUMERIC_DTYPES:
-        # Cast to Float64 for consistency in concatenation
-        return df.with_columns(pl.col(column).cast(pl.Float64).alias(column))
-
-    try:
-        if df[column].dtype == pl.Utf8:
-            return df.with_columns(
-                pl.col(column)
-                .str.to_decimal()
-                .cast(pl.Float64, strict=False)
-                .alias(column)
-            )
-        return df.with_columns(
-            pl.col(column).cast(pl.Float64, strict=False).alias(column)
-        )
-    except Exception as e:
-        raise ValueError(
-            f"Could not convert column '{column}' to numeric: {e}, keeping as {df[column].dtype}"
-        ) from e
-
-
-def safe_to_numeric(
-    data: pl.DataFrame | pl.Series, column: str | None = None
-) -> pl.DataFrame | pl.Series:
-    """Safely convert columns to numeric, keeping original if conversion fails.
-
-    Parameters
-    ----------
-    data : pl.DataFrame | pl.Series
-        Data to convert.
-    column : str | None
-        Column name to convert (required for DataFrames).
-
-    Returns
-    -------
-    pl.DataFrame | pl.Series
-        Converted data.
-
-    Raises
-    ------
-    ValueError
-        If conversion fails or invalid inputs provided.
-    TypeError
-        If input is not a Polars DataFrame or Series.
-    """
-    if isinstance(data, pl.Series):
-        return _convert_series_to_numeric(data)
-
-    if isinstance(data, pl.DataFrame):
-        if not column:
-            raise ValueError("Column is required with dataframes")
-        return _convert_dataframe_column_to_numeric(data, column)
-
-    raise TypeError("Input data must be a Polars DataFrame or Series.")
 
 
 # =============================================================================
@@ -1733,7 +1598,7 @@ def _render_constraint_violations_table(
     # select columns to display from data
     display_df = data.select(include_cols)
     # sanitize violation_data to avoid column name conflicts
-    violation_df = _sanitize_df_for_join(
+    violation_df = sanitize_df_for_join(
         main_df=display_df,
         join_df=violation_data,
         join_key=settings.survey_key,
@@ -1827,7 +1692,7 @@ def _render_outlier_table(
 
     # select columns to display from data
     display_df = data.select(include_cols)
-    outliers_df = _sanitize_df_for_join(display_df, outliers_data, settings.survey_key)
+    outliers_df = sanitize_df_for_join(display_df, outliers_data, settings.survey_key)
     display_df = display_df.join(
         outliers_df,
         on=settings.survey_key,
@@ -1953,7 +1818,7 @@ def _render_outlier_column_inspection(
 
     # select columns to display from data
     display_df = data.select(include_cols)
-    outliers_df = _sanitize_df_for_join(display_df, outliers_data, settings.survey_key)
+    outliers_df = sanitize_df_for_join(display_df, outliers_data, settings.survey_key)
     display_df = display_df.join(
         outliers_df,
         on=settings.survey_key,
