@@ -31,14 +31,11 @@ from datasure.checks.outliers import (
     _compute_iqr_bounds,
     _compute_sd_bounds,
     _compute_single_column_stats,
-    _convert_dataframe_column_to_numeric,
-    _convert_series_to_numeric,
     _ensure_list,
     _merge_outlier_results,
     _process_outlier_configs,
     _process_single_column_outliers,
     _process_single_config,
-    _sanitize_df_for_join,
     _should_expand_row,
     _update_unlocked_cols,
     # Statistical functions
@@ -53,6 +50,11 @@ from datasure.checks.outliers import (
     safe_to_numeric,
     stack_outlier_columns,
     update_unlocked_cols,
+)
+from datasure.utils.dataframe_utils import (
+    convert_dataframe_column_to_numeric,
+    convert_series_to_numeric,
+    sanitize_df_for_join,
 )
 
 # ============================================================================
@@ -1178,14 +1180,14 @@ class TestBuildIncludeCols:
 
 
 class TestSanitizeDfForJoin:
-    """Test _sanitize_df_for_join function."""
+    """Test sanitize_df_for_join function."""
 
     def test_no_overlapping_columns(self):
         """Test with no overlapping columns."""
         main_df = pl.DataFrame({"key": [1], "col1": [10]})
         join_df = pl.DataFrame({"key": [1], "col2": [20]})
 
-        result = _sanitize_df_for_join(main_df, join_df, "key")
+        result = sanitize_df_for_join(main_df, join_df, "key")
         assert set(result.columns) == {"key", "col2"}
 
     def test_overlapping_columns(self):
@@ -1193,7 +1195,7 @@ class TestSanitizeDfForJoin:
         main_df = pl.DataFrame({"key": [1], "col1": [10], "col2": [15]})
         join_df = pl.DataFrame({"key": [1], "col1": [20], "col3": [30]})
 
-        result = _sanitize_df_for_join(main_df, join_df, "key")
+        result = sanitize_df_for_join(main_df, join_df, "key")
         # col1 should be excluded since it's in main_df
         assert "col1" not in result.columns or result.columns == ["key", "col3"]
 
@@ -1202,45 +1204,45 @@ class TestSanitizeDfForJoin:
         main_df = pl.DataFrame({"key": [1], "col1": [10]})
         join_df = pl.DataFrame({"key": [1], "col2": [20]})
 
-        result = _sanitize_df_for_join(main_df, join_df, "key")
+        result = sanitize_df_for_join(main_df, join_df, "key")
         assert "key" in result.columns
 
 
 class TestConvertSeriesToNumeric:
-    """Test _convert_series_to_numeric function."""
+    """Test convert_series_to_numeric function."""
 
     def test_already_numeric_int(self):
         """Test series already numeric (int)."""
         series = pl.Series([1, 2, 3])
-        result = _convert_series_to_numeric(series)
+        result = convert_series_to_numeric(series)
         assert result.dtype == pl.Float64
 
     def test_already_numeric_float(self):
         """Test series already numeric (float)."""
         series = pl.Series([1.0, 2.0, 3.0])
-        result = _convert_series_to_numeric(series)
+        result = convert_series_to_numeric(series)
         assert result.dtype == pl.Float64
 
     def test_utf8_to_numeric(self):
         """Test UTF-8 string to numeric conversion."""
         series = pl.Series(["1.5", "2.5", "3.5"])
-        result = _convert_series_to_numeric(series)
+        result = convert_series_to_numeric(series)
         assert result.dtype == pl.Float64
 
 
 class TestConvertDataframeColumnToNumeric:
-    """Test _convert_dataframe_column_to_numeric function."""
+    """Test convert_dataframe_column_to_numeric function."""
 
     def test_already_numeric(self):
         """Test column already numeric."""
         df = pl.DataFrame({"col": [1, 2, 3]})
-        result = _convert_dataframe_column_to_numeric(df, "col")
+        result = convert_dataframe_column_to_numeric(df, "col")
         assert result["col"].dtype == pl.Float64
 
     def test_utf8_column(self):
         """Test UTF-8 column conversion."""
         df = pl.DataFrame({"col": ["1.5", "2.5", "3.5"]})
-        result = _convert_dataframe_column_to_numeric(df, "col")
+        result = convert_dataframe_column_to_numeric(df, "col")
         assert result["col"].dtype == pl.Float64
 
 

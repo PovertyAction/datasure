@@ -5,10 +5,15 @@ from unittest.mock import patch
 
 import pandas as pd
 import polars as pl
+import pytest
 
 from datasure.utils.dataframe_utils import (
     ColumnByType,
+    convert_dataframe_column_to_numeric,
+    convert_series_to_numeric,
     get_df_columns,
+    safe_to_numeric,
+    sanitize_df_for_join,
     standardize_missing_values,
 )
 
@@ -49,23 +54,15 @@ class TestColumnByType:
         assert col_type.datetime_columns == ["col4"]
         assert col_type.categorical_columns == ["col1", "col2"]
 
-    def test_validator_converts_none_to_empty_list(self):
-        """Test that None values are converted to empty lists."""
-        col_type = ColumnByType(
-            all_columns=None,
-            string_columns=None,
-            integer_columns=None,
-            numeric_columns=None,
-            datetime_columns=None,
-            categorical_columns=None,
-        )
+    def test_validator_rejects_none_inputs(self):
+        """Test that None values are rejected (validator runs post-validation)."""
+        from pydantic import ValidationError as PydanticValidationError
 
-        assert col_type.all_columns == []
-        assert col_type.string_columns == []
-        assert col_type.integer_columns == []
-        assert col_type.numeric_columns == []
-        assert col_type.datetime_columns == []
-        assert col_type.categorical_columns == []
+        with pytest.raises(PydanticValidationError):
+            ColumnByType(
+                all_columns=None,
+                string_columns=None,
+            )
 
     def test_partial_initialization(self):
         """Test initializing with some fields and leaving others default."""
@@ -667,3 +664,249 @@ class TestStandardizeMissingValues:
 
         assert result["city"][1] is None
         assert result["city"][3] is None
+
+
+# ============================================================================
+# SANITIZE_DF_FOR_JOIN TESTS
+# ============================================================================
+
+
+class TestSanitizeDfForJoin:
+    """Test sanitize_df_for_join function."""
+
+    def test_no_overlapping_columns(self):
+        """Test that non-overlapping columns are all kept."""
+        main_df = pl.DataFrame({"key": [1, 2], "col1": [10, 20]})
+        join_df = pl.DataFrame({"key": [1, 2], "col2": [30, 40]})
+
+        result = sanitize_df_for_join(main_df, join_df, "key")
+
+        assert set(result.columns) == {"key", "col2"}
+
+    def test_overlapping_columns_excluded(self):
+        """Test that columns in main_df (except join key) are removed from join_df."""
+        main_df = pl.DataFrame({"key": [1], "col1": [10], "col2": [15]})
+        join_df = pl.DataFrame({"key": [1], "col1": [20], "col3": [30]})
+
+        result = sanitize_df_for_join(main_df, join_df, "key")
+
+        assert "col1" not in result.columns
+        assert "key" in result.columns
+        assert "col3" in result.columns
+
+    def test_join_key_always_preserved(self):
+        """Test that the join key is kept even when it appears in main_df."""
+        main_df = pl.DataFrame({"key": [1, 2], "other": [10, 20]})
+        join_df = pl.DataFrame({"key": [1, 2], "value": [100, 200]})
+
+        result = sanitize_df_for_join(main_df, join_df, "key")
+
+        assert "key" in result.columns
+
+    def test_all_join_df_cols_overlap(self):
+        """Test when all join_df columns (except key) overlap with main_df."""
+        main_df = pl.DataFrame({"key": [1], "a": [1], "b": [2]})
+        join_df = pl.DataFrame({"key": [1], "a": [99], "b": [88]})
+
+        result = sanitize_df_for_join(main_df, join_df, "key")
+
+        assert result.columns == ["key"]
+
+    def test_empty_join_df_returns_key_only(self):
+        """Test with join_df that has only the key column."""
+        main_df = pl.DataFrame({"key": [1], "col1": [10]})
+        join_df = pl.DataFrame({"key": [1]})
+
+        result = sanitize_df_for_join(main_df, join_df, "key")
+
+        assert result.columns == ["key"]
+
+    def test_data_values_preserved(self):
+        """Test that row data is preserved after sanitization."""
+        main_df = pl.DataFrame({"key": [1, 2], "col1": [10, 20]})
+        join_df = pl.DataFrame({"key": [1, 2], "score": [99, 88]})
+
+        result = sanitize_df_for_join(main_df, join_df, "key")
+
+        assert result["score"].to_list() == [99, 88]
+
+
+# ============================================================================
+# CONVERT_SERIES_TO_NUMERIC TESTS
+# ============================================================================
+
+
+class TestConvertSeriesToNumeric:
+    """Test convert_series_to_numeric function."""
+
+    def test_int_series_cast_to_float64(self):
+        """Test that integer series is cast to Float64."""
+        series = pl.Series([1, 2, 3])
+        result = convert_series_to_numeric(series)
+        assert result.dtype == pl.Float64
+        assert result.to_list() == [1.0, 2.0, 3.0]
+
+    def test_float_series_unchanged_dtype(self):
+        """Test that float series is returned as Float64."""
+        series = pl.Series([1.5, 2.5, 3.5])
+        result = convert_series_to_numeric(series)
+        assert result.dtype == pl.Float64
+
+    def test_int32_cast_to_float64(self):
+        """Test that Int32 series is cast to Float64."""
+        series = pl.Series([1, 2, 3], dtype=pl.Int32)
+        result = convert_series_to_numeric(series)
+        assert result.dtype == pl.Float64
+
+    def test_utf8_decimal_strings(self):
+        """Test that UTF-8 decimal strings are converted to Float64."""
+        series = pl.Series(["1.5", "2.5", "3.5"])
+        result = convert_series_to_numeric(series)
+        assert result.dtype == pl.Float64
+
+    def test_utf8_integer_strings(self):
+        """Test that UTF-8 integer strings are converted to Float64."""
+        series = pl.Series(["1", "2", "3"])
+        result = convert_series_to_numeric(series)
+        assert result.dtype == pl.Float64
+
+    def test_non_convertible_utf8_returns_nulls(self):
+        """Test that non-numeric strings produce null values (strict=False)."""
+        series = pl.Series(["abc", "def", "ghi"])
+        result = convert_series_to_numeric(series)
+        assert result.dtype == pl.Float64
+        assert result.null_count() == 3
+
+    def test_numeric_series_values_preserved(self):
+        """Test that numeric values are preserved after conversion."""
+        series = pl.Series([10, 20, 30])
+        result = convert_series_to_numeric(series)
+        assert result.to_list() == [10.0, 20.0, 30.0]
+
+    def test_non_utf8_non_numeric_series(self):
+        """Test that non-Utf8, non-numeric series (e.g. Boolean) is cast via Float64."""
+        series = pl.Series([True, False, True], dtype=pl.Boolean)
+        result = convert_series_to_numeric(series)
+        assert result.dtype == pl.Float64
+        assert result.to_list() == [1.0, 0.0, 1.0]
+
+
+# ============================================================================
+# CONVERT_DATAFRAME_COLUMN_TO_NUMERIC TESTS
+# ============================================================================
+
+
+class TestConvertDataframeColumnToNumeric:
+    """Test convert_dataframe_column_to_numeric function."""
+
+    def test_numeric_column_cast_to_float64(self):
+        """Test that numeric column is cast to Float64."""
+        df = pl.DataFrame({"col": [1, 2, 3]})
+        result = convert_dataframe_column_to_numeric(df, "col")
+        assert result["col"].dtype == pl.Float64
+
+    def test_float_column_stays_float64(self):
+        """Test that float column remains Float64."""
+        df = pl.DataFrame({"col": [1.1, 2.2, 3.3]})
+        result = convert_dataframe_column_to_numeric(df, "col")
+        assert result["col"].dtype == pl.Float64
+
+    def test_utf8_column_converted(self):
+        """Test that UTF-8 column is converted to Float64."""
+        df = pl.DataFrame({"col": ["1.5", "2.5", "3.5"]})
+        result = convert_dataframe_column_to_numeric(df, "col")
+        assert result["col"].dtype == pl.Float64
+
+    def test_other_columns_untouched(self):
+        """Test that non-target columns are not modified."""
+        df = pl.DataFrame({"target": ["1", "2", "3"], "other": ["a", "b", "c"]})
+        result = convert_dataframe_column_to_numeric(df, "target")
+        assert result["other"].dtype == pl.Utf8
+        assert result["other"].to_list() == ["a", "b", "c"]
+
+    def test_non_convertible_utf8_returns_nulls(self):
+        """Test that non-numeric string column produces nulls (strict=False)."""
+        df = pl.DataFrame({"col": ["abc", "def", "ghi"]})
+        result = convert_dataframe_column_to_numeric(df, "col")
+        assert result["col"].dtype == pl.Float64
+        assert result["col"].null_count() == 3
+
+    def test_int32_column_cast_to_float64(self):
+        """Test that Int32 column is cast to Float64."""
+        df = pl.DataFrame({"col": pl.Series([1, 2, 3], dtype=pl.Int32)})
+        result = convert_dataframe_column_to_numeric(df, "col")
+        assert result["col"].dtype == pl.Float64
+
+    def test_values_preserved_after_conversion(self):
+        """Test that values are correctly converted."""
+        df = pl.DataFrame({"col": [10, 20, 30]})
+        result = convert_dataframe_column_to_numeric(df, "col")
+        assert result["col"].to_list() == [10.0, 20.0, 30.0]
+
+    def test_non_utf8_non_numeric_column(self):
+        """Test that non-Utf8, non-numeric column (e.g. Boolean) is cast to Float64."""
+        df = pl.DataFrame({"col": pl.Series([True, False, True], dtype=pl.Boolean)})
+        result = convert_dataframe_column_to_numeric(df, "col")
+        assert result["col"].dtype == pl.Float64
+        assert result["col"].to_list() == [1.0, 0.0, 1.0]
+
+
+# ============================================================================
+# SAFE_TO_NUMERIC TESTS
+# ============================================================================
+
+
+class TestSafeToNumeric:
+    """Test safe_to_numeric function."""
+
+    def test_series_already_numeric(self):
+        """Test that already-numeric series is returned as Float64."""
+        series = pl.Series([1, 2, 3])
+        result = safe_to_numeric(series)
+        assert result.dtype in pl.NUMERIC_DTYPES
+
+    def test_series_with_string_numbers(self):
+        """Test converting string series to numeric."""
+        series = pl.Series(["1.5", "2.5", "3.5"])
+        result = safe_to_numeric(series)
+        assert result.dtype == pl.Float64
+
+    def test_dataframe_with_column(self):
+        """Test converting DataFrame column."""
+        df = pl.DataFrame({"col": ["1", "2", "3"]})
+        result = safe_to_numeric(df, "col")
+        assert result["col"].dtype in pl.NUMERIC_DTYPES
+
+    def test_dataframe_numeric_column(self):
+        """Test converting already-numeric DataFrame column."""
+        df = pl.DataFrame({"col": [1.0, 2.0, 3.0]})
+        result = safe_to_numeric(df, "col")
+        assert result["col"].dtype == pl.Float64
+
+    def test_dataframe_without_column_raises(self):
+        """Test that missing column arg raises ValueError for DataFrames."""
+        df = pl.DataFrame({"col": [1, 2, 3]})
+        with pytest.raises(ValueError, match="Column is required"):
+            safe_to_numeric(df)
+
+    def test_invalid_type_raises_type_error(self):
+        """Test that unsupported input type raises TypeError."""
+        with pytest.raises(TypeError, match="must be a Polars DataFrame or Series"):
+            safe_to_numeric([1, 2, 3])
+
+    def test_invalid_string_type_raises(self):
+        """Test that a string raises TypeError."""
+        with pytest.raises(TypeError, match="must be a Polars DataFrame or Series"):
+            safe_to_numeric("not_valid")
+
+    def test_series_utf8_decimal_values_correct(self):
+        """Test that converted values are numerically correct."""
+        series = pl.Series(["10", "20", "30"])
+        result = safe_to_numeric(series)
+        assert result.dtype == pl.Float64
+
+    def test_dataframe_column_values_correct(self):
+        """Test that DataFrame column values are preserved after conversion."""
+        df = pl.DataFrame({"col": [5, 10, 15]})
+        result = safe_to_numeric(df, "col")
+        assert result["col"].to_list() == [5.0, 10.0, 15.0]
