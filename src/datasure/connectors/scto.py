@@ -625,10 +625,11 @@ class SurveyCTOClient:
             except SurveyCTOAPIError as e:
                 raise ConnectionError(f"Not connected to server: {e}") from e
         try:
-            # Try server dataset first
-            return self._import_server_dataset(form_config)
-        except Exception:
+            # downloading as regular form with incremental updates.
+            # If it fails (e.g., for server datasets), fallback to full download
             return self._import_regular_form(form_config)
+        except Exception:
+            return self._import_server_dataset(form_config)
 
     def _import_server_dataset(self, form_config: FormConfig) -> int:
         """Import from server dataset."""
