@@ -309,3 +309,38 @@ class BackcheckColumnSelectors(BaseModel):
     backchecker: str | None = Field(default=None, min_length=1)
     backchecker_team: str | None = Field(default=None, min_length=1)
     backcheck_target_percent: int | None = Field(default=None, ge=0, le=100)
+
+
+# ============================================================================
+# DATAFRAME UTILS MODELS
+# ============================================================================
+
+
+class ColumnByType(BaseModel):
+    """Class to hold columns by type."""
+
+    all_columns: list[str] = Field(
+        default_factory=list, description="List of all column names"
+    )
+    string_columns: list[str] = Field(
+        default_factory=list, description="List of string column names"
+    )
+    integer_columns: list[str] = Field(
+        default_factory=list, description="List of integer column names"
+    )
+    numeric_columns: list[str] = Field(
+        default_factory=list, description="List of numeric column names"
+    )
+    datetime_columns: list[str] = Field(
+        default_factory=list, description="List of datetime column names"
+    )
+    categorical_columns: list[str] = Field(
+        default_factory=list, description="List of categorical column names"
+    )
+
+    @field_validator("*")
+    def ensure_list(cls, v):
+        """Convert None values to empty lists."""
+        if v is None:
+            return []
+        return v

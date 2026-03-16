@@ -1,36 +1,7 @@
 import pandas as pd
 import polars as pl
-from pydantic import BaseModel, Field, field_validator
 
-
-class ColumnByType(BaseModel):
-    """Class to hold columns by type."""
-
-    all_columns: list[str] = Field(
-        default_factory=list, description="List of all column names"
-    )
-    string_columns: list[str] = Field(
-        default_factory=list, description="List of string column names"
-    )
-    integer_columns: list[str] = Field(
-        default_factory=list, description="List of integer column names"
-    )
-    numeric_columns: list[str] = Field(
-        default_factory=list, description="List of numeric column names"
-    )
-    datetime_columns: list[str] = Field(
-        default_factory=list, description="List of datetime column names"
-    )
-    categorical_columns: list[str] = Field(
-        default_factory=list, description="List of categorical column names"
-    )
-
-    @field_validator("*")
-    def ensure_list(cls, v):
-        """Convert None values to empty lists."""
-        if v is None:
-            return []
-        return v
+from datasure.models.schemas import ColumnByType
 
 
 def get_df_columns(df: pl.DataFrame | pd.DataFrame) -> ColumnByType:
