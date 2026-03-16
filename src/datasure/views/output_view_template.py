@@ -269,6 +269,7 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
     # Create tabs
     (
         summary,
+        descriptive_stats,
         progress,
         missing,
         duplicates,
@@ -276,10 +277,10 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
         gps_checks,
         enumerator_stats,
         backcheck_analysis,
-        descriptive_stats,
     ) = st.tabs(
         (
             "Summary",
+            "Descriptive Statistics",
             "Progress Tracking",
             "Missing Values",
             "Duplicates",
@@ -287,7 +288,6 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             "GPS Checks",
             "Enumerator Statistics",
             "Backcheck Analysis",
-            "Descriptive Statistics",
         )
     )
 
