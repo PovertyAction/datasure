@@ -305,6 +305,14 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             data.page_data, config.setting_file, summary_config, survey_columns
         )
 
+    with descriptive_stats:
+        descriptive_report(
+            project_id,
+            data.page_data,
+            config.setting_file,
+            survey_columns,
+        )
+
     with progress:
         progress_config: dict = {
             "survey_key": config.survey_key,
@@ -396,9 +404,6 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             enumerator_stats_config,
             survey_columns,
         )
-
-    with descriptive_stats:
-        descriptive_report(data.page_data, survey_columns)
 
     with backcheck_analysis:
         if data.backcheck_data is not None:
