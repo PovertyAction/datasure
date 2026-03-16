@@ -15,6 +15,7 @@ import polars as pl
 import streamlit as st
 
 from datasure.checks.backchecks import backchecks_report
+from datasure.checks.descriptive import descriptive_report
 from datasure.checks.duplicates import duplicates_report
 from datasure.checks.enumerator import enumerator_report
 from datasure.checks.gpschecks import gpschecks_report
@@ -275,6 +276,7 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
         gps_checks,
         enumerator_stats,
         backcheck_analysis,
+        descriptive_stats,
     ) = st.tabs(
         (
             "Summary",
@@ -285,6 +287,7 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             "GPS Checks",
             "Enumerator Statistics",
             "Backcheck Analysis",
+            "Descriptive Statistics",
         )
     )
 
@@ -393,6 +396,9 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             enumerator_stats_config,
             survey_columns,
         )
+
+    with descriptive_stats:
+        descriptive_report(data.page_data, survey_columns)
 
     with backcheck_analysis:
         if data.backcheck_data is not None:
