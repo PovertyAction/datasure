@@ -158,6 +158,55 @@ test-cov-xml:
 test-file f:
     uv run python -m pytest {{ f }}
 
+# Run tests for a module with coverage (auto-discovers test file and coverage module)
+# Usage: just test-mod-cov <module>  e.g. just test-mod-cov descriptive
+[linux]
+test-mod-cov mod:
+    #!/usr/bin/env bash
+    MOD="{{mod}}"
+    TEST_FILE=$(find tests -name "test_${MOD}.py" -type f | head -1)
+    if [ -z "$TEST_FILE" ]; then
+        echo "Error: no test file matching 'test_${MOD}.py' found under tests/"
+        exit 1
+    fi
+    SRC_FILE=$(find src/datasure -name "${MOD}.py" -type f | head -1)
+    if [ -z "$SRC_FILE" ]; then
+        echo "Error: no source file matching '${MOD}.py' found under src/datasure/"
+        exit 1
+    fi
+    COV_MODULE="${SRC_FILE#src/}"
+    COV_MODULE="${COV_MODULE%.py}"
+    COV_MODULE="${COV_MODULE//\//.}"
+    echo "Test file : $TEST_FILE"
+    echo "Coverage  : $COV_MODULE"
+    uv run python -m pytest "$TEST_FILE" -v --cov="$COV_MODULE" --cov-report=term-missing
+
+[macos]
+test-mod-cov mod:
+    #!/usr/bin/env bash
+    MOD="{{mod}}"
+    TEST_FILE=$(find tests -name "test_${MOD}.py" -type f | head -1)
+    if [ -z "$TEST_FILE" ]; then
+        echo "Error: no test file matching 'test_${MOD}.py' found under tests/"
+        exit 1
+    fi
+    SRC_FILE=$(find src/datasure -name "${MOD}.py" -type f | head -1)
+    if [ -z "$SRC_FILE" ]; then
+        echo "Error: no source file matching '${MOD}.py' found under src/datasure/"
+        exit 1
+    fi
+    COV_MODULE="${SRC_FILE#src/}"
+    COV_MODULE="${COV_MODULE%.py}"
+    COV_MODULE="${COV_MODULE//\//.}"
+    echo "Test file : $TEST_FILE"
+    echo "Coverage  : $COV_MODULE"
+    uv run python -m pytest "$TEST_FILE" -v --cov="$COV_MODULE" --cov-report=term-missing
+
+[windows]
+test-mod-cov mod:
+    @$mod = "{{mod}}"; $testFile = Get-ChildItem -Path "tests" -Recurse -Filter "test_$mod.py" | Select-Object -First 1; if (-not $testFile) { Write-Host "Error: no test file matching 'test_$mod.py' found under tests/"; exit 1 }; $srcFile = Get-ChildItem -Path "src\datasure" -Recurse -Filter "$mod.py" | Select-Object -First 1; if (-not $srcFile) { Write-Host "Error: no source file matching '$mod.py' found under src\datasure\"; exit 1 }; $srcIdx = $srcFile.FullName.IndexOf("src\") + 4; $covModule = $srcFile.FullName.Substring($srcIdx) -replace "\\", "." -replace "\.py$", ""; Write-Host "Test file : $($testFile.FullName)"; Write-Host "Coverage  : $covModule"; uv run python -m pytest $testFile.FullName -v --cov=$covModule --cov-report=term-missing
+
+
 # Run pre-commit hooks
 pre-commit-run:
     pre-commit run
