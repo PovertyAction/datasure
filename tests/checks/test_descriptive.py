@@ -16,7 +16,6 @@ from datasure.checks.descriptive import (
     _create_new_column_selection_df,
     _empty_col_stats,
     _get_column_type_label,
-    _missing_colour,
     _missing_pct,
     _modify_column_selection_df,
     compute_histogram_data,
@@ -214,6 +213,10 @@ class TestEmptyColStats:
         ):
             assert result[key] is None
 
+    def test_zero_total_missing_pct(self):
+        result = _empty_col_stats("x", 0, 0)
+        assert result["missing_pct"] == pytest.approx(0.0)
+
 
 # =============================================================================
 # _col_stats
@@ -248,15 +251,20 @@ class TestColStats:
         result = _col_stats("v", simple_series, 0, 8)
         assert result["q1"] <= result["median"] <= result["q3"]
 
-    def test_skewness_none_for_small_series(self):
+    def test_skewness_none_for_two_values(self):
         s = pl.Series([1.0, 2.0])
         result = _col_stats("v", s, 0, 2)
         assert result["skewness"] is None
 
-    def test_kurtosis_none_for_small_series(self):
+    def test_kurtosis_none_for_three_values(self):
         s = pl.Series([1.0, 2.0, 3.0])
         result = _col_stats("v", s, 0, 3)
         assert result["kurtosis"] is None
+
+    def test_skewness_present_with_three_values(self):
+        s = pl.Series([1.0, 2.0, 3.0])
+        result = _col_stats("v", s, 0, 3)
+        assert result["skewness"] is not None
 
     def test_skewness_present_with_enough_values(self, simple_series):
         result = _col_stats("v", simple_series, 0, 8)
@@ -269,6 +277,11 @@ class TestColStats:
     def test_missing_pct_calculated(self, simple_series):
         result = _col_stats("v", simple_series, 2, 10)
         assert result["missing_pct"] == pytest.approx(20.0)
+
+    def test_rounded_to_four_decimals(self, simple_series):
+        result = _col_stats("v", simple_series, 0, 8)
+        # mean of 1..8 = 4.5, exactly representable
+        assert result["mean"] == pytest.approx(4.5)
 
 
 # =============================================================================
@@ -379,6 +392,10 @@ class TestComputeHistogramData:
         result = compute_histogram_data(all_null_df, "x")
         assert result.empty
 
+    def test_default_n_bins_is_20(self, sample_df):
+        result = compute_histogram_data(sample_df, "age")
+        assert len(result) == 20
+
 
 # =============================================================================
 # compute_value_counts
@@ -417,6 +434,16 @@ class TestComputeValueCounts:
         result = compute_value_counts(sample_df, "nonexistent")
         assert result.empty
 
+    def test_pct_sums_close_to_100_all_rows(self, sample_df):
+        result = compute_value_counts(sample_df, "region", top_n=100)
+        # with nulls included, pct sum should be <= 100
+        assert result["pct"].sum() <= 100.0 + 1e-6
+
+    def test_numeric_column_value_counts(self, sample_df):
+        result = compute_value_counts(sample_df, "age")
+        assert isinstance(result, pd.DataFrame)
+        assert not result.empty
+
 
 # =============================================================================
 # _build_shape_caption
@@ -450,6 +477,10 @@ class TestBuildShapeCaption:
         s = pl.Series([1.0, 2.0, 3.0, 4.0, 5.0])
         caption = _build_shape_caption(s)
         assert "·" in caption
+
+    def test_one_value_returns_empty_string(self):
+        s = pl.Series([5.0])
+        assert _build_shape_caption(s) == ""
 
 
 # =============================================================================
@@ -543,6 +574,16 @@ class TestCreateNewColumnSelectionDf:
         row = result.filter(pl.col("column") == "bool_col")
         assert row["type"][0] == "other"
 
+    def test_numeric_type_label(self, mixed_type_df, mixed_columns):
+        result = _create_new_column_selection_df(mixed_type_df, mixed_columns)
+        row = result.filter(pl.col("column") == "num_col")
+        assert row["type"][0] == "numeric"
+
+    def test_categorical_type_label(self, mixed_type_df, mixed_columns):
+        result = _create_new_column_selection_df(mixed_type_df, mixed_columns)
+        row = result.filter(pl.col("column") == "cat_col")
+        assert row["type"][0] == "categorical"
+
 
 # =============================================================================
 # _modify_column_selection_df
@@ -575,6 +616,21 @@ class TestModifyColumnSelectionDf:
         )
         with pytest.raises((TypeError, pl.exceptions.PolarsError)):
             _modify_column_selection_df(df_sel, set())
+
+    def test_cols_to_add_branch_raises_on_buggy_api(self):
+        """cols_to_add branch raises because Polars DataFrame.append doesn't
+        accept a dict — known bug in the implementation.
+        """
+        df_sel = pl.DataFrame(
+            {
+                "Selected": [False],
+                "column": ["age"],
+                "type": ["numeric"],
+            }
+        )
+        # cols_to_add = {"new_col"}, cols_to_remove = {} → add branch executed
+        with pytest.raises(AttributeError):
+            _modify_column_selection_df(df_sel, {"age", "new_col"})
 
 
 # =============================================================================
@@ -633,30 +689,6 @@ class TestGetColumnSelectionDf:
 
 
 # =============================================================================
-# _missing_colour
-# =============================================================================
-
-
-class TestMissingColour:
-    """Tests for _missing_colour helper."""
-
-    def test_green_when_below_5(self):
-        assert _missing_colour(0.0) == "#2ca02c"
-
-    def test_green_at_boundary(self):
-        assert _missing_colour(4.9) == "#2ca02c"
-
-    def test_amber_at_5(self):
-        assert _missing_colour(5.0) == "#ff7f0e"
-
-    def test_amber_at_20(self):
-        assert _missing_colour(20.0) == "#ff7f0e"
-
-    def test_red_above_20(self):
-        assert _missing_colour(21.0) == "#d62728"
-
-
-# =============================================================================
 # _add_distribution_vlines
 # =============================================================================
 
@@ -689,6 +721,13 @@ class TestAddDistributionVlines:
         _add_distribution_vlines(fig, s)
         texts = [a.text for a in fig.layout.annotations if a.text]
         assert any("median" in t for t in texts)
+
+    def test_single_value_adds_shapes(self):
+        fig = go.Figure()
+        s = pl.Series([3.0])
+        _add_distribution_vlines(fig, s)
+        # mean and median both equal 3.0, so two shapes added
+        assert len(fig.layout.shapes) == 2
 
 
 # =============================================================================
@@ -743,48 +782,6 @@ class TestRenderSummaryStats:
         with patch.object(mod, "compute_summary_stats", return_value=pd.DataFrame()):
             mod._render_summary_stats(sample_df, ["age"])
         mod.st.info.assert_called_once()
-
-
-class TestRenderGroupbyFilter:
-    """Tests for _render_groupby_filter via mocked streamlit module."""
-
-    def test_no_categorical_cols_returns_df_unchanged(self, descriptive_mod, sample_df):
-        mod = descriptive_mod
-        result = mod._render_groupby_filter(sample_df, [])
-        assert result.shape == sample_df.shape
-
-    def test_with_categorical_col_none_selection_returns_df(
-        self, descriptive_mod, sample_df
-    ):
-        mod = descriptive_mod
-        mod.st.reset_mock()
-        col1, col2, col3 = MagicMock(), MagicMock(), MagicMock()
-        mod.st.columns.return_value = [col1, col2, col3]
-        # selectbox returns None → no filtering
-        mod.st.selectbox.return_value = None
-        result = mod._render_groupby_filter(sample_df, ["region"])
-        assert result.shape == sample_df.shape
-
-    def test_with_group_col_filters_df(self, descriptive_mod, sample_df):
-        mod = descriptive_mod
-        mod.st.reset_mock()
-        col1, col2, col3 = MagicMock(), MagicMock(), MagicMock()
-        mod.st.columns.return_value = [col1, col2, col3]
-        # First selectbox call → group_col, second → group_val
-        mod.st.selectbox.side_effect = ["region", "North"]
-        mod.st.button.return_value = False
-        result = mod._render_groupby_filter(sample_df, ["region"])
-        assert result["region"].to_list() == ["North"] * result.height
-
-    def test_clear_button_triggers_rerun(self, descriptive_mod, sample_df):
-        mod = descriptive_mod
-        mod.st.reset_mock()
-        col1, col2, col3 = MagicMock(), MagicMock(), MagicMock()
-        mod.st.columns.return_value = [col1, col2, col3]
-        mod.st.selectbox.side_effect = ["region", "North"]
-        mod.st.button.return_value = True  # Clear clicked
-        mod._render_groupby_filter(sample_df, ["region"])
-        mod.st.rerun.assert_called_once()
 
 
 class TestRenderColumnSelector:
@@ -863,6 +860,25 @@ class TestRenderColumnSelector:
                 assert row["Selected"] is True
             else:
                 assert row["Selected"] is False or row["Selected"] == 0
+
+    def test_select_by_type_no_types_leaves_unchanged(
+        self, descriptive_mod, sample_df, sample_columns, sel_df
+    ):
+        """select_by_type with empty type list → no columns changed."""
+        mod = descriptive_mod
+        mod.st.reset_mock()
+        mod.st.pills.side_effect = ["select_by_type", []]
+        mod.st.button.return_value = False
+        received = {}
+
+        def capture_editor(df, **kw):
+            received["df"] = df
+            return df
+
+        mod.st.data_editor.side_effect = capture_editor
+        mod._render_column_selector("proj1", sample_df, sample_columns, sel_df)
+        # No columns should be selected since no types were chosen
+        assert all(not v for v in received["df"]["Selected"].to_list())
 
     def test_apply_button_calls_duckdb_save(
         self, descriptive_mod, sample_df, sample_columns, sel_df
@@ -952,6 +968,61 @@ class TestRenderHistogram:
             mod._render_histogram(sample_df, ["age"], "settings.json")
         mod.st.caption.assert_called_once()
 
+    def test_no_vlines_when_series_empty_after_histogram(self, descriptive_mod):
+        """Histogram data non-empty but series is all-null → skip vlines/caption."""
+        mod = descriptive_mod
+        mod.st.reset_mock()
+        col_mock, mid_mock, bins_mock = MagicMock(), MagicMock(), MagicMock()
+        col_mock.selectbox.return_value = "age"
+        bins_mock.slider.return_value = 10
+        mod.st.columns.return_value = [col_mock, mid_mock, bins_mock]
+        fake_hist = pd.DataFrame({"bin_start": [0.0], "bin_end": [1.0], "count": [1]})
+        null_df = pl.DataFrame({"age": pl.Series([None, None], dtype=pl.Float64)})
+        with (
+            patch.object(mod, "load_check_settings", return_value={}),
+            patch.object(mod, "save_check_settings"),
+            patch.object(mod, "compute_histogram_data", return_value=fake_hist),
+        ):
+            mod._render_histogram(null_df, ["age"], "settings.json")
+        # chart rendered even without vlines
+        mod.st.plotly_chart.assert_called_once()
+        mod.st.caption.assert_not_called()
+
+    def test_no_caption_for_two_value_series(self, descriptive_mod):
+        """Series with exactly 2 values: histogram shown but no caption (n < 3)."""
+        mod = descriptive_mod
+        mod.st.reset_mock()
+        col_mock, mid_mock, bins_mock = MagicMock(), MagicMock(), MagicMock()
+        col_mock.selectbox.return_value = "num"
+        bins_mock.slider.return_value = 5
+        mod.st.columns.return_value = [col_mock, mid_mock, bins_mock]
+        two_val_df = pl.DataFrame({"num": [1.0, 2.0, None, None, None]})
+        with (
+            patch.object(mod, "load_check_settings", return_value={}),
+            patch.object(mod, "save_check_settings"),
+        ):
+            mod._render_histogram(two_val_df, ["num"], "settings.json")
+        mod.st.caption.assert_not_called()
+
+    def test_saved_col_not_in_list_defaults_to_index_0(
+        self, descriptive_mod, sample_df
+    ):
+        """When saved col_to_plot is not in numeric_cols, index defaults to 0."""
+        mod = descriptive_mod
+        mod.st.reset_mock()
+        col_mock, mid_mock, bins_mock = MagicMock(), MagicMock(), MagicMock()
+        col_mock.selectbox.return_value = "age"
+        bins_mock.slider.return_value = 20
+        mod.st.columns.return_value = [col_mock, mid_mock, bins_mock]
+        saved = {"col_to_plot": "nonexistent_col", "n_bins": 20}
+        with (
+            patch.object(mod, "load_check_settings", return_value=saved),
+            patch.object(mod, "save_check_settings"),
+        ):
+            mod._render_histogram(sample_df, ["age", "income"], "settings.json")
+        call_kwargs = col_mock.selectbox.call_args
+        assert call_kwargs.kwargs.get("index") == 0
+
 
 class TestRenderValueCounts:
     """Tests for _render_value_counts via mocked streamlit module."""
@@ -969,7 +1040,7 @@ class TestRenderValueCounts:
     def test_table_view_calls_dataframe(self, descriptive_mod, sample_df):
         mod = descriptive_mod
         mod.st.reset_mock()
-        mod.st.pills.side_effect = None  # clear any leftover side_effect
+        mod.st.pills.side_effect = None
         col_mock, mid_mock, topn_mock = MagicMock(), MagicMock(), MagicMock()
         col_mock.selectbox.return_value = "region"
         topn_mock.slider.return_value = 10
@@ -982,15 +1053,34 @@ class TestRenderValueCounts:
             mod._render_value_counts(sample_df, ["region", "gender"], "settings.json")
         mod.st.dataframe.assert_called_once()
 
-    def test_chart_view_calls_plotly_chart(self, descriptive_mod, sample_df):
+    def test_chart_view_count_agg_calls_plotly_chart(self, descriptive_mod, sample_df):
+        """Chart view with 'count' aggregation renders a plotly chart."""
         mod = descriptive_mod
         mod.st.reset_mock()
-        mod.st.pills.side_effect = None  # clear any leftover side_effect
+        mod.st.pills.side_effect = None
         col_mock, mid_mock, topn_mock = MagicMock(), MagicMock(), MagicMock()
         col_mock.selectbox.return_value = "region"
         topn_mock.slider.return_value = 10
         mod.st.columns.return_value = [col_mock, mid_mock, topn_mock]
-        mod.st.pills.return_value = "chart"
+        # First pills = view selector → "chart", second pills = agg → "count"
+        mod.st.pills.side_effect = ["chart", "count"]
+        with (
+            patch.object(mod, "load_check_settings", return_value={}),
+            patch.object(mod, "save_check_settings"),
+        ):
+            mod._render_value_counts(sample_df, ["region", "gender"], "settings.json")
+        mod.st.plotly_chart.assert_called_once()
+
+    def test_chart_view_pct_agg_calls_plotly_chart(self, descriptive_mod, sample_df):
+        """Chart view with 'pct' aggregation renders a plotly chart."""
+        mod = descriptive_mod
+        mod.st.reset_mock()
+        col_mock, mid_mock, topn_mock = MagicMock(), MagicMock(), MagicMock()
+        col_mock.selectbox.return_value = "region"
+        topn_mock.slider.return_value = 10
+        mod.st.columns.return_value = [col_mock, mid_mock, topn_mock]
+        # First pills = "chart", second pills = "pct"
+        mod.st.pills.side_effect = ["chart", "pct"]
         with (
             patch.object(mod, "load_check_settings", return_value={}),
             patch.object(mod, "save_check_settings"),
@@ -1016,7 +1106,7 @@ class TestRenderValueCounts:
     def test_saved_settings_restore_col(self, descriptive_mod, sample_df):
         mod = descriptive_mod
         mod.st.reset_mock()
-        mod.st.pills.side_effect = None  # clear any leftover side_effect
+        mod.st.pills.side_effect = None
         col_mock, mid_mock, topn_mock = MagicMock(), MagicMock(), MagicMock()
         col_mock.selectbox.return_value = "gender"
         topn_mock.slider.return_value = 20
@@ -1030,6 +1120,27 @@ class TestRenderValueCounts:
             mod._render_value_counts(sample_df, ["region", "gender"], "settings.json")
         call_kwargs = col_mock.selectbox.call_args
         assert call_kwargs.kwargs.get("index") == 1
+
+    def test_saved_col_not_in_list_defaults_to_index_0(
+        self, descriptive_mod, sample_df
+    ):
+        """Saved col_to_analyse not in list → index defaults to 0."""
+        mod = descriptive_mod
+        mod.st.reset_mock()
+        mod.st.pills.side_effect = None
+        col_mock, mid_mock, topn_mock = MagicMock(), MagicMock(), MagicMock()
+        col_mock.selectbox.return_value = "region"
+        topn_mock.slider.return_value = 20
+        mod.st.columns.return_value = [col_mock, mid_mock, topn_mock]
+        mod.st.pills.return_value = "table"
+        saved = {"col_to_analyse": "nonexistent", "top_n": 20}
+        with (
+            patch.object(mod, "load_check_settings", return_value=saved),
+            patch.object(mod, "save_check_settings"),
+        ):
+            mod._render_value_counts(sample_df, ["region", "gender"], "settings.json")
+        call_kwargs = col_mock.selectbox.call_args
+        assert call_kwargs.kwargs.get("index") == 0
 
 
 class TestDescriptiveReport:

@@ -26,15 +26,7 @@ from datasure.utils.settings_utils import (
 TAB_NAME: str = "descriptive_stats"
 
 # Colour constants
-_MISSING_GREEN = "#2ca02c"
-_MISSING_AMBER = "#ff7f0e"
-_MISSING_RED = "#d62728"
-_CORR_COLORSCALE = [
-    [0.0, "#d62728"],
-    [0.5, "#ffffff"],
-    [1.0, "#1f77b4"],
-]
-
+_ORANGE_HEX = "#f26529"
 
 # =============================================================================
 # Computation functions (pure, no Streamlit)
@@ -266,65 +258,6 @@ def get_column_selection_df(
 # =============================================================================
 # Internal rendering helpers
 # =============================================================================
-
-
-def _missing_colour(pct: float) -> str:
-    """Return traffic-light colour for a missing percentage."""
-    if pct < 5:
-        return _MISSING_GREEN
-    if pct <= 20:
-        return _MISSING_AMBER
-    return _MISSING_RED
-
-
-def _render_groupby_filter(
-    df: pl.DataFrame, categorical_cols: list[str]
-) -> pl.DataFrame:
-    """Render the GroupBy filter bar and return the filtered DataFrame.
-
-    Parameters
-    ----------
-    df : pl.DataFrame
-        Full dataset.
-    categorical_cols : list[str]
-        Categorical column names available for grouping.
-
-    Returns
-    -------
-    pl.DataFrame
-        Filtered (or original) DataFrame.
-    """
-    if not categorical_cols:
-        return df
-
-    col1, col2, col3 = st.columns([3, 3, 1])
-
-    with col1:
-        group_col = st.selectbox(
-            "Filter by column",
-            options=categorical_cols,
-            key="desc_groupby_col",
-            label_visibility="collapsed",
-        )
-
-    filtered_df = df
-    if group_col and group_col != "(none)":
-        unique_vals = df[group_col].drop_nulls().unique().sort().to_list()
-        with col2:
-            group_val = st.selectbox(
-                "Filter value",
-                options=unique_vals,
-                key="desc_groupby_val",
-                label_visibility="collapsed",
-            )
-        with col3:
-            if st.button("Clear", key="desc_groupby_clear"):
-                st.session_state.desc_groupby_col = "(none)"
-                st.rerun()
-
-        filtered_df = df.filter(pl.col(group_col) == group_val)
-
-    return filtered_df
 
 
 def _get_column_type_label(col: str, columns: ColumnByType) -> str:
@@ -584,7 +517,7 @@ def _render_histogram(
         x="bin_start",
         y="count",
         labels={"bin_start": col_to_plot, "count": "Count"},
-        color_discrete_sequence=["#f26529"],
+        color_discrete_sequence=[_ORANGE_HEX],
         title=f"Distribution of {col_to_plot}",
     )
 
@@ -711,7 +644,7 @@ def _render_value_counts(
                 x=vc["value"],
                 y=vc[agg_options],
                 name="",
-                marker_color="#f26529",
+                marker_color=_ORANGE_HEX,
                 hovertemplate=count_hovertemplate
                 if agg_options == "count"
                 else pct_hovertemplate,
