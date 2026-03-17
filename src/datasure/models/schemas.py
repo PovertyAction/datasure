@@ -10,7 +10,7 @@ robust data processing and transformation operations.
 import datetime
 
 import polars as pl
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from datasure.models.enums import (
     DelimiterType,
@@ -179,13 +179,24 @@ class DateDefaults(BaseModel):
     )
 
     default_start_date: datetime.date = Field(
-        default=datetime.date.today() - datetime.timedelta(days=30),
+        default=None,
         description="Default start date for date input (30 days ago)",
     )
     default_end_date: datetime.date = Field(
-        default=datetime.date.today() + datetime.timedelta(days=30),
-        description="Default end date for date input (today)",
+        default=None,
+        description="Default end date for date input (today + 30 days)",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def set_dynamic_date_defaults(cls, values: dict) -> dict:
+        """Compute time-dependent date defaults at instantiation time."""
+        today = datetime.date.today()
+        if values.get("default_start_date") is None:
+            values["default_start_date"] = today - datetime.timedelta(days=30)
+        if values.get("default_end_date") is None:
+            values["default_end_date"] = today + datetime.timedelta(days=30)
+        return values
 
 
 # ============================================================================
