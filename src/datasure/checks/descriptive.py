@@ -584,6 +584,7 @@ def _render_histogram(
         x="bin_start",
         y="count",
         labels={"bin_start": col_to_plot, "count": "Count"},
+        color_discrete_sequence=["#f26529"],
         title=f"Distribution of {col_to_plot}",
     )
 
@@ -649,13 +650,19 @@ def _render_value_counts(
         "chart": ":material/bar_chart: Chart View",
     }
 
+    default_view = saved_settings.get("view", "table")
+
     view = st.pills(
         "Select view",
+        default=default_view,
         options=options_map.keys(),
         format_func=lambda x: options_map[x],
         key="desc_vc_view_pills",
         help="Toggle between table and chart view for value counts",
+        on_change=trigger_save,
+        kwargs={"state_name": TAB_NAME + "_view"},
     )
+    save_check_settings(setting_file, TAB_NAME, {"view": view})
 
     if view == "table":
         st.dataframe(
@@ -675,16 +682,73 @@ def _render_value_counts(
             },
         )
     else:
-        fig = px.bar(
-            vc,
-            x="value",
-            y="count",
-            text="pct",
-            labels={"value": col_to_analyse, "count": "Count", "pct": "%"},
-            title=f"Value counts: {col_to_analyse}",
+        default_agg_option = saved_settings.get("agg_option", "count")
+        agg_options_map = {
+            "count": ":material/123: Count",
+            "pct": ":material/percent: Percentage",
+        }
+
+        agg_options = st.pills(
+            "Aggregate by",
+            options=agg_options_map.keys(),
+            format_func=lambda x: agg_options_map[x],
+            key="desc_vc_agg_pills",
+            help="Choose whether to size bars by count or percentage",
+            default=default_agg_option,
+            on_change=trigger_save,
+            kwargs={"state_name": TAB_NAME + "_agg_option"},
         )
-        fig.update_traces(texttemplate="%{text}%", textposition="outside")
-        st.plotly_chart(fig, width="stretch")
+        save_check_settings(setting_file, TAB_NAME, {"agg_option": agg_options})
+
+        # Create the figure
+        fig = go.Figure()
+
+        # Add bar plot for interviews per time period with conditional coloring
+        count_hovertemplate = "<b>%{x}</b><br>Count: %{y}<br>"
+        pct_hovertemplate = "<b>%{x}</b><br>Percentage: %{y}%<br>"
+        fig.add_trace(
+            go.Bar(
+                x=vc["value"],
+                y=vc[agg_options],
+                name="",
+                marker_color="#f26529",
+                hovertemplate=count_hovertemplate
+                if agg_options == "count"
+                else pct_hovertemplate,
+            )
+        )
+
+        # Update layout with transparent background
+        fig.update_layout(
+            title=f"Value counts for {col_to_analyse}",
+            title_x=0,
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
+            height=400,
+            margin={"t": 50, "b": 50, "l": 50, "r": 50},
+            legend={
+                "orientation": "h",
+                "yanchor": "bottom",
+                "y": 1.02,
+                "xanchor": "right",
+                "x": 1,
+            },
+            xaxis={
+                "title": col_to_analyse,
+                "showgrid": False,
+                "gridcolor": "lightgrey",
+                "tickangle": -45,
+                "type": "category",
+            },
+            yaxis={
+                "title_text": "Values" if agg_options == "count" else "Percentage",
+                "showgrid": False,
+                "gridcolor": "lightgrey",
+                "zeroline": False,
+            },
+        )
+
+        st.plotly_chart(fig, theme=None, width="stretch")
 
 
 # =============================================================================
