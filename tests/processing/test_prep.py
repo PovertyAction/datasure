@@ -1429,6 +1429,40 @@ class TestLogManagement:
         assert len(actions) == 1
         assert actions[0].action_type == PrepActions.remove_column
 
+    def test_parse_prep_log_to_actions_json_string(self):
+        """Regression test: prep_args stored as JSON (null values) must parse correctly.
+
+        Previously ast.literal_eval was used, which fails on JSON null values.
+        This test ensures json.loads is used instead.
+        """
+        import json
+
+        log = pl.DataFrame(
+            {
+                "prep_args": [
+                    json.dumps(
+                        {
+                            "action": "transform column(s)",
+                            "column_names": None,
+                            "affected_count": 5,
+                            "remaining_count": None,
+                            "value": None,
+                            "method": "to_uppercase",
+                            "source_columns": ["col1"],
+                            "condition": None,
+                            "failed_count": 0,
+                            "additional_info": None,
+                        }
+                    )
+                ]
+            }
+        )
+        actions = _parse_prep_log_to_actions(log)
+        assert len(actions) == 1
+        assert actions[0].prep_args.action == "transform column(s)"
+        assert actions[0].prep_args.source_columns == ["col1"]
+        assert actions[0].prep_args.column_names is None
+
     def test_generate_action_description_remove_columns(self):
         """Test Generate action description remove columns."""
         prep_args = PrepActionResult(
