@@ -5,6 +5,7 @@ high-performance DataFrame operations. It supports column removal, row filtering
 transformations, and new column creation with comprehensive error handling.
 """
 
+import ast
 import hashlib
 import json
 import re
@@ -864,7 +865,10 @@ def _parse_prep_log_to_actions(prep_log_df: pl.DataFrame) -> list[PrepAction]:
     for row in prep_log_df.iter_rows(named=True):
         args = row["prep_args"]
         if isinstance(args, str):
-            args = json.loads(args)
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                args = ast.literal_eval(args)
         prep_action = PrepActionResult(**args)
         actions.append(PrepAction.from_args(prep_action))
     return actions
