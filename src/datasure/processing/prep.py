@@ -5,8 +5,8 @@ high-performance DataFrame operations. It supports column removal, row filtering
 transformations, and new column creation with comprehensive error handling.
 """
 
-import ast
 import hashlib
+import json
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -779,9 +779,9 @@ class AddNewColumnOperation(PrepOperation):
             PrepFunctions.first.value: lambda cols: pl.concat_list(cols).list.first(),
             PrepFunctions.last.value: lambda cols: pl.concat_list(cols).list.last(),
             PrepFunctions.count.value: lambda cols: pl.concat_list(cols).list.len(),
-            PrepFunctions.nunique.value: lambda cols: pl.concat_list(cols)
-            .list.unique()
-            .list.len(),
+            PrepFunctions.nunique.value: lambda cols: (
+                pl.concat_list(cols).list.unique().list.len()
+            ),
             PrepFunctions.product.value: lambda cols: pl.fold(
                 acc=pl.lit(1), function=lambda acc, x: acc * x, exprs=cols
             ),
@@ -864,7 +864,7 @@ def _parse_prep_log_to_actions(prep_log_df: pl.DataFrame) -> list[PrepAction]:
     for row in prep_log_df.iter_rows(named=True):
         args = row["prep_args"]
         if isinstance(args, str):
-            args = ast.literal_eval(args)
+            args = json.loads(args)
         prep_action = PrepActionResult(**args)
         actions.append(PrepAction.from_args(prep_action))
     return actions
