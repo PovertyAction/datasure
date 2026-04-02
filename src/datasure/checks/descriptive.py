@@ -227,7 +227,7 @@ def _modify_column_selection_df(
             {
                 "Selected": False,
                 "column": col,
-                "type": _get_column_type_label(col, st.columns),
+                "type": _get_column_type_label(col, existing_cols),
             },
             allow_duplicates=False,
         )
@@ -376,12 +376,13 @@ def _render_column_selector(
                 "selected_columns_df",
                 "intermediate",
             )
+            st.rerun()
 
     selected_numeric_cols = selected_columns_df.filter(
-        (pl.col("Selected")) & (pl.col("type") == "numeric")
+        pl.col("Selected").cast(pl.Boolean) & (pl.col("type") == "numeric")
     )["column"].to_list()
 
-    selected_all_cols = selected_columns_df.filter(pl.col("Selected"))[
+    selected_all_cols = selected_columns_df.filter(pl.col("Selected").cast(pl.Boolean))[
         "column"
     ].to_list()
 
