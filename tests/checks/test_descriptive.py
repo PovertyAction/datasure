@@ -605,8 +605,8 @@ class TestModifyColumnSelectionDf:
         result = _modify_column_selection_df(df_sel.clone(), current_cols)
         assert set(result["column"].to_list()) == set(sample_df.columns)
 
-    def test_remove_branch_raises_on_buggy_api(self):
-        """drop_in_place with an Expr (known bug) raises a Polars error."""
+    def test_remove_drops_columns_not_in_current(self):
+        """Columns absent from current_cols are removed from the selection df."""
         df_sel = pl.DataFrame(
             {
                 "Selected": [False],
@@ -614,8 +614,20 @@ class TestModifyColumnSelectionDf:
                 "type": ["other"],
             }
         )
-        with pytest.raises((TypeError, pl.exceptions.PolarsError)):
-            _modify_column_selection_df(df_sel, set())
+        result = _modify_column_selection_df(df_sel, set())
+        assert len(result) == 0
+
+    def test_remove_keeps_columns_in_current(self):
+        """Columns present in current_cols are retained."""
+        df_sel = pl.DataFrame(
+            {
+                "Selected": [False, False],
+                "column": ["keep_col", "remove_col"],
+                "type": ["numeric", "other"],
+            }
+        )
+        result = _modify_column_selection_df(df_sel, {"keep_col"})
+        assert set(result["column"].to_list()) == {"keep_col"}
 
     def test_cols_to_add_branch_raises_on_buggy_api(self):
         """cols_to_add branch raises because Polars DataFrame.append doesn't
@@ -798,7 +810,7 @@ class TestRenderColumnSelector:
         mod.st.reset_mock()
         mod.st.pills.return_value = None
         mod.st.button.return_value = False
-        result = mod._render_column_selector("proj1", sample_df, sample_columns, sel_df)
+        result = mod._render_column_selector("proj1", sel_df)
         assert isinstance(result, mod.ColumnByType)
 
     def test_select_all_marks_all_selected(
@@ -817,7 +829,7 @@ class TestRenderColumnSelector:
             return df
 
         mod.st.data_editor.side_effect = capture_editor
-        mod._render_column_selector("proj1", sample_df, sample_columns, sel_df)
+        mod._render_column_selector("proj1", sel_df)
         assert received["df"]["Selected"].to_list() == [True] * len(sample_df.columns)
 
     def test_clear_all_marks_none_selected(
@@ -835,7 +847,7 @@ class TestRenderColumnSelector:
             return df.with_columns(pl.col("Selected").cast(pl.Boolean))
 
         mod.st.data_editor.side_effect = capture_editor
-        mod._render_column_selector("proj1", sample_df, sample_columns, sel_df)
+        mod._render_column_selector("proj1", sel_df)
         # all Selected should be False
         assert all(not v for v in received["df"]["Selected"].to_list())
 
@@ -853,7 +865,7 @@ class TestRenderColumnSelector:
             return df
 
         mod.st.data_editor.side_effect = capture_editor
-        mod._render_column_selector("proj1", sample_df, sample_columns, sel_df)
+        mod._render_column_selector("proj1", sel_df)
         # Only numeric columns should be selected
         for row in received["df"].iter_rows(named=True):
             if row["type"] == "numeric":
@@ -876,7 +888,7 @@ class TestRenderColumnSelector:
             return df
 
         mod.st.data_editor.side_effect = capture_editor
-        mod._render_column_selector("proj1", sample_df, sample_columns, sel_df)
+        mod._render_column_selector("proj1", sel_df)
         # No columns should be selected since no types were chosen
         assert all(not v for v in received["df"]["Selected"].to_list())
 
@@ -890,7 +902,7 @@ class TestRenderColumnSelector:
         mod.st.button.return_value = True  # Apply clicked
         mod.st.data_editor.side_effect = lambda *a, **kw: a[0]
         with patch.object(mod, "duckdb_save_table") as mock_save:
-            mod._render_column_selector("proj1", sample_df, sample_columns, sel_df)
+            mod._render_column_selector("proj1", sel_df)
             mock_save.assert_called_once()
 
 
