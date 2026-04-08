@@ -280,8 +280,6 @@ def _get_column_type_label(col: str, columns: ColumnByType) -> str:
 @st.fragment
 def _render_column_selector(
     project_id: str,
-    df: pl.DataFrame,
-    columns: ColumnByType,
     column_selection_df: pl.DataFrame,
 ) -> ColumnByType:
     """Render the inline column selector with descriptive type labels.
@@ -723,9 +721,7 @@ def descriptive_report(
     column_selection_df = get_column_selection_df(project_id, data, survey_columns)
 
     # Inline column selector
-    selected_columns = _render_column_selector(
-        project_id, data, survey_columns, column_selection_df
-    )
+    selected_columns = _render_column_selector(project_id, column_selection_df)
 
     if not selected_columns.all_columns:
         st.info("No columns selected. Use the column selector above to select columns.")
