@@ -219,16 +219,20 @@ def _modify_column_selection_df(
 
     # Remove columns that no longer exist
     if cols_to_remove:
-        column_selection_df.drop_in_place(pl.col("column").is_in(list(cols_to_remove)))
+        column_selection_df = column_selection_df.filter(
+            ~pl.col("column").is_in(list(cols_to_remove))
+        )
 
     # Add new columns that are not in the existing DataFrame
     for col in cols_to_add:
-        column_selection_df.append(
-            {
-                "Selected": False,
-                "column": col,
-                "type": _get_column_type_label(col, existing_cols),
-            },
+        column_selection_df = column_selection_df.concat(
+            pl.DataFrame(
+                {
+                    "Selected": [False],
+                    "column": [col],
+                    "type": [_get_column_type_label(col, existing_cols)],
+                }
+            ),
             allow_duplicates=False,
         )
 
