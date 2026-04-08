@@ -211,10 +211,18 @@ class ConfigurationService:
 
         # Delete any extra output view files beyond the configured page count
         views_dir = Path(__file__).parent.parent / "views"
-        for page_file in views_dir.glob("output_view_*.py"):
-            match = re.search(r"output_view_(\d+)\.py$", str(page_file))
-            if match and int(match.group(1)) > num_pages:
-                page_file.unlink()
+        existing_pages = [
+            int(m.group(1))
+            for page_file in views_dir.glob("output_view_*.py")
+            if (m := re.search(r"output_view_(\d+)\.py$", str(page_file)))
+        ]
+        if existing_pages and num_pages < max(existing_pages):
+            # Only delete if the DB-reported count is actually lower than
+            # what exists on disk
+            for page_file in views_dir.glob("output_view_*.py"):
+                match = re.search(r"output_view_(\d+)\.py$", str(page_file))
+                if match and int(match.group(1)) > num_pages:
+                    page_file.unlink()
 
     def remove_configuration(self, page_name: str) -> bool:
         """
