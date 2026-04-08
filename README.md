@@ -6,13 +6,13 @@ Built for data managers, survey coordinators, and research teams, DataSure provi
 
 ## Key Features
 
-- **📊 Data Quality Monitoring**: Real-time dashboards for comprehensive survey data analysis
-- **🔍 Automated Checks**: 10 specialized quality check modules including duplicates, outliers, GPS validation, and missing data analysis
-- **📈 Interactive Visualizations**: Charts and maps for data exploration and quality assessment
-- **🔗 Multi-Source Integration**: Direct SurveyCTO API connection plus CSV/Excel file support
-- **⚙️ Flexible Configuration**: Project-based settings with customizable check parameters
-- **📋 Comprehensive Reporting**: Export capabilities for different audiences and formats
-- **🎯 Enumerator Performance**: Monitor data collection team productivity and quality metrics
+- **Data Quality Monitoring**: Real-time dashboards for comprehensive survey data analysis
+- **Automated Checks**: 9 specialized quality check modules including duplicates, outliers, GPS validation, and missing data analysis
+- **Interactive Visualizations**: Charts and maps for data exploration and quality assessment
+- **Multi-Source Integration**: Direct SurveyCTO API connection plus local file support (CSV, Excel, Stata, JSON)
+- **Flexible Configuration**: Project-based settings with customizable check parameters
+- **Data Correction Workflows**: Built-in interface for reviewing and correcting flagged records
+- **Enumerator Performance**: Monitor data collection team productivity and quality metrics
 
 ## Installation
 
@@ -33,19 +33,19 @@ brew install uv
 uv tool install datasure
 
 # ON WINDOWS: update windows path after installation
-uv tool update-shell 
+uv tool update-shell
 ```
 
-### Step 3: verify installation
+### Step 3: Verify installation
 
 ```bash
 datasure --version
 ```
 
-## Getting the latest release
+## Getting the Latest Release
 
 ```bash
-# if datasure is already install, get latest version with
+# if datasure is already installed, get latest version with
 uv tool upgrade datasure
 ```
 
@@ -57,15 +57,19 @@ uv tool upgrade datasure
    datasure
    ```
 
-2. **Create your first project** and configure data quality checks
+2. **Create or open a project** from the Start Here page
 
 3. **Import survey data**:
    - Connect directly to your SurveyCTO server
-   - Upload CSV or Excel files from local storage
+   - Upload CSV, Excel, Stata (.dta), or JSON files from local storage
 
-4. **Monitor data quality** with interactive dashboards organized into specialized check modules
+4. **Prepare your data** with the built-in cleaning and transformation tools
 
-5. **Generate reports** and export results for your research team
+5. **Configure data quality checks** by selecting your dataset and setting check parameters
+
+6. **Monitor data quality** with interactive DQA Report dashboards organized into specialized check modules
+
+7. **Correct flagged records** using the Correct Data workflow
 
 ## System Requirements
 
@@ -77,7 +81,7 @@ uv tool upgrade datasure
 
 ## Data Quality Check Modules
 
-DataSure includes 10 specialized modules for comprehensive survey data quality monitoring:
+DataSure includes 9 specialized modules for comprehensive survey data quality monitoring:
 
 | Module | Purpose |
 |--------|---------|
@@ -88,40 +92,37 @@ DataSure includes 10 specialized modules for comprehensive survey data quality m
 | **Outliers** | Identify unusual responses requiring review |
 | **Enumerator Performance** | Monitor data collection team productivity |
 | **Progress Tracking** | Real-time survey completion monitoring |
-| **Descriptive Statistics** | Data distribution analysis and summaries |
+| **Descriptive Statistics** | Per-column summary statistics, histograms, and value counts |
 | **Back-checks** | Verification workflow support |
-| **Custom Checks** | Configure additional quality checks per project |
 
 ## Core Capabilities
 
 ### Data Import and Management
 
 - **SurveyCTO Integration**: Direct API connection with form metadata and authentication
-- **Local File Support**: CSV and Excel upload with automatic type detection  
+- **Local File Support**: CSV, Excel, Stata (.dta), and JSON upload with automatic type detection
 - **Multi-Project Organization**: Manage multiple surveys simultaneously
 - **Data Preparation**: Cleaning and transformation workflows
 
 ### Interactive Dashboards
 
-- **Real-time Monitoring**: Live updates as new data arrives
-- **Customizable Views**: Configure dashboards per project requirements
-- **Export Options**: Generate reports in PDF, Excel, and other formats
-- **Automated Alerts**: Notifications for quality issues requiring attention
+- **Real-time Monitoring**: Dashboards refresh as new data is imported
+- **Customizable Views**: Configure which checks to run and set thresholds per project
+- **Column Selector**: Choose specific columns for analysis within each check
+- **Data Correction**: Review and apply corrections to flagged records directly in the app
 
 ### Performance and Scalability
 
 - **High-Performance Processing**: DuckDB backend for fast analytical queries
-- **Large Dataset Support**: Optimized for datasets with hundreds of thousands of records
+- **Large Dataset Support**: Optimized with Polars for datasets with hundreds of thousands of records
 - **Intelligent Caching**: Reduces processing time and API calls
 - **Cross-Platform Compatibility**: Works on Windows, macOS, and Linux
 
-## Getting Started - Application Usage
-
-### Using DataSure
+## Getting Started - Application Workflow
 
 Once DataSure is installed, you can begin monitoring your survey data quality:
 
-#### 1. Launch the Application
+### 1. Launch the Application
 
 ```bash
 datasure
@@ -129,34 +130,40 @@ datasure
 
 The web interface will open in your default browser (typically at `http://localhost:8501`).
 
-#### 2. Import Data
+### 2. Create or Open a Project
 
-- **Import Data Page**: Start here to connect your data sources
-- **SurveyCTO Integration**: Connect directly to your SurveyCTO server with authentication
-- **Local Files**: Upload CSV or Excel files from your computer
+- **Start Here Page**: Create a new project or open an existing one
+- Projects are identified by a unique ID and store all settings and cached data
+
+### 3. Import Data
+
+- **Import Data Page**: Connect your data sources
+- **SurveyCTO Integration**: Connect to your SurveyCTO server with authentication
+- **Local Files**: Upload CSV, Excel (.xlsx/.xls), Stata (.dta), or JSON files
 - **Multiple Datasets**: Import and manage up to 10 datasets per project
 
-#### 3. Prepare and Configure
+### 4. Prepare Data
 
-- **Prepare Data Page**: Preview your imported datasets in separate tabs
+- **Prepare Data Page**: Preview imported datasets in separate tabs
+- Review data types, column names, and apply transformations before running checks
+
+### 5. Configure Checks
+
 - **Configure Checks Page**: Set up High-Frequency Checks (HFCs)
   - Enter a page name for your quality monitoring dashboard
   - Select the dataset to analyze
   - Configure check parameters and thresholds
-  - Save settings to create your HFC page
+  - Save settings to create your DQA Report page
 
-#### 4. Monitor Data Quality
+### 6. Monitor Data Quality
 
-- **HFC Dashboard**: Access your configured quality check page
-- **Interactive Tabs**: Each check type has its own tab (Summary, Missing Data, Duplicates, etc.)
-- **Settings Expanders**: Configure specific parameters for each check
-- **Real-time Updates**: Dashboard refreshes as new data becomes available
+- **DQA Reports**: Access your configured check pages in the sidebar
+- **Check Tabs**: Each report includes tabs for Summary, Missing Data, Duplicates, GPS, Outliers, Enumerator Performance, Progress, Descriptive Statistics, and Back-checks
+- **Column Selector**: Use the inline selector to choose which columns to include in each analysis
 
-#### 5. Export and Share
+### 7. Correct Data
 
-- Generate reports for different audiences
-- Export findings in various formats
-- Monitor trends over time
+- **Correct Data Page**: Review flagged issues and apply corrections within the app
 
 ### Command Line Options
 
@@ -164,7 +171,7 @@ The web interface will open in your default browser (typically at `http://localh
 # Show version information
 datasure --version
 
-# Launch with custom host/port  
+# Launch with custom host/port
 datasure --host 0.0.0.0 --port 8080
 
 # View all available options
@@ -189,7 +196,7 @@ DataSure automatically manages data storage and caching for optimal performance:
 - **SurveyCTO cache**: Cached form metadata and server connections
 - **User settings**: Check configurations and preferences
 
-Cache directories are created automatically - no manual setup required.
+Cache directories are created automatically — no manual setup required.
 
 ## Support and Resources
 
@@ -197,12 +204,12 @@ Cache directories are created automatically - no manual setup required.
 
 - **GitHub Issues**: [Report bugs and request features](https://github.com/PovertyAction/datasure/issues)
 - **Email Support**: <researchsupport@poverty-action.org>
-- **Documentation**: See [RELEASENOTES.md](RELEASENOTES.md) for latest updates
+- **Release Notes**: See [RELEASENOTES.md](RELEASENOTES.md) for latest updates
 
 ### Version Information
 
 - **Current Version**: See [RELEASENOTES.md](RELEASENOTES.md) for the latest release information
-- **Version History**: Track all changes and improvements
+- **Version History**: Track all changes and improvements in [CHANGELOG.md](CHANGELOG.md)
 - **Upgrade Instructions**: Follow installation commands above to get the latest version
 
 ## Contributing
@@ -222,7 +229,7 @@ If you're interested in contributing code or setting up a development environmen
 
 - Development environment setup
 - Code quality standards and testing requirements
-- Package building and distribution workflows  
+- Package building and distribution workflows
 - Release process and documentation guidelines
 - Technical architecture and development patterns
 
