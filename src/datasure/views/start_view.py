@@ -2,12 +2,13 @@ import hashlib
 import json
 import os
 from datetime import datetime
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import streamlit as st
 
 from datasure.utils.cache_utils import get_cache_path
+from datasure.utils.config_utils import ConfigurationService
 from datasure.utils.onboarding_utils import (
     DEMO_PROJECT_ID,
     create_demo_project,
@@ -181,6 +182,7 @@ def _handle_existing_project_selection(project: str):
     if select_project:
         st.write(f"Loading project '{project}'...")
         st.session_state.st_project_id = project_id
+        ConfigurationService(project_id).sync_output_view_files()
         st.switch_page(st.session_state.st_import_data_page)
 
     # Only show delete option for non-demo projects
@@ -228,7 +230,11 @@ def _render_project_selection_ui():
 
 def _render_page_header():
     """Render the page header with logo and description."""
-    st.write(f"version {version('DataSure')}")
+    try:
+        app_version = version("DataSure")
+    except PackageNotFoundError:
+        app_version = "dev"
+    st.write(f"version {app_version}")
     # Get the path to the assets directory relative to the package
     assets_dir = Path(__file__).parent.parent / "assets"
     image_path = assets_dir / "LinkedIn Cover IPA20.png"

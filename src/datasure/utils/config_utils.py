@@ -6,6 +6,7 @@ This module provides:
 - UI components for Streamlit interface
 """
 
+import re
 from pathlib import Path
 
 import polars as pl
@@ -190,6 +191,38 @@ class ConfigurationService:
 
         if page_path.exists():
             page_path.unlink()
+
+    def sync_output_view_files(self) -> None:
+        """Recreate output view files from template and remove any extras.
+
+        Intended to be called on project load so that template updates are
+        applied to all existing output view files without requiring the user
+        to remove and re-add configurations.
+        """
+        config_log = self.get_all_configurations()
+        if config_log.is_empty():
+            return
+
+        num_pages = config_log.height
+
+        # Recreate all output view files from the current template
+        for page_number in range(1, num_pages + 1):
+            self._add_page_file(page_number, replace=True)
+
+        # Delete any extra output view files beyond the configured page count
+        views_dir = Path(__file__).parent.parent / "views"
+        existing_pages = [
+            int(m.group(1))
+            for page_file in views_dir.glob("output_view_*.py")
+            if (m := re.search(r"output_view_(\d+)\.py$", str(page_file)))
+        ]
+        if existing_pages and num_pages < max(existing_pages):
+            # Only delete if the DB-reported count is actually lower than
+            # what exists on disk
+            for page_file in views_dir.glob("output_view_*.py"):
+                match = re.search(r"output_view_(\d+)\.py$", str(page_file))
+                if match and int(match.group(1)) > num_pages:
+                    page_file.unlink()
 
     def remove_configuration(self, page_name: str) -> bool:
         """

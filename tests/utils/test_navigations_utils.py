@@ -4,7 +4,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from datasure.utils.navigations_utils import page_navigation
+from datasure.utils.navigations_utils import (
+    add_demo_navigation,
+    demo_callout,
+    demo_sidebar_help,
+    page_navigation,
+    show_demo_next_action,
+)
 
 
 class TestPageNavigation:
@@ -258,3 +264,327 @@ class TestPageNavigation:
         # Verify switch_page is called with the exact page name including
         # special characters
         mock_st.switch_page.assert_called_once_with("Import Data & Configuration")
+
+
+# =============================================================================
+# Shared onboarding steps fixture
+# =============================================================================
+
+FAKE_STEPS = [
+    {"step": 1, "title": "Import Data", "description": "Load your dataset."},
+    {"step": 2, "title": "Configure Checks", "description": "Set up checks."},
+    {"step": 3, "title": "View Results", "description": "Review the report."},
+]
+
+
+# =============================================================================
+# TestAddDemoNavigation
+# =============================================================================
+
+
+class TestAddDemoNavigation:
+    """Test add_demo_navigation function."""
+
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=False)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_non_demo_project_sets_session_state_only(self, mock_st, _is_demo):
+        """When not a demo project, only session_state is updated."""
+        add_demo_navigation("My Page")
+
+        mock_st.session_state.__setitem__.assert_called_with("current_page", "My Page")
+
+    @patch("datasure.utils.navigations_utils.show_progress_indicator")
+    @patch("datasure.utils.navigations_utils.show_demo_banner")
+    @patch("datasure.utils.navigations_utils.OnboardingSteps")
+    @patch("datasure.utils.navigations_utils.get_onboarding_step", return_value=1)
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_demo_project_no_step_shows_onboarding(
+        self,
+        mock_st,
+        _is_demo,
+        _get_step,
+        mock_onboarding,
+        mock_banner,
+        mock_progress,
+    ):
+        """Demo project without step shows banner, progress, and current guidance."""
+        add_demo_navigation("My Page")
+
+        mock_banner.assert_called_once()
+        mock_progress.assert_called_once()
+        mock_onboarding.get_guidance.assert_called_once_with(1)
+
+    @patch("datasure.utils.navigations_utils.show_progress_indicator")
+    @patch("datasure.utils.navigations_utils.show_demo_banner")
+    @patch("datasure.utils.navigations_utils.set_onboarding_step")
+    @patch("datasure.utils.navigations_utils.OnboardingSteps")
+    @patch("datasure.utils.navigations_utils.get_onboarding_step", return_value=1)
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_demo_project_with_step_calls_set_onboarding(
+        self,
+        mock_st,
+        _is_demo,
+        _get_step,
+        mock_onboarding,
+        mock_set_step,
+        mock_banner,
+        mock_progress,
+    ):
+        """Demo project with explicit step calls set_onboarding_step."""
+        add_demo_navigation("My Page", step=2)
+
+        mock_set_step.assert_called_once_with(2)
+        mock_banner.assert_called_once()
+        mock_progress.assert_called_once()
+        mock_onboarding.get_guidance.assert_called_once_with(2)
+
+
+# =============================================================================
+# TestShowDemoNextAction
+# =============================================================================
+
+
+class TestShowDemoNextAction:
+    """Test show_demo_next_action function."""
+
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=False)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_non_demo_project_returns_early(self, mock_st, _is_demo):
+        """Non-demo project should return without rendering anything."""
+        show_demo_next_action(0)
+
+        mock_st.button.assert_not_called()
+
+    @patch("datasure.utils.navigations_utils.show_next_steps")
+    @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_step_at_end_calls_show_next_steps(self, mock_st, _is_demo, mock_next):
+        """When current_step >= len(ONBOARDING_STEPS), show_next_steps is called."""
+        show_demo_next_action(len(FAKE_STEPS))
+
+        mock_next.assert_called_once_with(len(FAKE_STEPS))
+        mock_st.button.assert_not_called()
+
+    @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_button_not_clicked_does_not_advance(self, mock_st, _is_demo):
+        """When button is not clicked, onboarding step is not advanced."""
+        mock_st.button.return_value = False
+        show_demo_next_action(0)
+
+        mock_st.button.assert_called_once()
+        mock_st.rerun.assert_not_called()
+
+    @patch("datasure.utils.navigations_utils.set_onboarding_step")
+    @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_button_clicked_no_session_key_reruns(self, mock_st, _is_demo, mock_set):
+        """Clicking button without session key advances step and reruns."""
+        mock_st.button.return_value = True
+        show_demo_next_action(0)
+
+        mock_set.assert_called_once_with(1)
+        mock_st.rerun.assert_called_once()
+
+    @patch("datasure.utils.navigations_utils.set_onboarding_step")
+    @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_button_clicked_with_valid_session_key_switches_page(
+        self, mock_st, _is_demo, mock_set
+    ):
+        """Clicking button with valid session key calls switch_page."""
+        mock_st.button.return_value = True
+        mock_st.session_state.__contains__ = MagicMock(return_value=True)
+        mock_st.session_state.__getitem__ = MagicMock(return_value="views/page2.py")
+
+        show_demo_next_action(0, next_page_session_key="st_next_page")
+
+        mock_set.assert_called_once_with(1)
+        mock_st.switch_page.assert_called_once_with("views/page2.py")
+        mock_st.rerun.assert_not_called()
+
+    @patch("datasure.utils.navigations_utils.set_onboarding_step")
+    @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_button_clicked_with_missing_session_key_reruns(
+        self, mock_st, _is_demo, mock_set
+    ):
+        """Clicking button with session key absent from state reruns."""
+        mock_st.button.return_value = True
+        mock_st.session_state.__contains__ = MagicMock(return_value=False)
+
+        show_demo_next_action(0, next_page_session_key="missing_key")
+
+        mock_set.assert_called_once_with(1)
+        mock_st.rerun.assert_called_once()
+
+    @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_custom_message_overrides_default(self, mock_st, _is_demo):
+        """Custom message is used instead of the default 'Continue to …'."""
+        mock_st.button.return_value = False
+        show_demo_next_action(0, custom_message="Go!")
+
+        call_label = mock_st.button.call_args[0][0]
+        assert call_label == "Go!"
+
+    @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_default_message_uses_next_step_title(self, mock_st, _is_demo):
+        """Default message references the next step title."""
+        mock_st.button.return_value = False
+        show_demo_next_action(0)
+
+        call_label = mock_st.button.call_args[0][0]
+        assert "Import Data" in call_label
+
+    @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_disabled_flag_passed_to_button(self, mock_st, _is_demo):
+        """Disabled flag is forwarded to the st.button call."""
+        mock_st.button.return_value = False
+        show_demo_next_action(0, disabled=True)
+
+        assert mock_st.button.call_args[1]["disabled"] is True
+
+
+# =============================================================================
+# TestDemoCallout
+# =============================================================================
+
+
+class TestDemoCallout:
+    """Test demo_callout function."""
+
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=False)
+    def test_non_demo_returns_none(self, _is_demo):
+        """Non-demo project returns None without building a message."""
+        result = demo_callout("Hello")
+        assert result is None
+
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    def test_info_type(self, _is_demo):
+        """Info type prefixes message with 'Demo Tip:'."""
+        result = demo_callout("Check this", type="info")
+        assert result == "**Demo Tip:** Check this"
+
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    def test_success_type(self, _is_demo):
+        """Success type prefixes message with 'Demo Success:'."""
+        result = demo_callout("Done", type="success")
+        assert result == "**Demo Success:** Done"
+
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    def test_warning_type(self, _is_demo):
+        """Warning type prefixes message with 'Demo Note:'."""
+        result = demo_callout("Be careful", type="warning")
+        assert result == "**Demo Note:** Be careful"
+
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    def test_error_type(self, _is_demo):
+        """Error type prefixes message with 'Demo Issue:'."""
+        result = demo_callout("Problem", type="error")
+        assert result == "**Demo Issue:** Problem"
+
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    def test_unknown_type_falls_back_to_info(self, _is_demo):
+        """Unknown type falls back to the info format."""
+        result = demo_callout("Something", type="unknown")
+        assert result == "**Demo Tip:** Something"
+
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    def test_default_type_is_info(self, _is_demo):
+        """Omitting type defaults to info."""
+        result = demo_callout("Hi")
+        assert result == "**Demo Tip:** Hi"
+
+
+# =============================================================================
+# TestDemoSidebarHelp
+# =============================================================================
+
+
+class TestDemoSidebarHelp:
+    """Test demo_sidebar_help function."""
+
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=False)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_non_demo_returns_early(self, mock_st, _is_demo):
+        """Non-demo project skips all sidebar rendering."""
+        demo_sidebar_help()
+
+        mock_st.sidebar.__enter__.assert_not_called()
+
+    @patch("datasure.utils.navigations_utils.load_demo_data")
+    @patch("datasure.utils.navigations_utils.get_onboarding_step", return_value=99)
+    @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_step_info_not_found_skips_step_details(
+        self, mock_st, _is_demo, _get_step, _load_demo
+    ):
+        """When current_step doesn't match any step, step details are skipped."""
+        mock_st.button.return_value = False
+        demo_sidebar_help()
+
+        calls = [str(c) for c in mock_st.markdown.call_args_list]
+        assert not any("title" in c.lower() for c in calls)
+
+    @patch("datasure.utils.navigations_utils.load_demo_data")
+    @patch("datasure.utils.navigations_utils.get_onboarding_step", return_value=1)
+    @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_step_info_found_renders_title_and_description(
+        self, mock_st, _is_demo, _get_step, _load_demo
+    ):
+        """When current_step matches a step, title and description are shown."""
+        mock_st.button.return_value = False
+        demo_sidebar_help()
+
+        all_markdown = " ".join(str(c.args[0]) for c in mock_st.markdown.call_args_list)
+        assert "Import Data" in all_markdown
+        assert "Load your dataset." in all_markdown
+
+    @patch("datasure.utils.navigations_utils.load_demo_data")
+    @patch("datasure.utils.navigations_utils.get_onboarding_step", return_value=1)
+    @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_restart_demo_button_switches_page_and_loads_demo(
+        self, mock_st, _is_demo, _get_step, mock_load
+    ):
+        """Clicking 'Restart Demo' switches to import page and reloads demo data."""
+        mock_st.button.side_effect = [True, False]
+        mock_st.session_state.st_import_data_page = "views/import.py"
+
+        demo_sidebar_help()
+
+        mock_st.switch_page.assert_called_once_with("views/import.py")
+        mock_load.assert_called_once()
+
+    @patch("datasure.utils.navigations_utils.load_demo_data")
+    @patch("datasure.utils.navigations_utils.get_onboarding_step", return_value=1)
+    @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_exit_demo_button_clears_project_and_switches_page(
+        self, mock_st, _is_demo, _get_step, _load_demo
+    ):
+        """Clicking 'Exit Demo' clears project id and switches to start page."""
+        mock_st.button.side_effect = [False, True]
+        mock_st.session_state.st_start_page = "views/start.py"
+
+        demo_sidebar_help()
+
+        mock_st.switch_page.assert_called_once_with("views/start.py")

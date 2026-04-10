@@ -1032,23 +1032,30 @@ if show_prep_page_info:
                 "raw",
             )
 
-            duckdb_save_table(
-                project_id,
-                prep_data,
-                label,
-                "prep",
-            )
-
-        # count rows, columns, number missing & percent missing
-        row_count = prep_data.height
-        col_count = prep_data.width
-        miss_count = prep_data.null_count().sum().sum_horizontal()[0]
-        total_values = row_count * col_count if row_count and col_count else 1
-        miss_perc = (miss_count / total_values) * 100
-        all_cols = prep_data.columns
+            if not prep_data.is_empty():
+                duckdb_save_table(
+                    project_id,
+                    prep_data,
+                    label,
+                    "prep",
+                )
 
         # display tab features
         with tab:
+            if prep_data.is_empty():
+                st.warning(
+                    "No data available to prepare. Please upload a dataset in the Import Data step."
+                )
+                continue
+
+            # count rows, columns, number missing & percent missing
+            row_count = prep_data.height
+            col_count = prep_data.width
+            miss_count = prep_data.null_count().sum().sum_horizontal()[0]
+            total_values = row_count * col_count if row_count and col_count else 1
+            miss_perc = (miss_count / total_values) * 100
+            all_cols = prep_data.columns
+
             st.subheader("Apply Changes:")
 
             # Demo guidance for apply changes section

@@ -1009,9 +1009,9 @@ class TestSurveyCTOClient:
         mock_scto_instance = Mock()
         mock_scto_class.return_value = mock_scto_instance
 
-        # Mock _import_server_dataset to fail and _import_regular_form to succeed
-        client._import_server_dataset = Mock(side_effect=Exception("Not a dataset"))
-        client._import_regular_form = Mock(return_value=5)
+        # Mock _import_regular_form to fail and _import_server_dataset to succeed
+        client._import_regular_form = Mock(side_effect=Exception("Not a regular form"))
+        client._import_server_dataset = Mock(return_value=5)
 
         form_config = FormConfig(
             alias="test_form",
@@ -1023,8 +1023,8 @@ class TestSurveyCTOClient:
         result = client.import_data(form_config)
 
         assert result == 5
-        client._import_server_dataset.assert_called_once_with(form_config)
         client._import_regular_form.assert_called_once_with(form_config)
+        client._import_server_dataset.assert_called_once_with(form_config)
 
     @patch("datasure.connectors.scto.retrieve_scto_credentials")
     def test_import_data_missing_credentials(self, mock_retrieve_credentials):

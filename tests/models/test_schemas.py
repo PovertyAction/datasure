@@ -1137,3 +1137,45 @@ class TestBackcheckColumnSelectors:
         """Empty string backcheck_date raises ValidationError (min_length=1)."""
         with pytest.raises(ValidationError):
             BackcheckColumnSelectors(backcheck_date="")
+
+
+# ── ColumnByType ──────────────────────────────────────────────────────────────
+
+
+from datasure.models.schemas import ColumnByType  # noqa: E402
+
+
+class TestColumnByType:
+    """Tests for the ColumnByType Pydantic model."""
+
+    def test_default_all_fields_are_empty_lists(self):
+        col = ColumnByType()
+        assert col.all_columns == []
+        assert col.string_columns == []
+        assert col.integer_columns == []
+        assert col.numeric_columns == []
+        assert col.datetime_columns == []
+        assert col.categorical_columns == []
+
+    def test_explicit_column_lists_stored_correctly(self):
+        col = ColumnByType(
+            all_columns=["a", "b"],
+            numeric_columns=["a"],
+            categorical_columns=["b"],
+        )
+        assert col.all_columns == ["a", "b"]
+        assert col.numeric_columns == ["a"]
+        assert col.categorical_columns == ["b"]
+
+    def test_ensure_list_returns_empty_list_for_none(self):
+        """ensure_list validator converts None to []."""
+        assert ColumnByType.ensure_list(None) == []
+
+    def test_ensure_list_returns_value_unchanged(self):
+        """ensure_list validator passes non-None values through."""
+        assert ColumnByType.ensure_list(["x", "y"]) == ["x", "y"]
+
+    def test_none_field_value_raises_validation_error(self):
+        """Passing None directly as a field value raises ValidationError."""
+        with pytest.raises(ValidationError):
+            ColumnByType(all_columns=None)
