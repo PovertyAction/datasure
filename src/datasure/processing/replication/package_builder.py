@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import zipfile
+from collections.abc import Callable
 
 import polars as pl
 
@@ -17,6 +18,9 @@ from datasure.processing.replication.script_generators import (
     generate_corrections_script,
     generate_import_script,
     generate_master_script,
+)
+from datasure.processing.replication.scto_import_generator import (
+    generate_scto_import_script,
 )
 from datasure.utils.duckdb_utils import duckdb_get_table
 
@@ -56,6 +60,10 @@ def build_replication_package(
     survey_name: str,
     alias: str,
     key_col: str,
+    scto_form_xlsx: bytes | None = None,
+    form_def: dict | None = None,
+    form_id: str = "",
+    on_progress: Callable[[str], None] | None = None,
 ) -> bytes:
     """Build the Stata replication package and return it as zip bytes.
 
@@ -71,12 +79,30 @@ def build_replication_package(
         The dataset alias stored in DuckDB.
     key_col : str
         The survey key column name (used in generated scripts).
+    scto_form_xlsx : bytes | None
+        Raw bytes of the SurveyCTO XLS form, if available. When provided the
+        file is included in docs/ as ``{survey}_questionnaire.xlsx``.
+    form_def : dict | None
+        SurveyCTO form definition JSON from ``download_form_definition``.
+        When provided, a fully-labelled ``import_data.do`` is generated
+        instead of the generic template.
+    form_id : str
+        SurveyCTO form ID, used in the generated import script header.
+    on_progress : Callable[[str], None] | None
+        Optional callback invoked with a human-readable status message at each
+        major step.  Callers can pass ``st.write`` to stream progress into a
+        Streamlit status block.
 
     Returns
     -------
     bytes
         Zip file contents ready for download.
     """
+
+    def _step(msg: str) -> None:
+        if on_progress is not None:
+            on_progress(msg)
+
     datasure_version = _get_version()
     safe_project = project_name.lower().replace(" ", "_")
     safe_survey = survey_name.lower().replace(" ", "_")
@@ -84,10 +110,19 @@ def build_replication_package(
 
     # Load data
     raw_df = _load_dataset(project_id, alias, "raw")
+    _step(f"Raw data loaded — {raw_df.height:,} rows")
+
     prep_log = _load_prep_log(project_id, alias)
+    _step(f"Preparation log loaded — {prep_log.height:,} steps")
+
     prepped_df = _load_dataset(project_id, alias, "prep")
+    _step(f"Prepped dataset loaded — {prepped_df.height:,} rows")
+
     corrected_df = _load_corrected(project_id, alias)
+    _step(f"Corrected dataset loaded — {corrected_df.height:,} rows")
+
     correction_log = _load_correction_log(project_id, alias)
+    _step(f"Correction log loaded — {correction_log.height:,} entries")
 
     # Build correction action summary
     n_by_action: dict[str, int] = {}
@@ -102,17 +137,31 @@ def build_replication_package(
         )
 
     # Generate scripts
-    import_script = generate_import_script(
-        project_name=project_name,
-        survey_name=survey_name,
-        datasure_version=datasure_version,
-    )
+    if form_def is not None:
+        import_script = generate_scto_import_script(
+            form_def=form_def,
+            form_id=form_id,
+            form_title=survey_name,
+            survey_name=survey_name,
+            datasure_version=datasure_version,
+        )
+        _step("`import_data.do` generated (SurveyCTO — with labels & value labels)")
+    else:
+        import_script = generate_import_script(
+            project_name=project_name,
+            survey_name=survey_name,
+            datasure_version=datasure_version,
+        )
+        _step("`import_data.do` generated")
+
     prepare_data_script = generate_prepare_data_script(
         prep_log=prep_log,
         project_name=project_name,
         survey_name=survey_name,
         datasure_version=datasure_version,
     )
+    _step("`prepare_data.do` generated")
+
     corrections_script = generate_corrections_script(
         correction_log=correction_log,
         key_col=key_col,
@@ -120,11 +169,15 @@ def build_replication_package(
         survey_name=survey_name,
         datasure_version=datasure_version,
     )
+    _step("`corrections.do` generated")
+
     master_script = generate_master_script(
         project_name=project_name,
         survey_name=survey_name,
         datasure_version=datasure_version,
     )
+    _step("`master.do` generated")
+
     readme = generate_readme(
         project_name=project_name,
         survey_name=survey_name,
@@ -135,7 +188,9 @@ def build_replication_package(
         prepped_rows=prepped_df.height if not prepped_df.is_empty() else 0,
         corrected_rows=corrected_df.height if not corrected_df.is_empty() else 0,
         n_corrections_by_action=n_by_action,
+        include_scto_form=scto_form_xlsx is not None,
     )
+    _step("README generated")
 
     # Raw CSV (input for import_data.do)
     raw_csv = raw_df.write_csv() if not raw_df.is_empty() else ""
@@ -167,7 +222,10 @@ def build_replication_package(
         zf.writestr(f"{root}/scripts/prepare_data.{SCRIPT_EXT}", prepare_data_script)
         zf.writestr(f"{root}/scripts/corrections.{SCRIPT_EXT}", corrections_script)
         zf.writestr(f"{root}/docs/README.md", readme)
+        if scto_form_xlsx is not None:
+            zf.writestr(f"{root}/docs/{safe_survey}_questionnaire.xlsx", scto_form_xlsx)
         zf.writestr(f"{root}/docs/correction_log.csv", correction_log_csv)
         zf.writestr(f"{root}/docs/prep_log.csv", prep_log_csv)
+    _step("Zip file assembled")
 
     return buf.getvalue()

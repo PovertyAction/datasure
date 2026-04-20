@@ -7,6 +7,7 @@ audit logs, README) as a zip file for download to the local drive.
 from __future__ import annotations
 
 import json
+import time
 
 import polars as pl
 import streamlit as st
@@ -14,6 +15,13 @@ import streamlit as st
 from datasure.processing.replication.package_builder import build_replication_package
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
+from datasure.utils.duckdb_utils import duckdb_get_table
+from datasure.utils.scto_api import (
+    SurveyCTOAPIClient,
+    SurveyCTOAPIConfig,
+    SurveyCTOAPIError,
+)
+from datasure.utils.secure_credentials import retrieve_scto_credentials
 
 _PROJECTS_FILE = "projects.json"
 
@@ -26,6 +34,90 @@ def _get_project_name(project_id: str) -> str:
             projects = json.load(f)
         return projects.get(project_id, {}).get("name", project_id)
     return project_id
+
+
+def _get_import_log_row(project_id: str, alias: str) -> dict | None:
+    """Return the import_log row for this alias, or None if not found."""
+    try:
+        import_log = duckdb_get_table(project_id, "import_log", "logs")
+        row_df = import_log.filter(pl.col("alias") == alias)
+        if row_df.is_empty():
+            return None
+        return row_df.row(0, named=True)
+    except Exception:
+        return None
+
+
+def _fetch_scto_form_xlsx(
+    project_id: str, alias: str
+) -> tuple[bytes | None, dict | None, str]:
+    """Attempt to download the SurveyCTO XLS form for the given alias.
+
+    Returns
+    -------
+    tuple[bytes | None, dict | None, str]
+        ``(xlsx_bytes, form_def, message)`` where *message* describes any
+        failure.  Both ``xlsx_bytes`` and ``form_def`` are ``None`` when the
+        dataset is not from SurveyCTO or the download failed.
+    """
+    row = _get_import_log_row(project_id, alias)
+    if row is None:
+        return None, None, "Dataset not found in import log."
+
+    if row.get("source") != "SurveyCTO":
+        return None, None, ""  # Not a SurveyCTO dataset — silently skip
+
+    server = row.get("server", "")
+    username = row.get("username", "")
+    form_id = row.get("form_id", "")
+
+    if not (server and form_id):
+        return None, None, "Server or form ID missing from import log."
+
+    cred = retrieve_scto_credentials(project_id, server)
+    if not cred.get("success"):
+        return (
+            None,
+            None,
+            (
+                f"Could not retrieve stored credentials for server **{server}**: "
+                f"{cred.get('error', 'unknown error')}. "
+                "Try re-importing the dataset to refresh your credentials."
+            ),
+        )
+
+    password = cred.get("credentials", {}).get("password", "")
+    if not password:
+        return None, None, f"Password not found in keyring for server **{server}**."
+
+    try:
+        api_config = SurveyCTOAPIConfig(
+            server_name=server,
+            username=username or cred["credentials"]["username"],
+            password=password,
+        )
+        client = SurveyCTOAPIClient(api_config)
+        xlsx_bytes, form_def = client.download_form_xlsx(form_id)
+    except SurveyCTOAPIError as exc:
+        return (
+            None,
+            None,
+            (
+                f"Could not download the questionnaire from SurveyCTO: {exc}  \n"
+                "The package will be built without the questionnaire file."
+            ),
+        )
+    except Exception as exc:
+        return (
+            None,
+            None,
+            (
+                f"Unexpected error fetching questionnaire: {exc}  \n"
+                "The package will be built without the questionnaire file."
+            ),
+        )
+    else:
+        return xlsx_bytes, form_def, ""
 
 
 # ── Guard: project must be loaded ────────────────────────────────────────────
@@ -109,15 +201,43 @@ if st.button(
     disabled=build_disabled,
 ):
     safe_project = project_name.lower().replace(" ", "_")
+    scto_form_xlsx: bytes | None = None
+    scto_form_def: dict | None = None
+    scto_form_id: str = ""
 
-    with st.spinner("Building replication package…"):
+    def _on_progress(msg: str) -> None:
+        st.write(f":white_check_mark: {msg}")
+        time.sleep(1)
+
+    with st.status("Building replication package…", expanded=True) as build_status:
+        # ── Step 1: SurveyCTO questionnaire + form definition ─────────────────
+        log_row = _get_import_log_row(project_id, selected_alias)
+        if log_row is not None and log_row.get("source") == "SurveyCTO":
+            scto_form_id = log_row.get("form_id", "") or ""
+            st.write("Fetching SurveyCTO questionnaire…")
+            scto_form_xlsx, scto_form_def, scto_error = _fetch_scto_form_xlsx(
+                project_id, selected_alias
+            )
+            if scto_error:
+                st.warning(f"Questionnaire not included: {scto_error}")
+            else:
+                st.write(":white_check_mark: Questionnaire downloaded")
+            time.sleep(1)
+
+        # ── Steps 2+: data loading + script generation + zip assembly ────────
         zip_bytes = build_replication_package(
             project_id=project_id,
             project_name=project_name,
             survey_name=survey_name,
             alias=selected_alias,
             key_col=key_col,
+            scto_form_xlsx=scto_form_xlsx,
+            form_def=scto_form_def,
+            form_id=scto_form_id,
+            on_progress=_on_progress,
         )
+
+        build_status.update(label="Package ready!", state="complete", expanded=False)
 
     st.session_state["_replication_zip"] = zip_bytes
     st.session_state["_replication_filename"] = f"{safe_project}_replication.zip"
@@ -141,6 +261,14 @@ with st.expander("What's inside the zip?", expanded=False):
     if selected_alias and project_name and survey_name:
         safe_p = project_name.lower().replace(" ", "_")
         safe_s = survey_name.lower().replace(" ", "_")
+
+        # Show questionnaire line only for SurveyCTO datasets
+        log_row = _get_import_log_row(project_id, selected_alias)
+        is_scto = log_row is not None and log_row.get("source") == "SurveyCTO"
+        questionnaire_line = (
+            f"    ├── {safe_s}_questionnaire.xlsx (SurveyCTO form)\n" if is_scto else ""
+        )
+
         st.code(
             f"{safe_p}_replication/\n"
             f"├── raw/\n"
@@ -157,6 +285,7 @@ with st.expander("What's inside the zip?", expanded=False):
             f"└── docs/\n"
             f"    ├── README.md\n"
             f"    ├── codebook.xlsx     (generated by ipacodebook)\n"
+            f"{questionnaire_line}"
             f"    ├── correction_log.csv\n"
             f"    └── prep_log.csv",
             language="text",
