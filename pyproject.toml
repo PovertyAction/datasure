@@ -63,6 +63,8 @@ dev = [
     "sqlfluff>=3.1.1",
     "pytest>=8.0.0",
     "pytest-cov>=4.1.0",
+    "great-docs>=0.7",
+
 ]
 
 [[tool.uv.index]]
