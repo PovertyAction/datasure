@@ -233,10 +233,10 @@ class TestNavigationProjectWithPages:
         nav_arg = st_mock.navigation.call_args[0][0]
         assert "---" in nav_arg
 
-    def test_correction_section_has_one_page(self, two_pages):
+    def test_correction_section_has_two_pages(self, two_pages):
         st_mock, *_ = two_pages
         nav_arg = st_mock.navigation.call_args[0][0]
-        assert len(nav_arg["---"]) == 1
+        assert len(nav_arg["---"]) == 2
 
     def test_output_pages_stored_in_session_state(self, two_pages):
         _st, ss, *_ = two_pages
