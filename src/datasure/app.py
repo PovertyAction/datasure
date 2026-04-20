@@ -28,6 +28,9 @@ if "st_output_pages" not in st.session_state:
 if "st_corr_page" not in st.session_state:
     st.session_state.st_corr_page = None
 
+if "st_replication_page" not in st.session_state:
+    st.session_state.st_replication_page = None
+
 # Get the directory where this module is located
 _package_dir = Path(__file__).parent
 _views_dir = _package_dir / "views"
@@ -100,17 +103,24 @@ else:
             icon=":material/cleaning_services:",
         )
 
+        replication_page = st.Page(
+            page=str(_views_dir / "replication_view.py"),
+            title="Export Replication Package",
+            icon=":material/package_2:",
+        )
+
         st.session_state.st_output_page1 = st.session_state.st_output_pages[
             0
         ]  # for demo
         st.session_state.st_corr_page = corr_page
+        st.session_state.st_replication_page = replication_page
 
         # --- NAVIGATION MENU WITH CHECK OUTPUTS AND CORRECTION PAGES--- #
         nav_menu = st.navigation(
             {
                 "": [start_page, import_data_page, prep_data_page, config_checks_page],
                 "DQA Reports": st.session_state.st_output_pages,
-                "---": [corr_page],
+                "---": [corr_page, replication_page],
             },
         )
     else:
