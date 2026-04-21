@@ -51,6 +51,23 @@ class TestCleanLabel:
         result = _clean_label("  <b> text </b>  ")
         assert result == "text"
 
+    def test_collapses_newlines_to_single_space(self):
+        result = _clean_label("Line one\n\nLine two")
+        assert result == "Line one Line two"
+
+    def test_collapses_multiline_label_like_surveycto(self):
+        label = "Nigeria ORS Zinc Project  \n \n COMMUNITY ENTRY FORM \n \n July 2024"
+        result = _clean_label(label)
+        assert result == "Nigeria ORS Zinc Project COMMUNITY ENTRY FORM July 2024"
+
+    def test_newlines_after_html_removal_collapsed(self):
+        result = _clean_label("Part one<br/>\n<br/>\nPart two")
+        assert result == "Part one Part two"
+
+    def test_tabs_collapsed(self):
+        result = _clean_label("word\t\tanother")
+        assert result == "word another"
+
 
 # ---------------------------------------------------------------------------
 # _find_label_col
@@ -311,7 +328,12 @@ class TestGenerateSCTOImportScript:
 
     def test_drops_note_fields(self, script):
         assert "note_fields" in script
-        assert "section_note" in script
+        assert "section_note" in script  # appears in the local declaration
+
+    def test_note_fields_have_no_label_variable_statement(self, script):
+        # note fields are absent from the data; no label variable statement should
+        # be emitted for them
+        assert "label variable section_note" not in script
 
     def test_text_fields_included(self, script):
         assert "text_fields" in script
@@ -339,15 +361,15 @@ class TestGenerateSCTOImportScript:
         assert "skipped_field" not in script
 
     def test_label_variable_for_text_field(self, script):
-        assert 'label variable respondent_name "Respondent name"' in script
+        assert 'cap label variable respondent_name "Respondent name"' in script
 
     def test_label_variable_for_integer_field(self, script):
-        assert 'label variable age "Age of respondent"' in script
+        assert 'cap label variable age "Age of respondent"' in script
 
     def test_numeric_value_labels_applied(self, script):
-        # yn choices 1/0 are numeric → label define + label values
+        # yn choices 1/0 are numeric → label define + cap label values
         assert "label define" in script
-        assert "label values consent" in script
+        assert "cap label values consent" in script
 
     def test_non_numeric_choices_no_value_labels(self, script):
         # region choices (north/south) are non-numeric → no value labels for regions

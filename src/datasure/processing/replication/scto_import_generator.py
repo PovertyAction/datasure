@@ -48,10 +48,15 @@ def _find_label_col(headers: list[str]) -> str:
     return ""
 
 
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
 def _clean_label(text: str) -> str:
     """Strip HTML tags and escape text for a Stata double-quoted string."""
     # Remove HTML tags (SurveyCTO embeds <b>, <br/>, <span ...>, etc.)
-    text = _HTML_TAG_RE.sub("", text).strip()
+    text = _HTML_TAG_RE.sub("", text)
+    # Collapse newlines and runs of whitespace into a single space
+    text = _WHITESPACE_RE.sub(" ", text).strip()
     # Escape $ to prevent Stata macro expansion (SurveyCTO uses ${var} syntax)
     text = text.replace("$", r"\$")
     # Replace embedded double-quotes with single quotes
@@ -290,10 +295,12 @@ def generate_scto_import_script(
 
     # ── Drop note fields ──────────────────────────────────────────────────────
     L += [
-        "\t* drop note fields (since they don't contain any real data)",
+        "\t* drop note fields if they exist (API downloads may omit them)",
         "\tforvalues i = 1/100 {",
         '\t\tif "`note_fields`i\'\'" ~= "" {',
-        "\t\t\tdrop `note_fields`i''",
+        "\t\t\tforeach nfvar in `note_fields`i'' {",
+        "\t\t\t\tcap drop `nfvar'",
+        "\t\t\t}",
         "\t\t}",
         "\t}",
         "",
@@ -388,12 +395,16 @@ def generate_scto_import_script(
     used_label_sets: set[str] = set()
 
     for name, base, list_name, label in survey_fields:
+        if base in _NOTE_TYPES:
+            continue  # note fields are absent from the data; nothing to label
+
         esc = _clean_label(label)
         short = _truncate(esc, _LABEL_VAR_MAX)
 
-        L.append(f'\tlabel variable {name} "{short}"')
+        # cap: silently skip if the variable is absent from this export
+        L.append(f'\tcap label variable {name} "{short}"')
         if label:
-            L.append(f'\tnote {name}: "{esc}"')
+            L.append(f'\tcap note {name}: "{esc}"')
 
         # Value labels for select_one / select_multiple with numeric choice values
         if base in (_SELECT_ONE, _SELECT_MULTI) and list_name in choices_map:
@@ -406,7 +417,7 @@ def generate_scto_import_script(
                     f'{int(float(v))} "{_clean_label(lb)}"' for v, lb in numeric_pairs
                 )
                 L.append(f"\tlabel define {lset} {define_parts}")
-                L.append(f"\tlabel values {name} {lset}")
+                L.append(f"\tcap label values {name} {lset}")
 
         L.append("")
 
