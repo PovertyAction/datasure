@@ -178,7 +178,7 @@ def generate_master_script(
         'do "$scripts/import_data.do"',
         "",
         "* Step 2: Apply preparation steps",
-        f'use "$raw/{safe_survey}_raw.dta", clear',
+        f'use "$output/{safe_survey}_raw.dta", clear',
         'do "$scripts/prepare_data.do"',
         "",
         "* Save prepped dataset",

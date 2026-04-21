@@ -226,6 +226,10 @@ def build_replication_package(
             zf.writestr(f"{root}/docs/{safe_survey}_questionnaire.xlsx", scto_form_xlsx)
         zf.writestr(f"{root}/docs/correction_log.csv", correction_log_csv)
         zf.writestr(f"{root}/docs/prep_log.csv", prep_log_csv)
+        zf.writestr(
+            f"{root}/output/.gitkeep",
+            "# This folder is created by master.do when the replication scripts are run.\n",
+        )
     _step("Zip file assembled")
 
     return buf.getvalue()
