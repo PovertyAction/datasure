@@ -17,6 +17,7 @@ from datasure.processing.replication.script_generators import (
     SCRIPT_EXT,
     generate_corrections_script,
     generate_import_script,
+    generate_install_packages_script,
     generate_master_script,
 )
 from datasure.processing.replication.scto_import_generator import (
@@ -162,6 +163,13 @@ def build_replication_package(
     )
     _step("`prepare_data.do` generated")
 
+    install_packages_script = generate_install_packages_script(
+        project_name=project_name,
+        survey_name=survey_name,
+        datasure_version=datasure_version,
+    )
+    _step("`install_packages.do` generated")
+
     corrections_script = generate_corrections_script(
         correction_log=correction_log,
         key_col=key_col,
@@ -218,6 +226,9 @@ def build_replication_package(
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{root}/raw/{safe_survey}_raw.csv", raw_csv)
         zf.writestr(f"{root}/scripts/master.{SCRIPT_EXT}", master_script)
+        zf.writestr(
+            f"{root}/scripts/install_packages.{SCRIPT_EXT}", install_packages_script
+        )
         zf.writestr(f"{root}/scripts/import_data.{SCRIPT_EXT}", import_script)
         zf.writestr(f"{root}/scripts/prepare_data.{SCRIPT_EXT}", prepare_data_script)
         zf.writestr(f"{root}/scripts/corrections.{SCRIPT_EXT}", corrections_script)

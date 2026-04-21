@@ -122,6 +122,46 @@ def generate_corrections_script(
     return "\n".join(lines)
 
 
+def generate_install_packages_script(
+    project_name: str,
+    survey_name: str,
+    datasure_version: str,
+) -> str:
+    """Generate a Stata do-file that installs all required packages.
+
+    Parameters
+    ----------
+    project_name : str
+        Human-readable project name.
+    survey_name : str
+        Human-readable survey name.
+    datasure_version : str
+        Version of DataSure.
+
+    Returns
+    -------
+    str
+        Stata script content as a string.
+    """
+    header = _header("Install Packages", project_name, survey_name, datasure_version)
+
+    lines = [
+        header,
+        "* Install github package manager",
+        'net install github, from("https://haghish.github.io/github/")',
+        "",
+        "* Install IPA packages",
+        "github install PovertyAction/high-frequency-checks",
+        "github install PovertyAction/ipahelper",
+        "github install PovertyAction/ipaclean",
+        "github install PovertyAction/ipaplots",
+        "",
+        'display "All packages installed."',
+    ]
+
+    return "\n".join(lines) + "\n"
+
+
 def generate_master_script(
     project_name: str,
     survey_name: str,
@@ -156,16 +196,17 @@ def generate_master_script(
         header,
         "* -------------------------------------------------------",
         "* INSTRUCTIONS:",
-        "* 1. Install ipaclean (required for codebook generation):",
-        "*    net install ipaclean, \\",
-        '*      from("https://raw.githubusercontent.com/PovertyAction/ipaclean/main/src") \\',
-        "*      replace",
-        "* 2. Set `root` below to the full path of the parent folder",
+        "* 1. Set `root` below to the full path of the parent folder",
         f"*    that contains the {safe_project}_replication/ directory.",
         "*    Example:  global root C:/Users/you/Desktop",
-        "* 3. Run this script from the Stata command window:",
+        "* 2. Run this script from the Stata command window:",
         "*    do master.do",
         "* -------------------------------------------------------",
+        "",
+        "cls",
+        "clear all",
+        "set trace off",
+        "set more off",
         "",
         'global root    "REPLACE_WITH_PARENT_PATH"',
         f'global pkg     "$root/{safe_project}_replication"',
@@ -174,23 +215,26 @@ def generate_master_script(
         'global output  "$pkg/output"',
         'global docs    "$pkg/docs"',
         "",
-        "* Step 1: Import raw CSV and save as Stata dataset",
+        "* Step 1: Install required packages",
+        'do "$scripts/install_packages.do"',
+        "",
+        "* Step 2: Import raw CSV and save as Stata dataset",
         'do "$scripts/import_data.do"',
         "",
-        "* Step 2: Apply preparation steps",
+        "* Step 3: Apply preparation steps",
         f'use "$output/{safe_survey}_raw.dta", clear',
         'do "$scripts/prepare_data.do"',
         "",
         "* Save prepped dataset",
         f'save "$output/{safe_survey}_prepped.dta", replace',
         "",
-        "* Step 3: Apply all recorded corrections",
+        "* Step 4: Apply all recorded corrections",
         'do "$scripts/corrections.do"',
         "",
         "* Save corrected dataset",
         f'save "$output/{safe_survey}_corrected.dta", replace',
         "",
-        "* Step 4: Generate codebook (requires ipaclean)",
+        "* Step 5: Generate codebook (requires ipaclean)",
         'ipacodebook using "$docs/codebook.xlsx", replace',
         "",
         'display "Done. Output files saved to output/ and docs/."',
