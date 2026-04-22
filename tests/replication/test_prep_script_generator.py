@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from datasure.processing.replication.prep_script_generator import (
+from datasure.replication.prep_script_generator import (
     _col_list,
     _cols,
     _first_val,

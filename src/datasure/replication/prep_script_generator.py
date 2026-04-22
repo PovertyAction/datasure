@@ -15,7 +15,7 @@ from typing import Any
 
 import polars as pl
 
-from datasure.processing.replication.script_generators import _C, _header
+from datasure.replication.script_generators import _C, _header
 
 # ---------------------------------------------------------------------------
 # String constants mirroring enum values (avoids importing the full app stack)

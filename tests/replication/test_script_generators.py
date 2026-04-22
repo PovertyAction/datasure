@@ -5,7 +5,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from datasure.processing.replication.script_generators import (
+from datasure.replication.script_generators import (
     SCRIPT_EXT,
     _emit_stata,
     _escape,

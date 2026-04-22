@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from datasure.processing.replication.scto_import_generator import (
+from datasure.replication.scto_import_generator import (
     _build_choices_map,
     _chunk_names,
     _clean_label,

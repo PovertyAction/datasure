@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-from datasure.processing.replication.script_generators import _C
+from datasure.replication.script_generators import _C
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 

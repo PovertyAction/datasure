@@ -9,18 +9,18 @@ from collections.abc import Callable
 
 import polars as pl
 
-from datasure.processing.replication.prep_script_generator import (
+from datasure.replication.prep_script_generator import (
     generate_prepare_data_script,
 )
-from datasure.processing.replication.readme import generate_readme
-from datasure.processing.replication.script_generators import (
+from datasure.replication.readme import generate_readme
+from datasure.replication.script_generators import (
     SCRIPT_EXT,
     generate_corrections_script,
     generate_import_script,
     generate_install_packages_script,
     generate_master_script,
 )
-from datasure.processing.replication.scto_import_generator import (
+from datasure.replication.scto_import_generator import (
     generate_scto_import_script,
 )
 from datasure.utils.duckdb_utils import duckdb_get_table

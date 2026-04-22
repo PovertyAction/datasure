@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from datasure.processing.replication.readme import generate_readme
+from datasure.replication.readme import generate_readme
 
 
 @pytest.fixture()

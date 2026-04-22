@@ -12,7 +12,7 @@ import time
 import polars as pl
 import streamlit as st
 
-from datasure.processing.replication.package_builder import build_replication_package
+from datasure.replication.package_builder import build_replication_package
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
 from datasure.utils.duckdb_utils import duckdb_get_table

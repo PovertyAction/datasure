@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from datasure.processing.replication.codebook import generate_codebook
+from datasure.replication.codebook import generate_codebook
 
 
 class TestGenerateCodebook:
