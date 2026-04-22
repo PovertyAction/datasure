@@ -313,9 +313,18 @@ def generate_prepare_data_script(
     )
 
     if prep_log.is_empty():
-        return h + f"{_C} No preparation steps recorded.\n"
+        return (
+            h
+            + 'cap log using "$logdir/3_prepare_data.log", replace text\n'
+            + f"{_C} No preparation steps recorded.\n"
+            + "cap log close\n"
+        )
 
-    lines: list[str] = [h]
+    lines: list[str] = [
+        h,
+        'cap log using "$logdir/3_prepare_data.log", replace text',
+        "",
+    ]
 
     for i, row in enumerate(prep_log.iter_rows(named=True), start=1):
         action = str(row.get("action") or "")
@@ -348,4 +357,5 @@ def generate_prepare_data_script(
 
         lines.append("")
 
+    lines.append("cap log close")
     return "\n".join(lines)

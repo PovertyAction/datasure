@@ -107,9 +107,18 @@ def generate_corrections_script(
     header = _header("Corrections Script", project_name, survey_name, datasure_version)
 
     if correction_log.is_empty():
-        return header + f"{_C} No corrections recorded.\n"
+        return (
+            header
+            + 'cap log using "$logdir/4_corrections.log", replace text\n'
+            + f"{_C} No corrections recorded.\n"
+            + "cap log close\n"
+        )
 
-    lines: list[str] = [header]
+    lines: list[str] = [
+        header,
+        'cap log using "$logdir/4_corrections.log", replace text',
+        "",
+    ]
 
     for row in correction_log.iter_rows(named=True):
         action = str(row["action"])
@@ -119,6 +128,7 @@ def generate_corrections_script(
         reason = str(row.get("reason") or "")
         lines += _emit_stata(action, key_col, key_val, col, new_val, reason)
 
+    lines.append("cap log close")
     return "\n".join(lines)
 
 
@@ -147,6 +157,8 @@ def generate_install_packages_script(
 
     lines = [
         header,
+        'cap log using "$logdir/1_install_packages.log", replace text',
+        "",
         "* Install github package manager",
         'net install github, from("https://haghish.github.io/github/")',
         "",
@@ -157,6 +169,8 @@ def generate_install_packages_script(
         "github install PovertyAction/ipaplots",
         "",
         'display "All packages installed."',
+        "",
+        "cap log close",
     ]
 
     return "\n".join(lines) + "\n"
@@ -200,7 +214,7 @@ def generate_master_script(
         f"*    that contains the {safe_project}_replication/ directory.",
         "*    Example:  global root C:/Users/you/Desktop",
         "* 2. Run this script from the Stata command window:",
-        "*    do master.do",
+        "*    do 0_main.do",
         "* -------------------------------------------------------",
         "",
         "cls",
@@ -210,34 +224,46 @@ def generate_master_script(
         "",
         'global root    "REPLACE_WITH_PARENT_PATH"',
         f'global pkg     "$root/{safe_project}_replication"',
-        'global raw     "$pkg/raw"',
-        'global scripts "$pkg/scripts"',
+        'global scripts "$pkg/2_scripts"',
+        'global docs    "$pkg/1_docs"',
+        'global raw     "$pkg/data/raw"',
+        'global inter   "$pkg/data/intermediate"',
+        'global final   "$pkg/data/final"',
         'global output  "$pkg/output"',
-        'global docs    "$pkg/docs"',
+        'global logs    "$output/logs"',
+        'global tables  "$output/tables"',
+        'global figures "$output/figures"',
+        "",
+        "* Create date-based log subfolder and start run log",
+        'local datestr = string(date(c(current_date), "DMY"), "%tdCCYY-NN-DD")',
+        'global logdir "$logs/`datestr\'"',
+        'cap mkdir "$logdir"',
+        'log using "$logdir/0_main.log", replace text',
         "",
         "* Step 1: Install required packages",
-        'do "$scripts/install_packages.do"',
+        'do "$scripts/1_install_packages.do"',
         "",
         "* Step 2: Import raw CSV and save as Stata dataset",
-        'do "$scripts/import_data.do"',
+        'do "$scripts/2_import_data.do"',
         "",
         "* Step 3: Apply preparation steps",
-        f'use "$output/{safe_survey}_raw.dta", clear',
-        'do "$scripts/prepare_data.do"',
+        f'use "$raw/{safe_survey}_raw.dta", clear',
+        'do "$scripts/3_prepare_data.do"',
         "",
         "* Save prepped dataset",
-        f'save "$output/{safe_survey}_prepped.dta", replace',
+        f'save "$inter/{safe_survey}_prepped.dta", replace',
         "",
         "* Step 4: Apply all recorded corrections",
-        'do "$scripts/corrections.do"',
+        'do "$scripts/4_corrections.do"',
         "",
         "* Save corrected dataset",
-        f'save "$output/{safe_survey}_corrected.dta", replace',
+        f'save "$final/{safe_survey}_corrected.dta", replace',
         "",
         "* Step 5: Generate codebook (requires ipaclean)",
-        'ipacodebook using "$docs/codebook.xlsx", replace',
+        'ipacodebook using "$docs/codebooks/codebook.xlsx", replace',
         "",
-        'display "Done. Output files saved to output/ and docs/."',
+        "log close",
+        'display "Done. Datasets saved to data/ and codebook to 1_docs/codebooks/."',
     ]
 
     return "\n".join(lines) + "\n"
@@ -269,6 +295,8 @@ def generate_import_script(
 
     lines = [
         header,
+        'cap log using "$logdir/2_import_data.log", replace text',
+        "",
         "* Import raw CSV dataset (all columns as strings to preserve data as-is)",
         f'import delimited "$raw/{safe_survey}_raw.csv", stringcols(_all) clear',
         "",
@@ -276,5 +304,7 @@ def generate_import_script(
         f'save "$raw/{safe_survey}_raw.dta", replace',
         "",
         'display "Raw dataset imported and saved as DTA."',
+        "",
+        "cap log close",
     ]
     return "\n".join(lines) + "\n"

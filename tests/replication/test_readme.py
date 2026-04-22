@@ -84,7 +84,8 @@ class TestGenerateReadme:
             corrected_rows=0,
             n_corrections_by_action={},
         )
-        assert "| — | 0 |" in result
+        assert "| —" in result
+        assert "0 |" in result
 
     def test_safe_survey_name_used_in_paths(self, readme):
         assert "baseline_survey" in readme
@@ -93,12 +94,13 @@ class TestGenerateReadme:
         assert "test_project" in readme
 
     def test_contains_folder_structure_block(self, readme):
-        assert "├── raw/" in readme
-        assert "├── scripts/" in readme
-        assert "└── docs/" in readme
+        assert "├── 1_docs/" in readme
+        assert "├── 2_scripts/" in readme
+        assert "├── data/" in readme
+        assert "└── output/" in readme
 
     def test_contains_how_to_run_section(self, readme):
-        assert "## How to run" in readme
+        assert "HOW TO RUN" in readme
 
     def test_contains_data_pipeline_summary(self, readme):
-        assert "## Data pipeline summary" in readme
+        assert "DATA PIPELINE SUMMARY" in readme
