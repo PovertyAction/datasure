@@ -5,7 +5,7 @@
 # ----------------------
 # Set this if your importable module name differs from the project name.
 # Example: project 'py-yaml12' with module name 'yaml12'
-# module: yaml12
+module: datasure
 
 # Docstring Parser
 # ----------------
