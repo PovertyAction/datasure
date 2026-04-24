@@ -24,8 +24,11 @@ from datasure.utils.secure_credentials import retrieve_scto_credentials
 _PROJECTS_FILE = "projects.json"
 
 
+# ── Data access ───────────────────────────────────────────────────────────────
+
+
 def _get_project_name(project_id: str) -> str:
-    """Look up the human-readable project name from projects.json."""
+    """Return the human-readable project name, falling back to project_id."""
     projects_file = get_cache_path(_PROJECTS_FILE)
     if projects_file.exists():
         with open(projects_file) as f:
@@ -35,7 +38,7 @@ def _get_project_name(project_id: str) -> str:
 
 
 def _get_import_log_row(project_id: str, alias: str) -> dict | None:
-    """Return the import_log row for this alias, or None if not found."""
+    """Return the import_log row for *alias*, or None if not found."""
     try:
         import_log = duckdb_get_table(project_id, "import_log", "logs")
         row_df = import_log.filter(pl.col("alias") == alias)
@@ -46,37 +49,107 @@ def _get_import_log_row(project_id: str, alias: str) -> dict | None:
         return None
 
 
-def _fetch_scto_form_xlsx(
+# ── Configuration helpers (pure) ──────────────────────────────────────────────
+
+
+def _resolve_page_config(
+    configs: pl.DataFrame, page_name: str
+) -> tuple[str, str] | None:
+    """Return ``(alias, key_col)`` for *page_name*, or None if not found.
+
+    Parameters
+    ----------
+    configs:
+        DataFrame returned by ``ConfigurationService.get_all_configurations()``.
+    page_name:
+        The selected page / check-configuration name.
+    """
+    page_configs = configs.filter(pl.col("page_name") == page_name)
+    if page_configs.is_empty():
+        return None
+    alias = page_configs[0, "survey_data_name"] or ""
+    key_col = page_configs[0, "survey_key"] or ""
+    return alias, key_col
+
+
+def _zip_filename(project_name: str, page_name: str) -> str:
+    """Return the download filename for the replication package zip.
+
+    Example: ``replication_ors_zinc_community_hfc.zip``
+    """
+    safe_p = project_name.lower().replace(" ", "_")
+    safe_pg = page_name.lower().replace(" ", "_")
+    return f"replication_{safe_p}_{safe_pg}.zip"
+
+
+def _package_tree(safe_project: str, safe_page: str, is_scto: bool) -> str:
+    """Return the zip contents as a plain-text directory tree."""
+    surveys_line = (
+        f"│   ├── surveys/{safe_page}_questionnaire.xlsx\n"
+        if is_scto
+        else "│   ├── surveys/\n"
+    )
+    return (
+        f"replication_{safe_project}_{safe_page}/\n"
+        f"├── 0_README.txt\n"
+        f"├── 1_docs/\n"
+        f"{surveys_line}"
+        f"│   ├── codebooks/\n"
+        f"│   └── notes/\n"
+        f"├── 2_scripts/\n"
+        f"│   ├── 0_main.do\n"
+        f"│   ├── 1_install_packages.do\n"
+        f"│   ├── 2_import_data.do\n"
+        f"│   ├── 3_prepare_data.do\n"
+        f"│   └── 4_corrections.do\n"
+        f"├── data/\n"
+        f"│   ├── raw/{safe_page}_raw.csv\n"
+        f"│   ├── intermediate/          (generated when scripts are run)\n"
+        f"│   └── final/                 (generated when scripts are run)\n"
+        f"└── output/\n"
+        f"    ├── tables/\n"
+        f"    ├── figures/\n"
+        f"    └── logs/\n"
+        f"        ├── <date>/\n"
+        f"        │   ├── 0_main.log\n"
+        f"        │   └── ...per-script logs\n"
+        f"        ├── correction_log.csv\n"
+        f"        └── prep_log.csv"
+    )
+
+
+# ── SurveyCTO integration ─────────────────────────────────────────────────────
+
+
+def _fetch_scto_assets(
     project_id: str, alias: str
-) -> tuple[bytes | None, dict | None, str]:
-    """Attempt to download the SurveyCTO XLS form for the given alias.
+) -> tuple[bytes | None, dict | None, str, str]:
+    """Fetch the SurveyCTO questionnaire XLS and form definition for *alias*.
 
     Returns
     -------
-    tuple[bytes | None, dict | None, str]
-        ``(xlsx_bytes, form_def, message)`` where *message* describes any
-        failure.  Both ``xlsx_bytes`` and ``form_def`` are ``None`` when the
-        dataset is not from SurveyCTO or the download failed.
+    tuple[bytes | None, dict | None, str, str]
+        ``(xlsx_bytes, form_def, form_id, error_msg)``.
+        *error_msg* is an empty string on success or for non-SurveyCTO datasets.
+        Both *xlsx_bytes* and *form_def* are ``None`` when the download failed.
     """
     row = _get_import_log_row(project_id, alias)
-    if row is None:
-        return None, None, "Dataset not found in import log."
-
-    if row.get("source") != "SurveyCTO":
-        return None, None, ""  # Not a SurveyCTO dataset — silently skip
+    if row is None or row.get("source") != "SurveyCTO":
+        return None, None, "", ""
 
     server = row.get("server", "")
     username = row.get("username", "")
-    form_id = row.get("form_id", "")
+    form_id = row.get("form_id", "") or ""
 
     if not (server and form_id):
-        return None, None, "Server or form ID missing from import log."
+        return None, None, form_id, "Server or form ID missing from import log."
 
     cred = retrieve_scto_credentials(project_id, server)
     if not cred.get("success"):
         return (
             None,
             None,
+            form_id,
             (
                 f"Could not retrieve stored credentials for server **{server}**: "
                 f"{cred.get('error', 'unknown error')}. "
@@ -86,7 +159,12 @@ def _fetch_scto_form_xlsx(
 
     password = cred.get("credentials", {}).get("password", "")
     if not password:
-        return None, None, f"Password not found in keyring for server **{server}**."
+        return (
+            None,
+            None,
+            form_id,
+            (f"Password not found in keyring for server **{server}**."),
+        )
 
     try:
         api_config = SurveyCTOAPIConfig(
@@ -94,12 +172,15 @@ def _fetch_scto_form_xlsx(
             username=username or cred["credentials"]["username"],
             password=password,
         )
-        client = SurveyCTOAPIClient(api_config)
-        xlsx_bytes, form_def = client.download_form_xlsx(form_id)
+        xlsx_bytes, form_def = SurveyCTOAPIClient(api_config).download_form_xlsx(
+            form_id
+        )
+        return xlsx_bytes, form_def, form_id, ""  # noqa: TRY300
     except SurveyCTOAPIError as exc:
         return (
             None,
             None,
+            form_id,
             (
                 f"Could not download the questionnaire from SurveyCTO: {exc}  \n"
                 "The package will be built without the questionnaire file."
@@ -109,28 +190,63 @@ def _fetch_scto_form_xlsx(
         return (
             None,
             None,
+            form_id,
             (
                 f"Unexpected error fetching questionnaire: {exc}  \n"
                 "The package will be built without the questionnaire file."
             ),
         )
-    else:
-        return xlsx_bytes, form_def, ""
 
 
-# ── Guard: project must be loaded ────────────────────────────────────────────
+# ── UI helpers ────────────────────────────────────────────────────────────────
+
+
+def _on_progress(msg: str) -> None:
+    st.write(f":white_check_mark: {msg}")
+    time.sleep(1)
+
+
+def _render_config_details(page_configs: pl.DataFrame) -> None:
+    """Show an expanded table of configuration fields for the selected page."""
+    with st.expander("Selected page details", expanded=True):
+        st.write("**Configurations for this page:**")
+        st.dataframe(
+            page_configs.select(
+                "survey_data_name",
+                "backcheck_data_name",
+                "survey_key",
+                "survey_id",
+                "survey_date",
+                "enumerator",
+            ),
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "survey_data_name": "Dataset name",
+                "backcheck_data_name": "Backcheck dataset name",
+                "survey_key": "Key column",
+                "survey_id": "Survey ID",
+                "survey_date": "Survey date column",
+                "enumerator": "Enumerator column",
+            },
+        )
+
+
+def _render_package_preview(safe_project: str, safe_page: str, is_scto: bool) -> None:
+    """Render the collapsible zip-contents preview."""
+    with st.expander("What's inside the zip?", expanded=False):
+        st.code(_package_tree(safe_project, safe_page, is_scto), language="text")
+
+
+# ── Page ──────────────────────────────────────────────────────────────────────
 
 project_id: str = st.session_state.get("st_project_id", "")
-
 if not project_id:
     st.info("Select a project from the Start Here page before exporting.")
     st.stop()
 
-# ── Load check configurations ────────────────────────────────────────────────
-
 config_service = ConfigurationService(project_id)
 configs: pl.DataFrame = config_service.get_all_configurations()
-
 if configs.is_empty():
     st.info(
         "No check configurations found. "
@@ -138,7 +254,7 @@ if configs.is_empty():
     )
     st.stop()
 
-# ── Page header ──────────────────────────────────────────────────────────────
+# ── Header ────────────────────────────────────────────────────────────────────
 
 st.title("Replication Package")
 st.markdown(
@@ -147,122 +263,79 @@ st.markdown(
 )
 st.divider()
 
-# ── Configuration form ───────────────────────────────────────────────────────
+# ── Page selector ─────────────────────────────────────────────────────────────
 
 st.subheader("Configure export")
 
-page_name = configs["page_name"].unique().to_list()
-
 page_name_col, _ = st.columns(2)
 with page_name_col:
-    selected_page = st.selectbox(
+    selected_page: str | None = st.selectbox(
         "Page Name",
-        options=[None] + page_name,
+        options=[None] + configs["page_name"].unique().to_list(),
         index=0,
-        help="Select the project page to export a replication package for. The dataset associated with this page will be included as raw data in the package.",
+        help=(
+            "Select the check configuration to export. "
+            "The associated dataset will be included as raw data in the package."
+        ),
     )
 
-# Resolve key column from the first matching configuration
+alias: str = ""
+key_col: str = ""
+
 if selected_page:
-    page_configs = configs.filter(pl.col("page_name") == selected_page)
-    if not page_configs.is_empty():
-        key_col = page_configs[0, "survey_key"] or ""
-
-        # show info for selected page in expander
-        with st.expander("Selected page details", expanded=True):
-            # show the survey_data_name, survey_key, survey_id,
-            # survey_date and enumerator columns
-            st.write("**Configurations for this page:**")
-            config_info = page_configs.select(
-                "survey_data_name",
-                "backcheck_data_name",
-                "survey_key",
-                "survey_id",
-                "survey_date",
-                "enumerator",
-            )
-            st.dataframe(
-                config_info,
-                hide_index=True,
-                width="stretch",
-                column_config={
-                    "survey_data_name": "Dataset name",
-                    "backcheck_data_name": "Backcheck dataset name",
-                    "survey_key": "Key column",
-                    "survey_id": "Survey ID",
-                    "survey_date": "Survey date column",
-                    "enumerator": "Enumerator column",
-                },
-            )
-
-    else:
+    resolved = _resolve_page_config(configs, selected_page)
+    if not resolved:
         st.warning(
-            "No configurations found for the selected page. The package will be built without a key column."
+            "No configurations found for the selected page. "
+            "The package will be built without a key column."
         )
-
+    else:
+        alias, key_col = resolved
+        _render_config_details(configs.filter(pl.col("page_name") == selected_page))
 else:
     st.info("Select a page to see its details here.")
 
-# ── Build button ─────────────────────────────────────────────────────────────
+# ── Build ─────────────────────────────────────────────────────────────────────
 
 st.divider()
 
 project_name = _get_project_name(project_id)
 safe_project = project_name.lower().replace(" ", "_")
-scto_form_xlsx: bytes | None = None
-scto_form_def: dict | None = None
-scto_form_id: str = ""
-
-
-def _on_progress(msg: str) -> None:
-    st.write(f":white_check_mark: {msg}")
-    time.sleep(1)
-
 
 if st.button(
     "Build Replication Package",
     type="primary",
-    disabled=not selected_page,
+    disabled=not selected_page or not alias,
 ):
     with st.status("Building replication package…", expanded=True) as build_status:
-        # ── Step 1: SurveyCTO questionnaire + form definition ─────────────────
-        log_row = _get_import_log_row(project_id, selected_page)
-        if log_row is not None and log_row.get("source") == "SurveyCTO":
-            scto_form_id = log_row.get("form_id", "") or ""
-            st.write("Fetching SurveyCTO questionnaire…")
-            scto_form_xlsx, scto_form_def, scto_error = _fetch_scto_form_xlsx(
-                project_id, selected_page
-            )
-            if scto_error:
-                st.warning(f"Questionnaire not included: {scto_error}")
-            else:
-                st.write(":white_check_mark: Questionnaire downloaded")
-            time.sleep(1)
-
-        # ── Steps 2+: data loading + script generation + zip assembly ────────
-        survey_name = (
-            log_row.get("survey_data_name", selected_page)
-            if log_row is not None
-            else selected_page
+        st.write("Fetching SurveyCTO questionnaire…")
+        scto_xlsx, scto_form_def, scto_form_id, scto_error = _fetch_scto_assets(
+            project_id, alias
         )
+        if scto_error:
+            st.warning(f"Questionnaire not included: {scto_error}")
+        elif scto_xlsx:
+            st.write(":white_check_mark: Questionnaire downloaded")
+
         zip_bytes = build_replication_package(
             project_id=project_id,
             project_name=project_name,
-            survey_name=survey_name,
-            alias=selected_page,
+            survey_name=selected_page,
+            alias=alias,
             key_col=key_col,
-            scto_form_xlsx=scto_form_xlsx,
+            scto_form_xlsx=scto_xlsx,
             form_def=scto_form_def,
             form_id=scto_form_id,
             on_progress=_on_progress,
         )
-
         build_status.update(label="Package ready!", state="complete", expanded=False)
 
     st.session_state["_replication_zip"] = zip_bytes
-    st.session_state["_replication_filename"] = f"{safe_project}_replication.zip"
+    st.session_state["_replication_filename"] = _zip_filename(
+        project_name, selected_page
+    )
 
-# ── Download button (persists after build) ───────────────────────────────────
+# ── Download ──────────────────────────────────────────────────────────────────
 
 if "_replication_zip" in st.session_state:
     st.success("Package ready — click below to save it to your local drive.")
@@ -275,48 +348,13 @@ if "_replication_zip" in st.session_state:
         type="primary",
     )
 
-# ── Package contents preview ─────────────────────────────────────────────────
+# ── Preview ───────────────────────────────────────────────────────────────────
 
-if selected_page:
-    log_row = _get_import_log_row(project_id, selected_page)
-    survey_name = (
-        log_row.get("survey_data_name", selected_page)
-        if log_row is not None
-        else selected_page
+if selected_page and alias:
+    import_row = _get_import_log_row(project_id, alias)
+    is_scto = import_row is not None and import_row.get("source") == "SurveyCTO"
+    _render_package_preview(
+        safe_project,
+        selected_page.lower().replace(" ", "_"),
+        is_scto,
     )
-    with st.expander("What's inside the zip?", expanded=False):
-        if selected_page and project_name and survey_name:
-            safe_p = project_name.lower().replace(" ", "_")
-            safe_s = survey_name.lower().replace(" ", "_")
-
-            # Show questionnaire line only for SurveyCTO datasets
-            is_scto = log_row is not None and log_row.get("source") == "SurveyCTO"
-            questionnaire_line = (
-                f"    ├── {safe_s}_questionnaire.xlsx (SurveyCTO form)\n"
-                if is_scto
-                else ""
-            )
-
-            st.code(
-                f"{safe_p}_replication/\n"
-                f"├── raw/\n"
-                f"│   └── {safe_s}_raw.csv\n"
-                f"├── scripts/\n"
-                f"│   ├── master.do\n"
-                f"│   ├── import_data.do\n"
-                f"│   ├── prepare_data.do\n"
-                f"│   └── corrections.do\n"
-                f"├── output/               (generated when scripts are run)\n"
-                f"│   ├── {safe_s}_raw.dta\n"
-                f"│   ├── {safe_s}_prepped.dta\n"
-                f"│   └── {safe_s}_corrected.dta\n"
-                f"└── docs/\n"
-                f"    ├── README.md\n"
-                f"    ├── codebook.xlsx     (generated by ipacodebook)\n"
-                f"{questionnaire_line}"
-                f"    ├── correction_log.csv\n"
-                f"    └── prep_log.csv",
-                language="text",
-            )
-        else:
-            st.info("Fill in the fields above to preview the package structure.")

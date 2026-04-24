@@ -111,7 +111,7 @@ def build_replication_package(
     datasure_version = _get_version()
     safe_project = project_name.lower().replace(" ", "_")
     safe_survey = survey_name.lower().replace(" ", "_")
-    root = f"{safe_project}_replication"
+    root = f"replication_{safe_project}_{safe_survey}"
 
     logger.info(
         "Building replication package: project=%s survey=%s", project_name, survey_name

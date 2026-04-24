@@ -8,6 +8,10 @@ import polars as pl
 
 SCRIPT_EXT = "do"
 _C = "*"  # Stata comment character
+_LOG_CLOSE = "cap log close"
+
+
+# ── Shared utilities ──────────────────────────────────────────────────────────
 
 
 def _header(
@@ -29,6 +33,9 @@ def _header(
             "",
         ]
     )
+
+
+# ── Corrections helpers ───────────────────────────────────────────────────────
 
 
 def _escape(value: str) -> str:
@@ -77,103 +84,7 @@ def _emit_stata(
     return [comment, stmt, ""]
 
 
-def generate_corrections_script(
-    correction_log: pl.DataFrame,
-    key_col: str,
-    project_name: str,
-    survey_name: str,
-    datasure_version: str,
-) -> str:
-    """Generate a Stata corrections script from the correction log.
-
-    Parameters
-    ----------
-    correction_log : pl.DataFrame
-        Correction log with columns: action, KEY, column, new_value, reason.
-    key_col : str
-        The survey key column name.
-    project_name : str
-        Human-readable project name.
-    survey_name : str
-        Human-readable survey name.
-    datasure_version : str
-        Version of DataSure that generated this package.
-
-    Returns
-    -------
-    str
-        Stata script content as a string.
-    """
-    header = _header("Corrections Script", project_name, survey_name, datasure_version)
-
-    if correction_log.is_empty():
-        return (
-            header
-            + 'cap log using "$logdir/4_corrections.log", replace text\n'
-            + f"{_C} No corrections recorded.\n"
-            + "cap log close\n"
-        )
-
-    lines: list[str] = [
-        header,
-        'cap log using "$logdir/4_corrections.log", replace text',
-        "",
-    ]
-
-    for row in correction_log.iter_rows(named=True):
-        action = str(row["action"])
-        key_val = str(row["KEY"])
-        col = row.get("column")
-        new_val = row.get("new_value")
-        reason = str(row.get("reason") or "")
-        lines += _emit_stata(action, key_col, key_val, col, new_val, reason)
-
-    lines.append("cap log close")
-    return "\n".join(lines)
-
-
-def generate_install_packages_script(
-    project_name: str,
-    survey_name: str,
-    datasure_version: str,
-) -> str:
-    """Generate a Stata do-file that installs all required packages.
-
-    Parameters
-    ----------
-    project_name : str
-        Human-readable project name.
-    survey_name : str
-        Human-readable survey name.
-    datasure_version : str
-        Version of DataSure.
-
-    Returns
-    -------
-    str
-        Stata script content as a string.
-    """
-    header = _header("Install Packages", project_name, survey_name, datasure_version)
-
-    lines = [
-        header,
-        'cap log using "$logdir/1_install_packages.log", replace text',
-        "",
-        "* Install github package manager",
-        'net install github, from("https://haghish.github.io/github/")',
-        "",
-        "* Install IPA packages",
-        "github install PovertyAction/high-frequency-checks",
-        "github install PovertyAction/ipahelper",
-        "github install PovertyAction/ipaclean",
-        "github install PovertyAction/ipaplots",
-        "",
-        'display "All packages installed."',
-        "",
-        "cap log close",
-    ]
-
-    return "\n".join(lines) + "\n"
+# ── Public API (in execution order: master → install → import → corrections) ──
 
 
 def generate_master_script(
@@ -269,6 +180,50 @@ def generate_master_script(
     return "\n".join(lines) + "\n"
 
 
+def generate_install_packages_script(
+    project_name: str,
+    survey_name: str,
+    datasure_version: str,
+) -> str:
+    """Generate a Stata do-file that installs all required packages.
+
+    Parameters
+    ----------
+    project_name : str
+        Human-readable project name.
+    survey_name : str
+        Human-readable survey name.
+    datasure_version : str
+        Version of DataSure.
+
+    Returns
+    -------
+    str
+        Stata script content as a string.
+    """
+    header = _header("Install Packages", project_name, survey_name, datasure_version)
+
+    lines = [
+        header,
+        'cap log using "$logdir/1_install_packages.log", replace text',
+        "",
+        "* Install github package manager",
+        'net install github, from("https://haghish.github.io/github/")',
+        "",
+        "* Install IPA packages",
+        "github install PovertyAction/high-frequency-checks",
+        "github install PovertyAction/ipahelper",
+        "github install PovertyAction/ipaclean",
+        "github install PovertyAction/ipaplots",
+        "",
+        'display "All packages installed."',
+        "",
+        _LOG_CLOSE,
+    ]
+
+    return "\n".join(lines) + "\n"
+
+
 def generate_import_script(
     project_name: str,
     survey_name: str,
@@ -305,6 +260,62 @@ def generate_import_script(
         "",
         'display "Raw dataset imported and saved as DTA."',
         "",
-        "cap log close",
+        _LOG_CLOSE,
     ]
     return "\n".join(lines) + "\n"
+
+
+def generate_corrections_script(
+    correction_log: pl.DataFrame,
+    key_col: str,
+    project_name: str,
+    survey_name: str,
+    datasure_version: str,
+) -> str:
+    """Generate a Stata corrections script from the correction log.
+
+    Parameters
+    ----------
+    correction_log : pl.DataFrame
+        Correction log with columns: action, KEY, column, new_value, reason.
+    key_col : str
+        The survey key column name.
+    project_name : str
+        Human-readable project name.
+    survey_name : str
+        Human-readable survey name.
+    datasure_version : str
+        Version of DataSure that generated this package.
+
+    Returns
+    -------
+    str
+        Stata script content as a string.
+    """
+    header = _header("Corrections Script", project_name, survey_name, datasure_version)
+
+    if correction_log.is_empty():
+        return (
+            header
+            + 'cap log using "$logdir/4_corrections.log", replace text\n'
+            + f"{_C} No corrections recorded.\n"
+            + _LOG_CLOSE
+            + "\n"
+        )
+
+    lines: list[str] = [
+        header,
+        'cap log using "$logdir/4_corrections.log", replace text',
+        "",
+    ]
+
+    for row in correction_log.iter_rows(named=True):
+        action = str(row["action"])
+        key_val = str(row["KEY"])
+        col = row.get("column")
+        new_val = row.get("new_value")
+        reason = str(row.get("reason") or "")
+        lines += _emit_stata(action, key_col, key_val, col, new_val, reason)
+
+    lines.append(_LOG_CLOSE)
+    return "\n".join(lines)
