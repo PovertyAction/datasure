@@ -64,7 +64,7 @@ dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.1.0",
     "great-docs>=0.7",
-
+    "quarto>=0.1.0",
 ]
 
 [[tool.uv.index]]
