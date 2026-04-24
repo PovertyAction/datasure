@@ -4,8 +4,6 @@ Exports a self-contained Stata replication package (raw CSV, do-files,
 audit logs, README) as a zip file for download to the local drive.
 """
 
-from __future__ import annotations
-
 import json
 import time
 
@@ -153,70 +151,87 @@ st.divider()
 
 st.subheader("Configure export")
 
-survey_aliases = sorted(configs["survey_data_name"].unique().to_list())
+page_name = configs["page_name"].unique().to_list()
 
-selected_alias = st.selectbox(
-    "Dataset",
-    options=survey_aliases,
-    help="Choose the survey dataset to include in the replication package.",
-)
+page_name_col, _ = st.columns(2)
+with page_name_col:
+    selected_page = st.selectbox(
+        "Page Name",
+        options=[None] + page_name,
+        index=0,
+        help="Select the project page to export a replication package for. The dataset associated with this page will be included as raw data in the package.",
+    )
 
 # Resolve key column from the first matching configuration
-key_col = ""
-if selected_alias:
-    match = configs.filter(pl.col("survey_data_name") == selected_alias)
-    if not match.is_empty():
-        key_col = match[0, "survey_key"] or ""
+if selected_page:
+    page_configs = configs.filter(pl.col("page_name") == selected_page)
+    if not page_configs.is_empty():
+        key_col = page_configs[0, "survey_key"] or ""
 
-col_left, col_right = st.columns(2)
-with col_left:
-    default_project_name = _get_project_name(project_id)
-    project_name = st.text_input(
-        "Project name",
-        value=default_project_name,
-        help="Used to name the root folder inside the zip file.",
-    )
-with col_right:
-    survey_name = st.text_input(
-        "Survey name",
-        value=selected_alias or "",
-        help="Used to name the raw data file and output datasets.",
-    )
+        # show info for selected page in expander
+        with st.expander("Selected page details", expanded=True):
+            # show the survey_data_name, survey_key, survey_id,
+            # survey_date and enumerator columns
+            st.write("**Configurations for this page:**")
+            config_info = page_configs.select(
+                "survey_data_name",
+                "backcheck_data_name",
+                "survey_key",
+                "survey_id",
+                "survey_date",
+                "enumerator",
+            )
+            st.dataframe(
+                config_info,
+                hide_index=True,
+                width="stretch",
+                column_config={
+                    "survey_data_name": "Dataset name",
+                    "backcheck_data_name": "Backcheck dataset name",
+                    "survey_key": "Key column",
+                    "survey_id": "Survey ID",
+                    "survey_date": "Survey date column",
+                    "enumerator": "Enumerator column",
+                },
+            )
+
+    else:
+        st.warning(
+            "No configurations found for the selected page. The package will be built without a key column."
+        )
+
+else:
+    st.info("Select a page to see its details here.")
 
 # ── Build button ─────────────────────────────────────────────────────────────
 
 st.divider()
 
-build_disabled = not (selected_alias and project_name and survey_name and key_col)
+project_name = _get_project_name(project_id)
+safe_project = project_name.lower().replace(" ", "_")
+scto_form_xlsx: bytes | None = None
+scto_form_def: dict | None = None
+scto_form_id: str = ""
 
-if not key_col and selected_alias:
-    st.warning(
-        "No key column is configured for the selected dataset. "
-        "Edit the check configuration to add one before exporting."
-    )
+
+def _on_progress(msg: str) -> None:
+    st.write(f":white_check_mark: {msg}")
+    time.sleep(1)
+
 
 if st.button(
     "Build Replication Package",
     type="primary",
-    disabled=build_disabled,
+    disabled=not selected_page,
 ):
-    safe_project = project_name.lower().replace(" ", "_")
-    scto_form_xlsx: bytes | None = None
-    scto_form_def: dict | None = None
-    scto_form_id: str = ""
-
-    def _on_progress(msg: str) -> None:
-        st.write(f":white_check_mark: {msg}")
-        time.sleep(1)
-
     with st.status("Building replication package…", expanded=True) as build_status:
         # ── Step 1: SurveyCTO questionnaire + form definition ─────────────────
-        log_row = _get_import_log_row(project_id, selected_alias)
+        log_row = _get_import_log_row(project_id, selected_page)
         if log_row is not None and log_row.get("source") == "SurveyCTO":
             scto_form_id = log_row.get("form_id", "") or ""
             st.write("Fetching SurveyCTO questionnaire…")
             scto_form_xlsx, scto_form_def, scto_error = _fetch_scto_form_xlsx(
-                project_id, selected_alias
+                project_id, selected_page
             )
             if scto_error:
                 st.warning(f"Questionnaire not included: {scto_error}")
@@ -225,11 +240,16 @@ if st.button(
             time.sleep(1)
 
         # ── Steps 2+: data loading + script generation + zip assembly ────────
+        survey_name = (
+            log_row.get("survey_data_name", selected_page)
+            if log_row is not None
+            else selected_page
+        )
         zip_bytes = build_replication_package(
             project_id=project_id,
             project_name=project_name,
             survey_name=survey_name,
-            alias=selected_alias,
+            alias=selected_page,
             key_col=key_col,
             scto_form_xlsx=scto_form_xlsx,
             form_def=scto_form_def,
@@ -257,38 +277,46 @@ if "_replication_zip" in st.session_state:
 
 # ── Package contents preview ─────────────────────────────────────────────────
 
-with st.expander("What's inside the zip?", expanded=False):
-    if selected_alias and project_name and survey_name:
-        safe_p = project_name.lower().replace(" ", "_")
-        safe_s = survey_name.lower().replace(" ", "_")
+if selected_page:
+    log_row = _get_import_log_row(project_id, selected_page)
+    survey_name = (
+        log_row.get("survey_data_name", selected_page)
+        if log_row is not None
+        else selected_page
+    )
+    with st.expander("What's inside the zip?", expanded=False):
+        if selected_page and project_name and survey_name:
+            safe_p = project_name.lower().replace(" ", "_")
+            safe_s = survey_name.lower().replace(" ", "_")
 
-        # Show questionnaire line only for SurveyCTO datasets
-        log_row = _get_import_log_row(project_id, selected_alias)
-        is_scto = log_row is not None and log_row.get("source") == "SurveyCTO"
-        questionnaire_line = (
-            f"    ├── {safe_s}_questionnaire.xlsx (SurveyCTO form)\n" if is_scto else ""
-        )
+            # Show questionnaire line only for SurveyCTO datasets
+            is_scto = log_row is not None and log_row.get("source") == "SurveyCTO"
+            questionnaire_line = (
+                f"    ├── {safe_s}_questionnaire.xlsx (SurveyCTO form)\n"
+                if is_scto
+                else ""
+            )
 
-        st.code(
-            f"{safe_p}_replication/\n"
-            f"├── raw/\n"
-            f"│   └── {safe_s}_raw.csv\n"
-            f"├── scripts/\n"
-            f"│   ├── master.do\n"
-            f"│   ├── import_data.do\n"
-            f"│   ├── prepare_data.do\n"
-            f"│   └── corrections.do\n"
-            f"├── output/               (generated when scripts are run)\n"
-            f"│   ├── {safe_s}_raw.dta\n"
-            f"│   ├── {safe_s}_prepped.dta\n"
-            f"│   └── {safe_s}_corrected.dta\n"
-            f"└── docs/\n"
-            f"    ├── README.md\n"
-            f"    ├── codebook.xlsx     (generated by ipacodebook)\n"
-            f"{questionnaire_line}"
-            f"    ├── correction_log.csv\n"
-            f"    └── prep_log.csv",
-            language="text",
-        )
-    else:
-        st.info("Fill in the fields above to preview the package structure.")
+            st.code(
+                f"{safe_p}_replication/\n"
+                f"├── raw/\n"
+                f"│   └── {safe_s}_raw.csv\n"
+                f"├── scripts/\n"
+                f"│   ├── master.do\n"
+                f"│   ├── import_data.do\n"
+                f"│   ├── prepare_data.do\n"
+                f"│   └── corrections.do\n"
+                f"├── output/               (generated when scripts are run)\n"
+                f"│   ├── {safe_s}_raw.dta\n"
+                f"│   ├── {safe_s}_prepped.dta\n"
+                f"│   └── {safe_s}_corrected.dta\n"
+                f"└── docs/\n"
+                f"    ├── README.md\n"
+                f"    ├── codebook.xlsx     (generated by ipacodebook)\n"
+                f"{questionnaire_line}"
+                f"    ├── correction_log.csv\n"
+                f"    └── prep_log.csv",
+                language="text",
+            )
+        else:
+            st.info("Fill in the fields above to preview the package structure.")
