@@ -543,15 +543,15 @@ version:
 # install required software
 [windows]
 pre-install:
-    winget install Casey.Just astral-sh.uv GitHub.cli OpenJS.NodeJS
+    winget install Casey.Just astral-sh.uv GitHub.cli OpenJS.NodeJS Posit.Quarto
     npm install -g markdownlint-cli
 
 # install required software
 [linux]
 pre-install:
-    brew install just uv gh markdownlint-cli
+    brew install just uv gh markdownlint-cli quarto
 
 # install required software
 [macos]
 pre-install:
-    brew install just uv gh markdownlint-cli
+    brew install just uv gh markdownlint-cli quarto
