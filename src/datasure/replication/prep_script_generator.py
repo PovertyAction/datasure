@@ -10,6 +10,7 @@ Stata statements that reproduce every recorded step.
 
 from __future__ import annotations
 
+import ast
 import json
 from typing import Any
 
@@ -335,8 +336,6 @@ def generate_prepare_data_script(
                 args = json.loads(raw_args)
             except json.JSONDecodeError:
                 try:
-                    import ast
-
                     args = ast.literal_eval(raw_args)
                 except Exception:
                     args = {}

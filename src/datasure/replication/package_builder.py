@@ -10,6 +10,7 @@ from collections.abc import Callable
 
 import polars as pl
 
+from datasure.replication.codebook import generate_codebook
 from datasure.replication.prep_script_generator import (
     generate_prepare_data_script,
 )
@@ -39,23 +40,45 @@ def _get_version() -> str:
 
 
 def _load_dataset(project_id: str, alias: str, db_name: str) -> pl.DataFrame:
-    return duckdb_get_table(project_id, alias, db_name)
+    try:
+        return duckdb_get_table(project_id, alias, db_name)
+    except Exception:
+        logger.warning(
+            "Table %s/%s not found; returning empty DataFrame", db_name, alias
+        )
+        return pl.DataFrame()
 
 
-def _load_corrected(project_id: str, alias: str) -> pl.DataFrame:
-    """Load corrected data, falling back to prep if no corrections exist."""
+def _load_corrected(project_id: str, alias: str) -> tuple[pl.DataFrame, bool]:
+    """Load corrected data, falling back to prep if no corrections exist.
+
+    Returns
+    -------
+    tuple[pl.DataFrame, bool]
+        The dataset and a flag indicating whether corrections were applied.
+    """
     corrected = _load_dataset(project_id, alias, "corrected")
-    if corrected.is_empty():
-        return _load_dataset(project_id, alias, "prep")
-    return corrected
+    if not corrected.is_empty():
+        return corrected, True
+    return _load_dataset(project_id, alias, "prep"), False
 
 
 def _load_prep_log(project_id: str, alias: str) -> pl.DataFrame:
-    return duckdb_get_table(project_id, f"prep_log_{alias}", "logs")
+    try:
+        return duckdb_get_table(project_id, f"prep_log_{alias}", "logs")
+    except Exception:
+        logger.warning("Prep log for %s not found; returning empty DataFrame", alias)
+        return pl.DataFrame()
 
 
 def _load_correction_log(project_id: str, alias: str) -> pl.DataFrame:
-    return duckdb_get_table(project_id, f"corr_log_{alias}", "logs")
+    try:
+        return duckdb_get_table(project_id, f"corr_log_{alias}", "logs")
+    except Exception:
+        logger.warning(
+            "Correction log for %s not found; returning empty DataFrame", alias
+        )
+        return pl.DataFrame()
 
 
 def _action_summary(correction_log: pl.DataFrame) -> dict[str, int]:
@@ -169,8 +192,12 @@ def build_replication_package(
     prepped_df = _load_dataset(project_id, alias, "prep")
     _step(f"Prepped dataset loaded — {prepped_df.height:,} rows")
 
-    corrected_df = _load_corrected(project_id, alias)
-    _step(f"Corrected dataset loaded — {corrected_df.height:,} rows")
+    corrected_df, has_corrections = _load_corrected(project_id, alias)
+    _step(
+        f"Corrected dataset loaded — {corrected_df.height:,} rows"
+        if has_corrections
+        else f"No corrections applied — using prepped dataset ({corrected_df.height:,} rows)"
+    )
 
     correction_log = _load_correction_log(project_id, alias)
     _step(f"Correction log loaded — {correction_log.height:,} entries")
@@ -232,6 +259,9 @@ def build_replication_package(
     )
     _step("README generated")
 
+    codebook_csv = generate_codebook(corrected_df)
+    _step("Codebook generated")
+
     # Raw CSV (input for import_data.do)
     raw_csv = raw_df.write_csv() if not raw_df.is_empty() else ""
 
@@ -266,7 +296,7 @@ def build_replication_package(
             )
         else:
             zf.writestr(f"{root}/1_docs/1_surveys/.gitkeep", "")
-        zf.writestr(f"{root}/1_docs/2_codebooks/.gitkeep", "")
+        zf.writestr(f"{root}/1_docs/2_codebooks/codebook.csv", codebook_csv)
         zf.writestr(f"{root}/1_docs/3_notes/.gitkeep", "")
 
         # 2_scripts/
