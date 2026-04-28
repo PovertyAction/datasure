@@ -237,13 +237,13 @@ def build_replication_package(
         # 1_docs/
         if scto_form_xlsx is not None:
             zf.writestr(
-                f"{root}/1_docs/surveys/{safe_survey}_questionnaire.xlsx",
+                f"{root}/1_docs/1_surveys/{safe_survey}_questionnaire.xlsx",
                 scto_form_xlsx,
             )
         else:
-            zf.writestr(f"{root}/1_docs/surveys/.gitkeep", "")
-        zf.writestr(f"{root}/1_docs/codebooks/.gitkeep", "")
-        zf.writestr(f"{root}/1_docs/notes/.gitkeep", "")
+            zf.writestr(f"{root}/1_docs/1_surveys/.gitkeep", "")
+        zf.writestr(f"{root}/1_docs/2_codebooks/.gitkeep", "")
+        zf.writestr(f"{root}/1_docs/3_notes/.gitkeep", "")
 
         # 2_scripts/
         zf.writestr(f"{root}/2_scripts/0_main.{SCRIPT_EXT}", master_script)
@@ -256,16 +256,16 @@ def build_replication_package(
         )
         zf.writestr(f"{root}/2_scripts/4_corrections.{SCRIPT_EXT}", corrections_script)
 
-        # data/
-        zf.writestr(f"{root}/data/raw/{safe_survey}_raw.csv", raw_csv)
-        zf.writestr(f"{root}/data/intermediate/.gitkeep", "")
-        zf.writestr(f"{root}/data/final/.gitkeep", "")
+        # 3_data/
+        zf.writestr(f"{root}/3_data/1_raw/{safe_survey}_raw.csv", raw_csv)
+        zf.writestr(f"{root}/3_data/2_intermediate/.gitkeep", "")
+        zf.writestr(f"{root}/3_data/3_final/.gitkeep", "")
 
-        # output/
-        zf.writestr(f"{root}/output/tables/.gitkeep", "")
-        zf.writestr(f"{root}/output/figures/.gitkeep", "")
-        zf.writestr(f"{root}/output/logs/correction_log.csv", correction_log_csv)
-        zf.writestr(f"{root}/output/logs/prep_log.csv", prep_log_csv)
+        # 4_output/
+        zf.writestr(f"{root}/4_output/1_tables/.gitkeep", "")
+        zf.writestr(f"{root}/4_output/2_figures/.gitkeep", "")
+        zf.writestr(f"{root}/4_output/3_logs/correction_log.csv", correction_log_csv)
+        zf.writestr(f"{root}/4_output/3_logs/prep_log.csv", prep_log_csv)
 
     logger.info("Zip assembled: %s", root)
     _step("Zip file assembled")

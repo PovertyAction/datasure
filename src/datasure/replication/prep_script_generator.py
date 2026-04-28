@@ -170,9 +170,9 @@ def _stata_transform_column(args: dict, _desc: str) -> list[str]:
         "ceil": f"replace {col} = ceil({col})",
         "round": f"replace {col} = round({col})",
         "string to number": f"destring {col}, replace",
-        "string to date": (f'gen {col}_date = date({col}, "DMY")  {_C} adjust format'),
+        "string to date": (f'gen {col}_date = date({col}, "DMY")  // adjust format'),
         "string to datetime": (
-            f'gen {col}_dt = clock({col}, "DMYhms")  {_C} adjust format'
+            f'gen {col}_dt = clock({col}, "DMYhms")  // adjust format'
         ),
         "day of month": f"gen {col}_day = day({col})",
         "day of week": f"gen {col}_dow = dow({col})",
@@ -215,7 +215,7 @@ def _stata_transform_column(args: dict, _desc: str) -> list[str]:
         return [f'gen {col}_extract = regexs(0) if regexm({col}, "{pattern}")']
 
     if method == "get dummies":
-        return [f"tabulate {col}, gen({col}_)  {_C} creates dummy columns"]
+        return [f"tabulate {col}, gen({col}_)  // creates dummy columns"]
 
     return [f"{_C} NOTE: transform '{method}' on '{col}' could not be translated"]
 

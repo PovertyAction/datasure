@@ -96,8 +96,8 @@ class TestGenerateReadme:
     def test_contains_folder_structure_block(self, readme):
         assert "├── 1_docs/" in readme
         assert "├── 2_scripts/" in readme
-        assert "├── data/" in readme
-        assert "└── output/" in readme
+        assert "├── 3_data/" in readme
+        assert "└── 4_output/" in readme
 
     def test_contains_how_to_run_section(self, readme):
         assert "HOW TO RUN" in readme
