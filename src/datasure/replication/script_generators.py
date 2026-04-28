@@ -122,7 +122,7 @@ def generate_master_script(
         "* -------------------------------------------------------",
         "* INSTRUCTIONS:",
         "* 1. Set `root` below to the full path of the parent folder",
-        f"*    that contains the {safe_project}_replication/ directory.",
+        f"*    that contains the replication_{safe_project}_{safe_survey}/ directory.",
         "*    Example:  global root C:/Users/you/Desktop",
         "* 2. Run this script from the Stata command window:",
         "*    do 0_main.do",
@@ -134,7 +134,7 @@ def generate_master_script(
         "set more off",
         "",
         'global root    "REPLACE_WITH_PARENT_PATH"',
-        f'global pkg     "$root/replication_{safe_project}"',
+        f'global pkg     "$root/replication_{safe_project}_{safe_survey}"',
         'global scripts "$pkg/2_scripts"',
         'global docs    "$pkg/1_docs"',
         'global raw     "$pkg/3_data/1_raw"',
@@ -294,6 +294,15 @@ def generate_corrections_script(
         Stata script content as a string.
     """
     header = _header("Corrections Script", project_name, survey_name, datasure_version)
+
+    if not key_col:
+        return (
+            header
+            + 'cap log using "$logdir/4_corrections.log", replace text\n'
+            + f"{_C} WARNING: no key column configured — corrections script is empty.\n"
+            + _LOG_CLOSE
+            + "\n"
+        )
 
     if correction_log.is_empty():
         return (

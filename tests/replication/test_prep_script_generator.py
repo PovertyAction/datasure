@@ -7,7 +7,6 @@ import polars as pl
 from datasure.replication.prep_script_generator import (
     _col_list,
     _cols,
-    _first_val,
     _fmt_val,
     _is_numeric_val,
     _stata_add_column,
@@ -44,20 +43,6 @@ class TestVal:
 
     def test_missing_returns_none(self):
         assert _val({}) is None
-
-
-class TestFirstVal:
-    def test_list_returns_first(self):
-        assert _first_val({"value": [1, 2, 3]}) == 1
-
-    def test_scalar_returns_scalar(self):
-        assert _first_val({"value": 5}) == 5
-
-    def test_empty_list_returns_empty_list(self):
-        assert _first_val({"value": []}) == []
-
-    def test_missing_returns_none(self):
-        assert _first_val({}) is None
 
 
 class TestValList:
@@ -126,9 +111,13 @@ class TestStataRemoveColumns:
 
 
 class TestStataRemoveRows:
-    def test_by_index(self):
+    def test_by_index_single(self):
+        lines = _stata_remove_rows({"method": "by row index", "value": [5]}, "")
+        assert lines == ["drop in 5"]
+
+    def test_by_index_multiple(self):
         lines = _stata_remove_rows({"method": "by row index", "value": [1, 3]}, "")
-        assert lines == ["drop in 1,3"]
+        assert lines == ["drop if _n == 1 | _n == 3"]
 
     def test_missing_condition(self):
         lines = _stata_remove_rows(

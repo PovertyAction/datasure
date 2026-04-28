@@ -43,7 +43,7 @@ def generate_codebook(df: pl.DataFrame) -> str:
             pl.Float64,
         ):
             col_type = "numeric"
-        elif dtype in (pl.Date, pl.Datetime):
+        elif dtype == pl.Date or isinstance(dtype, pl.Datetime):
             col_type = "datetime"
         elif dtype == pl.Boolean:
             col_type = "boolean"

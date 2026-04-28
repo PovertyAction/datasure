@@ -27,7 +27,6 @@ _ACT_TRANSFORM = "transform column(s)"
 _ACT_ADD_COL = "add new column"
 
 _METH_BY_INDEX = "by row index"
-_METH_BY_COND = "by condition"
 
 _COND_MISSING = "value is missing"
 _COND_NOT_MISSING = "value is not missing"
@@ -69,13 +68,6 @@ def _val(args: dict) -> Any:
     return args.get("value")
 
 
-def _first_val(args: dict) -> Any:
-    v = _val(args)
-    if isinstance(v, list) and v:
-        return v[0]
-    return v
-
-
 def _val_list(args: dict) -> list:
     v = _val(args)
     if v is None:
@@ -114,6 +106,38 @@ def _stata_remove_columns(args: dict, _desc: str) -> list[str]:
     return [f"drop {_col_list(cols)}"]
 
 
+def _drop_by_index(values: list) -> list[str]:
+    idx_vals = [str(int(v)) for v in values if str(v).strip() not in (",", "")]
+    if not idx_vals:
+        return [f"{_C} NOTE: no row indices provided for drop in"]
+    if len(idx_vals) == 1:
+        return [f"drop in {idx_vals[0]}"]
+    conditions = " | ".join(f"_n == {v}" for v in idx_vals)
+    return [f"drop if {conditions}"]
+
+
+def _drop_by_condition(col: str, condition: str, values: list) -> list[str]:
+    if condition == _COND_MISSING:
+        return [f"drop if missing({col})"]
+    if condition == _COND_NOT_MISSING:
+        return [f"keep if missing({col})"]
+    if condition in (_COND_LIKE, _COND_NOT_LIKE):
+        pattern = values[0] if values else ""
+        if condition == _COND_LIKE:
+            return [f'drop if regexm({col}, "{pattern}")']
+        return [f'keep if regexm({col}, "{pattern}")']
+    if condition in (_COND_BETWEEN, _COND_NOT_BETWEEN) and len(values) >= 2:
+        lo, hi = values[0], values[1]
+        if condition == _COND_BETWEEN:
+            return [f"drop if inrange({col}, {lo}, {hi})"]
+        return [f"keep if inrange({col}, {lo}, {hi})"]
+    op = _KEEP_OP.get(condition)
+    if op and values:
+        fv = _fmt_val(values[0] if isinstance(values, list) else values)
+        return [f"keep if {col} {op} {fv}"]
+    return [f"{_C} NOTE: condition '{condition}' could not be translated"]
+
+
 def _stata_remove_rows(args: dict, _desc: str) -> list[str]:
     method = args.get("method", "")
     cols = _cols(args)
@@ -121,38 +145,12 @@ def _stata_remove_rows(args: dict, _desc: str) -> list[str]:
     values = _val_list(args)
 
     if method == _METH_BY_INDEX:
-        idx_vals = [str(int(v)) for v in values if str(v).strip() not in (",", "")]
-        return [f"drop in {','.join(idx_vals)}"]
+        return _drop_by_index(values)
 
     if not cols or not condition:
         return [f"{_C} NOTE: remove row step could not be translated"]
 
-    col = cols[0]
-
-    if condition == _COND_MISSING:
-        return [f"drop if missing({col})"]
-
-    if condition == _COND_NOT_MISSING:
-        return [f"keep if missing({col})"]
-
-    if condition in (_COND_LIKE, _COND_NOT_LIKE):
-        pattern = values[0] if values else ""
-        if condition == _COND_LIKE:
-            return [f'drop if regexm({col}, "{pattern}")']
-        return [f'keep if regexm({col}, "{pattern}")']
-
-    if condition in (_COND_BETWEEN, _COND_NOT_BETWEEN) and len(values) >= 2:
-        lo, hi = values[0], values[1]
-        if condition == _COND_BETWEEN:
-            return [f"drop if inrange({col}, {lo}, {hi})"]
-        return [f"keep if inrange({col}, {lo}, {hi})"]
-
-    op = _KEEP_OP.get(condition)
-    if op and values:
-        fv = _fmt_val(values[0] if isinstance(values, list) else values)
-        return [f"keep if {col} {op} {fv}"]
-
-    return [f"{_C} NOTE: condition '{condition}' could not be translated"]
+    return _drop_by_condition(cols[0], condition, values)
 
 
 def _stata_transform_column(args: dict, _desc: str) -> list[str]:
