@@ -58,6 +58,48 @@ def _load_correction_log(project_id: str, alias: str) -> pl.DataFrame:
     return duckdb_get_table(project_id, f"corr_log_{alias}", "logs")
 
 
+def _action_summary(correction_log: pl.DataFrame) -> dict[str, int]:
+    if correction_log.is_empty():
+        return {}
+    counts = (
+        correction_log.group_by("action").agg(pl.len().alias("count")).sort("action")
+    )
+    return dict(
+        zip(counts["action"].to_list(), counts["count"].to_list(), strict=False)
+    )
+
+
+def _select_import_script(
+    form_def: dict | None,
+    form_id: str,
+    project_name: str,
+    survey_name: str,
+    datasure_version: str,
+) -> str:
+    if form_def is not None:
+        return generate_scto_import_script(
+            form_def=form_def,
+            form_id=form_id,
+            form_title=survey_name,
+            survey_name=survey_name,
+            datasure_version=datasure_version,
+        )
+    return generate_import_script(
+        project_name=project_name,
+        survey_name=survey_name,
+        datasure_version=datasure_version,
+    )
+
+
+def _serialize_prep_args(x: object) -> str | None:
+    if x is None:
+        return None
+    try:
+        return json.dumps(x)
+    except (TypeError, ValueError):
+        return str(x)
+
+
 def build_replication_package(
     project_id: str,
     project_name: str,
@@ -133,35 +175,17 @@ def build_replication_package(
     correction_log = _load_correction_log(project_id, alias)
     _step(f"Correction log loaded — {correction_log.height:,} entries")
 
-    # Build correction action summary
-    n_by_action: dict[str, int] = {}
-    if not correction_log.is_empty():
-        counts = (
-            correction_log.group_by("action")
-            .agg(pl.len().alias("count"))
-            .sort("action")
-        )
-        n_by_action = dict(
-            zip(counts["action"].to_list(), counts["count"].to_list(), strict=False)
-        )
+    n_by_action = _action_summary(correction_log)
 
     # Generate scripts
-    if form_def is not None:
-        import_script = generate_scto_import_script(
-            form_def=form_def,
-            form_id=form_id,
-            form_title=survey_name,
-            survey_name=survey_name,
-            datasure_version=datasure_version,
-        )
-        _step("`import_data.do` generated (SurveyCTO — with labels & value labels)")
-    else:
-        import_script = generate_import_script(
-            project_name=project_name,
-            survey_name=survey_name,
-            datasure_version=datasure_version,
-        )
-        _step("`import_data.do` generated")
+    import_script = _select_import_script(
+        form_def, form_id, project_name, survey_name, datasure_version
+    )
+    _step(
+        "`import_data.do` generated (SurveyCTO — with labels & value labels)"
+        if form_def is not None
+        else "`import_data.do` generated"
+    )
 
     prepare_data_script = generate_prepare_data_script(
         prep_log=prep_log,
@@ -220,7 +244,7 @@ def build_replication_package(
     prep_log_csv = (
         prep_log.with_columns(
             pl.col("prep_args").map_elements(
-                lambda x: json.dumps(x) if x is not None else None,
+                _serialize_prep_args,
                 return_dtype=pl.String,
             )
         ).write_csv()

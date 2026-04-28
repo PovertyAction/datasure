@@ -5,7 +5,6 @@ audit logs, README) as a zip file for download to the local drive.
 """
 
 import json
-import time
 
 import polars as pl
 import streamlit as st
@@ -27,6 +26,7 @@ _PROJECTS_FILE = "projects.json"
 # ── Data access ───────────────────────────────────────────────────────────────
 
 
+@st.cache_data(ttl=60)
 def _get_project_name(project_id: str) -> str:
     """Return the human-readable project name, falling back to project_id."""
     projects_file = get_cache_path(_PROJECTS_FILE)
@@ -203,7 +203,6 @@ def _fetch_scto_assets(
 
 def _on_progress(msg: str) -> None:
     st.write(f":white_check_mark: {msg}")
-    time.sleep(1)
 
 
 def _render_config_details(page_configs: pl.DataFrame) -> None:
@@ -281,6 +280,12 @@ with page_name_col:
 
 alias: str = ""
 key_col: str = ""
+
+# Clear any previously built zip when the page selection changes.
+if st.session_state.get("_replication_page_sel") != selected_page:
+    st.session_state.pop("_replication_zip", None)
+    st.session_state.pop("_replication_filename", None)
+    st.session_state["_replication_page_sel"] = selected_page
 
 if selected_page:
     resolved = _resolve_page_config(configs, selected_page)

@@ -15,7 +15,7 @@ from typing import Any
 
 import polars as pl
 
-from datasure.replication.script_generators import _C, _header
+from datasure.replication.script_generators import _C, _LOG_CLOSE, _header
 
 # ---------------------------------------------------------------------------
 # String constants mirroring enum values (avoids importing the full app stack)
@@ -355,5 +355,5 @@ def generate_prepare_data_script(
 
         lines.append("")
 
-    lines.append("cap log close")
-    return "\n".join(lines)
+    lines.append(_LOG_CLOSE)
+    return "\n".join(lines) + "\n"

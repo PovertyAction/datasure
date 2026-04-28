@@ -398,6 +398,12 @@ class SurveyCTOAPIClient:
         for row in choices_rows:
             ws_choices.append(list(row) if not isinstance(row, list) else row)
 
+        # ── settings sheet (required by XLSForm spec) ─────────────────────────
+        ws_settings = wb.create_sheet("settings")
+        ws_settings.append(["form_title", "form_id", "version"])
+        title = form_def.get("title", form_id)
+        ws_settings.append([title, form_id, ""])
+
         buf = io.BytesIO()
         wb.save(buf)
         return buf.getvalue(), form_def

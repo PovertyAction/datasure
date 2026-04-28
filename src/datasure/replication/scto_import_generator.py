@@ -289,6 +289,7 @@ def _emit_format_date_fields() -> list[str]:
     """Emit the block that converts date/datetime columns to Stata date values."""
     return [
         "\t* format date and date/time fields",
+        "\tlocal maxyr = year(today()) + 20",
         "\tforvalues i = 1/100 {",
         '\t\tif "`datetime_fields`i\'\'" ~= "" {',
         "\t\t\tforeach dtvarlist in `datetime_fields`i'' {",
@@ -298,9 +299,9 @@ def _emit_format_date_fields() -> list[str]:
         "\t\t\t\t\t\ttempvar tempdtvar",
         "\t\t\t\t\t\trename `dtvar' `tempdtvar'",
         "\t\t\t\t\t\tgen double `dtvar'=.",
-        "\t\t\t\t\t\tcap replace `dtvar'=clock(`tempdtvar',\"MDYhms\",2025)",
+        "\t\t\t\t\t\tcap replace `dtvar'=clock(`tempdtvar',\"MDYhms\",`maxyr')",
         "\t\t\t\t\t\t* automatically try without seconds, just in case",
-        "\t\t\t\t\t\tcap replace `dtvar'=clock(`tempdtvar',\"MDYhm\",2025) if `dtvar'==. & `tempdtvar'~=\"\"",
+        "\t\t\t\t\t\tcap replace `dtvar'=clock(`tempdtvar',\"MDYhm\",`maxyr') if `dtvar'==. & `tempdtvar'~=\"\"",
         "\t\t\t\t\t\tformat %tc `dtvar'",
         "\t\t\t\t\t\tdrop `tempdtvar'",
         "\t\t\t\t\t}",
@@ -315,7 +316,7 @@ def _emit_format_date_fields() -> list[str]:
         "\t\t\t\t\t\ttempvar tempdtvar",
         "\t\t\t\t\t\trename `dtvar' `tempdtvar'",
         "\t\t\t\t\t\tgen double `dtvar'=.",
-        "\t\t\t\t\t\tcap replace `dtvar'=date(`tempdtvar',\"MDY\",2025)",
+        "\t\t\t\t\t\tcap replace `dtvar'=date(`tempdtvar',\"MDY\",`maxyr')",
         "\t\t\t\t\t\tformat %td `dtvar'",
         "\t\t\t\t\t\tdrop `tempdtvar'",
         "\t\t\t\t\t}",

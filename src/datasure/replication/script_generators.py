@@ -320,12 +320,12 @@ def generate_corrections_script(
     ]
 
     for row in correction_log.iter_rows(named=True):
-        action = str(row["action"])
-        key_val = str(row["KEY"])
+        action = str(row.get("action") or "")
+        key_val = str(row.get("KEY") or "")
         col = row.get("column")
         new_val = row.get("new_value")
         reason = str(row.get("reason") or "")
         lines += _emit_stata(action, key_col, key_val, col, new_val, reason)
 
     lines.append(_LOG_CLOSE)
-    return "\n".join(lines)
+    return "\n".join(lines) + "\n"
