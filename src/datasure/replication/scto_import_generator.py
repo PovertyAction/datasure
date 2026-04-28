@@ -32,6 +32,14 @@ _SELECT_MULTI = "select_multiple"
 # Always-datetime system fields added regardless of form definition
 _SYSTEM_DATETIMES = ["submissiondate", "starttime", "endtime"]
 
+# Maps each XLSForm base type to its classification bucket name.
+_TYPE_BUCKET: dict[str, str] = (
+    dict.fromkeys(_NOTE_TYPES, "note")
+    | dict.fromkeys(_TEXT_TYPES, "text")
+    | dict.fromkeys(_DATE_TYPES, "date")
+    | dict.fromkeys(_DATETIME_TYPES, "datetime")
+)
+
 # ---------------------------------------------------------------------------
 # String helpers
 # ---------------------------------------------------------------------------
@@ -64,7 +72,7 @@ def _truncate(text: str, max_len: int) -> str:
     return text[:max_len] if len(text) > max_len else text
 
 
-def _is_numeric_str(s: str) -> bool:
+def _is_numeric_str(s: object) -> bool:
     try:
         float(s)
     except (ValueError, TypeError):
@@ -97,27 +105,38 @@ def _parse_form(form_def: dict) -> tuple[list[str], list[list], list[str], list[
     return f_hdr, f_data, c_hdr, c_data
 
 
+def _parse_choice_row(
+    row: list, li: int, ni: int, bi: int
+) -> tuple[str, str, str] | None:
+    """Return ``(list_name, value, label)`` from a choices row, or None if invalid."""
+    if len(row) <= max(li, ni):
+        return None
+    lst = str(row[li] or "").strip()
+    val = str(row[ni] or "").strip()
+    if not lst or not val:
+        return None
+    lbl = str(row[bi] or "").strip() if bi >= 0 and len(row) > bi else ""
+    return lst, val, lbl
+
+
 def _build_choices_map(
     c_hdr: list[str], c_data: list[list]
 ) -> dict[str, list[tuple[str, str]]]:
     """Build ``{list_name: [(value, label), ...]}`` from the choices rows."""
-    result: dict[str, list[tuple[str, str]]] = {}
     if not c_hdr or not c_data:
-        return result
+        return {}
     lbl_col = _find_label_col(c_hdr)
     try:
         li = c_hdr.index("list_name")
         ni = c_hdr.index("name")
     except ValueError:
-        return result
+        return {}
     bi = c_hdr.index(lbl_col) if lbl_col in c_hdr else -1
+    result: dict[str, list[tuple[str, str]]] = {}
     for row in c_data:
-        if len(row) <= max(li, ni):
-            continue
-        lst = str(row[li] or "").strip()
-        val = str(row[ni] or "").strip()
-        lbl = str(row[bi] or "").strip() if bi >= 0 and len(row) > bi else ""
-        if lst and val:
+        parsed = _parse_choice_row(row, li, ni, bi)
+        if parsed:
+            lst, val, lbl = parsed
             result.setdefault(lst, []).append((val, lbl))
     return result
 
@@ -125,6 +144,31 @@ def _build_choices_map(
 # ---------------------------------------------------------------------------
 # Field classification
 # ---------------------------------------------------------------------------
+
+
+def _parse_field_row(
+    row: list, f_hdr: list[str], lbl_col: str
+) -> tuple[str, str, str, str] | None:
+    """Parse one survey row into ``(name, base_type, list_name, label)``.
+
+    Returns None if the row should be skipped (disabled, empty, or a group/repeat).
+    """
+    name = _get_col(row, f_hdr, "name")
+    raw_type = _get_col(row, f_hdr, "type")
+    disabled = _get_col(row, f_hdr, "disabled").lower()
+
+    if not name or not raw_type or disabled == "yes":
+        return None
+
+    parts = raw_type.split(None, 1)
+    base = parts[0].lower()
+
+    if not base or base in _SKIP_TYPES:
+        return None
+
+    list_name = parts[1] if len(parts) > 1 else ""
+    label = _get_col(row, f_hdr, lbl_col) if lbl_col else ""
+    return name, base, list_name, label
 
 
 def _classify_fields(
@@ -141,44 +185,23 @@ def _classify_fields(
         where *survey_fields* is a list of ``(name, base_type, list_name, label)``
         tuples for every non-skip field.
     """
-    note_fields: list[str] = []
-    text_fields: list[str] = []
-    date_fields: list[str] = []
-    datetime_fields: list[str] = []
+    buckets: dict[str, list[str]] = {"note": [], "text": [], "date": [], "datetime": []}
     survey_fields: list[tuple[str, str, str, str]] = []
 
     for row in f_data:
-        name = _get_col(row, f_hdr, "name")
-        raw_type = _get_col(row, f_hdr, "type")
-        label = _get_col(row, f_hdr, lbl_col) if lbl_col else ""
-        disabled = _get_col(row, f_hdr, "disabled").lower()
-
-        if not name or not raw_type or disabled == "yes":
+        parsed = _parse_field_row(row, f_hdr, lbl_col)
+        if parsed is None:
             continue
-
-        parts = raw_type.split(None, 1)
-        base = parts[0].lower()
-        list_name = parts[1] if len(parts) > 1 else ""
-
-        if not base or base in _SKIP_TYPES:
-            continue
-
-        if base in _NOTE_TYPES:
-            note_fields.append(name)
-        elif base in _TEXT_TYPES:
-            text_fields.append(name)
-        elif base in _DATE_TYPES:
-            date_fields.append(name)
-        elif base in _DATETIME_TYPES:
-            datetime_fields.append(name)
-
+        name, base, list_name, label = parsed
+        bucket = _TYPE_BUCKET.get(base)
+        if bucket:
+            buckets[bucket].append(name)
         survey_fields.append((name, base, list_name, label))
 
-    for sf in _SYSTEM_DATETIMES:
-        if sf not in datetime_fields:
-            datetime_fields.append(sf)
+    dt = buckets["datetime"]
+    dt.extend(sf for sf in _SYSTEM_DATETIMES if sf not in dt)
 
-    return note_fields, text_fields, date_fields, datetime_fields, survey_fields
+    return buckets["note"], buckets["text"], buckets["date"], dt, survey_fields
 
 
 # ---------------------------------------------------------------------------

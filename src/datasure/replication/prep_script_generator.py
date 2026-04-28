@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import json
+from collections.abc import Callable
 from typing import Any
 
 import polars as pl
@@ -219,6 +220,21 @@ def _stata_transform_column(args: dict, _desc: str) -> list[str]:
     return [f"{_C} NOTE: transform '{method}' on '{col}' could not be translated"]
 
 
+# (min_cols, expr) — expr receives the source-column list.
+_ADD_COL_EXPRS: dict[str, tuple[int, Callable[[list[str]], str]]] = {
+    "index": (0, lambda _: "_n"),
+    "random": (0, lambda _: "runiform()"),
+    "sum": (1, lambda c: "+".join(c)),
+    "mean": (1, lambda c: f"({' + '.join(c)}) / {len(c)}"),
+    "min": (1, lambda c: f"min({', '.join(c)})"),
+    "max": (1, lambda c: f"max({', '.join(c)})"),
+    "first": (1, lambda c: c[0]),
+    "last": (1, lambda c: c[-1]),
+    "diff": (2, lambda c: f"{c[0]} - {c[1]}"),
+    "quotient": (2, lambda c: f"{c[0]} / {c[1]}"),
+}
+
+
 def _stata_add_column(args: dict, _desc: str) -> list[str]:
     new_col = args.get("column_names") or ""
     method = (args.get("method") or "").lower()
@@ -227,39 +243,15 @@ def _stata_add_column(args: dict, _desc: str) -> list[str]:
 
     if method == "constant":
         raw = values[0] if values else (args.get("value") or "")
-        fv = _fmt_val(raw)
-        return [f"gen {new_col} = {fv}"]
-
-    if method == "index":
-        return [f"gen {new_col} = _n"]
+        return [f"gen {new_col} = {_fmt_val(raw)}"]
 
     if method == "uuid":
         return [f"{_C} NOTE: uuid column '{new_col}' — no direct Stata equivalent"]
 
-    if method == "random":
-        return [f"gen {new_col} = runiform()"]
-
-    agg_stata: dict[str, str] = {
-        "sum": "+".join(src_cols),
-        "mean": f"({' + '.join(src_cols)}) / {len(src_cols)}",
-        "min": f"min({', '.join(src_cols)})",
-        "max": f"max({', '.join(src_cols)})",
-    }
-
-    if method in agg_stata and src_cols:
-        return [f"gen {new_col} = {agg_stata[method]}"]
-
-    if method == "first" and src_cols:
-        return [f"gen {new_col} = {src_cols[0]}"]
-
-    if method == "last" and src_cols:
-        return [f"gen {new_col} = {src_cols[-1]}"]
-
-    if method == "diff" and len(src_cols) >= 2:
-        return [f"gen {new_col} = {src_cols[0]} - {src_cols[1]}"]
-
-    if method == "quotient" and len(src_cols) >= 2:
-        return [f"gen {new_col} = {src_cols[0]} / {src_cols[1]}"]
+    entry = _ADD_COL_EXPRS.get(method)
+    if entry and len(src_cols) >= entry[0]:
+        _, expr_fn = entry
+        return [f"gen {new_col} = {expr_fn(src_cols)}"]
 
     return [f"{_C} NOTE: add column '{new_col}' ({method}) could not be translated"]
 
@@ -278,6 +270,37 @@ _EMITTERS = {
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+
+def _parse_prep_args(raw: object) -> dict:
+    """Parse prep_args — may arrive as a JSON string, a dict, or a Polars struct."""
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            try:
+                return ast.literal_eval(raw)  # type: ignore[return-value]
+            except Exception:
+                return {}
+    return {}
+
+
+def _emit_prep_step(i: int, row: dict) -> list[str]:
+    """Return the Stata lines for one prep-log row."""
+    action = str(row.get("action") or "")
+    description = str(row.get("description") or "")
+    args = _parse_prep_args(row.get("prep_args") or "{}")
+
+    comment = [f"{_C} Step {i}: {description or action}"]
+    emitter = _EMITTERS.get(action)
+    body = (
+        emitter(args, description)
+        if emitter
+        else [f"{_C} NOTE: unknown action '{action}'"]
+    )
+    return comment + body + [""]
 
 
 def generate_prepare_data_script(
@@ -326,33 +349,7 @@ def generate_prepare_data_script(
     ]
 
     for i, row in enumerate(prep_log.iter_rows(named=True), start=1):
-        action = str(row.get("action") or "")
-        description = str(row.get("description") or "")
-        raw_args = row.get("prep_args") or "{}"
-
-        # Parse prep_args — may arrive as a JSON string, a dict, or a struct
-        if isinstance(raw_args, str):
-            try:
-                args = json.loads(raw_args)
-            except json.JSONDecodeError:
-                try:
-                    args = ast.literal_eval(raw_args)
-                except Exception:
-                    args = {}
-        elif isinstance(raw_args, dict):
-            args = raw_args
-        else:
-            args = {}
-
-        lines.append(f"{_C} Step {i}: {description or action}")
-
-        emitter = _EMITTERS.get(action)
-        if emitter:
-            lines.extend(emitter(args, description))
-        else:
-            lines.append(f"{_C} NOTE: unknown action '{action}'")
-
-        lines.append("")
+        lines.extend(_emit_prep_step(i, row))
 
     lines.append(_LOG_CLOSE)
     return "\n".join(lines) + "\n"

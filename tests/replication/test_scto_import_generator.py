@@ -267,7 +267,7 @@ class TestParseForm:
             "fieldsRowsAndColumns": [["type", "name", "label"]],
             "choicesRowsAndColumns": [],
         }
-        f_hdr, f_data, c_hdr, c_data = _parse_form(form_def)
+        f_hdr, f_data, _, _ = _parse_form(form_def)
         assert f_hdr == ["type", "name", "label"]
         assert f_data == []
 

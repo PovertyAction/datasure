@@ -43,7 +43,7 @@ def _escape(value: str) -> str:
     return value.replace('"', '""')
 
 
-def _is_numeric(value: str) -> bool:
+def _is_numeric(value: str | None) -> bool:
     try:
         float(value)
     except (ValueError, TypeError):
