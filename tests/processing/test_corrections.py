@@ -227,7 +227,7 @@ class TestCorrectionProcessor:
         self, correction_processor, sample_data
     ):
         """Test applying modify value correction to string column."""
-        processor, mock_get, mock_save = correction_processor
+        processor, mock_get, _mock_save = correction_processor
         # Mock sequence: get corrected data, get log for add_correction_entry
         empty_log = pl.DataFrame(
             {
@@ -266,7 +266,7 @@ class TestCorrectionProcessor:
         self, correction_processor, sample_data
     ):
         """Test applying modify value correction to numeric column."""
-        processor, mock_get, mock_save = correction_processor
+        processor, mock_get, _mock_save = correction_processor
         empty_log = pl.DataFrame(
             {
                 "date": [],
@@ -300,7 +300,7 @@ class TestCorrectionProcessor:
         self, correction_processor, sample_data
     ):
         """Test modify value with type conversion fallback."""
-        processor, mock_get, mock_save = correction_processor
+        processor, mock_get, _mock_save = correction_processor
         empty_log = pl.DataFrame(
             {
                 "date": [],
@@ -333,7 +333,7 @@ class TestCorrectionProcessor:
 
     def test_apply_correction_remove_value(self, correction_processor, sample_data):
         """Test applying remove value correction."""
-        processor, mock_get, mock_save = correction_processor
+        processor, mock_get, _mock_save = correction_processor
         empty_log = pl.DataFrame(
             {
                 "date": [],
@@ -364,7 +364,7 @@ class TestCorrectionProcessor:
 
     def test_apply_correction_remove_row(self, correction_processor, sample_data):
         """Test applying remove row correction."""
-        processor, mock_get, mock_save = correction_processor
+        processor, mock_get, _mock_save = correction_processor
         empty_log = pl.DataFrame(
             {
                 "date": [],

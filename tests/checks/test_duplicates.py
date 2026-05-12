@@ -2529,7 +2529,7 @@ class TestDeleteDuplicatesColumn:
     @patch("datasure.checks.duplicates.st")
     def test_empty_settings(self, mock_st):
         """With empty settings, should show info message."""
-        mock_st_obj, mock_ctx = _make_mock_st()
+        mock_st_obj, _mock_ctx = _make_mock_st()
         for attr in dir(mock_st_obj):
             if not attr.startswith("_"):
                 setattr(mock_st, attr, getattr(mock_st_obj, attr))
@@ -2550,7 +2550,7 @@ class TestDeleteDuplicatesColumn:
     @patch("datasure.checks.duplicates.st")
     def test_with_settings_no_confirm(self, mock_st, mock_save):
         """With settings but no confirm click."""
-        mock_st_obj, mock_ctx = _make_mock_st()
+        mock_st_obj, _mock_ctx = _make_mock_st()
         for attr in dir(mock_st_obj):
             if not attr.startswith("_"):
                 setattr(mock_st, attr, getattr(mock_st_obj, attr))
@@ -2573,7 +2573,7 @@ class TestDeleteDuplicatesColumn:
     @patch("datasure.checks.duplicates.st")
     def test_with_confirm_delete(self, mock_st, mock_save):
         """With confirm delete, should save updated settings and rerun."""
-        mock_st_obj, mock_ctx = _make_mock_st()
+        mock_st_obj, _mock_ctx = _make_mock_st()
         for attr in dir(mock_st_obj):
             if not attr.startswith("_"):
                 setattr(mock_st, attr, getattr(mock_st_obj, attr))
@@ -2596,7 +2596,7 @@ class TestDeleteDuplicatesColumn:
     @patch("datasure.checks.duplicates.st")
     def test_no_selected_index(self, mock_st):
         """When selectbox returns None, should not show confirm button."""
-        mock_st_obj, mock_ctx = _make_mock_st()
+        mock_st_obj, _mock_ctx = _make_mock_st()
         for attr in dir(mock_st_obj):
             if not attr.startswith("_"):
                 setattr(mock_st, attr, getattr(mock_st_obj, attr))
@@ -2632,7 +2632,7 @@ class TestRenderDuplicatesColumnActions:
         self, mock_st, mock_get, mock_delete, mock_render
     ):
         """When no duplicates settings exist, should show info message."""
-        mock_st_obj, mock_ctx = _make_mock_st()
+        mock_st_obj, _mock_ctx = _make_mock_st()
         for attr in dir(mock_st_obj):
             if not attr.startswith("_"):
                 setattr(mock_st, attr, getattr(mock_st_obj, attr))
@@ -2649,7 +2649,7 @@ class TestRenderDuplicatesColumnActions:
         self, mock_st, mock_get, mock_delete, mock_render
     ):
         """When settings exist, should render the settings table."""
-        mock_st_obj, mock_ctx = _make_mock_st()
+        mock_st_obj, _mock_ctx = _make_mock_st()
         for attr in dir(mock_st_obj):
             if not attr.startswith("_"):
                 setattr(mock_st, attr, getattr(mock_st_obj, attr))
@@ -2715,7 +2715,7 @@ class TestRenderSearchTypeSelection:
         mock_st.selectbox.return_value = SearchType.STARTSWITH.value
         mock_st.text_input.return_value = ""
 
-        search_type, pattern, dup_cols, lock_cols = _render_search_type_selection(
+        _search_type, _pattern, dup_cols, _lock_cols = _render_search_type_selection(
             ["age", "income"]
         )
         assert dup_cols == []
@@ -2738,7 +2738,7 @@ class TestDuplicatesReportSettings:
         self, mock_st, mock_load_default, mock_save, mock_render_cond, mock_filter
     ):
         """Test basic duplicates report settings UI."""
-        mock_st_obj, mock_ctx = _make_mock_st()
+        mock_st_obj, _mock_ctx = _make_mock_st()
         for attr in dir(mock_st_obj):
             if not attr.startswith("_"):
                 setattr(mock_st, attr, getattr(mock_st_obj, attr))
@@ -2771,7 +2771,7 @@ class TestDuplicatesReportSettings:
         self, mock_st, mock_load_default, mock_save, mock_render_cond, mock_filter
     ):
         """Test settings when default values are found in column lists."""
-        mock_st_obj, mock_ctx = _make_mock_st()
+        mock_st_obj, _mock_ctx = _make_mock_st()
         for attr in dir(mock_st_obj):
             if not attr.startswith("_"):
                 setattr(mock_st, attr, getattr(mock_st_obj, attr))
@@ -2830,7 +2830,7 @@ class TestDuplicatesReport:
         mock_render_other_table,
     ):
         """Test duplicates report when column config is empty."""
-        mock_st_obj, mock_ctx = _make_mock_st()
+        mock_st_obj, _mock_ctx = _make_mock_st()
         for attr in dir(mock_st_obj):
             if not attr.startswith("_"):
                 setattr(mock_st, attr, getattr(mock_st_obj, attr))
@@ -2902,7 +2902,7 @@ class TestDuplicatesReport:
         mock_render_other_table,
     ):
         """Test full duplicates report with column configuration."""
-        mock_st_obj, mock_ctx = _make_mock_st()
+        mock_st_obj, _mock_ctx = _make_mock_st()
         for attr in dir(mock_st_obj):
             if not attr.startswith("_"):
                 setattr(mock_st, attr, getattr(mock_st_obj, attr))
@@ -2992,7 +2992,7 @@ class TestDuplicatesReport:
         mock_render_other_table,
     ):
         """Test that survey_id and key are removed from other columns list."""
-        mock_st_obj, mock_ctx = _make_mock_st()
+        mock_st_obj, _mock_ctx = _make_mock_st()
         for attr in dir(mock_st_obj):
             if not attr.startswith("_"):
                 setattr(mock_st, attr, getattr(mock_st_obj, attr))
@@ -3062,7 +3062,7 @@ class TestDuplicatesReport:
         mock_render_other_table,
     ):
         """Test when survey_id is not set, only key is removed from columns."""
-        mock_st_obj, mock_ctx = _make_mock_st()
+        mock_st_obj, _mock_ctx = _make_mock_st()
         for attr in dir(mock_st_obj):
             if not attr.startswith("_"):
                 setattr(mock_st, attr, getattr(mock_st_obj, attr))
