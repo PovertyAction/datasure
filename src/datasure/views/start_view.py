@@ -154,23 +154,50 @@ def delete_project(project_id: str):
         st.error(f"Project '{project_id}' does not exist.")
 
 
+def _launch_fresh_demo():
+    """Create a clean demo project and navigate to the import page."""
+    demo_project_id = create_demo_project()
+    st.session_state.st_project_id = demo_project_id
+    set_onboarding_step(1)
+    with st.spinner("Loading demo data..."):
+        if load_demo_data():
+            st.session_state.st_project_id = demo_project_id
+            set_onboarding_step(2)
+            st.switch_page(st.session_state.st_import_data_page)
+        else:
+            st.error("Failed to load demo data. Please try again.")
+
+
 def _handle_demo_project():
     """Handle demo project selection and initialization."""
     show_demo_intro()
 
-    if st.button("Start Demo", type="primary", width="stretch"):
-        demo_project_id = create_demo_project()
-        st.session_state.st_project_id = demo_project_id
-        set_onboarding_step(1)
+    demo_exists = DEMO_PROJECT_ID in load_projects()
 
-        with st.spinner("Loading demo data..."):
-            if load_demo_data():
-                st.success("Demo data loaded successfully!")
-                st.session_state.st_project_id = demo_project_id
-                set_onboarding_step(2)
+    if demo_exists:
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Resume Demo", type="primary", width="stretch"):
+                st.session_state.st_project_id = DEMO_PROJECT_ID
+                ConfigurationService(DEMO_PROJECT_ID).sync_output_view_files()
                 st.switch_page(st.session_state.st_import_data_page)
-            else:
-                st.error("Failed to load demo data. Please try again.")
+        with col2:
+            if st.button("Restart Demo", type="secondary", width="stretch"):
+                st.session_state["_demo_confirm_restart"] = True
+
+        if st.session_state.get("_demo_confirm_restart"):
+            st.warning(
+                "**Restarting will permanently delete all your demo progress**, "
+                "including any corrections and data preparation steps you have made. "
+                "This cannot be undone.",
+                icon=":material/warning:",
+            )
+            if st.button("Confirm Restart", type="primary"):
+                st.session_state.pop("_demo_confirm_restart", None)
+                _launch_fresh_demo()
+    else:
+        if st.button("Start Demo", type="primary", width="stretch"):
+            _launch_fresh_demo()
 
 
 def _handle_create_new_project():
