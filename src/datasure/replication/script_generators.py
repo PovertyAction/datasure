@@ -67,15 +67,18 @@ def _emit_stata(
         comment += f" | {reason}"
 
     escaped_key = _escape(key_val)
+    escaped_val = _escape(new_val) if new_val is not None else None
 
     if action == "modify value" and col and new_val is not None:
         if _is_numeric(new_val):
             stmt = f'replace {col} = {new_val} if {key_col} == "{escaped_key}"'
         else:
-            escaped_val = _escape(new_val)
             stmt = f'replace {col} = "{escaped_val}" if {key_col} == "{escaped_key}"'
     elif action == "remove value" and col:
-        stmt = f'replace {col} = . if {key_col} == "{escaped_key}"'
+        if _is_numeric(new_val):
+            stmt = f'replace {col} = . if {key_col} == "{escaped_key}"'
+        else:
+            stmt = f'replace {col} = "" if {key_col} == "{escaped_key}"'
     elif action == "remove row":
         stmt = f'drop if {key_col} == "{escaped_key}"'
     else:
@@ -130,7 +133,6 @@ def generate_master_script(
         "",
         "cls",
         "clear all",
-        "set trace off",
         "set more off",
         "",
         'global root    "REPLACE_WITH_PARENT_PATH"',
@@ -146,7 +148,7 @@ def generate_master_script(
         'global figures "$output/2_figures"',
         "",
         "* Create date-based log subfolder and start run log",
-        'local datestr = string(date(c(current_date), "DMY"), "%tdCCYY-NN-DD")',
+        "local datestr : display %tdCCYY-NN-DD today()",
         'global logdir "$logs/`datestr\'"',
         'cap mkdir "$logdir"',
         "cap log close",
@@ -209,7 +211,11 @@ def generate_install_packages_script(
         'cap log using "$logdir/1_install_packages.log", replace text',
         "",
         "* Install github package manager",
-        'net install github, from("https://haghish.github.io/github/")',
+        "which github",
+        "if _rc {",
+        '    display "github package not found. Installing github package manager..."',
+        '    net install github, from("https://haghish.github.io/github/")',
+        "}",
         "",
         "* Install IPA packages",
         "github install PovertyAction/high-frequency-checks",
@@ -254,7 +260,7 @@ def generate_import_script(
         'cap log using "$logdir/2_import_data.log", replace text',
         "",
         "* Import raw CSV dataset (all columns as strings to preserve data as-is)",
-        f'import delimited "$raw/{safe_survey}_raw.csv", stringcols(_all) clear',
+        f'import delimited "$raw/{safe_survey}_raw.csv", stringcols(_all) case(preserve) clear',
         "",
         "* Save as Stata dataset",
         f'save "$raw/{safe_survey}_raw.dta", replace',
