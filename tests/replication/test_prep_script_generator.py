@@ -195,7 +195,7 @@ class TestStataRemoveRows:
             },
             "",
         )
-        assert "keep if status ==" in lines[0]
+        assert "keep if status !=" in lines[0]
 
     def test_no_cols_no_condition_returns_note(self):
         lines = _stata_remove_rows({}, "")
