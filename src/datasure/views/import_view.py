@@ -26,7 +26,6 @@ from datasure.utils.navigations_utils import (
 from datasure.utils.onboarding_utils import (
     DEMO_PROJECT_ID,
     ImportDemoInfo,
-    demo_expander,
     is_demo_project,
 )
 from datasure.utils.secure_credentials import (
@@ -455,15 +454,8 @@ if not import_log.is_empty():
 
         st.dataframe(preview_data, width="stretch")
 
-        # Demo expander with educational content
+        # Demo next action
         if is_demo_project():
-            demo_expander(
-                "About Your Pre-loaded Demo Data",
-                ImportDemoInfo.get_info_message("demo_data_info"),
-                expanded=True,
-            )
-
-            # Demo next action
             st.write("---")
             show_demo_next_action(2, "st_prep_data_page", "Prepare Your Data")
 

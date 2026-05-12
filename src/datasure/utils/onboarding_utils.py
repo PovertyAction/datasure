@@ -42,15 +42,13 @@ class ImportDemoInfo:
     """Class to provide demo messages for import scenarios."""
 
     ADD_TO_SESSION_INFO: ClassVar[str] = """
-        Great! You've successfully loaded your demo survey data.
-        You can see the survey data and backcheck data are now available for analysis.
-        success
+        Your demo survey data has been loaded successfully.
+        The survey and backcheck datasets are now available for analysis.
     """
 
     PREVIEW_DATA_INFO: ClassVar[str] = """
-        Data import complete! Your demo datasets are loaded and ready for quality analysis. "
-        In a real project, this is what you would see after importing from SurveyCTO or uploading CSV files."
-        success
+        Your demo datasets are loaded and ready for quality analysis.
+        In a real project, this is what you would see after importing from SurveyCTO or uploading CSV files.
     """
 
     PREPARE_DATA_INFO: ClassVar[str] = """
@@ -229,26 +227,19 @@ class OnboardingSteps:
         "page": "import_view.py",
         "guidance_title": "Data Successfully Imported!",
         "guidance_content": """
-        ##### ✅ Your demo data is already loaded and ready!
+        Your demo data is already loaded — no import steps needed here.
 
-        In a real project, you would have just:
-        - Connected to your SurveyCTO server, OR
-        - Uploaded CSV/Excel files from your computer, OR
-
-        ##### What's been imported for you:
-        - **Survey Data**: 132 household survey responses from rural communities
+        **What's been imported:**
+        - **Survey Data**: 132 household survey responses from rural communities in India
         - **Backcheck Data**: 30 quality control validation records
 
-        ##### Both datasets contain realistic data quality issues
+        Both datasets contain realistic data quality issues including missing values,
+        duplicate household IDs, and inconsistent income reporting — exactly the kind
+        of issues DataSure is designed to catch.
 
-        **including**:
-        - Missing data
-        - Duplicate household IDs
-        - Inconsistent income reporting
-        - Missing demographic information
-
-        **👉 Ready for the next step:** Explore your data in the **Preview Imported Data** section.
-        Switch between the **demo_backcheck** and **demo_survey** datasets to see what's inside!
+        **:material/arrow_downward: What to do now:** Scroll down to **Preview Imported Data**,
+        switch between the **demo_survey** and **demo_backcheck** tabs to explore the data,
+        then click **Prepare Your Data** to continue.
         """,
     }
 
@@ -419,7 +410,9 @@ class OnboardingSteps:
         guidance = steps.get(step, {})
         if not guidance:
             raise ValueError(f"Invalid step: {step}")
-        with st.expander(f"📖 **{guidance['guidance_title']}**", expanded=True):
+        with st.expander(
+            f":material/menu_book: **{guidance['guidance_title']}**", expanded=True
+        ):
             demo_container(guidance["guidance_content"])
 
 

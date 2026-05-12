@@ -54,16 +54,12 @@ def page_navigation(prev=None, next=None):
 
 def add_demo_navigation(page_name: str, step: int | None = None):
     """Add navigation elements to pages with demo support."""
-    # Set the current page in session state
     st.session_state["current_page"] = page_name
 
-    # If this is a demo project, show onboarding elements
     if is_demo_project():
-        # Update onboarding step if provided
-        if step is not None:
+        if step is not None and step > get_onboarding_step():
             set_onboarding_step(step)
 
-        # Show demo-specific UI elements
         show_demo_banner()
         show_progress_indicator()
         OnboardingSteps.get_guidance(step or get_onboarding_step())
@@ -131,8 +127,23 @@ def demo_sidebar_help():
         st.markdown("---")
 
         if st.button("Restart Demo", width="stretch"):
-            st.switch_page(st.session_state.st_import_data_page)
-            load_demo_data()
+            st.session_state["_sidebar_confirm_restart"] = True
+
+        if st.session_state.get("_sidebar_confirm_restart"):
+            st.warning(
+                "This will reset all demo progress and data.",
+                icon=":material/warning:",
+            )
+            if st.button(
+                "Confirm restart", type="primary", key="_sidebar_restart_confirm"
+            ):
+                st.session_state.pop("_sidebar_confirm_restart", None)
+                load_demo_data()
+                set_onboarding_step(2)
+                st.switch_page(st.session_state.st_import_data_page)
+            if st.button("Cancel", key="_sidebar_restart_cancel"):
+                st.session_state.pop("_sidebar_confirm_restart", None)
+                st.rerun()
 
         if st.button("Exit Demo", width="stretch"):
             st.session_state.st_project_id = ""

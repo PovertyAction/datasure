@@ -68,21 +68,17 @@ class TestDemoContainer:
 
     @patch("datasure.utils.onboarding_utils.st")
     def test_demo_container_creates_container(self, mock_st):
-        """Test that demo_container creates a streamlit container with styled text."""
+        """Test that demo_container renders an info box with the given text."""
         test_text = "This is a test message"
         demo_container(test_text)
 
-        # Verify container was created
-        mock_st.container.assert_called_once()
-
-        # Verify markdown was called with unsafe_allow_html=True
-        assert mock_st.markdown.call_count == 2  # Once for styled div, once for spacing
+        mock_st.info.assert_called_once_with(test_text)
 
     @patch("datasure.utils.onboarding_utils.st")
     def test_demo_container_with_empty_text(self, mock_st):
         """Test demo_container with empty text."""
         demo_container("")
-        mock_st.container.assert_called_once()
+        mock_st.info.assert_called_once_with("")
 
 
 class TestImportDemoInfo:
@@ -91,13 +87,13 @@ class TestImportDemoInfo:
     def test_get_info_message_valid_ids(self):
         """Test getting valid demo messages."""
         message = ImportDemoInfo.get_info_message("add_to_session_info")
-        assert "successfully loaded your demo survey data" in message
+        assert "loaded successfully" in message
 
         message = ImportDemoInfo.get_info_message("prepare_data_info")
         assert "Data preparation is a crucial step" in message
 
         message = ImportDemoInfo.get_info_message("preview_data_info")
-        assert "Data import complete" in message
+        assert "loaded and ready" in message
 
         message = ImportDemoInfo.get_info_message("proceed_to_config_info")
         assert "experiment with data preparation" in message
@@ -143,7 +139,7 @@ class TestOnboardingSteps:
         start_step = OnboardingSteps.get_step_info("start")
         assert start_step["step"] == 1
         assert start_step["title"] == "Start Here"
-        assert start_step["icon"] == "🏠"
+        assert start_step["icon"] == ":material/home:"
 
         import_step = OnboardingSteps.get_step_info("import")
         assert import_step["step"] == 2
@@ -481,8 +477,8 @@ class TestDemoUIFunctions:
 
         show_progress_indicator()
 
-        # Verify that markdown was called for each step
-        assert mock_st.markdown.call_count >= 6
+        # Verify that markdown was called (header + current step + future steps)
+        assert mock_st.markdown.call_count >= 5
 
     @patch("datasure.utils.onboarding_utils.st")
     @patch("datasure.utils.onboarding_utils.demo_container")
@@ -491,8 +487,8 @@ class TestDemoUIFunctions:
         show_demo_intro()
         mock_demo_container.assert_called_once()
         args = mock_demo_container.call_args[0][0]
-        assert "Start here" in args
-        assert "Importing survey data" in args
+        assert "New to DataSure?" in args
+        assert "Import" in args
 
     @patch("datasure.utils.onboarding_utils.st")
     @patch("datasure.utils.onboarding_utils.is_demo_project")

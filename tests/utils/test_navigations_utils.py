@@ -574,8 +574,12 @@ class TestDemoSidebarHelp:
     def test_restart_demo_button_switches_page_and_loads_demo(
         self, mock_st, _is_demo, _get_step, mock_load
     ):
-        """Clicking 'Restart Demo' switches to import page and reloads demo data."""
-        mock_st.button.side_effect = [True, False]
+        """Confirming restart loads demo data and switches to import page."""
+        # Simulate confirmation state already set (user previously clicked
+        # "Restart Demo")
+        mock_st.session_state.get.return_value = True
+        # Buttons rendered: Restart Demo, Confirm restart, Cancel, Exit Demo
+        mock_st.button.side_effect = [False, True, False, False]
         mock_st.session_state.st_import_data_page = "views/import.py"
 
         demo_sidebar_help()
@@ -592,6 +596,9 @@ class TestDemoSidebarHelp:
         self, mock_st, _is_demo, _get_step, _load_demo
     ):
         """Clicking 'Exit Demo' clears project id and switches to start page."""
+        # No confirmation dialog active
+        mock_st.session_state.get.return_value = False
+        # Buttons rendered: Restart Demo, Exit Demo
         mock_st.button.side_effect = [False, True]
         mock_st.session_state.st_start_page = "views/start.py"
 
