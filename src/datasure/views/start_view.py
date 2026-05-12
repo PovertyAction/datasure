@@ -1,6 +1,6 @@
 import hashlib
 import json
-import os
+import shutil
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -80,21 +80,26 @@ def save_project(project_name: str, project_id: str):
 
     project_path = get_cache_path(project_id)
 
+    project_info_path = project_path / "settings" / "project_info.json"
     if not project_path.exists():
         project_path.mkdir(parents=True, exist_ok=True)
         (project_path / "data").mkdir(exist_ok=True)
         (project_path / "settings").mkdir(exist_ok=True)
         created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         last_used = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(project_info_path, "w") as f:
+            json.dump({"created_at": created_at}, f, indent=4)
     else:
-        # get created at date from existing project
-        project_info_path = project_path / "settings" / "project_info.json"
         if project_info_path.exists():
             with open(project_info_path) as f:
                 project_info = json.load(f)
-            created_at = project_info.get("created_at")
+            created_at = project_info.get(
+                "created_at", datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
         else:
             created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(project_info_path, "w") as f:
+                json.dump({"created_at": created_at}, f, indent=4)
         last_used = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     projects = load_projects() or {}
     new_project = {
@@ -125,12 +130,7 @@ def delete_project(project_id: str):
         project_path = get_cache_path(project_id)
 
         if project_path.exists():
-            for root, dirs, files in os.walk(project_path, topdown=False):
-                for name in files:
-                    os.remove(os.path.join(root, name))
-                for name in dirs:
-                    os.rmdir(os.path.join(root, name))
-            project_path.rmdir()
+            shutil.rmtree(project_path)
         st.success(f"Project '{project_id}' deleted successfully!")
     else:
         st.error(f"Project '{project_id}' does not exist.")
@@ -177,6 +177,11 @@ def _handle_existing_project_selection(project: str):
     """Handle selection of an existing project."""
     project_id = get_project_id(project)
     projects = load_projects()
+    project_info = projects.get(project_id, {})
+    if project_info:
+        created_at = project_info.get("created_at", "Unknown")
+        last_used = project_info.get("last_used", "Unknown")
+        st.caption(f"Created: {created_at} | Last used: {last_used}")
     select_project = st.button("Load Project", type="primary", width="stretch")
 
     if select_project:
@@ -193,6 +198,11 @@ def _handle_existing_project_selection(project: str):
 def _show_delete_project_option(project: str, project_id: str, projects: dict):
     """Show delete project option for non-demo projects."""
     with st.expander(":material/delete: delete project"):
+        st.warning(
+            f"Permanently deletes **{project}** and all its data, corrections, and logs. "
+            "This cannot be undone.",
+            icon=":material/warning:",
+        )
         if st.button("Confirm delete", width="stretch") and project_id in projects:
             delete_project(project_id)
             st.success(f"Project '{project}' deleted successfully!")
@@ -210,7 +220,7 @@ def _render_project_selection_ui():
     with pc1, st.container(border=True):
         st.markdown(
             "Select a DataSure project to get started. If you don't have a project yet, you can create a new project "
-            "by selection the **'Create New Project'** option. If you are new to DataSure, try the **'DataSure Demo'** "
+            "by selecting the **'Create New Project'** option. If you are new to DataSure, try the **'DataSure Demo'** "
             "project for a guided experience."
         )
         project = st.selectbox(
@@ -230,15 +240,11 @@ def _render_project_selection_ui():
 
 def _render_page_header():
     """Render the page header with logo and description."""
-    try:
-        app_version = version("DataSure")
-    except PackageNotFoundError:
-        app_version = "dev"
-    st.write(f"version {app_version}")
     # Get the path to the assets directory relative to the package
     assets_dir = Path(__file__).parent.parent / "assets"
-    image_path = assets_dir / "LinkedIn Cover IPA20.png"
-    st.image(str(image_path), width="stretch")
+    image_path = assets_dir / "datasure_logo.svg"
+    _, logo_col, _ = st.columns([0.35, 0.4, 0.35])
+    logo_col.image(str(image_path), width="stretch")
 
     st.title("Welcome to DataSure")
 
@@ -259,22 +265,14 @@ def _render_learn_more_section():
 
         st.divider()
 
-        # Benefits in a clean grid
         st.subheader("Why DataSure?")
 
-        benefits = st.columns(3)
-
-        with benefits[0]:
-            st.metric("Time Saved", "70%", "on QA tasks")
-            st.caption("Automate repetitive validation")
-
-        with benefits[1]:
-            st.metric("Error Rate", "-95%", "reduction")
-            st.caption("Catch issues early")
-
-        with benefits[2]:
-            st.metric("Processing", "10x", "faster")
-            st.caption("Batch operations")
+        st.markdown(
+            "DataSure automates the repetitive parts of survey data QA: connecting to your data "
+            "sources, running consistency and coverage checks, flagging issues for review, and "
+            "generating a documented audit trail. It is designed for research teams that run "
+            "high-frequency checks and need a reproducible record of every correction made to the data."
+        )
 
         st.divider()
 
@@ -289,7 +287,15 @@ def _render_learn_more_section():
         # Main workflow stages
         st.subheader("How It Works")
 
-        workflow_tabs = st.tabs(["1️⃣ Import", "2️⃣ Validate", "3️⃣ Correct", "4️⃣ Report"])
+        workflow_tabs = st.tabs(
+            [
+                ":material/upload: Import",
+                ":material/rule: Validate",
+                ":material/edit: Correct",
+                ":material/bar_chart: Report",
+                ":material/folder_zip: Replicate",
+            ]
+        )
 
         with workflow_tabs[0]:
             st.write("""
@@ -325,11 +331,26 @@ def _render_learn_more_section():
             - Real-time analytics
             """)
 
-        st.divider()
+        with workflow_tabs[4]:
+            st.write("""
+            **Export a self-contained replication package:**
+            - Raw survey data (CSV)
+            - Stata do-files that reproduce every import, preparation, and correction step
+            - Audit logs for all recorded changes
+            - README with instructions for running the package
 
-        # Simple CTA
-        st.success(
-            "Ready to improve your data workflow? Start with our quick setup guide →"
+            The package allows anyone with Stata to reproduce your corrected dataset
+            from the original source data, supporting transparency and reproducibility
+            standards for IPA research projects.
+            """)
+
+        st.divider()
+        st.link_button(
+            "Ready to improve your data workflow? Start with our comprehensive guide",
+            "https://data.poverty-action.org/data-quality/datasure/how-to-datasure.html",
+            icon=":material/open_in_new:",
+            width="stretch",
+            type="primary",
         )
 
 
@@ -345,3 +366,9 @@ with page_canvas:
     _render_learn_more_section()
     st.write("---")
     _render_project_selection_ui()
+
+try:
+    _app_version = version("DataSure")
+except PackageNotFoundError:
+    _app_version = "dev"
+st.caption(f"DataSure v{_app_version}")
