@@ -1263,7 +1263,7 @@ def test_build_map_dataframe_all_fields():
 def test_build_map_dataframe_no_optional_fields():
     """Test building map dataframe with no optional fields."""
     data = pl.DataFrame({"latitude": [1.0], "longitude": [3.0]})
-    map_pd, tooltip_fields = _build_map_dataframe(data, None, None, None, None, None)
+    _map_pd, tooltip_fields = _build_map_dataframe(data, None, None, None, None, None)
     assert tooltip_fields == ["lat", "lon"]
 
 
@@ -1531,7 +1531,7 @@ def test_load_and_parse_gps_data_success(mock_get_table, mock_selectbox):
     mock_selectbox.return_value = "gps1"
 
     data = pl.DataFrame({"lat": [1.0, 2.0], "lon": [3.0, 4.0]})
-    gps_settings, alias, parsed = _load_and_parse_gps_data("proj", "page", data)
+    _gps_settings, alias, parsed = _load_and_parse_gps_data("proj", "page", data)
     assert alias == "gps1"
     assert parsed is not None
     assert len(parsed) == 2
@@ -2677,7 +2677,7 @@ def test_load_and_parse_gps_data_with_alias_key(mock_get_table, mock_selectbox):
     mock_selectbox.return_value = "gps1"
 
     data = pl.DataFrame({"lat": [1.0], "lon": [2.0]})
-    _, alias, parsed = _load_and_parse_gps_data(
+    _, alias, _parsed = _load_and_parse_gps_data(
         "proj", "page", data, alias_select_key="custom_key"
     )
     assert alias == "gps1"
