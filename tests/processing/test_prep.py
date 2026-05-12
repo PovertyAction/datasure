@@ -1020,7 +1020,7 @@ class TestAddNewColumnOperation:
             method="constant",
             value="hello",
         )
-        result, args = op.execute(data, prep_args)
+        result, _args = op.execute(data, prep_args)
         assert "new" in result.columns
         assert all(v == "hello" for v in result["new"].to_list())
 

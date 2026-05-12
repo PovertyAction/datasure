@@ -618,7 +618,7 @@ class TestProgressByColumn:
         df = sample_pandas_df.copy()
         df_pl = pl.from_pandas(df)
         result = compute_summary_progress_by_col(df_pl, "date", "name", "Daily")
-        progress_df, vmin, vmax, format_cols = result
+        progress_df, _vmin, _vmax, _format_cols = result
         assert isinstance(progress_df, pd.DataFrame)
 
     def test_compute_summary_progress_by_col_weekly(self, sample_pandas_df):
