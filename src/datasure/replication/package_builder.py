@@ -103,7 +103,7 @@ def _select_import_script(
         return generate_scto_import_script(
             form_def=form_def,
             form_id=form_id,
-            form_title=survey_name,
+            form_title=form_def.get("title", survey_name),
             survey_name=survey_name,
             datasure_version=datasure_version,
         )
