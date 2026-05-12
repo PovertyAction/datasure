@@ -13,6 +13,7 @@ from datasure.replication.script_generators import (
     _is_numeric,
     generate_corrections_script,
     generate_import_script,
+    generate_install_packages_script,
     generate_master_script,
 )
 
@@ -113,8 +114,12 @@ class TestEmitStata:
         # Value should be escaped
         assert any('""hi""' in line for line in lines)
 
-    def test_remove_value(self):
-        lines = _emit_stata("remove value", "KEY", "k002", "score", None, "")
+    def test_remove_value_string(self):
+        lines = _emit_stata("remove value", "KEY", "k002", "name", None, "")
+        assert any('replace name = ""' in line for line in lines)
+
+    def test_remove_value_numeric(self):
+        lines = _emit_stata("remove value", "KEY", "k002", "score", "0", "cleared")
         assert any("replace score = ." in line for line in lines)
 
     def test_remove_row(self):
@@ -140,6 +145,12 @@ class TestEmitStata:
 
 
 class TestGenerateCorrectionsScript:
+    def test_empty_key_col_returns_warning(self):
+        log = pl.DataFrame(schema={"action": pl.String, "KEY": pl.String})
+        script = generate_corrections_script(log, "", "Proj", "Survey", "1.0")
+        assert "WARNING" in script
+        assert "no key column" in script
+
     def test_empty_log_returns_no_corrections_message(self):
         log = pl.DataFrame(schema={"action": pl.String, "KEY": pl.String})
         script = generate_corrections_script(log, "key", "Proj", "Survey", "1.0")
@@ -183,10 +194,66 @@ class TestGenerateCorrectionsScript:
         script = generate_corrections_script(log, "KEY", "P", "S", "0.1")
         assert "drop if KEY" in script
 
+    def test_remove_value_action(self):
+        log = pl.DataFrame(
+            {
+                "action": ["remove value"],
+                "KEY": ["k003"],
+                "column": ["notes"],
+                "new_value": [None],
+                "reason": ["clear"],
+                "ID": ["3"],
+                "date": ["2024-01-01"],
+                "current_value": ["old text"],
+            }
+        )
+        script = generate_corrections_script(log, "KEY", "P", "S", "0.1")
+        assert "replace notes" in script
+
+    def test_ends_with_newline(self):
+        log = pl.DataFrame(schema={"action": pl.String, "KEY": pl.String})
+        script = generate_corrections_script(log, "key", "P", "S", "1.0")
+        assert script.endswith("\n")
+
     def test_returns_string(self):
         log = pl.DataFrame(schema={"action": pl.String, "KEY": pl.String})
         result = generate_corrections_script(log, "key", "P", "S", "1.0")
         assert isinstance(result, str)
+
+
+# ---------------------------------------------------------------------------
+# generate_install_packages_script
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateInstallPackagesScript:
+    @pytest.fixture()
+    def script(self):
+        return generate_install_packages_script("My Project", "My Survey", "1.0.0")
+
+    def test_returns_string(self, script):
+        assert isinstance(script, str)
+
+    def test_ends_with_newline(self, script):
+        assert script.endswith("\n")
+
+    def test_header_present(self, script):
+        assert "Install Packages" in script
+
+    def test_contains_github_install(self, script):
+        assert "github install" in script
+
+    def test_installs_ipaclean(self, script):
+        assert "ipaclean" in script
+
+    def test_installs_high_frequency_checks(self, script):
+        assert "high-frequency-checks" in script
+
+    def test_contains_log_close(self, script):
+        assert "cap log close" in script
+
+    def test_checks_for_existing_github(self, script):
+        assert "which github" in script
 
 
 # ---------------------------------------------------------------------------
