@@ -1,5 +1,6 @@
 """Comprehensive tests for the prep module."""
 
+import json
 from unittest.mock import patch
 
 import polars as pl
@@ -1020,7 +1021,7 @@ class TestAddNewColumnOperation:
             method="constant",
             value="hello",
         )
-        result, args = op.execute(data, prep_args)
+        result, _args = op.execute(data, prep_args)
         assert "new" in result.columns
         assert all(v == "hello" for v in result["new"].to_list())
 
@@ -1404,7 +1405,33 @@ class TestLogManagement:
     """Test private log management functions."""
 
     def test_parse_prep_log_to_actions_dict(self):
-        """Test Parse prep log to actions dict."""
+        """Test parsing JSON-serialized prep_args (current production format)."""
+        log = pl.DataFrame(
+            {
+                "prep_args": [
+                    json.dumps(
+                        {
+                            "action": "remove column(s)",
+                            "source_columns": ["col1"],
+                            "column_names": None,
+                            "affected_count": None,
+                            "remaining_count": None,
+                            "value": None,
+                            "method": None,
+                            "condition": None,
+                            "failed_count": None,
+                            "additional_info": None,
+                        }
+                    )
+                ]
+            }
+        )
+        actions = _parse_prep_log_to_actions(log)
+        assert len(actions) == 1
+        assert actions[0].action_type == PrepActions.remove_column
+
+    def test_parse_prep_log_to_actions_legacy_repr(self):
+        """Test parsing Python-repr-serialized prep_args (legacy fallback format)."""
         log = pl.DataFrame(
             {
                 "prep_args": [
