@@ -1280,7 +1280,9 @@ def set_onboarding_step(step: int):
 
 def get_onboarding_step() -> int:
     """Get the current onboarding step."""
-    return st.session_state["onboarding_step"] or 1
+    if "onboarding_step" not in st.session_state:
+        return 1
+    return st.session_state["onboarding_step"]
 
 
 def show_progress_indicator():
