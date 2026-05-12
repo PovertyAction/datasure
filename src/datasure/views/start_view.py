@@ -33,18 +33,36 @@ def get_project_id(project_name: str) -> str:
 
 
 def get_project_names() -> list[str]:
-    """Get a list of project names from the local directory."""
+    """Get a list of project names sorted by last used date (most recent first)."""
     projects_file = get_cache_path(PROJECTS_FILE)
-    project_names = []
+    project_names: list[str] = []
     if projects_file.exists():
         with open(projects_file) as f:
             projects = json.load(f)
-        project_names = [
-            project["name"]
-            for project in projects.values()
-            if not project.get("is_demo", False)
-        ]
+        sorted_projects = sorted(
+            (p for p in projects.values() if not p.get("is_demo", False)),
+            key=lambda p: p.get("last_used", ""),
+            reverse=True,
+        )
+        project_names = [p["name"] for p in sorted_projects]
     return ["DataSure Demo"] + project_names + ["Create New Project"]
+
+
+def _get_last_used_project_name() -> str | None:
+    """Return the name of the most recently used non-demo project, or None."""
+    projects_file = get_cache_path(PROJECTS_FILE)
+    if not projects_file.exists():
+        return None
+    with open(projects_file) as f:
+        projects = json.load(f)
+    candidates = [
+        p
+        for p in projects.values()
+        if not p.get("is_demo", False) and p.get("last_used")
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p["last_used"])["name"]
 
 
 def valid_project_name(project_name: str) -> bool:
@@ -186,6 +204,7 @@ def _handle_existing_project_selection(project: str):
 
     if select_project:
         st.write(f"Loading project '{project}'...")
+        save_project(project, project_id)
         st.session_state.st_project_id = project_id
         ConfigurationService(project_id).sync_output_view_files()
         st.switch_page(st.session_state.st_import_data_page)
@@ -216,6 +235,12 @@ def _render_project_selection_ui():
     st.header("Select Your Project")
     _, pc1, _ = st.columns([0.25, 0.5, 0.25])
     project_list = get_project_names()
+    last_used_name = _get_last_used_project_name()
+    default_index = (
+        project_list.index(last_used_name)
+        if last_used_name and last_used_name in project_list
+        else None
+    )
 
     with pc1, st.container(border=True):
         st.markdown(
@@ -226,7 +251,7 @@ def _render_project_selection_ui():
         project = st.selectbox(
             label="Select Project",
             options=project_list,
-            index=None,
+            index=default_index,
             key="project_select_key",
         )
 
