@@ -1363,15 +1363,20 @@ def show_progress_indicator():
 def show_demo_intro():
     """Display the demo introduction message."""
     demo_container("""
-        **Start here, if you are new to DataSure.**
+        **New to DataSure?** This guided demo walks you through a complete survey data quality
+        workflow using realistic sample data. Expect to spend about **45 minutes** going through all steps.
 
-        This guided demo will walk you through:
-        - Importing survey data
-        - Running data quality checks
-        - Identifying and understanding data issues
-        - Generating quality reports
+        **What you will do:**
 
-        **Demo data:** Household survey data from rural communities with realistic data quality challenges.
+        1. **Import** - Load 132 household survey responses and 30 backcheck records
+        2. **Prepare** - Transform and clean columns ready for analysis
+        3. **Configure** - Set up quality check rules for your survey
+        4. **Review** - Explore duplicate detection, missing data, outliers, enumerator stats, and more
+        5. **Correct** - Log a data correction and watch its effect in the reports
+        6. **Export** - Download a replication package with all scripts and audit logs
+
+        **Demo data:** 132 household survey records from rural communities in India,
+        with realistic data quality issues built in.
     """)
 
 
