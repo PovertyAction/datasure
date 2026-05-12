@@ -271,10 +271,7 @@ def gpschecks_report_settings(
             st.subheader("Mapbox API Token Configuration")
             st.caption("Configure your Mapbox API key for map visualizations. ")
 
-            if "mapbox_token" in st.secrets:
-                current_mapbox_token = st.secrets["mapbox_token"]
-            else:
-                current_mapbox_token = None
+            current_mapbox_token = st.secrets.get("mapbox_token", None)
 
             # Show text input if user wants to add own key
             mt1, mt2 = st.columns([0.7, 0.3])
