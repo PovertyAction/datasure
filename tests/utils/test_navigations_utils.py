@@ -467,46 +467,56 @@ class TestDemoCallout:
     """Test demo_callout function."""
 
     @patch("datasure.utils.navigations_utils.is_demo_project", return_value=False)
-    def test_non_demo_returns_none(self, _is_demo):
-        """Non-demo project returns None without building a message."""
-        result = demo_callout("Hello")
-        assert result is None
+    @patch("datasure.utils.navigations_utils.st")
+    def test_non_demo_renders_nothing(self, mock_st, _is_demo):
+        """Non-demo project returns early without rendering anything."""
+        demo_callout("Hello")
+        mock_st.info.assert_not_called()
+        mock_st.success.assert_not_called()
+        mock_st.warning.assert_not_called()
+        mock_st.error.assert_not_called()
 
     @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
-    def test_info_type(self, _is_demo):
-        """Info type prefixes message with 'Demo Tip:'."""
-        result = demo_callout("Check this", type="info")
-        assert result == "**Demo Tip:** Check this"
+    @patch("datasure.utils.navigations_utils.st")
+    def test_info_type(self, mock_st, _is_demo):
+        """Info type renders via st.info."""
+        demo_callout("Check this", type="info")
+        mock_st.info.assert_called_once_with("Check this")
 
     @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
-    def test_success_type(self, _is_demo):
-        """Success type prefixes message with 'Demo Success:'."""
-        result = demo_callout("Done", type="success")
-        assert result == "**Demo Success:** Done"
+    @patch("datasure.utils.navigations_utils.st")
+    def test_success_type(self, mock_st, _is_demo):
+        """Success type renders via st.success."""
+        demo_callout("Done", type="success")
+        mock_st.success.assert_called_once_with("Done")
 
     @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
-    def test_warning_type(self, _is_demo):
-        """Warning type prefixes message with 'Demo Note:'."""
-        result = demo_callout("Be careful", type="warning")
-        assert result == "**Demo Note:** Be careful"
+    @patch("datasure.utils.navigations_utils.st")
+    def test_warning_type(self, mock_st, _is_demo):
+        """Warning type renders via st.warning."""
+        demo_callout("Be careful", type="warning")
+        mock_st.warning.assert_called_once_with("Be careful")
 
     @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
-    def test_error_type(self, _is_demo):
-        """Error type prefixes message with 'Demo Issue:'."""
-        result = demo_callout("Problem", type="error")
-        assert result == "**Demo Issue:** Problem"
+    @patch("datasure.utils.navigations_utils.st")
+    def test_error_type(self, mock_st, _is_demo):
+        """Error type renders via st.error."""
+        demo_callout("Problem", type="error")
+        mock_st.error.assert_called_once_with("Problem")
 
     @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
-    def test_unknown_type_falls_back_to_info(self, _is_demo):
-        """Unknown type falls back to the info format."""
-        result = demo_callout("Something", type="unknown")
-        assert result == "**Demo Tip:** Something"
+    @patch("datasure.utils.navigations_utils.st")
+    def test_unknown_type_falls_back_to_info(self, mock_st, _is_demo):
+        """Unknown type falls back to st.info."""
+        demo_callout("Something", type="unknown")
+        mock_st.info.assert_called_once_with("Something")
 
     @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
-    def test_default_type_is_info(self, _is_demo):
-        """Omitting type defaults to info."""
-        result = demo_callout("Hi")
-        assert result == "**Demo Tip:** Hi"
+    @patch("datasure.utils.navigations_utils.st")
+    def test_default_type_is_info(self, mock_st, _is_demo):
+        """Omitting type defaults to st.info."""
+        demo_callout("Hi")
+        mock_st.info.assert_called_once_with("Hi")
 
 
 # =============================================================================

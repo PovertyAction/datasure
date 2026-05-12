@@ -96,18 +96,17 @@ def show_demo_next_action(
 
 
 def demo_callout(message: str, type: str = "info"):
-    """Show a demo-specific callout message."""
+    """Render a demo-specific callout message."""
     if not is_demo_project():
         return
 
-    messages = {
-        "info": f"**Demo Tip:** {message}",
-        "success": f"**Demo Success:** {message}",
-        "warning": f"**Demo Note:** {message}",
-        "error": f"**Demo Issue:** {message}",
+    render = {
+        "info": st.info,
+        "success": st.success,
+        "warning": st.warning,
+        "error": st.error,
     }
-
-    return messages.get(type, messages["info"])
+    render.get(type, st.info)(message)
 
 
 def demo_sidebar_help():
