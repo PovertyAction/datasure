@@ -169,7 +169,7 @@ def _fetch_scto_assets(
     try:
         api_config = SurveyCTOAPIConfig(
             server_name=server,
-            username=username or cred["credentials"]["username"],
+            username=username or cred["credentials"].get("username", ""),
             password=password,
         )
         xlsx_bytes, form_def = SurveyCTOAPIClient(api_config).download_form_xlsx(
@@ -260,6 +260,16 @@ st.markdown(
     "Export a self-contained Stata replication package that allows anyone to "
     "reproduce your corrected dataset from the raw source data."
 )
+
+st.error(
+    "**This package contains personally identifiable information (PII).** "
+    "The zip file includes raw survey data with respondent PII. "
+    "You must download it only to an **encrypted, access-controlled storage location** "
+    "in compliance with IPA data security and confidentiality policies. "
+    "Do not store this package on unencrypted drives, shared folders, or cloud services "
+    "that are not approved for confidential data.",
+    icon=":material/lock:",
+)
 st.divider()
 
 # ── Page selector ─────────────────────────────────────────────────────────────
@@ -343,7 +353,17 @@ if st.button(
 # ── Download ──────────────────────────────────────────────────────────────────
 
 if "_replication_zip" in st.session_state:
-    st.success("Package ready — click below to save it to your local drive.")
+    st.success("Package ready — confirm below before downloading.")
+    st.warning(
+        "**Before downloading:** this zip contains PII. "
+        "Confirm you are saving it to an encrypted location.",
+        icon=":material/lock:",
+    )
+    pii_confirmed = st.checkbox(
+        "I confirm I am downloading this package to an encrypted, "
+        "access-controlled storage location.",
+        key="_replication_pii_confirmed",
+    )
     st.download_button(
         label="Download replication package (.zip)",
         data=st.session_state["_replication_zip"],
@@ -351,6 +371,7 @@ if "_replication_zip" in st.session_state:
         mime="application/zip",
         icon=":material/download:",
         type="primary",
+        disabled=not pii_confirmed,
     )
 
 # ── Preview ───────────────────────────────────────────────────────────────────
