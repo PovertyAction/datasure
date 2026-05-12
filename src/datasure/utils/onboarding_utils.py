@@ -34,19 +34,8 @@ class CheckPage(Enum):
 
 
 def demo_container(text: str = ""):
-    """Create a colored container for demo messages."""
-    with st.container():
-        st.markdown(
-            f"""
-        <div style="padding: 10px; background-color: #F0EBE3;border-radius: 10px; border: 1px solid #D4C5A9;">
-            {text}
-        </div>
-        """,
-            unsafe_allow_html=True,
-        )
-
-    # add some spacing after the container
-    st.markdown("<br>", unsafe_allow_html=True)
+    """Create an info container for demo messages."""
+    st.info(text)
 
 
 class ImportDemoInfo:
@@ -217,7 +206,7 @@ class OnboardingSteps:
         "step": 1,
         "title": "Start Here",
         "description": "Welcome to DataSure! Learn how to manage survey data quality.",
-        "icon": "🏠",
+        "icon": ":material/home:",
         "page": "start_view.py",
         "guidance_title": "Welcome to DataSure!",
         "guidance_content": """
@@ -236,7 +225,7 @@ class OnboardingSteps:
         "step": 2,
         "title": "Import Data",
         "description": "Import your survey data from various sources.",
-        "icon": "📥",
+        "icon": ":material/upload:",
         "page": "import_view.py",
         "guidance_title": "Data Successfully Imported!",
         "guidance_content": """
@@ -267,7 +256,7 @@ class OnboardingSteps:
         "step": 3,
         "title": "Prepare Data",
         "description": "Clean and prepare your data for quality checks.",
-        "icon": "🛠️",
+        "icon": ":material/build:",
         "page": "prep_view.py",
         "guidance_title": "Data Preparation (Optional)",
         "guidance_content": """
@@ -294,7 +283,7 @@ class OnboardingSteps:
         "step": 4,
         "title": "Configure Checks",
         "description": "Set up data quality checks and validation rules.",
-        "icon": "⚙️",
+        "icon": ":material/tune:",
         "page": "config_view.py",
         "guidance_title": "Configure Quality Checks",
         "guidance_content": """
@@ -342,7 +331,7 @@ class OnboardingSteps:
         "step": 5,
         "title": "Review Reports",
         "description": "Analyze data quality results and insights.",
-        "icon": "📊",
+        "icon": ":material/bar_chart:",
         "page": "output_view_1.py",
         "guidance_title": "Review Quality Reports",
         "guidance_content": """
@@ -360,7 +349,7 @@ class OnboardingSteps:
         "step": 6,
         "title": "Correct Data",
         "description": "Make corrections to your data based on quality findings.",
-        "icon": "🧹",
+        "icon": ":material/edit:",
         "page": "correction_view.py",
         "guidance_title": "Correct Data Issues",
         "guidance_content": """
@@ -1316,48 +1305,18 @@ def show_progress_indicator():
 
     for i, step_info in enumerate(onboarding_steps):
         step = step_info["step"]
-        step_icon = step_info["icon"]
-        step_title = step_info["title"]
+        icon = step_info["icon"]
+        title = step_info["title"]
         with cols[i]:
-            if step <= current_step:
-                # Completed or current step
-
-                if step == current_step:
-                    st.markdown(
-                        f"""
-                    <div style="text-align: center; padding: 10px; border: 2px solid #1f77b4; border-radius: 10px; background-color: #e6f3ff;">
-                        <div style="font-size: 24px;">{step_icon}</div>
-                        <div style="font-size: 12px; font-weight: bold; color: #1f77b4;">Step {step}</div>
-                        <div style="font-size: 10px;">{step_title}</div>
-                    </div>
-                    """,
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    st.markdown(
-                        f"""
-                    <div style="text-align: center; padding: 10px; border: 1px solid #28a745; border-radius: 10px; background-color: #d4edda;">
-                        <div style="font-size: 20px; color: #28a745;">✓</div>
-                        <div style="font-size: 12px; color: #28a745;">Step {step}</div>
-                        <div style="font-size: 10px;">{step_title}</div>
-                    </div>
-                    """,
-                        unsafe_allow_html=True,
-                    )
+            if step < current_step:
+                st.success(f":material/check: **{title}**", icon=None)
+            elif step == current_step:
+                with st.container(border=True):
+                    st.markdown(f"{icon} **Step {step}**  \n{title}")
             else:
-                # Future step
-                st.markdown(
-                    f"""
-                <div style="text-align: center; padding: 10px; border: 1px solid #dee2e6; border-radius: 10px; background-color: #f8f9fa;">
-                    <div style="font-size: 20px; color: #6c757d;">{step_icon}</div>
-                    <div style="font-size: 12px; color: #6c757d;">Step {step}</div>
-                    <div style="font-size: 10px; color: #6c757d;">{step_title}</div>
-                </div>
-                """,
-                    unsafe_allow_html=True,
-                )
+                st.markdown(f"{icon} {title}")
 
-    st.markdown("---")
+    st.divider()
 
 
 def show_demo_intro():
