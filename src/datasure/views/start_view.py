@@ -396,4 +396,30 @@ try:
     _app_version = version("DataSure")
 except PackageNotFoundError:
     _app_version = "dev"
-st.caption(f"DataSure v{_app_version}")
+
+st.divider()
+left, mid, right = st.columns(3, border=True)
+
+with left:
+    st.caption("ABOUT GRDS AND IPA")
+    st.caption(
+        "**DataSure** is a product of the "
+        "[Global Research and Data Science (GRDS)](https://data.poverty-action.org/teams/grds.html) "
+        "team at [Innovations for Poverty Action (IPA)](https://www.poverty-action.org/)."
+    )
+    st.caption(
+        f"Version {_app_version} | Released under the [MIT License](https://github.com/PovertyAction/datasure/blob/main/LICENSE)"
+    )
+
+with mid:
+    st.caption("PARTNER WITH US")
+    st.caption(
+        "We welcome contributions from the community! If you're interested in contributing to DataSure, please check out our [Contributing guide](https://github.com/PovertyAction/datasure/blob/main/CONTRIBUTING.md)."
+    )
+
+with right:
+    st.caption("CONNECT WITH US")
+    st.caption(
+        ":material/mail: [researchsupport@poverty-action.org](mailto:researchsupport@poverty-action.org)  \n"
+        ":material/bug_report: [Open a GitHub issue](https://github.com/PovertyAction/datasure/issues)"
+    )
