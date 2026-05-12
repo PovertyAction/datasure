@@ -8,7 +8,7 @@ This module provides comprehensive outlier detection functionality with:
 """
 
 import re
-from enum import Enum, IntEnum
+from enum import Enum, IntEnum, StrEnum
 from typing import Any
 
 import numpy as np
@@ -45,14 +45,14 @@ TAB_NAME: str = "outliers"
 # =============================================================================
 
 
-class OutlierMethod(str, Enum):
+class OutlierMethod(StrEnum):
     """Supported outlier detection methods."""
 
     IQR = "Interquartile Range (IQR)"
     SD = "Standard Deviation (SD)"
 
 
-class SearchType(str, Enum):
+class SearchType(StrEnum):
     """Column search pattern types."""
 
     EXACT = "exact"
