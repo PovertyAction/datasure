@@ -15,7 +15,11 @@ from pydantic import BaseModel, Field
 
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.utils.duckdb_utils import duckdb_get_table
-from datasure.utils.navigations_utils import demo_sidebar_help, page_navigation
+from datasure.utils.navigations_utils import (
+    add_demo_navigation,
+    demo_sidebar_help,
+    page_navigation,
+)
 from datasure.utils.onboarding_utils import ImportDemoInfo, demo_expander
 from datasure.utils.settings_utils import get_check_config_settings
 
@@ -1021,6 +1025,7 @@ def main() -> None:
     """
     # Set up demo navigation
     demo_sidebar_help()
+    add_demo_navigation("correction_view", step=6)
 
     # Render page header
     render_page_header()
