@@ -100,6 +100,12 @@ else:
             icon=":material/cleaning_services:",
         )
 
+        replication_page = st.Page(
+            page=str(_views_dir / "replication_view.py"),
+            title="Export Replication Package",
+            icon=":material/package_2:",
+        )
+
         st.session_state.st_output_page1 = st.session_state.st_output_pages[
             0
         ]  # for demo
@@ -110,7 +116,7 @@ else:
             {
                 "": [start_page, import_data_page, prep_data_page, config_checks_page],
                 "DQA Reports": st.session_state.st_output_pages,
-                "---": [corr_page],
+                "---": [corr_page, replication_page],
             },
         )
     else:

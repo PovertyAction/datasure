@@ -116,7 +116,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["D102"]  # test methods don't need docstrings
+"tests/**/*.py" = ["D101", "D102", "D103"]  # test classes/methods/funcs don't need docstrings
 
 [tool.ruff.lint.pycodestyle]
 max-doc-length = 88

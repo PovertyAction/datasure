@@ -1,7 +1,9 @@
+import io
 import logging
 from dataclasses import dataclass
 from typing import Any
 
+import openpyxl
 import requests
 from requests.auth import HTTPBasicAuth
 
@@ -344,6 +346,67 @@ class SurveyCTOAPIClient:
                 f"Unexpected error downloading form definition from {url}"
             )
             raise SurveyCTOAPIError(f"Unexpected error: {e}") from e
+
+    def download_form_xlsx(self, form_id: str) -> tuple[bytes, dict]:
+        """Build an XLSForm-compatible XLSX from the form definition JSON.
+
+        Parameters
+        ----------
+            form_id: Form identifier
+
+        Returns
+        -------
+            tuple[bytes, dict]
+                ``(xlsx_bytes, form_def)`` — the XLSX file content and the raw
+                form definition dict so callers can use it without a second
+                round-trip to the server.
+
+        Raises
+        ------
+            SurveyCTOAPIError: If the form definition cannot be retrieved.
+
+        Notes
+        -----
+            SurveyCTO does not expose a public API endpoint for downloading the
+            raw XLS form file.  This method instead calls ``download_form_definition``
+            (the same CSRF-authenticated endpoint used by ``get_form_definition`` in
+            the connector) and converts the returned JSON to a standards-compliant
+            XLSForm XLSX in memory.
+        """
+        try:
+            form_def = self.download_form_definition(form_id)
+        except SurveyCTOAPIError:
+            raise
+        except Exception as exc:
+            raise SurveyCTOAPIError(
+                f"Could not retrieve form definition for '{form_id}': {exc}"
+            ) from exc
+
+        fields_rows = form_def.get("fieldsRowsAndColumns", [])
+        choices_rows = form_def.get("choicesRowsAndColumns", [])
+
+        wb = openpyxl.Workbook()
+
+        # ── survey sheet ──────────────────────────────────────────────────────
+        ws_survey = wb.active
+        ws_survey.title = "survey"
+        for row in fields_rows:
+            ws_survey.append(list(row) if not isinstance(row, list) else row)
+
+        # ── choices sheet ─────────────────────────────────────────────────────
+        ws_choices = wb.create_sheet("choices")
+        for row in choices_rows:
+            ws_choices.append(list(row) if not isinstance(row, list) else row)
+
+        # ── settings sheet (required by XLSForm spec) ─────────────────────────
+        ws_settings = wb.create_sheet("settings")
+        ws_settings.append(["form_title", "form_id", "version"])
+        title = form_def.get("title", form_id)
+        ws_settings.append([title, form_id, ""])
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue(), form_def
 
     def download_form_data_json(
         self,
