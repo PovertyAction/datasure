@@ -26,6 +26,8 @@ from datasure.utils.duckdb_utils import (
     duckdb_save_table,
     load_missing_codes_from_db,
 )
+from datasure.utils.navigations_utils import demo_callout
+from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.settings_utils import (
     load_check_settings,
     save_check_settings,
@@ -334,6 +336,7 @@ def load_default_enumerator_settings(
     return EnumeratorSettings(**default_settings)
 
 
+@demo_output_onboarding(TAB_NAME)
 def enumerator_report_settings(
     project_id: str,
     settings_file: str,
@@ -2506,6 +2509,22 @@ def enumerator_report(
 
     st.title("Enumerator Report")
 
+    demo_callout(
+        """
+        This tab tracks enumerator performance across your survey dataset.
+
+        It has four sections:
+        - **Enumerator Overview**: 8 summary metrics at the top.
+        - **Enumerator Summary**: Tabular breakdown by enumerator with pill-based view switching.
+        - **Enumerator Productivity**: Submission counts per enumerator over time.
+        - **Column Statistics by Enumerator**: Per-column statistics broken down by enumerator.
+        - **Enumerator Statistics Over Time**: Time-series chart of a selected statistic.
+
+        **Start here**: Open the :material/settings: settings panel above to confirm your column
+        selections and apply consent and outcome settings.
+        """
+    )
+
     if data.is_empty():
         st.info(
             "No data available for the enumerator report. "
@@ -2534,6 +2553,17 @@ def enumerator_report(
     if data_enum_report.is_empty():
         data_enum_report = data
 
+    demo_callout(
+        """
+        ##### Enumerator Overview
+        Eight metrics appear here in two rows of four:
+        - Row 1: Total enumerators, Total teams, Active enumerators (past 7 days),
+          % active enumerators.
+        - Row 2: Fewest submissions, Highest submissions, Average submissions,
+          Total submissions.
+        """
+    )
+
     _render_enumerator_overview_metrics(
         data_enum_report,
         enumerator_settings.survey_date,
@@ -2543,6 +2573,22 @@ def enumerator_report(
 
     st.write("---")
     st.subheader("Enumerator Summary")
+
+    demo_callout(
+        """
+        ##### Enumerator Summary
+        Use the pills above the table to switch between views. Each pill shows a different
+        set of columns:
+        - **Submissions**: First/last submission dates, submission counts (total, today,
+          this week, this month), unique active days.
+        - **Missing Data**: Percentage of missing values per enumerator.
+        - **Duration**: Min, max, mean, and median interview duration.
+        - **Form Version**: Form versions used by each enumerator.
+        - **Consent & Outcome**: Consent rate and completed survey rate per enumerator.
+
+        You can select multiple pills to see combined columns side by side.
+        """
+    )
 
     _render_enumerator_summary_table(
         project_id,
@@ -2557,6 +2603,14 @@ def enumerator_report(
     st.write("---")
     st.subheader("Enumerator Productivity")
 
+    demo_callout(
+        """
+        ##### Enumerator Productivity
+        This section shows submission counts per enumerator over time as a table.
+        Use the **Daily / Weekly / Monthly** pills to change the time period granularity.
+        """
+    )
+
     _render_enumerator_productivity(
         data_enum_report,
         enumerator_settings.survey_date,
@@ -2568,6 +2622,19 @@ def enumerator_report(
     st.write("---")
     st.subheader("Column Statistics by Enumerator")
 
+    demo_callout(
+        """
+        ##### Column Statistics by Enumerator
+        Use the **column multiselect** to choose one or more numeric columns to analyse,
+        then use the **statistics multiselect** to choose which statistics to display
+        (count, mean, median, min, max, std, 25th percentile, 75th percentile).
+
+        ##### Instructions for Demo:
+        Select **household_size** as the column and choose **count**, **mean**, **min**,
+        and **max** to check whether enumerators are recording consistent household sizes.
+        """
+    )
+
     _render_enumerator_statistics(
         data_enum_report,
         enumerator_settings.enumerator,
@@ -2577,6 +2644,23 @@ def enumerator_report(
 
     st.write("---")
     st.subheader("Enumerator Statistics Over Time")
+
+    demo_callout(
+        """
+        ##### Enumerator Statistics Over Time
+        This section renders a line chart showing how a selected statistic for a chosen
+        column changes over time, broken down per enumerator. Use the **column selectbox**
+        to pick the variable, the **statistic selectbox** to choose the metric
+        (e.g., mean, count, missing), and the **Daily / Weekly / Monthly** pills to set
+        the time granularity.
+
+        ##### Instructions for Demo:
+        Select **household_size** as the column and **mean** as the statistic, then switch
+        to **Weekly** to see whether average household size varies by enumerator over time.
+
+        **Next**: Explore the **Backcheck Analysis** tab.
+        """
+    )
 
     _render_enumerator_statistics_overtime(
         data_enum_report,

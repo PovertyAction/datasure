@@ -736,122 +736,35 @@ class OutputOnboardingInfo:
         },
     }
     ENUMERATORS: ClassVar[dict] = {
-        "enumerator_report": {
-            "title": "Enumerator Stats Report",
-            "content": """
-        ### Enumerator Stats Report
-        This tab provides detailed insights into enumerator performance in your survey dataset.
-        It includes reports on various metrics such as number of interviews conducted, data quality issues identified, and overall enumerator performance.
-        **Next**: Go to the settings icon (⚙️) to configure global settings for the enumerator stats tab.
-        """,
-        },
         "enumerator_report_settings": {
-            "title": "Enumerator Stats Settings",
+            "title": "Enumerator Statistics Settings",
             "content": """
-        ##### Setup for Enumerator Stats Tab
-        In this section, you can configure global settings for the enumerator stats tab, you will notice that some settings are pre-filled with default values.
-        This tab contains the following settings:
-        - Date: The date when the survey was conducted or submitted. (e.g., submissiondate, starttime).
-        - Form Version: The version of the survey form used for data collection (e.g., form_version).
-        - Survey ID: The main identifier for your survey respondents (e.g., household ID, Respondent ID).
-        - Duration: The column indicating the duration of each survey interview (e.g., duration).
-        - Enumerator: The column indicating who collected the data (e.g., enumerator name or ID).
-        - Team: The column indicating the team or group the enumerator belongs to (e.g., team_name).
-        - Consent: The column indicating whether the respondent provided consent (e.g., consent).
-        - Consent Value: The value in the consent column that indicates consent was given (e.g., yes).
-        - Outcome: The column indicating the outcome status of the survey (e.g., completion_status).
-        - Outcome Value: The value in the outcome column that indicates a completed survey (e.g., complete).
+        ##### Enumerator Statistics Settings
+        These settings identify the key columns DataSure uses to track enumerator
+        performance across the report.
+
+        - **Survey Key**: Unique row identifier for each submission (e.g., KEY).
+        - **Survey ID**: Respondent or household identifier (e.g., hhid).
+        - **Survey Date**: Submission or interview date column (e.g., submissiondate).
+        - **Enumerator ID**: Column identifying the data collector (e.g., enum_name).
+        - **Team**: Column identifying the team (e.g., team_id).
+        - **Duration Column**: Column recording how long each interview took (e.g., duration).
+        - **Duration Unit**: Unit of the duration column — seconds, minutes, or hours.
+        - **Form Version Column**: Column recording the form version used (e.g., formdef_version).
+        - **Consent and Outcome Settings**: Configure which column and value indicate consent
+          and which indicate a completed survey, then click **Apply Consent and Outcome Settings**.
 
         ##### Instructions for Demo:
-        For the demo data, set the following values:
-        - Duration: Select "duration"
-        - Team: Select "team_id"
-        - Consent: Select "consent"
-        - Consent Value: Set to "yes"
-        - Outcome: Select "completion_status"
-        - Outcome Value: Set to "complete"
+        Your Survey Key, Survey ID, Survey Date, Enumerator ID, and Form Version are
+        pre-filled from earlier configuration. Confirm and complete the remaining fields:
+        - Duration Column: **duration**
+        - Duration Unit: **seconds**
+        - Team: **team_id**
+        - Consent Column: **consent** | Valid Consent Values: **yes**
+        - Outcome Column: **completion_status** | Completed Survey Values: **complete**
 
-        **Next**: Explore the **Enumerator Overview** section below.
-        """,
-        },
-        "display_enumerator_overview": {
-            "title": "Enumerator Overview",
-            "content": """
-        ##### Enumerator Overview
-        This section provides a quick overview of enumerator performance in your survey dataset, including:
-        - Total Number Enumerators: Total number of unique enumerators in the dataset.
-        - Total Number of Teams: Total number of unique teams in the dataset.
-        - Active Enumerators (past 7 days): Number of enumerators who have submitted data in the past 7 days.
-        - Percentage of active enumerators (past 7 days): Percentage of enumerators who have submitted data in the past 7 days.
-        - Minimum number of submissions: Minimum number of submissions made by any enumerator.
-        - Highest number of submissions: Maximum number of submissions made by any enumerator.
-        - Average number of submissions: Average number of submissions made by enumerators.
-        - Total number of submissions: Total number of submissions made by all enumerators.
-        **Next**: Explore the **Top Performing Enumerators** in the **Enumerator Summary** section below.
-        """,
-        },
-        "display_enumerator_summary": {
-            "title": "Enumerator Summary",
-            "content": """
-        ##### Enumerator Summary
-        This section provides a summary about enumerator performance in your survey dataset, including:
-        - A table showing each enumerator with the following details:
-            - Enumerator: Identifier for the enumerator.
-            - First Submission: Date of the first submission made by the enumerator.
-            - Last Submission: Date of the most recent submission made by the enumerator.
-            - # submissions: Total number of submissions made by the enumerator.
-            - # of unique dates: Number of unique dates on which the enumerator made submissions. This indicates the number of days the enumerator was active.
-            - # number of submissions today: Number of submissions made by the enumerator on the current day.
-            - # number of submissions this week: Number of submissions made by the enumerator in the current week.
-            - # number of submissions this month: Number of submissions made by the enumerator in the current month.
-            - # Null Values: Total number of null or missing values in the submissions made by the enumerator.
-            - min duration: Minimum duration of submissions made by the enumerator.
-            - max duration: Maximum duration of submissions made by the enumerator.
-            - mean duration: Average duration of submissions made by the enumerator.
-            - median duration: Median duration of submissions made by the enumerator.
-            - % consent: Percentage of submissions where consent was given.
-            - % completed survey: Percentage of submissions that were completed surveys.
-
-        **Next**: Explore the **Enumerator Productivity** section below.
-        """,
-        },
-        "display_enumerator_productivity": {
-            "title": "Enumerator Productivity",
-            "content": """
-        ##### Enumerator Productivity
-        This section visualizes enumerator productivity over time, helping you identify trends and patterns in data collection, including:
-        - A table showing the number of submissions per enumerator over time.
-        - Option to show productivity by day, week, or month.
-        **Next**: Explore the **Enumerator Statistics** section below.
-        """,
-        },
-        "display_enumerator_statistics": {
-            "title": "Enumerator Statistics",
-            "content": """
-        ##### Enumerator Statistics
-        This section provides detailed statistics about enumerator performance, including:
-        - A table showing statistic for specific columns for each enumerator
-        - User can select the column and statistics to display including count, mean, median, min, max, standard deviation, 25th percentile, and 75th percentile.
-
-        ##### Instructions for Demo:
-        For the demo, at the **Select column to analyze enumerator statistics** dropdown, choose "household_size" to see if there are differences by enumerator. Select the
-        statistics: count, mean, min and max.
-
-        **Next**: Explore the **Enumerator Statistics Over Time** section.
-        """,
-        },
-        "display_enumerator_statistics_overtime": {
-            "title": "Enumerator Statistics Over Time",
-            "content": """
-        ##### Enumerator Statistics Over Time
-        This section visualizes enumerator statistics over time, helping you identify trends and patterns in data quality and performance, including:
-        - A table showing selected statistics for a specific column per enumerator over time.
-        - Option to show statistics by day, week, or month.
-        - Option to select the statistic to display (e.g., mean, median, min, max, etc.)
-
-        ##### Instructions for Demo:
-        For the demo, at the **Select Column** dropdown, choose "household_size" to see if there are differences by enumerator. Select the statistic "mean" to see how the average household size varies by enumerator over time.
-        Visualize by "week" to see broader trends.
+        Click **Apply Consent and Outcome Settings**, then close the panel and explore
+        the sections below.
         """,
         },
     }
