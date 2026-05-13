@@ -300,13 +300,14 @@ class OnboardingSteps:
         "page": "output_view_1.py",
         "guidance_title": "Review Quality Reports",
         "guidance_content": """
-        ##### In this step you'll:
-        - Analyze data quality results
-        - Understand quality metrics
-        - Learn how to act on findings
+        Each tab covers a different data quality check. Start by expanding the
+        :material/settings: **settings panel** at the top of each tab and configuring
+        it for your data. Then work through the sections below — demo guidance is
+        available within each section to explain what you are seeing and what to do next.
 
-        **Final step:** Discover insights about your data quality and learn how to improve
-        data collection processes based on the findings.
+        **Tabs to explore:** Summary, Descriptive Statistics, Progress Tracking,
+        Missing Values, Duplicates, Outliers & Constraints, GPS Checks,
+        Enumerator Statistics, Backcheck Analysis.
         """,
     }
 
@@ -403,7 +404,7 @@ class OutputOnboardingInfo:
         It summarizes key metrics such as the number of checks run, issues identified,
         and overall data quality score.
 
-        **Next**: Click on the settings icon (⚙️) to configure global settings for the summary tab.
+        **Next**: Click on the :material/settings: settings icon to configure global settings for the summary tab.
         """,
         },
         "summary_settings": {
@@ -417,7 +418,7 @@ class OutputOnboardingInfo:
         - Total Expected Interviews: The total number of survey interviews you expect to have in your dataset (e.g., 1000).
 
         ##### Instructions for Demo:
-        For the demo data, you will need to indicate a total of **200** expected interviews,
+        For the demo data, you will need to indicate a total of **200** expected interviews.
 
         **Next**: Explore the data summary section below.
         """,
@@ -441,8 +442,8 @@ class OutputOnboardingInfo:
         ##### Submission Details
         This section provides insights into the submission patterns of your survey data, including:
         - Today: Number of submissions received today.
-        - This Week: Number of submissions received in the current week.
-        - This Month: Number of submissions received in the current month.
+        - This Week: Number of submissions received in the last 7 days.
+        - This Month: Number of submissions received in the last 30 days.
         - Total Submissions: Total number of submissions received to date.
 
         This section also includes a submission trend chart that visualizes the number of submissions over time, helping you identify patterns and peaks in data collection.
@@ -456,11 +457,11 @@ class OutputOnboardingInfo:
         ##### Progress
         This section provides an overview of the progress of your survey data collection, including:
         - Submission Progress: A progress bar showing the percentage of completed submissions against the total expected interviews.
-        - Average Submissions per Day: The average number of submissions received per day.
-        - Average Submissions Per Week: The average number of submissions received per week.
-        - Average Submissions Per Month: The average number of submissions received per month.
+        - Average Submissions per Day: The average number of submissions per calendar day across the full survey period.
+        - Average Submissions Per Week: The average number of submissions per calendar week (Monday to Sunday) across the full survey period.
+        - Average Submissions Per Month: The average number of submissions per calendar month across the full survey period.
 
-        **Next**: Explore the progress by sub sections below.
+        **Next**: Explore the progress by subsections below.
 
         ##### Instructions for Demo:
         For the demo, you will explore how to create a table showing progress by subgroups such as enumerator or region.
@@ -478,7 +479,7 @@ class OutputOnboardingInfo:
         ##### Data Quality
         This section provides an overview of the overall data quality of your survey dataset, including:
         - % of duplicate values on ID column: Percentage of duplicate entries found in the ID column.
-        - % of values flagged as outliers: Percentage of data points identified as outliers based on statistical analysis.
+        - % of values flagged as outliers: Percentage of data points identified as outliers. This will show **0%** until you configure the **Outliers & Constraints** tab — once configured, return here to see the updated value.
         - % of missing values in survey dataset: Percentage of missing or null values in the survey dataset.
         - Backcheck error rate: Percentage of discrepancies found between survey data and backcheck data.
 

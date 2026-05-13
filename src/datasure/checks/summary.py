@@ -1414,7 +1414,6 @@ def summary_data_quality(data: pl.DataFrame, survey_id: str | None) -> None:
 # =============================================================================
 
 
-@demo_output_onboarding(TAB_NAME)
 def summary_report(
     data: pl.DataFrame, setting_file: str, config: dict, survey_columns: ColumnByType
 ) -> None:
