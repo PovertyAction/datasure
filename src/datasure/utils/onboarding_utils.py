@@ -640,55 +640,24 @@ class OutputOnboardingInfo:
         },
     }
     MISSING: ClassVar[dict] = {
-        "missing_report": {
-            "title": "Missing Data Report",
-            "content": """
-        ### Missing Data Report
-        This tab provides detailed insights into missing data in your survey dataset.
-        It includes reports on missing values by column as well as patterns of missing data across records.
-        **Next**: Go to the settings icon (⚙️) to configure global settings for the missing data tab.
-        """,
-        },
-        "missing_settings": {
-            "title": "Missing Data Settings",
-            "content": """
-        ##### Setup for Missing Data Tab
-        In this section, you can configure global settings for the missing data tab, you will notice that some settings are pre-filled with default values.
-
-        **Important**: DataSure automatically standardizes 80+ common missing value representations during data preparation, including:
-        - Empty strings and whitespace ("", "   ", "\\t", "\\n")
-        - NULL variants ("NULL", "null", "None", "none")
-        - N/A variants ("N/A", "n/a", "NA", "#N/A")
-        - Common placeholders ("-", "--", ".", "?", "???")
-        - Explicit missing labels ("Missing", "missing", "Unknown", "unknown")
-        - String NaN representations ("NaN", "nan", "NaT")
-
-        This tab contains the following settings:
-        - Each row indicates a **specific coded missing value type** (e.g., Don't know = -99, Refused = -88, etc.)
-        - The **Missing Labels** column allows you to specify custom labels that represent missing data in your dataset. This label will be used in the reports
-        to show counts of missing values based on this category.
-        - The **Missing Codes** column allows you to specify numeric or text codes that represent missing data in your dataset. This value will be used to calculate the counts of missing values based on this category.
-        Multiple codes can be separated by commas (e.g., "99,999" or "-99,-999")
-
-        ##### Instructions for Demo:
-        In a real project, you should standardize your survey programming to use consistent missing data codes (e.g., always use -999, not sometimes .999).
-        For this demo, edit each row to use the following missing codes:
-        - Use the code **-99** for the "Don't Know" row
-        - Use the code **-88** for the "Refused to Answer" row
-        - Use the code **-77** for the "Not Applicable" row
-
-        **Next**: Explore the **Missing Data Statistics** section below.
-        """,
-        },
         "missing_summary": {
-            "title": "Missing Data Statistics",
+            "title": "Missing Values Tab",
             "content": """
-        ##### Missing Data Statistics
-        This section provides insights into missing data in your survey dataset, including:
-        - Percentage of missing values: Overall percentage of missing values in the dataset.
-        - % of columns with missing values: Percentage of columns that contain missing values.
-        - % of columns with at least one missing value: Percentage of columns that have at least one missing value.
-        - % of columns with no missing values: Percentage of columns that do not contain any missing values.
+        This tab helps you understand the extent and patterns of missing data in your survey dataset.
+
+        **Start here**: At the top of this tab, configure your **missing value codes** (the
+        :material/add: **Add** / :material/edit: **Modify** / :material/delete: **Delete** buttons).
+        These codes tell DataSure which numeric values in your data represent survey-specific
+        non-responses (e.g., -99 = Don't Know).
+
+        The tab then provides five sections:
+        - **Missing Data Statistics**: High-level summary metrics.
+        - **Missingness by Column**: Per-column breakdown with a filter slider.
+        - **Compare Missing Data Within Groups**: Missing rates broken down by a grouping variable.
+        - **Missingness Over Time**: Trend chart showing how missingness changes over the survey period.
+        - **Nullity Correlation**: Heatmap showing which columns tend to be missing together.
+        - **Nullity Matrix**: Visual grid of presence/absence across all rows and columns.
+
         **Next**: Explore the **Missingness by Column** section below.
         """,
         },
@@ -703,14 +672,14 @@ class OutputOnboardingInfo:
             - % Total Missing: Percentage of missing values in the column.
             - Null Values: Count of null or NaN values in the column.
             - % Null Values: Percentage of null or NaN values in the column.
-            - Don't KNow: Count of values marked as "Don't Know".
+            - Don't Know: Count of values marked as "Don't Know".
             - % Don't Know: Percentage of values marked as "Don't Know".
             - Refused to Answer: Count of values marked as "Refused to Answer".
             - % Refused to Answer: Percentage of values marked as "Refused to Answer".
             - Not Applicable: Count of values marked as "Not Applicable".
             - % Not Applicable: Percentage of values marked as "Not Applicable".
         - The table can be sorted by any of the columns to help identify which columns have the highest or lowest missing data.
-        - The table also includes a "Filter Report by % missing" slider at the top left to allow you to filter the report based on a minimum percentage of missing data.
+        - The table also includes a "Filter Report by % missing" slider at the top right to allow you to filter the report based on a minimum percentage of missing data.
 
         ##### Instructions for Demo:
         For the demo, use the "% missing" slider to filter the report to only show columns with 100% missing values.
@@ -723,7 +692,7 @@ class OutputOnboardingInfo:
         ##### Compare Missing Data Within Groups
         This section allows you to compare missing data patterns within different groups in your dataset, including:
         - A dropdown to select a categorical column (e.g., enumerator, region, etc.) to group the data by.
-        - A dropdow to select columns to compare. By default, all columns will be used but an aggregate view will be shown.
+        - A dropdown to select columns to compare. By default, all columns will be used but an aggregate view will be shown.
         - A table showing the percentage of missing values for each selected column within each group.
 
         ##### Instructions for Demo:
@@ -742,7 +711,7 @@ class OutputOnboardingInfo:
         - A dropdown to select a specific date column to use for analysis.
         ##### Instructions for Demo:
         For the demo, at the **Select column to analyze missingness over time** dropdown, choose "submissiondate" to see how missing data varies over the survey period.
-        **Next**: Explore the **Nullity COrrection** section below.
+        **Next**: Explore the **Nullity Correlation** section below.
         """,
         },
         "missing_correlation": {
@@ -751,11 +720,13 @@ class OutputOnboardingInfo:
         ##### Nullity Correlation
         This section provides insights into the correlation of missing data between different columns in your dataset, helping you identify patterns and relationships in missingness, including:
         - A heatmap visualizing the correlation of missing values between columns.
+        - Use the **All columns** toggle to include every column at once, or turn it off to
+          manually select specific columns from the dropdown.
 
         ##### Instructions for Demo:
-        For the demo,
-        - at the **Select columns to include in nullity correlation** dropdown, choose "min_dist" and "travel_sch" to see how missing data in these specific columns correlates with each other.
-        - You will notice that whenever "min_dist" is missing, "travel_sch" is also missing. Which makes sense since if the distance to school is not recorded, the mode of travel to school is also likely not recorded.
+        For the demo:
+        - Turn off the **All columns** toggle, then at the **Select columns** dropdown, choose "min_dist" and "travel_sch".
+        - You will notice that whenever "min_dist" is missing, "travel_sch" is also missing. This makes sense: if the distance to school is not recorded, the mode of travel is also likely missing.
 
         This insight can help identify potential data collection issues or patterns in missingness that may require further investigation.
         **Next**: Explore the **Nullity Matrix** section.
@@ -767,7 +738,7 @@ class OutputOnboardingInfo:
         ##### Nullity Matrix
         This section provides a visual representation of the missing data patterns in your dataset, helping you quickly identify areas with high or low missingness, including:
         - A matrix visualization showing the presence or absence of data for each column in the dataset. The red blocks represent missing values, while the blue blocks represent non-missing values.
-        **Next**: Explore **outliers** tab.
+        **Next**: Explore the **Duplicates** tab.
         """,
         },
     }
