@@ -28,6 +28,9 @@ if "st_output_pages" not in st.session_state:
 if "st_corr_page" not in st.session_state:
     st.session_state.st_corr_page = None
 
+if "st_replication_page" not in st.session_state:
+    st.session_state.st_replication_page = None
+
 # Get the directory where this module is located
 _package_dir = Path(__file__).parent
 _views_dir = _package_dir / "views"
@@ -110,6 +113,7 @@ else:
             0
         ]  # for demo
         st.session_state.st_corr_page = corr_page
+        st.session_state.st_replication_page = replication_page
 
         # --- NAVIGATION MENU WITH CHECK OUTPUTS AND CORRECTION PAGES--- #
         nav_menu = st.navigation(

@@ -13,6 +13,7 @@ from datasure.replication.package_builder import build_replication_package
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
 from datasure.utils.duckdb_utils import duckdb_get_table
+from datasure.utils.navigations_utils import demo_callout, demo_sidebar_help
 from datasure.utils.scto_api import (
     SurveyCTOAPIClient,
     SurveyCTOAPIConfig,
@@ -255,10 +256,32 @@ if configs.is_empty():
 
 # ── Header ────────────────────────────────────────────────────────────────────
 
+demo_sidebar_help()
+
 st.title("Replication Package")
 st.markdown(
     "Export a self-contained Stata replication package that allows anyone to "
     "reproduce your corrected dataset from the raw source data."
+)
+
+demo_callout(
+    """
+    This page bundles everything needed to reproduce your corrected dataset into a
+    single downloadable zip file — raw data, Stata do-files (import, prepare,
+    correct), correction and prep logs, codebooks, and a README.
+
+    ##### Instructions for Demo:
+    1. Under **Page Name**, select **Household HFCs**.
+    2. Review the configuration details that appear below the selector, then
+       expand **What's inside the zip?** to see the full directory structure.
+    3. Click **Build Replication Package**. DataSure will assemble the zip in seconds.
+    4. Once the build completes, check the PII confirmation box and click
+       **Download replication package (.zip)**.
+
+    The demo dataset is synthetic and contains no real PII. In a live project the
+    zip would include raw respondent data and must be stored on an encrypted,
+    access-controlled drive in accordance with IPA data policy.
+    """
 )
 
 st.error(

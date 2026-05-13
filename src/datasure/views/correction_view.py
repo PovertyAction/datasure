@@ -1005,11 +1005,18 @@ def render_page_header() -> None:
 
 def render_page_navigation() -> None:
     """Render the page navigation controls."""
+    replication_page = st.session_state.get("st_replication_page")
     page_navigation(
         prev={
             "page_name": st.session_state.get("st_output_page1", "output_view_1"),
             "label": "← Back: Output Page 1",
         },
+        next={
+            "page_name": replication_page,
+            "label": "Export Replication Package →",
+        }
+        if replication_page
+        else None,
     )
 
 
