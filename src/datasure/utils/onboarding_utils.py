@@ -47,8 +47,9 @@ class ImportDemoInfo:
     """
 
     PREVIEW_DATA_INFO: ClassVar[str] = """
-        Your demo datasets are loaded and ready for quality analysis.
-        In a real project, this is what you would see after importing from SurveyCTO or uploading CSV files.
+        Your demo datasets are loaded and ready to explore.
+        Switch between **demo_survey** and **demo_backcheck** to review the data,
+        then click **Prepare Your Data** below to continue to the next step.
     """
 
     PREPARE_DATA_INFO: ClassVar[str] = """
@@ -225,9 +226,9 @@ class OnboardingSteps:
         "description": "Import your survey data from various sources.",
         "icon": ":material/upload:",
         "page": "import_view.py",
-        "guidance_title": "Data Successfully Imported!",
+        "guidance_title": "Your Data is Pre-loaded",
         "guidance_content": """
-        Your demo data is already loaded — no import steps needed here.
+        Your demo data has already been imported — no configuration needed here.
 
         **What's been imported:**
         - **Survey Data**: 132 household survey responses from rural communities in India
@@ -238,7 +239,7 @@ class OnboardingSteps:
         of issues DataSure is designed to catch.
 
         **:material/arrow_downward: What to do now:** Scroll down to **Preview Imported Data**,
-        switch between the **demo_survey** and **demo_backcheck** tabs to explore the data,
+        switch between the **demo_survey** and **demo_backcheck** datasets to explore the data,
         then click **Prepare Your Data** to continue.
         """,
     }
@@ -251,7 +252,7 @@ class OnboardingSteps:
         "page": "prep_view.py",
         "guidance_title": "Data Preparation (Optional)",
         "guidance_content": """
-        ##### ✅ Your demo data is ALMOST ready for analysis!
+        ##### Your demo data is almost ready for analysis!
 
         ##### What you're seeing:
         - Tools to transform, clean, and modify your data
@@ -266,7 +267,7 @@ class OnboardingSteps:
             - Handle missing values
         - For this demo, you will only need to convert the submissiondate column to a date format.
 
-        **👉 Ready to prepare your data?** Go to the "Get your data ready" section!
+        **:material/arrow_forward: Ready to prepare your data?** Go to the "Get your data ready" section!
         """,
     }
 
@@ -278,7 +279,7 @@ class OnboardingSteps:
         "page": "config_view.py",
         "guidance_title": "Configure Quality Checks",
         "guidance_content": """
-        ##### 🔧 Set up your data quality checks!
+        ##### Set up your data quality checks!
 
         ##### What you're doing in this step:
         - Creating a "check configuration" that tells DataSure how to analyze your data
@@ -314,7 +315,7 @@ class OnboardingSteps:
         - Statistical outliers with configurable detection methods (IQR/Standard Deviation)
         - Backcheck validation comparing survey responses to quality control visits
 
-        **🎆 Next step:** View comprehensive quality analysis reports on your new output page!
+        **:material/arrow_forward: Next step:** View comprehensive quality analysis reports on your new output page!
         """,
     }
 
