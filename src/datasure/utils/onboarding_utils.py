@@ -252,22 +252,17 @@ class OnboardingSteps:
         "page": "prep_view.py",
         "guidance_title": "Data Preparation (Optional)",
         "guidance_content": """
-        ##### Your demo data is almost ready for analysis!
+        One preparation step is required before you can continue: convert the
+        **submissiondate** column from text to a datetime format in **both** datasets.
 
-        ##### What you're seeing:
-        - Tools to transform, clean, and modify your data
-        - Your imported survey data displayed in tabs
-        - Data metrics showing rows, columns, and missing values
+        **:material/arrow_forward: To do this for each dataset tab (demo_survey and demo_backcheck):**
+        1. Click **:material/add: Add data prep step**
+        2. Under **Select Action**, choose **Transform Column**
+        3. Under **Select Column to Transform**, choose **submissiondate**
+        4. Under **Select Function**, choose **string to datetime**
+        5. Click **Add** to save the step
 
-        ##### What to prepare:
-        - In a real project, you might also want to:
-            - Transform additional columns
-            - Remove unwanted rows or columns
-            - Create new columns
-            - Handle missing values
-        - For this demo, you will only need to convert the submissiondate column to a date format.
-
-        **:material/arrow_forward: Ready to prepare your data?** Go to the "Get your data ready" section!
+        Once both datasets have been prepared, the **Configure Quality Checks** button will become active.
         """,
     }
 
