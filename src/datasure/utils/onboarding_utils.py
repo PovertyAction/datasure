@@ -483,7 +483,7 @@ class OutputOnboardingInfo:
         - % of missing values in survey dataset: Percentage of missing or null values in the survey dataset.
         - Backcheck error rate: Percentage of discrepancies found between survey data and backcheck data.
 
-        **Next**: Explore the "Survey Progress" tab.
+        **Next**: Explore the "Descriptive Statistics" tab.
         """,
         },
     }
@@ -495,7 +495,7 @@ class OutputOnboardingInfo:
         ### Survey Progress Report
         This tab provides detailed insights into the progress of your survey data collection.
         It includes metrics such as submission counts over time, progress by enumerator or selected categories, and overall submission trends.
-        **Next**: Go to the settings icon (⚙️) to configure global settings for the survey progress tab.
+        **Next**: Go to the :material/settings: settings icon to configure global settings for the survey progress tab.
         """,
         },
         "progress_report_settings": {
@@ -1014,35 +1014,32 @@ class OutputOnboardingInfo:
 
     DESCRIPTIVE_STATS: ClassVar[dict] = {
         "descriptive_report": {
-            "title": "Descriptive Statistics Report",
+            "title": "Descriptive Statistics",
             "content": """
-        ### Descriptive Statistics Report
-        This tab provides detailed descriptive statistics for numeric columns in your survey dataset.
-        It includes measures such as mean, median, standard deviation, min, max, and percentiles to help you understand the distribution and characteristics of your data.
-        **Next**: Go to the settings icon (⚙️) to configure global settings for the descriptive statistics tab.
-        """,
-        },
-        "descriptive_report_settings": {
-            "title": "Descriptive Statistics Settings",
-            "content": """
-        ##### Setup for Descriptive Statistics Tab
-        In this section, you can configure global settings for the descriptive statistics tab, you will notice
-        that some settings are pre-filled with default values.
-        This tab contains the following settings:
-        - Select columns to include in descriptive statistics (maximum 10): Choose one or more numeric columns from your dataset to include in the descriptive statistics analysis.
+        This tab lets you explore the distribution and characteristics of any column
+        in your dataset. Use the **column selector** below to choose which columns to
+        analyse, then explore three sections:
 
-        Note that individual descriptive statistics reports will be shown for each column selected.
+        - **Summary Stats**: Count, mean, median, standard deviation, min/max, quartiles,
+          skewness, and kurtosis for each selected numeric column.
+        - **Histogram**: Distribution chart for a selected numeric column, with mean and
+          median lines marked. Use the **Bins** slider to adjust the resolution.
+        - **Value Counts**: Frequency table showing how often each value appears.
+          Switch between table and chart view, and toggle between count and percentage.
 
         ##### Instructions for Demo:
-        For the demo data, select the following columns:
-        - Select the columns "age" and "household_count" for descriptive statistics analysis. When the tables are rendered, you will notice the following:
-            - Basic Statistics: This toggle allows you to show only basic statistics (count, mean, std, min, 25%, 50%, 75%, max) in the descriptive statistics report table for this column. Switch on
-            this toggle for the age column.
-            - Select table type: This dropdown allows you to choose the type of table to display for the descriptive statistics report for this column.
-            You can choose between a "one-way table", "two-way table" or "summary statistics". For the household count column,
-            switch to the different table types to see how the data is presented in each format.
+        1. In the **column selector**, check **age** and **household_count** — or use the
+           **Select by Type** pill and choose **Numeric** to select all numeric columns at once.
+        2. Click **Apply Selection** to load the analysis.
+        3. In **Summary Stats**, compare the mean and median for each column to spot skewed distributions.
+        4. In **Histogram**, select **age** and try adjusting the **Bins** slider.
+        5. In **Value Counts**, switch the column to **state** or **enum_name** to see how
+           responses are distributed across categories. Note that categorical columns like
+           **state** are only available here if you included them in your column selection —
+           if you selected numeric columns only, go back to the column selector and add
+           **state** or **enum_name**.
 
-        **Next**: Explore the **Back Checks** tab.
+        **Next**: Explore the **Progress Tracking** tab.
         """,
         },
     }
