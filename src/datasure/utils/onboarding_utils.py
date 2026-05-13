@@ -110,10 +110,10 @@ class ImportDemoInfo:
     """
 
     PROCEED_TO_HFCS_INFO: ClassVar[str] = """
-        **You are ready to view your HFC reports:**
-        Your demo data is now prepared for quality analysis. In a real project, this is what you would see after preparing your data for quality checks.
+        Your configuration is set up and your data is ready for quality analysis.
 
-        **Next:** Click on the "View Quality Reports" button to explore comprehensive data quality insights and reports!
+        Click **View Quality Reports** to explore the results — DataSure has run all
+        configured checks and the reports are ready to review.
     """
 
     ADD_CHECK_CONFIG_INFO: ClassVar[str] = """
@@ -146,7 +146,7 @@ class ImportDemoInfo:
         - DataSure validates your inputs using Pydantic models for data integrity
         - If validation passes, a new quality analysis page is automatically created!
 
-        **🎆 What happens next:** DataSure creates a comprehensive quality analysis page with all configured checks!
+        **:material/celebration: What happens next:** DataSure creates a comprehensive quality analysis page with all configured checks!
     """
 
     ADD_PREP_STEPS_INFO: ClassVar[str] = """
@@ -274,43 +274,21 @@ class OnboardingSteps:
         "page": "config_view.py",
         "guidance_title": "Configure Quality Checks",
         "guidance_content": """
-        ##### Set up your data quality checks!
+        One configuration covers both datasets. Click **:material/add: Add New Check Configuration**
+        and fill in the form with these values:
 
-        ##### What you're doing in this step:
-        - Creating a "check configuration" that tells DataSure how to analyze your data
-        - Mapping your data columns to specific quality checks (using categorized column types)
-        - Connecting your survey data with backcheck data for validation
-        - Setting validation rules using Pydantic models for data integrity
+        **Configuration name:** Household HFCs
 
-        ##### Demo Instructions:
-        1. **Click ":material/add: Add new check configuration"**
-            - A dialog window will appear with a step-by-step form
-        2. **Name your configuration**: Enter "Household HFCs" or similar (1-20 characters)
-        3. **Select Survey Dataset**: Choose "demo_survey" from the dropdown
-            - The system will automatically categorize columns by type (datetime, numeric, categorical)
-        4. **Configure Key Columns** (note column categories will be shown):
-            - **Key Column**: "KEY" (unique row identifier) - from categorical columns
-            - **ID Column**: "hhid" (Unique household identifier) - from categorical columns
-            - **Enumerator Column**: "enum_name" (who collected the data) - from categorical columns
-            - **Date Column**: "submissiondate" (submission date) - from datetime columns
-            - **Survey Target** (optional): Enter 200 (expected number of interviews)
-        5. **Add Backcheck Dataset** (optional):
-            - Toggle "Add backcheck dataset" to expand options
-            - **Backcheck Dataset**: Choose "demo_backcheck"
-            - **Backcheck Date**: Choose "submissiondate"
-            - **Backchecker**: Choose "backchecker_name"
-            - **Backcheck Target %**: Enter 10 (percentage of surveys to backcheck)
-        6. **Click "Submit"** to create the configuration
-            - DataSure will validate all inputs
-            - A new output page will be automatically created
+        **Survey dataset:** demo_survey
+        - Key Column: KEY | ID Column: hhid | Enumerator Column: enum_name
+        - Team Column: team_id | Duration Column: duration | Date Column: submissiondate
+        - Survey Target: 200 (optional)
 
-        ##### What DataSure will analyze:
-        - Duplicate household records and missing data patterns
-        - Enumerator performance and data collection quality
-        - Statistical outliers with configurable detection methods (IQR/Standard Deviation)
-        - Backcheck validation comparing survey responses to quality control visits
+        **Backcheck dataset:** demo_backcheck
+        - Date: submissiondate | Backchecker: bcer_name | Team: team_id | Target %: 10
 
-        **:material/arrow_forward: Next step:** View comprehensive quality analysis reports on your new output page!
+        Click **Submit** — DataSure creates a quality analysis page automatically.
+        Once created, the **View Quality Reports** button will appear at the bottom of this page.
         """,
     }
 
