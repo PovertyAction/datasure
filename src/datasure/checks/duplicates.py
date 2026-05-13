@@ -29,6 +29,8 @@ from datasure.models.schemas import (
 )
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.navigations_utils import demo_callout
+from datasure.utils.onboarding_utils import demo_output_onboarding, is_demo_project
 from datasure.utils.settings_utils import (
     load_check_settings,
     save_check_settings,
@@ -74,6 +76,7 @@ def load_default_duplicates_settings(
     return DuplicatesSettings(**default_settings)
 
 
+@demo_output_onboarding(TAB_NAME)
 def duplicates_report_settings(
     project_id: str,
     settings_file: str,
@@ -2041,6 +2044,16 @@ def duplicates_report(
 
     st.title("Duplicates Report")
 
+    if is_demo_project():
+        demo_callout(
+            "This tab identifies duplicate records in your survey data. It has two sections:\n\n"
+            "- **ID Duplicates**: Records sharing the same Survey ID (e.g., two submissions "
+            "with the same household ID).\n"
+            "- **Other Duplicates**: Duplicates in any additional columns you configure.\n\n"
+            "Start by reviewing the :material/settings: **settings** panel — your columns are "
+            "pre-filled from your check configuration."
+        )
+
     config_settings = DuplicatesSettings(**config)
     duplicates_settings = duplicates_report_settings(
         project_id,
@@ -2064,6 +2077,18 @@ def duplicates_report(
     st.write("---")
     st.title("ID Duplicates")
 
+    if is_demo_project():
+        demo_callout(
+            "This section lists survey records that share the same **hhid** (household ID). "
+            "Three metrics summarise the findings: "
+            "**Total ID Duplicates** (all duplicate rows found), "
+            "**Missing Survey IDs** (rows where hhid is blank), and "
+            "**Resolved ID Duplicates** (duplicates already corrected on the Corrections page). "
+            "The table below shows each duplicate record. "
+            "Expand **:material/clarify: Show more columns in report** to add context columns "
+            "such as **enum_name** or **state** to help investigate each case."
+        )
+
     if not duplicates_settings.survey_id:
         st.info("Survey ID column is not configured for duplicates check.")
     else:
@@ -2084,6 +2109,16 @@ def duplicates_report(
     # Duplicates column configuration
     st.write("---")
     st.title("Other Duplicates")
+
+    if is_demo_project():
+        demo_callout(
+            "Use **Add Duplicates Column(s)** to check any column for duplicate values — "
+            "for example, a phone number or unique ID number. "
+            "The demo dataset has no additional columns that should be duplicate-free beyond "
+            "the household ID, so you can skip adding columns here. "
+            "**Next**: Explore the **Outliers & Constraints** tab."
+        )
+
     all_columns = data.columns
     # if survey id exist, remove it + key from the list of columns to check
     # for duplicates, else only remove the key if exist. This is to

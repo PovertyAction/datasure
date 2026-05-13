@@ -579,63 +579,31 @@ class OutputOnboardingInfo:
     }
 
     DUPLICATES: ClassVar[dict] = {
-        "duplicate_report": {
-            "title": "Duplicate Records Report",
-            "content": """
-        ### Duplicates Report
-        This tab provides detailed insights into duplicate records in your survey data.
-        It includes reports for duplicates on your ID column as well as other columns in your dataset.
-        **Next**: Go to the settings icon (⚙️) to configure global settings for the duplicates tab.
-        """,
-        },
-        "duplicates_settings": {
+        "duplicates_report_settings": {
             "title": "Duplicates Settings",
             "content": """
-        ##### Setup for Duplicates Tab
-        In this section, you can configure global settings for the duplicates tab, you will notice that some settings are pre-filled based on your check configuration.
-        This tab contains the following settings:
-        - Survey ID: The main identifier for your survey respondents (e.g., household ID, Respondent ID).
-        - Survey Key: The unique key column for your survey dataset (e.g., KEY). This is different from the Survey ID which identifies unique respondents.
-                                If your dataset does not have a unique key column, you can create one during data preparation.
-        - Date: The date when the survey was conducted or submitted. (e.g., submissiondate, starttime).
-        - Columns: Select the columns you want to check for duplicates. You can choose one or more columns from your dataset. Note that the ID column is always included in the duplicate checks.
-        **Next**: Explore the **Duplicate Records on ID Column** section below.
-        """,
-        },
-        "display_duplicates_statistics": {
-            "title": "Duplicate Records on ID Column",
-            "content": """
-        ##### Duplicate Records on ID Column
-        This section provides insights into duplicate records based on your ID column and other duplicate columns added, including:
-        - Total Duplicate: Total number of duplicate records found in the dataset.
-        - Resolved Duplicates: Number of duplicate records that have been resolved.
-        - Columns Checked: Number of columns selected for duplicate checks.
-        - Columns With No Duplicates: Number of columns checked that have no duplicate records.
-        - Columns With Duplicates: Number of columns checked that have duplicate records.
-        - Survey ID Duplicates: Number of unique survey IDs that have duplicate records.
-        **Next**: Explore the **Duplicate Records Table** section below.
-        """,
-        },
-        "display_id_duplicates": {
-            "title": "Duplicate Records Table",
-            "content": """
-        - Table of duplicate records showing details such as survey ID, duplicate column values, count of duplicates, and resolution status.
+        ##### Duplicates Settings
+        These settings control which columns identify a unique survey record and how
+        duplicate detection is performed.
+
+        - **Survey Key**: The unique row identifier for each submission (e.g., KEY).
+          Different from Survey ID — every submission has a unique key even if two share
+          the same respondent ID.
+        - **Survey ID**: The respondent or household identifier checked for duplicates
+          (e.g., hhid).
+        - **Survey Date**: The submission or interview date column (e.g., submissiondate).
+        - **Enumerator ID**: The column identifying who collected the data (e.g., enum_name).
+        - **Duplicates Conditions**: Optional filter to restrict the check to a subset of
+          records. Use the toggle to treat missing values as duplicates.
+
         ##### Instructions for Demo:
-        For the demo, explore the duplicate records found on the "hhid" column. At the **Select columns to display in the report** dropdown, choose "enum_name" and "state" to see additional context about the duplicates.
-        You may also select other columns to see how duplicates vary across different attributes.
-        **Next**: Look at the instructions for the **Duplictate Entries for columns** section below.
-        """,
-        },
-        "display_column_duplicates": {
-            "title": "Duplicate Entries for Other Columns",
-            "content": """
-        ##### Duplicate Entries for Other Columns
-        This section provides insights into duplicate records based on other columns in your dataset that were selected in the settings section, including:
-        - Table of duplicate records for each selected column showing details such as column name, duplicate values, count of duplicates, and resolution status.
-        ##### Instructions for Demo:
-        The dataset for the demo does not contain other columns for which we want to check duplicates. However, in a real project, you can select multiple columns in the settings section to identify duplicates across different attributes.
-        These could include columns like "address", "phone number", "ID number", etc.
-        **Next**: Explore the **Missing Data** tab.
+        Your settings are pre-filled from the check configuration you set up earlier.
+        Confirm the following values are selected, then close the panel and explore the
+        sections below:
+        - Survey Key: **KEY**
+        - Survey ID: **hhid**
+        - Survey Date: **submissiondate**
+        - Enumerator ID: **enum_name**
         """,
         },
     }
@@ -743,130 +711,27 @@ class OutputOnboardingInfo:
         },
     }
     OUTLIERS: ClassVar[dict] = {
-        "outlier_report": {
-            "title": "Outliers Report",
-            "content": """
-        ### Outliers Report
-        This tab provides detailed insights into outliers in your survey dataset.
-        It includes reports on outlier values by column as well as patterns of outliers across records.
-        **Next**: Go to the settings icon (⚙️) to configure global settings for the outliers tab.
-        """,
-        },
         "outliers_report_settings": {
-            "title": "Outliers Settings",
+            "title": "Outliers & Constraints Settings",
             "content": """
-        ##### Setup for Outliers Tab
-        In this section, you can configure global settings for the outliers tab. DataSure uses Pydantic models for configuration validation to ensure data integrity.
+        ##### Outliers & Constraints Settings
+        These settings identify the key columns DataSure uses to contextualise flagged
+        records in the report tables.
 
-        This tab contains the following settings:
-        - **Admin Settings**:
-            - **Survey ID**: The main identifier for your survey respondents (e.g., household ID, Respondent ID).
-            - **Survey Key**: The unique key column for your survey dataset (e.g., KEY). This is different from the Survey ID which identifies unique respondents.
-            - **Enumerator ID**: The column indicating who collected the data (e.g., enumerator name or ID).
-        - **Display Settings**:
-            - **Display Columns**: Select the columns you want to display in the outliers report table.
-            - **Minimum Threshold**: Set the minimum number of non-missing values required for a column to be included in the outliers analysis.
-            The default thresholds are:
-                - **IQR Method**: 20 non-missing values minimum
-                - **Standard Deviation Method**: 30 non-missing values minimum
-        - **Outlier Columns Configuration**:
-            - Click ":material/add: Add Outlier Column" to add columns for outlier analysis. You can select one or more numeric columns from your dataset to check for outliers.
-
-            **Configuration options include**:
-                - **Search Type**: Specifies how to search for columns. Choose from:
-                    - "exact" - Match exact column name
-                    - "contains" - Find columns containing the search text (e.g., "land" finds "land_acre", "land_rent")
-                    - "starts_with" - Match columns starting with search text
-                    - "ends_with" - Match columns ending with search text
-                - **Select Columns to Check for Outliers**: Choose one or more numeric columns from your dataset. Uses text input with search functionality.
-                - **Select Outlier Detection Method**: Choose between:
-                    - **IQR (Interquartile Range)**: Default multiplier 1.5, minimum threshold 20 values
-                    - **SD (Standard Deviation)**: Default multiplier 3.0, minimum threshold 30 values
-                - **Select Multiplier for Outlier Detection**: Set the sensitivity of outlier detection:
-                    - IQR: Common values are 1.5 (default), 2.0, 2.5, 3.0
-                    - SD: Common values are 2.0, 2.5, 3.0 (default), 3.5, 4.0
-                - **(Optional) Soft Minimum**: Set a hard floor - values below this threshold are automatically flagged as outliers
-                - **(Optional) Soft Maximum**: Set a hard ceiling - values above this threshold are automatically flagged as outliers
-            - Click ":material/delete:" button to remove an outlier column from the analysis.
+        - **Survey Key**: Unique row identifier for each submission (e.g., KEY).
+        - **Survey ID**: Respondent or household identifier (e.g., hhid).
+        - **Survey Date**: Submission or interview date column (e.g., submissiondate).
+        - **Enumerator ID**: Column identifying the data collector (e.g., enum_name).
+        - **Team ID**: Column identifying the team (e.g., team_id).
 
         ##### Instructions for Demo:
-        For the demo data, add the following outlier columns:
-        1. Click on ":material/add: Add Outlier Column"
-        2. For **search type** select "exact"
-        3. For **select columns to check for outliers** select "land_acre" and "household_count"
-        4. Leave the default settings for the rest (IQR method with 1.5 multiplier)
-        5. Click "Apply" to add the selected columns to the outliers analysis
-
-        **(OPTIONAL)** Add more outlier columns by repeating the steps above with different search types.
-
-        **Next**: Explore the **Outliers Summary** section below.
-        """,
-        },
-        "display_outlier_metrics": {
-            "title": "Outliers Statistics",
-            "content": """
-        ##### Outliers Statistics
-        This section provides insights into outliers in your survey dataset, including:
-        - Variables Checked: Number of numeric columns checked for outliers. If a column has less than the minimum threshold of non-missing values, it will not be included in the outliers analysis.
-        - Outlier Variables: Number of columns that contain at least 1 outlier value.
-        - Number of Outliers: Total number of outlier values identified across all checked columns.
-        """,
-        },
-        "display_outlier_column_summary": {
-            "title": "Outlier Summaries",
-            "content": """
-        ##### Outlier Summaries
-        This section provides a detailed view of outlier data by column, including:
-            - A table showing each outlier column in the dataset with the following details:
-            - Column Name: Name of the outlier column.
-            - # of values: Total number of non-missing values in the column.
-            - # of outliers: Total number of outlier values identified in the column.
-            - Minimum Value: Minimum value in the column.
-            - Maximum Value: Maximum value in the column.
-            - Mean: Mean (average) value of the column.
-            - Median: Median (middle) value of the column.
-            - Standard Deviation: Standard deviation of the column.
-            - Interquartile Range: Interquartile range of the column.
-            - Lower Bound: Lower bound for outlier detection based on the selected method and multiplier.
-            - Upper Bound: Upper bound for outlier detection based on the selected method and multiplier.
-        **Next**: Explore the **Outlier Details Table** section below.
-        """,
-        },
-        "display_outlier_output": {
-            "title": "Outlier Details Table",
-            "content": """
-        ##### Outlier Details Table
-        This section provides detailed information about the outlier values identified in your dataset, including:
-        - A table showing each outlier record with the following details:
-        - Key column: Unique key for the record.
-        - Survey ID: Identifier for the survey respondent.
-        - Enumerator ID: Identifier for the enumerator who collected the data.
-        - Column Name: Name of the outlier column.
-        - Outlier Value: The actual outlier value identified in the column.
-        - *Column Statistics: Minimum, Maximum, Mean, Median, Standard Deviation, Interquartile Range, Lower Bound, Upper Bound for the outlier column.
-        - *Other Display Columns: Any additional columns selected in the settings section to be displayed in the outliers report table.
-        - Outlier Reason: Explanation of why the value was identified as an outlier (e.g., "Above Upper Bound", "Below Lower Bound").
-        - Outlier Multiplier: The multiplier value used for outlier detection.
-        - Soft Minimum: The soft minimum threshold set for outlier detection.
-        - Soft Maximum: The soft maximum threshold set for outlier detection.
-        """,
-        },
-        "inspect_outliers_columns": {
-            "title": "Inspect Outlier Columns",
-            "content": """
-        ##### Inspect Outlier Columns
-        This section allows you to visually inspect the distribution of outlier values in your dataset, including:
-        - A dropdown to select an outlier column to visualize.
-        - A dropdown to select the selct columns to display
-        - Statistics for the selected outlier column, including Minimum, Maximum, Mean, Median, Standard Deviation, Interquartile Range, Lower Bound, Upper Bound.
-        - A histogram visualizing the distribution of values in the selected outlier column, with outlier values highlighted.
-        - A violin plot showing the distribution of values in the selected outlier column, with outlier values highlighted.
-        - A table showing all records for the selected outlier column, including key column, survey ID, enumerator ID, outlier value, and other display columns and an indication of whether the value is an outlier.
-
-        ##### Instructions for Demo:
-        For inspect each of the outlier columns.
-
-        **Next**: Explore the **Enumerator Stats** tab.
+        Your settings are pre-filled from the check configuration. Confirm the following
+        are selected, then close the panel and proceed to configure outlier columns below:
+        - Survey Key: **KEY**
+        - Survey ID: **hhid**
+        - Survey Date: **submissiondate**
+        - Enumerator ID: **enum_name**
+        - Team ID: **team_id**
         """,
         },
     }

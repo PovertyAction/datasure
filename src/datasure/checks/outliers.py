@@ -30,7 +30,8 @@ from datasure.utils.dataframe_utils import (
     sanitize_df_for_join,
 )
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
-from datasure.utils.onboarding_utils import demo_output_onboarding
+from datasure.utils.navigations_utils import demo_callout
+from datasure.utils.onboarding_utils import demo_output_onboarding, is_demo_project
 from datasure.utils.settings_utils import (
     load_check_settings,
     save_check_settings,
@@ -2713,6 +2714,18 @@ def outliers_report(
 
     st.title("Outliers and Constraints Report")
 
+    if is_demo_project():
+        demo_callout(
+            "This tab checks your survey data against two types of rules:\n\n"
+            "- **Constraint Violations**: Records that breach hard or soft numeric bounds "
+            "you define (e.g., age below 0 or above 120).\n"
+            "- **Outliers**: Records flagged by a statistical method (IQR or Standard "
+            "Deviation) as unusually high or low.\n\n"
+            "Start by reviewing the :material/settings: **settings** panel — your columns "
+            "are pre-filled. Then use **Add Outlier/Constraint Column** to configure "
+            "which columns to check."
+        )
+
     # Load settings
     config_settings = OutlierSettings(**config)
     outliers_settings = outliers_report_settings(
@@ -2721,6 +2734,23 @@ def outliers_report(
 
     # Outlier columns configuration
     st.subheader("Outlier/Constraint Columns Configuration")
+
+    if is_demo_project():
+        demo_callout(
+            "Click **Add Outlier/Constraint Column** to select which numeric columns to "
+            "analyse. In the dialog that opens:\n\n"
+            "1. Leave **Search type** as **exact** and select **age** and "
+            "**household_count** from the column list.\n"
+            "2. Under **Outlier Options**, keep the default IQR method (multiplier 1.5, "
+            "threshold 20).\n"
+            "3. Under **Constraint Options**, optionally enter bounds — for example, "
+            "for **age** set **Hard Min = 0**, **Soft Min = 15**, **Soft Max = 60**, "
+            "**Hard Max = 100**. Hard bounds flag impossible values; soft bounds flag "
+            "values that are unusual but may be legitimate.\n"
+            "4. Click **Add Outlier & Constraint Configuration** to save.\n\n"
+            "Repeat the steps to add **land_acre** as a second column."
+        )
+
     _render_outlier_column_actions(project_id, page_name_id, numeric_columns)
 
     # get outlier column config
@@ -2751,6 +2781,19 @@ def outliers_report(
     st.write("---")
     st.title("Constraint Violations")
 
+    if is_demo_project():
+        demo_callout(
+            "This section shows records that breach the **hard or soft bounds** you set "
+            "when configuring columns above.\n\n"
+            "- **Hard Min / Hard Max**: Absolute limits — any value outside these is an "
+            "unambiguous error (e.g., age < 0 or age > 120).\n"
+            "- **Soft Min / Soft Max**: Advisory range — values outside these are "
+            "unexpected but may be legitimate (e.g., a very large land holding).\n\n"
+            "Six metrics show how many records breach each bound type. "
+            "Use **:material/clarify: Show more columns in report** to add context "
+            "columns such as **enum_name** or **state** to the violations table."
+        )
+
     # compute constraint violations
     constraint_violations = compute_constraint_violations(
         data,
@@ -2777,6 +2820,21 @@ def outliers_report(
     # show outliers metrics
     st.write("---")
     st.title("Outliers")
+
+    if is_demo_project():
+        demo_callout(
+            "This section flags records that fall outside the **statistical bounds** "
+            "computed by the method you chose (IQR or Standard Deviation).\n\n"
+            "Four metrics summarise the findings: **Columns Checked**, "
+            "**Columns with Outliers**, **Total Outliers**, and "
+            "**Enumerators with Outliers**.\n\n"
+            "Under **Inspect Columns**, select a column from the dropdown to see "
+            "its descriptive statistics and a **box plot** showing where flagged values "
+            "sit relative to the distribution. Expand "
+            "**:material/clarify: Show more columns in report** to add context columns "
+            "to the record table below the chart.\n\n"
+            "**Next**: Explore the **GPS Checks** tab."
+        )
 
     # Compute outliers
     outlier_data = compute_outlier_output(
