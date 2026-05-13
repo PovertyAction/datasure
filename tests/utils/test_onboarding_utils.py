@@ -102,7 +102,7 @@ class TestImportDemoInfo:
         assert "Data Import Complete" in message
 
         message = ImportDemoInfo.get_info_message("proceed_to_hfcs_info")
-        assert "ready to view your HFC reports" in message
+        assert "ready for quality analysis" in message
 
         message = ImportDemoInfo.get_info_message("add_check_config_info")
         assert "Follow these steps to set up data quality checks" in message
@@ -111,7 +111,7 @@ class TestImportDemoInfo:
         assert "convert the submissiondate" in message
 
         message = ImportDemoInfo.get_info_message("add_correction_step_info")
-        assert "make corrections to the demo_survey dataset" in message
+        assert "targeted corrections" in message
 
     def test_get_info_message_invalid_id(self):
         """Test getting info message with invalid ID returns default message."""
@@ -244,51 +244,154 @@ class TestOutputOnboardingInfo:
     def test_get_onboarding_message_duplicates(self):
         """Test getting onboarding message for duplicates tab."""
         message = OutputOnboardingInfo.get_onboarding_message(
-            "duplicates", "duplicate_report"
+            "duplicates", "duplicates_report_settings"
         )
-        assert message["title"] == "Duplicate Records Report"
+        assert message["title"] == "Duplicates Settings"
+        assert "Survey Key" in message["content"]
 
     def test_get_onboarding_message_missing(self):
         """Test getting onboarding message for missing tab."""
         message = OutputOnboardingInfo.get_onboarding_message(
-            "missing", "missing_report"
+            "missing", "missing_summary"
         )
-        assert message["title"] == "Missing Data Report"
+        assert message["title"] == "Missing Values Tab"
+        assert "missing data" in message["content"].lower()
 
     def test_get_onboarding_message_outliers(self):
         """Test getting onboarding message for outliers tab."""
         message = OutputOnboardingInfo.get_onboarding_message(
-            "outliers", "outlier_report"
+            "outliers", "outliers_report_settings"
         )
-        assert message["title"] == "Outliers Report"
+        assert message["title"] == "Outliers & Constraints Settings"
+        assert "Survey Key" in message["content"]
 
     def test_get_onboarding_message_enumerators(self):
         """Test getting onboarding message for enumerators tab."""
         message = OutputOnboardingInfo.get_onboarding_message(
-            "enumerators", "enumerator_report"
+            "enumerators", "enumerator_report_settings"
         )
-        assert message["title"] == "Enumerator Stats Report"
+        assert message["title"] == "Enumerator Statistics Settings"
+        assert "Duration Column" in message["content"]
 
     def test_get_onboarding_message_descriptive_stats(self):
         """Test getting onboarding message for descriptive stats tab."""
         message = OutputOnboardingInfo.get_onboarding_message(
             "descriptive_stats", "descriptive_report"
         )
-        assert message["title"] == "Descriptive Statistics Report"
+        assert message["title"] == "Descriptive Statistics"
+        assert "distribution" in message["content"].lower()
 
     def test_get_onboarding_message_backchecks(self):
         """Test getting onboarding message for backchecks tab."""
         message = OutputOnboardingInfo.get_onboarding_message(
-            "backchecks", "backchecks_report"
+            "backchecks", "backchecks_report_settings"
         )
-        assert message["title"] == "Back Checks Report"
+        assert message["title"] == "Backcheck Analysis Settings"
+        assert "Survey Key" in message["content"]
 
     def test_get_onboarding_message_gpschecks(self):
         """Test getting onboarding message for GPS checks tab."""
         message = OutputOnboardingInfo.get_onboarding_message(
-            "gpschecks", "gpschecks_report"
+            "gpschecks", "gpschecks_report_settings"
         )
-        assert message["title"] == "GPS Checks Report"
+        assert message["title"] == "GPS Checks Settings"
+        assert "Survey Key" in message["content"]
+
+    def test_get_onboarding_message_summary_submissions(self):
+        """Test summary_submissions entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "summary", "summary_submissions"
+        )
+        assert message["title"] == "Submission Details"
+        assert "Today" in message["content"]
+
+    def test_get_onboarding_message_summary_progress(self):
+        """Test summary_progress entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "summary", "summary_progress"
+        )
+        assert message["title"] == "Progress"
+        assert "Submission Progress" in message["content"]
+
+    def test_get_onboarding_message_summary_data_quality(self):
+        """Test summary_data_quality entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "summary", "summary_data_quality"
+        )
+        assert message["title"] == "Data Quality"
+        assert "duplicate" in message["content"].lower()
+
+    def test_get_onboarding_message_progress_display_summary(self):
+        """Test display_progress_summary entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "progress", "display_progress_summary"
+        )
+        assert message["title"] == "Progress Summary"
+        assert "Submission Progress" in message["content"]
+
+    def test_get_onboarding_message_progress_display_overtime(self):
+        """Test display_progress_overtime entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "progress", "display_progress_overtime"
+        )
+        assert message["title"] == "Progress Over Time"
+        assert "green" in message["content"].lower()
+
+    def test_get_onboarding_message_progress_attempted_interviews(self):
+        """Test display_attempted_interviews entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "progress", "display_attempted_interviews"
+        )
+        assert message["title"] == "Attempted Interviews"
+        assert "Unique IDs" in message["content"]
+
+    def test_get_onboarding_message_progress_chart(self):
+        """Test display_progress_chart entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "progress", "display_progress_chart"
+        )
+        assert message["title"] == "Consent and Completion Progress"
+        assert "Consent Rate" in message["content"]
+
+    def test_get_onboarding_message_missing_columns(self):
+        """Test missing_columns entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "missing", "missing_columns"
+        )
+        assert message["title"] == "Missingness by Column"
+        assert "Total Missing" in message["content"]
+
+    def test_get_onboarding_message_missing_compare(self):
+        """Test missing_compare entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "missing", "missing_compare"
+        )
+        assert message["title"] == "Compare Missing Data Within Groups"
+        assert "group" in message["content"].lower()
+
+    def test_get_onboarding_message_missing_over_time(self):
+        """Test missing_over_time entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "missing", "missing_over_time"
+        )
+        assert message["title"] == "Missingness Over Time"
+        assert "over time" in message["content"].lower()
+
+    def test_get_onboarding_message_missing_correlation(self):
+        """Test missing_correlation entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "missing", "missing_correlation"
+        )
+        assert message["title"] == "Nullity Correlation"
+        assert "heatmap" in message["content"].lower()
+
+    def test_get_onboarding_message_missing_matrix(self):
+        """Test missing_matrix entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "missing", "missing_matrix"
+        )
+        assert message["title"] == "Nullity Matrix"
+        assert "missing" in message["content"].lower()
 
     def test_get_onboarding_message_invalid_tab(self):
         """Test getting onboarding message with invalid tab."""
