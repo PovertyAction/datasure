@@ -138,6 +138,22 @@ class TestEmitStata:
         lines = _emit_stata("remove row", "KEY", 'k"x', None, None, "")
         assert any('""x"' in line or '""' in line for line in lines)
 
+    def test_remove_value_non_numeric_gives_empty_string(self):
+        lines = _emit_stata("remove value", "KEY", "k1", "notes", "some text", "clear")
+        assert any('replace notes = ""' in line for line in lines)
+
+    def test_remove_value_numeric_gives_stata_missing(self):
+        lines = _emit_stata("remove value", "KEY", "k1", "score", "99", "outlier")
+        assert any("replace score = ." in line for line in lines)
+
+    def test_modify_value_missing_col_returns_empty(self):
+        lines = _emit_stata("modify value", "KEY", "k1", None, "new", "reason")
+        assert lines == []
+
+    def test_comment_includes_column(self):
+        lines = _emit_stata("modify value", "KEY", "k1", "age", "30", "")
+        assert any("age" in line for line in lines)
+
 
 # ---------------------------------------------------------------------------
 # generate_corrections_script
@@ -253,7 +269,21 @@ class TestGenerateInstallPackagesScript:
         assert "cap log close" in script
 
     def test_checks_for_existing_github(self, script):
-        assert "which github" in script
+        assert "cap which github" in script
+
+    def test_ipacheck_installed_via_net_install(self, script):
+        assert "net install ipacheck" in script
+
+    def test_ipaclean_installed_via_net_install(self, script):
+        assert "net install ipaclean" in script
+
+    def test_cap_which_guards_each_package(self, script):
+        assert "cap which ipacheck" in script
+        assert "cap which ipaclean" in script
+
+    def test_ipahelper_and_ipaplots_installed_via_foreach(self, script):
+        assert "foreach pkg in ipahelper ipaplots" in script
+        assert "github install PovertyAction/`pkg'" in script
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +325,12 @@ class TestGenerateMasterScript:
 
     def test_header_present(self, script):
         assert "Master Replication Script" in script
+
+    def test_datestr_format(self, script):
+        assert "local datestr : display %tdCCYY-NN-DD today()" in script
+
+    def test_no_set_trace_off(self, script):
+        assert "set trace off" not in script
 
 
 # ---------------------------------------------------------------------------
