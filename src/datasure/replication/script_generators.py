@@ -176,7 +176,7 @@ def generate_master_script(
         "* Step 5: Generate codebook (requires ipaclean)",
         'ipacodebook using "$docs/2_codebooks/codebook.xlsx", replace',
         "",
-        "log close",
+        "cap log close",
         'display "Done. Datasets saved to 3_data/ and codebook to 1_docs/2_codebooks/."',
     ]
 
