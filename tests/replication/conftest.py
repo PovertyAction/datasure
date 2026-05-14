@@ -11,16 +11,17 @@ than triggering fresh imports.
 
 from __future__ import annotations
 
+import importlib
 import sys
 from unittest.mock import MagicMock
 
 try:
-    import duckdb  # noqa: F401
+    importlib.import_module("duckdb")
 except Exception:
     sys.modules["duckdb"] = MagicMock()
 
 try:
-    from scipy import stats  # noqa: F401
+    import scipy.stats  # noqa: F401
 except Exception:
     sys.modules["scipy"] = MagicMock()
     sys.modules["scipy.stats"] = MagicMock()
