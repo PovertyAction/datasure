@@ -21,7 +21,7 @@ except Exception:
     sys.modules["duckdb"] = MagicMock()
 
 try:
-    from scipy import stats  # noqa: F401
+    import scipy.stats  # noqa: F401
 except Exception:
     sys.modules["scipy"] = MagicMock()
     sys.modules["scipy.stats"] = MagicMock()
