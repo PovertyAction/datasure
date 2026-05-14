@@ -22,6 +22,3 @@ MD024:
   siblings_only: true
 
 MD038: false
-
-# MD060/table-column-style - cosmetic table pipe alignment, not enforced
-MD060: false

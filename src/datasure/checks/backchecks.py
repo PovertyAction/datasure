@@ -1,6 +1,6 @@
 import re
 from contextlib import suppress
-from enum import StrEnum
+from enum import Enum
 from typing import Any, Literal
 
 import pandas as pd
@@ -61,7 +61,7 @@ WEEKDAY_OFFSET_TO_NUMERIC = {
 # ==============================================================================
 
 
-class SearchType(StrEnum):
+class SearchType(str, Enum):
     """Column search pattern types."""
 
     EXACT = "exact"
@@ -131,7 +131,7 @@ class OkRangeOptions(BaseModel):
     )
 
 
-class OkRangeType(StrEnum):
+class OkRangeType(str, Enum):
     """OK range types for backchecks."""
 
     NUMBER = "number"

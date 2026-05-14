@@ -1478,7 +1478,7 @@ class TestComputeSingleColumnStats:
     def test_with_nulls(self):
         """Test stats computation with null values."""
         df = pl.DataFrame({"col": [10.0, None, 30.0, None, 50.0]})
-        _stats, count = _compute_single_column_stats(
+        stats, count = _compute_single_column_stats(
             df, "col", "Interquartile Range (IQR)", 1.5
         )
 
@@ -1942,7 +1942,7 @@ class TestComputeSingleColumnStatsEdgeCases:
     def test_all_nulls(self):
         """Test column with all null values."""
         df = pl.DataFrame({"col": pl.Series([None, None, None], dtype=pl.Float64)})
-        _stats, count = _compute_single_column_stats(
+        stats, count = _compute_single_column_stats(
             df, "col", OutlierMethod.IQR.value, 1.5
         )
 
@@ -2345,13 +2345,13 @@ def outliers_mod():
         return lambda f: f
 
     st_mock.cache_data = mock_cache_data
-    st_mock.dialog = lambda *args, **kwargs: lambda f: f
+    st_mock.dialog = lambda *args, **kwargs: (lambda f: f)
 
     sys.modules["streamlit"] = st_mock
     try:
         with patch(
             "datasure.utils.onboarding_utils.demo_output_onboarding",
-            lambda tab: lambda f: f,
+            lambda tab: (lambda f: f),
         ):
             mod = importlib.import_module("datasure.checks.outliers")
             sys.modules.pop("datasure.checks.outliers", None)
@@ -2486,7 +2486,7 @@ class TestValidateConstraintSettings:
         st_mock.error.assert_called_once()
 
     def test_all_none_settings_valid(self):
-        _result, valid = _validate_constraint_settings(
+        result, valid = _validate_constraint_settings(
             {"hard_min": None, "soft_min": None, "soft_max": None, "hard_max": None}
         )
         assert valid is True
@@ -2993,7 +2993,7 @@ class TestRenderSearchTypeSelection:
             st_mock.columns.side_effect = _columns_side_effect
             st_mock.selectbox.return_value = SearchType.EXACT.value
             st_mock.multiselect.return_value = ["col1"]
-            search_type, pattern, cols, _lock = _render_search_type_selection(
+            search_type, pattern, cols, lock = _render_search_type_selection(
                 ["col1", "col2"]
             )
         assert search_type == SearchType.EXACT.value
@@ -3004,7 +3004,7 @@ class TestRenderSearchTypeSelection:
         with patch("datasure.checks.outliers.st") as st_mock:
             st_mock.selectbox.return_value = SearchType.STARTSWITH.value
             st_mock.text_input.return_value = "num"
-            search_type, pattern, cols, _lock = _render_search_type_selection(
+            search_type, pattern, cols, lock = _render_search_type_selection(
                 ["num_col1", "num_col2", "other"]
             )
         assert search_type == SearchType.STARTSWITH.value
@@ -3015,7 +3015,7 @@ class TestRenderSearchTypeSelection:
         with patch("datasure.checks.outliers.st") as st_mock:
             st_mock.selectbox.return_value = SearchType.CONTAINS.value
             st_mock.text_input.return_value = ""
-            _search_type, _pattern, cols, lock = _render_search_type_selection(
+            search_type, pattern, cols, lock = _render_search_type_selection(
                 ["col1", "col2"]
             )
         assert cols == []
@@ -3076,7 +3076,7 @@ class TestRenderOutlierOptions:
             st_mock.toggle.return_value = True
             st_mock.selectbox.return_value = OutlierMethod.SD.value
             st_mock.number_input.side_effect = [3.0, 30]
-            enabled, _settings, valid = _render_outlier_options()
+            enabled, settings, valid = _render_outlier_options()
         assert enabled is True
         assert valid is True
 
@@ -3102,14 +3102,14 @@ class TestRenderConstraintOptions:
         with patch("datasure.checks.outliers.st") as st_mock:
             st_mock.columns.side_effect = _columns_side_effect
             st_mock.number_input.return_value = None
-            _settings, valid = _render_constraint_options()
+            settings, valid = _render_constraint_options()
         assert valid is True
 
     def test_invalid_settings_calls_error(self):
         with patch("datasure.checks.outliers.st") as st_mock:
             st_mock.columns.side_effect = _columns_side_effect
             st_mock.number_input.side_effect = [50.0, 10.0, None, None]
-            _settings, valid = _render_constraint_options()
+            settings, valid = _render_constraint_options()
         assert valid is False
         st_mock.error.assert_called_once()
 

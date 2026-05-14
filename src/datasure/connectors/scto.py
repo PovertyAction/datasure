@@ -4,7 +4,7 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from enum import StrEnum
+from enum import Enum
 from pathlib import Path
 
 import polars as pl
@@ -32,14 +32,14 @@ SCTO_KEY_IMPORT_OPTIONS = ("Import from File", "Paste private key text")
 # --- Configuration and Models --- #
 
 
-class FormType(StrEnum):
+class FormType(str, Enum):
     """Enum for form types."""
 
     REGULAR = "regular"
     SERVER_DATASET = "server_dataset"
 
 
-class MediaType(StrEnum):
+class MediaType(str, Enum):
     """Enum for media types."""
 
     IMAGE = "image"

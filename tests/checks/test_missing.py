@@ -700,7 +700,7 @@ def test_compute_filtered_missing_columns_all_match():
         }
     )
 
-    filtered_data, _perc_cols, vmin, vmax = compute_filtered_missing_columns(
+    filtered_data, perc_cols, vmin, vmax = compute_filtered_missing_columns(
         data, mv_threshold=0
     )
 
