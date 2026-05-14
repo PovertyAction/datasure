@@ -779,9 +779,9 @@ class AddNewColumnOperation(PrepOperation):
             PrepFunctions.first.value: lambda cols: pl.concat_list(cols).list.first(),
             PrepFunctions.last.value: lambda cols: pl.concat_list(cols).list.last(),
             PrepFunctions.count.value: lambda cols: pl.concat_list(cols).list.len(),
-            PrepFunctions.nunique.value: lambda cols: pl.concat_list(cols)
-            .list.unique()
-            .list.len(),
+            PrepFunctions.nunique.value: lambda cols: (
+                pl.concat_list(cols).list.unique().list.len()
+            ),
             PrepFunctions.product.value: lambda cols: pl.fold(
                 acc=pl.lit(1), function=lambda acc, x: acc * x, exprs=cols
             ),
