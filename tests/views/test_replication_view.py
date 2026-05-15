@@ -265,7 +265,7 @@ class TestFetchSctoAssets:
         with patch(
             "datasure.views.replication_view._get_import_log_row", return_value=row
         ):
-            xlsx, form_def, _fid, error = _fetch_scto_assets("proj", "alias")
+            xlsx, _, _fid, error = _fetch_scto_assets("proj", "alias")
         assert xlsx is None
         assert "missing" in error.lower()
 
@@ -274,7 +274,7 @@ class TestFetchSctoAssets:
         with patch(
             "datasure.views.replication_view._get_import_log_row", return_value=row
         ):
-            xlsx, form_def, _fid, error = _fetch_scto_assets("proj", "alias")
+            xlsx, _, _fid, error = _fetch_scto_assets("proj", "alias")
         assert xlsx is None
         assert error
 
