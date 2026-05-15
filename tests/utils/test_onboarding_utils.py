@@ -165,7 +165,7 @@ class TestOnboardingSteps:
     def test_get_all_steps(self):
         """Test getting all onboarding steps."""
         all_steps = OnboardingSteps.get_all_steps()
-        assert len(all_steps) == 6
+        assert len(all_steps) == 7
         assert all_steps[0]["step"] == 1
         assert all_steps[5]["step"] == 6
 
@@ -509,7 +509,7 @@ class TestDemoProjectFunctions:
     @patch("datasure.utils.onboarding_utils.get_onboarding_step")
     def test_is_demo_complete_true(self, mock_get_step, mock_st):
         """Test is_demo_complete returns True when all steps completed."""
-        mock_get_step.return_value = 6
+        mock_get_step.return_value = 7
         assert is_demo_complete() is True
 
     @patch("datasure.utils.onboarding_utils.st")
@@ -539,7 +539,7 @@ class TestDemoUIFunctions:
         """Test progress indicator displays in demo mode."""
         mock_is_demo.return_value = True
         mock_get_step.return_value = 2
-        mock_st.columns.return_value = [MagicMock() for _ in range(6)]
+        mock_st.columns.return_value = [MagicMock() for _ in range(7)]
 
         show_progress_indicator()
 
@@ -570,7 +570,7 @@ class TestDemoUIFunctions:
 
         # Create mock columns with context manager support
         mock_cols = []
-        for _ in range(6):
+        for _ in range(7):
             mock_col = MagicMock()
             mock_col.__enter__ = MagicMock(return_value=mock_col)
             mock_col.__exit__ = MagicMock(return_value=False)
@@ -642,7 +642,7 @@ class TestDemoUIFunctions:
         mock_is_demo.return_value = True
         mock_st.button.return_value = False
 
-        show_next_steps(6)
+        show_next_steps(7)
 
         mock_st.success.assert_called_once()
         mock_st.button.assert_called()

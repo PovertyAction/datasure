@@ -1,7 +1,10 @@
 """Tests for the progress module with comprehensive coverage."""
 
+import datetime
+import importlib
 import math
-from unittest.mock import patch
+import sys
+from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
@@ -16,15 +19,26 @@ from datasure.checks.progress import (
     TimePeriodConfig,
     _aggregate_attempts_by_survey_id,
     _compute_summary_stats,
+    _display_chart_and_table,
+    _display_chart_if_configured,
+    _display_metrics,
     _expand_attempt_dates,
     _get_unique_values,
     _prepare_display_columns,
+    _render_column_value_selection,
     compute_attempted_interviews,
     compute_average_interviews,
     compute_progress_chart,
     compute_progress_overtime,
     compute_progress_summary,
+    display_progress_chart,
+    display_progress_summary,
+    load_default_settings,
+    progress_report,
+    progress_report_settings,
+    render_time_period_selector,
 )
+from datasure.utils.dataframe_utils import ColumnByType
 
 
 @pytest.fixture(autouse=True)
@@ -34,6 +48,84 @@ def mock_database_functions(monkeypatch):
     Disables database mocking for these tests.
     """
     pass
+
+
+# ==============================================================================
+# UI Test Helpers and Fixtures
+# ==============================================================================
+
+
+def _make_mock_st():
+    """Create a mock Streamlit module for progress UI tests."""
+
+    def make_col():
+        col = MagicMock()
+        col.selectbox.return_value = None
+        col.number_input.return_value = 0
+        col.multiselect.return_value = []
+        return col
+
+    def _col_factory(*args, **kwargs):
+        n_or_spec = args[0] if args else kwargs.get("spec", kwargs.get("n_or_spec", 2))
+        if isinstance(n_or_spec, int):
+            n = n_or_spec
+        elif isinstance(n_or_spec, list | tuple):
+            n = len(n_or_spec)
+        else:
+            n = 2
+        return tuple(make_col() for _ in range(n))
+
+    mock_st = MagicMock()
+    mock_st.fragment = lambda func: func
+    mock_st.columns.side_effect = _col_factory
+    mock_st.selectbox.return_value = None
+    mock_st.multiselect.return_value = []
+    mock_st.number_input.return_value = 0
+    mock_st.pills.return_value = "Day"
+    mock_st.button.return_value = False
+    mock_st.session_state = {}
+    return mock_st
+
+
+@pytest.fixture
+def patched_progress():
+    mock_st = _make_mock_st()
+    with (
+        patch("datasure.checks.progress.st", mock_st),
+        patch("datasure.utils.onboarding_utils.is_demo_project", return_value=False),
+        patch("datasure.checks.progress.load_check_settings", return_value={}),
+        patch("datasure.checks.progress.save_check_settings"),
+        patch("datasure.checks.progress.trigger_save"),
+        patch("datasure.checks.progress.demo_callout"),
+        patch("datasure.checks.progress.donut_chart2", return_value=MagicMock()),
+    ):
+        yield mock_st
+
+
+@pytest.fixture
+def prog_bc():
+    mock_st = _make_mock_st()
+    original_st = sys.modules.get("streamlit")
+    sys.modules["streamlit"] = mock_st
+    import datasure.checks.progress as prog_module
+
+    try:
+        importlib.reload(prog_module)
+        prog_module.load_check_settings = MagicMock(return_value={})
+        prog_module.save_check_settings = MagicMock()
+        prog_module.trigger_save = MagicMock()
+        prog_module.demo_callout = MagicMock()
+        prog_module.donut_chart2 = MagicMock(return_value=MagicMock())
+        with patch(
+            "datasure.utils.onboarding_utils.is_demo_project", return_value=False
+        ):
+            yield prog_module
+    finally:
+        if original_st is not None:
+            sys.modules["streamlit"] = original_st
+        else:
+            sys.modules.pop("streamlit", None)
+        importlib.reload(prog_module)
 
 
 class TestComputeProgressSummary:
@@ -537,3 +629,298 @@ class TestComputeAttemptedInterviewsUpdated:
         assert isinstance(result, AttemptedInterviewsResult)
         assert "enumerator" in result.attempted_interviews.columns
         assert "team" in result.attempted_interviews.columns
+
+
+# ==============================================================================
+# New UI Coverage Tests
+# ==============================================================================
+
+
+def test_load_default_settings_basic(patched_progress):
+    """load_default_settings merges saved and default config."""
+    config = ProgressSettings(survey_id="id_col")
+    with patch(
+        "datasure.checks.progress.load_check_settings",
+        return_value={"survey_id": "id_col", "survey_key": "key_col"},
+    ):
+        result = load_default_settings("settings.json", config)
+    assert isinstance(result, ProgressSettings)
+
+
+def test_progress_report_settings_renders(patched_progress):
+    """progress_report_settings renders settings UI and returns ProgressSettings."""
+    config = ProgressSettings(survey_id=None)
+    default_settings = ProgressSettings(survey_id=None)
+    patched_progress.selectbox.return_value = "survey_id"
+    patched_progress.number_input.return_value = 0
+    with patch(
+        "datasure.checks.progress.load_default_settings",
+        return_value=default_settings,
+    ):
+        result = progress_report_settings(
+            "settings.json",
+            config,
+            ["survey_id", "enum_col"],
+            ["date_col"],
+        )
+    assert isinstance(result, ProgressSettings)
+    patched_progress.expander.assert_called()
+
+
+def test_display_progress_summary_with_target(patched_progress):
+    """display_progress_summary renders progress bar when target is set."""
+    data = pl.DataFrame({"value": list(range(10))})
+    display_progress_summary(data, target=20)
+    patched_progress.columns.assert_called()
+
+
+def test_display_progress_summary_no_target(patched_progress):
+    """display_progress_summary shows info messages when no target."""
+    data = pl.DataFrame({"value": list(range(5))})
+    display_progress_summary(data, target=None)
+    patched_progress.columns.assert_called()
+
+
+def test_render_time_period_selector_returns_period(patched_progress):
+    """render_time_period_selector returns the selected time period."""
+    patched_progress.pills.return_value = "Week"
+    result = render_time_period_selector("settings.json", "progress")
+    assert result == "Week"
+
+
+def test_display_progress_overtime_no_date(prog_bc):
+    """display_progress_overtime shows info when date is None."""
+    data = pl.DataFrame({"value": [1, 2, 3]})
+    prog_bc.display_progress_overtime(data, None, "settings.json")
+    prog_bc.st.info.assert_called()
+
+
+def test_display_progress_overtime_with_date(prog_bc):
+    """display_progress_overtime renders chart with valid date column."""
+    data = pl.DataFrame(
+        {
+            "date": pl.Series(
+                [datetime.datetime(2024, 1, 1), datetime.datetime(2024, 1, 2)]
+            ),
+            "value": [1, 2],
+        }
+    )
+    period_stats = pl.DataFrame(
+        {
+            "time_period": [datetime.date(2024, 1, 1), datetime.date(2024, 1, 2)],
+            "num_interviews": [3, 5],
+        }
+    )
+    prog_bc.render_time_period_selector = MagicMock(return_value="Day")
+    prog_bc.compute_progress_overtime = MagicMock(return_value=period_stats)
+    prog_bc.compute_average_interviews = MagicMock(return_value=4.0)
+
+    prog_bc.display_progress_overtime(data, "date", "settings.json")
+    prog_bc.st.plotly_chart.assert_called()
+
+
+def test_display_progress_overtime_with_target(prog_bc):
+    """display_progress_overtime colors bars based on target_per_period."""
+    data = pl.DataFrame(
+        {
+            "date": pl.Series(
+                [datetime.datetime(2024, 1, 1), datetime.datetime(2024, 1, 2)]
+            ),
+        }
+    )
+    period_stats = pl.DataFrame(
+        {
+            "time_period": [datetime.date(2024, 1, 1), datetime.date(2024, 1, 2)],
+            "num_interviews": [2, 6],
+        }
+    )
+    prog_bc.render_time_period_selector = MagicMock(return_value="Day")
+    prog_bc.compute_progress_overtime = MagicMock(return_value=period_stats)
+    prog_bc.compute_average_interviews = MagicMock(return_value=4.0)
+
+    prog_bc.display_progress_overtime(
+        data, "date", "settings.json", target_per_period=5
+    )
+    prog_bc.st.plotly_chart.assert_called()
+
+
+def test_render_column_value_selection_no_col(patched_progress):
+    """_render_column_value_selection returns (None, None) when no column selected."""
+    data = pl.DataFrame({"consent": ["Yes", "No"], "outcome": ["Complete", "Refused"]})
+    patched_progress.selectbox.return_value = None
+
+    col, vals = _render_column_value_selection(
+        data=data,
+        setting_file="settings.json",
+        survey_cols=["consent", "outcome"],
+        default_column=None,
+        default_values=None,
+        column_label="Select consent column",
+        column_key="progress_consent_test",
+        values_key="consent_vals_test",
+        column_help="Help",
+        values_help="Values help",
+        info_message="Select column first",
+    )
+    assert col is None
+    assert vals is None
+
+
+def test_render_column_value_selection_with_col(patched_progress):
+    """_render_column_value_selection returns column and values when selected."""
+    data = pl.DataFrame({"consent": ["Yes", "No", "Yes"]})
+    patched_progress.selectbox.return_value = "consent"
+    patched_progress.multiselect.return_value = ["Yes"]
+
+    col, vals = _render_column_value_selection(
+        data=data,
+        setting_file="settings.json",
+        survey_cols=["consent"],
+        default_column=None,
+        default_values=None,
+        column_label="Select consent column",
+        column_key="progress_consent_test2",
+        values_key="consent_vals_test2",
+        column_help="Help",
+        values_help="Values help",
+        info_message="Select column first",
+    )
+    assert col == "consent"
+    assert vals == ["Yes"]
+
+
+def test_display_chart_if_configured_not_shown(patched_progress):
+    """_display_chart_if_configured does not render when column is None."""
+    _display_chart_if_configured(None, ["Yes"], 75.0, "% Consent")
+    patched_progress.pyplot.assert_not_called()
+
+
+def test_display_chart_if_configured_shown(patched_progress):
+    """_display_chart_if_configured renders chart when column and values set."""
+    _display_chart_if_configured("consent_col", ["Yes"], 75.0, "% Consent")
+    patched_progress.pyplot.assert_called()
+
+
+def test_display_progress_chart_renders(patched_progress):
+    """display_progress_chart renders with no columns selected (info path)."""
+    data = pl.DataFrame(
+        {
+            "consent": ["Yes", "No", "Yes"],
+            "outcome": ["Complete", "Refused", "Complete"],
+        }
+    )
+    display_progress_chart(data, "settings.json")
+    patched_progress.columns.assert_called()
+
+
+def test_display_attempted_interviews_missing_id(prog_bc):
+    """display_attempted_interviews shows info when survey_id is missing."""
+    data = pl.DataFrame({"value": [1, 2, 3]})
+    prog_bc.display_attempted_interviews(data, None, "date", "settings.json")
+    prog_bc.st.info.assert_called()
+
+
+def test_display_attempted_interviews_with_data(prog_bc):
+    """display_attempted_interviews renders full report."""
+    data = pl.DataFrame(
+        {
+            "survey_id": ["ID1", "ID2"],
+            "date": pl.Series(
+                [datetime.datetime(2024, 1, 1), datetime.datetime(2024, 1, 2)]
+            ),
+        }
+    )
+    mock_result = AttemptedInterviewsResult(
+        attempted_interviews=pl.DataFrame(
+            {
+                "survey_id": ["ID1", "ID2"],
+                "num_interviews": [1, 2],
+                "last_attempt_date": [
+                    datetime.date(2024, 1, 1),
+                    datetime.date(2024, 1, 2),
+                ],
+                "Attempt Date 1": [
+                    datetime.datetime(2024, 1, 1),
+                    datetime.datetime(2024, 1, 2),
+                ],
+            }
+        ),
+        total_submitted=2,
+        number_of_unique_ids=2,
+        min_attempts=1,
+        max_attempts=2,
+    )
+    prog_bc.compute_attempted_interviews = MagicMock(return_value=mock_result)
+    prog_bc.st.multiselect.return_value = []
+
+    prog_bc.display_attempted_interviews(data, "survey_id", "date", "settings.json")
+    prog_bc.st.columns.assert_called()
+
+
+def test_display_metrics_renders(patched_progress):
+    """_display_metrics renders four metric columns."""
+    result = AttemptedInterviewsResult(
+        attempted_interviews=pl.DataFrame(
+            {"survey_id": ["ID1"], "num_interviews": [1]}
+        ),
+        total_submitted=5,
+        number_of_unique_ids=1,
+        min_attempts=1,
+        max_attempts=1,
+    )
+    _display_metrics(result)
+    patched_progress.columns.assert_called()
+
+
+def test_display_chart_and_table_renders(patched_progress):
+    """_display_chart_and_table renders frequency chart and data table."""
+    data = pl.DataFrame(
+        {
+            "survey_id": ["ID1", "ID2"],
+            "num_interviews": [1, 2],
+            "last_attempt_date": [
+                datetime.date(2024, 1, 1),
+                datetime.date(2024, 1, 2),
+            ],
+            "Attempt Date 1": [
+                datetime.datetime(2024, 1, 1),
+                datetime.datetime(2024, 1, 2),
+            ],
+            "Attempt Date 2": [None, datetime.datetime(2024, 1, 3)],
+        }
+    )
+    _display_chart_and_table(data, "survey_id")
+    patched_progress.plotly_chart.assert_called()
+    patched_progress.dataframe.assert_called()
+
+
+def test_progress_report_renders(patched_progress):
+    """progress_report renders full dashboard, calling all sub-sections."""
+    data = pl.DataFrame(
+        {
+            "survey_id": ["ID1", "ID2"],
+            "date": pl.Series(
+                [datetime.datetime(2024, 1, 1), datetime.datetime(2024, 1, 2)]
+            ),
+        }
+    )
+    survey_cols = ColumnByType(
+        categorical_columns=["survey_id"],
+        datetime_columns=["date"],
+    )
+    with (
+        patch(
+            "datasure.checks.progress.progress_report_settings",
+            return_value=ProgressSettings(survey_id="survey_id"),
+        ),
+        patch("datasure.checks.progress.display_progress_summary"),
+        patch("datasure.checks.progress.display_progress_overtime"),
+        patch("datasure.checks.progress.display_attempted_interviews"),
+    ):
+        progress_report(
+            data,
+            "settings.json",
+            {"survey_id": "survey_id"},
+            survey_cols,
+        )
+    patched_progress.title.assert_called()
