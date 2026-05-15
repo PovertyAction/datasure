@@ -2657,8 +2657,6 @@ def enumerator_report(
         ##### Instructions for Demo:
         Select **household_size** as the column and **mean** as the statistic, then switch
         to **Weekly** to see whether average household size varies by enumerator over time.
-
-        **Next**: Explore the **Backcheck Analysis** tab.
         """
     )
 
@@ -2668,4 +2666,8 @@ def enumerator_report(
         enumerator_settings.enumerator,
         enumerator_settings.team,
         setting_file,
+    )
+
+    demo_callout(
+        "**Next**: :material/arrow_upward: Scroll up and select the **Backcheck Analysis** tab."
     )

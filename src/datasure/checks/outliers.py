@@ -2832,8 +2832,7 @@ def outliers_report(
             "its descriptive statistics and a **box plot** showing where flagged values "
             "sit relative to the distribution. Expand "
             "**:material/clarify: Show more columns in report** to add context columns "
-            "to the record table below the chart.\n\n"
-            "**Next**: Explore the **GPS Checks** tab."
+            "to the record table below the chart."
         )
 
     # Compute outliers
@@ -2859,3 +2858,7 @@ def outliers_report(
             outliers_settings,
             setting_file,
         )
+
+    demo_callout(
+        "**Next**: :material/arrow_upward: Scroll up and select the **GPS Checks** tab."
+    )

@@ -13,7 +13,11 @@ from datasure.replication.package_builder import build_replication_package
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
 from datasure.utils.duckdb_utils import duckdb_get_table
-from datasure.utils.navigations_utils import demo_callout, demo_sidebar_help
+from datasure.utils.navigations_utils import (
+    add_demo_navigation,
+    demo_callout,
+    demo_sidebar_help,
+)
 from datasure.utils.scto_api import (
     SurveyCTOAPIClient,
     SurveyCTOAPIConfig,
@@ -257,6 +261,7 @@ if configs.is_empty():
 # ── Header ────────────────────────────────────────────────────────────────────
 
 demo_sidebar_help()
+add_demo_navigation("replication_view.py", step=7)
 
 st.title("Replication Package")
 st.markdown(
@@ -396,6 +401,17 @@ if "_replication_zip" in st.session_state:
         type="primary",
         disabled=not pii_confirmed,
     )
+
+    if pii_confirmed:
+        demo_callout(
+            "You have completed the DataSure demo! You have gone through the full "
+            "workflow — importing data, preparing it, configuring quality checks, "
+            "reviewing reports, correcting data issues, and exporting a replication "
+            "package.\n\n"
+            "To exit the demo and return to the project selection screen, click the "
+            "**Exit Demo** button in the sidebar.",
+            type="success",
+        )
 
 # ── Preview ───────────────────────────────────────────────────────────────────
 

@@ -17,6 +17,7 @@ import streamlit as st
 
 from datasure.models.schemas import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.settings_utils import (
     load_check_settings,
@@ -742,3 +743,7 @@ def descriptive_report(
     st.write("---")
     st.subheader("Value Counts")
     _render_value_counts(data, selected_columns.all_columns, setting_file)
+
+    demo_callout(
+        "**Next**: :material/arrow_upward: Scroll up and select the **Progress Tracking** tab."
+    )

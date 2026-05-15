@@ -2221,8 +2221,7 @@ def gpschecks_report(
             "It is useful when you have GPS from both a main survey and a backcheck "
             "visit and want to verify the household was revisited at the same location.\n\n"
             "This section requires at least **two GPS configurations** added above. "
-            "The demo only has one configuration, so you can skip this section.\n\n"
-            "**Next**: Explore the **Enumerator Statistics** tab."
+            "The demo only has one configuration, so you can skip this section."
         )
 
     _render_gps_comparison_checks(
@@ -2232,4 +2231,8 @@ def gpschecks_report(
         config_settings.survey_key,
         config_settings.survey_date,
         config_settings.enumerator,
+    )
+
+    demo_callout(
+        "**Next**: :material/arrow_upward: Scroll up and select the **Enumerator Statistics** tab."
     )

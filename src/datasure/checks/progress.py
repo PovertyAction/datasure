@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from datasure.utils.chart_utils import donut_chart2
 from datasure.utils.dataframe_utils import ColumnByType
+from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.settings_utils import (
     load_check_settings,
@@ -1208,6 +1209,10 @@ def display_attempted_interviews(
 
     # Display chart and table
     _display_chart_and_table(result.attempted_interviews, survey_id)
+
+    demo_callout(
+        "**Next**: :material/arrow_upward: Scroll up and select the **Missing Values** tab."
+    )
 
 
 def _display_metrics(result: AttemptedInterviewsResult) -> None:

@@ -2115,8 +2115,7 @@ def duplicates_report(
             "Use **Add Duplicates Column(s)** to check any column for duplicate values — "
             "for example, a phone number or unique ID number. "
             "The demo dataset has no additional columns that should be duplicate-free beyond "
-            "the household ID, so you can skip adding columns here. "
-            "**Next**: Explore the **Outliers & Constraints** tab."
+            "the household ID, so you can skip adding columns here."
         )
 
     all_columns = data.columns
@@ -2171,4 +2170,8 @@ def duplicates_report(
 
     _render_other_duplicates_table(
         data, all_dup_cols, duplicates_settings, setting_file
+    )
+
+    demo_callout(
+        "**Next**: :material/arrow_upward: Scroll up and select the **Outliers & Constraints** tab."
     )

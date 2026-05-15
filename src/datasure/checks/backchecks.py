@@ -11,7 +11,7 @@ from scipy import stats
 
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
-from datasure.utils.navigations_utils import demo_callout
+from datasure.utils.navigations_utils import demo_callout, show_demo_next_action
 from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.settings_utils import (
     load_check_settings,
@@ -4223,3 +4223,16 @@ def backchecks_report(
     _render_backcheck_comparison_results(
         survey_data, backcheck_data, _backcheck_analysis, backcheck_settings
     )
+
+    st.write("---")
+    demo_callout(
+        "You have now explored all the data quality check tabs — Summary, Descriptive Statistics, "
+        "Progress Tracking, Missing Values, Duplicates, Outliers & Constraints, GPS Checks, "
+        "Enumerator Statistics, and Backcheck Analysis.\n\n"
+        "The next step is the **Correct Data** page, where you will learn how to apply targeted "
+        "corrections to your survey data based on the quality findings from these checks.\n\n"
+        "To get there, click **Correct Data** in the sidebar or use the **Proceed to Correct Data** "
+        "button below.",
+        type="success",
+    )
+    show_demo_next_action(5, "st_corr_page", "Proceed to Correct Data")

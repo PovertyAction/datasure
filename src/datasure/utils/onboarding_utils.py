@@ -328,6 +328,32 @@ class OnboardingSteps:
         """,
     }
 
+    REPLICATION: ClassVar[dict] = {
+        "step": 7,
+        "title": "Replication Package",
+        "description": "Export a Stata replication package for your corrected dataset.",
+        "icon": ":material/folder_zip:",
+        "page": "replication_view.py",
+        "guidance_title": "Export Replication Package",
+        "guidance_content": """
+        This page bundles everything needed to reproduce your corrected dataset into a
+        single downloadable zip file — raw data, Stata do-files (import, prepare,
+        correct), correction and prep logs, codebooks, and a README.
+
+        ##### Instructions for Demo:
+        1. Under **Page Name**, select **Household HFCs**.
+        2. Review the configuration details that appear, then expand
+           **What's inside the zip?** to see the full directory structure.
+        3. Click **Build Replication Package**. DataSure will assemble the zip in seconds.
+        4. Once the build completes, check the PII confirmation box and click
+           **Download replication package (.zip)**.
+
+        The demo dataset is synthetic and contains no real PII. In a live project the
+        zip would include raw respondent data and must be stored on an encrypted,
+        access-controlled drive in accordance with IPA data policy.
+        """,
+    }
+
     CORRECT: ClassVar[dict] = {
         "step": 6,
         "title": "Correct Data",
@@ -358,8 +384,9 @@ class OnboardingSteps:
                 - Remove Row: Remove an entire row from the dataset
                 - Remove Value: Replace a specific value with null/missing
 
-        **Final step:** After applying corrections, revisit the quality reports to see how the data quality has improved!
+        After applying corrections, revisit the quality reports to see how the data quality has improved!
 
+        **Next:** Use the navigation button below or click **Replication Package** in the sidebar to proceed to the final step — exporting a Stata replication package of your corrected dataset.
         """,
     }
 
@@ -373,6 +400,7 @@ class OnboardingSteps:
             "configure": cls.CONFIGURE,
             "reports": cls.OUTPUTS,
             "correct": cls.CORRECT,
+            "replication": cls.REPLICATION,
         }
         return steps.get(step, {})
 
@@ -386,6 +414,7 @@ class OnboardingSteps:
             cls.CONFIGURE,
             cls.OUTPUTS,
             cls.CORRECT,
+            cls.REPLICATION,
         ]
 
     @classmethod
@@ -398,6 +427,7 @@ class OnboardingSteps:
             4: cls.CONFIGURE,
             5: cls.OUTPUTS,
             6: cls.CORRECT,
+            7: cls.REPLICATION,
         }
         guidance = steps.get(step, {})
         if not guidance:
@@ -499,8 +529,6 @@ class OutputOnboardingInfo:
         - % of values flagged as outliers: Percentage of data points identified as outliers. This will show **0%** until you configure the **Outliers & Constraints** tab — once configured, return here to see the updated value.
         - % of missing values in survey dataset: Percentage of missing or null values in the survey dataset.
         - Backcheck error rate: Percentage of discrepancies found between survey data and backcheck data.
-
-        **Next**: Explore the "Descriptive Statistics" tab.
         """,
         },
     }
@@ -574,8 +602,6 @@ class OutputOnboardingInfo:
         It also includes the following visualizations:
         - A horizontal bar chart showing the **distribution of attempt counts** — how many respondents had exactly 1 attempt, 2 attempts, 3 or more, etc.
         - A data table summarizing attempted interviews by respondent ID (e.g., household ID), including the date of each attempt.
-
-        **Next**: Explore the **Missing Values** tab.
         """,
         },
         "display_progress_chart": {
@@ -723,7 +749,6 @@ class OutputOnboardingInfo:
         ##### Nullity Matrix
         This section provides a visual representation of the missing data patterns in your dataset, helping you quickly identify areas with high or low missingness, including:
         - A matrix visualization showing the presence or absence of data for each column in the dataset. The red blocks represent missing values, while the blue blocks represent non-missing values.
-        **Next**: Explore the **Duplicates** tab.
         """,
         },
     }
@@ -812,8 +837,6 @@ class OutputOnboardingInfo:
            **state** are only available here if you included them in your column selection —
            if you selected numeric columns only, go back to the column selector and add
            **state** or **enum_name**.
-
-        **Next**: Explore the **Progress Tracking** tab.
         """,
         },
     }

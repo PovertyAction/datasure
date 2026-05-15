@@ -1220,6 +1220,10 @@ def missing_matrix(missing_data: pl.DataFrame, color_map: list) -> None:
     fig.update_layout(width=1000, height=1000)
     st.plotly_chart(fig, width="stretch")
 
+    demo_callout(
+        "**Next**: :material/arrow_upward: Scroll up and select the **Duplicates** tab."
+    )
+
 
 # =============================================================================
 # Main Report Function
