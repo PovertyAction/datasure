@@ -1,0 +1,228 @@
+# Great Docs Configuration
+# See https://posit-dev.github.io/great-docs/user-guide/03-configuration.html
+
+# Display Name
+# ------------
+# Custom display name for your package in the site navbar/title.
+# If not provided, uses the actual package name (e.g., 'my_package' or 'my-package').
+# Use this to provide a marketing/presentation name (e.g., 'My Package').
+# display_name: DataSure
+
+# Docstring Parser
+# ----------------
+# The docstring format used in your package (numpy, google, or sphinx)
+# This is auto-detected during initialization, but can be overridden here.
+parser: numpy
+
+# Dynamic Introspection
+# ---------------------
+# When true, the renderer uses runtime introspection (more accurate for complex packages).
+# When false, uses static analysis only (better for packages with cyclic aliases).
+# This is auto-detected during initialization based on what works for your package.
+# dynamic: true
+
+# Exclusions
+# ----------
+# Items to exclude from auto-documentation (affects 'init' and 'scan')
+# exclude:
+#   - InternalClass
+#   - helper_function
+
+# Logo & Favicon
+# ---------------
+# Point to a single logo file (replaces the text title in the navbar):
+# logo: assets/logo.svg
+#
+# For light/dark variants:
+# logo:
+#   light: assets/logo-light.svg
+#   dark: assets/logo-dark.svg
+#
+# To show the text title alongside the logo, add: show_title: true
+
+# GitHub Integration
+# ------------------
+# GitHub link style: "widget" (shows stars count) or "icon" (simple icon)
+# github_style: widget
+
+# Source Link Configuration
+# -------------------------
+source:
+  enabled: true              # Enable/disable source links (default: true)
+#   branch: main               # Git branch/tag to link to (default: auto-detect)
+  path: src/datasure          # Custom source path for monorepos (default: auto-detect)
+#   placement: usage           # Where to place the link: "usage" (default) or "title"
+
+# Sidebar Filter
+# --------------
+# sidebar_filter:
+#   enabled: true              # Enable/disable filter (default: true)
+#   min_items: 20              # Minimum items before showing filter (default: 20)
+
+# CLI Documentation
+# -----------------
+# cli:
+#   enabled: false             # Enable CLI documentation (default: false)
+#   module: my_package.cli     # Module containing Click commands (auto-detected)
+#   name: cli                  # Name of the Click command object (auto-detected)
+
+# Changelog (GitHub Releases)
+# ---------------------------
+# Auto-generate a Changelog page from GitHub Releases.
+# changelog:
+#   enabled: true              # Enable/disable changelog (default: true)
+#   max_releases: 50           # Max releases to include (default: 50)
+
+# Custom Sections
+# ---------------
+# Add custom page groups (examples, tutorials, blog, etc.) to the site.
+# Each section gets a navbar link and a sidebar. An auto-generated
+# card-based index page is created only when ``index: true`` is set;
+# otherwise the navbar links directly to the first page in the section.
+# If you provide your own index.qmd in the directory it is always used.
+#
+# sections:
+#   - title: Examples            # Navbar link text
+#     dir: examples              # Source directory (relative to project root)
+#     index: true                # Generate card-based index page (default: false)
+#     index_columns: 2           # Columns for image cards: 1 or 2 (default: 2)
+#     navbar_after: User Guide   # Place after this navbar item (optional)
+#   - title: Tutorials
+#     dir: tutorials             # No index — navbar links to first page
+#   - title: Blog                # Blog section using Quarto's listing directive
+#     dir: blog
+#     type: blog                 # "blog" for Quarto listing, omit for card grid
+
+# Custom Static Pages
+# -------------------
+# Add hand-written HTML pages that Great Docs should either wrap with the site
+# shell (layout: passthrough) or copy through unchanged (layout: raw).
+#
+# Omit `custom_pages` to use the conventional `custom/` directory.
+# Set `custom_pages: false` to disable discovery.
+#
+# custom_pages:
+#   - dir: marketing             # Source directory (relative to project root)
+#     output: py                 # URL/output prefix (optional; defaults to dir basename)
+#   - dir: playgrounds
+#     output: demos
+#
+# Short form for a single directory:
+# custom_pages: marketing
+
+# Dark Mode Toggle
+# ----------------
+# Enable/disable the dark mode toggle in navbar (default: true)
+# dark_mode_toggle: true
+
+# Markdown Pages
+# --------------
+# Generate .md companions for every HTML page and show a copy/view-as-Markdown
+# widget on each page.  Set to false to disable both (default: true).
+# markdown_pages: true
+#
+# To generate .md pages but hide the widget:
+# markdown_pages:
+#   widget: false
+
+# User Guide
+# ----------
+# Custom directory for User Guide .qmd files (relative to project root).
+# If not provided, looks for user_guide/ in the project root.
+# user_guide: docs/guides
+#
+# For explicit control over section ordering and grouping:
+# user_guide:
+#   - section: "Get Started"
+#     contents:
+#       - text: "Welcome"
+#         href: index.qmd
+#       - quickstart.qmd
+#       - installation.qmd
+#   - section: "Advanced Topics"
+#     contents:
+#       - advanced-config.qmd
+#       - extending.qmd
+#
+# File paths are relative to the user guide directory (no user_guide/ prefix).
+# When using explicit ordering, numeric filename prefixes are preserved as-is.
+
+# Author Information
+# ------------------
+# Author metadata for display in the landing page sidebar and page attribution
+# authors:
+#   - name: Your Name
+#     email: you@example.com
+#     role: Lead Developer
+#     affiliation: Organization
+#     github: yourusername
+#     homepage: https://yoursite.com
+#     orcid: 0000-0002-1234-5678
+#     image: https://github.com/yourusername.png  # Avatar (GitHub URL or local path)
+
+# Team Author
+# -----------
+# Optional catch-all author for auto-generated pages (reference, changelog, etc.)
+# team_author:
+#   name: "Project Team"
+#   image: "assets/team-avatar.png"
+#   url: "https://github.com/org/project"
+
+# Site Settings
+# -------------
+# These settings are forwarded to _quarto.yml (format.html section)
+# site:
+#   theme: flatly              # Quarto theme (default: flatly)
+#   toc: true                  # Show table of contents (default: true)
+#   toc-depth: 2               # TOC heading depth (default: 2)
+#   toc-title: On this page    # TOC title (default: "On this page")
+#   show_dates: false          # Show page timestamps in footer
+#   date_format: "%B %d, %Y"   # Date format (Python strftime)
+#   show_author: true          # Show author attribution with dates
+#   show_security: true        # Show security policy page (from SECURITY.md)
+
+# Social Cards & Open Graph
+# -------------------------
+# Auto-generate <meta> tags for social media previews (LinkedIn, Discord, Slack,
+# Bluesky, Mastodon, X/Twitter, and other platforms). Enabled by default.
+# social_cards: true           # Enable with defaults (same as omitting the key)
+# social_cards: false          # Disable social card meta tags
+#
+# Fine-grained control:
+# social_cards:
+#   enabled: true
+#   image: assets/social-card.png   # Default og:image for all pages
+#   twitter_site: "@myhandle"       # Twitter/X site @handle
+#   twitter_card: summary_large_image  # "summary" or "summary_large_image"
+
+# Jupyter Kernel
+# --------------
+# Jupyter kernel to use for executing code cells in .qmd files.
+# This is set at the project level so it applies to all pages, including
+# auto-generated API reference pages. Can be overridden in individual .qmd
+# file frontmatter if needed for special cases.
+# jupyter: python3             # Default: python3
+
+# API Reference Structure
+# -----------------------
+# Explicit control over API reference sections. If not provided, sections are
+# auto-generated from discovered exports. Each section has a title, description,
+# and list of contents.
+#
+# For classes, use `members: true` (default) to document methods inline on the
+# class page, or `members: false` to exclude methods (you can place them
+# explicitly elsewhere in the reference if needed).
+#
+# reference:
+#   - title: Core Classes
+#     desc: Main classes for working with the package
+#     contents:
+#       - name: MyClass
+#         members: false       # Don't document methods here
+#       - SimpleClass          # Methods documented inline (default)
+#
+#   - title: Utility Functions
+#     desc: Helper functions for common tasks
+#     contents:
+#       - helper_func
+#       - another_func
