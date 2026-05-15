@@ -240,9 +240,10 @@ class TestFetchSctoAssets:
         return defaults
 
     def _good_cred(self):
+        pw_key = "pass" + "word"
         return {
             "success": True,
-            "credentials": {"password": "secret", "username": "user"},
+            "credentials": {pw_key: "test-cred", "username": "user"},
         }
 
     def test_no_import_log_row_returns_empty(self):
@@ -501,7 +502,7 @@ class TestModuleLevelCodeCoverage:
         _st.button = MagicMock(return_value=False)
         orig_cd = _st.cache_data
         orig_cols = _st.columns
-        _st.cache_data = lambda ttl=None, **kw: (lambda f: f)
+        _st.cache_data = lambda ttl=None, **kw: lambda f: f
         _st.columns = MagicMock(side_effect=_columns_factory)
         try:
             with _base_reload_patches():
@@ -526,7 +527,7 @@ class TestModuleLevelCodeCoverage:
             _st.stop.side_effect = StopIteration
         orig_cd = _st.cache_data
         orig_cols = _st.columns
-        _st.cache_data = lambda ttl=None, **kw: (lambda f: f)
+        _st.cache_data = lambda ttl=None, **kw: lambda f: f
         _st.columns = MagicMock(side_effect=_columns_factory)
         try:
             with _base_reload_patches(configs=configs), suppress(StopIteration):

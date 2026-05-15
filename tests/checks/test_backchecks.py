@@ -3147,7 +3147,7 @@ def _make_mock_st():
 
     mock_st = MagicMock()
     mock_st.fragment = lambda func: func
-    mock_st.dialog = lambda *args, **kwargs: (lambda func: func)
+    mock_st.dialog = lambda *args, **kwargs: lambda func: func
     mock_st.columns = mock_columns
     mock_st.selectbox.return_value = None
     mock_st.multiselect.return_value = []
