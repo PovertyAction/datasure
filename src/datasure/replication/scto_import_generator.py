@@ -384,8 +384,8 @@ def _emit_consolidate_key() -> list[str]:
     """Emit the block that consolidates instanceid into the key variable."""
     return [
         "\t* consolidate unique ID into key variable",
-        '\treplace key=instanceid if key==""',
-        "\tdrop instanceid",
+        '\treplace KEY=instanceID if KEY==""',
+        "\tdrop instanceID",
         "",
     ]
 
@@ -394,7 +394,7 @@ def _emit_system_labels() -> list[str]:
     """Emit variable labels for standard SurveyCTO system fields."""
     return [
         "\t* label standard system variables",
-        '\tlabel variable key "Unique submission ID"',
+        '\tlabel variable KEY "Unique submission ID"',
         '\tcap label variable submissiondate "Date/time submitted"',
         '\tcap label variable formdef_version "Form version used on device"',
         '\tcap label variable review_status "Review status"',
@@ -449,8 +449,8 @@ def _emit_append_and_save() -> list[str]:
         "\tif _rc == 0 {",
         "\t\tgen new_data_row=1",
         '\t\tappend using "`dtafile\'"',
-        "\t\tsort key",
-        "\t\tby key: gen num_for_key = _N",
+        "\t\tsort KEY",
+        "\t\tby KEY: gen num_for_key = _N",
         "\t\tdrop if num_for_key > 1 & ((`overwrite_old_data' == 0 & new_data_row == 1) | (`overwrite_old_data' == 1 & new_data_row != 1))",
         "\t\tdrop num_for_key",
         "\t\tdrop new_data_row",
@@ -528,7 +528,7 @@ def generate_scto_import_script(
         'disp ""',
         "",
         "* import data from primary .csv file",
-        'insheet using "`csvfile\'", names clear',
+        'insheet using "`csvfile\'", names case clear',
         "",
         "* drop extra table-list columns",
         "cap drop reserved_name_for_field_*",

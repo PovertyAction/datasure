@@ -10,8 +10,11 @@ from datasure.replication.scto_import_generator import (
     _clean_label,
     _emit_locals,
     _find_label_col,
+    _get_col,
     _is_numeric_str,
+    _parse_choice_row,
     _parse_form,
+    _truncate,
     generate_scto_import_script,
 )
 
@@ -326,6 +329,9 @@ class TestGenerateSCTOImportScript:
     def test_contains_insheet_command(self, script):
         assert "insheet using" in script
 
+    def test_insheet_preserves_case(self, script):
+        assert "names case clear" in script
+
     def test_drops_note_fields(self, script):
         assert "note_fields" in script
         assert "section_note" in script  # appears in the local declaration
@@ -376,8 +382,15 @@ class TestGenerateSCTOImportScript:
         assert "label values regions" not in script
 
     def test_key_consolidation_present(self, script):
-        assert "replace key=instanceid" in script
-        assert "drop instanceid" in script
+        assert "replace KEY=instanceID" in script
+        assert "drop instanceID" in script
+
+    def test_key_label_is_uppercase(self, script):
+        assert 'label variable KEY "Unique submission ID"' in script
+
+    def test_sort_and_dedup_use_uppercase_key(self, script):
+        assert "sort KEY" in script
+        assert "by KEY: gen num_for_key" in script
 
     def test_save_command_present(self, script):
         assert 'save "`dtafile\'"' in script
@@ -441,3 +454,74 @@ class TestGenerateSCTOImportScript:
             datasure_version="0.0.1",
         )
         assert r"\${name}" in script
+
+
+# ---------------------------------------------------------------------------
+# _truncate
+# ---------------------------------------------------------------------------
+
+
+class TestTruncate:
+    def test_short_string_unchanged(self):
+        assert _truncate("hello", 10) == "hello"
+
+    def test_exactly_at_limit_unchanged(self):
+        assert _truncate("hello", 5) == "hello"
+
+    def test_truncates_when_over_limit(self):
+        assert _truncate("hello world", 5) == "hello"
+
+    def test_empty_string(self):
+        assert _truncate("", 10) == ""
+
+
+# ---------------------------------------------------------------------------
+# _get_col
+# ---------------------------------------------------------------------------
+
+
+class TestGetCol:
+    def test_returns_value_at_correct_index(self):
+        assert (
+            _get_col(["text", "q1", "Label"], ["type", "name", "label"], "name") == "q1"
+        )
+
+    def test_returns_empty_when_col_missing(self):
+        assert _get_col(["text", "q1"], ["type", "name"], "label") == ""
+
+    def test_returns_empty_when_row_too_short(self):
+        assert _get_col(["text"], ["type", "name", "label"], "label") == ""
+
+    def test_strips_whitespace(self):
+        assert _get_col(["text", "  q1  "], ["type", "name"], "name") == "q1"
+
+    def test_none_value_returns_empty_string(self):
+        assert _get_col(["text", None], ["type", "name"], "name") == ""
+
+
+# ---------------------------------------------------------------------------
+# _parse_choice_row
+# ---------------------------------------------------------------------------
+
+
+class TestParseChoiceRow:
+    def test_returns_tuple_for_valid_row(self):
+        result = _parse_choice_row(["yn", "1", "Yes"], li=0, ni=1, bi=2)
+        assert result == ("yn", "1", "Yes")
+
+    def test_returns_none_when_list_name_empty(self):
+        assert _parse_choice_row(["", "1", "Yes"], li=0, ni=1, bi=2) is None
+
+    def test_returns_none_when_value_empty(self):
+        assert _parse_choice_row(["yn", "", "Yes"], li=0, ni=1, bi=2) is None
+
+    def test_returns_none_when_row_too_short(self):
+        assert _parse_choice_row(["yn"], li=0, ni=1, bi=2) is None
+
+    def test_label_empty_when_bi_negative(self):
+        result = _parse_choice_row(["yn", "1"], li=0, ni=1, bi=-1)
+        assert result == ("yn", "1", "")
+
+    def test_label_empty_when_bi_out_of_range(self):
+        result = _parse_choice_row(["yn", "1"], li=0, ni=1, bi=5)
+        assert result == ("yn", "1", "")
