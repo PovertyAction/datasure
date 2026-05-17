@@ -1,4 +1,5 @@
-from unittest.mock import patch
+import datetime
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
@@ -23,7 +24,54 @@ from datasure.checks.missing import (
     compute_missing_over_time,
     compute_missing_summary,
     get_null_list,
+    missing_columns,
+    missing_compare,
+    missing_correlation,
+    missing_matrix,
+    missing_over_time,
+    missing_report,
+    missing_summary,
+    render_missing_codes_table,
 )
+
+# ==============================================================================
+# Mock Streamlit Helper
+# ==============================================================================
+
+
+def _make_mock_st():
+    """Create a mock Streamlit module for testing UI render functions."""
+
+    def make_col():
+        col = MagicMock()
+        col.selectbox.return_value = None
+        col.text_input.return_value = ""
+        col.multiselect.return_value = []
+        col.slider.return_value = 0
+        col.toggle.return_value = False
+        col.button.return_value = False
+        return col
+
+    def _col_factory(n_or_spec, **kwargs):
+        if isinstance(n_or_spec, int):
+            n = n_or_spec
+        elif isinstance(n_or_spec, list | tuple):
+            n = len(n_or_spec)
+        else:
+            n = 2
+        return tuple(make_col() for _ in range(n))
+
+    mock_st = MagicMock()
+    mock_st.columns.side_effect = _col_factory
+    mock_st.selectbox.return_value = None
+    mock_st.multiselect.return_value = []
+    mock_st.slider.return_value = 0
+    mock_st.toggle.return_value = False
+    mock_st.button.return_value = False
+    mock_st.text_input.return_value = ""
+    mock_st.session_state = {}
+    return mock_st
+
 
 #  ==============================================================================
 # Test Fixtures
@@ -138,6 +186,28 @@ def random_age_gender_df(n):
             "gender": np.random.randint(0, 5, size=n),
         }
     )
+
+
+@pytest.fixture
+def patched_missing():
+    """Fixture that patches all Streamlit and external dependencies for UI tests."""
+    mock_st = _make_mock_st()
+    with (
+        patch("datasure.checks.missing.st", mock_st),
+        patch("datasure.checks.missing.is_demo_project", return_value=False),
+        patch(
+            "datasure.checks.missing.load_missing_codes_from_db",
+            return_value=pl.DataFrame(schema={"label": pl.Utf8, "codes": pl.Utf8}),
+        ),
+        patch("datasure.checks.missing.add_missing_code"),
+        patch("datasure.checks.missing.duckdb_save_table"),
+        patch("datasure.checks.missing.load_check_settings", return_value={}),
+        patch("datasure.checks.missing.save_check_settings"),
+        patch("datasure.checks.missing.trigger_save"),
+        patch("datasure.checks.missing.demo_callout"),
+        patch("datasure.utils.onboarding_utils.is_demo_project", return_value=False),
+    ):
+        yield mock_st
 
 
 # ==============================================================================
@@ -1016,3 +1086,216 @@ def test_compute_missing_matrix_all_missing():
     assert result.shape == (4, 2)
     assert all(result["age"] == 1)
     assert all(result["gender"] == 1)
+
+
+# ==============================================================================
+# Additional Edge Case Tests (non-UI)
+# ==============================================================================
+
+
+def test_missing_code_invalid_codes_type():
+    """MissingCode.parse_codes raises ValidationError for non-str/list input."""
+    with pytest.raises(ValidationError):
+        MissingCode(label="Test", codes=123)
+
+
+def test_try_convert_code_float_failure():
+    """_try_convert_code_to_column_type returns failure for invalid float string."""
+    converted, success = _try_convert_code_to_column_type("abc", pl.Float64, "score")
+    assert success is False
+    assert converted is None
+
+
+def test_try_convert_code_boolean_invalid_string():
+    """_try_convert_code_to_column_type: failure for unrecognized boolean string."""
+    converted, success = _try_convert_code_to_column_type("maybe", pl.Boolean, "flag")
+    assert success is False
+    assert converted is None
+
+
+def test_compute_missing_data_paired_temporal_types():
+    """_compute_missing_data_paired skips special code checks for temporal columns."""
+    data = pl.DataFrame(
+        {
+            "date": pl.Series(
+                [datetime.date(2023, 1, 1), None, datetime.date(2023, 1, 3)]
+            ).cast(pl.Date),
+            "value": [1, -999, 3],
+        }
+    )
+    missing_codes_df = pl.DataFrame({"label": ["Missing"], "codes": ["-999"]})
+    result = _compute_missing_data_paired(data, missing_codes_df)
+    assert result["date"][0] == 0
+    assert result["date"][1] == 1
+    assert result["date"][2] == 0
+    assert result["value"][1] == 2
+
+
+def test_get_missing_code_pairs_empty():
+    """_get_missing_code_pairs returns empty dict for empty DataFrame."""
+    empty_df = pl.DataFrame(schema={"label": pl.Utf8, "codes": pl.Utf8})
+    result = _get_missing_code_pairs(empty_df)
+    assert result == {}
+
+
+# ==============================================================================
+# UI Function Tests
+# ==============================================================================
+
+
+def test_render_missing_codes_table_empty(patched_missing):
+    """render_missing_codes_table works with no existing codes."""
+    render_missing_codes_table("test_project")
+    patched_missing.columns.assert_called()
+
+
+def test_render_missing_codes_table_with_codes(patched_missing):
+    """render_missing_codes_table renders dataframe when codes exist."""
+    codes_df = pl.DataFrame({"label": ["Don't Know"], "codes": ["-999"]})
+    with patch(
+        "datasure.checks.missing.load_missing_codes_from_db",
+        return_value=codes_df,
+    ):
+        patched_missing.selectbox.return_value = "Don't Know"
+        patched_missing.text_input.return_value = "-999"
+        render_missing_codes_table("test_project")
+    patched_missing.dataframe.assert_called()
+
+
+def test_missing_summary_ui(patched_missing):
+    """missing_summary renders metric columns."""
+    missing_data = pl.DataFrame({"age": [0, 1, 0, 0], "gender": [0, 0, 1, 0]})
+    missing_summary(missing_data)
+    patched_missing.columns.assert_called()
+
+
+def test_missing_columns_ui(patched_missing):
+    """missing_columns renders with slider and data."""
+    missing_data = pl.DataFrame({"age": [0, 1, 0, 0], "gender": [0, 0, 1, 0]})
+    missing_codes_df = pl.DataFrame({"label": ["DontKnow"], "codes": ["-999"]})
+    patched_missing.slider.return_value = 0
+    missing_columns(missing_data, missing_codes_df, "settings.json")
+    patched_missing.columns.assert_called()
+
+
+def test_missing_over_time_no_date_cols(patched_missing):
+    """missing_over_time shows info message when no datetime columns."""
+    missing_data = pl.DataFrame({"age": [0, 1, 0, 0]})
+    data = pl.DataFrame({"age": [25, None, 30, 35]})
+    missing_over_time(missing_data, data, "settings.json")
+    patched_missing.info.assert_called()
+
+
+def test_missing_over_time_with_date_col(patched_missing):
+    """missing_over_time renders chart when datetime column is present."""
+    missing_data = pl.DataFrame({"age": [0, 1, 0, 0], "gender": [0, 0, 1, 0]})
+    data = (
+        pl.DataFrame(
+            {
+                "date": pl.Series(
+                    [
+                        datetime.datetime(2023, 1, 1),
+                        datetime.datetime(2023, 1, 2),
+                        datetime.datetime(2023, 1, 3),
+                        datetime.datetime(2023, 1, 4),
+                    ]
+                ),
+                "age": [25, None, 30, 35],
+                "gender": [1, 2, None, 1],
+            }
+        ),
+    )
+    patched_missing.selectbox.return_value = "date"
+    missing_over_time(missing_data, data[0], "settings.json")
+    patched_missing.plotly_chart.assert_called()
+
+
+def test_missing_compare_no_categorical_cols(patched_missing):
+    """missing_compare warns when no categorical columns available."""
+    missing_data = pl.DataFrame({"age": [0, 1, 0, 0]})
+    data = pl.DataFrame({"age": [25, None, 30, 35]})
+    missing_compare(missing_data, data, "settings.json")
+    patched_missing.warning.assert_called()
+
+
+def test_missing_compare_with_group_no_compare_cols(patched_missing):
+    """missing_compare renders group-only dataframe when compare cols empty."""
+    missing_data = pl.DataFrame({"age": [0, 1, 0, 0], "gender": [0, 0, 1, 0]})
+    data = pl.DataFrame(
+        {
+            "group": ["A", "A", "B", "B"],
+            "age": [25, None, 30, None],
+            "gender": [1, 2, None, 1],
+        }
+    )
+    patched_missing.selectbox.return_value = "group"
+    patched_missing.multiselect.return_value = []
+    missing_compare(missing_data, data, "settings.json")
+    patched_missing.dataframe.assert_called()
+
+
+def test_missing_compare_with_compare_cols(patched_missing):
+    """missing_compare renders styled dataframe when compare cols selected."""
+    missing_data = pl.DataFrame({"age": [0, 1, 0, 0], "gender": [0, 0, 1, 0]})
+    data = pl.DataFrame(
+        {
+            "group": ["A", "A", "B", "B"],
+            "age": [25, None, 30, None],
+            "gender": [1, 2, None, 1],
+        }
+    )
+    patched_missing.selectbox.return_value = "group"
+    patched_missing.multiselect.return_value = ["age"]
+    missing_compare(missing_data, data, "settings.json")
+    patched_missing.dataframe.assert_called()
+
+
+def test_missing_correlation_warning_less_than_2_cols(patched_missing):
+    """missing_correlation warns when fewer than 2 columns selected."""
+    missing_data = pl.DataFrame({"age": [0, 1, 0, 0], "income": [1, 0, 0, 1]})
+    patched_missing.toggle.return_value = False
+    patched_missing.multiselect.return_value = []
+    missing_correlation(missing_data, [[0, "#ff0000"], [1, "#00ff00"]], "settings.json")
+    patched_missing.warning.assert_called()
+
+
+def test_missing_correlation_with_enough_cols(patched_missing):
+    """missing_correlation renders chart when 2+ columns selected."""
+    missing_data = pl.DataFrame(
+        {"age": [0, 1, 0, 0], "income": [1, 0, 0, 1], "gender": [0, 1, 1, 0]}
+    )
+    patched_missing.toggle.return_value = False
+    patched_missing.multiselect.return_value = ["age", "income"]
+    missing_correlation(missing_data, [[0, "#ff0000"], [1, "#00ff00"]], "settings.json")
+    patched_missing.plotly_chart.assert_called()
+
+
+def test_missing_matrix_ui(patched_missing):
+    """missing_matrix renders plotly chart."""
+    missing_data = pl.DataFrame({"age": [0, 1, 0, 0], "gender": [0, 0, 1, 0]})
+    missing_matrix(missing_data, [[0, "#3f7f93"], [1, "#da3b46"]])
+    patched_missing.plotly_chart.assert_called()
+
+
+def test_missing_report_calls_title(patched_missing):
+    """missing_report calls st.title and sub-functions."""
+    data = pl.DataFrame(
+        {
+            "group": ["A", "A", "B", "B"],
+            "age": [25, None, 30, None],
+        }
+    )
+    with (
+        patch("datasure.checks.missing.missing_summary"),
+        patch("datasure.checks.missing.missing_columns"),
+        patch("datasure.checks.missing.missing_compare"),
+        patch("datasure.checks.missing.missing_over_time"),
+        patch("datasure.checks.missing.missing_correlation"),
+        patch("datasure.checks.missing.missing_matrix"),
+        patch("datasure.checks.missing.render_missing_codes_table"),
+        patch(
+            "datasure.checks.missing._compute_missing_data_paired", return_value=data
+        ),
+    ):
+        missing_report("proj_id", "page1", data, "settings.json")
+    patched_missing.title.assert_called()

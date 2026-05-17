@@ -104,46 +104,28 @@ class TestRenderHeader:
 
         st.title.assert_called_once_with("Configure Checks")
         st.markdown.assert_called_once_with(
-            "Add a page for each dataset you want to check"
+            "Set up the quality checks DataSure will run on your survey data."
         )
 
 
 class TestRenderDemoGuidance:
     """Test _render_demo_guidance function."""
 
-    @patch("datasure.views.config_view.demo_expander")
-    @patch("datasure.views.config_view.ImportDemoInfo")
-    @patch("datasure.views.config_view.is_demo_project")
-    def test_renders_guidance_when_demo_project(
-        self, mock_is_demo, mock_info, mock_expander
-    ):
-        """Test that demo guidance is rendered for demo projects."""
+    def test_renders_guidance_is_noop(self):
+        """Test that _render_demo_guidance is a no-op (guidance moved to navigation)."""
         from datasure.views.config_view import _render_demo_guidance
 
-        mock_is_demo.return_value = True
-        mock_info.get_info_message.return_value = "Demo info message"
+        # Function should execute without error and do nothing
+        result = _render_demo_guidance()
+        assert result is None
+
+    @patch("datasure.views.config_view.demo_expander")
+    def test_no_expander_called(self, mock_expander):
+        """Test that demo_expander is not called by _render_demo_guidance."""
+        from datasure.views.config_view import _render_demo_guidance
 
         _render_demo_guidance()
 
-        mock_is_demo.assert_called_once()
-        mock_info.get_info_message.assert_called_once_with("add_check_config_info")
-        mock_expander.assert_called_once_with(
-            "Demo Instructions: Create Your First Configuration",
-            "Demo info message",
-            expanded=True,
-        )
-
-    @patch("datasure.views.config_view.demo_expander")
-    @patch("datasure.views.config_view.is_demo_project")
-    def test_no_guidance_when_not_demo_project(self, mock_is_demo, mock_expander):
-        """Test that no guidance is rendered for non-demo projects."""
-        from datasure.views.config_view import _render_demo_guidance
-
-        mock_is_demo.return_value = False
-
-        _render_demo_guidance()
-
-        mock_is_demo.assert_called_once()
         mock_expander.assert_not_called()
 
 
@@ -305,17 +287,18 @@ class TestRenderNavigation:
         mock_is_demo.assert_called_once()
         st.write.assert_called_once_with("---")
         mock_expander.assert_called_once_with(
-            "Learn More: Proceed to Data QUality Checks",
+            "Proceed to Quality Reports",
             "Proceed info",
-            expanded=True,
+            expanded=False,
         )
         mock_next_action.assert_called_once_with(
             4, "st_output_page1", "View Quality Reports"
         )
 
+    @patch("datasure.views.config_view.demo_callout")
     @patch("datasure.views.config_view.is_demo_project")
-    def test_demo_navigation_without_configs(self, mock_is_demo):
-        """Test demo navigation when no configurations exist."""
+    def test_demo_navigation_without_configs(self, mock_is_demo, mock_callout):
+        """Test demo navigation when no configurations exist shows a warning callout."""
         import streamlit as st
 
         from datasure.views.config_view import _render_navigation
@@ -329,7 +312,10 @@ class TestRenderNavigation:
 
         mock_is_demo.assert_called_once()
         st.write.assert_called_once_with("---")
-        # No further actions when configs are empty
+        mock_callout.assert_called_once()
+        callout_args = mock_callout.call_args
+        assert "View Quality Reports" in callout_args[0][0]
+        assert callout_args[0][1] == "warning"
 
     @patch("datasure.views.config_view.page_navigation")
     @patch("datasure.views.config_view.is_demo_project")

@@ -22,7 +22,8 @@ from datasure.utils.duckdb_utils import (
     duckdb_save_table,
     load_missing_codes_from_db,
 )
-from datasure.utils.onboarding_utils import demo_output_onboarding
+from datasure.utils.navigations_utils import demo_callout
+from datasure.utils.onboarding_utils import demo_output_onboarding, is_demo_project
 from datasure.utils.settings_utils import (
     load_check_settings,
     save_check_settings,
@@ -708,6 +709,13 @@ def render_missing_codes_table(project_id: str) -> None:
     missing_codes = load_missing_codes_from_db(project_id)
     table_name = f"missing_codes_{project_id}"
 
+    if is_demo_project():
+        demo_callout(
+            "Before exploring the charts below, configure your missing value codes using "
+            "the **Add** / **Modify** / **Delete** buttons. For this demo, use: "
+            "**-99** = Don't Know, **-88** = Refused to Answer, **-77** = Not Applicable."
+        )
+
     # Create three popover buttons in a row
     col1, col2, col3 = st.columns([0.35, 0.35, 0.3])
 
@@ -1212,13 +1220,16 @@ def missing_matrix(missing_data: pl.DataFrame, color_map: list) -> None:
     fig.update_layout(width=1000, height=1000)
     st.plotly_chart(fig, width="stretch")
 
+    demo_callout(
+        "**Next**: :material/arrow_upward: Scroll up and select the **Duplicates** tab."
+    )
+
 
 # =============================================================================
 # Main Report Function
 # =============================================================================
 
 
-@demo_output_onboarding(TAB_NAME)
 def missing_report(
     project_id: str, page_name: str, data: pl.DataFrame, setting_file: str
 ) -> None:

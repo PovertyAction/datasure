@@ -17,7 +17,8 @@ from datasure.models.enums import DelimiterType, GPSFormatType, GPSOutlierMethod
 from datasure.models.schemas import GPSColumnConfig, GPSSettings
 from datasure.utils.dataframe_utils import ColumnByType, get_df_columns
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
-from datasure.utils.onboarding_utils import demo_output_onboarding
+from datasure.utils.navigations_utils import demo_callout
+from datasure.utils.onboarding_utils import demo_output_onboarding, is_demo_project
 from datasure.utils.settings_utils import (
     load_check_settings,
     save_check_settings,
@@ -117,6 +118,7 @@ def load_default_gpschecks_settings(
 
 
 #  gps check settings
+@demo_output_onboarding(TAB_NAME)
 def gpschecks_report_settings(
     settings_file: str,
     config: GPSSettings,
@@ -2054,8 +2056,6 @@ def plot_clusters_on_map(
     _render_scatterplot_map(df, tooltip_fields, fill_color="color", zoom=7)
 
 
-@demo_output_onboarding(TAB_NAME)
-# gps checks report
 def gpschecks_report(
     project_id: str,
     page_name_id: str,
@@ -2086,6 +2086,21 @@ def gpschecks_report(
     """
     st.title("GPS Checks Report")
 
+    if is_demo_project():
+        demo_callout(
+            "This tab visualises your GPS data and checks coordinate quality. "
+            "It has three sections:\n\n"
+            "- **GPS Coordinates Visualization**: Plot all survey GPS points on an "
+            "interactive map, colour-coded by enumerator, team, or any categorical column.\n"
+            "- **GPS Outliers Detection**: Flag coordinates that appear to be in the wrong "
+            "location, using statistical (Auto-LOF) or group-based (Cluster by Column) "
+            "methods.\n"
+            "- **GPS Coordinates Comparison**: Compare coordinates from two different GPS "
+            "configurations to identify discrepancies beyond a set distance threshold.\n\n"
+            "Start by reviewing the :material/settings: **settings** panel, then configure "
+            "your GPS columns below."
+        )
+
     categorical_columns = survey_columns.categorical_columns
     datetime_columns = survey_columns.datetime_columns
 
@@ -2106,6 +2121,22 @@ def gpschecks_report(
     )
 
     st.subheader("GPS Columns Configuration")
+
+    if is_demo_project():
+        demo_callout(
+            "Click **Add GPS Column Configuration** to tell DataSure which columns "
+            "contain your GPS data. In the dialog that opens:\n\n"
+            "1. Under **GPS Data Format**, select **Separate Columns**.\n"
+            "2. Set **Latitude Column** to **household_latitude**.\n"
+            "3. Set **Longitude Column** to **household_longitude**.\n"
+            "4. Set **Accuracy Column** to **household_gps_accuracy**.\n"
+            "5. Enter a short **Configuration Alias** such as **household_gps**.\n"
+            "6. Click **Add GPS Configuration** to save.\n\n"
+            "If your GPS data is stored as a single delimited column "
+            "(e.g., '-1.20 36.77 0.0 15.8'), choose **Single Column** instead and "
+            "select the delimiter and column."
+        )
+
     all_columns = list(data.columns)
     _render_gps_column_actions(project_id, page_name_id, all_columns)
 
@@ -2113,6 +2144,16 @@ def gpschecks_report(
 
     mapbox_token = _gpschecks_settings.mapbox_custom_key
     pydeck.settings.mapbox_key = mapbox_token
+
+    if is_demo_project() and not mapbox_token:
+        demo_callout(
+            "Map visualizations require a **Mapbox API token**. "
+            "A free token is available from Mapbox — sign up on their website to get one. "
+            "Once you have a token, open the :material/settings: **settings** panel, "
+            "paste it under **Mapbox API Token Configuration**, and click "
+            "**Save Mapbox Token**. The three map sections below will then load.",
+            "warning",
+        )
 
     if not mapbox_token:
         st.warning(
@@ -2122,6 +2163,16 @@ def gpschecks_report(
         return
 
     # Render GPS coordinates visualization
+    if is_demo_project():
+        demo_callout(
+            "Select a **GPS Configuration** from the dropdown to load your coordinates "
+            "onto the map. Use **Color Points By** to colour-code points by a categorical "
+            "column (e.g., **enum_name** to see each enumerator's coverage area). "
+            "Use **Filter Points By** to show only a subset of points. "
+            "Hover over any point to see the survey ID, date, enumerator, team, and "
+            "coordinates."
+        )
+
     _render_gps_coordinates(
         project_id,
         page_name_id,
@@ -2135,6 +2186,22 @@ def gpschecks_report(
     st.write("---")
 
     # Render GPS outliers detection
+    if is_demo_project():
+        demo_callout(
+            "This section flags GPS points that appear to be in the wrong location. "
+            "Two detection methods are available:\n\n"
+            "- **Auto (LOF)**: Uses the Local Outlier Factor algorithm to flag points "
+            "distant from their neighbours. Adjust **Number of Neighbors** and "
+            "**Expected Outlier Proportion** to tune sensitivity.\n"
+            "- **Cluster by Column**: Groups points by a categorical column and flags "
+            "points far from their group's centroid. Try **state** as the clustering "
+            "column to detect households recorded in the wrong state.\n\n"
+            "Three metrics summarise the results: **Total GPS Points**, "
+            "**Outliers Detected**, and **Outlier Percentage**. "
+            "Flagged points appear red on the map. Expand **View Outliers Data** to "
+            "download the flagged records."
+        )
+
     _render_gps_outliers_checks(
         project_id,
         page_name_id,
@@ -2147,6 +2214,16 @@ def gpschecks_report(
     st.write("---")
 
     # Render GPS comparison checks
+    if is_demo_project():
+        demo_callout(
+            "This section compares GPS coordinates from two different configurations "
+            "and flags pairs where the distance between them exceeds a threshold. "
+            "It is useful when you have GPS from both a main survey and a backcheck "
+            "visit and want to verify the household was revisited at the same location.\n\n"
+            "This section requires at least **two GPS configurations** added above. "
+            "The demo only has one configuration, so you can skip this section."
+        )
+
     _render_gps_comparison_checks(
         project_id,
         page_name_id,
@@ -2154,4 +2231,8 @@ def gpschecks_report(
         config_settings.survey_key,
         config_settings.survey_date,
         config_settings.enumerator,
+    )
+
+    demo_callout(
+        "**Next**: :material/arrow_upward: Scroll up and select the **Enumerator Statistics** tab."
     )

@@ -15,7 +15,11 @@ from pydantic import BaseModel, Field
 
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.utils.duckdb_utils import duckdb_get_table
-from datasure.utils.navigations_utils import demo_sidebar_help, page_navigation
+from datasure.utils.navigations_utils import (
+    add_demo_navigation,
+    demo_sidebar_help,
+    page_navigation,
+)
 from datasure.utils.onboarding_utils import ImportDemoInfo, demo_expander
 from datasure.utils.settings_utils import get_check_config_settings
 
@@ -1001,11 +1005,18 @@ def render_page_header() -> None:
 
 def render_page_navigation() -> None:
     """Render the page navigation controls."""
+    replication_page = st.session_state.get("st_replication_page")
     page_navigation(
         prev={
             "page_name": st.session_state.get("st_output_page1", "output_view_1"),
             "label": "← Back: Output Page 1",
         },
+        next={
+            "page_name": replication_page,
+            "label": "Export Replication Package →",
+        }
+        if replication_page
+        else None,
     )
 
 
@@ -1021,6 +1032,7 @@ def main() -> None:
     """
     # Set up demo navigation
     demo_sidebar_help()
+    add_demo_navigation("correction_view", step=6)
 
     # Render page header
     render_page_header()

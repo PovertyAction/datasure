@@ -14,6 +14,7 @@ from datasure.utils.config_utils import (
 from datasure.utils.duckdb_utils import duckdb_get_aliases
 from datasure.utils.navigations_utils import (
     add_demo_navigation,
+    demo_callout,
     demo_sidebar_help,
     page_navigation,
     show_demo_next_action,
@@ -57,17 +58,12 @@ def _get_project_id() -> str:
 def _render_header() -> None:
     """Render page header and description."""
     st.title("Configure Checks")
-    st.markdown("Add a page for each dataset you want to check")
+    st.markdown("Set up the quality checks DataSure will run on your survey data.")
 
 
 def _render_demo_guidance() -> None:
     """Render demo project guidance if applicable."""
-    if is_demo_project():
-        demo_expander(
-            "Demo Instructions: Create Your First Configuration",
-            ImportDemoInfo.get_info_message("add_check_config_info"),
-            expanded=True,
-        )
+    pass
 
 
 def _render_configuration_actions(project_id: str, alias_list: list[str]) -> None:
@@ -130,11 +126,16 @@ def _render_navigation(config_service: ConfigurationService) -> None:
     if is_demo_project():
         st.write("---")
 
-        if not check_config_log.is_empty():
+        if check_config_log.is_empty():
+            demo_callout(
+                "Create a check configuration above to unlock the **View Quality Reports** button.",
+                "warning",
+            )
+        else:
             demo_expander(
-                "Learn More: Proceed to Data QUality Checks",
+                "Proceed to Quality Reports",
                 ImportDemoInfo.get_info_message("proceed_to_hfcs_info"),
-                expanded=True,
+                expanded=False,
             )
             show_demo_next_action(4, "st_output_page1", "View Quality Reports")
     else:

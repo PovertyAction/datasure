@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from datasure.utils.chart_utils import donut_chart2
 from datasure.utils.dataframe_utils import ColumnByType
+from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.settings_utils import (
     load_check_settings,
@@ -1408,13 +1409,16 @@ def summary_data_quality(data: pl.DataFrame, survey_id: str | None) -> None:
         st.markdown("**Back check error rate**")
         st.pyplot(perc_back_check_error_rate_chart)
 
+    demo_callout(
+        "**Next**: :material/arrow_upward: Scroll up and select the **Descriptive Statistics** tab."
+    )
+
 
 # =============================================================================
 # Main Report Function
 # =============================================================================
 
 
-@demo_output_onboarding(TAB_NAME)
 def summary_report(
     data: pl.DataFrame, setting_file: str, config: dict, survey_columns: ColumnByType
 ) -> None:

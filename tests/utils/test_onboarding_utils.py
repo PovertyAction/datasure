@@ -68,21 +68,17 @@ class TestDemoContainer:
 
     @patch("datasure.utils.onboarding_utils.st")
     def test_demo_container_creates_container(self, mock_st):
-        """Test that demo_container creates a streamlit container with styled text."""
+        """Test that demo_container renders an info box with the given text."""
         test_text = "This is a test message"
         demo_container(test_text)
 
-        # Verify container was created
-        mock_st.container.assert_called_once()
-
-        # Verify markdown was called with unsafe_allow_html=True
-        assert mock_st.markdown.call_count == 2  # Once for styled div, once for spacing
+        mock_st.info.assert_called_once_with(test_text)
 
     @patch("datasure.utils.onboarding_utils.st")
     def test_demo_container_with_empty_text(self, mock_st):
         """Test demo_container with empty text."""
         demo_container("")
-        mock_st.container.assert_called_once()
+        mock_st.info.assert_called_once_with("")
 
 
 class TestImportDemoInfo:
@@ -91,13 +87,13 @@ class TestImportDemoInfo:
     def test_get_info_message_valid_ids(self):
         """Test getting valid demo messages."""
         message = ImportDemoInfo.get_info_message("add_to_session_info")
-        assert "successfully loaded your demo survey data" in message
+        assert "loaded successfully" in message
 
         message = ImportDemoInfo.get_info_message("prepare_data_info")
         assert "Data preparation is a crucial step" in message
 
         message = ImportDemoInfo.get_info_message("preview_data_info")
-        assert "Data import complete" in message
+        assert "loaded and ready" in message
 
         message = ImportDemoInfo.get_info_message("proceed_to_config_info")
         assert "experiment with data preparation" in message
@@ -106,7 +102,7 @@ class TestImportDemoInfo:
         assert "Data Import Complete" in message
 
         message = ImportDemoInfo.get_info_message("proceed_to_hfcs_info")
-        assert "ready to view your HFC reports" in message
+        assert "ready for quality analysis" in message
 
         message = ImportDemoInfo.get_info_message("add_check_config_info")
         assert "Follow these steps to set up data quality checks" in message
@@ -115,7 +111,7 @@ class TestImportDemoInfo:
         assert "convert the submissiondate" in message
 
         message = ImportDemoInfo.get_info_message("add_correction_step_info")
-        assert "make corrections to the demo_survey dataset" in message
+        assert "targeted corrections" in message
 
     def test_get_info_message_invalid_id(self):
         """Test getting info message with invalid ID returns default message."""
@@ -143,7 +139,7 @@ class TestOnboardingSteps:
         start_step = OnboardingSteps.get_step_info("start")
         assert start_step["step"] == 1
         assert start_step["title"] == "Start Here"
-        assert start_step["icon"] == "🏠"
+        assert start_step["icon"] == ":material/home:"
 
         import_step = OnboardingSteps.get_step_info("import")
         assert import_step["step"] == 2
@@ -169,7 +165,7 @@ class TestOnboardingSteps:
     def test_get_all_steps(self):
         """Test getting all onboarding steps."""
         all_steps = OnboardingSteps.get_all_steps()
-        assert len(all_steps) == 6
+        assert len(all_steps) == 7
         assert all_steps[0]["step"] == 1
         assert all_steps[5]["step"] == 6
 
@@ -248,51 +244,154 @@ class TestOutputOnboardingInfo:
     def test_get_onboarding_message_duplicates(self):
         """Test getting onboarding message for duplicates tab."""
         message = OutputOnboardingInfo.get_onboarding_message(
-            "duplicates", "duplicate_report"
+            "duplicates", "duplicates_report_settings"
         )
-        assert message["title"] == "Duplicate Records Report"
+        assert message["title"] == "Duplicates Settings"
+        assert "Survey Key" in message["content"]
 
     def test_get_onboarding_message_missing(self):
         """Test getting onboarding message for missing tab."""
         message = OutputOnboardingInfo.get_onboarding_message(
-            "missing", "missing_report"
+            "missing", "missing_summary"
         )
-        assert message["title"] == "Missing Data Report"
+        assert message["title"] == "Missing Values Tab"
+        assert "missing data" in message["content"].lower()
 
     def test_get_onboarding_message_outliers(self):
         """Test getting onboarding message for outliers tab."""
         message = OutputOnboardingInfo.get_onboarding_message(
-            "outliers", "outlier_report"
+            "outliers", "outliers_report_settings"
         )
-        assert message["title"] == "Outliers Report"
+        assert message["title"] == "Outliers & Constraints Settings"
+        assert "Survey Key" in message["content"]
 
     def test_get_onboarding_message_enumerators(self):
         """Test getting onboarding message for enumerators tab."""
         message = OutputOnboardingInfo.get_onboarding_message(
-            "enumerators", "enumerator_report"
+            "enumerators", "enumerator_report_settings"
         )
-        assert message["title"] == "Enumerator Stats Report"
+        assert message["title"] == "Enumerator Statistics Settings"
+        assert "Duration Column" in message["content"]
 
     def test_get_onboarding_message_descriptive_stats(self):
         """Test getting onboarding message for descriptive stats tab."""
         message = OutputOnboardingInfo.get_onboarding_message(
             "descriptive_stats", "descriptive_report"
         )
-        assert message["title"] == "Descriptive Statistics Report"
+        assert message["title"] == "Descriptive Statistics"
+        assert "distribution" in message["content"].lower()
 
     def test_get_onboarding_message_backchecks(self):
         """Test getting onboarding message for backchecks tab."""
         message = OutputOnboardingInfo.get_onboarding_message(
-            "backchecks", "backchecks_report"
+            "backchecks", "backchecks_report_settings"
         )
-        assert message["title"] == "Back Checks Report"
+        assert message["title"] == "Backcheck Analysis Settings"
+        assert "Survey Key" in message["content"]
 
     def test_get_onboarding_message_gpschecks(self):
         """Test getting onboarding message for GPS checks tab."""
         message = OutputOnboardingInfo.get_onboarding_message(
-            "gpschecks", "gpschecks_report"
+            "gpschecks", "gpschecks_report_settings"
         )
-        assert message["title"] == "GPS Checks Report"
+        assert message["title"] == "GPS Checks Settings"
+        assert "Survey Key" in message["content"]
+
+    def test_get_onboarding_message_summary_submissions(self):
+        """Test summary_submissions entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "summary", "summary_submissions"
+        )
+        assert message["title"] == "Submission Details"
+        assert "Today" in message["content"]
+
+    def test_get_onboarding_message_summary_progress(self):
+        """Test summary_progress entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "summary", "summary_progress"
+        )
+        assert message["title"] == "Progress"
+        assert "Submission Progress" in message["content"]
+
+    def test_get_onboarding_message_summary_data_quality(self):
+        """Test summary_data_quality entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "summary", "summary_data_quality"
+        )
+        assert message["title"] == "Data Quality"
+        assert "duplicate" in message["content"].lower()
+
+    def test_get_onboarding_message_progress_display_summary(self):
+        """Test display_progress_summary entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "progress", "display_progress_summary"
+        )
+        assert message["title"] == "Progress Summary"
+        assert "Submission Progress" in message["content"]
+
+    def test_get_onboarding_message_progress_display_overtime(self):
+        """Test display_progress_overtime entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "progress", "display_progress_overtime"
+        )
+        assert message["title"] == "Progress Over Time"
+        assert "green" in message["content"].lower()
+
+    def test_get_onboarding_message_progress_attempted_interviews(self):
+        """Test display_attempted_interviews entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "progress", "display_attempted_interviews"
+        )
+        assert message["title"] == "Attempted Interviews"
+        assert "Unique IDs" in message["content"]
+
+    def test_get_onboarding_message_progress_chart(self):
+        """Test display_progress_chart entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "progress", "display_progress_chart"
+        )
+        assert message["title"] == "Consent and Completion Progress"
+        assert "Consent Rate" in message["content"]
+
+    def test_get_onboarding_message_missing_columns(self):
+        """Test missing_columns entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "missing", "missing_columns"
+        )
+        assert message["title"] == "Missingness by Column"
+        assert "Total Missing" in message["content"]
+
+    def test_get_onboarding_message_missing_compare(self):
+        """Test missing_compare entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "missing", "missing_compare"
+        )
+        assert message["title"] == "Compare Missing Data Within Groups"
+        assert "group" in message["content"].lower()
+
+    def test_get_onboarding_message_missing_over_time(self):
+        """Test missing_over_time entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "missing", "missing_over_time"
+        )
+        assert message["title"] == "Missingness Over Time"
+        assert "over time" in message["content"].lower()
+
+    def test_get_onboarding_message_missing_correlation(self):
+        """Test missing_correlation entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "missing", "missing_correlation"
+        )
+        assert message["title"] == "Nullity Correlation"
+        assert "heatmap" in message["content"].lower()
+
+    def test_get_onboarding_message_missing_matrix(self):
+        """Test missing_matrix entry."""
+        message = OutputOnboardingInfo.get_onboarding_message(
+            "missing", "missing_matrix"
+        )
+        assert message["title"] == "Nullity Matrix"
+        assert "missing" in message["content"].lower()
 
     def test_get_onboarding_message_invalid_tab(self):
         """Test getting onboarding message with invalid tab."""
@@ -410,7 +509,7 @@ class TestDemoProjectFunctions:
     @patch("datasure.utils.onboarding_utils.get_onboarding_step")
     def test_is_demo_complete_true(self, mock_get_step, mock_st):
         """Test is_demo_complete returns True when all steps completed."""
-        mock_get_step.return_value = 6
+        mock_get_step.return_value = 7
         assert is_demo_complete() is True
 
     @patch("datasure.utils.onboarding_utils.st")
@@ -440,7 +539,7 @@ class TestDemoUIFunctions:
         """Test progress indicator displays in demo mode."""
         mock_is_demo.return_value = True
         mock_get_step.return_value = 2
-        mock_st.columns.return_value = [MagicMock() for _ in range(6)]
+        mock_st.columns.return_value = [MagicMock() for _ in range(7)]
 
         show_progress_indicator()
 
@@ -471,7 +570,7 @@ class TestDemoUIFunctions:
 
         # Create mock columns with context manager support
         mock_cols = []
-        for _ in range(6):
+        for _ in range(7):
             mock_col = MagicMock()
             mock_col.__enter__ = MagicMock(return_value=mock_col)
             mock_col.__exit__ = MagicMock(return_value=False)
@@ -481,8 +580,8 @@ class TestDemoUIFunctions:
 
         show_progress_indicator()
 
-        # Verify that markdown was called for each step
-        assert mock_st.markdown.call_count >= 6
+        # Verify that markdown was called (header + current step + future steps)
+        assert mock_st.markdown.call_count >= 5
 
     @patch("datasure.utils.onboarding_utils.st")
     @patch("datasure.utils.onboarding_utils.demo_container")
@@ -491,8 +590,8 @@ class TestDemoUIFunctions:
         show_demo_intro()
         mock_demo_container.assert_called_once()
         args = mock_demo_container.call_args[0][0]
-        assert "Start here" in args
-        assert "Importing survey data" in args
+        assert "New to DataSure?" in args
+        assert "Import" in args
 
     @patch("datasure.utils.onboarding_utils.st")
     @patch("datasure.utils.onboarding_utils.is_demo_project")
@@ -543,7 +642,7 @@ class TestDemoUIFunctions:
         mock_is_demo.return_value = True
         mock_st.button.return_value = False
 
-        show_next_steps(6)
+        show_next_steps(7)
 
         mock_st.success.assert_called_once()
         mock_st.button.assert_called()

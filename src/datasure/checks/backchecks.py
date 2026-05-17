@@ -11,6 +11,8 @@ from scipy import stats
 
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.navigations_utils import demo_callout, show_demo_next_action
+from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.settings_utils import (
     load_check_settings,
     save_check_settings,
@@ -2598,6 +2600,7 @@ def _render_additional_options(
     return drop_duplicates_option, no_diff_values, exclude_values, string_comp_options
 
 
+@demo_output_onboarding(TAB_NAME)
 def backchecks_report_settings(
     project_id: str,
     settings_file: str,
@@ -4049,6 +4052,26 @@ def backchecks_report(
     """
     st.title("Backchecks Report")
 
+    demo_callout(
+        """
+        This tab compares original survey responses against back check responses to
+        identify discrepancies.
+
+        It has five sections:
+        - **Backchecks Columns Configuration**: Define which columns to compare and
+          how to categorise them.
+        - **Backchecks Summary**: High-level metrics on coverage and backchecker
+          productivity.
+        - **Enumerator Backchecker Error Statistics**: Error rates broken down by
+          enumerator and backchecker.
+        - **Column Statistics**: Per-column comparison results and error rates.
+        - **Comparison Results Details**: Row-level table of every comparison made.
+
+        **Start here**: Open the :material/settings: settings panel above to confirm
+        your column selections, then configure your backcheck columns below.
+        """
+    )
+
     # Convert Polars DataFrames to Pandas for compatibility
     survey_data_pd = survey_data.to_pandas()
     backcheck_data_pd = backcheck_data.to_pandas()
@@ -4076,6 +4099,33 @@ def backchecks_report(
 
     # Outlier columns configuration
     st.subheader("Backchecks Columns Configuration")
+
+    demo_callout(
+        """
+        ##### Backchecks Columns Configuration
+        Use the :material/add: **Add Backcheck Column** button to configure which
+        columns to compare between the survey and backcheck datasets. For each column
+        you can set:
+        - **Category**: A numeric group (e.g., 1 for critical questions, 2 for
+          secondary questions) used to aggregate error rates in the summary.
+        - **OK Range**: An acceptable difference threshold for numeric columns.
+        - **Comparison Condition**: How to handle missing values
+          (e.g., ignore_missing_values).
+
+        ##### Instructions for Demo:
+        Add the following columns using the :material/add: **Add Backcheck Column** button:
+
+        | Column          | Category | OK Range | Comparison Condition  |
+        |-----------------|----------|----------|-----------------------|
+        | age             | 1        | 1        | ignore_missing_values |
+        | household_count | 2        | None     | ignore_missing_values |
+        | minc_pri        | 1        | None     | ignore_missing_values |
+        | npinc_out       | 1        | None     | ignore_missing_values |
+        | no_save         | 1        | None     | ignore_missing_values |
+        | pri_govt_sch    | 1        | None     | ignore_missing_values |
+        """
+    )
+
     common_columns = list(
         set(survey_categorical_columns).intersection(set(backcheck_categorical_columns))
     )
@@ -4094,6 +4144,19 @@ def backchecks_report(
     )
 
     st.subheader("Backchecks Summary")
+
+    demo_callout(
+        """
+        ##### Backchecks Summary
+        Five metrics appear here: Survey Observations, Backcheck Observations,
+        Backcheck Coverage %, Total Enumerators, and Total Back Checkers.
+
+        Below the metrics, a **Backchecker Productivity** table shows submission
+        counts per backchecker over time. Use the **Daily / Weekly / Monthly** pills
+        to change the time granularity.
+        """
+    )
+
     _render_backcheck_summary(
         survey_data, backcheck_data, _backcheck_analysis, backcheck_settings
     )
@@ -4107,6 +4170,16 @@ def backchecks_report(
 
     st.subheader("Enumerator Backchecker Error Statistics")
 
+    demo_callout(
+        """
+        ##### Enumerator Backchecker Error Statistics
+        Use the **Enumerator / Backchecker** pills to switch between two views.
+        Each view shows a table with submission counts, values compared, number of
+        mismatches, and error rate — broken down by category — for either the
+        original enumerator or the backchecker.
+        """
+    )
+
     _render_enum_bcer_stats(
         survey_data,
         backcheck_data,
@@ -4116,9 +4189,50 @@ def backchecks_report(
     )
 
     st.subheader("Column Statistics")
+
+    demo_callout(
+        """
+        ##### Column Statistics
+        A table showing per-column comparison results for every column you configured
+        above. Columns include: Column Name, Category, Data Type, # of Values,
+        Values Compared, Mismatches, Error Rate (%), and Test Results.
+        """
+    )
+
     _render_column_stats(survey_data, _backcheck_analysis)
 
     st.subheader("Comparison Results Details")
+
+    demo_callout(
+        """
+        ##### Comparison Results Details
+        A row-level table of every comparison made between the survey and backcheck
+        datasets. Use the **Filter by Columns** multiselect to focus on specific
+        columns, and the **Filter by Match Status** pills to show all results or
+        mismatches only. You can also add extra columns from the survey or backcheck
+        dataset to provide more context alongside each comparison.
+
+        You have reached the end of the DataSure demo. You now have a full picture of
+        how DataSure tracks data quality across your survey — from progress and
+        missingness through to GPS validation, enumerator performance, and back check
+        verification.
+        """,
+        type="success",
+    )
+
     _render_backcheck_comparison_results(
         survey_data, backcheck_data, _backcheck_analysis, backcheck_settings
     )
+
+    st.write("---")
+    demo_callout(
+        "You have now explored all the data quality check tabs — Summary, Descriptive Statistics, "
+        "Progress Tracking, Missing Values, Duplicates, Outliers & Constraints, GPS Checks, "
+        "Enumerator Statistics, and Backcheck Analysis.\n\n"
+        "The next step is the **Correct Data** page, where you will learn how to apply targeted "
+        "corrections to your survey data based on the quality findings from these checks.\n\n"
+        "To get there, click **Correct Data** in the sidebar or use the **Proceed to Correct Data** "
+        "button below.",
+        type="success",
+    )
+    show_demo_next_action(5, "st_corr_page", "Proceed to Correct Data")

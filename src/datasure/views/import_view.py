@@ -26,7 +26,6 @@ from datasure.utils.navigations_utils import (
 from datasure.utils.onboarding_utils import (
     DEMO_PROJECT_ID,
     ImportDemoInfo,
-    demo_expander,
     is_demo_project,
 )
 from datasure.utils.secure_credentials import (
@@ -230,6 +229,12 @@ def update_import_log(import_log: pl.DataFrame) -> None:
 
 
 # --- Credential Manager --- #
+if is_demo_project():
+    demo_callout(
+        "The sections below (credentials and import configuration) are for setting up "
+        "real data sources. For this demo, your data is already configured — scroll down "
+        "to **Preview Imported Data** to explore it."
+    )
 with st.container(border=True):
     st.subheader(":material/key: Manage Credentials")
     st.write("Import and manage your credentials for data import.")
@@ -378,6 +383,11 @@ if not import_log.is_empty():
     update_import_log(import_log)
 
     # -- Load data from import configurations -- #
+    if is_demo_project():
+        demo_callout(
+            "Your demo data is already loaded. You do not need to click **Load Data** — "
+            "scroll down to **Preview Imported Data** to continue."
+        )
     ld1, ld2 = st.columns([0.3, 0.7])
     with ld1:
         load_btn = st.button(
@@ -455,15 +465,8 @@ if not import_log.is_empty():
 
         st.dataframe(preview_data, width="stretch")
 
-        # Demo expander with educational content
+        # Demo next action
         if is_demo_project():
-            demo_expander(
-                "About Your Pre-loaded Demo Data",
-                ImportDemoInfo.get_info_message("demo_data_info"),
-                expanded=True,
-            )
-
-            # Demo next action
             st.write("---")
             show_demo_next_action(2, "st_prep_data_page", "Prepare Your Data")
 

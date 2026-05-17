@@ -1,6 +1,6 @@
 import hashlib
 import json
-import os
+import shutil
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -33,18 +33,36 @@ def get_project_id(project_name: str) -> str:
 
 
 def get_project_names() -> list[str]:
-    """Get a list of project names from the local directory."""
+    """Get a list of project names sorted by last used date (most recent first)."""
     projects_file = get_cache_path(PROJECTS_FILE)
-    project_names = []
+    project_names: list[str] = []
     if projects_file.exists():
         with open(projects_file) as f:
             projects = json.load(f)
-        project_names = [
-            project["name"]
-            for project in projects.values()
-            if not project.get("is_demo", False)
-        ]
+        sorted_projects = sorted(
+            (p for p in projects.values() if not p.get("is_demo", False)),
+            key=lambda p: p.get("last_used", ""),
+            reverse=True,
+        )
+        project_names = [p["name"] for p in sorted_projects]
     return ["DataSure Demo"] + project_names + ["Create New Project"]
+
+
+def _get_last_used_project_name() -> str | None:
+    """Return the name of the most recently used non-demo project, or None."""
+    projects_file = get_cache_path(PROJECTS_FILE)
+    if not projects_file.exists():
+        return None
+    with open(projects_file) as f:
+        projects = json.load(f)
+    candidates = [
+        p
+        for p in projects.values()
+        if not p.get("is_demo", False) and p.get("last_used")
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p["last_used"])["name"]
 
 
 def valid_project_name(project_name: str) -> bool:
@@ -80,21 +98,26 @@ def save_project(project_name: str, project_id: str):
 
     project_path = get_cache_path(project_id)
 
+    project_info_path = project_path / "settings" / "project_info.json"
     if not project_path.exists():
         project_path.mkdir(parents=True, exist_ok=True)
         (project_path / "data").mkdir(exist_ok=True)
         (project_path / "settings").mkdir(exist_ok=True)
         created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         last_used = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(project_info_path, "w") as f:
+            json.dump({"created_at": created_at}, f, indent=4)
     else:
-        # get created at date from existing project
-        project_info_path = project_path / "settings" / "project_info.json"
         if project_info_path.exists():
             with open(project_info_path) as f:
                 project_info = json.load(f)
-            created_at = project_info.get("created_at")
+            created_at = project_info.get(
+                "created_at", datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
         else:
             created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(project_info_path, "w") as f:
+                json.dump({"created_at": created_at}, f, indent=4)
         last_used = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     projects = load_projects() or {}
     new_project = {
@@ -125,34 +148,56 @@ def delete_project(project_id: str):
         project_path = get_cache_path(project_id)
 
         if project_path.exists():
-            for root, dirs, files in os.walk(project_path, topdown=False):
-                for name in files:
-                    os.remove(os.path.join(root, name))
-                for name in dirs:
-                    os.rmdir(os.path.join(root, name))
-            project_path.rmdir()
+            shutil.rmtree(project_path)
         st.success(f"Project '{project_id}' deleted successfully!")
     else:
         st.error(f"Project '{project_id}' does not exist.")
+
+
+def _launch_fresh_demo():
+    """Create a clean demo project and navigate to the import page."""
+    demo_project_id = create_demo_project()
+    st.session_state.st_project_id = demo_project_id
+    set_onboarding_step(1)
+    with st.spinner("Loading demo data..."):
+        if load_demo_data():
+            st.session_state.st_project_id = demo_project_id
+            set_onboarding_step(2)
+            st.switch_page(st.session_state.st_import_data_page)
+        else:
+            st.error("Failed to load demo data. Please try again.")
 
 
 def _handle_demo_project():
     """Handle demo project selection and initialization."""
     show_demo_intro()
 
-    if st.button("Start Demo", type="primary", width="stretch"):
-        demo_project_id = create_demo_project()
-        st.session_state.st_project_id = demo_project_id
-        set_onboarding_step(1)
+    demo_exists = DEMO_PROJECT_ID in load_projects()
 
-        with st.spinner("Loading demo data..."):
-            if load_demo_data():
-                st.success("Demo data loaded successfully!")
-                st.session_state.st_project_id = demo_project_id
-                set_onboarding_step(2)
+    if demo_exists:
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Resume Demo", type="primary", width="stretch"):
+                st.session_state.st_project_id = DEMO_PROJECT_ID
+                ConfigurationService(DEMO_PROJECT_ID).sync_output_view_files()
                 st.switch_page(st.session_state.st_import_data_page)
-            else:
-                st.error("Failed to load demo data. Please try again.")
+        with col2:
+            if st.button("Restart Demo", type="secondary", width="stretch"):
+                st.session_state["_demo_confirm_restart"] = True
+
+        if st.session_state.get("_demo_confirm_restart"):
+            st.warning(
+                "**Restarting will permanently delete all your demo progress**, "
+                "including any corrections and data preparation steps you have made. "
+                "This cannot be undone.",
+                icon=":material/warning:",
+            )
+            if st.button("Confirm Restart", type="primary"):
+                st.session_state.pop("_demo_confirm_restart", None)
+                _launch_fresh_demo()
+    else:
+        if st.button("Start Demo", type="primary", width="stretch"):
+            _launch_fresh_demo()
 
 
 def _handle_create_new_project():
@@ -177,10 +222,16 @@ def _handle_existing_project_selection(project: str):
     """Handle selection of an existing project."""
     project_id = get_project_id(project)
     projects = load_projects()
+    project_info = projects.get(project_id, {})
+    if project_info:
+        created_at = project_info.get("created_at", "Unknown")
+        last_used = project_info.get("last_used", "Unknown")
+        st.caption(f"Created: {created_at} | Last used: {last_used}")
     select_project = st.button("Load Project", type="primary", width="stretch")
 
     if select_project:
         st.write(f"Loading project '{project}'...")
+        save_project(project, project_id)
         st.session_state.st_project_id = project_id
         ConfigurationService(project_id).sync_output_view_files()
         st.switch_page(st.session_state.st_import_data_page)
@@ -193,6 +244,11 @@ def _handle_existing_project_selection(project: str):
 def _show_delete_project_option(project: str, project_id: str, projects: dict):
     """Show delete project option for non-demo projects."""
     with st.expander(":material/delete: delete project"):
+        st.warning(
+            f"Permanently deletes **{project}** and all its data, corrections, and logs. "
+            "This cannot be undone.",
+            icon=":material/warning:",
+        )
         if st.button("Confirm delete", width="stretch") and project_id in projects:
             delete_project(project_id)
             st.success(f"Project '{project}' deleted successfully!")
@@ -206,17 +262,23 @@ def _render_project_selection_ui():
     st.header("Select Your Project")
     _, pc1, _ = st.columns([0.25, 0.5, 0.25])
     project_list = get_project_names()
+    last_used_name = _get_last_used_project_name()
+    default_index = (
+        project_list.index(last_used_name)
+        if last_used_name and last_used_name in project_list
+        else None
+    )
 
     with pc1, st.container(border=True):
         st.markdown(
             "Select a DataSure project to get started. If you don't have a project yet, you can create a new project "
-            "by selection the **'Create New Project'** option. If you are new to DataSure, try the **'DataSure Demo'** "
+            "by selecting the **'Create New Project'** option. If you are new to DataSure, try the **'DataSure Demo'** "
             "project for a guided experience."
         )
         project = st.selectbox(
             label="Select Project",
             options=project_list,
-            index=None,
+            index=default_index,
             key="project_select_key",
         )
 
@@ -230,15 +292,11 @@ def _render_project_selection_ui():
 
 def _render_page_header():
     """Render the page header with logo and description."""
-    try:
-        app_version = version("DataSure")
-    except PackageNotFoundError:
-        app_version = "dev"
-    st.write(f"version {app_version}")
     # Get the path to the assets directory relative to the package
     assets_dir = Path(__file__).parent.parent / "assets"
-    image_path = assets_dir / "LinkedIn Cover IPA20.png"
-    st.image(str(image_path), width="stretch")
+    image_path = assets_dir / "datasure_logo.svg"
+    _, logo_col, _ = st.columns([0.35, 0.4, 0.35])
+    logo_col.image(str(image_path), width="stretch")
 
     st.title("Welcome to DataSure")
 
@@ -259,22 +317,14 @@ def _render_learn_more_section():
 
         st.divider()
 
-        # Benefits in a clean grid
         st.subheader("Why DataSure?")
 
-        benefits = st.columns(3)
-
-        with benefits[0]:
-            st.metric("Time Saved", "70%", "on QA tasks")
-            st.caption("Automate repetitive validation")
-
-        with benefits[1]:
-            st.metric("Error Rate", "-95%", "reduction")
-            st.caption("Catch issues early")
-
-        with benefits[2]:
-            st.metric("Processing", "10x", "faster")
-            st.caption("Batch operations")
+        st.markdown(
+            "DataSure automates the repetitive parts of survey data QA: connecting to your data "
+            "sources, running consistency and coverage checks, flagging issues for review, and "
+            "generating a documented audit trail. It is designed for research teams that run "
+            "high-frequency checks and need a reproducible record of every correction made to the data."
+        )
 
         st.divider()
 
@@ -289,7 +339,15 @@ def _render_learn_more_section():
         # Main workflow stages
         st.subheader("How It Works")
 
-        workflow_tabs = st.tabs(["1️⃣ Import", "2️⃣ Validate", "3️⃣ Correct", "4️⃣ Report"])
+        workflow_tabs = st.tabs(
+            [
+                ":material/upload: Import",
+                ":material/rule: Validate",
+                ":material/edit: Correct",
+                ":material/bar_chart: Report",
+                ":material/folder_zip: Replicate",
+            ]
+        )
 
         with workflow_tabs[0]:
             st.write("""
@@ -325,11 +383,26 @@ def _render_learn_more_section():
             - Real-time analytics
             """)
 
-        st.divider()
+        with workflow_tabs[4]:
+            st.write("""
+            **Export a self-contained replication package:**
+            - Raw survey data (CSV)
+            - Stata do-files that reproduce every import, preparation, and correction step
+            - Audit logs for all recorded changes
+            - README with instructions for running the package
 
-        # Simple CTA
-        st.success(
-            "Ready to improve your data workflow? Start with our quick setup guide →"
+            The package allows anyone with Stata to reproduce your corrected dataset
+            from the original source data, supporting transparency and reproducibility
+            standards for IPA research projects.
+            """)
+
+        st.divider()
+        st.link_button(
+            "Ready to improve your data workflow? Start with our comprehensive guide",
+            "https://data.poverty-action.org/data-quality/datasure/how-to-datasure.html",
+            icon=":material/open_in_new:",
+            width="stretch",
+            type="primary",
         )
 
 
@@ -345,3 +418,35 @@ with page_canvas:
     _render_learn_more_section()
     st.write("---")
     _render_project_selection_ui()
+
+try:
+    _app_version = version("DataSure")
+except PackageNotFoundError:
+    _app_version = "dev"
+
+st.divider()
+left, mid, right = st.columns(3, border=True)
+
+with left:
+    st.caption("ABOUT GRDS AND IPA")
+    st.caption(
+        "**DataSure** is a product of the "
+        "[Global Research and Data Science (GRDS)](https://data.poverty-action.org/teams/grds.html) "
+        "team at [Innovations for Poverty Action (IPA)](https://www.poverty-action.org/)."
+    )
+    st.caption(
+        f"Version {_app_version} | Released under the [MIT License](https://github.com/PovertyAction/datasure/blob/main/LICENSE)"
+    )
+
+with mid:
+    st.caption("PARTNER WITH US")
+    st.caption(
+        "We welcome contributions from the community! If you're interested in contributing to DataSure, please check out our [Contributing guide](https://github.com/PovertyAction/datasure/blob/main/CONTRIBUTING.md)."
+    )
+
+with right:
+    st.caption("CONNECT WITH US")
+    st.caption(
+        ":material/mail: [researchsupport@poverty-action.org](mailto:researchsupport@poverty-action.org)  \n"
+        ":material/bug_report: [Open a GitHub issue](https://github.com/PovertyAction/datasure/issues)"
+    )
