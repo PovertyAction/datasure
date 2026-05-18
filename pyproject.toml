@@ -24,7 +24,7 @@ classifiers = [
 requires-python = ">=3.11"
 dependencies = [
     "streamlit>=1.52.0",
-    "pandas>=2.2.2,<3.0",
+    "pandas>=2.2.2,<4.0",
     "plotly>=6.2.0",
     "numpy>=2.2.3",
     "openpyxl>=3.1.5",
