@@ -202,6 +202,7 @@ Cache directories are created automatically — no manual setup required.
 
 ### Getting Help
 
+- **Documentation**: [data.poverty-action.org/data-quality/datasure](https://data.poverty-action.org/data-quality/datasure/) - Full user guides, installation instructions, and workflow documentation
 - **GitHub Issues**: [Report bugs and request features](https://github.com/PovertyAction/datasure/issues)
 - **Email Support**: <researchsupport@poverty-action.org>
 - **Release Notes**: See [RELEASENOTES.md](RELEASENOTES.md) for latest updates
