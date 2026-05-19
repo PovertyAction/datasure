@@ -1,5 +1,16 @@
 # DataSure
 
+<p align="center">
+  <img src="src/datasure/assets/datasure_logo.svg" alt="DataSure" width="350">
+</p>
+
+<p align="center">
+  <a href="https://pypi.org/project/DataSure/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/datasure.svg"></a>
+  <a href="https://pepy.tech/project/datasure"><img alt="Total downloads" src="https://static.pepy.tech/badge/datasure"></a>
+  <a href="https://pypi.org/project/DataSure/"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/datasure.svg"></a>
+  <a href="https://github.com/PovertyAction/datasure/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/pypi/l/datasure.svg"></a>
+</p>
+
 **DataSure** is IPA's Data Management System Dashboard - a comprehensive tool for survey data quality monitoring and high-frequency checks (HFCs) in research projects.
 
 Built for data managers, survey coordinators, and research teams, DataSure provides real-time monitoring of survey data quality with interactive dashboards, automated checks, and flexible reporting capabilities.
