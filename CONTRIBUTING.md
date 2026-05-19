@@ -282,24 +282,25 @@ For emergency releases only:
 
 ### Workflow for Contributors
 
-1. **Fork the repository** and create a feature branch
-2. **Make your changes** following the coding standards
-3. **Write or update tests** for your changes
-4. **Run the full test suite**:
+1. **Review the roadmap**: Check [ROADMAP.md](ROADMAP.md) to understand current priorities and avoid duplicating in-progress work
+2. **Fork the repository** and create a feature branch
+3. **Make your changes** following the coding standards
+4. **Write or update tests** for your changes
+5. **Run the full test suite**:
 
    ```bash
    just test
    just lint-py
    ```
 
-5. **Build and test the package**:
+6. **Build and test the package**:
 
    ```bash
    just package-workflow
    ```
 
-6. **Commit your changes** with descriptive commit messages
-7. **Push to your fork** and create a pull request
+7. **Commit your changes** with descriptive commit messages
+8. **Push to your fork** and create a pull request
 
 ### Pull Request Guidelines
 

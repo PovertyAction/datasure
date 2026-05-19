@@ -245,6 +245,8 @@ If you're interested in contributing code or setting up a development environmen
 - Release process and documentation guidelines
 - Technical architecture and development patterns
 
+See [ROADMAP.md](ROADMAP.md) for planned features, current development priorities, and future considerations to understand where the project is headed before starting work.
+
 ### Community Standards
 
 - Use clear, descriptive language when reporting issues
