@@ -407,6 +407,9 @@ def _add_statistical_test_columns(
                 pl.lit(test_results.get("signrank", {}).get("p_value")).alias(
                     "signrank_p_value"
                 ),
+                pl.lit(test_results.get("skipped_tests", {}).get("signrank")).alias(
+                    "signrank_skipped"
+                ),
                 pl.lit(test_results.get("reliability", {}).get("srv")).alias(
                     "reliability_srv"
                 ),
@@ -425,6 +428,7 @@ def _add_statistical_test_columns(
             pl.lit(None).alias("prtest_p_value"),
             pl.lit(None).alias("signrank_statistic"),
             pl.lit(None).alias("signrank_p_value"),
+            pl.lit(None).alias("signrank_skipped"),
             pl.lit(None).alias("reliability_srv"),
             pl.lit(None).alias("reliability_ratio"),
         ]
@@ -1238,7 +1242,7 @@ def _get_test_value(col_data: pl.DataFrame, test_col: str) -> float | None:
     return test_val[0] if len(test_val) > 0 else None
 
 
-def _format_test_result(test_col: str, val: float) -> str | None:
+def _format_test_result(test_col: str, val: float | str) -> str | None:
     """Format a single test result value.
 
     Parameters
@@ -1269,6 +1273,8 @@ def _format_test_result(test_col: str, val: float) -> str | None:
 
     # Sign-rank test results
     if "signrank" in test_col:
+        if test_col == "signrank_skipped":
+            return f"Sign-rank: skipped ({val})"
         if "statistic" in test_col:
             return f"Sign-rank: W={val:.3f}"
         if "p_value" in test_col:
@@ -1303,6 +1309,7 @@ def _collect_test_results(col_data: pl.DataFrame) -> str:
         "prtest_p_value",
         "signrank_statistic",
         "signrank_p_value",
+        "signrank_skipped",
         "reliability_srv",
         "reliability_ratio",
     ]
@@ -1854,11 +1861,17 @@ def _perform_statistical_tests(
     # Wilcoxon signed-rank test
     if signrank:
         with suppress(Exception):
-            stat, p_value = stats.wilcoxon(survey_vals, backcheck_vals)
-            test_results["signrank"] = {
-                "statistic": float(stat),
-                "p_value": float(p_value),
-            }
+            diffs = survey_vals - backcheck_vals
+            if diffs.std() > 0:
+                stat, p_value = stats.wilcoxon(survey_vals, backcheck_vals)
+                test_results["signrank"] = {
+                    "statistic": float(stat),
+                    "p_value": float(p_value),
+                }
+            else:
+                test_results.setdefault("skipped_tests", {})["signrank"] = (
+                    "zero variance in differences"
+                )
 
     # Reliability metrics (Simple Response Variance and Reliability Ratio)
     if reliability:
