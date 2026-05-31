@@ -407,9 +407,10 @@ def _add_statistical_test_columns(
                 pl.lit(test_results.get("signrank", {}).get("p_value")).alias(
                     "signrank_p_value"
                 ),
-                pl.lit(test_results.get("skipped_tests", {}).get("signrank")).alias(
-                    "signrank_skipped"
-                ),
+                pl.lit(
+                    test_results.get("skipped_tests", {}).get("signrank"),
+                    dtype=pl.Utf8,
+                ).alias("signrank_skipped"),
                 pl.lit(test_results.get("reliability", {}).get("srv")).alias(
                     "reliability_srv"
                 ),
@@ -428,7 +429,7 @@ def _add_statistical_test_columns(
             pl.lit(None).alias("prtest_p_value"),
             pl.lit(None).alias("signrank_statistic"),
             pl.lit(None).alias("signrank_p_value"),
-            pl.lit(None).alias("signrank_skipped"),
+            pl.lit(None, dtype=pl.Utf8).alias("signrank_skipped"),
             pl.lit(None).alias("reliability_srv"),
             pl.lit(None).alias("reliability_ratio"),
         ]
