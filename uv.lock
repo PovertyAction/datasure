@@ -551,7 +551,7 @@ wheels = [
 
 [[package]]
 name = "datasure"
-version = "0.8.3rc1"
+version = "0.8.4rc1"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
