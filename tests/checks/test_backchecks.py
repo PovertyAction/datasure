@@ -1723,7 +1723,7 @@ def test_perform_statistical_tests_signrank():
     data = pl.DataFrame(
         {
             "age": [25, 30, 35, 28, 32],
-            "age__BCCL": [26, 31, 36, 29, 33],
+            "age__BCCL": [27, 29, 38, 26, 34],
         }
     )
 

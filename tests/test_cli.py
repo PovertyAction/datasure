@@ -1,12 +1,72 @@
 """Tests for the CLI module."""
 
+import logging
 import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest  # type: ignore
 
-from datasure.cli import get_version, main
+from datasure.cli import _SuppressStaticSyncRouteError, get_version, main
+
+
+class TestSuppressStaticSyncRouteError:
+    """Tests for the _SuppressStaticSyncRouteError logging filter."""
+
+    def _make_record(self, exc_info=None):
+        return logging.LogRecord(
+            name="uvicorn.error",
+            level=logging.ERROR,
+            pathname="",
+            lineno=0,
+            msg="Exception in ASGI application",
+            args=(),
+            exc_info=exc_info,
+        )
+
+    def _exc_info_for(self, exc):
+        return (type(exc), exc, None)
+
+    def test_passes_record_without_exc_info(self):
+        """Record with no exception info is not suppressed."""
+        f = _SuppressStaticSyncRouteError()
+        assert f.filter(self._make_record(exc_info=None)) is True
+
+    def test_passes_non_os_error(self):
+        """Record whose exception is not an OSError is not suppressed."""
+        f = _SuppressStaticSyncRouteError()
+        record = self._make_record(exc_info=self._exc_info_for(ValueError("nope")))
+        assert f.filter(record) is True
+
+    def test_passes_os_error_without_winerror_123(self):
+        """OSError without winerror=123 is not suppressed."""
+        f = _SuppressStaticSyncRouteError()
+        record = self._make_record(exc_info=self._exc_info_for(OSError("generic")))
+        assert f.filter(record) is True
+
+    def test_passes_winerror_123_without_sync_in_path(self):
+        """WinError 123 on a path that does not contain ':sync:' is not suppressed."""
+        f = _SuppressStaticSyncRouteError()
+        exc = OSError("bad path")
+        exc.winerror = 123
+        exc.filename = r"C:\some\other\path"
+        assert f.filter(self._make_record(exc_info=self._exc_info_for(exc))) is True
+
+    def test_suppresses_winerror_123_with_sync_path(self):
+        """WinError 123 on a path containing ':sync:' is suppressed."""
+        f = _SuppressStaticSyncRouteError()
+        exc = OSError("bad path")
+        exc.winerror = 123
+        exc.filename = r"C:\path\to\streamlit\static\:sync:"
+        assert f.filter(self._make_record(exc_info=self._exc_info_for(exc))) is False
+
+    def test_passes_winerror_123_with_none_filename(self):
+        """WinError 123 with None filename is not suppressed."""
+        f = _SuppressStaticSyncRouteError()
+        exc = OSError("bad path")
+        exc.winerror = 123
+        exc.filename = None
+        assert f.filter(self._make_record(exc_info=self._exc_info_for(exc))) is True
 
 
 class TestGetVersion:

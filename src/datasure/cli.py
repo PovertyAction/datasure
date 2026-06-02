@@ -6,10 +6,28 @@ as a command-line application.
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
 import streamlit.web.cli as stcli
+
+
+class _SuppressStaticSyncRouteError(logging.Filter):
+    """Suppress spurious WinError 123 from Streamlit's static/:sync: routing on Windows.
+
+    Streamlit's internal /:sync: endpoint is sometimes misrouted to the static
+    file handler, which constructs an invalid Windows path containing ':sync:'.
+    """
+
+    def filter(self, record):
+        if record.exc_info:
+            exc = record.exc_info[1]
+            if isinstance(exc, OSError) and getattr(exc, "winerror", None) == 123:
+                filename = str(getattr(exc, "filename", "") or "")
+                if ":sync:" in filename:
+                    return False
+        return True
 
 
 def main():
@@ -71,6 +89,8 @@ def main():
         "--logger.level",
         str(args.logging),
     ]
+
+    logging.getLogger("uvicorn.error").addFilter(_SuppressStaticSyncRouteError())
 
     sys.exit(stcli.main())
 
