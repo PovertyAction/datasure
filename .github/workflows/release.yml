@@ -1,0 +1,193 @@
+name: Release
+
+# Single tag-triggered release pipeline:
+#   test (quality gate) -> build + verify -> publish -> GitHub release
+# Publishing uses PyPI Trusted Publishing (OIDC) - no API tokens.
+# Pre-releases (a/b/rc/dev) go to Test PyPI; final X.Y.Z releases go to PyPI.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v1.0.0). Must match pyproject.toml.'
+        required: true
+        type: string
+
+env:
+  PYTHON_VERSION: '3.11'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Quality gate
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+
+    - uses: actions/setup-python@v6
+
+    - name: Run pre-commit hooks
+      uses: pre-commit/action@v3.0.1
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Install dependencies
+      run: uv sync
+
+    - name: Run tests
+      run: uv run python -m pytest tests/
+
+  build:
+    name: Build and verify package
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Determine version and release type
+      id: version
+      shell: bash
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          VERSION="${{ github.event.inputs.version }}"
+        else
+          VERSION=${GITHUB_REF#refs/tags/}
+        fi
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        # PEP 440: anything beyond MAJOR.MINOR.PATCH (a/b/rc/dev suffixes)
+        # is a pre-release. A '-' substring check misses suffixes like 1.0.0rc1.
+        if [[ "$VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Verify tag matches package version
+      shell: bash
+      run: |
+        TAG_VERSION="${{ steps.version.outputs.version }}"
+        TAG_VERSION="${TAG_VERSION#v}"
+        PKG_VERSION=$(uv version --short)
+        if [[ "$TAG_VERSION" != "$PKG_VERSION" ]]; then
+          echo "::error::Tag version ($TAG_VERSION) does not match pyproject.toml version ($PKG_VERSION)"
+          exit 1
+        fi
+
+    - name: Build package
+      run: uv build
+
+    - name: Smoke-test the built wheel
+      shell: bash
+      run: |
+        PKG_VERSION=$(uv version --short)
+        uv venv smoke-env
+        uv pip install --python smoke-env/bin/python dist/*.whl
+        OUTPUT=$(smoke-env/bin/datasure --version)
+        echo "datasure --version -> $OUTPUT"
+        if [[ "$OUTPUT" != *"$PKG_VERSION"* ]]; then
+          echo "::error::Wheel smoke test failed: expected '$PKG_VERSION' in output '$OUTPUT'"
+          exit 1
+        fi
+
+    - name: Upload package artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: python-package
+        path: dist/
+        retention-days: 30
+
+  publish-testpypi:
+    name: Publish to Test PyPI
+    needs: build
+    if: needs.build.outputs.is_prerelease == 'true'
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+    - name: Download package artifacts
+      uses: actions/download-artifact@v8
+      with:
+        name: python-package
+        path: dist/
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+
+    - name: Publish via trusted publishing
+      run: >-
+        uv publish
+        --check-url https://test.pypi.org/simple/
+        --publish-url https://test.pypi.org/legacy/
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build
+    if: needs.build.outputs.is_prerelease == 'false'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+    - name: Download package artifacts
+      uses: actions/download-artifact@v8
+      with:
+        name: python-package
+        path: dist/
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+
+    - name: Publish via trusted publishing
+      run: uv publish
+
+  github-release:
+    name: Create GitHub release
+    needs: [build, publish-testpypi, publish-pypi]
+    # Exactly one publish job runs per release; the other is skipped.
+    if: |
+      always() &&
+      github.event_name == 'push' &&
+      needs.build.result == 'success' &&
+      (needs.publish-testpypi.result == 'success' || needs.publish-pypi.result == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Download package artifacts
+      uses: actions/download-artifact@v8
+      with:
+        name: python-package
+        path: dist/
+
+    - name: Create release
+      uses: softprops/action-gh-release@v3
+      with:
+        files: |
+          dist/*.whl
+          dist/*.tar.gz
+        generate_release_notes: true
+        draft: false
+        prerelease: ${{ needs.build.outputs.is_prerelease == 'true' }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
