@@ -85,7 +85,9 @@ class TestGetVersion:
     @patch("importlib.metadata.version")
     def test_get_version_fallback(self, mock_version):
         """Test get_version returns fallback version when metadata fails."""
-        mock_version.side_effect = Exception("Module not found")
+        from importlib.metadata import PackageNotFoundError
+
+        mock_version.side_effect = PackageNotFoundError("DataSure")
 
         result = get_version()
 

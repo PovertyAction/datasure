@@ -122,7 +122,6 @@ ignore = [
     "D400",   # First line should end with a period
     "D401",   # First line of docstring should be in imperative mood
     "RUF005", # Code suggestions
-    "E722",   #bare-exception
 ]
 
 [tool.ruff.lint.per-file-ignores]
