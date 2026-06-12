@@ -9,7 +9,6 @@ from .cache_utils import get_cache_path
 
 # Set up logging
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
 
 def _validate_table_name(table_name: str) -> str:
