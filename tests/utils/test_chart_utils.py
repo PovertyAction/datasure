@@ -63,9 +63,7 @@ class TestDonutChart:
         # Default value segment is orange and the centre text matches it
         axes = fig.get_axes()
         patches = axes[0].patches
-        assert patches[0].get_facecolor()[:3] == plt.matplotlib.colors.to_rgb(
-            "#FF8000"
-        )
+        assert patches[0].get_facecolor()[:3] == plt.matplotlib.colors.to_rgb("#FF8000")
         # The centre text is the last text element (pie wedges add empty labels)
         assert axes[0].texts[-1].get_color() == "#FF8000"
 
@@ -208,9 +206,7 @@ class TestDonutChartEdgeCases:
 
     def test_multiple_chart_creation(self):
         """Test creating multiple charts in sequence."""
-        charts = [
-            donut_chart(i * 20, 100, title=f"Chart {i}") for i in range(5)
-        ]
+        charts = [donut_chart(i * 20, 100, title=f"Chart {i}") for i in range(5)]
 
         assert len(charts) == 5
         for chart in charts:
