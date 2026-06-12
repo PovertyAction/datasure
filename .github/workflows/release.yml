@@ -116,6 +116,11 @@ jobs:
         path: dist/
         retention-days: 30
 
+  # Publishing uses PyPI Trusted Publishing (OIDC): the job's id-token
+  # permission plus the trusted publisher configured on (test.)pypi.org for
+  # this repo, workflow file, and environment name. No token secrets.
+  # --trusted-publishing always makes uv fail loudly if OIDC is unavailable
+  # instead of silently looking for other credentials.
   publish-testpypi:
     name: Publish to Test PyPI
     needs: build
@@ -137,6 +142,7 @@ jobs:
     - name: Publish via trusted publishing
       run: >-
         uv publish
+        --trusted-publishing always
         --check-url https://test.pypi.org/simple/
         --publish-url https://test.pypi.org/legacy/
 
@@ -159,7 +165,7 @@ jobs:
       uses: astral-sh/setup-uv@v7
 
     - name: Publish via trusted publishing
-      run: uv publish
+      run: uv publish --trusted-publishing always
 
   github-release:
     name: Create GitHub release
