@@ -215,68 +215,36 @@ pre-commit-run:
 build-package:
     uv build
 
-# Bump alpha patch release
-bump-patch-alpha:
-    uv version --bump patch --bump alpha
+# Verify CHANGELOG.md has entries under [Unreleased] (release gate)
+check-changelog:
+    uv run python scripts/check_changelog.py
 
-# Bump alpha minor release
-bump-minor-alpha:
-    uv version --bump minor --bump alpha
+# Bump the version only (no commit, no tag). Accepts any `uv version --bump`
+# stage, combinable: `just bump patch`, `just bump minor rc`, `just bump stable`
+bump +bumps:
+    uv version {{ prepend("--bump=", bumps) }}
 
-# Bump alpha major release
-bump-major-alpha:
-    uv version --bump major --bump alpha
+# Bump version by patch, commit, and create git tag
+bump-patch: (bump-and-tag "patch")
 
-# Bump beta patch release
-bump-patch-beta:
-    uv version --bump patch --bump beta
+# Bump version by minor, commit, and create git tag
+bump-minor: (bump-and-tag "minor")
 
-# Bump beta minor release
-bump-minor-beta:
-    uv version --bump minor --bump beta
+# Bump version by major, commit, and create git tag
+bump-major: (bump-and-tag "major")
 
-# Bump beta major release
-bump-major-beta:
-    uv version --bump major --bump beta
+# Finalize the current pre-release (e.g. 1.0.0rc1 -> 1.0.0), commit, and tag
+bump-stable: (bump-and-tag "stable")
 
-# Bump release candidate patch release
-bump-patch-rc:
-    uv version --bump patch --bump rc
+# Pre-release bump, commit, and tag: `just bump-pre patch rc` -> v0.8.4rc1
+bump-pre type stage: (bump-and-tag type stage)
 
-# Bump release candidate minor release
-bump-minor-rc:
-    uv version --bump minor --bump rc
-
-# Bump release candidate major release
-bump-major-rc:
-    uv version --bump major --bump rc
-
-# # Bump patch release
-# bump-patch:
-#     uv version --bump patch
-# # Bump minor release
-# bump-minor:
-#     uv version --bump minor
-# # Bump major release
-# bump-major:
-#     uv version --bump major
-
-# Bump version by patch and create git tag
-bump-patch:
-    @just bump-and-tag patch
-
-# Bump version by minor and create git tag
-bump-minor:
-    @just bump-and-tag minor
-
-# Bump version by major and create git tag
-bump-major:
-    @just bump-and-tag major
-
-# Internal recipe to bump version and create git tag
-[linux]
-bump-and-tag type:
+# Internal recipe to bump version, commit pyproject.toml + uv.lock, and tag.
+# Gated on a non-empty [Unreleased] section in CHANGELOG.md.
+[unix]
+bump-and-tag +bumps: check-changelog
     #!/usr/bin/env bash
+    set -euo pipefail
     # Check if the repo is clean
     if [[ -n $(git status --porcelain) ]]; then
         echo "Error: Git repository has uncommitted changes. Please commit or stash them first."
@@ -288,8 +256,8 @@ bump-and-tag type:
     echo "Current version: $OLD_VERSION"
 
     # Bump the version
-    echo "Bumping {{ type }} version..."
-    uv version --bump {{ type }}
+    echo "Bumping version ({{ bumps }})..."
+    uv version {{ prepend("--bump=", bumps) }}
 
     # Get the new version
     NEW_VERSION=$(uv version --short)
@@ -299,91 +267,29 @@ bump-and-tag type:
     echo "Updating lock file with uv sync..."
     uv sync
 
-    # Commit both the pyproject.toml and lock file changes in one commit
-    git add pyproject.toml
-    git add .
+    # Commit only the files the bump changes
+    git add pyproject.toml uv.lock
     git commit -m "Bump version: $OLD_VERSION → $NEW_VERSION"
 
     # Create tag directly rather than calling another recipe
-    VERSION=$NEW_VERSION
-    TAG="v$VERSION"
+    TAG="v$NEW_VERSION"
 
     # Check if tag already exists
     if git rev-parse "$TAG" >/dev/null 2>&1; then
         echo "Tag $TAG already exists. Skipping tag creation."
     else
         echo "Creating git tag $TAG..."
-        git tag -a "$TAG" -m "Version $VERSION"
-        echo "Created git tag: $TAG"
-        echo "To push the tag, run: git push origin $TAG"
-    fi
-
-[macos]
-bump-and-tag type:
-    #!/usr/bin/env bash
-    # Check if the repo is clean
-    if [[ -n $(git status --porcelain) ]]; then
-        echo "Error: Git repository has uncommitted changes. Please commit or stash them first."
-        exit 1
-    fi
-
-    # Get the current version before bumping
-    OLD_VERSION=$(uv version --short)
-    echo "Current version: $OLD_VERSION"
-
-    # Bump the version
-    echo "Bumping {{ type }} version..."
-    uv version --bump {{ type }}
-
-    # Get the new version
-    NEW_VERSION=$(uv version --short)
-    echo "New version: $NEW_VERSION"
-
-    # Run uv sync to update the lock file
-    echo "Updating lock file with uv sync..."
-    uv sync
-
-    # Commit both the pyproject.toml and lock file changes in one commit
-    git add pyproject.toml
-    git add .
-    git commit -m "Bump version: $OLD_VERSION → $NEW_VERSION"
-
-    # Create tag directly rather than calling another recipe
-    VERSION=$NEW_VERSION
-    TAG="v$VERSION"
-
-    # Check if tag already exists
-    if git rev-parse "$TAG" >/dev/null 2>&1; then
-        echo "Tag $TAG already exists. Skipping tag creation."
-    else
-        echo "Creating git tag $TAG..."
-        git tag -a "$TAG" -m "Version $VERSION"
+        git tag -a "$TAG" -m "Version $NEW_VERSION"
         echo "Created git tag: $TAG"
         echo "To push the tag, run: git push origin $TAG"
     fi
 
 [windows]
-bump-and-tag type:
-    @$status = & git status --porcelain; if ($status) { Write-Host "Error: Git repository has uncommitted changes. Please commit or stash them first."; exit 1 }; $OLD_VERSION = & uv version --short; Write-Host "Current version: $OLD_VERSION"; Write-Host "Bumping {{ type }} version..."; & uv version --bump {{ type }}; $NEW_VERSION = & uv version --short; Write-Host "New version: $NEW_VERSION"; Write-Host "Updating lock file with uv sync..."; & uv sync; & git add pyproject.toml; & git add .; & git commit -m "Bump version: $OLD_VERSION → $NEW_VERSION"; $VERSION = $NEW_VERSION; $TAG = "v$VERSION"; if (git rev-parse "$TAG" 2>$null) { Write-Host "Tag $TAG already exists. Skipping tag creation." } else { Write-Host "Creating git tag $TAG..."; git tag -a "$TAG" -m "Version $VERSION"; Write-Host "Created git tag: $TAG"; Write-Host "To push the tag, run: git push origin $TAG" }
+bump-and-tag +bumps: check-changelog
+    @$status = & git status --porcelain; if ($status) { Write-Host "Error: Git repository has uncommitted changes. Please commit or stash them first."; exit 1 }; $OLD_VERSION = & uv version --short; Write-Host "Current version: $OLD_VERSION"; Write-Host "Bumping version ({{ bumps }})..."; & uv version {{ prepend("--bump=", bumps) }}; if ($LASTEXITCODE -ne 0) { exit 1 }; $NEW_VERSION = & uv version --short; Write-Host "New version: $NEW_VERSION"; Write-Host "Updating lock file with uv sync..."; & uv sync; & git add pyproject.toml uv.lock; & git commit -m "Bump version: $OLD_VERSION → $NEW_VERSION"; $TAG = "v$NEW_VERSION"; if (git rev-parse "$TAG" 2>$null) { Write-Host "Tag $TAG already exists. Skipping tag creation." } else { Write-Host "Creating git tag $TAG..."; git tag -a "$TAG" -m "Version $NEW_VERSION"; Write-Host "Created git tag: $TAG"; Write-Host "To push the tag, run: git push origin $TAG" }
 
 # Create git tag from current version if it doesn't exist
-[linux]
-tag-version:
-    #!/usr/bin/env bash
-    VERSION=$(uv version --short)
-    TAG="v$VERSION"
-
-    # Check if tag already exists
-    if git rev-parse "$TAG" >/dev/null 2>&1; then
-        echo "Tag $TAG already exists. Skipping tag creation."
-    else
-        echo "Creating git tag $TAG..."
-        git tag -a "$TAG" -m "Version $VERSION"
-        echo "Created git tag: $TAG"
-        echo "To push the tag, run: git push origin $TAG"
-    fi
-
-[macos]
+[unix]
 tag-version:
     #!/usr/bin/env bash
     VERSION=$(uv version --short)
@@ -404,23 +310,7 @@ tag-version:
     @$VERSION = & uv version --short; $TAG = "v$VERSION"; if (git rev-parse "$TAG" 2>$null) { Write-Host "Tag $TAG already exists. Skipping tag creation." } else { Write-Host "Creating git tag $TAG..."; git tag -a "$TAG" -m "Version $VERSION"; Write-Host "Created git tag: $TAG"; Write-Host "To push the tag, run: git push origin $TAG" }
 
 # Push the latest version tag to remote
-[linux]
-push-tag:
-    #!/usr/bin/env bash
-    VERSION=$(uv version --short)
-    TAG="v$VERSION"
-
-    # Check if tag exists locally
-    if git rev-parse "$TAG" >/dev/null 2>&1; then
-        echo "Pushing tag $TAG to remote..."
-        git push origin "$TAG"
-        echo "Tag $TAG pushed successfully!"
-    else
-        echo "Tag $TAG does not exist locally. Create it first with 'just tag-version'."
-        exit 1
-    fi
-
-[macos]
+[unix]
 push-tag:
     #!/usr/bin/env bash
     VERSION=$(uv version --short)
@@ -441,27 +331,7 @@ push-tag:
     @$VERSION = & uv version --short; $TAG = "v$VERSION"; if (git rev-parse "$TAG" 2>$null) { Write-Host "Pushing tag $TAG to remote..."; git push origin "$TAG"; Write-Host "Tag $TAG pushed successfully!" } else { Write-Host "Tag $TAG does not exist locally. Create it first with 'just tag-version'."; exit 1 }
 
 # Push both commits and tag to remote
-[linux]
-push-all:
-    #!/usr/bin/env bash
-    VERSION=$(uv version --short)
-    TAG="v$VERSION"
-
-    # Push commits
-    echo "Pushing commits to remote..."
-    git push
-
-    # Check if tag exists locally
-    if git rev-parse "$TAG" >/dev/null 2>&1; then
-        echo "Pushing tag $TAG to remote..."
-        git push origin "$TAG"
-        echo "All changes pushed successfully!"
-    else
-        echo "Tag $TAG does not exist locally. Create it first with 'just tag-version'."
-        exit 1
-    fi
-
-[macos]
+[unix]
 push-all:
     #!/usr/bin/env bash
     VERSION=$(uv version --short)
@@ -486,13 +356,7 @@ push-all:
     @$VERSION = & uv version --short; $TAG = "v$VERSION"; Write-Host "Pushing commits to remote..."; git push; if (git rev-parse "$TAG" 2>$null) { Write-Host "Pushing tag $TAG to remote..."; git push origin "$TAG"; Write-Host "All changes pushed successfully!" } else { Write-Host "Tag $TAG does not exist locally. Create it first with 'just tag-version'."; exit 1 }
 
 # Clean build artifacts
-[linux]
-clean-build:
-    rm -rf dist/
-    rm -rf build/
-
-# Clean build artifacts
-[macos]
+[unix]
 clean-build:
     rm -rf dist/
     rm -rf build/
@@ -508,11 +372,7 @@ clean-build:
 install-package: build-package
     $wheel = Get-ChildItem -Path "dist" -Filter "*.whl" | Select-Object -First 1; uv pip install --force-reinstall $wheel.FullName
 
-[linux]
-install-package: build-package
-    uv pip install --force-reinstall dist/datasure-*.whl
-
-[macos]
+[unix]
 install-package: build-package
     uv pip install --force-reinstall dist/datasure-*.whl
 
@@ -524,13 +384,24 @@ uninstall-package:
 test-cli: install-package
     uv run datasure --version
 
+# Manual publish escape hatches. CI (.github/workflows/release.yml) is the
+# primary publish path via PyPI Trusted Publishing; these recipes need
+# UV_PUBLISH_TOKEN set. Both rebuild from a clean dist/ with --no-sources,
+# as recommended by https://docs.astral.sh/uv/guides/package/
+
 # Publish to TestPyPI (for testing)
-publish-test: build-package
-    uv publish --check-url https://test.pypi.org/simple --publish-url https://test.pypi.org/legacy/
+publish-test: clean-build
+    uv build --no-sources
+    uv publish --index testpypi
 
 # Publish to PyPI (production)
-publish: build-package
-    uv publish
+publish: clean-build
+    uv build --no-sources
+    uv publish --index pypi
+
+# Verify the published package installs and runs from PyPI
+verify-published:
+    uv run --no-project --refresh-package datasure --with datasure -- datasure --version
 
 # Package development workflow: test, build, and verify
 package-workflow: test build-package test-cli clean-build

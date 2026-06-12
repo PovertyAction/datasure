@@ -142,11 +142,14 @@ just package-workflow     # Complete workflow: test, build, and verify
 
 ### Publishing Commands
 
+Releases are normally published by CI via PyPI Trusted Publishing when a
+version tag is pushed. The recipes below are manual escape hatches and
+require `UV_PUBLISH_TOKEN` to be set:
+
 ```bash
-just check-pypi           # Check package metadata and structure
-just pypi-info            # View package info and version
-just publish-test         # Publish to TestPyPI (for testing)
-just publish              # Publish to PyPI (production)
+just publish-test         # Clean build + publish to TestPyPI
+just publish              # Clean build + publish to PyPI (production)
+just verify-published     # Install latest from PyPI and run datasure --version
 ```
 
 ## Version Management
@@ -155,44 +158,36 @@ DataSure uses automated version management with semantic versioning (MAJOR.MINOR
 
 ### Version Bump Commands
 
-#### Alpha Releases (Early Development Testing)
+Version bumps use [`uv version --bump`](https://docs.astral.sh/uv/guides/package/)
+under the hood. Stages can be combined, and `stable` finalizes a pre-release.
+
+#### Releases (bump + commit + tag)
 
 ```bash
-just bump-patch-alpha     # 0.1.0 -> 0.1.1a1
-just bump-minor-alpha     # 0.1.0 -> 0.2.0a1
-just bump-major-alpha     # 0.1.0 -> 1.0.0a1
-```
-
-#### Beta Releases (Feature-Complete Testing)
-
-```bash
-just bump-patch-beta      # 0.1.0 -> 0.1.1b1
-just bump-minor-beta      # 0.1.0 -> 0.2.0b1
-just bump-major-beta      # 0.1.0 -> 1.0.0b1
-```
-
-#### Release Candidates (Final Testing)
-
-```bash
-just bump-patch-rc        # 0.1.0 -> 0.1.1rc1
-just bump-minor-rc        # 0.1.0 -> 0.2.0rc1
-just bump-major-rc        # 0.1.0 -> 1.0.0rc1
-```
-
-#### Final Releases
-
-```bash
-just bump-patch           # 0.1.0 -> 0.1.1
-just bump-minor           # 0.1.0 -> 0.2.0
-just bump-major           # 0.1.0 -> 1.0.0
+just bump-patch            # 0.1.0  -> 0.1.1
+just bump-minor            # 0.1.0  -> 0.2.0
+just bump-major            # 0.1.0  -> 1.0.0
+just bump-pre patch rc     # 0.1.0  -> 0.1.1rc1 (stages: alpha, beta, rc)
+just bump-pre minor beta   # 0.1.0  -> 0.2.0b1
+just bump-stable           # 1.0.0rc1 -> 1.0.0 (finalize a pre-release)
 ```
 
 These commands automatically:
 
-- Update the version in `src/datasure/__init__.py`
+- Verify CHANGELOG.md has entries under `[Unreleased]` (release gate)
+- Update the version in `pyproject.toml`
 - Run `uv sync` to update the lock file
-- Commit the changes to git
-- Create a git tag for the new version
+- Commit `pyproject.toml` and `uv.lock`
+- Create a git tag for the new version (pushing the tag triggers the
+  release pipeline)
+
+#### Version-only bump (no commit, no tag)
+
+```bash
+just bump patch            # any `uv version --bump` stage, combinable
+just bump minor rc
+just bump stable
+```
 
 ### Git Tag Management
 
