@@ -84,7 +84,8 @@ def duckdb_save_table(
     with duckdb.connect(db_path) as conn:
         table_exists = (
             conn.execute(
-                f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table_id}'"
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",
+                [table_id],
             ).fetchone()[0]
             > 0
         )
@@ -128,7 +129,8 @@ def duckdb_get_table(
         # Check if the table exists
         table_exists = (
             conn.execute(
-                f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table_id}'"
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",
+                [table_id],
             ).fetchone()[0]
             > 0
         )
@@ -167,7 +169,8 @@ def duckdb_remove_table(project_id: str, alias: str, db_name: str) -> None:
         # Check if the table exists
         table_exists = (
             conn.execute(
-                f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table_id}'"
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",
+                [table_id],
             ).fetchone()[0]
             > 0
         )
@@ -175,17 +178,44 @@ def duckdb_remove_table(project_id: str, alias: str, db_name: str) -> None:
             conn.execute(f"DROP TABLE {table_id}")
 
 
-def duckdb_row_filter(
-    project_id: str, alias: str, db_name: str, filter_condition: str
-) -> pl.DataFrame:
-    """Filter rows inplace from a DuckDB table based on a condition.
+def _validate_column_name(column_name: str) -> str:
+    """Validate a column name used in a SQL statement.
+
+    Unlike table aliases, column names are not sanitized: a silently
+    rewritten column would target the wrong data, so invalid names are
+    rejected instead.
+
+    Args:
+        column_name: The column name to validate
+
+    Returns
+    -------
+        str: The validated column name
+
+    Raises
+    ------
+        ValueError: If the column name is not a valid SQL identifier
+    """
+    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", column_name):
+        raise ValueError(f"Invalid column name: {column_name!r}")
+    return column_name
+
+
+def duckdb_delete_rows(
+    project_id: str, alias: str, db_name: str, column: str, value: str
+) -> None:
+    """Delete rows from a DuckDB table where a column equals a value.
+
+    The value is passed as a prepared-statement parameter, so it is safe
+    for arbitrary user-supplied strings.
 
     PARAMS:
     -------
     project_id: str : project ID
     alias: str : alias for the data
     db_name: str : name of the DuckDB database
-    filter_condition: str : condition to filter rows
+    column: str : column to match rows on
+    value: str : rows with this value in `column` are deleted
 
     Returns
     -------
@@ -196,14 +226,10 @@ def duckdb_row_filter(
         if db_name == "logs"
         else get_cache_path(project_id, "data", f"{db_name}.duckdb")
     )
-    table_id = alias.lower().replace(" ", "_").replace("-", "_")
+    table_id = _validate_table_name(alias.lower().replace(" ", "_").replace("-", "_"))
+    column_id = _validate_column_name(column)
     with duckdb.connect(db_path) as conn:
-        # Create a new table with filtered rows
-        conn.execute(
-            f"CREATE OR REPLACE TABLE {table_id} AS SELECT * FROM {table_id} WHERE {filter_condition}"
-        )
-        # Optionally, return the filtered data
-        return conn.execute(f"SELECT * FROM {table_id}").pl()
+        conn.execute(f"DELETE FROM {table_id} WHERE {column_id} = ?", [value])
 
 
 # --- Get aliases from import log ---#
@@ -305,7 +331,8 @@ def duckdb_table_exists(project_id: str, alias: str, db_name: str) -> bool:
         # Check if the table exists
         table_exists = (
             conn.execute(
-                f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table_id}'"
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",
+                [table_id],
             ).fetchone()[0]
             > 0
         )

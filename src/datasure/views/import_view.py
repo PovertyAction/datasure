@@ -8,11 +8,11 @@ from datasure.connectors.scto import (
     download_forms,
 )
 from datasure.utils.duckdb_utils import (
+    duckdb_delete_rows,
     duckdb_get_aliases,
     duckdb_get_imported_datasets,
     duckdb_get_table,
     duckdb_remove_table,
-    duckdb_row_filter,
     duckdb_save_table,
     duckdb_table_exists,
 )
@@ -362,11 +362,12 @@ with (
         "Select Data to Remove", options=remove_column_options, index=None
     )
     if st.button("Remove Data", type="primary", width="stretch"):
-        duckdb_row_filter(
+        duckdb_delete_rows(
             project_id=project_id,
             alias="import_log",
             db_name="logs",
-            filter_condition=f"alias != '{remove_data}'",
+            column="alias",
+            value=remove_data,
         )
         duckdb_remove_table(project_id, alias=remove_data, db_name="raw")
         # check if the table exist in prep, if yes remove it
