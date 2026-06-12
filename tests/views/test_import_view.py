@@ -17,9 +17,6 @@ from datasure.connectors.scto import FormConfig
 # implementations.
 _st = sys.modules["streamlit"]
 _orig_stop = _st.stop
-_orig_columns = _st.columns
-_orig_popover = _st.popover
-_orig_container = _st.container
 
 
 def _make_columns(spec, **_kwargs):
@@ -29,7 +26,9 @@ def _make_columns(spec, **_kwargs):
 
 
 # Let module load past the project guard, and make layout primitives
-# context-manager capable (plain Mock cannot be used in a `with` block)
+# context-manager capable (plain Mock cannot be used in a `with` block).
+# The layout overrides intentionally stay in place for the whole test
+# module: TestRemoveImportFlow reloads import_view and needs them active.
 _st.session_state["st_project_id"] = "test_project"
 _st.stop = MagicMock()
 _st.columns = MagicMock(side_effect=_make_columns)
@@ -73,18 +72,9 @@ _patches = _module_patches()
 for _p in _patches:
     _p.start()
 try:
+    # Single import form: module-qualified access also guarantees tests
+    # resolve the current bindings after TestRemoveImportFlow reloads
     import datasure.views.import_view as import_view
-    from datasure.views.import_view import (
-        _add_to_session_state,
-        _create_form_config,
-        _get_filtered_import_log,
-        _load_dataset_by_source,
-        _load_from_surveycto,
-        _process_import_log,
-        _process_single_import,
-        load_raw_datasets,
-        update_import_log,
-    )
 finally:
     for _p in _patches:
         _p.stop()
@@ -132,7 +122,7 @@ class TestCreateFormConfig:
         return row
 
     def test_basic_config(self):
-        config = _create_form_config(self._row())
+        config = import_view._create_form_config(self._row())
 
         assert isinstance(config, FormConfig)
         assert config.alias == "svy"
@@ -143,7 +133,7 @@ class TestCreateFormConfig:
         assert config.refresh is True
 
     def test_empty_strings_become_none(self):
-        config = _create_form_config(
+        config = import_view._create_form_config(
             self._row(username="", private_key="", save_to="")
         )
 
@@ -152,7 +142,7 @@ class TestCreateFormConfig:
         assert config.save_to is None
 
     def test_populated_optional_fields_preserved(self):
-        config = _create_form_config(
+        config = import_view._create_form_config(
             self._row(private_key="C:/keys/key.pem", save_to="survey_data")
         )
 
@@ -172,7 +162,7 @@ class TestGetFilteredImportLog:
             ]
         )
         with patch.object(import_view, "duckdb_get_table", return_value=log):
-            result = _get_filtered_import_log("test_project")
+            result = import_view._get_filtered_import_log("test_project")
 
         assert result["alias"].to_list() == ["a", "c"]
 
@@ -180,7 +170,7 @@ class TestGetFilteredImportLog:
         with patch.object(
             import_view, "duckdb_get_table", return_value=_import_log_df()
         ) as mock_get:
-            _get_filtered_import_log("test_project")
+            import_view._get_filtered_import_log("test_project")
 
         mock_get.assert_called_once_with(
             project_id="test_project", alias="import_log", db_name="logs"
@@ -199,7 +189,7 @@ class TestLoadRawDatasets:
             ),
             patch.object(import_view, "_process_import_log") as mock_process,
         ):
-            load_raw_datasets("test_project")
+            import_view.load_raw_datasets("test_project")
 
         _st.error.assert_called()
         mock_process.assert_not_called()
@@ -207,12 +197,10 @@ class TestLoadRawDatasets:
     def test_nonempty_log_is_processed(self):
         log = _import_log_df()
         with (
-            patch.object(
-                import_view, "_get_filtered_import_log", return_value=log
-            ),
+            patch.object(import_view, "_get_filtered_import_log", return_value=log),
             patch.object(import_view, "_process_import_log") as mock_process,
         ):
-            load_raw_datasets("test_project")
+            import_view.load_raw_datasets("test_project")
 
         mock_process.assert_called_once_with("test_project", log)
 
@@ -223,7 +211,7 @@ class TestProcessImportLog:
     def test_processes_each_row(self):
         log = _import_log_df([{"alias": "a"}, {"alias": "b"}])
         with patch.object(import_view, "_process_single_import") as mock_single:
-            _process_import_log("test_project", log)
+            import_view._process_import_log("test_project", log)
 
         assert mock_single.call_count == 2
         processed_aliases = [
@@ -241,7 +229,7 @@ class TestProcessSingleImport:
             patch.object(import_view, "_load_dataset_by_source") as mock_load,
             patch.object(import_view, "_add_to_session_state") as mock_add,
         ):
-            _process_single_import("test_project", row)
+            import_view._process_single_import("test_project", row)
 
         mock_load.assert_called_once_with("test_project", row)
         mock_add.assert_called_once_with("survey")
@@ -252,7 +240,7 @@ class TestProcessSingleImport:
             patch.object(import_view, "_load_dataset_by_source") as mock_load,
             patch.object(import_view, "_add_to_session_state") as mock_add,
         ):
-            _process_single_import("test_project", row)
+            import_view._process_single_import("test_project", row)
 
         mock_load.assert_not_called()
         mock_add.assert_called_once_with("survey")
@@ -267,7 +255,7 @@ class TestLoadDatasetBySource:
             patch.object(import_view, "_load_from_local_storage") as mock_local,
             patch.object(import_view, "_load_from_surveycto") as mock_scto,
         ):
-            _load_dataset_by_source("test_project", row)
+            import_view._load_dataset_by_source("test_project", row)
 
         mock_local.assert_called_once_with("test_project", row)
         mock_scto.assert_not_called()
@@ -278,7 +266,7 @@ class TestLoadDatasetBySource:
             patch.object(import_view, "_load_from_local_storage") as mock_local,
             patch.object(import_view, "_load_from_surveycto") as mock_scto,
         ):
-            _load_dataset_by_source("test_project", row)
+            import_view._load_dataset_by_source("test_project", row)
 
         mock_scto.assert_called_once_with("test_project", row)
         mock_local.assert_not_called()
@@ -289,7 +277,7 @@ class TestLoadDatasetBySource:
             patch.object(import_view, "_load_from_local_storage") as mock_local,
             patch.object(import_view, "_load_from_surveycto") as mock_scto,
         ):
-            _load_dataset_by_source("test_project", row)
+            import_view._load_dataset_by_source("test_project", row)
 
         mock_local.assert_not_called()
         mock_scto.assert_not_called()
@@ -310,7 +298,7 @@ class TestLoadFromSurveycto:
             "refresh": True,
         }
         with patch.object(import_view, "download_forms") as mock_download:
-            _load_from_surveycto("test_project", row)
+            import_view._load_from_surveycto("test_project", row)
 
         mock_download.assert_called_once()
         kwargs = mock_download.call_args.kwargs
@@ -327,14 +315,14 @@ class TestAddToSessionState:
     def test_new_alias_appended(self):
         _st.session_state.st_raw_dataset_list = []
 
-        _add_to_session_state("survey")
+        import_view._add_to_session_state("survey")
 
         assert _st.session_state.st_raw_dataset_list == ["survey"]
 
     def test_existing_alias_not_duplicated(self):
         _st.session_state.st_raw_dataset_list = ["survey"]
 
-        _add_to_session_state("survey")
+        import_view._add_to_session_state("survey")
 
         assert _st.session_state.st_raw_dataset_list == ["survey"]
 
@@ -351,7 +339,7 @@ class TestUpdateImportLog:
             patch.object(_st, "data_editor", return_value=edited),
             patch.object(import_view, "duckdb_save_table") as mock_save,
         ):
-            update_import_log(log)
+            import_view.update_import_log(log)
 
         mock_save.assert_called_once()
         kwargs = mock_save.call_args.kwargs
@@ -367,7 +355,7 @@ class TestUpdateImportLog:
             patch.object(_st, "data_editor", return_value=log),
             patch.object(import_view, "duckdb_save_table") as mock_save,
         ):
-            update_import_log(log)
+            import_view.update_import_log(log)
 
         mock_save.assert_not_called()
 
@@ -412,9 +400,7 @@ class TestRemoveImportFlow:
                     "datasure.utils.duckdb_utils.duckdb_get_imported_datasets",
                     return_value=[],
                 ),
-                patch(
-                    "datasure.utils.duckdb_utils.duckdb_remove_table"
-                ) as mock_remove,
+                patch("datasure.utils.duckdb_utils.duckdb_remove_table") as mock_remove,
                 patch(
                     "datasure.utils.duckdb_utils.duckdb_table_exists",
                     side_effect=[True, False],
