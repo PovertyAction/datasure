@@ -21,7 +21,7 @@ import streamlit as st
 from dateutil.relativedelta import relativedelta
 from pydantic import BaseModel, Field, field_validator
 
-from datasure.utils.chart_utils import donut_chart2
+from datasure.utils.chart_utils import donut_chart
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding
@@ -1370,16 +1370,16 @@ def summary_data_quality(data: pl.DataFrame, survey_id: str | None) -> None:
 
     # Create donut charts
     if metrics.duplicates_pct is not None:
-        perc_duplicates_chart = donut_chart2(actual_value=metrics.duplicates_pct)
+        perc_duplicates_chart = donut_chart(actual_value=metrics.duplicates_pct)
         plt.close(perc_duplicates_chart)
 
-    perc_outliers_chart = donut_chart2(actual_value=metrics.outliers_pct)
+    perc_outliers_chart = donut_chart(actual_value=metrics.outliers_pct)
     plt.close(perc_outliers_chart)
 
-    perc_missing_chart = donut_chart2(actual_value=metrics.missing_pct)
+    perc_missing_chart = donut_chart(actual_value=metrics.missing_pct)
     plt.close(perc_missing_chart)
 
-    perc_back_check_error_rate_chart = donut_chart2(
+    perc_back_check_error_rate_chart = donut_chart(
         actual_value=metrics.backcheck_error_pct
     )
 

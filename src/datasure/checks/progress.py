@@ -17,7 +17,7 @@ import seaborn as sns
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
 
-from datasure.utils.chart_utils import donut_chart2
+from datasure.utils.chart_utils import donut_chart
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding
@@ -868,7 +868,7 @@ def _display_chart_if_configured(
         Title to display above the chart.
     """
     if column and values:
-        chart = donut_chart2(actual_value=int(percentage))
+        chart = donut_chart(actual_value=int(percentage))
         st.markdown(f"**{chart_title}**")
         st.pyplot(chart, width="stretch")
 
