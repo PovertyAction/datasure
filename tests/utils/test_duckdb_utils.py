@@ -467,9 +467,7 @@ class TestDuckdbDeleteRows:
 
     @patch("datasure.utils.duckdb_utils.get_cache_path")
     @patch("duckdb.connect")
-    def test_delete_rows_sanitizes_table_alias(
-        self, mock_connect, mock_get_cache_path
-    ):
+    def test_delete_rows_sanitizes_table_alias(self, mock_connect, mock_get_cache_path):
         """Aliases with spaces/dashes are normalized and validated."""
         mock_get_cache_path.return_value = "/fake/path/raw.duckdb"
         mock_conn = MagicMock()
@@ -539,4 +537,3 @@ class TestDuckdbDeleteRows:
 
             remaining = duckdb_get_table("test_project", "import_log", "logs")
             assert remaining.shape[0] == 2
-
