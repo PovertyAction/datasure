@@ -186,9 +186,9 @@ class RemoveColumnsOperation(PrepOperation):
             # Remove columns using Polars
             return results, PrepActionResult(**updated_prep_args)
 
+        except (ValidationError, OperationError):
+            raise
         except Exception as e:
-            if isinstance(e, ValidationError | OperationError):
-                raise
             raise OperationError(f"Failed to remove columns: {e}") from e
 
 
@@ -229,9 +229,9 @@ class RemoveRowsOperation(PrepOperation):
 
             return results, PrepActionResult(**updated_prep_args)
 
+        except (ValidationError, OperationError):
+            raise
         except Exception as e:
-            if isinstance(e, ValidationError | OperationError):
-                raise
             raise OperationError(f"Failed to remove rows: {e}") from e
 
     def _remove_by_index(self, data: pl.DataFrame, index_values: list) -> pl.DataFrame:
@@ -431,9 +431,9 @@ class TransformColumnsOperation(PrepOperation):
 
             return result_data, PrepActionResult(**prep_args)
 
+        except (ValidationError, OperationError):
+            raise
         except Exception as e:
-            if isinstance(e, ValidationError | OperationError):
-                raise
             raise OperationError(f"Failed to transform columns: {e}") from e
 
     @staticmethod
@@ -702,9 +702,9 @@ class AddNewColumnOperation(PrepOperation):
 
             return results, PrepActionResult(**updated_prep_args)
 
+        except (ValidationError, OperationError):
+            raise
         except Exception as e:
-            if isinstance(e, ValidationError | OperationError):
-                raise
             raise OperationError(f"Failed to add new column: {e}") from e
 
     def _add_constant_column(
@@ -842,6 +842,8 @@ class PrepProcessor:
         for action in actions:
             try:
                 result_data, _ = self.execute_single_action(result_data, action)
+            except (ValidationError, OperationError):
+                raise
             except Exception as e:
                 raise OperationError(f"Failed to execute action '{action}': {e}") from e
 

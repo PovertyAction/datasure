@@ -96,6 +96,40 @@ just pre-commit-run        # Run pre-commit hooks
 4. **B007 - Unused loop variables**: Prefix with underscore
 5. **TRY301 - Abstract raise**: Move raise statements to helper functions
 
+### Error Handling Conventions
+
+Bare `except:` is never allowed (Ruff `E722` is enforced). Catch the most
+specific exception the code can actually raise, and follow these rules:
+
+1. **Library and utility code** (`utils/`, `processing/`, `checks/`): catch
+   specific exceptions only (`OSError`, `ValueError`, `pl.exceptions.PolarsError`,
+   `duckdb.Error`, etc.). Never silently swallow an exception - log it with a
+   module logger (`logger = logging.getLogger(__name__)`) before returning a
+   fallback value.
+
+2. **Domain-error translation**: when wrapping arbitrary lower-level failures
+   in a domain exception (e.g. `OperationError` in `processing/prep.py`),
+   re-raise known domain exceptions first, then translate the rest:
+
+   ```python
+   except (ValidationError, OperationError):
+       raise
+   except Exception as e:
+       raise OperationError(f"Failed to remove columns: {e}") from e
+   ```
+
+   Always chain with `from e` so the original traceback is preserved.
+
+3. **UI boundaries** (Streamlit button callbacks, per-item loops where one
+   failure must not abort the batch or crash the page): a broad
+   `except Exception` is acceptable *only* here, and it must both log the full
+   traceback (`logger.exception(...)`) and show the user a message
+   (`st.error(...)`). Add a short comment marking the boundary.
+
+4. **Streamlit control flow**: never call `st.rerun()` inside a `try` block
+   with a broad except - it raises a control-flow exception that the handler
+   would swallow. Put it in the `else:` clause instead.
+
 ## Testing
 
 DataSure uses pytest for testing with comprehensive coverage requirements.

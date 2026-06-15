@@ -1394,7 +1394,8 @@ class TestPrepProcessor:
                 )
             )
         ]
-        with pytest.raises(OperationError, match="Failed to execute action"):
+        # Domain errors raised by individual actions propagate unwrapped
+        with pytest.raises(OperationError, match="Columns not found"):
             processor.execute_all_actions(data, actions)
 
 

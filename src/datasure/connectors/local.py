@@ -1,13 +1,19 @@
+import logging
 import os
 from pathlib import Path
+from zipfile import BadZipFile
 
+import duckdb
 import polars as pl
 import streamlit as st
 from openpyxl import load_workbook
+from openpyxl.utils.exceptions import InvalidFileException
 from polars_readstat import scan_readstat
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+
+logger = logging.getLogger(__name__)
 
 # --- Pydantic Models for Validation ---
 
@@ -87,7 +93,8 @@ def get_excel_sheet_names(file_path: str) -> list[str]:
         # Use read_only=True for better performance
         workbook = load_workbook(file_path, read_only=True, data_only=True)
         return workbook.sheetnames  # noqa: TRY300
-    except Exception as e:
+    except (OSError, ValueError, InvalidFileException, BadZipFile) as e:
+        logger.warning("Failed to read Excel file %s: %s", file_path, e)
         st.error(f"Error reading Excel file: {e}")
         return []
 
@@ -129,7 +136,8 @@ def load_data_efficiently(filename: str, sheet_name: str | None = None) -> pl.Da
         else:
             raise ValueError(f"Unsupported file format: {file_ext}")  # noqa: TRY301
 
-    except Exception as e:
+    except (OSError, ValueError, pl.exceptions.PolarsError) as e:
+        logger.warning("Failed to load file %s: %s", filename, e)
         st.error(f"Error loading file {filename}: {e}")
         return pl.DataFrame()
 
@@ -194,15 +202,12 @@ def render_local_file_form(
 
             else:
                 if path_obj.suffix.lower() in [".xlsx", ".xls"]:
-                    try:
-                        sheets = get_excel_sheet_names(file_path)
-                        if sheets and defaults.get("sheet_name") in sheets:
-                            default_index = sheets.index(defaults.get("sheet_name"))
+                    # get_excel_sheet_names returns [] on read failure
+                    sheets = get_excel_sheet_names(file_path)
+                    if sheets and defaults.get("sheet_name") in sheets:
+                        default_index = sheets.index(defaults.get("sheet_name"))
 
-                        disable_submit = bool(not sheets)
-
-                    except Exception:
-                        pass  # sheets will remain empty
+                    disable_submit = bool(not sheets)
                 else:
                     disable_submit = False  # Non-Excel files
                     sheets = []
@@ -290,8 +295,11 @@ def _handle_form_submission(
 
         st.success(f"File {'updated' if edit_mode else 'added'} successfully!")
 
-    except Exception as e:
+    except ValidationError as e:
         st.error(f"Validation error: {e}")
+    except duckdb.Error as e:
+        logger.exception("Failed to save import configuration for alias %s", alias)
+        st.error(f"Failed to save import configuration: {e}")
 
 
 # --- Optimized Data Loading ---
@@ -321,6 +329,9 @@ def load_local_data(
         st.success(f"Data loaded successfully! Shape: {data.shape}")
 
     except Exception as e:
+        # UI boundary: a failed import must not crash the page, but the
+        # error has to be visible in the logs, not just the toast.
+        logger.exception("Failed to load local data for alias %s", alias)
         st.error(f"Error loading data: {e}")
 
 
@@ -334,7 +345,8 @@ def validate_file_accessibility(file_path: Path) -> bool:
         return (
             path_obj.exists() and path_obj.is_file() and os.access(file_path, os.R_OK)
         )
-    except Exception:
+    except OSError as e:
+        logger.debug("File accessibility check failed for %s: %s", file_path, e)
         return False
 
 
@@ -349,5 +361,6 @@ def get_file_info(file_path: Path) -> dict:
             "extension": path_obj.suffix.lower(),
             "exists": path_obj.exists(),
         }
-    except Exception:
+    except OSError as e:
+        logger.debug("Could not stat file %s: %s", file_path, e)
         return {"exists": False}

@@ -97,11 +97,11 @@ def main():
 
 def get_version():
     """Get the package version."""
-    try:
-        from importlib.metadata import version
+    from importlib.metadata import PackageNotFoundError, version
 
+    try:
         return version("DataSure")
-    except Exception:
+    except PackageNotFoundError:
         return "0.2.0"
 
 

@@ -194,7 +194,7 @@ class TestGetExcelSheetNames:
     @patch("datasure.connectors.local.load_workbook")
     def test_excel_sheet_names_error_handling(self, mock_load_workbook, mock_st):
         """Test error handling in get_excel_sheet_names."""
-        mock_load_workbook.side_effect = Exception("Cannot read file")
+        mock_load_workbook.side_effect = OSError("Cannot read file")
 
         result = get_excel_sheet_names("invalid_file.xlsx")
 
@@ -310,7 +310,7 @@ class TestLoadDataEfficiently:
         csv_file = tmp_path / "test.csv"
         csv_file.write_text("test")
 
-        mock_read_csv.side_effect = Exception("Read error")
+        mock_read_csv.side_effect = pl.exceptions.ComputeError("Read error")
 
         result = load_data_efficiently(str(csv_file))
 
@@ -582,7 +582,7 @@ class TestGetFileInfo:
     @patch("datasure.connectors.local.Path")
     def test_get_info_error_handling(self, mock_path):
         """Test error handling in get_file_info."""
-        mock_path.side_effect = Exception("Path error")
+        mock_path.side_effect = OSError("Path error")
 
         info = get_file_info("some_path")
 
