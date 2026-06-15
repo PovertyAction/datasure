@@ -468,7 +468,7 @@ src/datasure/                   # Main package (source layout)
 
 ## Code of Conduct
 
-By participating in this project, you agree to abide by our Code of Conduct. Please treat all contributors with respect and create a welcoming environment for everyone.
+By participating in this project, you agree to abide by our Code of Conduct ([CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)). Please treat all contributors with respect and create a welcoming environment for everyone.
 
 ---
 
