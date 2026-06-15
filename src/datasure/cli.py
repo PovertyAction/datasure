@@ -102,7 +102,8 @@ def get_version():
     try:
         return version("DataSure")
     except PackageNotFoundError:
-        return "0.2.0"
+        # Better to admit ignorance than report a stale hardcoded version
+        return "unknown"
 
 
 if __name__ == "__main__":
