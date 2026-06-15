@@ -240,22 +240,26 @@ just bump-patch  # Creates git tag
 # 3. Push to trigger automation
 just push-all    # Pushes commits and tags
 
-# 4. Monitor workflows in GitHub Actions
-# - Code Coverage runs first (quality gate)
-# - Build and Release runs only if Code Coverage passes
-# - Package published to PyPI automatically
-# - GitHub release created with artifacts
+# 4. Monitor the Release workflow in GitHub Actions
+# - The tag push triggers .github/workflows/release.yml, which runs:
+#   test (pre-commit + pytest) -> build and verify -> publish -> GitHub release
+# - The build job fails if the tag does not match the pyproject.toml version
+# - Pre-releases (a/b/rc/dev suffixes) publish to Test PyPI;
+#   final X.Y.Z versions publish to PyPI
+# - Publishing uses PyPI Trusted Publishing (OIDC) - no API tokens
 ```
 
 ### Quality Gates
 
-All releases must pass:
+All releases must pass (enforced by the `test` and `build` jobs in release.yml):
 
 - **Pre-commit hooks**: Code formatting and linting
 - **Test suite**: All tests must pass
-- **SonarQube analysis**: Code quality and security checks
+- **Version consistency**: Git tag must match the version in pyproject.toml
+- **Wheel smoke test**: Built wheel installs cleanly and `datasure --version` works
 - **Documentation completeness**: Both CHANGELOG.md and RELEASENOTES.md updated
 
+SonarQube analysis runs on every push to main via the Code Coverage workflow.
 Failed quality checks prevent releases.
 
 ### Documentation Review Process
@@ -274,9 +278,12 @@ Failed quality checks prevent releases.
 
 For emergency releases only:
 
-1. Go to GitHub Actions → Build and Release → Run workflow
-2. Enter version (e.g., `v1.0.1`) and click "Run workflow"
-3. **Note**: Manual releases should still update documentation post-release
+1. Go to GitHub Actions → Release → Run workflow
+2. Enter the version (e.g., `v1.0.1`) and click "Run workflow"
+3. The version must match `pyproject.toml` on the selected branch; the build
+   job fails otherwise. Manual runs publish to PyPI/Test PyPI but do not
+   create a GitHub release (that requires a tag push).
+4. **Note**: Manual releases should still update documentation post-release
 
 ## Submitting Changes
 
