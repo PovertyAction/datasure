@@ -7,6 +7,7 @@ Thank you for your interest in contributing to DataSure! This guide will help yo
 - [Development Setup](#development-setup)
 - [Development Workflow](#development-workflow)
 - [Testing](#testing)
+- [Dependency Management](#dependency-management)
 - [Package Building](#package-building)
 - [Version Management](#version-management)
 - [Release Process](#release-process)
@@ -160,6 +161,71 @@ tests/
 ├── processing/                 # Data processing tests
 └── utils/                      # Utility function tests
 ```
+
+## Dependency Management
+
+DataSure declares dependencies in `pyproject.toml` and locks exact versions
+in `uv.lock`. Three places matter:
+
+- **`[project.dependencies]`** - packages DataSure imports directly. These
+  are install requirements of the published package.
+- **`[dependency-groups].dev`** - development tooling (PEP 735). Never
+  shipped with the package.
+- **`[tool.uv] constraint-dependencies`** - security version floors for
+  transitive packages DataSure does *not* import (they are pulled in by
+  streamlit, requests, matplotlib, keyring, etc.). Constraints steer
+  dependency resolution but are not install requirements, so they never
+  leak into the published package metadata.
+
+For routine (non-security) refreshes, `just update-reqs` re-locks everything
+to the latest compatible versions.
+
+### Responding to a Dependabot Alert
+
+When an alert flags a vulnerable package, work through this decision tree:
+
+1. **Upgrade the lock first - this is the actual remediation:**
+
+   ```bash
+   uv lock --upgrade-package <package>
+   uv sync
+   just test
+   ```
+
+   `uv.lock` controls what developers and CI actually install. If the
+   resolver reaches the fixed version, the alert closes once this merges.
+
+2. **Add a version floor so a future re-lock cannot regress.** Where the
+   floor goes depends on whether DataSure imports the package - check with
+   `uv tree --invert --package <package>` and grep `src/datasure/`:
+
+   - **Transitive** (not imported): add or raise its floor in
+     `[tool.uv] constraint-dependencies`, e.g. `"pillow>=12.2.0"`. Do
+     **not** add transitive packages to `[project.dependencies]` - pins
+     there become install requirements of the published package and rot
+     once the CVE is forgotten.
+   - **Direct** (imported in `src/datasure/`): raise its floor in
+     `[project.dependencies]` instead, with a short comment naming the
+     reason. This also protects users who install DataSure from PyPI.
+
+   Re-run `uv lock` after editing and commit `pyproject.toml` + `uv.lock`
+   together.
+
+3. **If the resolver cannot reach the fixed version**, a parent package is
+   capping it (for example, streamlit pinning protobuf below the fix).
+   Upgrading the parent is the real fix: `uv lock --upgrade-package
+   <parent>`, or raise the parent's floor. Adding a conflicting constraint
+   only makes resolution fail - acceptable temporarily to keep the problem
+   loud, but remove it if you need to cut a release before the parent ships
+   a fix.
+
+4. **Verify**: run the full test suite (a vulnerable-version bump can be a
+   major-version bump), and after merging confirm the alert closes under
+   GitHub Security -> Dependabot.
+
+In short: the lock upgrade remediates today; the floor (constraint for
+transitive, `[project.dependencies]` for direct) prevents regression
+tomorrow. A security fix usually needs both.
 
 ## Package Building
 
