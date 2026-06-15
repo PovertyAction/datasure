@@ -97,7 +97,7 @@ def patched_progress():
         patch("datasure.checks.progress.save_check_settings"),
         patch("datasure.checks.progress.trigger_save"),
         patch("datasure.checks.progress.demo_callout"),
-        patch("datasure.checks.progress.donut_chart2", return_value=MagicMock()),
+        patch("datasure.checks.progress.donut_chart", return_value=MagicMock()),
     ):
         yield mock_st
 
@@ -115,7 +115,7 @@ def prog_bc():
         prog_module.save_check_settings = MagicMock()
         prog_module.trigger_save = MagicMock()
         prog_module.demo_callout = MagicMock()
-        prog_module.donut_chart2 = MagicMock(return_value=MagicMock())
+        prog_module.donut_chart = MagicMock(return_value=MagicMock())
         with patch(
             "datasure.utils.onboarding_utils.is_demo_project", return_value=False
         ):
