@@ -593,8 +593,7 @@ class TestStandardizeMissingValues:
         assert all(val is None for val in result["col1"])
         assert all(val is None for val in result["col2"])
 
-    @patch("builtins.print")
-    def test_exception_handling_continues_processing(self, mock_print):
+    def test_exception_handling_continues_processing(self, caplog):
         """Test that exceptions in one column don't stop processing others."""
         # Create a DataFrame with a column that will cause issues during processing
         df = pl.DataFrame(
@@ -621,11 +620,10 @@ class TestStandardizeMissingValues:
             # The function should handle any exceptions gracefully
             result = standardize_missing_values(df)
 
-            # Check that a warning was printed
-            assert mock_print.called
+            # Check that a warning was logged
             assert any(
-                "Warning: Could not standardize missing values" in str(call)
-                for call in mock_print.call_args_list
+                "Could not standardize missing values" in record.message
+                for record in caplog.records
             )
 
         assert isinstance(result, pl.DataFrame)

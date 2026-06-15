@@ -251,26 +251,34 @@ class TestIntegration:
         home_dir = tmp_path / "home"
         home_dir.mkdir()
 
-        # Change to production directory and mock home
-        monkeypatch.chdir(prod_dir)
-        monkeypatch.setattr("datasure.utils.cache_utils.Path.home", lambda: home_dir)
-        monkeypatch.setattr("os.name", "posix")
         monkeypatch.delenv("XDG_DATA_HOME", raising=False)
 
-        # Test the workflow
-        base_dir = get_cache_base_dir()
-        expected_base = home_dir / ".local" / "share" / "datasure" / "cache"
-        assert base_dir == expected_base
-        assert base_dir.exists()
+        # Patch via context managers, not the monkeypatch fixture: while
+        # os.name is "posix", constructing pathlib.Path on Windows raises
+        # NotImplementedError ("cannot instantiate 'PosixPath'"). Context
+        # managers restore the patches before pytest formats a potential
+        # failure report, which itself instantiates Path. Path.cwd is
+        # mocked for the same reason - the real call would construct a
+        # PosixPath while os.name is patched.
+        with (
+            patch("datasure.utils.cache_utils.Path.cwd", return_value=prod_dir),
+            patch("datasure.utils.cache_utils.Path.home", return_value=home_dir),
+            patch("os.name", "posix"),
+        ):
+            # Test the workflow
+            base_dir = get_cache_base_dir()
+            expected_base = home_dir / ".local" / "share" / "datasure" / "cache"
+            assert base_dir == expected_base
+            assert base_dir.exists()
 
-        # Test get_cache_path
-        data_path = get_cache_path("project2", "data", "survey.db")
-        expected_data = expected_base / "project2" / "data" / "survey.db"
-        assert data_path == expected_data
+            # Test get_cache_path
+            data_path = get_cache_path("project2", "data", "survey.db")
+            expected_data = expected_base / "project2" / "data" / "survey.db"
+            assert data_path == expected_data
 
-        # Test ensure_cache_dir
-        data_dir = ensure_cache_dir("project2", "data")
-        expected_data_dir = expected_base / "project2" / "data"
-        assert data_dir == expected_data_dir
-        assert data_dir.exists()
-        assert data_dir.is_dir()
+            # Test ensure_cache_dir
+            data_dir = ensure_cache_dir("project2", "data")
+            expected_data_dir = expected_base / "project2" / "data"
+            assert data_dir == expected_data_dir
+            assert data_dir.exists()
+            assert data_dir.is_dir()

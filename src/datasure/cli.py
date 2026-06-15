@@ -96,7 +96,7 @@ def main():
 
 
 def get_version():
-    """Get the package version from installed metadata."""
+    """Get the package version."""
     from importlib.metadata import PackageNotFoundError, version
 
     try:

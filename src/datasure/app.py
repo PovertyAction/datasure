@@ -1,8 +1,13 @@
+import logging
 from pathlib import Path
 
 import streamlit as st
 
 from datasure.utils.config_utils import ConfigurationService
+
+# Root logging config belongs to the application entry point, not to
+# library modules. No-op if the root logger is already configured.
+logging.basicConfig(level=logging.INFO)
 
 # --- PAGE SETUP --- #
 

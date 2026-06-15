@@ -33,7 +33,7 @@ dependencies = [
     "scipy>=1.17.0",
     "geopy>=2.4.1",
     "requests>=2.32.3",
-    "pyarrow>=16.0.0",
+    "pyarrow>=23.0.1",
     "opencv-python>=4.11.0.86",
     "matplotlib>=3.10.0",
     "polars>=1.30.0",
@@ -79,6 +79,13 @@ name = "pypi"
 url = "https://pypi.org/simple"
 publish-url = "https://upload.pypi.org/legacy/"
 
+# Publish target only (explicit = never used for dependency resolution)
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true
+
 [tool.ruff]
 line-length = 88
 fix = true
@@ -122,7 +129,6 @@ ignore = [
     "D400",   # First line should end with a period
     "D401",   # First line of docstring should be in imperative mood
     "RUF005", # Code suggestions
-    "E722",   #bare-exception
 ]
 
 [tool.ruff.lint.per-file-ignores]

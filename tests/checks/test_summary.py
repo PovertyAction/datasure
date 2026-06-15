@@ -939,7 +939,7 @@ class TestUIComponents:
     @patch("datasure.checks.summary.st")
     @patch("datasure.checks.summary.pandas_to_polars")
     @patch("datasure.checks.summary.calculate_data_quality_metrics")
-    @patch("datasure.checks.summary.donut_chart2")
+    @patch("datasure.checks.summary.donut_chart")
     @patch("datasure.checks.summary.plt")
     def test_summary_data_quality(
         self, mock_plt, mock_chart, mock_calc, mock_convert, mock_st
@@ -979,7 +979,7 @@ class TestUIComponents:
     @patch("datasure.checks.summary.st")
     @patch("datasure.checks.summary.pandas_to_polars")
     @patch("datasure.checks.summary.calculate_data_quality_metrics")
-    @patch("datasure.checks.summary.donut_chart2")
+    @patch("datasure.checks.summary.donut_chart")
     @patch("datasure.checks.summary.plt")
     def test_summary_data_quality_no_survey_id(
         self, mock_plt, mock_chart, mock_calc, mock_convert, mock_st
