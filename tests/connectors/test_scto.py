@@ -1340,7 +1340,7 @@ class TestMediaDownloaderExtended:
     def test_download_field_media_exception_handling(self, caplog, tmp_path):
         """Test downloading field media with exception handling."""
         mock_client = Mock()
-        mock_client.download_attachment_from_url.side_effect = Exception(
+        mock_client.download_attachment_from_url.side_effect = OSError(
             "Download failed"
         )
 

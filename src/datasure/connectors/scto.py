@@ -29,6 +29,8 @@ from datasure.utils.secure_credentials import (
 # --- Constants --- #
 SCTO_KEY_IMPORT_OPTIONS = ("Import from File", "Paste private key text")
 
+logger = logging.getLogger(__name__)
+
 # --- Configuration and Models --- #
 
 
@@ -277,7 +279,7 @@ class DataProcessor:
             elif field_type == "note":
                 return data.drop(col)
             return data  # noqa: TRY300
-        except Exception as e:
+        except pl.exceptions.PolarsError as e:
             self.logger.warning(f"Failed to convert column {col}: {e}")
             return data
 
@@ -364,7 +366,7 @@ class MediaDownloader:
                             (idx + 1) / len(media_data),
                             text=f"Downloading {col}... {idx + 1}/{len(media_data)}",
                         )
-                    except Exception:
+                    except (SurveyCTOAPIError, OSError):
                         self.logger.exception(
                             f"Failed to download {col} for {row['KEY']}"
                         )
@@ -433,6 +435,9 @@ class SurveyCTOClient:
             else:
                 self._skip_validation(credentials.server, connection_info)
 
+        except ConnectionError:
+            # Already translated by the validation handlers; do not re-wrap.
+            raise
         except Exception as e:
             self._handle_connection_error(e, credentials.server)
 
@@ -629,6 +634,12 @@ class SurveyCTOClient:
             # If it fails (e.g., for server datasets), fallback to full download
             return self._import_regular_form(form_config)
         except Exception:
+            self.logger.info(
+                "Regular form import failed for %s; falling back to server "
+                "dataset import",
+                form_config.form_id,
+                exc_info=True,
+            )
             return self._import_server_dataset(form_config)
 
     def _import_server_dataset(self, form_config: FormConfig) -> int:
@@ -652,8 +663,8 @@ class SurveyCTOClient:
         try:
             with open(private_key) as f:
                 return f.read().strip()
-        except Exception as e:
-            raise ValidationError(f"Failed to read private key: {e}")  # noqa: B904
+        except (OSError, UnicodeDecodeError) as e:
+            raise ValidationError(f"Failed to read private key: {e}") from e
 
     def _import_regular_form(self, form_config: FormConfig) -> int:
         """Import from regular form with incremental updates."""
@@ -791,6 +802,9 @@ class SurveyCTOUI:
                         type="scto_login",
                     )
                 except Exception as e:
+                    # UI boundary: surface the failure without crashing the
+                    # page, but keep the traceback in the logs.
+                    self.logger.exception("SurveyCTO connection failed")
                     st.error(f"Connection failed: {e}")
 
     def _validate_private_key_text(self, private_key_text: str) -> bool:
@@ -1097,10 +1111,18 @@ class SurveyCTOUI:
             else:
                 self._add_form_to_project(form_config)
                 st.success("Form added successfully")
-
-            st.rerun()
         except Exception as e:
+            # UI boundary: surface the failure without crashing the page.
+            self.logger.exception(
+                "Failed to %s form %s",
+                "update" if edit_mode else "add",
+                form_config.alias,
+            )
             st.error(f"Failed to {'update' if edit_mode else 'add'} form: {e}")
+        else:
+            # Outside the try block: st.rerun() raises a Streamlit
+            # control-flow exception that must not be caught above.
+            st.rerun()
 
     def _get_form_options(self, server: str) -> list[tuple[str, str]] | None:
         """
@@ -1122,7 +1144,7 @@ class SurveyCTOUI:
                         title = form.get("title", "Title unavailable")
                         form_options.append((form_id, title))
 
-                    except Exception as e:
+                    except (AttributeError, TypeError) as e:
                         # If we can't get the title, just use the form ID
                         self.logger.warning(f"Could not get title for form {form}: {e}")
                         form_options.append((str(form), "Title unavailable"))
@@ -1161,7 +1183,7 @@ class SurveyCTOUI:
 
             return form_id  # noqa: TRY300
 
-        except Exception as e:
+        except (KeyError, IndexError, TypeError, AttributeError) as e:
             self.logger.warning(f"Error extracting title for form {form_id}: {e}")
             return form_id
 
@@ -1302,6 +1324,9 @@ def download_forms(project_id: str, form_configs: list[FormConfig]) -> None:
             )
             success_count += 1
         except Exception as e:
+            # UI boundary: one failed form must not abort the batch, but the
+            # traceback has to land in the logs.
+            logger.exception("Failed to download form %s", form_config.alias)
             st.error(f"Failed to download {form_config.alias}: {e}")
             failed_count += 1
         finally:

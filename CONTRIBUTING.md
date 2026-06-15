@@ -97,6 +97,40 @@ just pre-commit-run        # Run pre-commit hooks
 4. **B007 - Unused loop variables**: Prefix with underscore
 5. **TRY301 - Abstract raise**: Move raise statements to helper functions
 
+### Error Handling Conventions
+
+Bare `except:` is never allowed (Ruff `E722` is enforced). Catch the most
+specific exception the code can actually raise, and follow these rules:
+
+1. **Library and utility code** (`utils/`, `processing/`, `checks/`): catch
+   specific exceptions only (`OSError`, `ValueError`, `pl.exceptions.PolarsError`,
+   `duckdb.Error`, etc.). Never silently swallow an exception - log it with a
+   module logger (`logger = logging.getLogger(__name__)`) before returning a
+   fallback value.
+
+2. **Domain-error translation**: when wrapping arbitrary lower-level failures
+   in a domain exception (e.g. `OperationError` in `processing/prep.py`),
+   re-raise known domain exceptions first, then translate the rest:
+
+   ```python
+   except (ValidationError, OperationError):
+       raise
+   except Exception as e:
+       raise OperationError(f"Failed to remove columns: {e}") from e
+   ```
+
+   Always chain with `from e` so the original traceback is preserved.
+
+3. **UI boundaries** (Streamlit button callbacks, per-item loops where one
+   failure must not abort the batch or crash the page): a broad
+   `except Exception` is acceptable *only* here, and it must both log the full
+   traceback (`logger.exception(...)`) and show the user a message
+   (`st.error(...)`). Add a short comment marking the boundary.
+
+4. **Streamlit control flow**: never call `st.rerun()` inside a `try` block
+   with a broad except - it raises a control-flow exception that the handler
+   would swallow. Put it in the `else:` clause instead.
+
 ## Testing
 
 DataSure uses pytest for testing with comprehensive coverage requirements.
@@ -208,11 +242,14 @@ just package-workflow     # Complete workflow: test, build, and verify
 
 ### Publishing Commands
 
+Releases are normally published by CI via PyPI Trusted Publishing when a
+version tag is pushed. The recipes below are manual escape hatches and
+require `UV_PUBLISH_TOKEN` to be set:
+
 ```bash
-just check-pypi           # Check package metadata and structure
-just pypi-info            # View package info and version
-just publish-test         # Publish to TestPyPI (for testing)
-just publish              # Publish to PyPI (production)
+just publish-test         # Clean build + publish to TestPyPI
+just publish              # Clean build + publish to PyPI (production)
+just verify-published     # Install latest from PyPI and run datasure --version
 ```
 
 ## Version Management
@@ -221,44 +258,36 @@ DataSure uses automated version management with semantic versioning (MAJOR.MINOR
 
 ### Version Bump Commands
 
-#### Alpha Releases (Early Development Testing)
+Version bumps use [`uv version --bump`](https://docs.astral.sh/uv/guides/package/)
+under the hood. Stages can be combined, and `stable` finalizes a pre-release.
+
+#### Releases (bump + commit + tag)
 
 ```bash
-just bump-patch-alpha     # 0.1.0 -> 0.1.1a1
-just bump-minor-alpha     # 0.1.0 -> 0.2.0a1
-just bump-major-alpha     # 0.1.0 -> 1.0.0a1
-```
-
-#### Beta Releases (Feature-Complete Testing)
-
-```bash
-just bump-patch-beta      # 0.1.0 -> 0.1.1b1
-just bump-minor-beta      # 0.1.0 -> 0.2.0b1
-just bump-major-beta      # 0.1.0 -> 1.0.0b1
-```
-
-#### Release Candidates (Final Testing)
-
-```bash
-just bump-patch-rc        # 0.1.0 -> 0.1.1rc1
-just bump-minor-rc        # 0.1.0 -> 0.2.0rc1
-just bump-major-rc        # 0.1.0 -> 1.0.0rc1
-```
-
-#### Final Releases
-
-```bash
-just bump-patch           # 0.1.0 -> 0.1.1
-just bump-minor           # 0.1.0 -> 0.2.0
-just bump-major           # 0.1.0 -> 1.0.0
+just bump-patch            # 0.1.0  -> 0.1.1
+just bump-minor            # 0.1.0  -> 0.2.0
+just bump-major            # 0.1.0  -> 1.0.0
+just bump-pre patch rc     # 0.1.0  -> 0.1.1rc1 (stages: alpha, beta, rc)
+just bump-pre minor beta   # 0.1.0  -> 0.2.0b1
+just bump-stable           # 1.0.0rc1 -> 1.0.0 (finalize a pre-release)
 ```
 
 These commands automatically:
 
-- Update the version in `src/datasure/__init__.py`
+- Verify CHANGELOG.md has entries under `[Unreleased]` (release gate)
+- Update the version in `pyproject.toml`
 - Run `uv sync` to update the lock file
-- Commit the changes to git
-- Create a git tag for the new version
+- Commit `pyproject.toml` and `uv.lock`
+- Create a git tag for the new version (pushing the tag triggers the
+  release pipeline)
+
+#### Version-only bump (no commit, no tag)
+
+```bash
+just bump patch            # any `uv version --bump` stage, combinable
+just bump minor rc
+just bump stable
+```
 
 ### Git Tag Management
 
@@ -306,22 +335,26 @@ just bump-patch  # Creates git tag
 # 3. Push to trigger automation
 just push-all    # Pushes commits and tags
 
-# 4. Monitor workflows in GitHub Actions
-# - Code Coverage runs first (quality gate)
-# - Build and Release runs only if Code Coverage passes
-# - Package published to PyPI automatically
-# - GitHub release created with artifacts
+# 4. Monitor the Release workflow in GitHub Actions
+# - The tag push triggers .github/workflows/release.yml, which runs:
+#   test (pre-commit + pytest) -> build and verify -> publish -> GitHub release
+# - The build job fails if the tag does not match the pyproject.toml version
+# - Pre-releases (a/b/rc/dev suffixes) publish to Test PyPI;
+#   final X.Y.Z versions publish to PyPI
+# - Publishing uses PyPI Trusted Publishing (OIDC) - no API tokens
 ```
 
 ### Quality Gates
 
-All releases must pass:
+All releases must pass (enforced by the `test` and `build` jobs in release.yml):
 
 - **Pre-commit hooks**: Code formatting and linting
 - **Test suite**: All tests must pass
-- **SonarQube analysis**: Code quality and security checks
+- **Version consistency**: Git tag must match the version in pyproject.toml
+- **Wheel smoke test**: Built wheel installs cleanly and `datasure --version` works
 - **Documentation completeness**: Both CHANGELOG.md and RELEASENOTES.md updated
 
+SonarQube analysis runs on every push to main via the Code Coverage workflow.
 Failed quality checks prevent releases.
 
 ### Documentation Review Process
@@ -340,9 +373,12 @@ Failed quality checks prevent releases.
 
 For emergency releases only:
 
-1. Go to GitHub Actions → Build and Release → Run workflow
-2. Enter version (e.g., `v1.0.1`) and click "Run workflow"
-3. **Note**: Manual releases should still update documentation post-release
+1. Go to GitHub Actions → Release → Run workflow
+2. Enter the version (e.g., `v1.0.1`) and click "Run workflow"
+3. The version must match `pyproject.toml` on the selected branch; the build
+   job fails otherwise. Manual runs publish to PyPI/Test PyPI but do not
+   create a GitHub release (that requires a tag push).
+4. **Note**: Manual releases should still update documentation post-release
 
 ## Submitting Changes
 

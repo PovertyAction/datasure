@@ -4,13 +4,15 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import polars as pl
+import pytest
 
 from datasure.utils.duckdb_utils import (
+    _validate_column_name,
     _validate_table_name,
+    duckdb_delete_rows,
     duckdb_get_aliases,
     duckdb_get_imported_datasets,
     duckdb_get_table,
-    duckdb_row_filter,
     duckdb_save_table,
 )
 
@@ -417,293 +419,121 @@ class TestIntegration:
             pd.testing.assert_frame_equal(test_pd, retrieved_pd)
 
 
-class TestDuckdbRowFilter:
-    """Test the duckdb_row_filter function."""
+class TestValidateColumnName:
+    """Test the _validate_column_name function."""
+
+    def test_valid_column_name(self):
+        assert _validate_column_name("alias") == "alias"
+
+    def test_valid_column_name_with_underscore(self):
+        assert _validate_column_name("_my_column2") == "_my_column2"
+
+    def test_invalid_column_name_with_space(self):
+        with pytest.raises(ValueError, match="Invalid column name"):
+            _validate_column_name("my column")
+
+    def test_invalid_column_name_with_quote(self):
+        with pytest.raises(ValueError, match="Invalid column name"):
+            _validate_column_name("alias' OR '1'='1")
+
+    def test_invalid_column_name_starting_with_digit(self):
+        with pytest.raises(ValueError, match="Invalid column name"):
+            _validate_column_name("1column")
+
+
+class TestDuckdbDeleteRows:
+    """Test the duckdb_delete_rows function."""
 
     @patch("datasure.utils.duckdb_utils.get_cache_path")
     @patch("duckdb.connect")
-    def test_row_filter_basic_condition(self, mock_connect, mock_get_cache_path):
-        """Test basic row filtering with simple condition."""
-        db_path = "/fake/path/data.duckdb"
-        mock_get_cache_path.return_value = db_path
-
-        # Mock database connection and cursor
+    def test_delete_rows_uses_parameterized_query(
+        self, mock_connect, mock_get_cache_path
+    ):
+        """The value must be passed as a prepared-statement parameter."""
+        mock_get_cache_path.return_value = "/fake/path/logs.duckdb"
         mock_conn = MagicMock()
         mock_connect.return_value.__enter__.return_value = mock_conn
 
-        # Mock the result of filtered query
-        expected_df = pl.DataFrame({"col1": [2, 3], "col2": ["b", "c"]})
-        mock_conn.execute.return_value.pl.return_value = expected_df
+        duckdb_delete_rows(
+            "test_project", "import_log", "logs", column="alias", value="my_data"
+        )
 
-        result = duckdb_row_filter("test_project", "test_alias", "data", "col1 > 1")
-
-        # Verify the database path was constructed correctly
-        mock_get_cache_path.assert_called_with("test_project", "data", "data.duckdb")
-
-        # Verify the CREATE OR REPLACE TABLE query was called
-        expected_create_query = "CREATE OR REPLACE TABLE test_alias AS SELECT * FROM test_alias WHERE col1 > 1"
-        mock_conn.execute.assert_any_call(expected_create_query)
-
-        # Verify the SELECT query was called
-        expected_select_query = "SELECT * FROM test_alias"
-        mock_conn.execute.assert_any_call(expected_select_query)
-
-        # Verify the result
-        assert result.equals(expected_df)
-
-    @patch("datasure.utils.duckdb_utils.get_cache_path")
-    @patch("duckdb.connect")
-    def test_row_filter_logs_database(self, mock_connect, mock_get_cache_path):
-        """Test row filtering with logs database."""
-        logs_db_path = "/fake/path/logs.duckdb"
-        mock_get_cache_path.return_value = logs_db_path
-
-        # Mock database connection
-        mock_conn = MagicMock()
-        mock_connect.return_value.__enter__.return_value = mock_conn
-
-        expected_df = pl.DataFrame({"log_id": [1], "message": ["error"]})
-        mock_conn.execute.return_value.pl.return_value = expected_df
-
-        duckdb_row_filter("test_project", "error_log", "logs", "level = 'ERROR'")
-
-        # Verify logs database path was used
         mock_get_cache_path.assert_called_with(
             "test_project", "settings", "logs.duckdb"
         )
-
-        # Verify table name normalization (space/dash replacement)
-        expected_table_id = "error_log"
-        expected_create_query = f"CREATE OR REPLACE TABLE {expected_table_id} AS SELECT * FROM {expected_table_id} WHERE level = 'ERROR'"
-        mock_conn.execute.assert_any_call(expected_create_query)
+        mock_conn.execute.assert_called_once_with(
+            "DELETE FROM import_log WHERE alias = ?", ["my_data"]
+        )
 
     @patch("datasure.utils.duckdb_utils.get_cache_path")
     @patch("duckdb.connect")
-    def test_row_filter_table_name_normalization(
+    def test_delete_rows_sanitizes_table_alias(self, mock_connect, mock_get_cache_path):
+        """Aliases with spaces/dashes are normalized and validated."""
+        mock_get_cache_path.return_value = "/fake/path/raw.duckdb"
+        mock_conn = MagicMock()
+        mock_connect.return_value.__enter__.return_value = mock_conn
+
+        duckdb_delete_rows(
+            "test_project", "My Test-Data", "raw", column="id", value="1"
+        )
+
+        mock_conn.execute.assert_called_once_with(
+            "DELETE FROM my_test_data WHERE id = ?", ["1"]
+        )
+
+    @patch("datasure.utils.duckdb_utils.get_cache_path")
+    @patch("duckdb.connect")
+    def test_delete_rows_rejects_invalid_column(
         self, mock_connect, mock_get_cache_path
     ):
-        """Test table name normalization for aliases with spaces and dashes."""
-        db_path = "/fake/path/data.duckdb"
-        mock_get_cache_path.return_value = db_path
+        """A malicious column name raises instead of reaching SQL."""
+        mock_get_cache_path.return_value = "/fake/path/raw.duckdb"
 
-        mock_conn = MagicMock()
-        mock_connect.return_value.__enter__.return_value = mock_conn
+        with pytest.raises(ValueError, match="Invalid column name"):
+            duckdb_delete_rows(
+                "test_project",
+                "users",
+                "raw",
+                column="alias = 'x' OR 1=1 --",
+                value="x",
+            )
 
-        expected_df = pl.DataFrame({"id": [1], "name": ["test"]})
-        mock_conn.execute.return_value.pl.return_value = expected_df
+    def test_delete_rows_integration(self, tmp_path):
+        """Delete rows from a real DuckDB table by column value."""
+        with patch("datasure.utils.duckdb_utils.get_cache_path") as mock_path:
+            mock_path.return_value = tmp_path / "logs.duckdb"
 
-        # Test alias with spaces and dashes
-        alias_with_spaces = "My Test Data"
-        alias_with_dashes = "my-test-data"
+            test_df = pl.DataFrame(
+                {
+                    "alias": ["data_one", "data_two", "data_three"],
+                    "source": ["local storage", "SurveyCTO", "local storage"],
+                }
+            )
+            duckdb_save_table("test_project", test_df, "import_log", "logs")
 
-        # Test spaces replacement
-        duckdb_row_filter("test_project", alias_with_spaces, "data", "id > 0")
-        expected_table_id_spaces = "my_test_data"
-        expected_create_query_spaces = f"CREATE OR REPLACE TABLE {expected_table_id_spaces} AS SELECT * FROM {expected_table_id_spaces} WHERE id > 0"
-        mock_conn.execute.assert_any_call(expected_create_query_spaces)
+            duckdb_delete_rows(
+                "test_project", "import_log", "logs", column="alias", value="data_two"
+            )
 
-        # Reset mock for next test
-        mock_conn.reset_mock()
+            remaining = duckdb_get_table("test_project", "import_log", "logs")
+            assert remaining.shape[0] == 2
+            assert "data_two" not in remaining["alias"].to_list()
 
-        # Test dashes replacement
-        duckdb_row_filter("test_project", alias_with_dashes, "data", "id > 0")
-        expected_table_id_dashes = "my_test_data"
-        expected_create_query_dashes = f"CREATE OR REPLACE TABLE {expected_table_id_dashes} AS SELECT * FROM {expected_table_id_dashes} WHERE id > 0"
-        mock_conn.execute.assert_any_call(expected_create_query_dashes)
+    def test_delete_rows_injection_value_is_inert(self, tmp_path):
+        """A quote-laden value must not delete unrelated rows (regression)."""
+        with patch("datasure.utils.duckdb_utils.get_cache_path") as mock_path:
+            mock_path.return_value = tmp_path / "logs.duckdb"
 
-    @patch("datasure.utils.duckdb_utils.get_cache_path")
-    @patch("duckdb.connect")
-    def test_row_filter_complex_condition(self, mock_connect, mock_get_cache_path):
-        """Test row filtering with complex WHERE condition."""
-        db_path = "/fake/path/data.duckdb"
-        mock_get_cache_path.return_value = db_path
+            test_df = pl.DataFrame({"alias": ["safe_row", "other_row"]})
+            duckdb_save_table("test_project", test_df, "import_log", "logs")
 
-        mock_conn = MagicMock()
-        mock_connect.return_value.__enter__.return_value = mock_conn
+            duckdb_delete_rows(
+                "test_project",
+                "import_log",
+                "logs",
+                column="alias",
+                value="x' OR '1'='1",
+            )
 
-        expected_df = pl.DataFrame({"age": [25], "name": ["Alice"], "score": [95.0]})
-        mock_conn.execute.return_value.pl.return_value = expected_df
-
-        # Complex filter condition
-        complex_filter = "age >= 18 AND name LIKE 'A%' AND score > 90.0"
-        result = duckdb_row_filter("test_project", "people", "data", complex_filter)
-
-        # Verify the complex filter was used
-        expected_create_query = f"CREATE OR REPLACE TABLE people AS SELECT * FROM people WHERE {complex_filter}"
-        mock_conn.execute.assert_any_call(expected_create_query)
-
-        assert result.equals(expected_df)
-
-    @patch("datasure.utils.duckdb_utils.get_cache_path")
-    @patch("duckdb.connect")
-    def test_row_filter_string_conditions(self, mock_connect, mock_get_cache_path):
-        """Test row filtering with string-based conditions."""
-        db_path = "/fake/path/data.duckdb"
-        mock_get_cache_path.return_value = db_path
-
-        mock_conn = MagicMock()
-        mock_connect.return_value.__enter__.return_value = mock_conn
-
-        expected_df = pl.DataFrame({"name": ["John"], "status": ["active"]})
-        mock_conn.execute.return_value.pl.return_value = expected_df
-
-        # Test string equality condition
-        result = duckdb_row_filter("test_project", "users", "data", "status = 'active'")
-
-        expected_create_query = "CREATE OR REPLACE TABLE users AS SELECT * FROM users WHERE status = 'active'"
-        mock_conn.execute.assert_any_call(expected_create_query)
-
-        assert result.equals(expected_df)
-
-    @patch("datasure.utils.duckdb_utils.get_cache_path")
-    @patch("duckdb.connect")
-    def test_row_filter_numeric_conditions(self, mock_connect, mock_get_cache_path):
-        """Test row filtering with numeric conditions."""
-        db_path = "/fake/path/data.duckdb"
-        mock_get_cache_path.return_value = db_path
-
-        mock_conn = MagicMock()
-        mock_connect.return_value.__enter__.return_value = mock_conn
-
-        expected_df = pl.DataFrame({"price": [99.99, 150.00], "quantity": [5, 10]})
-        mock_conn.execute.return_value.pl.return_value = expected_df
-
-        # Test numeric conditions
-        numeric_conditions = [
-            "price > 50.0",
-            "quantity BETWEEN 1 AND 100",
-            "price <= 200.0 AND quantity >= 5",
-        ]
-
-        for condition in numeric_conditions:
-            mock_conn.reset_mock()
-            mock_conn.execute.return_value.pl.return_value = expected_df
-
-            duckdb_row_filter("test_project", "products", "data", condition)
-
-            expected_create_query = f"CREATE OR REPLACE TABLE products AS SELECT * FROM products WHERE {condition}"
-            mock_conn.execute.assert_any_call(expected_create_query)
-
-    @patch("datasure.utils.duckdb_utils.get_cache_path")
-    @patch("duckdb.connect")
-    def test_row_filter_date_conditions(self, mock_connect, mock_get_cache_path):
-        """Test row filtering with date conditions."""
-        db_path = "/fake/path/data.duckdb"
-        mock_get_cache_path.return_value = db_path
-
-        mock_conn = MagicMock()
-        mock_connect.return_value.__enter__.return_value = mock_conn
-
-        expected_df = pl.DataFrame(
-            {"date": ["2024-01-15", "2024-02-20"], "event": ["meeting", "deadline"]}
-        )
-        mock_conn.execute.return_value.pl.return_value = expected_df
-
-        # Test date condition
-        date_condition = "date >= '2024-01-01' AND date <= '2024-12-31'"
-        result = duckdb_row_filter("test_project", "events", "data", date_condition)
-
-        expected_create_query = f"CREATE OR REPLACE TABLE events AS SELECT * FROM events WHERE {date_condition}"
-        mock_conn.execute.assert_any_call(expected_create_query)
-
-        assert result.equals(expected_df)
-
-    @patch("datasure.utils.duckdb_utils.get_cache_path")
-    @patch("duckdb.connect")
-    def test_row_filter_in_conditions(self, mock_connect, mock_get_cache_path):
-        """Test row filtering with IN conditions."""
-        db_path = "/fake/path/data.duckdb"
-        mock_get_cache_path.return_value = db_path
-
-        mock_conn = MagicMock()
-        mock_connect.return_value.__enter__.return_value = mock_conn
-
-        expected_df = pl.DataFrame({"category": ["A", "B", "C"], "value": [1, 2, 3]})
-        mock_conn.execute.return_value.pl.return_value = expected_df
-
-        # Test IN condition
-        in_condition = "category IN ('A', 'B', 'C')"
-        result = duckdb_row_filter("test_project", "categories", "data", in_condition)
-
-        expected_create_query = f"CREATE OR REPLACE TABLE categories AS SELECT * FROM categories WHERE {in_condition}"
-        mock_conn.execute.assert_any_call(expected_create_query)
-
-        assert result.equals(expected_df)
-
-    @patch("datasure.utils.duckdb_utils.get_cache_path")
-    @patch("duckdb.connect")
-    def test_row_filter_null_conditions(self, mock_connect, mock_get_cache_path):
-        """Test row filtering with NULL conditions."""
-        db_path = "/fake/path/data.duckdb"
-        mock_get_cache_path.return_value = db_path
-
-        mock_conn = MagicMock()
-        mock_connect.return_value.__enter__.return_value = mock_conn
-
-        expected_df = pl.DataFrame(
-            {
-                "name": ["John", "Jane"],
-                "email": ["john@example.com", "jane@example.com"],
-            }
-        )
-        mock_conn.execute.return_value.pl.return_value = expected_df
-
-        # Test NULL conditions
-        null_conditions = [
-            "email IS NOT NULL",
-            "name IS NOT NULL AND email IS NOT NULL",
-            "description IS NULL",
-        ]
-
-        for condition in null_conditions:
-            mock_conn.reset_mock()
-            mock_conn.execute.return_value.pl.return_value = expected_df
-
-            duckdb_row_filter("test_project", "contacts", "data", condition)
-
-            expected_create_query = f"CREATE OR REPLACE TABLE contacts AS SELECT * FROM contacts WHERE {condition}"
-            mock_conn.execute.assert_any_call(expected_create_query)
-
-    @patch("datasure.utils.duckdb_utils.get_cache_path")
-    @patch("duckdb.connect")
-    def test_row_filter_case_insensitive_alias(self, mock_connect, mock_get_cache_path):
-        """Test that alias is converted to lowercase."""
-        db_path = "/fake/path/data.duckdb"
-        mock_get_cache_path.return_value = db_path
-
-        mock_conn = MagicMock()
-        mock_connect.return_value.__enter__.return_value = mock_conn
-
-        expected_df = pl.DataFrame({"id": [1], "name": ["test"]})
-        mock_conn.execute.return_value.pl.return_value = expected_df
-
-        # Test uppercase alias
-        uppercase_alias = "MY_DATA_TABLE"
-        duckdb_row_filter("test_project", uppercase_alias, "data", "id > 0")
-
-        # Should convert to lowercase
-        expected_table_id = "my_data_table"
-        expected_create_query = f"CREATE OR REPLACE TABLE {expected_table_id} AS SELECT * FROM {expected_table_id} WHERE id > 0"
-        mock_conn.execute.assert_any_call(expected_create_query)
-
-    @patch("datasure.utils.duckdb_utils.get_cache_path")
-    @patch("duckdb.connect")
-    def test_row_filter_return_value_type(self, mock_connect, mock_get_cache_path):
-        """Test that function returns a Polars DataFrame."""
-        db_path = "/fake/path/data.duckdb"
-        mock_get_cache_path.return_value = db_path
-
-        mock_conn = MagicMock()
-        mock_connect.return_value.__enter__.return_value = mock_conn
-
-        # Mock return value
-        expected_df = pl.DataFrame({"col1": [1, 2], "col2": ["a", "b"]})
-        mock_conn.execute.return_value.pl.return_value = expected_df
-
-        result = duckdb_row_filter("test_project", "test_data", "data", "col1 > 0")
-
-        # Verify return type and content
-        assert isinstance(result, pl.DataFrame)
-        assert result.equals(expected_df)
-        assert result.shape == (2, 2)
-        assert list(result.columns) == ["col1", "col2"]
+            remaining = duckdb_get_table("test_project", "import_log", "logs")
+            assert remaining.shape[0] == 2
