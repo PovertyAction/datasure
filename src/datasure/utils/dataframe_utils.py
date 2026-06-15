@@ -1,7 +1,11 @@
+import logging
+
 import pandas as pd
 import polars as pl
 
 from datasure.models.schemas import ColumnByType
+
+logger = logging.getLogger(__name__)
 
 
 def get_df_columns(df: pl.DataFrame | pd.DataFrame) -> ColumnByType:
@@ -120,8 +124,8 @@ def standardize_missing_values(data: pd.DataFrame | pl.DataFrame) -> pl.DataFram
                 )
         except Exception as e:
             # Log warning but continue processing other columns
-            print(
-                f"Warning: Could not standardize missing values for column '{col}': {e}"
+            logger.warning(
+                "Could not standardize missing values for column '%s': %s", col, e
             )
             continue
 

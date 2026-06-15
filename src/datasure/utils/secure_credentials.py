@@ -103,8 +103,7 @@ def store_scto_credentials(
             try:
                 with open(metadata_path, encoding="utf-8") as f:
                     existing_metadata = json.load(f)
-            except Exception:
-                print(f"Warning: Invalid JSON in {metadata_path}, starting fresh")
+            except (OSError, json.JSONDecodeError):
                 logger.warning(f"Invalid JSON in {metadata_path}, starting fresh")
                 existing_metadata = {}
         else:
