@@ -37,7 +37,10 @@ dependencies = [
     # polars interop; floor at the CVE-fixed release (see issue #186)
     "pyarrow>=23.0.1",
     "matplotlib>=3.10.0",
-    "polars>=1.30.0",
+    # Floor at the CVE-fixed release (see issue #186). Ceiling: 1.33.0 made
+    # str.to_decimal()'s `scale` a required kwarg and removed scale inference,
+    # breaking dataframe_utils numeric coercion. Revisit when that code path is updated.
+    "polars>=1.30.0,<1.33.0",
     "duckdb>=1.3.1",
     "pydantic>=2.11.7",
     "keyring>=25.6.0",
