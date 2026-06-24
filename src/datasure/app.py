@@ -194,8 +194,8 @@ with st.sidebar:
     if _ipa_logo_path.exists():
         _ipa_logo_uri = _image_data_uri(str(_ipa_logo_path))
         st.markdown(
-            f'<a href="https://www.poverty-action.org" target="_blank">'
-            f'<img src="{_ipa_logo_uri}" style="width:80%;"></a>',
+            f'<a href="https://www.poverty-action.org" target="_blank" rel="noopener noreferrer">'
+            f'<img src="{_ipa_logo_uri}" alt="Innovations for Poverty Action (IPA) logo" style="width:80%;"></a>',
             unsafe_allow_html=True,
         )
 
