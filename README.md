@@ -1,7 +1,7 @@
 # DataSure
 
 <p align="center">
-  <img src="src/datasure/assets/datasure_logo.svg" alt="DataSure" width="350">
+  <img src="src/datasure/assets/datasure-horizontal.svg" alt="DataSure" width="350">
 </p>
 
 <p align="center">
