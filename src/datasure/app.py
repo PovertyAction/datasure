@@ -38,6 +38,7 @@ _favicon = _favicon_file.read_text() if _favicon_file.exists() else ":material/h
 st.set_page_config(
     page_title="DataSure",
     page_icon=_favicon,
+    layout="wide",
 )
 
 # initialize session states
@@ -168,13 +169,11 @@ _logo_path = _assets_dir / "datasure-icon.svg"
 if _logo_path.exists():
     st.logo(str(_logo_path))
 
-# --- RUN NAVIGATION --- #
-
-nav_menu.run()
-
 # --- SIDEBAR FOOTER --- #
-# Rendered after nav_menu.run() so it falls below any sidebar content the
-# active page adds during its run (e.g. the demo Help section).
+# Rendered before nav_menu.run() so it is never skipped when the active page
+# calls st.stop() (which unwinds the whole run). It therefore sits under the
+# nav menu and above any sidebar content the active page adds during its run
+# (e.g. the demo Help section).
 
 try:
     _app_version = version("DataSure")
@@ -183,15 +182,23 @@ except PackageNotFoundError:
 
 with st.sidebar:
     st.divider()
-    st.image(str(_assets_dir / "datasure-horizontal.svg"), width="stretch")
+    _horizontal_logo = _assets_dir / "datasure-horizontal.svg"
+    if _horizontal_logo.exists():
+        st.image(str(_horizontal_logo), width="stretch")
     st.caption(f"Version {_app_version}")
     st.caption(
         "Released under the "
         "[MIT License](https://github.com/PovertyAction/datasure/blob/main/LICENSE)"
     )
-    _ipa_logo_uri = _image_data_uri(str(_assets_dir / "IPA-primary-color-RGB.png"))
-    st.markdown(
-        f'<a href="https://www.poverty-action.org" target="_blank">'
-        f'<img src="{_ipa_logo_uri}" style="width:80%;"></a>',
-        unsafe_allow_html=True,
-    )
+    _ipa_logo_path = _assets_dir / "IPA-primary-color-RGB.png"
+    if _ipa_logo_path.exists():
+        _ipa_logo_uri = _image_data_uri(str(_ipa_logo_path))
+        st.markdown(
+            f'<a href="https://www.poverty-action.org" target="_blank">'
+            f'<img src="{_ipa_logo_uri}" style="width:80%;"></a>',
+            unsafe_allow_html=True,
+        )
+
+# --- RUN NAVIGATION --- #
+
+nav_menu.run()

@@ -43,6 +43,7 @@ def _import_app(
     page_names: list[str] | None = None,
     assets_dir_exists: bool = True,
     logo_exists: bool = True,
+    footer_assets_exist: bool = True,
 ) -> tuple:
     """Remove datasure.app from sys.modules, then re-import under controlled mocks.
 
@@ -65,6 +66,8 @@ def _import_app(
             return assets_dir_exists
         if self.name == "datasure-icon.svg":
             return logo_exists
+        if self.name in ("datasure-horizontal.svg", "IPA-primary-color-RGB.png"):
+            return footer_assets_exist
         return _original_exists(self)
 
     def _mock_read_text(self: Path, *args, **kwargs) -> str:
@@ -362,3 +365,50 @@ class TestAssetsAndLogo:
     def test_logo_not_loaded_when_fallback_and_missing(self):
         st_mock, *_ = _import_app(assets_dir_exists=False, logo_exists=False)
         st_mock.logo.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Sidebar footer
+# ---------------------------------------------------------------------------
+
+
+class TestSidebarFooter:
+    """The footer renders branding when assets exist and degrades gracefully."""
+
+    def test_footer_rendered_when_assets_exist(self):
+        st_mock, *_ = _import_app(footer_assets_exist=True)
+
+        # Divider, version + license captions are always rendered.
+        st_mock.divider.assert_called()
+        st_mock.caption.assert_called()
+
+        # Horizontal logo is rendered via st.image with the SVG path.
+        image_args = [c.args[0] for c in st_mock.image.call_args_list if c.args]
+        assert any(a.endswith("datasure-horizontal.svg") for a in image_args)
+
+        # IPA logo is rendered as a clickable outbound link (raw HTML).
+        assert any(
+            c.kwargs.get("unsafe_allow_html") is True
+            for c in st_mock.markdown.call_args_list
+        )
+
+    def test_footer_renders_before_navigation(self):
+        """Footer is rendered before nav_menu.run() so st.stop() cannot skip it."""
+        st_mock, _ss, _cs, nav_mock = _import_app(footer_assets_exist=True)
+        nav_mock.run.assert_called_once()
+
+        # The footer divider must be recorded before the navigation run() call.
+        call_names = [str(c) for c in st_mock.mock_calls]
+        divider_idx = next(
+            i for i, name in enumerate(call_names) if name.startswith("call.divider")
+        )
+        run_idx = next(i for i, name in enumerate(call_names) if ".run(" in name)
+        assert divider_idx < run_idx
+
+    def test_footer_assets_missing_does_not_crash(self):
+        # Import must succeed (no FileNotFoundError) and skip the missing images.
+        st_mock, *_ = _import_app(footer_assets_exist=False)
+        image_args = [c.args[0] for c in st_mock.image.call_args_list if c.args]
+        assert not any(a.endswith("datasure-horizontal.svg") for a in image_args)
+        # Captions still render even when branding assets are absent.
+        st_mock.caption.assert_called()

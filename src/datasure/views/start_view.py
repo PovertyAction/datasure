@@ -406,10 +406,8 @@ def _render_learn_more_section():
         )
 
 
-st.set_page_config(
-    page_title="DataSure - Data Management System",
-    layout="wide",
-)
+# Page title and layout are set globally in app.py via st.set_page_config; the
+# per-page title is supplied by st.Page(title=...) in the navigation menu.
 
 _, page_canvas, _ = st.columns([0.1, 0.8, 0.1])
 with page_canvas:
