@@ -209,13 +209,11 @@ class TestAppAssetManagement:
         package_dir = "/package/path"
         views_dir = compose_asset_path(package_dir, "views")
         assets_dir = compose_asset_path(package_dir, "assets")
-        logo_path = compose_asset_path(
-            assets_dir, "IPA-primary-full-color-abbreviated.png"
-        )
+        logo_path = compose_asset_path(assets_dir, "datasure-icon.svg")
 
         assert views_dir == "/package/path/views"
         assert assets_dir == "/package/path/assets"
-        assert "IPA-primary-full-color-abbreviated.png" in logo_path
+        assert "datasure-icon.svg" in logo_path
 
 
 class TestAppDynamicPageManagement:

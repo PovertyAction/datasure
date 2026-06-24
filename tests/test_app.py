@@ -58,18 +58,27 @@ def _import_app(
     st_mock.navigation.return_value = nav_mock
 
     _original_exists = Path.exists
+    _original_read_text = Path.read_text
 
     def _mock_exists(self: Path) -> bool:
         if self.name == "assets":
             return assets_dir_exists
-        if self.name == "IPA-primary-full-color-abbreviated.png":
+        if self.name == "datasure-icon.svg":
             return logo_exists
         return _original_exists(self)
+
+    def _mock_read_text(self: Path, *args, **kwargs) -> str:
+        # The favicon reads datasure-icon.svg; keep it hermetic so the
+        # fallback-assets-dir case does not touch a path that is absent on disk.
+        if self.name == "datasure-icon.svg":
+            return "<svg></svg>"
+        return _original_read_text(self, *args, **kwargs)
 
     with (
         patch.dict(sys.modules, {"streamlit": st_mock}),
         patch("datasure.utils.config_utils.ConfigurationService") as cs_cls,
         patch.object(Path, "exists", _mock_exists),
+        patch.object(Path, "read_text", _mock_read_text),
     ):
         cs_cls.return_value.get_page_names.return_value = list(page_names or [])
         importlib.import_module("datasure.app")
@@ -339,11 +348,11 @@ class TestAssetsAndLogo:
         st_mock, *_ = _import_app(assets_dir_exists=True, logo_exists=False)
         st_mock.logo.assert_not_called()
 
-    def test_logo_arg_is_png_string(self):
+    def test_logo_arg_is_svg_string(self):
         st_mock, *_ = _import_app(assets_dir_exists=True, logo_exists=True)
         logo_arg = st_mock.logo.call_args[0][0]
         assert isinstance(logo_arg, str)
-        assert logo_arg.endswith(".png")
+        assert logo_arg.endswith(".svg")
 
     def test_logo_loaded_with_fallback_assets_dir(self):
         """Logo is still loaded when the assets dir falls back to cwd."""

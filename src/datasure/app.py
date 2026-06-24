@@ -1,15 +1,44 @@
+import base64
 import logging
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import streamlit as st
 
 from datasure.utils.config_utils import ConfigurationService
 
+
+@st.cache_data
+def _image_data_uri(path: str) -> str:
+    """Return a base64 data URI for an image, cached so it is encoded once."""
+    encoded = base64.b64encode(Path(path).read_bytes()).decode()
+    return f"data:image/png;base64,{encoded}"
+
+
 # Root logging config belongs to the application entry point, not to
 # library modules. No-op if the root logger is already configured.
 logging.basicConfig(level=logging.INFO)
 
+# Get the directory where this module is located
+_package_dir = Path(__file__).parent
+_views_dir = _package_dir / "views"
+
 # --- PAGE SETUP --- #
+
+# Resolve assets (package first, then fallback to project root for dev)
+_assets_dir = _package_dir / "assets"
+if not _assets_dir.exists():
+    _assets_dir = Path.cwd() / "assets"
+
+# set_page_config must be the first Streamlit command and run only once.
+# page_icon accepts what st.image accepts: SVG is supported as an inline
+# string (not a .svg file path), so read the markup and pass it directly.
+_favicon_file = _assets_dir / "datasure-icon.svg"
+_favicon = _favicon_file.read_text() if _favicon_file.exists() else ":material/home:"
+st.set_page_config(
+    page_title="DataSure",
+    page_icon=_favicon,
+)
 
 # initialize session states
 if "st_project_id" not in st.session_state:
@@ -35,10 +64,6 @@ if "st_corr_page" not in st.session_state:
 
 if "st_replication_page" not in st.session_state:
     st.session_state.st_replication_page = None
-
-# Get the directory where this module is located
-_package_dir = Path(__file__).parent
-_views_dir = _package_dir / "views"
 
 # start page
 start_page = st.Page(
@@ -139,16 +164,34 @@ else:
 
 # --- GLOBAL ASSETS --- #
 
-# Try to find assets in package first, then fallback to project root
-_assets_dir = _package_dir / "assets"
-if not _assets_dir.exists():
-    # Fallback for development
-    _assets_dir = Path.cwd() / "assets"
-
-_logo_path = _assets_dir / "IPA-primary-full-color-abbreviated.png"
+_logo_path = _assets_dir / "datasure-icon.svg"
 if _logo_path.exists():
     st.logo(str(_logo_path))
 
 # --- RUN NAVIGATION --- #
 
 nav_menu.run()
+
+# --- SIDEBAR FOOTER --- #
+# Rendered after nav_menu.run() so it falls below any sidebar content the
+# active page adds during its run (e.g. the demo Help section).
+
+try:
+    _app_version = version("DataSure")
+except PackageNotFoundError:
+    _app_version = "dev"
+
+with st.sidebar:
+    st.divider()
+    st.image(str(_assets_dir / "datasure-horizontal.svg"), width="stretch")
+    st.caption(f"Version {_app_version}")
+    st.caption(
+        "Released under the "
+        "[MIT License](https://github.com/PovertyAction/datasure/blob/main/LICENSE)"
+    )
+    _ipa_logo_uri = _image_data_uri(str(_assets_dir / "IPA-primary-color-RGB.png"))
+    st.markdown(
+        f'<a href="https://www.poverty-action.org" target="_blank">'
+        f'<img src="{_ipa_logo_uri}" style="width:80%;"></a>',
+        unsafe_allow_html=True,
+    )

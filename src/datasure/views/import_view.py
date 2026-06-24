@@ -40,7 +40,7 @@ CREDENTIAL_TYPE = ("SurveyCTO Login", "SurveyCTO Private Key")
 
 # --- CONFIGURE PAGE --- #
 
-st.set_page_config("Import Data", page_icon=":sync:", layout="wide")
+st.set_page_config("Import Data", layout="wide")
 
 # Add demo navigation and guidance
 add_demo_navigation("import_view.py", step=2)
