@@ -185,19 +185,25 @@ with st.sidebar:
     _horizontal_logo = _assets_dir / "datasure-horizontal.svg"
     if _horizontal_logo.exists():
         st.image(str(_horizontal_logo), width="stretch")
-    st.caption(f"Version {_app_version}")
+    st.caption(
+        f"Version {_app_version} | [Documentation](https://data.poverty-action.org/data-quality/datasure/)"
+    )
     st.caption(
         "Released under the "
-        "[MIT License](https://github.com/PovertyAction/datasure/blob/main/LICENSE)"
+        "[MIT License](https://github.com/PovertyAction/datasure/blob/main/LICENSE) by"
     )
     _ipa_logo_path = _assets_dir / "IPA-primary-color-RGB.png"
     if _ipa_logo_path.exists():
         _ipa_logo_uri = _image_data_uri(str(_ipa_logo_path))
         st.markdown(
             f'<a href="https://www.poverty-action.org" target="_blank" rel="noopener noreferrer">'
-            f'<img src="{_ipa_logo_uri}" alt="Innovations for Poverty Action (IPA) logo" style="width:80%;"></a>',
+            f'<img src="{_ipa_logo_uri}" alt="Innovations for Poverty Action (IPA) logo" style="width:60%;"></a>',
             unsafe_allow_html=True,
         )
+
+    st.caption(
+        ":material/bug_report: [Report an issue](https://github.com/PovertyAction/datasure/issues)"
+    )
 
 # --- RUN NAVIGATION --- #
 
