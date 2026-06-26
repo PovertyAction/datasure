@@ -74,6 +74,8 @@ def main():
         sys.exit(1)
 
     # Launch Streamlit with the app.py file
+    browser_address = "localhost" if args.host == "0.0.0.0" else args.host
+
     sys.argv = [
         "streamlit",
         "run",
@@ -81,6 +83,10 @@ def main():
         "--server.address",
         args.host,
         "--server.port",
+        str(args.port),
+        "--browser.serverAddress",
+        browser_address,
+        "--browser.serverPort",
         str(args.port),
         "--server.headless",
         "true",
