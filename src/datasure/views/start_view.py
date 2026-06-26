@@ -294,7 +294,7 @@ def _render_page_header():
     """Render the page header with logo and description."""
     # Get the path to the assets directory relative to the package
     assets_dir = Path(__file__).parent.parent / "assets"
-    image_path = assets_dir / "datasure_logo.svg"
+    image_path = assets_dir / "datasure-stacked.svg"
     _, logo_col, _ = st.columns([0.35, 0.4, 0.35])
     logo_col.image(str(image_path), width="stretch")
 
@@ -406,11 +406,8 @@ def _render_learn_more_section():
         )
 
 
-st.set_page_config(
-    page_title="DataSure - Data Management System",
-    page_icon=":material/home_app_logo:",
-    layout="wide",
-)
+# Page title and layout are set globally in app.py via st.set_page_config; the
+# per-page title is supplied by st.Page(title=...) in the navigation menu.
 
 _, page_canvas, _ = st.columns([0.1, 0.8, 0.1])
 with page_canvas:
@@ -428,7 +425,10 @@ st.divider()
 left, mid, right = st.columns(3, border=True)
 
 with left:
-    st.caption("ABOUT GRDS AND IPA")
+    _ipa_logo_path = (
+        Path(__file__).parent.parent / "assets" / "IPA-primary-color-RGB.png"
+    )
+    st.image(str(_ipa_logo_path), width=180)
     st.caption(
         "**DataSure** is a product of the "
         "[Global Research and Data Science (GRDS)](https://data.poverty-action.org/teams/grds.html) "

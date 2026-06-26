@@ -39,8 +39,8 @@ from datasure.utils.settings_utils import trigger_save
 CREDENTIAL_TYPE = ("SurveyCTO Login", "SurveyCTO Private Key")
 
 # --- CONFIGURE PAGE --- #
-
-st.set_page_config("Import Data", page_icon=":sync:", layout="wide")
+# Page title and layout are set globally in app.py via st.set_page_config; the
+# per-page title is supplied by st.Page(title=...) in the navigation menu.
 
 # Add demo navigation and guidance
 add_demo_navigation("import_view.py", step=2)
