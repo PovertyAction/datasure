@@ -45,6 +45,16 @@ venv:
     uv tool install pre-commit
     pre-commit install
 
+# Print the command to activate the virtual environment
+[windows]
+activate-venv:
+    @Write-Host "Run: .venv\Scripts\activate.ps1"
+
+# Print the command to activate the virtual environment
+[unix]
+activate-venv:
+    @echo "Run: source .venv/bin/activate"
+
 # launch jupyter lab
 lab:
     uv run jupyter lab
@@ -153,9 +163,9 @@ test-mod-cov mod:
     @$mod = "{{mod}}"; $testFile = Get-ChildItem -Path "tests" -Recurse -Filter "test_$mod.py" | Select-Object -First 1; if (-not $testFile) { Write-Host "Error: no test file matching 'test_$mod.py' found under tests/"; exit 1 }; $srcFile = Get-ChildItem -Path "src\datasure" -Recurse -Filter "$mod.py" | Select-Object -First 1; if (-not $srcFile) { Write-Host "Error: no source file matching '$mod.py' found under src\datasure\"; exit 1 }; $srcIdx = $srcFile.FullName.IndexOf("src\") + 4; $covModule = $srcFile.FullName.Substring($srcIdx) -replace "\\", "." -replace "\.py$", ""; Write-Host "Test file : $($testFile.FullName)"; Write-Host "Coverage  : $covModule"; uv run python -m pytest $testFile.FullName -v --cov=$covModule --cov-report=term-missing
 
 
-# Run pre-commit hooks
+# Run pre-commit hooks on all files
 pre-commit-run:
-    pre-commit run
+    uv tool run pre-commit run --all-files
 
 # Build the package using uv
 build-package:
