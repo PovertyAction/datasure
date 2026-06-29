@@ -26,10 +26,10 @@ Development requires the following software:
 
 ### Installation Commands
 
-| Platform  | Commands                                                            |
-| --------- | ------------------------------------------------------------------- |
-| Windows   | `winget install Git.Git Casey.Just astral-sh.uv GitHub.cli` |
-| Mac/Linux | `brew install just uv gh`                                          |
+| Platform  | Commands                                                                          |
+| --------- | --------------------------------------------------------------------------------- |
+| Windows   | `winget install Git.Git Casey.Just astral-sh.uv GitHub.cli OpenJS.NodeJS`, then `npm install -g markdownlint-cli` |
+| Mac/Linux | `brew install just uv gh markdownlint-cli`                                        |
 
 ### Quick Start
 
@@ -62,14 +62,15 @@ just venv
 ```bash
 just venv                 # Create virtual environment and install dependencies
 just clean                # Remove virtual environment
-just activate-venv        # Activate the virtual environment
+just activate-venv        # Print the activation command for your shell
 ```
 
 ### Running the Application
 
 ```bash
-uv run datasure                  # Launch the DataSure application
-just lab                     # Launch Jupyter Lab
+uv run datasure                  # Launch the DataSure application (via CLI entry point)
+just datasure-dev                # Launch via streamlit run on the source tree (dev mode)
+just lab                         # Launch Jupyter Lab
 ```
 
 ### Code Quality
@@ -87,13 +88,13 @@ just fmt-all              # Format all code and markdown files
 just pre-commit-run        # Run pre-commit hooks
 ```
 
-**⚠️ CRITICAL:** Always run `just lint-py` before committing. Pre-commit hooks will block commits with linting violations.
+**⚠️ CRITICAL:** Always run `just lint-py` **and** `just fmt-python` before committing. CI enforces both linting and formatting — a commit can pass linting and still fail CI on formatting. Run `just pre-commit-run` to catch both at once.
 
 ### Common Linting Issues to Avoid
 
 1. **F841 - Unused variables**: Remove or prefix with underscore
 2. **F811 - Redefinition**: Check for duplicate class/function names
-3. **W505 - Line too long**: Keep lines ≤ 88 characters
+3. **E501 - Line too long**: Keep lines ≤ 88 characters
 4. **B007 - Unused loop variables**: Prefix with underscore
 5. **TRY301 - Abstract raise**: Move raise statements to helper functions
 
@@ -157,9 +158,14 @@ uv run python -m pytest --markers                       # Show available test ma
 ```text
 tests/
 ├── conftest.py                 # Shared fixtures and test configuration
-├── checks/                     # Test modules for each check type
-├── processing/                 # Data processing tests
-└── utils/                      # Utility function tests
+├── checks/                     # Tests for each data quality check module
+├── connectors/                 # Tests for data source connectors
+├── data/                       # Sample data files used by tests
+├── models/                     # Tests for Pydantic schemas and enums
+├── processing/                 # Tests for data preparation and corrections
+├── replication/                # Tests for replication package generation
+├── utils/                      # Tests for utility functions
+└── views/                      # Tests for Streamlit page scripts
 ```
 
 ## Dependency Management
