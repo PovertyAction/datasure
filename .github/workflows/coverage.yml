@@ -20,7 +20,7 @@ jobs:
     name: Secret scan (full history)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # Full clone so gitleaks can scan the entire commit history
           fetch-depth: 0
