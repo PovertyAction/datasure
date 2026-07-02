@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Create Streamlit App Script
+"""Create Streamlit App Script
 
 Generate a new Streamlit application from templates.
 """
@@ -11,13 +10,13 @@ from pathlib import Path
 
 
 def create_app(app_type: str, output_path: Path, app_name: str = "My App"):
-    """
-    Create a new Streamlit app from template.
+    """Create a new Streamlit app from template.
 
     Args:
         app_type: Type of app ('basic', 'multipage', 'form')
         output_path: Path where to create the app
         app_name: Name of the application
+
     """
     # Get script directory
     script_dir = Path(__file__).parent

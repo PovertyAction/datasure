@@ -248,7 +248,7 @@ st.session_state.shared_data = {"user_id": 123}
 # page_2.py
 import streamlit as st
 
-data = st.session_state.get("shared_data", {})
+data = st.session_state["shared_data"]
 st.write(f"User ID: {data.get('user_id')}")
 ```
 
@@ -910,6 +910,11 @@ if st.checkbox("Show Debug Info"):
    - Add docstrings to cached functions
    - Document session state variables
    - Provide inline help text for complex UI
+
+9. **Deprecated Parameters — never use these**
+   - `use_container_width=True` → use `width="stretch"` (fills container) or `width="content"` (fits content)
+   - `use_container_width=False` → use `width="content"`
+   - `use_column_width=True` on `st.image` → pass an explicit integer `width` instead
 
 ## Resources
 

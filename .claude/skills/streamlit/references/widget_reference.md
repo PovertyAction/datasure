@@ -387,6 +387,41 @@ st.selectbox(
 
 ```
 
+### Deprecated Parameters
+
+**`use_container_width` is deprecated** — use the `width` parameter instead:
+
+| Old (deprecated) | New | Meaning |
+| --- | --- | --- |
+| `use_container_width=True` | `width="stretch"` | Fill full container width |
+| `use_container_width=False` | `width="content"` | Fit to content width |
+
+The `width` parameter accepts `"content"`, `"stretch"`, or an integer pixel value.
+
+```python
+# WRONG — deprecated
+if st.button("Submit", use_container_width=True): ...
+st.dataframe(df, use_container_width=True)
+st.plotly_chart(fig, use_container_width=True)
+with st.popover("Options", use_container_width=True): ...
+
+# CORRECT
+if st.button("Submit", width="content"): ...
+st.dataframe(df, width="stretch")
+st.plotly_chart(fig, use_container_width=True)  # plotly_chart uses use_container_width still
+with st.popover("Options", width="content"): ...
+```
+
+**`use_column_width` on `st.image` is also deprecated** — pass an integer `width` instead or omit for natural size:
+
+```python
+# WRONG — deprecated
+st.image("logo.png", use_column_width=True)
+
+# CORRECT
+st.image("logo.png", width=300)
+```
+
 ### Third-Party Visualizations
 
 ```python

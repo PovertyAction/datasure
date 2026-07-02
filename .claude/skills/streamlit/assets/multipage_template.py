@@ -1,5 +1,4 @@
-"""
-Multi-Page Streamlit App Template
+"""Multi-Page Streamlit App Template
 
 Template for creating a multi-page Streamlit app with navigation and shared state.
 
