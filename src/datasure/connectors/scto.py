@@ -713,7 +713,7 @@ class SurveyCTOClient:
 
         # Download media if requested
         if form_config.attachments and form_config.save_to:
-            self._download_attachments(questions, new_data, form_config)
+            self._download_attachments(questions, new_data, form_config, private_key)
 
         # Save to DuckDB
         duckdb_save_table(
@@ -723,7 +723,11 @@ class SurveyCTOClient:
         return new_count
 
     def _download_attachments(
-        self, questions: pl.DataFrame, data: pl.DataFrame, form_config: FormConfig
+        self,
+        questions: pl.DataFrame,
+        data: pl.DataFrame,
+        form_config: FormConfig,
+        private_key: str | None = None,
     ) -> None:
         """Download media attachments."""
         media_types = {e.value for e in MediaType}
@@ -739,7 +743,7 @@ class SurveyCTOClient:
 
             downloader = MediaDownloader(self._scto_client, self.config)
             downloader.download_media_files(
-                media_fields, data, media_folder, form_config.private_key
+                media_fields, data, media_folder, private_key
             )
 
 
