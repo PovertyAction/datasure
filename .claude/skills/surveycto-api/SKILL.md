@@ -1,114 +1,188 @@
 ---
 name: surveycto-api
-description: This skill should be used when working with the SurveyCTO Server API (v1 or v2) in this project. Use this skill when adding, modifying, or debugging API calls to SurveyCTO, extending SurveyCTOAPIClient or SCTOConnector, writing tests for SurveyCTO API interactions, or reasoning about endpoints, authentication, rate limits, encryption, and pagination patterns.
+description: Use this skill when working with the SurveyCTO API in this project — fetching form submissions, handling rate limits, encrypted forms, or credential configuration. Covers the pysurveycto client, fetch_submissions(), RateLimitError, and all related environment variables.
 ---
 
 # SurveyCTO API Skill
 
-## Overview
+This skill covers how the GiveWell VCS dashboard interacts with SurveyCTO to pull form submissions.
 
-This skill provides guidance for working with the SurveyCTO Server API within this project. All API communication goes through `src/edms_scto_pipeline/utils/scto_api.py` (`SurveyCTOAPIClient`) and `src/edms_scto_pipeline/connectors/scto_connector.py` (`SCTOConnector`). The `pysurveycto` library is intentionally not used.
+## Architecture overview
 
-## Authentication
+```text
+.env (credentials)
+  └─ src/utils/config_utils.py   load_credentials(), load_private_key_path()
+       └─ src/connectors/scto.py  fetch_submissions() → pysurveycto.SurveyCTOObject
+            └─ src/processing/processor.py  load_submissions() / append_submissions()
+                 └─ data/submissions.duckdb  (local cache)
+```
 
-All endpoints use **HTTP Basic Auth** (username + password). The `SurveyCTOAPIClient` sets this up via `requests.Session` with `HTTPBasicAuth`.
+The connector layer is intentionally thin: it calls the SurveyCTO API and returns raw dicts. All caching, transformation, and querying happen downstream.
 
-**Exception — CSRF-protected endpoints** (form listing, form design download): These internal console endpoints require a two-step CSRF token flow handled by `_get_csrf_auth_headers()`:
+## Environment variables
 
-1. HEAD request to base URL with `X-OpenRosa-Version: 1.0` to obtain the initial CSRF token
-2. POST to `/login` using that token to obtain a refreshed CSRF token
-3. All subsequent requests include `X-csrf-token` and `X-OpenRosa-Version: 1.0` headers
+| Variable | Required | Description |
+| --- | --- | --- |
+| `SURVEYCTO_SERVER` | Yes | Server name or full URL (`ipa3`, `https://ipa3.surveycto.com`) |
+| `SURVEYCTO_USERNAME` | Yes | SurveyCTO account email |
+| `SURVEYCTO_PASSWORD` | Yes | SurveyCTO account password |
+| `SURVEYCTO_FORM_ID` | Yes | Form ID to pull submissions from |
+| `SURVEYCTO_PRIVATE_KEY_PATH` | No | Path to PEM private key for encrypted forms |
 
-## Base URLs
+All four required vars are loaded by `load_credentials()` in `src/utils/config_utils.py`. If any are missing it raises `OSError` with the missing variable names listed.
 
-| API Version | Base URL |
-|-------------|----------|
-| v1 | `https://{server_name}.surveycto.com/api/v1` |
-| v2 | `https://{server_name}.surveycto.com/api/v2` |
-| Console (CSRF) | `https://{server_name}.surveycto.com` |
+## Credential loading
 
-## Project Client: `SurveyCTOAPIClient`
+```python
+from src.utils.config_utils import load_credentials, load_private_key_path
 
-Located at `src/edms_scto_pipeline/utils/scto_api.py`. All HTTP calls go through `_make_request()` which handles error wrapping into `SurveyCTOAPIError`.
+server, username, password, form_id = load_credentials()
+private_key_path = load_private_key_path()   # returns str | None
+```
 
-### Currently implemented methods
+`load_private_key_path()` returns `None` if the env var is unset, empty, or points to a missing file — never raises.
 
-| Method | Endpoint | Notes |
-|--------|----------|-------|
-| `list_datasets()` | `GET /api/v2/datasets` | |
-| `get_dataset_info(dataset_id)` | `GET /api/v2/datasets/{id}` | |
-| `update_dataset(dataset_id, ...)` | `PUT /api/v2/datasets/{id}` | |
-| `download_dataset_csv(dataset_id)` | `GET /api/v2/datasets/data/csv/{id}` | streams bytes |
-| `upload_dataset_csv(dataset_id, csv_data)` | POST multipart to `/api/v2/datasets/data/csv/{id}` | replaces all data |
-| `list_form_ids()` | `GET /api/v2/forms/ids` | |
-| `list_forms()` | Console endpoint (CSRF) | returns `forms` key |
-| `download_form_definition(form_id)` | Console form design endpoint (CSRF) | |
-| `download_form_data_json(form_id, ...)` | `GET /api/v2/forms/data/wide/json/{id}` | POST when encrypted |
-| `download_attachment_from_url(url, ...)` | Full URL from submission data | GET or POST with key |
+## fetch_submissions()
 
-### Adding new API methods
+**Location:** `src/connectors/scto.py`
 
-To add a method to `SurveyCTOAPIClient`:
+```python
+def fetch_submissions(
+    server: str,
+    username: str,
+    password: str,
+    form_id: str,
+    since_date: date | None = None,
+    private_key_path: str | None = None,
+) -> list[dict]:
+```
 
-1. Use `self._make_request(method, endpoint, params=..., json_data=..., stream=...)` for standard v2 endpoints
-2. Use the CSRF pattern (see `list_forms`) for console/internal endpoints
-3. Wrap non-`_make_request` calls in the same try/except pattern with specific exception types
-4. Raise `SurveyCTOAPIError` with a descriptive message
+### Parameters
 
-## Key API Behaviours to Know
+| Parameter | Type | Notes |
+| --- | --- | --- |
+| `server` | `str` | Bare name, URL, or full subdomain — normalised internally |
+| `username` | `str` | SurveyCTO account email |
+| `password` | `str` | SurveyCTO account password |
+| `form_id` | `str` | Form ID as shown in SurveyCTO console |
+| `since_date` | `date \| None` | Fetch only submissions on or after this date |
+| `private_key_path` | `str \| None` | Path to PEM file for encrypted forms |
 
-### Data Format & Truncation
+### Returns
 
-- **CSV long format** (`/api/v1/forms/data/csv/{id}`): No truncation, multiple files (one per repeat group)
-- **CSV wide format** (`/api/v1/forms/data/wide/csv/{id}`): **Truncates at 16,384 chars** — avoid for large text fields
-- **JSON wide format** (`/api/v2/forms/data/wide/json/{id}`): No truncation, preferred for programmatic use; **requires `date` query param** in v2
+A `list[dict]` where each dict is one submission row in SurveyCTO JSON wide format. Field names match the form's variable names. The submission key is stored under `"KEY"`.
 
-### Rate Limiting
+### Server name normalisation
 
-- Max **30 requests per minute** per server
-- `GET /api/v2/forms/data/wide/json/{id}` with `date=0` (all data) enforces a **5-minute quiet period** between calls
-- `SCTOConnector.get_form_data()` adds a `time.sleep(2)` before each form request
+`_server_name()` strips scheme (`https://`, `http://`), `.surveycto.com` suffix, trailing slashes, and whitespace so any of these work equivalently:
 
-### Encrypted Forms
+```python
+fetch_submissions("ipa3", ...)
+fetch_submissions("https://ipa3.surveycto.com/", ...)
+fetch_submissions("ipa3.surveycto.com", ...)
+```
 
-- Provide the private key as bytes or string via the `private_key` parameter
-- JSON download: POST multipart with `files={"private_key": key}` instead of GET
-- Attachment download: POST multipart with `files={"private_key": key}` instead of GET
-- If the server returns 500 on an encrypted-key request for an unencrypted form, retry without the key (see `SCTOConnector.get_form_data()`)
+### Unencrypted form (default)
 
-### Pagination (v2)
+```python
+records = fetch_submissions(server, username, password, form_id)
+```
 
-Cursor-based pagination applies to: datasets, records, groups, roles, users.
+Uses `pysurveycto.SurveyCTOObject.get_form_data()` as a plain GET request.
 
-- Default page size: 20, max: 1000
-- Use `nextCursor` from the response to fetch the next page
-- `null` nextCursor means no more pages
+### Encrypted form
 
-### Date Filtering (v2 Forms)
+```python
+records = fetch_submissions(
+    server, username, password, form_id,
+    private_key_path="/path/to/private_key.pem",
+)
+```
 
-The `date` query parameter is **required** for `GET /api/v2/forms/data/wide/json/{id}`:
+When `private_key_path` is provided the PEM file is opened and passed as the `key=` argument to `get_form_data()`. SurveyCTO requires a multipart POST with the key attached for encrypted forms.
 
-- Unix timestamp in seconds (<=12 digits) or milliseconds (>=13 digits)
-- Use `0` to get all data (triggers 5-min rate limit)
-- In `SCTOConnector`, `oldest_date` is converted: `{"date": int(oldest_date.timestamp())}`
+### Incremental pull (append mode)
 
-### Dataset Records vs. CSV Upload
+```python
+from src.processing.processor import latest_submission_date
 
-The project currently uses the CSV upload endpoint (`upload_dataset_csv`). The v2 API also supports individual record CRUD via `/api/v2/datasets/{id}/record(s)` — use these when you need to add/update/delete specific rows without replacing the whole dataset.
+since = latest_submission_date("data/submissions.duckdb")
+records = fetch_submissions(server, username, password, form_id, since_date=since)
+```
 
-## Common Error Codes
+When `since_date` is `None`, a hardcoded epoch of `2026-04-01` is used as the lower bound so all submissions are returned.
 
-| Code | Meaning |
-|------|---------|
-| 401 | Authentication failed — check credentials |
-| 403 | Insufficient permissions |
-| 404 | Form/dataset not found |
-| 417 | Rate limited — wait and retry |
-| 500 | Server error (may indicate wrong private key for encrypted form) |
+## Rate limiting
 
-## References
+SurveyCTO returns HTTP **417** when a rate limit is hit. The connector translates this into a `RateLimitError`:
 
-For full endpoint specifications including all request/response fields:
+```python
+from src.connectors.scto import RateLimitError, fetch_submissions
 
-- [`references/api_v1.md`](references/api_v1.md) — Server API v1 (forms data, CSV settings)
-- [`references/api_v2.md`](references/api_v2.md) — Server API v2 (datasets, records, forms, submissions, groups, teams, roles, users)
+try:
+    records = fetch_submissions(server, username, password, form_id)
+except RateLimitError as exc:
+    print(f"Rate limited — {exc}")   # exc message is the wait instruction from SCTO
+```
+
+The 417 response body contains `{"error": {"message": "..."}}` with the wait time. All other `HTTPError` statuses are re-raised unchanged.
+
+**Rate limit guidance:** SurveyCTO rate-limits bulk data pulls. If you hit a 417, wait the period specified in the error message before retrying. The app's "Refresh data" button surfaces this to the user via `st.warning`.
+
+## pysurveycto client
+
+The project uses the [`pysurveycto`](https://github.com/PovertyAction/pysurveycto) library:
+
+```python
+import pysurveycto
+
+client = pysurveycto.SurveyCTOObject(server_name, username, password)
+data = client.get_form_data(
+    form_id,
+    format="json",
+    oldest_completion_date=datetime(2025, 1, 1),   # lower bound
+    key=open("key.pem", "rb"),                      # only for encrypted forms
+)
+```
+
+`get_form_data` returns a `list[dict]`. Each dict has string values for all fields.
+
+## Adding new connector behaviour
+
+If you need to extend the connector (e.g. pull a different data endpoint):
+
+1. Add a new function to `src/connectors/scto.py` — keep it a thin wrapper around `pysurveycto`
+2. All env-var loading belongs in `src/utils/config_utils.py`, not in the connector
+3. The connector must never import from `src.processing` or `src.views` (no circular deps)
+4. If the new function can rate-limit, raise `RateLimitError` on HTTP 417 the same way `fetch_submissions` does
+
+## Common errors
+
+| HTTP status | Meaning | Handler |
+| --- | --- | --- |
+| 401 | Bad credentials | Fix `SURVEYCTO_USERNAME` / `SURVEYCTO_PASSWORD` in `.env` |
+| 403 | Permission denied | Ensure the account has access to the form |
+| 404 | Form not found | Check `SURVEYCTO_FORM_ID` in `.env` |
+| 417 | Rate limit | Caught as `RateLimitError`; wait and retry |
+| 500 | Server error | Re-raised as `HTTPError`; usually transient |
+
+## Testing the connector
+
+Tests live in `tests/connectors/test_scto.py`. The client is mocked via `unittest.mock.patch`:
+
+```python
+with patch("src.connectors.scto.pysurveycto.SurveyCTOObject") as mock_cls:
+    mock_cls.return_value.get_form_data.return_value = [{"KEY": "uuid:001"}]
+    result = fetch_submissions("ipa3", "user", "pass", "form1")
+```
+
+To test the 417 path:
+
+```python
+from requests.exceptions import HTTPError
+
+mock_response = MagicMock()
+mock_response.status_code = 417
+mock_response.json.return_value = {"error": {"message": "wait 60s"}}
+mock_client.get_form_data.side_effect = HTTPError(response=mock_response)
+```
