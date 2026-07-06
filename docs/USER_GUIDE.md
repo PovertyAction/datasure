@@ -1,6 +1,6 @@
 # DataSure User Guide
 
-**Version 1.0 - Comprehensive Guide to Survey Data Quality Management** #noqa: MD036
+Version 1.0 - Comprehensive Guide to Survey Data Quality Management
 
 ---
 
@@ -27,12 +27,13 @@
 
 ### What DataSure Does
 
-- **Import** survey data from multiple sources (SurveyCTO, CSV, Excel)
+- **Import** survey data from multiple sources (SurveyCTO, CSV, Excel, JSON, Stata)
 - **Prepare** and clean data with transformation tools
 - **Configure** customizable quality check parameters
 - **Analyze** data with 9 specialized quality check modules
 - **Report** comprehensive quality metrics and visualizations
 - **Correct** data issues with tracking and audit trails
+- **Export** a replication package (Stata or Python scripts) that reproduces your full data pipeline
 
 ### Key Features
 
@@ -41,6 +42,7 @@
 - **Interactive Visualizations**: Charts, tables, and heatmaps for easy interpretation
 - **Audit Trails**: Complete tracking of all data corrections and modifications
 - **Demo Mode**: Guided tutorial with sample household survey data
+- **Replication Package Export**: Generate Stata or Python scripts that reproduce your complete data pipeline for sharing or archiving
 
 ---
 
@@ -48,19 +50,19 @@
 
 ### System Requirements
 
-- Python 3.11+
 - Modern web browser (Chrome, Firefox, Safari, Edge)
 - Minimum 4GB RAM
 - Internet connection (for SurveyCTO integration)
+- Python 3.11+ (only required when installing via pip; uv manages Python automatically)
 
 ### Installation
 
 ```bash
-# Install via pip
-pip install datasure
-
-# Or uv
+# Install via uv (recommended)
 uv tool install datasure
+
+# Or pip
+pip install datasure
 
 # Launch the application
 datasure
@@ -128,20 +130,22 @@ Import sources are added via the **"Add Import Configuration"** popover. Click i
 3. Enter server credentials:
    - **Server Name**: Your SurveyCTO server URL
    - **Username**: Your SurveyCTO username
-   - **Password**: Your SurveyCTO password
+   - **Password**: Your SurveyCTO password (stored securely in your OS keyring — never written to disk)
 4. Select form(s) to import
 5. Configure import settings:
    - Include/exclude attachments
    - Private key (if encrypted)
 6. Click "Import Data"
 
-##### Option B: CSV/Excel Upload
+> **Note**: DataSure performs incremental refresh — only submissions newer than your last import are downloaded, so daily refreshes are fast regardless of total dataset size.
+
+##### Option B: Local File Upload
 
 1. Click "Add Import Configuration"
 2. Select **"local storage"** from the Import Type dropdown
 3. Upload file(s):
    - Drag and drop or browse
-   - Supported formats: .csv, .xlsx, .xls
+   - Supported formats: .csv, .xlsx, .xls, .json, .dta (Stata)
 4. Configure settings:
    - Assign dataset alias (name)
    - Select sheet (for Excel files)
@@ -288,7 +292,7 @@ Convert `submissiondate` column to datetime format for both survey and backcheck
 
 **Steps**:
 
-1. Click ":material/add: Add New Check Configuration"
+1. Click "Add New Check Configuration" (+ button)
 2. **Configuration Details**:
    - **Name**: Descriptive name (e.g., "Household Survey Checks")
    - **Survey Dataset**: Select main survey dataset (e.g., "demo_survey")
@@ -399,7 +403,7 @@ Change specific field values:
 
 **Steps**:
 
-1. Click ":material/add: Add correction step"
+1. Click "Add correction step" (+ button)
 2. **Select Key**: Choose record to modify
 3. **Select Action**: "modify value"
 4. **Select Column**: Choose field to modify
@@ -420,7 +424,7 @@ Replace specific value with null/missing:
 
 **Steps**:
 
-1. Click ":material/add: Add correction step"
+1. Click "Add correction step" (+ button)
 2. **Select Key**: Choose record
 3. **Select Action**: "remove value"
 4. **Select Column**: Choose field
@@ -439,7 +443,7 @@ Delete entire survey records:
 
 **Steps**:
 
-1. Click ":material/add: Add correction step"
+1. Click "Add correction step" (+ button)
 2. **Select Key**: Choose record to remove
 3. **Select Action**: "remove row"
 4. **Reason**: Document why (required)
@@ -456,7 +460,6 @@ All corrections are tracked with:
 - Action type
 - Reason for correction
 - Timestamp
-- User (if multi-user system)
 
 #### Verifying Corrections
 
@@ -476,7 +479,7 @@ Correcting duplicate household ID:
 **Steps**:
 
 1. Go to Correct Data page
-2. Click ":material/add: Add correction step"
+2. Click "Add correction step" (+ button)
 3. **Select Key**: "uuid:0dk0vt97-786b-250u-34k7-z34615zz820c"
 4. **Select Action**: "modify value"
 5. **Select Column**: "hhid"
@@ -745,7 +748,7 @@ Visual representation:
 - Minimum threshold (min non-missing values required)
 
 **Outlier Columns Configuration**:
-Click ":material/add: Add Outlier Column":
+Click "Add Outlier Column" (+ button):
 
 - **Search Type**: How to find columns
   - "exact": Specific column names
@@ -942,7 +945,7 @@ Configure validation:
 - **Handle Duplicates**: Include or exclude duplicates
 
 **Add Back Check Columns**:
-Click ":material/add: Add a back check column":
+Click "Add a back check column" (+ button):
 
 - **Column**: Variable to validate
 - **Category**: Grouping (1, 2, 3 for analysis)

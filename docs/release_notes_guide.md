@@ -108,12 +108,13 @@ Describe fixes in terms of improved user experience:
 ```markdown
 ### Bug Fixes
 
-#### Resolved Issues
 - **Fixed**: Survey import now handles special characters in enumerator names correctly
-- **Fixed**: Settings are now properly saved between application sessions  
+- **Fixed**: Settings are now properly saved between application sessions
 - **Fixed**: Missing data percentage calculations now display accurate results for all check types
 - **Fixed**: Application no longer crashes when processing very large datasets (>100MB)
 ```
+
+The `#### Resolved Issues` sub-heading is optional. List bug fix bullets directly under `### Bug Fixes` unless the release has enough fixes to warrant grouping.
 
 ---
 
@@ -165,7 +166,7 @@ Frame features within common data management workflows:
 
 Keep the Getting Started section minimal — show the install and upgrade commands, then link to README.md for full details (system requirements, alternative installers, troubleshooting). Do not duplicate README.md content here; it will drift out of sync as versions change.
 
-**uv is the recommended installer for DataSure.** Always show it as the primary option.
+**uv is the recommended installer for DataSure.** Always show it as the primary option in all DataSure documentation — RELEASENOTES.md, USER_GUIDE.md, README.md, and any other user-facing docs. pip may be listed as a secondary option but must never appear first.
 
 ````markdown
 ## Getting Started
@@ -294,7 +295,7 @@ Before publishing release notes, verify:
 - [ ] **User Language**: No technical jargon or code references
 - [ ] **Clear Benefits**: Each feature explains user value
 - [ ] **Workflow Context**: Features described within data management workflows
-- [ ] **Visual Descriptions**: UI changes and new visualizations clearly explained
+- [ ] **Visual Descriptions**: UI changes and new visualizations clearly explained *(applies to update releases; skip for initial 1.0 releases where all UI is new)*
 - [ ] **Getting Started**: uv install and upgrade commands present; README.md linked for full details
 - [ ] **Compatibility Notes**: README.md linked for system requirements
 - [ ] **External Docs**: How-To Guide linked under Support and Resources

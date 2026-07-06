@@ -62,7 +62,7 @@ Log and apply corrections to individual survey responses within the app. Correct
 
 #### Replication package export
 
-Export a self-contained Stata or Python script package that reproduces your entire data pipeline outside DataSure. Useful for sharing with external researchers or archiving for publication.
+A replication package is a set of scripts that re-runs your complete data pipeline — imports, preparation steps, and checks — independently of DataSure. Export one as Stata or Python to share your workflow with external researchers, submit alongside a publication, or archive a project at close-out.
 
 #### Multi-project support
 
@@ -71,7 +71,7 @@ Manage multiple surveys simultaneously. Each project has its own settings, data,
 ### Bug Fixes
 
 - **Fixed**: Encrypted attachment downloads now work correctly when a private key is configured
-- **Fixed**: Browser URL now shows the correct port when launching with `--port`
+- **Fixed**: The application link shown after launch now reflects the correct address when a custom port is configured
 
 ---
 
