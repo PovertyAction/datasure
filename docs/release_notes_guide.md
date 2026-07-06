@@ -54,11 +54,14 @@ This document provides guidance for maintaining the user-facing release notes (R
 ### Version Header Format
 
 ```markdown
-## Version X.Y.Z - Release Name
-*Released: Month DD, YYYY*
+## Version X.Y.Z — Release Name
+
+Released: Month YYYY
 
 [Brief 1-2 sentence summary of the release's main focus]
 ```
+
+Use an em dash (—) before the release name, not a hyphen. Omit the day from the date; month and year are sufficient.
 
 ### Standard Sections
 
@@ -160,26 +163,28 @@ Frame features within common data management workflows:
 
 ### Installation and Setup Instructions
 
-Provide clear instructions for different user types:
+Keep the Getting Started section minimal — show the install and upgrade commands, then link to README.md for full details (system requirements, alternative installers, troubleshooting). Do not duplicate README.md content here; it will drift out of sync as versions change.
 
-```markdown
-### Getting Started
+**uv is the recommended installer for DataSure.** Always show it as the primary option.
 
-#### For Data Managers (Recommended)
-1. Install from PyPI: `pip install DataSure`
-2. Launch the application: `datasure`
-3. Create your first project and import survey data
-4. Configure quality checks based on your survey requirements
+````markdown
+## Getting Started
 
-#### For Windows Users
-1. Download the installer from [GitHub Releases](link)
-2. Run the installer and follow setup wizard
-3. Launch DataSure from Start Menu or desktop shortcut
+Install DataSure with uv (recommended):
 
-#### For Advanced Users
-- Install development version: `pip install datasure[dev]`
-- Command-line usage: `datasure --help`
+```bash
+uv tool install datasure
 ```
+
+To upgrade an existing installation:
+
+```bash
+uv tool upgrade datasure
+```
+
+Then launch with `datasure`. For full installation instructions and system requirements,
+see [README.md](README.md).
+````
 
 ---
 
@@ -288,10 +293,12 @@ Before publishing release notes, verify:
 
 - [ ] **User Language**: No technical jargon or code references
 - [ ] **Clear Benefits**: Each feature explains user value
-- [ ] **Workflow Context**: Features described within data management workflows  
+- [ ] **Workflow Context**: Features described within data management workflows
 - [ ] **Visual Descriptions**: UI changes and new visualizations clearly explained
-- [ ] **Installation Instructions**: Up-to-date setup guidance for different user types
-- [ ] **Compatibility Notes**: Clear guidance on version compatibility
+- [ ] **Getting Started**: uv install and upgrade commands present; README.md linked for full details
+- [ ] **Compatibility Notes**: README.md linked for system requirements
+- [ ] **External Docs**: How-To Guide linked under Support and Resources
+- [ ] **Linked References**: CHANGELOG.md linked (not plain text) in both About This Document and the footer
 - [ ] **Contact Information**: Current support channels and documentation links
 - [ ] **Cross-Reference**: Consistency with technical changelog content
 
@@ -301,11 +308,11 @@ Before publishing release notes, verify:
 
 ### Help Documentation Links
 
-Always include links to relevant help sections:
+Always include links to relevant help sections in the Support and Resources section:
 
+- **How-To Guide**: [DataSure How-To Guide](https://data.poverty-action.org/data-quality/datasure/how-to-datasure.html) — detailed instructions and training materials. List this first as it is the primary resource for end users.
 - Getting Started guides for new features
 - Updated workflow documentation
-- Video tutorials for complex new capabilities
 - FAQ updates for common questions
 
 ### User Communication Channels
