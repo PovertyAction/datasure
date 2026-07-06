@@ -75,99 +75,21 @@ Manage multiple surveys simultaneously. Each project has its own settings, data,
 
 ---
 
-## Getting Started with DataSure
+## Getting Started
 
-### Installation Options
-
-#### Install with pip
-
-```bash
-pip install datasure
-```
-
-#### Install with uv
-
-Ensure that you have uv installed:
-
-##### with winget
-
-```bash
-winget install astral-sh.uv
-```
-
-##### with homebrew
-
-```bash
-brew install uv
-```
-
-##### verify uv installation
-
-```bash
-uv --version
-```
-
-##### Install DataSure
+Install DataSure with uv (recommended):
 
 ```bash
 uv tool install datasure
 ```
 
-or update an existing installation:
+To upgrade an existing installation:
 
 ```bash
 uv tool upgrade datasure
 ```
 
-### Quick Start
-
-1. Launch the application: `datasure` (opens at <http://localhost:8501>)
-   - Use a custom port: `datasure --port 8080`
-2. Create your first project
-3. Import survey data from SurveyCTO or upload CSV/Excel files
-4. Configure data quality checks based on your survey requirements
-5. Monitor data quality with interactive dashboards and reports
-
----
-
-## Core Features
-
-DataSure provides comprehensive survey data quality monitoring through:
-
-### Data Quality Checks
-
-- **Summary Statistics**: Overall project progress and completion tracking
-- **Missing Data Analysis**: Identify patterns in incomplete responses
-- **Duplicate Detection**: Find and manage duplicate survey entries
-- **GPS Validation**: Verify location data accuracy with interactive maps
-- **Outlier Detection**: Identify unusual responses requiring review
-- **Enumerator Performance**: Monitor data collection team productivity
-- **Progress Tracking**: Real-time survey completion monitoring
-- **Descriptive Statistics**: Data distribution analysis and summaries
-- **Back-check Management**: Verification workflow support
-
-### Data Import and Management
-
-- **SurveyCTO Integration**: Direct connection to your SurveyCTO server
-- **Local File Support**: Import CSV, Excel (XLSX/XLS), JSON, and Stata (DTA) files
-- **Multi-Project Organization**: Manage multiple surveys simultaneously
-- **Flexible Configuration**: Customize checks per project requirements
-
-### Reporting and Visualization
-
-- **Interactive Dashboards**: Real-time data quality monitoring
-- **Replication Package Export**: Generate Stata or Python scripts that reproduce your pipeline
-- **Custom Charts**: Visualize data patterns and quality metrics
-
----
-
-## System Requirements
-
-- **Python**: Version 3.11 or higher
-- **Operating System**: Windows, macOS, or Linux
-- **Memory**: Minimum 4GB RAM (8GB recommended for large datasets)
-- **Storage**: 1GB free space for application and data cache
-- **Internet**: Required for SurveyCTO integration and updates
+Then launch with `datasure`. For full installation instructions and system requirements, see [README.md](README.md).
 
 ---
 
@@ -175,9 +97,9 @@ DataSure provides comprehensive survey data quality monitoring through:
 
 ### Getting Help
 
+- **Documentation**: [DataSure How-To Guide](https://data.poverty-action.org/data-quality/datasure/how-to-datasure.html) — detailed instructions and training materials
 - **GitHub Issues**: [Report bugs and request features](https://github.com/PovertyAction/datasure/issues)
 - **Email Support**: <researchsupport@poverty-action.org>
-- **Documentation**: See project documentation for detailed guides
 
 ### Contributing
 
@@ -195,7 +117,7 @@ DataSure 1.0.0 is the first stable public release. Prior versions were internal 
 
 ---
 
-*This document is maintained alongside the project and updated with each release. For technical details, see CHANGELOG.md.*
+*This document is maintained alongside the project and updated with each release. For technical details, see [CHANGELOG.md](CHANGELOG.md).*
 
-**Last Updated**: July 2025
-**Document Version**: 1.1
+**Last Updated**: July 2026
+**Document Version**: 1.0.0
