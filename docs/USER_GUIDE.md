@@ -119,31 +119,34 @@ You're working with household survey data from rural communities in India, inclu
 
 #### Import Options
 
+Import sources are added via the **"Add Import Configuration"** popover. Click it and select the import type from the **Import Type** dropdown.
+
 ##### Option A: SurveyCTO Integration
 
-1. Click "SurveyCTO" tab
-2. Enter server credentials:
+1. Click "Add Import Configuration"
+2. Select **"SurveyCTO"** from the Import Type dropdown
+3. Enter server credentials:
    - **Server Name**: Your SurveyCTO server URL
    - **Username**: Your SurveyCTO username
    - **Password**: Your SurveyCTO password
-3. Select form(s) to import
-4. Configure import settings:
+4. Select form(s) to import
+5. Configure import settings:
    - Include/exclude attachments
-   - Date range filters
    - Private key (if encrypted)
-5. Click "Import Data"
+6. Click "Import Data"
 
 ##### Option B: CSV/Excel Upload
 
-1. Click "Local Files" tab
-2. Upload file(s):
+1. Click "Add Import Configuration"
+2. Select **"local storage"** from the Import Type dropdown
+3. Upload file(s):
    - Drag and drop or browse
    - Supported formats: .csv, .xlsx, .xls
-3. Configure settings:
+4. Configure settings:
    - Assign dataset alias (name)
    - Select sheet (for Excel files)
    - Preview data structure
-4. Click "Load Data"
+5. Click "Load Data"
 
 #### Preview Imported Data
 
@@ -248,7 +251,7 @@ Delete unnecessary or problematic data:
 3. Select column(s) or define row filter
 4. Click "Add"
 
-#### Preparation Log
+#### Change Log
 
 All preparation steps are tracked:
 
@@ -304,12 +307,18 @@ Convert `submissiondate` column to datetime format for both survey and backcheck
      - Must be in date format
      - Example: "submissiondate", "starttime"
 
-4. **Optional: Add Backcheck Dataset**:
+4. **Optional Columns**:
+   - **Team Column**: Team or group assignment
+   - **Form Version Column**: Survey version field
+   - **Duration Column**: Interview length field
+   - **Target Number of Responses**: Expected total submissions
+
+5. **Optional: Add Backcheck Dataset**:
    - Select backcheck dataset
    - Must have matching ID column
    - Used for validation comparisons
 
-5. Click "Add Check Configuration"
+6. Click "Add Check Configuration"
 
 #### What Happens Next
 
@@ -390,32 +399,14 @@ Change specific field values:
 
 **Steps**:
 
-1. Click ":material/add: Add correction"
+1. Click ":material/add: Add correction step"
 2. **Select Key**: Choose record to modify
 3. **Select Action**: "modify value"
 4. **Select Column**: Choose field to modify
 5. **Current Value**: Auto-populated
 6. **New Value**: Enter correct value
 7. **Reason**: Document why (required)
-8. Click ":material/check: Apply"
-
-##### Remove Row
-
-Delete entire survey records:
-
-**Use Cases**:
-
-- Test submissions
-- Duplicate surveys (after investigation)
-- Invalid records
-
-**Steps**:
-
-1. Click ":material/add: Add correction"
-2. **Select Key**: Choose record to remove
-3. **Select Action**: "remove row"
-4. **Reason**: Document why (required)
-5. Click ":material/check: Apply"
+8. Click "Apply"
 
 ##### Remove Value
 
@@ -429,12 +420,30 @@ Replace specific value with null/missing:
 
 **Steps**:
 
-1. Click ":material/add: Add correction"
+1. Click ":material/add: Add correction step"
 2. **Select Key**: Choose record
 3. **Select Action**: "remove value"
 4. **Select Column**: Choose field
 5. **Reason**: Document why (required)
-6. Click ":material/check: Apply"
+6. Click "Apply"
+
+##### Remove Row
+
+Delete entire survey records:
+
+**Use Cases**:
+
+- Test submissions
+- Duplicate surveys (after investigation)
+- Invalid records
+
+**Steps**:
+
+1. Click ":material/add: Add correction step"
+2. **Select Key**: Choose record to remove
+3. **Select Action**: "remove row"
+4. **Reason**: Document why (required)
+5. Click "Apply"
 
 #### Correction Audit Trail
 
@@ -466,15 +475,15 @@ Correcting duplicate household ID:
 
 **Steps**:
 
-1. Go to Corrections page
-2. Click ":material/add: Add correction"
+1. Go to Correct Data page
+2. Click ":material/add: Add correction step"
 3. **Select Key**: "uuid:0dk0vt97-786b-250u-34k7-z34615zz820c"
 4. **Select Action**: "modify value"
 5. **Select Column**: "hhid"
 6. **Current Value**: "UP015-005" (auto-loaded)
 7. **New Value**: "UP015-055"
 8. **Reason**: "Correcting duplicate HHID after investigation"
-9. Click ":material/check: Apply"
+9. Click "Apply"
 10. Return to Duplicates tab to verify resolution
 
 ---
@@ -551,9 +560,11 @@ Key quality metrics:
 Configure parameters:
 
 - **Survey ID**: Respondent identifier
+- **Survey Key**: Unique row identifier
 - **Date**: Submission date column
 - **Enumerator**: Data collector column
 - **Target Number of Interviews**: Expected total
+- **Target Submissions Per Period**: Target rate per time interval
 
 ##### Progress Summary
 
@@ -608,6 +619,7 @@ Configure detection:
 - **Survey ID**: Main identifier to check
 - **Survey Key**: Unique key column
 - **Date**: Submission date
+- **Enumerator ID**: Data collector identifier
 - **Columns**: Additional columns to check for duplicates
 
 ##### Duplicate Statistics
@@ -884,7 +896,7 @@ Temporal performance trends:
 
 Configure analysis:
 
-- Select columns (maximum 10)
+- Select columns to analyze
 - Separate report per column
 
 ##### For Each Selected Column
@@ -1236,9 +1248,9 @@ After completing all 6 steps:
 
 ### Getting Help
 
-- **Documentation**: Full docs at [docs URL]
-- **GitHub Issues**: Report bugs at [GitHub URL]
-- **Email Support**: <support@ipa.org>
+- **Documentation**: [DataSure How-To Guide](https://data.poverty-action.org/data-quality/datasure/how-to-datasure.html)
+- **GitHub Issues**: [Report bugs and request features](https://github.com/PovertyAction/datasure/issues)
+- **Email Support**: <researchsupport@poverty-action.org>
 
 ### Further Reading
 
@@ -1249,5 +1261,5 @@ After completing all 6 steps:
 ---
 
 **Document Version**: 1.0
-**Last Updated**: 2025-01-15
-**DataSure Version**: 0.1.0
+**Last Updated**: July 2026
+**DataSure Version**: 1.0.0
