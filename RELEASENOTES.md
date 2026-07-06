@@ -14,21 +14,64 @@ This document tracks user-facing changes and improvements to help data managers,
 
 **Related Documentation**:
 
-- **CHANGELOG.md**: Technical implementation details for developers
+- **[CHANGELOG.md](CHANGELOG.md)**: Technical implementation details for developers
 
 ---
 
-## Current Version
+## Version 1.0.0 — Initial Release
 
-### Version X.Y.Z (Latest)
+Released: July 2026
 
-This version focuses on improving the core application architecture and preparing for enhanced user features in upcoming releases.
+DataSure 1.0.0 is the first stable release of IPA's survey data quality monitoring tool. It brings together data import, preparation, nine configurable quality checks, and a replication package export in a single web-based dashboard.
 
-#### Improvements
+### New Features
 
-- **Enhanced Stability**: Improved application reliability and error handling
-- **Better Performance**: Optimized data processing for faster loading times
-- **Updated Dependencies**: Latest versions of underlying components for better security and performance
+#### Connect to SurveyCTO or import local files
+
+Download survey data directly from your SurveyCTO server with saved credentials. Passwords are stored in your operating system's secure keyring (Windows Credential Manager, macOS Keychain) — never written to disk or log files. Incremental refresh means only new submissions are downloaded each time.
+
+Supports encrypted SurveyCTO forms with private key authentication, and imports local files in CSV, Excel (XLSX/XLS), JSON, and Stata (DTA) formats.
+
+#### Automatic attachment download
+
+Media files attached to survey responses (images, audio, video) can be downloaded and organized automatically, including attachments from encrypted forms.
+
+#### Data preparation
+
+Rename columns, filter rows, drop fields, and fix data types before running checks. All preparation steps are logged so your workflow is reproducible.
+
+#### Nine built-in data quality checks
+
+- **Summary**: Overall data quality score and flagged issues across all checks at a glance
+- **Missing data**: Identify which fields have high rates of missing responses, broken down by enumerator or over time
+- **Duplicates**: Detect duplicate survey submissions
+- **GPS validation**: Map survey coordinates and flag outliers far from expected survey areas
+- **Outliers**: Statistical detection of unusual values in numeric fields
+- **Enumerator performance**: Track submission rates, duration, and quality by interviewer
+- **Survey progress**: Daily and weekly submission counts against targets
+- **Descriptive statistics**: Frequency tables and summary statistics for any field
+- **Back-checks**: Compare original interviews against verification back-checks
+
+#### Interactive report pages
+
+Each check produces a report page with charts, maps, and tables that update automatically when new data is imported. Configure which checks run and which fields to include per project.
+
+#### Data corrections
+
+Log and apply corrections to individual survey responses within the app. Corrections are tracked separately from raw data — the original is always preserved.
+
+#### Replication package export
+
+Export a self-contained Stata or Python script package that reproduces your entire data pipeline outside DataSure. Useful for sharing with external researchers or archiving for publication.
+
+#### Multi-project support
+
+Manage multiple surveys simultaneously. Each project has its own settings, data, and check configuration stored locally.
+
+### Bug Fixes
+
+- **Fixed**: Encrypted attachment downloads now work correctly when a private key is configured
+- **Fixed**: Browser URL now shows the correct port when launching with `--port`
 
 ---
 
@@ -36,37 +79,41 @@ This version focuses on improving the core application architecture and preparin
 
 ### Installation Options
 
+#### Install with pip
+
+```bash
+pip install datasure
+```
+
 #### Install with uv
 
-Ensure that you have uv  installed:
+Ensure that you have uv installed:
 
-#### with winget
+##### with winget
 
 ```bash
 winget install astral-sh.uv
 ```
 
-#### with homebrew
+##### with homebrew
 
 ```bash
 brew install uv
 ```
 
-#### verify uv installation
+##### verify uv installation
 
 ```bash
 uv --version
 ```
 
-#### Install DataSure
+##### Install DataSure
 
 ```bash
-uv tool install dataSure
+uv tool install datasure
 ```
 
-or
-
-#### Update current version
+or update an existing installation:
 
 ```bash
 uv tool upgrade datasure
@@ -74,7 +121,8 @@ uv tool upgrade datasure
 
 ### Quick Start
 
-1. Launch the application: `datasure`
+1. Launch the application: `datasure` (opens at <http://localhost:8501>)
+   - Use a custom port: `datasure --port 8080`
 2. Create your first project
 3. Import survey data from SurveyCTO or upload CSV/Excel files
 4. Configure data quality checks based on your survey requirements
@@ -101,16 +149,15 @@ DataSure provides comprehensive survey data quality monitoring through:
 ### Data Import and Management
 
 - **SurveyCTO Integration**: Direct connection to your SurveyCTO server
-- **Local File Support**: Import CSV and Excel files
+- **Local File Support**: Import CSV, Excel (XLSX/XLS), JSON, and Stata (DTA) files
 - **Multi-Project Organization**: Manage multiple surveys simultaneously
 - **Flexible Configuration**: Customize checks per project requirements
 
 ### Reporting and Visualization
 
 - **Interactive Dashboards**: Real-time data quality monitoring
-- **Export Capabilities**: Generate reports in multiple formats
+- **Replication Package Export**: Generate Stata or Python scripts that reproduce your pipeline
 - **Custom Charts**: Visualize data patterns and quality metrics
-- **Automated Alerts**: Notifications for quality issues requiring attention
 
 ---
 
@@ -144,16 +191,11 @@ DataSure is released under the MIT License. See LICENSE file for details.
 
 ## Version History
 
-### Previous Versions
-
-#### Version 0.3.6a1
-
-- Application path resolution improvements
-- Enhanced module loading and view handling
+DataSure 1.0.0 is the first stable public release. Prior versions were internal pre-releases and are not documented here.
 
 ---
 
 *This document is maintained alongside the project and updated with each release. For technical details, see CHANGELOG.md.*
 
-**Last Updated**: January 2025  
-**Document Version**: 1.0
+**Last Updated**: July 2025
+**Document Version**: 1.1
