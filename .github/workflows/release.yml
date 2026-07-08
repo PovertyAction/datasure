@@ -4,6 +4,12 @@ name: Release
 #   test (quality gate) -> build + verify -> publish -> GitHub release
 # Publishing uses PyPI Trusted Publishing (OIDC) - no API tokens.
 # Pre-releases (a/b/rc/dev) go to Test PyPI; final X.Y.Z releases go to PyPI.
+#
+# Hardening (audited with zizmor):
+#   - actions pinned to commit SHAs (Dependabot keeps them current)
+#   - permissions: {} at the workflow level; each job requests only what it needs
+#   - no dependency caching in this workflow so a poisoned cache cannot
+#     influence release artifacts
 
 on:
   push:
@@ -19,27 +25,29 @@ on:
 env:
   PYTHON_VERSION: '3.11'
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   test:
     name: Quality gate
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      with:
+        persist-credentials: false
 
-    - uses: actions/setup-python@v6
+    - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
 
     - name: Run pre-commit hooks
-      uses: pre-commit/action@v3.0.1
+      uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v7
+      uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       with:
         python-version: ${{ env.PYTHON_VERSION }}
-        enable-cache: true
-        cache-dependency-glob: "uv.lock"
+        enable-cache: false
 
     - name: Install dependencies
       run: uv sync
@@ -51,25 +59,30 @@ jobs:
     name: Build and verify package
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.version.outputs.version }}
       is_prerelease: ${{ steps.version.outputs.is_prerelease }}
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      with:
+        persist-credentials: false
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v7
+      uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       with:
         python-version: ${{ env.PYTHON_VERSION }}
-        enable-cache: true
-        cache-dependency-glob: "uv.lock"
+        enable-cache: false
 
     - name: Determine version and release type
       id: version
       shell: bash
+      env:
+        INPUT_VERSION: ${{ github.event.inputs.version }}
       run: |
-        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-          VERSION="${{ github.event.inputs.version }}"
+        if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+          VERSION="$INPUT_VERSION"
         else
           VERSION=${GITHUB_REF#refs/tags/}
         fi
@@ -84,8 +97,9 @@ jobs:
 
     - name: Verify tag matches package version
       shell: bash
+      env:
+        TAG_VERSION: ${{ steps.version.outputs.version }}
       run: |
-        TAG_VERSION="${{ steps.version.outputs.version }}"
         TAG_VERSION="${TAG_VERSION#v}"
         PKG_VERSION=$(uv version --short)
         if [[ "$TAG_VERSION" != "$PKG_VERSION" ]]; then
@@ -110,7 +124,7 @@ jobs:
         fi
 
     - name: Upload package artifacts
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: python-package
         path: dist/
@@ -126,13 +140,15 @@ jobs:
       id-token: write
     steps:
     - name: Download package artifacts
-      uses: actions/download-artifact@v8
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
         name: python-package
         path: dist/
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v7
+      uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      with:
+        enable-cache: false
 
     - name: Publish via trusted publishing
       run: >-
@@ -150,13 +166,15 @@ jobs:
       id-token: write
     steps:
     - name: Download package artifacts
-      uses: actions/download-artifact@v8
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
         name: python-package
         path: dist/
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v7
+      uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      with:
+        enable-cache: false
 
     - name: Publish via trusted publishing
       run: uv publish
@@ -175,19 +193,23 @@ jobs:
       contents: write
     steps:
     - name: Download package artifacts
-      uses: actions/download-artifact@v8
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
         name: python-package
         path: dist/
 
+    # gh is preinstalled on the runner; using it directly avoids a
+    # third-party release action (zizmor: superfluous-actions).
     - name: Create release
-      uses: softprops/action-gh-release@v3
-      with:
-        files: |
-          dist/*.whl
-          dist/*.tar.gz
-        generate_release_notes: true
-        draft: false
-        prerelease: ${{ needs.build.outputs.is_prerelease == 'true' }}
+      shell: bash
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        TAG: ${{ needs.build.outputs.version }}
+        IS_PRERELEASE: ${{ needs.build.outputs.is_prerelease }}
+      run: |
+        args=(--generate-notes)
+        if [[ "$IS_PRERELEASE" == "true" ]]; then
+          args=(--prerelease "${args[@]}")
+        fi
+        gh release create "$TAG" dist/*.whl dist/*.tar.gz \
+          --repo "$GITHUB_REPOSITORY" "${args[@]}"
