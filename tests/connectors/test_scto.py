@@ -27,6 +27,7 @@ from datasure.connectors.scto import (
 from datasure.connectors.scto import (
     ValidationError as SctoValidationError,
 )
+from datasure.utils.scto_api import SurveyCTOAPIError
 from datasure.utils.settings_utils import ProjectID
 
 
@@ -1102,7 +1103,9 @@ class TestSurveyCTOClient:
             private_key="test_key",
         )
 
-        client._download_attachments(questions, data, form_config)
+        client._download_attachments(
+            questions, data, form_config, private_key="test_key"
+        )
 
         # Check MediaDownloader was created and called
         mock_downloader_class.assert_called_once_with(mock_scto_client, client.config)
@@ -1138,7 +1141,10 @@ class TestSurveyCTOClient:
         client = SurveyCTOClient("test1234")
 
         key_file = tmp_path / "test_key.pem"
-        key_content = "-----BEGIN RSA PRIVATE KEY-----\ntest_key_content\n-----END RSA PRIVATE KEY-----"
+        key_content = (
+            "-----BEGIN RSA PRIVATE KEY"
+            + "-----\ntest_key_content\n-----END RSA PRIVATE KEY-----"
+        )
         key_file.write_text(key_content)
 
         result = client._import_private_key(str(key_file))
@@ -1417,3 +1423,1100 @@ class TestValidationErrorClass:
         assert str(error) == "Validation failed"
         assert isinstance(error, SurveyCTOError)
         assert isinstance(error, Exception)
+
+
+class TestCacheManagerExtended:
+    """Extended tests for CacheManager.get_existing_data date branches."""
+
+    @patch("datasure.connectors.scto.duckdb_get_table")
+    def test_get_existing_data_string_date_parseable(self, mock_get_table):
+        """Test get_existing_data with a string SubmissionDate that parses as ISO."""
+        manager = CacheManager("test1234")
+        mock_get_table.return_value = pl.DataFrame(
+            {"name": ["John"], "SubmissionDate": ["2024-06-15T10:30:00"]}
+        )
+        _, date = manager.get_existing_data("alias")
+        assert date == datetime(2024, 6, 15, 10, 30, 0)
+
+    @patch("datasure.connectors.scto.duckdb_get_table")
+    def test_get_existing_data_string_date_invalid(self, mock_get_table):
+        """Test get_existing_data with a string SubmissionDate that fails to parse."""
+        manager = CacheManager("test1234")
+        mock_get_table.return_value = pl.DataFrame(
+            {"name": ["John"], "SubmissionDate": ["not-a-date"]}
+        )
+        _, date = manager.get_existing_data("alias")
+        assert date == SurveyCTOConfig().default_date
+
+    @patch("datasure.connectors.scto.duckdb_get_table")
+    def test_get_existing_data_unexpected_date_type(self, mock_get_table):
+        """Test get_existing_data with an integer SubmissionDate (unexpected type)."""
+        manager = CacheManager("test1234")
+        mock_get_table.return_value = pl.DataFrame(
+            {"name": ["John"], "SubmissionDate": [20240101]}
+        )
+        _, date = manager.get_existing_data("alias")
+        assert date == SurveyCTOConfig().default_date
+
+
+class TestDataProcessorExtended:
+    """Extended tests for DataProcessor covering the PolarsError branch."""
+
+    def test_convert_column_by_type_polars_error(self):
+        """Test that PolarsError is caught and original data is returned."""
+        processor = DataProcessor()
+        mock_data = Mock(spec=pl.DataFrame)
+        mock_data.with_columns.side_effect = pl.exceptions.InvalidOperationError(
+            "type mismatch"
+        )
+        result = processor._convert_column_by_type(mock_data, "date_col", "date")
+        assert result is mock_data
+
+
+class TestSurveyCTOClientExtended:
+    """Extended tests for SurveyCTOClient covering previously uncovered paths."""
+
+    @patch("datasure.connectors.scto.st")
+    def test_show_connection_status_no_forms(self, mock_st):
+        """Test _show_connection_status when the server has no forms."""
+        client = SurveyCTOClient("test1234")
+        client._show_connection_status([], "testserver")
+        mock_st.warning.assert_called_once()
+
+    def test_handle_api_error_generic_fallthrough(self):
+        """Test _handle_api_error raises ConnectionError for unrecognised errors."""
+        from datasure.utils.scto_api import SurveyCTOAPIError as _SurveyCTOAPIError
+
+        client = SurveyCTOClient("test1234")
+        api_err = _SurveyCTOAPIError("some completely unmatched error text")
+        with pytest.raises(ConnectionError, match="API error"):
+            client._handle_api_error(api_err, "testserver")
+
+    def test_handle_connection_error_generic(self):
+        """Test _handle_connection_error for non-server-name errors."""
+        client = SurveyCTOClient("test1234")
+        error = Exception("Something unexpected went wrong")
+        with pytest.raises(ConnectionError, match="Failed to create connection"):
+            client._handle_connection_error(error, "testserver")
+
+    def test_import_data_missing_server_raises(self):
+        """Test import_data raises ValueError when username is absent."""
+        client = SurveyCTOClient("test1234")
+        # username defaults to None — triggers the guard at the top of import_data
+        form_config = FormConfig(alias="test", form_id="form123", server="testserver")
+        with pytest.raises(ValueError, match="Server and username must be provided"):
+            client.import_data(form_config)
+
+    @patch("datasure.connectors.scto.standardize_missing_values")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_import_regular_form_loads_private_key(
+        self, mock_save, mock_standardize, tmp_path
+    ):
+        """Test _import_regular_form passes key file PEM content to the API."""
+        client = SurveyCTOClient("test1234")
+        mock_scto_client = Mock()
+        client._scto_client = mock_scto_client
+
+        mock_scto_client.download_form_data_json.return_value = [{"name": "John"}]
+        mock_scto_client.download_form_definition.return_value = {
+            "fieldsRowsAndColumns": [["name", "type"], ["name", "text"]],
+            "choicesRowsAndColumns": [["list name", "name", "label"]],
+        }
+        mock_standardize.side_effect = lambda x: x
+
+        key_file = tmp_path / "key.pem"
+        key_content = (
+            "-----BEGIN RSA PRIVATE KEY" + "-----\ntest\n-----END RSA PRIVATE KEY-----"
+        )
+        key_file.write_text(key_content)
+
+        form_config = FormConfig(
+            alias="test_form",
+            form_id="form123",
+            server="testserver",
+            private_key=str(key_file),
+        )
+        result = client._import_regular_form(form_config)
+
+        assert result == 1
+        call_kwargs = mock_scto_client.download_form_data_json.call_args.kwargs
+        assert call_kwargs.get("private_key") == key_content.strip()
+
+    @patch("datasure.connectors.scto.standardize_missing_values")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_import_regular_form_concats_existing_data(
+        self, mock_save, mock_standardize
+    ):
+        """Test _import_regular_form concatenates new rows onto existing data."""
+        client = SurveyCTOClient("test1234")
+        mock_scto_client = Mock()
+        client._scto_client = mock_scto_client
+
+        existing_df = pl.DataFrame({"name": ["Alice"], "age": ["20"]})
+        client.cache_manager.get_existing_data = Mock(
+            return_value=(existing_df, datetime(2024, 1, 1))
+        )
+
+        mock_scto_client.download_form_data_json.return_value = [
+            {"name": "John", "age": "25"}
+        ]
+        mock_scto_client.download_form_definition.return_value = {
+            "fieldsRowsAndColumns": [["name", "type"], ["name", "text"]],
+            "choicesRowsAndColumns": [["list name", "name", "label"]],
+        }
+        mock_standardize.side_effect = lambda x: x
+
+        form_config = FormConfig(
+            alias="test_form",
+            form_id="form123",
+            server="testserver",
+            save_to="/some/path/data.csv",
+        )
+        result = client._import_regular_form(form_config)
+
+        assert result == 1
+        saved_df = mock_save.call_args[0][1]
+        assert len(saved_df) == 2
+
+    @patch("datasure.connectors.scto.standardize_missing_values")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_import_regular_form_filters_disabled_questions(
+        self, mock_save, mock_standardize
+    ):
+        """Test _import_regular_form filters out disabled questions."""
+        client = SurveyCTOClient("test1234")
+        mock_scto_client = Mock()
+        client._scto_client = mock_scto_client
+
+        mock_scto_client.download_form_data_json.return_value = [{"name": "John"}]
+        mock_scto_client.download_form_definition.return_value = {
+            "fieldsRowsAndColumns": [
+                ["name", "type", "disabled"],
+                ["name", "text", "no"],
+                ["hidden_field", "text", "yes"],
+            ],
+            "choicesRowsAndColumns": [["list name", "name", "label"]],
+        }
+        mock_standardize.side_effect = lambda x: x
+
+        form_config = FormConfig(
+            alias="test_form", form_id="form123", server="testserver"
+        )
+        result = client._import_regular_form(form_config)
+
+        assert result == 1
+
+    @patch("datasure.connectors.scto.standardize_missing_values")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_import_regular_form_triggers_attachment_download(
+        self, mock_save, mock_standardize, tmp_path
+    ):
+        """Test _import_regular_form calls _download_attachments when configured."""
+        client = SurveyCTOClient("test1234")
+        mock_scto_client = Mock()
+        client._scto_client = mock_scto_client
+        client._download_attachments = Mock()
+        client.cache_manager.get_existing_data = Mock(
+            return_value=(pl.DataFrame(), SurveyCTOConfig().default_date)
+        )
+
+        mock_scto_client.download_form_data_json.return_value = [
+            {"name": "John", "photo": "photo1.jpg"}
+        ]
+        mock_scto_client.download_form_definition.return_value = {
+            "fieldsRowsAndColumns": [
+                ["name", "type"],
+                ["name", "text"],
+                ["photo", "image"],
+            ],
+            "choicesRowsAndColumns": [["list name", "name", "label"]],
+        }
+        mock_standardize.side_effect = lambda x: x
+
+        form_config = FormConfig(
+            alias="test_form",
+            form_id="form123",
+            server="testserver",
+            save_to=str(tmp_path / "data.csv"),
+            attachments=True,
+        )
+        result = client._import_regular_form(form_config)
+
+        assert result == 1
+        client._download_attachments.assert_called_once()
+
+    def test_download_attachments_no_media_fields_skips_download(self, tmp_path):
+        """Test _download_attachments does nothing when no media fields exist."""
+        client = SurveyCTOClient("test1234")
+        mock_scto_client = Mock()
+        client._scto_client = mock_scto_client
+
+        questions = pl.DataFrame({"type": ["text", "integer"], "name": ["name", "age"]})
+        data = pl.DataFrame({"name": ["John"], "age": ["25"]})
+        form_config = FormConfig(
+            alias="test",
+            form_id="form123",
+            server="testserver",
+            save_to=str(tmp_path / "data.csv"),
+        )
+        client._download_attachments(questions, data, form_config)
+        mock_scto_client.download_attachment_from_url.assert_not_called()
+
+
+class TestSurveyCTOUIExtended:
+    """Tests for SurveyCTOUI helper methods."""
+
+    # --- _validate_private_key_text ---
+
+    def test_validate_private_key_text_valid(self):
+        """Test valid PEM key passes validation."""
+        ui = SurveyCTOUI("test1234")
+        key = (
+            "-----BEGIN RSA PRIVATE KEY" + "-----\ntest\n-----END RSA PRIVATE KEY-----"
+        )
+        assert ui._validate_private_key_text(key) is True
+
+    def test_validate_private_key_text_empty_string(self):
+        """Test empty string raises ValidationError."""
+        ui = SurveyCTOUI("test1234")
+        with pytest.raises(SctoValidationError, match="cannot be empty"):
+            ui._validate_private_key_text("")
+
+    def test_validate_private_key_text_none(self):
+        """Test None raises ValidationError."""
+        ui = SurveyCTOUI("test1234")
+        with pytest.raises(SctoValidationError, match="cannot be empty"):
+            ui._validate_private_key_text(None)
+
+    def test_validate_private_key_text_wrong_format(self):
+        """Test key without PEM headers raises ValidationError."""
+        ui = SurveyCTOUI("test1234")
+        with pytest.raises(SctoValidationError, match="must start with"):
+            ui._validate_private_key_text("this is not a PEM key at all")
+
+    # --- _get_default_form_index ---
+
+    def test_get_default_form_index_found(self):
+        """Test returns correct index when form_id is present."""
+        ui = SurveyCTOUI("test1234")
+        assert (
+            ui._get_default_form_index(
+                {"form_id": "form2"}, ["form1", "form2", "form3"]
+            )
+            == 1
+        )
+
+    def test_get_default_form_index_not_found(self):
+        """Test returns None when form_id is not in the list."""
+        ui = SurveyCTOUI("test1234")
+        assert (
+            ui._get_default_form_index({"form_id": "missing"}, ["form1", "form2"])
+            is None
+        )
+
+    def test_get_default_form_index_no_defaults(self):
+        """Test returns None when defaults dict is empty."""
+        ui = SurveyCTOUI("test1234")
+        assert ui._get_default_form_index({}, ["form1"]) is None
+
+    # --- _parse_selected_form ---
+
+    @patch("datasure.connectors.scto.st")
+    def test_parse_selected_form_with_matching_pattern(self, mock_st):
+        """Test parsing a 'form_id (title)' formatted selection."""
+        mock_st.expander.return_value.__enter__ = Mock(return_value=None)
+        mock_st.expander.return_value.__exit__ = Mock(return_value=False)
+        ui = SurveyCTOUI("test1234")
+        forms_info = {"forms_list": [("form123", "My Survey", True)]}
+        form_options = ["form123 (My Survey)"]
+        result = ui._parse_selected_form(
+            "form123 (My Survey)", form_options, forms_info
+        )
+        assert result["form_id"] == "form123"
+        assert result["form_title"] == "My Survey"
+        assert result["encrypted"] is True
+
+    @patch("datasure.connectors.scto.st")
+    def test_parse_selected_form_without_matching_pattern(self, mock_st):
+        """Test parsing a bare form_id with no title in parentheses."""
+        mock_st.expander.return_value.__enter__ = Mock(return_value=None)
+        mock_st.expander.return_value.__exit__ = Mock(return_value=False)
+        ui = SurveyCTOUI("test1234")
+        forms_info = {"forms_list": [("form123", "title", False)]}
+        form_options = ["form123"]
+        result = ui._parse_selected_form("form123", form_options, forms_info)
+        assert result["form_id"] == "form123"
+        assert result["form_title"] == "No title"
+        assert result["encrypted"] is False
+
+    # --- _validate_private_key_path ---
+
+    @patch("datasure.connectors.scto.st")
+    def test_validate_private_key_path_valid(self, mock_st, tmp_path):
+        """Test valid .pem path returns True."""
+        ui = SurveyCTOUI("test1234")
+        key_file = tmp_path / "key.pem"
+        key_file.write_text("test")
+        assert ui._validate_private_key_path(str(key_file)) is True
+        mock_st.error.assert_not_called()
+
+    @patch("datasure.connectors.scto.st")
+    def test_validate_private_key_path_not_exists(self, mock_st):
+        """Test non-existent path shows error and returns False."""
+        ui = SurveyCTOUI("test1234")
+        result = ui._validate_private_key_path("/nonexistent/key.pem")
+        assert result is False
+        mock_st.error.assert_called_once()
+
+    @patch("datasure.connectors.scto.st")
+    def test_validate_private_key_path_wrong_extension(self, mock_st, tmp_path):
+        """Test non-.pem file shows error and returns False."""
+        ui = SurveyCTOUI("test1234")
+        key_file = tmp_path / "key.txt"
+        key_file.write_text("test")
+        result = ui._validate_private_key_path(str(key_file))
+        assert result is False
+        mock_st.error.assert_called_once()
+
+    # --- _render_save_file_field ---
+
+    @patch("datasure.connectors.scto.st")
+    def test_render_save_file_field_empty_input(self, mock_st):
+        """Test that an empty save_file input returns empty string."""
+        mock_st.text_input.return_value = ""
+        ui = SurveyCTOUI("test1234")
+        result = ui._render_save_file_field({})
+        assert result == ""
+
+    @patch("datasure.connectors.scto.os")
+    @patch("datasure.connectors.scto.st")
+    def test_render_save_file_field_file_does_not_exist(self, mock_st, mock_os):
+        """Test that a non-existent save_file path is returned as-is."""
+        mock_st.text_input.return_value = "/path/to/data.csv"
+        mock_os.path.exists.return_value = False
+        ui = SurveyCTOUI("test1234")
+        result = ui._render_save_file_field({})
+        assert result == "/path/to/data.csv"
+
+    @patch("datasure.connectors.scto.st")
+    def test_render_save_file_field_existing_valid_path(self, mock_st, tmp_path):
+        """Test a valid save path whose parent dir exists is returned as-is."""
+        save_file = tmp_path / "data.csv"
+        save_file.write_text("col1\nval1")
+        mock_st.text_input.return_value = str(save_file)
+        ui = SurveyCTOUI("test1234")
+        result = ui._render_save_file_field({})
+        assert result == str(save_file)
+
+    # --- _get_forms_info ---
+
+    def test_get_forms_info_returns_connection_info(self):
+        """Test _get_forms_info delegates to client.connect and returns dict."""
+        ui = SurveyCTOUI("test1234")
+        ui.client.connect = Mock(
+            return_value={
+                "connected": True,
+                "forms_count": 2,
+                "forms_list": [
+                    ("form1", "Survey 1", False),
+                    ("form2", "Survey 2", True),
+                ],
+            }
+        )
+        credentials = ServerCredentials(
+            server="testserver", user="user@example.com", password="pass"
+        )
+        result = ui._get_forms_info(credentials)
+        assert result["connected"] is True
+        assert result["forms_count"] == 2
+        assert len(result["forms_list"]) == 2
+
+    # --- _add_form_to_project ---
+
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    @patch("datasure.connectors.scto.duckdb_get_table")
+    def test_add_form_to_project_success(self, mock_get_table, mock_save_table):
+        """Test _add_form_to_project appends a new row to the import log."""
+        ui = SurveyCTOUI("test1234")
+        mock_get_table.return_value = pl.DataFrame(
+            {
+                "alias": ["existing_form"],
+                "refresh": [True],
+                "load": [True],
+                "source": ["SurveyCTO"],
+                "filename": [""],
+                "sheet_name": [""],
+                "server": ["testserver"],
+                "username": ["user@example.com"],
+                "form_id": ["existing123"],
+                "private_key": [""],
+                "save_to": [""],
+                "attachments": [False],
+            }
+        )
+        form_config = FormConfig(
+            alias="new_form", form_id="form123", server="testserver"
+        )
+        ui._add_form_to_project(form_config)
+        mock_save_table.assert_called_once()
+        saved_df = mock_save_table.call_args[0][1]
+        assert len(saved_df) == 2
+
+    @patch("datasure.connectors.scto.duckdb_get_table")
+    def test_add_form_to_project_duplicate_alias_raises(self, mock_get_table):
+        """Test _add_form_to_project raises ValidationError for a duplicate alias."""
+        ui = SurveyCTOUI("test1234")
+        mock_get_table.return_value = pl.DataFrame({"alias": ["existing_form"]})
+        form_config = FormConfig(
+            alias="existing_form", form_id="form123", server="testserver"
+        )
+        with pytest.raises(SctoValidationError, match="already exists"):
+            ui._add_form_to_project(form_config)
+
+    # --- _update_form_on_project ---
+
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    @patch("datasure.connectors.scto.duckdb_get_table")
+    def test_update_form_on_project_success(self, mock_get_table, mock_save_table):
+        """Test _update_form_on_project updates the matching row in the import log."""
+        ui = SurveyCTOUI("test1234")
+        mock_get_table.return_value = pl.DataFrame(
+            {
+                "alias": ["existing_form"],
+                "refresh": [True],
+                "load": [True],
+                "source": ["SurveyCTO"],
+                "filename": [""],
+                "sheet_name": [""],
+                "server": ["oldserver"],
+                "form_id": ["oldform"],
+                "private_key": [""],
+                "save_to": [""],
+                "attachments": [False],
+            }
+        )
+        form_config = FormConfig(
+            alias="existing_form", form_id="newform", server="newserver"
+        )
+        ui._update_form_on_project(form_config)
+        mock_save_table.assert_called_once()
+
+    @patch("datasure.connectors.scto.duckdb_get_table")
+    def test_update_form_on_project_not_found_raises(self, mock_get_table):
+        """Test _update_form_on_project raises ValidationError when alias is missing."""
+        ui = SurveyCTOUI("test1234")
+        mock_get_table.return_value = pl.DataFrame({"alias": ["other_form"]})
+        form_config = FormConfig(
+            alias="missing_form", form_id="form123", server="testserver"
+        )
+        with pytest.raises(SctoValidationError, match="does not exist"):
+            ui._update_form_on_project(form_config)
+
+    # --- _extract_form_title and helpers ---
+
+    def test_extract_form_title_from_settings(self):
+        """Test title is extracted from the settings block."""
+        ui = SurveyCTOUI("test1234")
+        form_def = {
+            "settings": [
+                ["form_title", "form_id"],
+                ["My Survey", "survey123"],
+            ],
+            "fieldsRowsAndColumns": [["name", "type"]],
+        }
+        assert ui._extract_form_title(form_def, "fallback") == "My Survey"
+
+    def test_extract_form_title_falls_back_to_form_id(self):
+        """Test form_id is returned when no title can be found."""
+        ui = SurveyCTOUI("test1234")
+        assert (
+            ui._extract_form_title({"fieldsRowsAndColumns": [["name"]]}, "my_form")
+            == "my_form"
+        )
+
+    def test_extract_form_title_exception_returns_form_id(self):
+        """Test form_id is returned when extraction raises an exception."""
+        ui = SurveyCTOUI("test1234")
+        assert ui._extract_form_title({}, "fallback_id") == "fallback_id"
+
+    def test_extract_title_from_settings_no_key(self):
+        """Test returns None when settings key is absent."""
+        ui = SurveyCTOUI("test1234")
+        assert ui._extract_title_from_settings({}) is None
+
+    def test_extract_title_from_settings_too_short(self):
+        """Test returns None when settings list has only one row."""
+        ui = SurveyCTOUI("test1234")
+        assert ui._extract_title_from_settings({"settings": [["form_title"]]}) is None
+
+    def test_find_title_in_headers_found(self):
+        """Test returns title value when a recognised header is present."""
+        ui = SurveyCTOUI("test1234")
+        result = ui._find_title_in_headers(
+            ["form_title", "form_id"], ["My Survey", "id123"]
+        )
+        assert result == "My Survey"
+
+    def test_find_title_in_headers_not_found(self):
+        """Test returns None when no recognised title header is present."""
+        ui = SurveyCTOUI("test1234")
+        assert ui._find_title_in_headers(["other_col"], ["value"]) is None
+
+    def test_extract_title_from_fields_no_key(self):
+        """Test returns None when fieldsRowsAndColumns is absent."""
+        ui = SurveyCTOUI("test1234")
+        assert ui._extract_title_from_fields({}) is None
+
+    def test_extract_title_from_fields_too_short(self):
+        """Test returns None when fieldsRowsAndColumns has only a header row."""
+        ui = SurveyCTOUI("test1234")
+        assert (
+            ui._extract_title_from_fields({"fieldsRowsAndColumns": [["headers"]]})
+            is None
+        )
+
+
+class TestDownloadFormsExtended:
+    """Extended tests for download_forms covering the all-failures branch."""
+
+    @patch("datasure.connectors.scto.SurveyCTOClient")
+    @patch("datasure.connectors.scto.st")
+    def test_download_forms_all_failures(self, mock_st, mock_client_class):
+        """Test download_forms shows only the failure message when every form fails."""
+        mock_client = Mock()
+        mock_client_class.return_value = mock_client
+        mock_client.import_data.side_effect = Exception("always fails")
+
+        mock_progress = Mock()
+        mock_st.progress.return_value = mock_progress
+
+        form_configs = [FormConfig(alias="form1", form_id="f1", server="server1")]
+        download_forms("test1234", form_configs)
+
+        success_calls = [
+            c
+            for c in mock_st.success.call_args_list
+            if "Successfully downloaded" in str(c)
+        ]
+        assert len(success_calls) == 0
+
+        error_calls = [
+            c
+            for c in mock_st.error.call_args_list
+            if "Failed to download" in str(c) and "forms" in str(c)
+        ]
+        assert len(error_calls) == 1
+
+
+class TestSurveyCTOUIRendering:
+    """Tests for SurveyCTOUI render and submission methods."""
+
+    # --- _render_logo ---
+
+    @patch("datasure.connectors.scto.st")
+    def test_render_logo_with_valid_path(self, mock_st, tmp_path):
+        """Test _render_logo calls st.image when the logo file exists."""
+        logo = tmp_path / "logo.png"
+        logo.write_bytes(b"PNG")
+        ui = SurveyCTOUI("test1234")
+        ui._get_logo_path = Mock(return_value=str(logo))
+        ui._render_logo()
+        mock_st.image.assert_called_once()
+
+    @patch("datasure.connectors.scto.st")
+    def test_render_logo_without_valid_path(self, mock_st):
+        """Test _render_logo falls back to st.markdown when logo is absent."""
+        ui = SurveyCTOUI("test1234")
+        ui._get_logo_path = Mock(return_value=None)
+        ui._render_logo()
+        mock_st.markdown.assert_called_once()
+
+    # --- _get_server_credentials ---
+
+    @patch("datasure.connectors.scto.list_stored_credentials")
+    @patch("datasure.connectors.scto.st")
+    def test_get_server_credentials_no_credentials(self, mock_st, mock_list_cred):
+        """Test returns None and shows warning when no credentials are stored."""
+        mock_list_cred.return_value = {"credentials": {}}
+        ui = SurveyCTOUI("test1234")
+        result = ui._get_server_credentials()
+        assert result is None
+        mock_st.warning.assert_called_once()
+
+    @patch("datasure.connectors.scto.list_stored_credentials")
+    @patch("datasure.connectors.scto.st")
+    def test_get_server_credentials_keyerror_shows_info(self, mock_st, mock_list_cred):
+        """Test returns None and shows info when nothing is selected."""
+        mock_list_cred.return_value = {
+            "credentials": {
+                "server1": {"server": "test", "username": "user@example.com"}
+            }
+        }
+        mock_st.selectbox.return_value = None
+        ui = SurveyCTOUI("test1234")
+        result = ui._get_server_credentials()
+        assert result is None
+        mock_st.info.assert_called_once()
+
+    @patch("datasure.connectors.scto.retrieve_scto_credentials")
+    @patch("datasure.connectors.scto.list_stored_credentials")
+    @patch("datasure.connectors.scto.st")
+    def test_get_server_credentials_connection_fails(
+        self, mock_st, mock_list_cred, mock_retrieve
+    ):
+        """Test returns None and shows error when server connection fails."""
+        mock_list_cred.return_value = {
+            "credentials": {
+                "server1": {"server": "testserver", "username": "user@example.com"}
+            }
+        }
+        mock_st.selectbox.return_value = "server1"
+        mock_retrieve.return_value = {"credentials": {"password": "pass"}}
+        ui = SurveyCTOUI("test1234")
+        ui.client.connect = Mock(side_effect=ConnectionError("connection refused"))
+        result = ui._get_server_credentials()
+        assert result is None
+        mock_st.error.assert_called_once()
+
+    @patch("datasure.connectors.scto.retrieve_scto_credentials")
+    @patch("datasure.connectors.scto.list_stored_credentials")
+    @patch("datasure.connectors.scto.st")
+    def test_get_server_credentials_success(
+        self, mock_st, mock_list_cred, mock_retrieve
+    ):
+        """Test returns ServerCredentials on a successful connection."""
+        mock_list_cred.return_value = {
+            "credentials": {
+                "server1": {"server": "testserver", "username": "user@example.com"}
+            }
+        }
+        mock_st.selectbox.return_value = "server1"
+        mock_retrieve.return_value = {"credentials": {"password": "pass"}}
+        ui = SurveyCTOUI("test1234")
+        ui.client.connect = Mock(return_value=None)
+        result = ui._get_server_credentials()
+        assert result is not None
+        assert result.server == "testserver"
+
+    # --- _render_form_selection ---
+
+    @patch("datasure.connectors.scto.st")
+    def test_render_form_selection_no_form_selected(self, mock_st):
+        """Test returns None when the user has not picked a form."""
+        mock_st.selectbox.return_value = None
+        ui = SurveyCTOUI("test1234")
+        ui._get_forms_info = Mock(
+            return_value={"forms_list": [("form1", "Survey 1", False)]}
+        )
+        credentials = ServerCredentials(server="test", user="user@ex.com", password="p")
+        result = ui._render_form_selection(credentials, {})
+        assert result is None
+
+    @patch("datasure.connectors.scto.st")
+    def test_render_form_selection_form_selected(self, mock_st):
+        """Test returns form data dict when the user selects a form."""
+        mock_st.selectbox.return_value = "form1 (Survey 1)"
+        ui = SurveyCTOUI("test1234")
+        forms_info = {"forms_list": [("form1", "Survey 1", False)]}
+        ui._get_forms_info = Mock(return_value=forms_info)
+        ui._parse_selected_form = Mock(
+            return_value={
+                "form_id": "form1",
+                "form_title": "Survey 1",
+                "encrypted": False,
+            }
+        )
+        credentials = ServerCredentials(server="test", user="user@ex.com", password="p")
+        result = ui._render_form_selection(credentials, {})
+        assert result is not None
+        assert result["form_id"] == "form1"
+
+    # --- _render_alias_field ---
+
+    @patch("datasure.connectors.scto.st")
+    def test_render_alias_field(self, mock_st):
+        """Test returns the value from the alias text input."""
+        mock_st.text_input.return_value = "my_alias"
+        ui = SurveyCTOUI("test1234")
+        result = ui._render_alias_field({"form_title": "My Survey"}, {}, False)
+        assert result == "my_alias"
+
+    # --- _render_private_key_field ---
+
+    @patch("datasure.connectors.scto.st")
+    def test_render_private_key_field_not_encrypted(self, mock_st):
+        """Test returns empty string for non-encrypted forms."""
+        mock_st.text_input.return_value = ""
+        ui = SurveyCTOUI("test1234")
+        result = ui._render_private_key_field(False, {}, False)
+        assert result == ""
+
+    @patch("datasure.connectors.scto.st")
+    def test_render_private_key_field_encrypted_no_file(self, mock_st):
+        """Test returns empty string with warning when encrypted and no key given."""
+        mock_st.text_input.return_value = ""
+        ui = SurveyCTOUI("test1234")
+        result = ui._render_private_key_field(True, {}, False)
+        assert result == ""
+        mock_st.warning.assert_called_once()
+
+    @patch("datasure.connectors.scto.st")
+    def test_render_private_key_field_encrypted_invalid_path(self, mock_st):
+        """Test returns None when the key path fails validation."""
+        mock_st.text_input.return_value = "/nonexistent/key.pem"
+        ui = SurveyCTOUI("test1234")
+        ui._validate_private_key_path = Mock(return_value=False)
+        result = ui._render_private_key_field(True, {}, False)
+        assert result is None
+
+    @patch("datasure.connectors.scto.st")
+    def test_render_private_key_field_encrypted_valid_path(self, mock_st):
+        """Test returns the file path when it passes validation."""
+        mock_st.text_input.return_value = "/valid/key.pem"
+        ui = SurveyCTOUI("test1234")
+        ui._validate_private_key_path = Mock(return_value=True)
+        result = ui._render_private_key_field(True, {}, False)
+        assert result == "/valid/key.pem"
+
+    # --- _render_config_fields ---
+
+    @patch("datasure.connectors.scto.st")
+    def test_render_config_fields_private_key_none(self, mock_st):
+        """Test returns None when private key field returns None."""
+        ui = SurveyCTOUI("test1234")
+        ui._render_alias_field = Mock(return_value="alias")
+        ui._render_private_key_field = Mock(return_value=None)
+        ui._render_save_file_field = Mock(return_value="/save/path")
+        result = ui._render_config_fields({"encrypted": True}, {}, False)
+        assert result is None
+
+    @patch("datasure.connectors.scto.st")
+    def test_render_config_fields_save_file_none(self, mock_st):
+        """Test returns None when save file field returns None."""
+        ui = SurveyCTOUI("test1234")
+        ui._render_alias_field = Mock(return_value="alias")
+        ui._render_private_key_field = Mock(return_value="")
+        ui._render_save_file_field = Mock(return_value=None)
+        result = ui._render_config_fields({"encrypted": False}, {}, False)
+        assert result is None
+
+    @patch("datasure.connectors.scto.st")
+    def test_render_config_fields_success(self, mock_st):
+        """Test returns the full config dict when all fields are valid."""
+        mock_st.checkbox.return_value = True
+        mock_st.markdown.return_value = None
+        ui = SurveyCTOUI("test1234")
+        ui._render_alias_field = Mock(return_value="my_alias")
+        ui._render_private_key_field = Mock(return_value="")
+        ui._render_save_file_field = Mock(return_value="/save/path")
+        result = ui._render_config_fields({"encrypted": False}, {}, False)
+        assert result is not None
+        assert result["alias"] == "my_alias"
+        assert result["attachments"] is True
+
+    # --- _render_save_file_field (parent directory missing) ---
+
+    @patch("datasure.connectors.scto.Path")
+    @patch("datasure.connectors.scto.os")
+    @patch("datasure.connectors.scto.st")
+    def test_render_save_file_field_parent_dir_missing(
+        self, mock_st, mock_os, mock_path_cls
+    ):
+        """Test returns None and shows error when save file parent dir is missing."""
+        mock_st.text_input.return_value = "/missing/parent/data.csv"
+        mock_os.path.exists.return_value = True
+        mock_path_inst = Mock()
+        mock_path_cls.return_value = mock_path_inst
+        mock_path_inst.parent.exists.return_value = False
+        ui = SurveyCTOUI("test1234")
+        result = ui._render_save_file_field({})
+        assert result is None
+        mock_st.error.assert_called_once()
+
+    # --- _handle_form_submission ---
+
+    @patch("datasure.connectors.scto.st")
+    def test_handle_form_submission_button_not_clicked(self, mock_st):
+        """Test early return when the submit button is not clicked."""
+        mock_st.button.return_value = False
+        ui = SurveyCTOUI("test1234")
+        ui._add_form_to_project = Mock()
+        ui._handle_form_submission(
+            False,
+            ServerCredentials(server="srv", user="u@ex.com", password="p"),
+            {"form_id": "f1", "form_title": "Survey", "encrypted": False},
+            {
+                "alias": "alias",
+                "private_key_file": "",
+                "save_file": "",
+                "attachments": False,
+            },
+        )
+        ui._add_form_to_project.assert_not_called()
+
+    @patch("datasure.connectors.scto.st")
+    def test_handle_form_submission_no_alias(self, mock_st):
+        """Test shows error and aborts when alias is empty."""
+        mock_st.button.return_value = True
+        ui = SurveyCTOUI("test1234")
+        ui._add_form_to_project = Mock()
+        ui._handle_form_submission(
+            False,
+            ServerCredentials(server="srv", user="u@ex.com", password="p"),
+            {"form_id": "f1", "form_title": "Survey", "encrypted": False},
+            {
+                "alias": "",
+                "private_key_file": "",
+                "save_file": "",
+                "attachments": False,
+            },
+        )
+        mock_st.error.assert_called_once()
+        ui._add_form_to_project.assert_not_called()
+
+    @patch("datasure.connectors.scto.st")
+    def test_handle_form_submission_no_form_id(self, mock_st):
+        """Test shows error and aborts when form_id is empty."""
+        mock_st.button.return_value = True
+        ui = SurveyCTOUI("test1234")
+        ui._add_form_to_project = Mock()
+        ui._handle_form_submission(
+            False,
+            ServerCredentials(server="srv", user="u@ex.com", password="p"),
+            {"form_id": "", "form_title": "Survey", "encrypted": False},
+            {
+                "alias": "my_alias",
+                "private_key_file": "",
+                "save_file": "",
+                "attachments": False,
+            },
+        )
+        mock_st.error.assert_called_once()
+        ui._add_form_to_project.assert_not_called()
+
+    @patch("datasure.connectors.scto.st")
+    def test_handle_form_submission_add_mode_success(self, mock_st):
+        """Test calls _add_form_to_project and triggers rerun in add mode."""
+        mock_st.button.return_value = True
+        ui = SurveyCTOUI("test1234")
+        ui._add_form_to_project = Mock()
+        ui._handle_form_submission(
+            False,
+            ServerCredentials(server="testserver", user="u@ex.com", password="p"),
+            {"form_id": "form123", "form_title": "Survey", "encrypted": False},
+            {
+                "alias": "my_alias",
+                "private_key_file": "",
+                "save_file": "",
+                "attachments": False,
+            },
+        )
+        ui._add_form_to_project.assert_called_once()
+        mock_st.success.assert_called_once()
+        mock_st.rerun.assert_called_once()
+
+    @patch("datasure.connectors.scto.st")
+    def test_handle_form_submission_edit_mode_success(self, mock_st):
+        """Test calls _update_form_on_project and triggers rerun in edit mode."""
+        mock_st.button.return_value = True
+        ui = SurveyCTOUI("test1234")
+        ui._update_form_on_project = Mock()
+        ui._handle_form_submission(
+            True,
+            ServerCredentials(server="testserver", user="u@ex.com", password="p"),
+            {"form_id": "form123", "form_title": "Survey", "encrypted": False},
+            {
+                "alias": "my_alias",
+                "private_key_file": "",
+                "save_file": "",
+                "attachments": False,
+            },
+        )
+        ui._update_form_on_project.assert_called_once()
+        mock_st.success.assert_called_once()
+        mock_st.rerun.assert_called_once()
+
+    @patch("datasure.connectors.scto.st")
+    def test_handle_form_submission_exception_shows_error(self, mock_st):
+        """Test shows error message and does not rerun when add raises."""
+        mock_st.button.return_value = True
+        ui = SurveyCTOUI("test1234")
+        ui._add_form_to_project = Mock(side_effect=Exception("save failed"))
+        ui._handle_form_submission(
+            False,
+            ServerCredentials(server="testserver", user="u@ex.com", password="p"),
+            {"form_id": "form123", "form_title": "Survey", "encrypted": False},
+            {
+                "alias": "my_alias",
+                "private_key_file": "",
+                "save_file": "",
+                "attachments": False,
+            },
+        )
+        mock_st.error.assert_called_once()
+        mock_st.rerun.assert_not_called()
+
+    # --- _get_form_options ---
+
+    @patch("datasure.connectors.scto.st")
+    def test_get_form_options_success(self, mock_st):
+        """Test returns sorted list of (form_id, title) tuples on success."""
+        mock_spinner = Mock()
+        mock_spinner.__enter__ = Mock(return_value=None)
+        mock_spinner.__exit__ = Mock(return_value=False)
+        mock_st.spinner.return_value = mock_spinner
+        ui = SurveyCTOUI("test1234")
+        ui.client._scto_client = Mock()
+        ui.client._scto_client.list_forms.return_value = [
+            {"id": "form2", "title": "Survey B"},
+            {"id": "form1", "title": "Survey A"},
+        ]
+        result = ui._get_form_options("testserver")
+        assert result is not None
+        assert len(result) == 2
+        assert result[0] == ("form1", "Survey A")
+
+    @patch("datasure.connectors.scto.st")
+    def test_get_form_options_api_error_returns_none(self, mock_st):
+        """Test returns None and shows error when list_forms raises an API error."""
+        mock_spinner = Mock()
+        mock_spinner.__enter__ = Mock(return_value=None)
+        mock_spinner.__exit__ = Mock(return_value=False)
+        mock_st.spinner.return_value = mock_spinner
+        ui = SurveyCTOUI("test1234")
+        ui.client._scto_client = Mock()
+        ui.client._scto_client.list_forms.side_effect = SurveyCTOAPIError("API error")
+        result = ui._get_form_options("testserver")
+        assert result is None
+        mock_st.error.assert_called_once()
+
+    # --- render_form_config ---
+
+    @patch("datasure.connectors.scto.st")
+    def test_render_form_config_no_credentials(self, mock_st):
+        """Test exits early when _get_server_credentials returns None."""
+        mock_container = Mock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        ui = SurveyCTOUI("test1234")
+        ui._render_logo = Mock()
+        ui._get_server_credentials = Mock(return_value=None)
+        ui.render_form_config()
+        ui._get_server_credentials.assert_called_once()
+
+    @patch("datasure.connectors.scto.st")
+    def test_render_form_config_no_form_data(self, mock_st):
+        """Test exits early when _render_form_selection returns None."""
+        mock_container = Mock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        ui = SurveyCTOUI("test1234")
+        ui._render_logo = Mock()
+        ui._get_server_credentials = Mock(return_value=Mock())
+        ui._render_form_selection = Mock(return_value=None)
+        ui.render_form_config()
+        ui._render_form_selection.assert_called_once()
+
+    @patch("datasure.connectors.scto.st")
+    def test_render_form_config_no_config_data(self, mock_st):
+        """Test exits early when _render_config_fields returns None."""
+        mock_container = Mock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        ui = SurveyCTOUI("test1234")
+        ui._render_logo = Mock()
+        ui._get_server_credentials = Mock(return_value=Mock())
+        ui._render_form_selection = Mock(return_value={"form_id": "f1"})
+        ui._render_config_fields = Mock(return_value=None)
+        ui.render_form_config()
+        ui._render_config_fields.assert_called_once()
+
+    @patch("datasure.connectors.scto.st")
+    def test_render_form_config_full_path(self, mock_st):
+        """Test reaches _handle_form_submission when all steps succeed."""
+        mock_container = Mock()
+        mock_container.__enter__ = Mock(return_value=mock_container)
+        mock_container.__exit__ = Mock(return_value=False)
+        mock_st.container.return_value = mock_container
+        ui = SurveyCTOUI("test1234")
+        credentials = Mock()
+        form_data = {"form_id": "f1", "form_title": "Survey"}
+        config_data = {
+            "alias": "a",
+            "private_key_file": "",
+            "save_file": "",
+            "attachments": False,
+        }
+        ui._render_logo = Mock()
+        ui._get_server_credentials = Mock(return_value=credentials)
+        ui._render_form_selection = Mock(return_value=form_data)
+        ui._render_config_fields = Mock(return_value=config_data)
+        ui._handle_form_submission = Mock()
+        ui.render_form_config()
+        ui._handle_form_submission.assert_called_once()
+
+    # --- _extract_form_title exception handler ---
+
+    def test_extract_form_title_exception_in_settings(self):
+        """Test returns form_id when settings extraction raises."""
+        ui = SurveyCTOUI("test1234")
+        ui._extract_title_from_settings = Mock(side_effect=AttributeError("attr error"))
+        result = ui._extract_form_title({}, "fallback_id")
+        assert result == "fallback_id"
+
+    def test_extract_form_title_from_fields_fallback(self):
+        """Test returns title when _extract_title_from_fields finds one."""
+        ui = SurveyCTOUI("test1234")
+        ui._extract_title_from_settings = Mock(return_value=None)
+        ui._extract_title_from_fields = Mock(return_value="Field Title")
+        result = ui._extract_form_title({}, "fallback_id")
+        assert result == "Field Title"
+
+    # --- _find_title_in_headers: value present but falsy ---
+
+    def test_find_title_in_headers_empty_value_continues(self):
+        """Test returns None when header is present but data value is empty."""
+        ui = SurveyCTOUI("test1234")
+        result = ui._find_title_in_headers(["form_title", "other"], ["", "something"])
+        assert result is None
+
+    # --- _extract_title_from_fields: loop body executed ---
+
+    def test_extract_title_from_fields_with_multiple_rows(self):
+        """Test loop runs over rows but returns None (heuristic never matches)."""
+        ui = SurveyCTOUI("test1234")
+        form_def = {
+            "fieldsRowsAndColumns": [
+                ["name", "type"],
+                ["field_a", "text"],
+                ["field_b", "integer"],
+            ]
+        }
+        result = ui._extract_title_from_fields(form_def)
+        assert result is None
+
+    # --- import_data when _scto_client is already set (covers 607->632) ---
+
+    @patch("datasure.connectors.scto.standardize_missing_values")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_import_data_with_preconfigured_client(self, mock_save, mock_standardize):
+        """Test import_data skips connection setup when _scto_client is pre-set."""
+        client = SurveyCTOClient("test1234")
+        mock_scto_client = Mock()
+        client._scto_client = mock_scto_client
+
+        mock_scto_client.download_form_data_json.return_value = [{"name": "Alice"}]
+        mock_scto_client.download_form_definition.return_value = {
+            "fieldsRowsAndColumns": [["name", "type"], ["name", "text"]],
+            "choicesRowsAndColumns": [["list name", "name", "label"]],
+        }
+        mock_standardize.side_effect = lambda x: x
+
+        form_config = FormConfig(
+            alias="test_form", form_id="form123", server="testserver"
+        )
+        result = client.import_data(form_config)
+        assert result == 1

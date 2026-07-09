@@ -1,5 +1,4 @@
-"""
-Streamlit Form Template
+"""Streamlit Form Template
 
 Template for creating forms with validation and state management.
 """

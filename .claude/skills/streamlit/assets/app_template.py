@@ -1,5 +1,4 @@
-"""
-Basic Streamlit App Template
+"""Basic Streamlit App Template
 
 A minimal template for creating a Streamlit application with best practices.
 """

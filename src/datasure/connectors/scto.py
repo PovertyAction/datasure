@@ -713,7 +713,7 @@ class SurveyCTOClient:
 
         # Download media if requested
         if form_config.attachments and form_config.save_to:
-            self._download_attachments(questions, new_data, form_config)
+            self._download_attachments(questions, new_data, form_config, private_key)
 
         # Save to DuckDB
         duckdb_save_table(
@@ -723,7 +723,11 @@ class SurveyCTOClient:
         return new_count
 
     def _download_attachments(
-        self, questions: pl.DataFrame, data: pl.DataFrame, form_config: FormConfig
+        self,
+        questions: pl.DataFrame,
+        data: pl.DataFrame,
+        form_config: FormConfig,
+        private_key: str | None = None,
     ) -> None:
         """Download media attachments."""
         media_types = {e.value for e in MediaType}
@@ -739,7 +743,7 @@ class SurveyCTOClient:
 
             downloader = MediaDownloader(self._scto_client, self.config)
             downloader.download_media_files(
-                media_fields, data, media_folder, form_config.private_key
+                media_fields, data, media_folder, private_key
             )
 
 
@@ -947,7 +951,7 @@ class SurveyCTOUI:
         self, selected_form: str, form_options: list, forms_info: dict
     ) -> dict:
         """Parse selected form and return form data."""
-        selected_form_split = re.match(r"^(.*?) \((.*)\)$", selected_form)
+        selected_form_split = re.match(r"^(\S+) \((.*)\)$", selected_form)
         form_id = selected_form_split.group(1) if selected_form_split else selected_form
         form_title = selected_form_split.group(2) if selected_form_split else "No title"
 
@@ -1196,8 +1200,8 @@ class SurveyCTOUI:
         if not isinstance(settings, list) or len(settings) <= 1:
             return None
 
-        headers = settings[0] if settings else []
-        data = settings[1] if len(settings) > 1 else []
+        headers = settings[0]
+        data = settings[1]
 
         return self._find_title_in_headers(headers, data)
 
