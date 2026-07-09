@@ -951,7 +951,7 @@ class SurveyCTOUI:
         self, selected_form: str, form_options: list, forms_info: dict
     ) -> dict:
         """Parse selected form and return form data."""
-        selected_form_split = re.match(r"^([^(]*) \(([^)]*)\)$", selected_form)
+        selected_form_split = re.match(r"^(\S+) \((.*)\)$", selected_form)
         form_id = selected_form_split.group(1) if selected_form_split else selected_form
         form_title = selected_form_split.group(2) if selected_form_split else "No title"
 
