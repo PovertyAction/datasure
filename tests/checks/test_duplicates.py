@@ -1307,9 +1307,9 @@ class TestCoerceDatetimeValue:
         result = _coerce_datetime_value(["2024-01-01", "2024-01-31"])
         assert result == [datetime.date(2024, 1, 1), datetime.date(2024, 1, 31)]
 
-    def test_invalid_string_returns_unchanged(self):
-        result = _coerce_datetime_value("not-a-date")
-        assert result == "not-a-date"
+    def test_invalid_string_raises(self):
+        with pytest.raises(ValueError, match="Cannot convert filter value to date"):
+            _coerce_datetime_value("not-a-date")
 
     def test_none_returns_unchanged(self):
         result = _coerce_datetime_value(None)
@@ -1324,10 +1324,14 @@ class TestCoerceDatetimeValue:
         assert result[0] == datetime.date(2024, 1, 1)
         assert result[1] == 42
 
-    def test_invalid_list_returns_unchanged(self):
-        """List with values that can't be parsed returns original list."""
+    def test_list_of_non_strings_returns_unchanged(self):
+        """Non-string list elements pass through without coercion."""
         result = _coerce_datetime_value([None, None])
         assert result == [None, None]
+
+    def test_invalid_list_raises(self):
+        with pytest.raises(ValueError, match="Cannot convert filter value to date"):
+            _coerce_datetime_value(["not-a-date", "2024-01-01"])
 
 
 class TestCoerceNumericValue:
@@ -1351,9 +1355,9 @@ class TestCoerceNumericValue:
         result = _coerce_numeric_value(["1.1", "2.2"], pl.Float64)
         assert result == [1.1, 2.2]
 
-    def test_invalid_string_returns_unchanged(self):
-        result = _coerce_numeric_value("abc", pl.Int64)
-        assert result == "abc"
+    def test_invalid_string_raises(self):
+        with pytest.raises(ValueError, match="Cannot convert filter value to numeric"):
+            _coerce_numeric_value("abc", pl.Int64)
 
     def test_none_returns_unchanged(self):
         result = _coerce_numeric_value(None, pl.Int64)
@@ -1366,6 +1370,10 @@ class TestCoerceNumericValue:
     def test_list_with_mixed_types(self):
         result = _coerce_numeric_value(["1", 2], pl.Int64)
         assert result == [1, 2]
+
+    def test_invalid_list_raises(self):
+        with pytest.raises(ValueError, match="Cannot convert filter value to numeric"):
+            _coerce_numeric_value(["not_a_number", "2"], pl.Int64)
 
 
 class TestCoerceConditionValue:

@@ -9,7 +9,6 @@ This module provides comprehensive duplicate detection functionality with:
 - Modular, testable architecture with Pydantic validation
 """
 
-import contextlib
 import datetime
 import re
 
@@ -1095,17 +1094,23 @@ def _coerce_datetime_value(
     Returns
     -------
     datetime.date | list
-        Coerced value(s), unchanged if coercion fails.
+        Coerced value(s); non-string values are returned unchanged.
+
+    Raises
+    ------
+    ValueError
+        If a string value is not an ISO-format date.
     """
-    if isinstance(condition_value, str):
-        with contextlib.suppress(ValueError, TypeError):
+    try:
+        if isinstance(condition_value, str):
             return datetime.date.fromisoformat(condition_value)
-    elif isinstance(condition_value, list):
-        with contextlib.suppress(ValueError, TypeError):
+        if isinstance(condition_value, list):
             return [
                 datetime.date.fromisoformat(v) if isinstance(v, str) else v
                 for v in condition_value
             ]
+    except (ValueError, TypeError) as e:
+        raise ValueError(f"Cannot convert filter value to date: {e}") from e
     return condition_value
 
 
@@ -1125,16 +1130,22 @@ def _coerce_numeric_value(
     Returns
     -------
     int | float | list
-        Coerced value(s), unchanged if coercion fails.
+        Coerced value(s); non-string values are returned unchanged.
+
+    Raises
+    ------
+    ValueError
+        If a string value cannot be converted to the column's numeric type.
     """
     cast_fn = int if col_dtype in pl.INTEGER_DTYPES else float
 
-    if isinstance(condition_value, str):
-        with contextlib.suppress(ValueError, TypeError):
+    try:
+        if isinstance(condition_value, str):
             return cast_fn(condition_value)
-    elif isinstance(condition_value, list):
-        with contextlib.suppress(ValueError, TypeError):
+        if isinstance(condition_value, list):
             return [cast_fn(v) if isinstance(v, str) else v for v in condition_value]
+    except (ValueError, TypeError) as e:
+        raise ValueError(f"Cannot convert filter value to numeric: {e}") from e
     return condition_value
 
 
@@ -1201,7 +1212,10 @@ def _filter_data_on_conditions(
     if not conditions or not _has_valid_filter_conditions(conditions):
         filtered_data = data
     else:
-        _coerce_condition_value(conditions, data)
+        try:
+            _coerce_condition_value(conditions, data)
+        except Exception as e:
+            raise ValueError(f"Error applying filter: {e}") from e
 
         try:
             validated_condition = FilterCondition(**conditions)

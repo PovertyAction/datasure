@@ -185,8 +185,6 @@ def convert_series_to_numeric(series: pl.Series) -> pl.Series:
         return series.cast(pl.Float64)
 
     try:
-        if series.dtype == pl.Utf8:
-            return series.str.to_decimal().cast(pl.Float64, strict=False)
         return series.cast(pl.Float64, strict=False)
     except Exception as e:
         raise ValueError(
@@ -218,13 +216,6 @@ def convert_dataframe_column_to_numeric(df: pl.DataFrame, column: str) -> pl.Dat
         return df.with_columns(pl.col(column).cast(pl.Float64).alias(column))
 
     try:
-        if df[column].dtype == pl.Utf8:
-            return df.with_columns(
-                pl.col(column)
-                .str.to_decimal()
-                .cast(pl.Float64, strict=False)
-                .alias(column)
-            )
         return df.with_columns(
             pl.col(column).cast(pl.Float64, strict=False).alias(column)
         )
