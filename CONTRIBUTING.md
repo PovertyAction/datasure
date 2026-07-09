@@ -363,6 +363,34 @@ All releases must pass (enforced by the `test` and `build` jobs in release.yml):
 SonarQube analysis runs on every push to main via the Code Coverage workflow.
 Failed quality checks prevent releases.
 
+### Release Security
+
+The release pipeline is hardened following
+[publishing-to-PyPI best practices](https://snarky.ca/how-to-publish-to-pypi-using-github-actions-securely/):
+
+- **Trusted Publishing (OIDC)**: no PyPI API tokens; the `testpypi`/`pypi`
+  GitHub environments are registered as trusted publishers on
+  Test PyPI/PyPI.
+- **zizmor**: GitHub Actions workflows are statically analyzed by the
+  `zizmor` pre-commit hook (runs locally and in CI). Run it directly with
+  `uvx zizmor .github/workflows/`.
+- **SHA-pinned actions**: all `uses:` references are pinned to full commit
+  SHAs with a version comment. Dependabot updates the pins on a 7-day
+  cooldown (`.github/dependabot.yml`). When adding an action, pin its SHA.
+- **Minimal permissions**: workflows start from `permissions: {}` (or
+  `contents: read`); each job requests only what it needs, and checkouts
+  use `persist-credentials: false`.
+- **No caching in release jobs**: the Release workflow disables the uv
+  cache so a poisoned cache cannot influence published artifacts.
+
+Repository settings (maintainers, not enforceable in code):
+
+- Add **required reviewers** to the `pypi` environment
+  (Settings → Environments → pypi) so final releases need a manual
+  approval even after a tag push; optionally do the same for `testpypi`.
+- Optionally enable **"Require actions to be pinned to a full-length
+  commit SHA"** (Settings → Actions → General).
+
 ### Documentation Review Process
 
 1. **Technical Review**: Verify CHANGELOG.md entries follow [docs/changelog_guide.md](docs/changelog_guide.md)

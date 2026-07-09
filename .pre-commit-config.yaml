@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.30.1
+    rev: v8.30.0
     hooks:
       - id: gitleaks
 
@@ -27,8 +27,13 @@ repos:
     hooks:
       - id: markdownlint-fix
 
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: v1.26.1
+    hooks:
+      - id: zizmor
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.18
+    rev: v0.15.20
     hooks:
       - id: ruff-check
         args: [--fix, --exit-non-zero-on-fix]
