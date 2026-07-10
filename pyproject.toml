@@ -7,7 +7,8 @@ name = "DataSure"
 version = "1.0.0"
 description = "IPA Data Management System Dashboard"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Innovations for Poverty Action", email = "researchsupport@poverty-action.org" },
 ]
