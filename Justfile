@@ -171,9 +171,10 @@ pre-commit-run:
 build-package:
     uv build
 
-# Verify CHANGELOG.md has entries under [Unreleased] (release gate)
-check-changelog:
-    uv run python scripts/check_changelog.py
+# Verify CHANGELOG.md has entries under [Unreleased] (release gate).
+# Accepts the same bump stages as bump-and-tag so stable releases can skip the check.
+check-changelog +bumps="":
+    uv run python scripts/check_changelog.py {{ bumps }}
 
 # Bump the version only (no commit, no tag). Accepts any `uv version --bump`
 # stage, combinable: `just bump patch`, `just bump minor rc`, `just bump stable`
@@ -196,11 +197,14 @@ bump-stable: (bump-and-tag "stable")
 bump-pre type stage: (bump-and-tag type stage)
 
 # Internal recipe to bump version, commit pyproject.toml + uv.lock, and tag.
-# Gated on a non-empty [Unreleased] section in CHANGELOG.md.
+# Gated on a non-empty [Unreleased] section in CHANGELOG.md (skipped for stable).
 [unix]
-bump-and-tag +bumps: check-changelog
+bump-and-tag +bumps:
     #!/usr/bin/env bash
     set -euo pipefail
+    # Run changelog gate (skipped automatically for stable releases)
+    uv run python scripts/check_changelog.py {{ bumps }}
+
     # Check if the repo is clean
     if [[ -n $(git status --porcelain) ]]; then
         echo "Error: Git repository has uncommitted changes. Please commit or stash them first."
@@ -241,8 +245,8 @@ bump-and-tag +bumps: check-changelog
     fi
 
 [windows]
-bump-and-tag +bumps: check-changelog
-    @$status = & git status --porcelain; if ($status) { Write-Host "Error: Git repository has uncommitted changes. Please commit or stash them first."; exit 1 }; $OLD_VERSION = & uv version --short; Write-Host "Current version: $OLD_VERSION"; Write-Host "Bumping version ({{ bumps }})..."; & uv version {{ prepend("--bump=", bumps) }}; if ($LASTEXITCODE -ne 0) { exit 1 }; $NEW_VERSION = & uv version --short; Write-Host "New version: $NEW_VERSION"; Write-Host "Updating lock file with uv sync..."; & uv sync; & git add pyproject.toml uv.lock; & git commit -m "Bump version: $OLD_VERSION → $NEW_VERSION"; $TAG = "v$NEW_VERSION"; if (git rev-parse "$TAG" 2>$null) { Write-Host "Tag $TAG already exists. Skipping tag creation." } else { Write-Host "Creating git tag $TAG..."; git tag -a "$TAG" -m "Version $NEW_VERSION"; Write-Host "Created git tag: $TAG"; Write-Host "To push the tag, run: git push origin $TAG" }
+bump-and-tag +bumps:
+    @uv run python scripts/check_changelog.py {{ bumps }}; if ($LASTEXITCODE -ne 0) { exit 1 }; $status = & git status --porcelain; if ($status) { Write-Host "Error: Git repository has uncommitted changes. Please commit or stash them first."; exit 1 }; $OLD_VERSION = & uv version --short; Write-Host "Current version: $OLD_VERSION"; Write-Host "Bumping version ({{ bumps }})..."; & uv version {{ prepend("--bump=", bumps) }}; if ($LASTEXITCODE -ne 0) { exit 1 }; $NEW_VERSION = & uv version --short; Write-Host "New version: $NEW_VERSION"; Write-Host "Updating lock file with uv sync..."; & uv sync; & git add pyproject.toml uv.lock; & git commit -m "Bump version: $OLD_VERSION → $NEW_VERSION"; $TAG = "v$NEW_VERSION"; if (git rev-parse "$TAG" 2>$null) { Write-Host "Tag $TAG already exists. Skipping tag creation." } else { Write-Host "Creating git tag $TAG..."; git tag -a "$TAG" -m "Version $NEW_VERSION"; Write-Host "Created git tag: $TAG"; Write-Host "To push the tag, run: git push origin $TAG" }
 
 # Create git tag from current version if it doesn't exist
 [unix]
