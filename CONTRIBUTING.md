@@ -28,8 +28,8 @@ Development requires the following software:
 
 | Platform  | Commands                                                                          |
 | --------- | --------------------------------------------------------------------------------- |
-| Windows   | `winget install Git.Git Casey.Just astral-sh.uv GitHub.cli OpenJS.NodeJS`, then `npm install -g markdownlint-cli` |
-| Mac/Linux | `brew install just uv gh markdownlint-cli`                                        |
+| Windows   | `winget install Git.Git Casey.Just astral-sh.uv GitHub.cli OpenJS.NodeJS`, then `npm install -g markdownlint-cli2` |
+| Mac/Linux | `brew install just uv gh markdownlint-cli2`                                       |
 
 ### Quick Start
 
@@ -335,13 +335,26 @@ Before making any release, developers must update both technical and user-facing
 # - Update RELEASENOTES.md (user-facing content)
 # - Follow guidelines in docs/changelog_guide.md and docs/release_notes_guide.md
 
-# 2. Create release (triggers quality gate)
-just bump-patch  # Creates git tag
+# 2. Run the bump recipe locally — this commits pyproject.toml + uv.lock and
+#    creates a git tag. NOTE: main is branch-protected, so the commit cannot
+#    be pushed directly.
+just bump-patch  # or bump-minor, bump-major, bump-pre, bump-stable
 
-# 3. Push to trigger automation
-just push-all    # Pushes commits and tags
+# 3. Move the bump commit to a branch and open a PR
+#    (the bump recipe commits to your local main; branch protection blocks
+#    pushing it directly)
+git checkout -b release/vX.Y.Z
+git checkout main && git reset --hard origin/main
+git checkout release/vX.Y.Z
+git push -u origin release/vX.Y.Z
+# Open a PR and merge it via GitHub
 
-# 4. Monitor the Release workflow in GitHub Actions
+# 4. After the PR merges, pull main and push the tag to trigger automation
+git checkout main && git pull
+git tag -a vX.Y.Z -m "Version X.Y.Z"
+git push origin vX.Y.Z
+
+# 5. Monitor the Release workflow in GitHub Actions
 # - The tag push triggers .github/workflows/release.yml, which runs:
 #   test (pre-commit + pytest) -> build and verify -> publish -> GitHub release
 # - The build job fails if the tag does not match the pyproject.toml version
@@ -461,7 +474,7 @@ For emergency releases only:
 src/datasure/                   # Main package (source layout)
 ├── app.py                  # Main Streamlit application entry point
 ├── cli.py                  # Command-line interface
-├── checks/                 # 10 modular data quality check modules
+├── checks/                 # 9 modular data quality check modules
 ├── connectors/             # Data source connectors
 ├── processing/             # Data preparation utilities
 ├── utils/                  # Shared utilities
@@ -481,21 +494,19 @@ src/datasure/                   # Main package (source layout)
 
 1. Create new module in `src/datasure/checks/`
 2. Implement standardized interface with report function
-3. Add imports to `src/datasure/checks/__init__.py`
-4. Create corresponding test file in `tests/checks/`
-5. Update navigation in `src/datasure/app.py` if needed
+3. Create corresponding test file in `tests/checks/`
+4. Update navigation in `src/datasure/app.py` if needed
 
 #### Adding a New Data Connector
 
 1. Create new module in `src/datasure/connectors/`
 2. Implement data loading and form functions
-3. Add imports to `src/datasure/connectors/__init__.py`
-4. Update import view to include new connector
-5. Add appropriate tests and documentation
+3. Update import view to include new connector
+4. Add appropriate tests and documentation
 
 ## Getting Help
 
-- **Documentation**: Check the [CLAUDE.md](CLAUDE.md) file for comprehensive development guidance
+- **Documentation**: Check the [docs/](docs/) directory for development guides (changelog, release notes, etc.)
 - **Issues**: Report bugs or request features on GitHub Issues
 - **Discussions**: Use GitHub Discussions for questions and ideas
 - **Code Quality**: Monitor [SonarQube Dashboard](https://sonarcloud.io/project/overview?id=PovertyAction_datasure)
