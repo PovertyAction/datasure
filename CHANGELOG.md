@@ -7,21 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-### Changed
-
-### Deprecated
-
-### Removed
-
 ### Fixed
+
+- **Filter coercion**: `_coerce_numeric_value` now raises `ValueError` for
+  list inputs containing non-numeric strings instead of silently returning
+  the original values unchanged; coercion errors in `_filter_data_on_conditions`
+  are consistently wrapped as `"Error applying filter"` — #231
+- **Polars compatibility**: Removed `polars<1.33.0` ceiling; replaced
+  `str.to_decimal()` two-step cast with direct `cast(Float64, strict=False)`
+  in `src/datasure/utils/dataframe_utils.py` — #231
+- **Encrypted attachments**: Fixed PEM key content not being passed correctly
+  to the attachment downloader (`src/datasure/connectors/scto.py`) — #227
 
 ### Security
 
+- **GitHub Actions hardening**: Workflow action versions pinned and
+  permissions scoped; release pipeline hardened against supply-chain
+  attacks — #234
+
 ---
 
-## [1.0.0] - 2026-07
+## [1.0.0] - 2026-07-10
 
 ### Added
 
