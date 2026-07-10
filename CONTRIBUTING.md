@@ -391,6 +391,58 @@ Repository settings (maintainers, not enforceable in code):
 - Optionally enable **"Require actions to be pinned to a full-length
   commit SHA"** (Settings → Actions → General).
 
+#### Trusted Publishing configuration (and what to change if release.yml changes)
+
+Trusted Publishing works by GitHub sending Test PyPI/PyPI an OIDC token
+whose claims must **exactly match** a publisher registered on the index.
+There are no API tokens; the match is the entire authentication. Test PyPI
+and PyPI are separate accounts and separate registries — a publisher on one
+does nothing for the other, so both must be configured independently.
+
+Each publisher is registered against four values that come straight from
+`.github/workflows/release.yml`:
+
+| Publisher field   | Source in release.yml                          | Current value          |
+| ----------------- | ---------------------------------------------- | ---------------------- |
+| Owner             | repository owner                               | `PovertyAction`        |
+| Repository        | repository name                                | `datasure`             |
+| Workflow name     | the workflow **filename only** (no path)       | `release.yml`          |
+| Environment name  | `environment:` on the publish job              | `testpypi` / `pypi`    |
+
+The publish jobs are `publish-testpypi` (`environment: testpypi`, publishes
+pre-releases to Test PyPI) and `publish-pypi` (`environment: pypi`, publishes
+final releases to PyPI). The environment name is **case-sensitive** and must
+match the registered publisher character-for-character.
+
+**If you change any of these in `release.yml`, you must update the matching
+publisher on BOTH Test PyPI and PyPI before the next release, or publishing
+fails with `invalid-publisher: valid token, but no corresponding publisher`.**
+Changes that require re-registering the publisher include:
+
+- Renaming or moving `release.yml` (the workflow filename is a claim).
+- Changing an `environment:` name on a publish job.
+- Renaming or transferring the repository, or changing its owner.
+
+To register or update a publisher:
+
+- **Test PyPI** (for pre-releases): <https://test.pypi.org/manage/account/publishing/>
+  if the project does not exist yet (register a *pending* publisher), or
+  `https://test.pypi.org/manage/project/datasure/settings/publishing/` once it
+  does.
+- **PyPI** (for final releases): the same paths on <https://pypi.org>.
+
+Select **GitHub** as the publisher, fill in the four values from the table
+(matching the current `release.yml`), and add it. If a stale publisher with
+the old values exists, delete it — a leftover mismatched publisher is a common
+cause of `invalid-publisher`. The corresponding GitHub Environments
+(Settings → Environments → `testpypi` and `pypi`) must also exist; they need
+no secrets because authentication is via OIDC.
+
+A secondary error line, `Missing credentials for
+https://test.pypi.org/legacy/`, is only `uv`'s fallback after the OIDC match
+failed — fixing the publisher registration resolves both. Do **not** switch to
+API tokens to work around it.
+
 ### Documentation Review Process
 
 1. **Technical Review**: Verify CHANGELOG.md entries follow [docs/changelog_guide.md](docs/changelog_guide.md)
