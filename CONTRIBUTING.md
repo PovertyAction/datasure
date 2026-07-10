@@ -363,6 +363,41 @@ git push origin vX.Y.Z
 # - Publishing uses PyPI Trusted Publishing (OIDC) - no API tokens
 ```
 
+### Verifying a Pre-release from Test PyPI
+
+After a pre-release tag (e.g. `v1.0.0rc1`) is pushed and the Release workflow
+publishes to Test PyPI, **developers should install and test the published
+package before approving the final stable release**. This catches packaging
+issues (missing files, broken entry points, bad metadata) that the test suite
+alone cannot detect.
+
+```bash
+# Install the pre-release from Test PyPI
+# Dependencies are resolved from PyPI; the datasure package itself comes
+# from Test PyPI.
+uv tool install "datasure==X.Y.ZrcN" \
+    --index https://test.pypi.org/simple/ \
+    --index https://pypi.org/simple/
+
+# Verify the entry point and version
+datasure --version
+
+# Smoke-test the application
+datasure
+```
+
+**What to verify:**
+
+- `datasure --version` reports the correct pre-release version
+- The application launches without import errors
+- The demo project loads and all nine check pages render correctly
+- SurveyCTO connection and local file import work end-to-end on a real project
+- The replication package export completes without errors
+
+Only proceed to the final stable release (pushing a `vX.Y.Z` tag without a
+pre-release suffix) once at least one developer has confirmed the above on
+the Test PyPI build.
+
 ### Quality Gates
 
 All releases must pass (enforced by the `test` and `build` jobs in release.yml):
