@@ -7,24 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- **Filter coercion**: `_coerce_numeric_value` now raises `ValueError` for
-  list inputs containing non-numeric strings instead of silently returning
-  the original values unchanged; coercion errors in `_filter_data_on_conditions`
-  are consistently wrapped as `"Error applying filter"` — #231
-- **Polars compatibility**: Removed `polars<1.33.0` ceiling; replaced
-  `str.to_decimal()` two-step cast with direct `cast(Float64, strict=False)`
-  in `src/datasure/utils/dataframe_utils.py` — #231
-- **Encrypted attachments**: Fixed PEM key content not being passed correctly
-  to the attachment downloader (`src/datasure/connectors/scto.py`) — #227
-
-### Security
-
-- **GitHub Actions hardening**: Workflow action versions pinned and
-  permissions scoped; release pipeline hardened against supply-chain
-  attacks — #234
-
 ---
 
 ## [1.0.0] - 2026-07-10
@@ -104,7 +86,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Replication package install**: Incorrect `ipaclean` install path in
   generated scripts fixed — #174
 - **Encrypted attachments**: Attachment downloads now work correctly when a
-  private key is configured in the SurveyCTO connector — #179
+  private key is configured in the SurveyCTO connector — #179, #227
+- **Filter coercion**: `_coerce_numeric_value` now raises `ValueError` for
+  list inputs containing non-numeric strings instead of silently returning
+  the original values unchanged; coercion errors in `_filter_data_on_conditions`
+  are consistently wrapped as `"Error applying filter"` — #231
+- **Polars compatibility**: Removed `polars<1.33.0` ceiling; replaced
+  `str.to_decimal()` two-step cast with direct `cast(Float64, strict=False)`
+  in `src/datasure/utils/dataframe_utils.py` — #231
 
 ### Security
 
@@ -114,13 +103,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `starlette`, `tornado`, `h11`, `urllib3`, `gitpython`, `cryptography`,
   `setuptools`, and `pillow` to address Dependabot vulnerability alerts
   — #205
+- **GitHub Actions hardening**: Workflow action versions pinned and
+  permissions scoped; release pipeline hardened against supply-chain
+  attacks — #234
 
 ### Dependencies
 
 Key runtime dependencies introduced in this release:
 
 - `streamlit>=1.52.0` — web application framework
-- `polars>=1.30.0` — primary DataFrame library for data preparation and checks
+- `polars>=1.30.0` — primary DataFrame library for data preparation and checks (no upper bound)
 - `pandas>=2.2.2,<3.0` — interop layer for checks and DuckDB output
 - `duckdb>=1.3.1` — per-project data storage
 - `pydantic>=2.11.7` — schema validation for settings and data models
