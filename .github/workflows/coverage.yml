@@ -71,6 +71,6 @@ jobs:
 
       # docs: https://github.com/marketplace/actions/official-sonarqube-scan#cloud-1
       - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@c7ee0f9df90b7aa20e8dcf9695dcfe2e7da5b4f2 # v7.2.1
+        uses: SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e # v8.2.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
