@@ -1,7 +1,7 @@
 # DataSure
 
 <p align="center">
-  <img src="src/datasure/assets/datasure-horizontal.svg" alt="DataSure" width="350">
+  <img src="https://raw.githubusercontent.com/PovertyAction/datasure/main/src/datasure/assets/datasure-stacked.png" alt="DataSure" width="128">
 </p>
 
 <p align="center">

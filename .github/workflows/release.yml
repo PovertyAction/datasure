@@ -87,9 +87,10 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/}
         fi
         echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-        # PEP 440: anything beyond MAJOR.MINOR.PATCH (a/b/rc/dev suffixes)
-        # is a pre-release. A '-' substring check misses suffixes like 1.0.0rc1.
-        if [[ "$VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        # PEP 440: a/b/rc/dev suffixes are pre-releases and go to Test PyPI.
+        # Final X.Y.Z and post-releases (X.Y.Z.postN) are NOT pre-releases and
+        # go to real PyPI. A '-' substring check misses suffixes like 1.0.0rc1.
+        if [[ "$VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(\.post[0-9]+)?$ ]]; then
           echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
         else
           echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
