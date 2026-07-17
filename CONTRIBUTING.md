@@ -168,6 +168,64 @@ tests/
 └── views/                      # Tests for Streamlit page scripts
 ```
 
+### Optional: Validating replication data dictionaries
+
+The replication package builder (`src/datasure/replication/`) generates a
+`data-dict.yaml` file for each exported dataset, following the
+[data-dict.yaml spec](https://data-dict.tidyverse.org/). Validating it
+against the spec — and, more thoroughly, against the actual Parquet files it
+describes — requires the `data-dict` CLI
+(<https://github.com/tidyverse/data-dict>), a Rust tool.
+
+This is entirely optional and outside the normal Python/uv toolchain: it is
+**not** installed in CI, and the corresponding pytest tests
+(`tests/replication/test_data_dict_cli.py`) automatically skip when the CLI
+isn't found on `PATH`. Install it if you're working on `data_dict.py` or want
+to double-check a generated package by hand.
+
+**1. Install Rust**, if you don't already have it, via
+[rustup](https://rustup.rs):
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+On Windows, use the [rustup-init.exe installer](https://rustup.rs) instead of
+the shell script above. Or install via `winget`:
+
+```bash
+winget install --id Rustlang.Rustup
+```
+
+**2. Install the data-dict CLI** with Cargo:
+
+```bash
+cargo install --git https://github.com/tidyverse/data-dict data-dict-cli
+```
+
+This places a `data-dict` binary in `~/.cargo/bin` — make sure that
+directory is on your `PATH`. Confirm it worked with `data-dict --help`.
+
+**3. Run the validation tests** (they run for real now that the CLI is
+installed, instead of skipping):
+
+```bash
+uv run python -m pytest tests/replication/test_data_dict_cli.py -v
+```
+
+**4. Validate an exported package by hand**, if needed:
+
+```bash
+data-dict validate-spec path/to/replication_.../1_docs/2_codebooks/data-dict.yaml
+data-dict validate-meta path/to/replication_.../1_docs/2_codebooks/data-dict.yaml
+data-dict validate-data path/to/replication_.../1_docs/2_codebooks/data-dict.yaml
+```
+
+`validate-spec` checks only the yaml file against the spec; `validate-meta`
+additionally checks that the referenced Parquet file's column names/types
+match; `validate-data` additionally checks that the actual values (ranges,
+enum membership, etc.) match what's declared.
+
 ## Dependency Management
 
 DataSure declares dependencies in `pyproject.toml` and locks exact versions
