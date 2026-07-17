@@ -19,8 +19,10 @@ def reset_streamlit_mocks():
     st.success.reset_mock()
     st.title.reset_mock()
     st.markdown.reset_mock()
+    st.caption.reset_mock()
     st.subheader.reset_mock()
     st.write.reset_mock()
+    st.divider.reset_mock()
     st.columns.reset_mock()
     st.button.reset_mock()
     st.stop.reset_mock()
@@ -34,8 +36,10 @@ def reset_streamlit_mocks():
     st.success.reset_mock()
     st.title.reset_mock()
     st.markdown.reset_mock()
+    st.caption.reset_mock()
     st.subheader.reset_mock()
     st.write.reset_mock()
+    st.divider.reset_mock()
     st.columns.reset_mock()
     st.button.reset_mock()
     st.stop.reset_mock()
@@ -94,8 +98,8 @@ class TestGetProjectId:
 class TestRenderHeader:
     """Test _render_header function."""
 
-    def test_renders_title_and_markdown(self):
-        """Test that title and markdown are rendered."""
+    def test_renders_title_and_subtitle(self):
+        """Test that the page header title and subtitle are rendered."""
         import streamlit as st
 
         from datasure.views.config_view import _render_header
@@ -103,30 +107,9 @@ class TestRenderHeader:
         _render_header()
 
         st.title.assert_called_once_with("Configure Checks")
-        st.markdown.assert_called_once_with(
+        st.caption.assert_called_once_with(
             "Set up the quality checks DataSure will run on your survey data."
         )
-
-
-class TestRenderDemoGuidance:
-    """Test _render_demo_guidance function."""
-
-    def test_renders_guidance_is_noop(self):
-        """Test that _render_demo_guidance is a no-op (guidance moved to navigation)."""
-        from datasure.views.config_view import _render_demo_guidance
-
-        # Function should execute without error and do nothing
-        result = _render_demo_guidance()
-        assert result is None
-
-    @patch("datasure.views.config_view.demo_expander")
-    def test_no_expander_called(self, mock_expander):
-        """Test that demo_expander is not called by _render_demo_guidance."""
-        from datasure.views.config_view import _render_demo_guidance
-
-        _render_demo_guidance()
-
-        mock_expander.assert_not_called()
 
 
 class TestRenderConfigurationActions:
@@ -285,7 +268,7 @@ class TestRenderNavigation:
         _render_navigation(mock_service)
 
         mock_is_demo.assert_called_once()
-        st.write.assert_called_once_with("---")
+        st.divider.assert_called_once()
         mock_expander.assert_called_once_with(
             "Proceed to Quality Reports",
             "Proceed info",
@@ -311,7 +294,7 @@ class TestRenderNavigation:
         _render_navigation(mock_service)
 
         mock_is_demo.assert_called_once()
-        st.write.assert_called_once_with("---")
+        st.divider.assert_called_once()
         mock_callout.assert_called_once()
         callout_args = mock_callout.call_args
         assert "View Quality Reports" in callout_args[0][0]
@@ -371,7 +354,6 @@ class TestMain:
     @patch("datasure.views.config_view._render_navigation")
     @patch("datasure.views.config_view._render_configurations_display")
     @patch("datasure.views.config_view._render_configuration_actions")
-    @patch("datasure.views.config_view._render_demo_guidance")
     @patch("datasure.views.config_view.ConfigurationService")
     @patch("datasure.views.config_view.duckdb_get_aliases")
     @patch("datasure.views.config_view._render_header")
@@ -382,14 +364,11 @@ class TestMain:
         mock_header,
         mock_get_aliases,
         mock_service_class,
-        mock_demo_guidance,
         mock_config_actions,
         mock_config_display,
         mock_navigation,
     ):
         """Test that main function orchestrates all components correctly."""
-        import streamlit as st
-
         from datasure.views.config_view import main
 
         # Setup mocks
@@ -406,8 +385,6 @@ class TestMain:
         mock_get_aliases.assert_called_once_with(project_id="test_project")
         mock_service_class.assert_called_once_with("test_project")
         mock_header.assert_called_once()
-        st.subheader.assert_called_once_with("Check Configurations")
-        mock_demo_guidance.assert_called_once()
         mock_config_actions.assert_called_once_with(
             "test_project", ["alias1", "alias2"]
         )
@@ -417,7 +394,6 @@ class TestMain:
     @patch("datasure.views.config_view._render_navigation")
     @patch("datasure.views.config_view._render_configurations_display")
     @patch("datasure.views.config_view._render_configuration_actions")
-    @patch("datasure.views.config_view._render_demo_guidance")
     @patch("datasure.views.config_view.ConfigurationService")
     @patch("datasure.views.config_view.duckdb_get_aliases")
     @patch("datasure.views.config_view._render_header")
@@ -428,7 +404,6 @@ class TestMain:
         mock_header,
         mock_get_aliases,
         mock_service_class,
-        mock_demo_guidance,
         mock_config_actions,
         mock_config_display,
         mock_navigation,
@@ -595,7 +570,6 @@ class TestEdgeCases:
     @patch("datasure.views.config_view._render_navigation")
     @patch("datasure.views.config_view._render_configurations_display")
     @patch("datasure.views.config_view._render_configuration_actions")
-    @patch("datasure.views.config_view._render_demo_guidance")
     @patch("datasure.views.config_view._render_header")
     @patch("datasure.views.config_view.ConfigurationService")
     @patch("datasure.views.config_view.duckdb_get_aliases")
@@ -606,7 +580,6 @@ class TestEdgeCases:
         mock_get_aliases,
         mock_service_class,
         mock_header,
-        mock_demo_guidance,
         mock_config_actions,
         mock_config_display,
         mock_navigation,

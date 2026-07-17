@@ -1838,12 +1838,12 @@ class TestPrepRemoveStep:
                 "description": ["Removed col1"],
             }
         )
-        _st.warning = MagicMock()
         _st.selectbox = MagicMock(return_value=None)
         _st.button = MagicMock(return_value=False)
 
         prep_remove_step()
-        _st.warning.assert_called()
+        # With entries present, the action selector is rendered.
+        _st.selectbox.assert_called()
 
     @patch("datasure.views.prep_view.prep_apply_action")
     @patch("datasure.views.prep_view.duckdb_save_table")
@@ -1875,7 +1875,15 @@ class TestPrepRemoveStep:
         action_index_val = "0 - remove column(s) - Removed col1"
         _st.warning = MagicMock()
         _st.selectbox = MagicMock(return_value=action_index_val)
-        _st.button = MagicMock(return_value=True)
+        # Clicking "Remove" opens confirm_dialog; the dialog's "Remove" button
+        # then runs the removal. Return True for both, False for "Cancel".
+        _st.button = MagicMock(
+            side_effect=lambda label=None, *a, **k: label != "Cancel"
+        )
+        # Make @st.dialog a no-op decorator so the dialog body runs, and give
+        # confirm_dialog its two columns.
+        _st.dialog = MagicMock(side_effect=lambda *a, **k: lambda fn: fn)
+        _st.columns = MagicMock(return_value=[MagicMock(), MagicMock()])
         _st.success = MagicMock()
         _st.rerun = MagicMock()
 

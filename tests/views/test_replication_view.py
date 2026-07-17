@@ -391,7 +391,7 @@ class TestOnProgress:
         _st.write.assert_called_once()
         arg = _st.write.call_args[0][0]
         assert "Processing data" in arg
-        assert ":white_check_mark:" in arg
+        assert ":material/check_circle:" in arg
 
 
 # ---------------------------------------------------------------------------
