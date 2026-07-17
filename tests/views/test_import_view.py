@@ -40,6 +40,11 @@ _st.status = MagicMock()
 def _module_patches():
     """Patches required for import_view's module-level code to execute."""
     return (
+        # The "Add Credentials" popover renders the SurveyCTO login form at
+        # import; the real form calls st.image on scto's own streamlit binding
+        # (which may be the real module if scto was imported by another test
+        # package first). Patch the UI class so module import stays in bare mode.
+        patch("datasure.connectors.scto.SurveyCTOUI"),
         patch(
             "datasure.utils.duckdb_utils.duckdb_get_aliases",
             return_value=[],
@@ -375,19 +380,30 @@ class TestRemoveImportFlow:
         orig_button = _st.button
         orig_selectbox = _st.selectbox
         orig_stop = _st.stop
+        orig_dialog = _st.dialog
+        orig_columns = _st.columns
 
         _st.stop = MagicMock()
+        # The removal is guarded by confirm_dialog: clicking "Remove Data"
+        # opens the modal, whose "Remove" button runs the cascade. Return True
+        # for both so the whole flow executes in one reload pass.
         _st.button = MagicMock(
-            side_effect=lambda label=None, *a, **k: label == "Remove Data"
+            side_effect=lambda label=None, *a, **k: label in ("Remove Data", "Remove")
         )
         _st.selectbox = MagicMock(
             side_effect=lambda label=None, *a, **k: (
                 "stale_data" if label == "Select Data to Remove" else None
             )
         )
+        # Make @st.dialog(title) a no-op decorator so the dialog body runs, and
+        # return one column per requested slot (confirm_dialog needs 2, the
+        # action row needs 3) regardless of leaked state from other view tests.
+        _st.dialog = MagicMock(side_effect=lambda *a, **k: lambda fn: fn)
+        _st.columns = MagicMock(side_effect=_make_columns)
 
         try:
             with (
+                patch("datasure.connectors.scto.SurveyCTOUI"),
                 patch(
                     "datasure.utils.duckdb_utils.duckdb_get_aliases",
                     return_value=["stale_data"],
@@ -445,6 +461,8 @@ class TestRemoveImportFlow:
         finally:
             _st.button = orig_button
             _st.selectbox = orig_selectbox
+            _st.dialog = orig_dialog
+            _st.columns = orig_columns
 
             # Re-import cleanly so later tests see a module bound to
             # default mocks rather than this test's patched state

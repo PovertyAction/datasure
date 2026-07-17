@@ -106,6 +106,7 @@ src/datasure/
 │   ├── scto_api.py         # SurveyCTO REST client (requests + basic auth)
 │   ├── prep_utils.py, dataframe_utils.py, chart_utils.py,
 │   ├── navigations_utils.py, onboarding_utils.py (demo project)
+│   ├── ui_utils.py          # Shared view UI helpers (headers, dialogs, metrics)
 └── views/                  # Streamlit pages (top-level page scripts)
     ├── start_view.py       # Project selection/creation
     ├── import_view.py      # Credentials + data import
@@ -232,6 +233,33 @@ Views are Streamlit page scripts with module-level code. Use
 package-relative asset paths (`Path(__file__).parent.parent / "assets"`),
 follow the existing session-state naming, and keep `st.rerun()` out of
 broad try blocks (its control-flow exception must not be caught).
+
+**View UI consistency (use `utils/ui_utils.py`).** Every view must render its
+chrome through the shared helpers so pages stay uniform as new ones are added:
+
+- `page_header(title, subtitle)` for the page heading. The `title` MUST match
+  the view's `st.Page(title=...)` nav label in `app.py` word-for-word
+  (`start_view`'s "Welcome to DataSure" hero is the one intentional
+  exception). Put the one-line "what this page does" prose in `subtitle`, not
+  a loose `st.markdown`.
+- `section_header(text, icon=None)` for section subheadings — no trailing
+  colons; use a `:material/...:` icon shortcode, never emoji.
+- `metric_row([(label, value[, help]), ...])` for metric rows so they align
+  across pages (don't hand-build `st.columns` + `st.metric`).
+- `confirm_dialog(title, body, on_confirm=...)` for every destructive action
+  (delete/remove/restart) — do not invent per-view confirm flows with
+  session-state flags, expanders, or inline warnings.
+- Use `st.divider()` for horizontal rules, never `st.write("---")`.
+- Icons are Material shortcodes (`:material/check_circle:`), not emoji
+  shortcodes (`:white_check_mark:`).
+
+`ui_utils` imports `streamlit` inside each helper (not at module top) so it
+honors the view-test harness's `sys.modules` swap regardless of import order —
+keep that pattern if you add helpers. When a view runs a `utils`/connector
+function at module import that itself calls `st.*` (e.g.
+`SurveyCTOUI(...).render_login_form()`), the view test must patch that symbol
+at its source in `_module_patches()` before importing the view (see
+`tests/views/test_import_view.py`), or collection fails in bare mode.
 
 ## Troubleshooting
 

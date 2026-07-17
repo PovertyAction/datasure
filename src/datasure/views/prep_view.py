@@ -38,6 +38,12 @@ from datasure.utils.prep_utils import (
     PrepActionResult,
     PrepDescriptions,
 )
+from datasure.utils.ui_utils import (
+    confirm_dialog,
+    metric_row,
+    page_header,
+    section_header,
+)
 
 # === PAGE GUARDS === #
 
@@ -933,7 +939,6 @@ def prep_remove_step():
         if prep_log.empty:
             st.info("No preparation steps to remove.")
         else:
-            st.warning("This will remove a data preparation step from the log.")
             # get unique index + actions
             prep_log["action_index"] = (
                 prep_log.index.astype(str)
@@ -951,41 +956,35 @@ def prep_remove_step():
                 help="Select the action you want to remove from the log",
             )
 
-            # confirm removal
-            dp_prep_remove_confirm = st.button(
+            def _remove_prep_step(action_index: str, log=prep_log, alias=label):
+                """Remove a prep step from the log and reapply remaining steps."""
+                action_desc = log.loc[
+                    log["action_index"] == action_index, "description"
+                ].values[0]
+                duckdb_save_table(
+                    project_id,
+                    log.drop(index=log[log["action_index"] == action_index].index),
+                    alias=f"prep_log_{alias}",
+                    db_name="logs",
+                )
+                prep_apply_action(project_id, alias)
+                st.success(f"Action '{action_desc}' removed successfully!")
+
+            if st.button(
                 label="Remove",
                 key=f"st_sb_remove_confirm{i}",
                 width="stretch",
                 type="primary",
                 help="Remove the selected data preparation step from the log",
                 disabled=(not dp_prep_remove_action),
-            )
-
-            if dp_prep_remove_confirm:
-                # remove action from log, save log to database, and re-run
-                # the entire prep log to reflect the changes
-                dp_prep_remove_action_desc = prep_log.loc[
-                    prep_log["action_index"] == dp_prep_remove_action, "description"
-                ].values[0]
-
-                duckdb_save_table(
-                    project_id,
-                    prep_log.drop(
-                        index=prep_log[
-                            prep_log["action_index"] == dp_prep_remove_action
-                        ].index
-                    ),
-                    alias=f"prep_log_{label}",
-                    db_name="logs",
+            ):
+                confirm_dialog(
+                    "Remove data preparation step",
+                    "This removes the selected preparation step from the log and "
+                    "reapplies the remaining steps. This cannot be undone.",
+                    confirm_label="Remove",
+                    on_confirm=lambda: _remove_prep_step(dp_prep_remove_action),
                 )
-
-                prep_apply_action(project_id, label)
-                st.success(
-                    f"Action '{dp_prep_remove_action_desc}' removed successfully!"
-                )
-
-                # rerun to refresh page
-                st.rerun()
 
 
 # === PAGE LAYOUT === #
@@ -997,9 +996,9 @@ def prep_remove_step():
 add_demo_navigation("prep_view.py", step=3)
 demo_sidebar_help()
 
-st.title("Get Your Data Ready")
-st.write(
-    "Prepare your dataset for Data Quality Checks. Use these tools to transform, add and remove columns and rows in your dataset."
+page_header(
+    "Prepare Data",
+    "Transform, add, and remove columns and rows to get your dataset ready for Data Quality Checks.",
 )
 
 
@@ -1049,7 +1048,7 @@ if show_prep_page_info:
             miss_perc = (miss_count / total_values) * 100
             all_cols = prep_data.columns
 
-            st.subheader("Apply Changes:")
+            section_header("Apply Changes")
 
             # Demo guidance for apply changes section
             if is_demo_project():
@@ -1069,7 +1068,7 @@ if show_prep_page_info:
                 prep_remove_step()
 
             with st.container(border=True):
-                st.subheader("Change Log:")
+                section_header("Change Log")
 
                 prep_log: pl.DataFrame = duckdb_get_table(
                     project_id=project_id,
@@ -1091,7 +1090,7 @@ if show_prep_page_info:
 
             # display preview of peppered data
             with st.container(border=True):
-                st.subheader("Preview Prepared Data")
+                section_header("Preview Prepared Data")
 
                 # Demo guidance for data preview
                 if is_demo_project():
@@ -1101,23 +1100,21 @@ if show_prep_page_info:
                         "info",
                     )
 
-                st.write("---")
+                st.divider()
 
-                mc1, mc2, mc3 = st.columns((0.3, 0.3, 0.4))
-
-                mc1.metric(label="Rows", value=f"{row_count:,}", border=True)
-                mc2.metric(label="Columns", value=f"{col_count:,}", border=True)
-                mc3.metric(
-                    label="Percentage missing values",
-                    value=f"{miss_perc:.2f}%",
-                    border=True,
+                metric_row(
+                    [
+                        ("Rows", f"{row_count:,}"),
+                        ("Columns", f"{col_count:,}"),
+                        ("Percentage missing values", f"{miss_perc:.2f}%"),
+                    ]
                 )
 
                 st.dataframe(prep_data, width="stretch", hide_index=False)
 
 # Demo next action or regular navigation
 if is_demo_project():
-    st.write("---")
+    st.divider()
 
     enable_next_count = 0
 
