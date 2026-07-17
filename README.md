@@ -114,6 +114,7 @@ DataSure includes 9 specialized modules for comprehensive survey data quality mo
 - **Local File Support**: CSV, Excel, Stata (.dta), JSON, and Parquet upload with automatic type detection
 - **Multi-Project Organization**: Manage multiple surveys simultaneously
 - **Data Preparation**: Cleaning and transformation workflows
+- **PII Detection & De-identification**: Presidio-based scanning of column names and values, per-column mask/drop/keep review, and a de-identified (default) or with-PII replication export
 
 ### Interactive Dashboards
 

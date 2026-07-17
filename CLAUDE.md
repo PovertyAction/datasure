@@ -89,7 +89,8 @@ src/datasure/
 │   └── local.py            # Local file import (csv/xlsx/xls/json/dta/parquet)
 ├── processing/
 │   ├── prep.py             # Data preparation operations (Polars)
-│   └── corrections.py      # Data correction application
+│   ├── corrections.py      # Data correction application
+│   └── pii.py              # PII detection (Presidio) + redaction + flags
 ├── replication/            # Stata/Python replication package export
 │   ├── package_builder.py, script_generators.py, prep_script_generator.py,
 │   ├── py_script_generators.py, py_prep_script_generator.py,
@@ -142,6 +143,12 @@ pattern `output_view_?.py` - never commit them, and never edit them directly
 5. **Reports** (generated output views): charts and tables per check
 6. **Corrections / replication**: apply corrections; export a replication
    package that reproduces the pipeline outside DataSure
+7. **PII gate** (`processing/pii.py`): column-name heuristics + Presidio
+   value scanning flag PII per dataset (`pii_flags_{alias}` in logs db);
+   flags drive the "redact column(s)" prep action and the export-time
+   de-identification in `package_builder.py` (de-identified is the default
+   export mode; the survey key column is never redacted). spaCy models are
+   downloaded at runtime from the UI, never bundled
 
 ### Cache and data locations (`utils/cache_utils.py`)
 

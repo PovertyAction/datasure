@@ -168,6 +168,18 @@ tests/
 └── views/                      # Tests for Streamlit page scripts
 ```
 
+### PII detection tests and the spaCy model
+
+PII detection (`src/datasure/processing/pii.py`) uses Microsoft Presidio,
+which needs a spaCy language model for value scanning. The English model
+(`en_core_web_sm`) is a **dev dependency** (installed by `uv sync` via a
+direct wheel URL in `[dependency-groups]` — allowed there because groups
+are not published to PyPI), so the Presidio-path tests in
+`tests/processing/test_pii.py` run for real locally and in CI. Tests that
+need the model skip automatically when it is absent. At runtime, end
+users download models from the PII Review section of the Prepare Data
+page instead.
+
 ## Dependency Management
 
 DataSure declares dependencies in `pyproject.toml` and locks exact versions
