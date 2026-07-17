@@ -1,3 +1,5 @@
+import logging
+
 import pandas as pd
 import polars as pl
 import streamlit as st
@@ -15,6 +17,7 @@ from datasure.models.enums import (
     PrepOperations,
     PrepRowConditions,
 )
+from datasure.processing import pii
 from datasure.processing.prep import prep_apply_action
 from datasure.utils.dataframe_utils import ColumnByType, get_df_columns
 from datasure.utils.duckdb_utils import (
@@ -44,6 +47,8 @@ from datasure.utils.ui_utils import (
     page_header,
     section_header,
 )
+
+logger = logging.getLogger(__name__)
 
 # === PAGE GUARDS === #
 
@@ -209,6 +214,7 @@ def _is_prep_form_incomplete(action: str, prep_args: dict) -> bool:
         PrepActions.transform_column.value: _is_transform_column_incomplete,
         PrepActions.remove_column.value: lambda args: not args.get("source_columns"),
         PrepActions.remove_row.value: _is_remove_row_incomplete,
+        PrepActions.redact_column.value: lambda args: not args.get("source_columns"),
     }
 
     validator = validators.get(action)
@@ -779,6 +785,40 @@ class PrepStepHandler:
             "additional_info": None,
         }
 
+    def redact_column_handler(self) -> dict | None:
+        """Handle redact column UI and logic (PII masking)."""
+        dp_prep_redact_cols = st.multiselect(
+            label="Select columns to redact",
+            options=self.all_cols,
+            help=(
+                "All values in the selected columns are replaced with the "
+                "redaction label. Use the PII Review section above to see "
+                "which columns are suspected to contain PII."
+            ),
+            key=f"st_sb_redact_cols{self.step_index}",
+        )
+        dp_prep_redact_label = st.text_input(
+            label="Redaction label",
+            value="*****",
+            help="The label written in place of every value, e.g. [PERSON]",
+            key=f"st_sb_redact_label{self.step_index}",
+        )
+
+        return {
+            "action": PrepActions.redact_column.value,
+            "column_names": None,
+            "affected_count": len(dp_prep_redact_cols) if dp_prep_redact_cols else 0,
+            "remaining_count": self.prep_data.shape[1],
+            "value": [dp_prep_redact_label or "*****"] * len(dp_prep_redact_cols)
+            if dp_prep_redact_cols
+            else [],
+            "method": None,
+            "source_columns": dp_prep_redact_cols if dp_prep_redact_cols else [],
+            "condition": None,
+            "failed_count": None,
+            "additional_info": None,
+        }
+
     def remove_rows_handler(self) -> dict | None:
         """Handle remove rows UI and logic.
 
@@ -905,6 +945,9 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
         elif dp_prep_action == PrepActions.remove_row.value:
             prep_args = prep_handler.remove_rows_handler()
 
+        elif dp_prep_action == PrepActions.redact_column.value:
+            prep_args = prep_handler.redact_column_handler()
+
         if prep_args is None:
             st.warning("Please complete the form to add a new preparation step.")
             return
@@ -987,6 +1030,212 @@ def prep_remove_step():
                 )
 
 
+# --- PII Review ---#
+
+
+def _pii_model_controls(section_index: int) -> tuple[str, bool]:
+    """Render language/model controls; return (language, model_installed)."""
+    models = pii.installed_models()
+    lang_col, status_col = st.columns((0.3, 0.7))
+
+    with lang_col:
+        language = (
+            st.selectbox(
+                label="Detection language",
+                options=list(pii.PII_LANGUAGES),
+                format_func=lambda code: pii.PII_LANGUAGES[code],
+                key=f"st_pii_lang_{section_index}",
+                help="Language of the survey responses, used for value scanning",
+            )
+            or "en"
+        )
+
+    model_name = pii.PII_MODEL_OPTIONS[language]
+    model_ready = models.get(language, False)
+
+    with status_col:
+        if model_ready:
+            st.caption(
+                f":material/check_circle: NER model **{model_name}** installed — "
+                "column names and values will both be scanned."
+            )
+        else:
+            st.caption(
+                f"NER model **{model_name}** is not installed — only column-name "
+                "heuristics will run. Download the model to enable value scanning."
+            )
+            if st.button(
+                ":material/download: Download model",
+                key=f"st_pii_download_{section_index}",
+            ):
+                with st.spinner(f"Downloading {model_name}..."):
+                    success, message = pii.download_model(language)
+                if success:
+                    st.success(message)
+                    st.rerun()
+                else:
+                    st.error(message)
+
+    return language, model_ready
+
+
+def _apply_pii_decisions_as_prep_steps(
+    flags: pl.DataFrame, prep_columns: list[str], alias: str
+) -> int:
+    """Convert mask/drop decisions into prep actions; return steps applied."""
+    mask_cols: list[str] = []
+    mask_labels: list[str] = []
+    drop_cols: list[str] = []
+    for row in flags.iter_rows(named=True):
+        if row["column"] not in prep_columns:
+            continue
+        if row["decision"] == "mask":
+            mask_cols.append(row["column"])
+            mask_labels.append(row["mask_label"] or pii.DEFAULT_MASK)
+        elif row["decision"] == "drop":
+            drop_cols.append(row["column"])
+
+    steps = 0
+    if mask_cols:
+        prep_apply_action(
+            project_id,
+            alias,
+            PrepActionResult(
+                action=PrepActions.redact_column.value,
+                source_columns=mask_cols,
+                value=mask_labels,
+            ),
+        )
+        steps += 1
+    if drop_cols:
+        prep_apply_action(
+            project_id,
+            alias,
+            PrepActionResult(
+                action=PrepActions.remove_column.value,
+                source_columns=drop_cols,
+            ),
+        )
+        steps += 1
+    return steps
+
+
+def pii_review_section(prep_data: pl.DataFrame, alias: str, section_index: int) -> None:
+    """Render the PII Review section for one dataset tab."""
+    with st.container(border=True):
+        section_header("PII Review", icon=":material/shield:")
+        st.caption(
+            "Scan this dataset for columns and values suspected to contain "
+            "personally identifiable information (PII), then decide per column "
+            "whether to **mask** (replace values with a label), **drop** "
+            "(remove the column), or **keep**."
+        )
+
+        language, model_ready = _pii_model_controls(section_index)
+
+        if st.button(
+            ":material/search: Scan for PII",
+            key=f"st_pii_scan_{section_index}",
+            type="secondary",
+        ):
+            with st.spinner("Scanning for PII..."):
+                try:
+                    new_flags = pii.run_pii_scan(
+                        prep_data, language=language, use_value_scan=model_ready
+                    )
+                    merged = pii.merge_with_existing(
+                        new_flags, pii.load_pii_flags(project_id, alias)
+                    )
+                    pii.save_pii_flags(project_id, alias, merged)
+                    st.success(
+                        f"Scan complete — {merged.height} column(s) flagged."
+                        if merged.height
+                        else "Scan complete — no columns flagged."
+                    )
+                except Exception as e:
+                    # UI boundary: a failed scan must not crash the page.
+                    logger.exception("PII scan failed for alias %s", alias)
+                    st.error(f"PII scan failed: {e}")
+
+        flags = pii.load_pii_flags(project_id, alias)
+        if flags.is_empty():
+            st.info(
+                "No PII flags yet. Click **Scan for PII** to check column names"
+                + (" and values." if model_ready else ".")
+            )
+            return
+
+        edited = st.data_editor(
+            flags,
+            column_config={
+                "column": st.column_config.TextColumn("Column"),
+                "source": st.column_config.TextColumn(
+                    "Flagged by", help="Detection pass that flagged this column"
+                ),
+                "entity_type": st.column_config.TextColumn("Entity"),
+                "hit_rate": st.column_config.NumberColumn("Hit rate", format="%.2f"),
+                "sample_matches": st.column_config.TextColumn("Sample flagged values"),
+                "decision": st.column_config.SelectboxColumn(
+                    "Decision", options=list(pii.FLAG_DECISIONS), required=True
+                ),
+                "mask_label": st.column_config.TextColumn(
+                    "Mask label", help="Label written in place of masked values"
+                ),
+                "scanned_at": None,
+            },
+            disabled=["column", "source", "entity_type", "hit_rate", "sample_matches"],
+            hide_index=True,
+            width="stretch",
+            key=f"st_pii_editor_{section_index}",
+        )
+
+        save_col, apply_col = st.columns(2)
+        with save_col:
+            if st.button(
+                "Save decisions",
+                key=f"st_pii_save_{section_index}",
+                width="stretch",
+            ):
+                pii.save_pii_flags(project_id, alias, pl.DataFrame(edited))
+                st.success("PII decisions saved.")
+        with apply_col:
+            if st.button(
+                "Apply mask/drop decisions as prep steps",
+                key=f"st_pii_apply_{section_index}",
+                width="stretch",
+                type="primary",
+                help=(
+                    "Masks and column drops are added to the change log below, "
+                    "so they are replayable and removable like any prep step."
+                ),
+            ):
+                try:
+                    edited_flags = pl.DataFrame(edited)
+                    pii.save_pii_flags(project_id, alias, edited_flags)
+                    steps = _apply_pii_decisions_as_prep_steps(
+                        edited_flags, prep_data.columns, alias
+                    )
+                    if steps:
+                        st.success(f"{steps} preparation step(s) added.")
+                        st.rerun()
+                    else:
+                        st.info("No mask or drop decisions to apply.")
+                except Exception as e:
+                    # UI boundary: surface and log, never crash the page.
+                    logger.exception(
+                        "Applying PII decisions failed for alias %s", alias
+                    )
+                    st.error(f"Applying PII decisions failed: {e}")
+
+        st.warning(
+            "De-identification is not anonymization: even with direct "
+            "identifiers masked or dropped, subjects may remain identifiable "
+            "through combinations of remaining variables (e.g. age, location, "
+            "occupation). Review before sharing any export.",
+            icon=":material/warning:",
+        )
+
+
 # === PAGE LAYOUT === #
 
 # -- DATA PREP PAGE --#
@@ -1066,6 +1315,8 @@ if show_prep_page_info:
 
             with pt2:
                 prep_remove_step()
+
+            pii_review_section(prep_data, label, section_index=i)
 
             with st.container(border=True):
                 section_header("Change Log")
