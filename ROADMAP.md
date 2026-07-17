@@ -36,7 +36,7 @@ For feature requests and bug reports, see our [GitHub Issues](https://github.com
 | Feature | Description | Status |
 | ------- | ----------- | ------ |
 | **SurveyCTO Integration** | Direct API connection with authentication and form metadata | Launched |
-| **Local File Support** | CSV, Excel, Stata (.dta), and JSON upload | Launched |
+| **Local File Support** | CSV, Excel, Stata (.dta), JSON, and Parquet upload | Launched |
 | **Multi-Project Management** | Manage multiple surveys with isolated settings and data | Launched |
 | **Data Preparation Workflows** | Built-in cleaning and transformation tools | Launched |
 | **Data Correction Interface** | Review and apply corrections to flagged records in-app | Launched |

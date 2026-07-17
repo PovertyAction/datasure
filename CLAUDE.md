@@ -86,7 +86,7 @@ src/datasure/
 │   └── backchecks.py       #   Back-check comparison workflows
 ├── connectors/
 │   ├── scto.py             # SurveyCTO download/UI (uses utils/scto_api.py)
-│   └── local.py            # Local file import (csv/xlsx/xls/json/dta)
+│   └── local.py            # Local file import (csv/xlsx/xls/json/dta/parquet)
 ├── processing/
 │   ├── prep.py             # Data preparation operations (Polars)
 │   └── corrections.py      # Data correction application

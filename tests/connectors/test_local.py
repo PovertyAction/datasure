@@ -36,7 +36,7 @@ class TestValidFileTypes:
 
     def test_valid_file_types_constant(self):
         """Test that VALID_FILE_TYPES contains expected file extensions."""
-        expected_types = {".csv", ".xlsx", ".xls", ".json", ".dta"}
+        expected_types = {".csv", ".xlsx", ".xls", ".json", ".dta", ".parquet"}
         assert expected_types == VALID_FILE_TYPES
 
 
@@ -289,6 +289,21 @@ class TestLoadDataEfficiently:
 
         mock_scan_readstat.assert_called_once_with(str(stata_file))
         assert result.equals(mock_df)
+
+    def test_load_parquet_file(self, tmp_path):
+        """Test loading Parquet file."""
+        parquet_file = tmp_path / "test.parquet"
+        test_data = pl.DataFrame(
+            {"name": ["John", "Jane"], "age": [25, 30], "city": ["NYC", "LA"]}
+        )
+        test_data.write_parquet(parquet_file)
+
+        result = load_data_efficiently(str(parquet_file))
+
+        assert isinstance(result, pl.DataFrame)
+        assert result.shape == (2, 3)
+        assert list(result.columns) == ["name", "age", "city"]
+        assert result.row(0) == ("John", 25, "NYC")
 
     def test_unsupported_file_format(self, tmp_path):
         """Test loading unsupported file format."""
