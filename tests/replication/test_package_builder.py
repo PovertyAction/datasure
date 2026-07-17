@@ -229,7 +229,7 @@ class TestBuildReplicationPackage:
     def test_zip_contains_readme(self, zip_bytes):
         with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
             names = zf.namelist()
-        assert any("0_README.txt" in n for n in names)
+        assert any("0_README.md" in n for n in names)
 
     def test_zip_contains_all_scripts(self, zip_bytes):
         with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:

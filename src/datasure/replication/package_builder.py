@@ -358,7 +358,7 @@ def build_replication_package(
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         # README
-        zf.writestr(f"{root}/0_README.txt", readme)
+        zf.writestr(f"{root}/0_README.md", readme)
 
         # 1_docs/
         if scto_form_xlsx is not None:
