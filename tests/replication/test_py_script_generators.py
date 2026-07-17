@@ -7,13 +7,29 @@ import ast
 import polars as pl
 import pytest
 
+from datasure.processing.pii import empty_flags
 from datasure.replication.py_script_generators import (
     SCRIPT_EXT_PY,
     _emit_py,
     _py_lit,
     generate_corrections_script_py,
+    generate_deidentify_script_py,
     generate_master_script_py,
 )
+
+
+def _pii_flags(rows: list[dict]) -> pl.DataFrame:
+    base = {
+        "column": "",
+        "source": "name_match",
+        "entity_type": None,
+        "hit_rate": 1.0,
+        "sample_matches": "",
+        "decision": "undecided",
+        "mask_label": "*****",
+        "scanned_at": "2026-01-01T00:00:00",
+    }
+    return pl.DataFrame([{**base, **row} for row in rows], schema=empty_flags().schema)
 
 
 def test_script_ext():
@@ -110,6 +126,63 @@ class TestGenerateCorrectionsScriptPy:
             pl.DataFrame(), "key", "P", "S", "1.0.0"
         )
         assert "_corrected.parquet" in script
+
+
+# ---------------------------------------------------------------------------
+# generate_deidentify_script_py
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateDeidentifyScriptPy:
+    def _script(self, flags):
+        return generate_deidentify_script_py(
+            flags, "Test Project", "Baseline Survey", "1.0.0"
+        )
+
+    def test_parses_as_valid_python(self):
+        flags = _pii_flags(
+            [{"column": "name", "decision": "mask", "mask_label": "[PERSON]"}]
+        )
+        ast.parse(self._script(flags))
+
+    def test_decisions_embedded(self):
+        flags = _pii_flags(
+            [
+                {"column": "name", "decision": "mask", "mask_label": "[PERSON]"},
+                {"column": "latitude", "decision": "drop"},
+            ]
+        )
+        script = self._script(flags)
+        assert "('name', 'mask', '[PERSON]')" in script
+        assert "('latitude', 'drop', '*****')" in script
+
+    def test_undecided_treated_as_mask(self):
+        flags = _pii_flags([{"column": "notes", "decision": "undecided"}])
+        script = self._script(flags)
+        assert "('notes', 'mask', '*****')" in script
+
+    def test_kept_columns_excluded(self):
+        flags = _pii_flags([{"column": "age", "decision": "keep"}])
+        script = self._script(flags)
+        assert "'age'" not in script
+
+    def test_empty_flags_yields_empty_decisions(self):
+        script = self._script(empty_flags())
+        ast.parse(script)
+        assert "DECISIONS = []" in script
+
+    def test_targets_all_bundled_datasets(self):
+        script = self._script(empty_flags())
+        for name in (
+            "baseline_survey_raw.parquet",
+            "baseline_survey_prepped.parquet",
+            "baseline_survey_corrected.parquet",
+        ):
+            assert name in script
+
+    def test_prints_indirect_identifier_warning(self):
+        script = self._script(empty_flags())
+        assert "not anonymization" in script
 
 
 # ---------------------------------------------------------------------------

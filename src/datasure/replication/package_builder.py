@@ -10,6 +10,12 @@ from collections.abc import Callable
 
 import polars as pl
 
+from datasure.processing.pii import (
+    apply_pii_decisions,
+    empty_flags,
+    load_pii_flags,
+    redact_correction_log,
+)
 from datasure.replication.codebook import generate_codebook
 from datasure.replication.data_dict import generate_data_dict
 from datasure.replication.prep_script_generator import (
@@ -21,6 +27,7 @@ from datasure.replication.py_prep_script_generator import (
 from datasure.replication.py_script_generators import (
     SCRIPT_EXT_PY,
     generate_corrections_script_py,
+    generate_deidentify_script_py,
     generate_master_script_py,
 )
 from datasure.replication.readme import generate_readme
@@ -123,6 +130,39 @@ def _select_import_script(
     )
 
 
+def _load_pii_flags(project_id: str, alias: str) -> pl.DataFrame:
+    try:
+        return load_pii_flags(project_id, alias)
+    except Exception:
+        logger.warning("PII flags for %s not found; returning empty flags", alias)
+        return empty_flags()
+
+
+def _pii_column_lists(
+    pii_flags: pl.DataFrame, protect: tuple[str, ...]
+) -> tuple[list[str], list[str], list[str]]:
+    """Split flags into (masked, dropped, flagged-but-kept) column lists.
+
+    "undecided" flags count as masked — the export gate's conservative
+    default. Protected columns (e.g. the survey key) are never redacted.
+    """
+    masked: list[str] = []
+    dropped: list[str] = []
+    kept: list[str] = []
+    for row in pii_flags.iter_rows(named=True):
+        if row["column"] in protect:
+            kept.append(row["column"])
+            continue
+        decision = row["decision"]
+        if decision in ("mask", "undecided"):
+            masked.append(row["column"])
+        elif decision == "drop":
+            dropped.append(row["column"])
+        else:
+            kept.append(row["column"])
+    return masked, dropped, kept
+
+
 def _to_parquet_bytes(df: pl.DataFrame) -> bytes:
     """Serialize a DataFrame to Parquet bytes.
 
@@ -157,6 +197,7 @@ def build_replication_package(
     scto_form_xlsx: bytes | None = None,
     form_def: dict | None = None,
     form_id: str = "",
+    include_pii: bool = False,
     on_progress: Callable[[str], None] | None = None,
 ) -> bytes:
     """Build the Stata replication package and return it as zip bytes.
@@ -172,7 +213,8 @@ def build_replication_package(
     alias : str
         The dataset alias stored in DuckDB.
     key_col : str
-        The survey key column name (used in generated scripts).
+        The survey key column name (used in generated scripts). Never
+        redacted: the corrections pipeline requires it.
     scto_form_xlsx : bytes | None
         Raw bytes of the SurveyCTO XLS form, if available. When provided the
         file is included in docs/ as ``{survey}_questionnaire.xlsx``.
@@ -182,6 +224,13 @@ def build_replication_package(
         instead of the generic template.
     form_id : str
         SurveyCTO form ID, used in the generated import script header.
+    include_pii : bool
+        False (default) exports a **de-identified** package: columns flagged
+        in the PII review are masked or dropped (undecided flags are masked)
+        in every bundled dataset, the codebook, the data dictionary, and the
+        correction log before anything is written. True exports the data
+        untouched and instead bundles ``5_deidentify_data.py`` (encoding the
+        recorded decisions) plus the flags audit log.
     on_progress : Callable[[str], None] | None
         Optional callback invoked with a human-readable status message at each
         major step.  Callers can pass ``st.write`` to stream progress into a
@@ -226,6 +275,39 @@ def build_replication_package(
 
     correction_log = _load_correction_log(project_id, alias)
     _step(f"Correction log loaded — {correction_log.height:,} entries")
+
+    # PII gate: in de-identified mode (the default) every flagged column is
+    # masked or dropped in the data BEFORE anything downstream is generated,
+    # so the CSVs, Parquets, codebook, data dictionary, correction log, and
+    # the value literals embedded in generated correction scripts are all
+    # covered. The survey key column is protected (corrections need it).
+    pii_flags = _load_pii_flags(project_id, alias)
+    protect = (key_col,) if key_col else ()
+    pii_masked, pii_dropped, pii_kept = _pii_column_lists(pii_flags, protect)
+
+    if not include_pii and not pii_flags.is_empty():
+        raw_df = apply_pii_decisions(
+            raw_df, pii_flags, mask_undecided=True, protect=protect
+        )
+        prepped_df = apply_pii_decisions(
+            prepped_df, pii_flags, mask_undecided=True, protect=protect
+        )
+        corrected_df = apply_pii_decisions(
+            corrected_df, pii_flags, mask_undecided=True, protect=protect
+        )
+        correction_log = redact_correction_log(
+            correction_log, pii_flags, mask_undecided=True, protect=protect
+        )
+        _step(
+            f"De-identification applied — {len(pii_masked)} column(s) masked, "
+            f"{len(pii_dropped)} dropped"
+            + (f", {len(pii_kept)} flagged column(s) kept" if pii_kept else "")
+        )
+    elif include_pii:
+        _step(
+            "Export includes PII — data left untouched; "
+            "`5_deidentify_data.py` will be bundled"
+        )
 
     n_by_action = _action_summary(correction_log)
 
@@ -290,6 +372,19 @@ def build_replication_package(
     )
     _step("Python replication scripts generated (`uv run`-ready)")
 
+    deidentify_script_py = (
+        generate_deidentify_script_py(
+            pii_flags=pii_flags,
+            project_name=project_name,
+            survey_name=survey_name,
+            datasure_version=datasure_version,
+        )
+        if include_pii
+        else None
+    )
+    if deidentify_script_py is not None:
+        _step("`5_deidentify_data.py` generated")
+
     readme = generate_readme(
         project_name=project_name,
         survey_name=survey_name,
@@ -301,6 +396,10 @@ def build_replication_package(
         corrected_rows=corrected_df.height if not corrected_df.is_empty() else 0,
         n_corrections_by_action=n_by_action,
         include_scto_form=scto_form_xlsx is not None,
+        include_pii=include_pii,
+        pii_masked_columns=pii_masked,
+        pii_dropped_columns=pii_dropped,
+        pii_kept_columns=pii_kept,
     )
     _step("README generated")
 
@@ -319,6 +418,7 @@ def build_replication_package(
         key_col=key_col,
         parquet_path=corrected_parquet_path,
         datasure_version=datasure_version,
+        redacted_columns=tuple(pii_masked) if not include_pii else (),
     )
     _step("data-dict.yaml generated")
 
@@ -383,6 +483,11 @@ def build_replication_package(
         zf.writestr(
             f"{root}/2_scripts/4_corrections.{SCRIPT_EXT_PY}", corrections_script_py
         )
+        if deidentify_script_py is not None:
+            zf.writestr(
+                f"{root}/2_scripts/5_deidentify_data.{SCRIPT_EXT_PY}",
+                deidentify_script_py,
+            )
 
         # 3_data/
         zf.writestr(f"{root}/3_data/1_raw/{safe_survey}_raw.csv", raw_csv)
@@ -408,6 +513,10 @@ def build_replication_package(
         zf.writestr(f"{root}/4_output/2_figures/.gitkeep", "")
         zf.writestr(f"{root}/4_output/3_logs/correction_log.csv", correction_log_csv)
         zf.writestr(f"{root}/4_output/3_logs/prep_log.csv", prep_log_csv)
+        # The flags audit log carries sample matched values (actual data), so
+        # it is bundled only when the export already includes PII.
+        if include_pii and not pii_flags.is_empty():
+            zf.writestr(f"{root}/4_output/3_logs/pii_flags.csv", pii_flags.write_csv())
 
     logger.info("Zip assembled: %s", root)
     _step("Zip file assembled")

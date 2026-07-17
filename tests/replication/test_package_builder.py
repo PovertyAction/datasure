@@ -351,3 +351,153 @@ class TestBuildReplicationPackageNoRawData:
             names = zf.namelist()
         assert not any("_raw.parquet" in n for n in names)
         assert any("_raw.csv" in n for n in names)
+
+
+# ---------------------------------------------------------------------------
+# PII export gate
+# ---------------------------------------------------------------------------
+
+_PII_RAW = pl.DataFrame(
+    {
+        "key": ["k1", "k2"],
+        "enum_name": ["Kailash Khosla", "Arjun Patel"],
+        "household_latitude": [26.08, 25.91],
+        "age": [34, 51],
+    }
+)
+_PII_FLAGS = pl.DataFrame(
+    {
+        "column": ["enum_name", "household_latitude", "age"],
+        "source": ["fuzzy", "fuzzy", "name_match"],
+        "entity_type": ["PERSON", None, None],
+        "hit_rate": [1.0, 1.0, 1.0],
+        "sample_matches": ["Kailash Khosla", "", ""],
+        "decision": ["mask", "drop", "keep"],
+        "mask_label": ["[PERSON]", "*****", "*****"],
+        "scanned_at": ["2026-01-01T00:00:00"] * 3,
+    }
+)
+_PII_CORR_LOG = pl.DataFrame(
+    {
+        "date": ["2026-01-01"],
+        "KEY": ["k1"],
+        "ID": [None],
+        "action": ["modify value"],
+        "column": ["enum_name"],
+        "current_value": ["Kailash Khosla"],
+        "new_value": ["K. Khosla"],
+        "reason": ["typo"],
+    }
+)
+
+
+def _pii_duckdb_get(project_id, table, db_name, **kwargs):
+    name = str(table)
+    if "pii_flags" in name:
+        return _PII_FLAGS
+    if "corr_log" in name:
+        return _PII_CORR_LOG
+    if "prep_log" in name:
+        return pl.DataFrame()
+    return _PII_RAW
+
+
+def _build_pii_package(include_pii: bool) -> bytes:
+    with (
+        patch(
+            "datasure.replication.package_builder.duckdb_get_table",
+            side_effect=_pii_duckdb_get,
+        ),
+        patch(
+            "datasure.utils.duckdb_utils.duckdb_get_table",
+            side_effect=_pii_duckdb_get,
+        ),
+    ):
+        return build_replication_package(
+            project_id="test-proj",
+            project_name="Test Project",
+            survey_name="Baseline Survey",
+            alias="baseline",
+            key_col="key",
+            include_pii=include_pii,
+        )
+
+
+class TestBuildReplicationPackageDeidentified:
+    @pytest.fixture()
+    def zip_file(self):
+        return zipfile.ZipFile(BytesIO(_build_pii_package(include_pii=False)))
+
+    def _read(self, zip_file, suffix: str) -> str:
+        name = next(n for n in zip_file.namelist() if n.endswith(suffix))
+        return zip_file.read(name).decode()
+
+    def test_masked_column_in_raw_csv(self, zip_file):
+        raw_csv = self._read(zip_file, "_raw.csv")
+        assert "Kailash" not in raw_csv
+        assert "[PERSON]" in raw_csv
+
+    def test_dropped_column_absent(self, zip_file):
+        raw_csv = self._read(zip_file, "_raw.csv")
+        assert "household_latitude" not in raw_csv
+
+    def test_kept_column_intact(self, zip_file):
+        raw_csv = self._read(zip_file, "_raw.csv")
+        assert "age" in raw_csv
+        assert "34" in raw_csv
+
+    def test_correction_log_redacted(self, zip_file):
+        corr = self._read(zip_file, "correction_log.csv")
+        assert "Kailash" not in corr
+
+    def test_codebook_samples_redacted(self, zip_file):
+        codebook = self._read(zip_file, "codebook.csv")
+        assert "Kailash" not in codebook
+
+    def test_data_dict_annotated_and_redacted(self, zip_file):
+        dd = self._read(zip_file, "data-dict.yaml")
+        assert "Redacted (PII)" in dd
+        assert "Kailash" not in dd
+
+    def test_no_deidentify_script_or_flags_csv(self, zip_file):
+        names = zip_file.namelist()
+        assert not any("5_deidentify" in n for n in names)
+        assert not any("pii_flags.csv" in n for n in names)
+
+    def test_readme_states_deidentified(self, zip_file):
+        readme = self._read(zip_file, "README.md")
+        assert "exported de-identified" in readme
+        assert "indirect identifiers" in readme
+        assert "`enum_name`" in readme
+
+
+class TestBuildReplicationPackageWithPii:
+    @pytest.fixture()
+    def zip_file(self):
+        return zipfile.ZipFile(BytesIO(_build_pii_package(include_pii=True)))
+
+    def _read(self, zip_file, suffix: str) -> str:
+        name = next(n for n in zip_file.namelist() if n.endswith(suffix))
+        return zip_file.read(name).decode()
+
+    def test_data_left_untouched(self, zip_file):
+        raw_csv = self._read(zip_file, "_raw.csv")
+        assert "Kailash" in raw_csv
+        assert "household_latitude" in raw_csv
+
+    def test_deidentify_script_bundled_and_parses(self, zip_file):
+        import ast
+
+        script = self._read(zip_file, "5_deidentify_data.py")
+        ast.parse(script)
+        assert "('enum_name', 'mask', '[PERSON]')" in script
+        assert "('household_latitude', 'drop', '*****')" in script
+
+    def test_flags_audit_log_bundled(self, zip_file):
+        flags_csv = self._read(zip_file, "pii_flags.csv")
+        assert "enum_name" in flags_csv
+
+    def test_readme_states_with_pii(self, zip_file):
+        readme = self._read(zip_file, "README.md")
+        assert "WITH personally identifiable" in readme
+        assert "5_deidentify_data.py" in readme

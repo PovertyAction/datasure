@@ -182,6 +182,105 @@ def generate_corrections_script_py(
     return "\n".join(lines) + "\n"
 
 
+def generate_deidentify_script_py(
+    pii_flags: pl.DataFrame,
+    project_name: str,
+    survey_name: str,
+    datasure_version: str,
+) -> str:
+    """Generate a Python script that de-identifies the bundled datasets.
+
+    Included in packages exported *with* PII: it encodes the PII decisions
+    recorded in DataSure (mask/drop per column; undecided treated as mask)
+    so a recipient can produce de-identified copies of every bundled
+    Parquet dataset with ``uv run 5_deidentify_data.py``.
+
+    Parameters
+    ----------
+    pii_flags : pl.DataFrame
+        PII flags table (processing/pii.py canonical schema).
+    project_name : str
+        Human-readable project name.
+    survey_name : str
+        Human-readable survey name.
+    datasure_version : str
+        Version of DataSure that generated this package.
+
+    Returns
+    -------
+    str
+        Python script content as a string.
+    """
+    header = _py_header(
+        "De-identification Script (Python)",
+        project_name,
+        survey_name,
+        datasure_version,
+        ["polars"],
+    )
+    safe_survey = _safe_survey(survey_name)
+
+    decisions: list[tuple[str, str, str]] = []
+    for row in pii_flags.iter_rows(named=True):
+        decision = row["decision"]
+        if decision == "undecided":
+            decision = "mask"  # conservative default
+        if decision in ("mask", "drop"):
+            decisions.append((row["column"], decision, row["mask_label"] or "*****"))
+
+    decision_lines = (
+        ["DECISIONS = ["] + [f"    {d!r}," for d in decisions] + ["]"]
+        if decisions
+        else ["DECISIONS = []  # no PII flags were recorded in DataSure"]
+    )
+
+    lines = [
+        header,
+        "from pathlib import Path",
+        "",
+        "import polars as pl",
+        "",
+        "PKG_ROOT = Path(__file__).resolve().parents[1]",
+        "DATASETS = [",
+        f'    PKG_ROOT / "3_data" / "1_raw" / "{safe_survey}_raw.parquet",',
+        f'    PKG_ROOT / "3_data" / "2_intermediate" / "{safe_survey}_prepped.parquet",',
+        f'    PKG_ROOT / "3_data" / "3_final" / "{safe_survey}_corrected.parquet",',
+        "]",
+        "",
+        "# (column, action, mask_label) decisions recorded in DataSure's PII",
+        '# review. "mask" replaces every non-null value with the label;',
+        '# "drop" removes the column.',
+        *decision_lines,
+        "",
+        "for path in DATASETS:",
+        "    if not path.exists():",
+        "        continue",
+        "    df = pl.read_parquet(path)",
+        "    for column, action, label in DECISIONS:",
+        "        if column not in df.columns:",
+        "            continue",
+        '        if action == "drop":',
+        "            df = df.drop(column)",
+        "        else:",
+        "            df = df.with_columns(",
+        "                pl.when(pl.col(column).is_not_null())",
+        "                .then(pl.lit(label))",
+        "                .otherwise(pl.lit(None, dtype=pl.String))",
+        "                .alias(column)",
+        "            )",
+        '    out = path.with_name(path.stem + "_deidentified.parquet")',
+        "    df.write_parquet(out)",
+        '    print(f"Wrote {out} — {df.height:,} rows")',
+        "",
+        'print("")',
+        'print("WARNING: De-identification is not anonymization. Even with")',
+        'print("direct identifiers masked or dropped, subjects may remain")',
+        'print("identifiable through combinations of remaining variables")',
+        'print("(e.g. age, location, occupation). Review before sharing.")',
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def generate_master_script_py(
     project_name: str,
     survey_name: str,
