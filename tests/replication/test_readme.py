@@ -104,3 +104,18 @@ class TestGenerateReadme:
 
     def test_contains_data_pipeline_summary(self, readme):
         assert "DATA PIPELINE SUMMARY" in readme
+
+    def test_mentions_data_dict_yaml(self, readme):
+        assert "data-dict.yaml" in readme
+
+    def test_mentions_parquet(self, readme):
+        assert ".parquet" in readme
+
+    def test_mentions_python_scripts(self, readme):
+        assert "0_main.py" in readme
+        assert "2_import_data.py" in readme
+        assert "3_prepare_data.py" in readme
+        assert "4_corrections.py" in readme
+
+    def test_contains_python_how_to_run_section(self, readme):
+        assert "HOW TO RUN (Python" in readme
