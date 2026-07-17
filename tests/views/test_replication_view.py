@@ -154,6 +154,27 @@ class TestPackageTree:
         tree = _package_tree("proj", "hh_survey", is_scto=False)
         assert "hh_survey_raw.csv" in tree
 
+    def test_tree_contains_codebook_and_data_dict(self):
+        tree = _package_tree("p", "s", is_scto=False)
+        assert "codebook.csv" in tree
+        assert "data-dict.yaml" in tree
+
+    def test_tree_contains_parquet_files(self):
+        tree = _package_tree("proj", "hh_survey", is_scto=False)
+        assert "hh_survey_raw.parquet" in tree
+        assert "hh_survey_prepped.parquet" in tree
+        assert "hh_survey_corrected.parquet" in tree
+
+    def test_tree_contains_python_scripts(self):
+        tree = _package_tree("p", "s", is_scto=False)
+        for script in [
+            "0_main.py",
+            "2_import_data.do / .py",
+            "3_prepare_data.do / .py",
+            "4_corrections.do / .py",
+        ]:
+            assert script in tree
+
 
 # ---------------------------------------------------------------------------
 # _resolve_page_config
