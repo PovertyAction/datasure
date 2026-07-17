@@ -33,8 +33,12 @@ class TestPrepActions:
     """Tests for the PrepActions enum."""
 
     def test_member_count(self):
-        """Verify PrepActions has exactly 4 members."""
-        assert len(PrepActions) == 4
+        """Verify PrepActions has exactly 5 members."""
+        assert len(PrepActions) == 5
+
+    def test_redact_column_value(self):
+        """Verify redact_column has the expected string value."""
+        assert PrepActions.redact_column.value == "redact column(s)"
 
     def test_add_column_value(self):
         """Verify add_column has the expected string value."""

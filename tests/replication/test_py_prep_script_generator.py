@@ -9,6 +9,7 @@ import polars as pl
 
 from datasure.replication.py_prep_script_generator import (
     _py_add_column,
+    _py_redact_columns,
     _py_remove_columns,
     _py_remove_rows,
     _py_transform_column,
@@ -24,6 +25,32 @@ class TestPyRemoveColumns:
     def test_drops_listed_columns(self):
         lines = _py_remove_columns({"source_columns": ["a", "b"]}, "")
         assert lines == ["df = df.drop(['a', 'b'])"]
+
+
+# ---------------------------------------------------------------------------
+# _py_redact_columns
+# ---------------------------------------------------------------------------
+
+
+class TestPyRedactColumns:
+    def test_single_column(self):
+        lines = _py_redact_columns(
+            {"source_columns": ["name"], "value": ["[PERSON]"]}, ""
+        )
+        assert len(lines) == 1
+        assert "pl.when(pl.col('name').is_not_null())" in lines[0]
+        assert "pl.lit('[PERSON]')" in lines[0]
+
+    def test_single_string_label_applies_to_all(self):
+        lines = _py_redact_columns({"source_columns": ["a", "b"], "value": "*"}, "")
+        assert len(lines) == 2
+        assert all("pl.lit('*')" in line for line in lines)
+
+    def test_generated_code_parses(self):
+        lines = _py_redact_columns(
+            {"source_columns": ["name"], "value": ["[PERSON]"]}, ""
+        )
+        ast.parse("\n".join(lines))
 
 
 # ---------------------------------------------------------------------------

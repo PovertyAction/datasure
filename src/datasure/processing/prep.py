@@ -192,6 +192,63 @@ class RemoveColumnsOperation(PrepOperation):
             raise OperationError(f"Failed to remove columns: {e}") from e
 
 
+class RedactColumnsOperation(PrepOperation):
+    """Mask all values in specified columns with a redaction label.
+
+    Used for PII removal: every non-null value in each source column is
+    replaced with the column's mask label (e.g. ``[PERSON]``, ``*****``),
+    and the column is cast to String. ``prep_args.value`` carries the labels
+    as a list aligned with ``source_columns`` (a single string applies to
+    all columns).
+    """
+
+    def execute(
+        self, data: pl.DataFrame, prep_args: PrepActionResult
+    ) -> tuple[pl.DataFrame, PrepActionResult]:
+        """Redact columns specified in prep_args."""
+        try:
+            columns = prep_args.source_columns
+            self._validate_columns_exist(data, columns)
+
+            labels = prep_args.value
+            if isinstance(labels, str) or labels is None:
+                labels = [labels or "*****"] * len(columns)
+            if len(labels) != len(columns):
+                raise ValidationError(  # noqa: TRY301
+                    "Number of mask labels must match number of columns"
+                )
+
+            results = data.with_columns(
+                [
+                    pl.when(pl.col(col).is_not_null())
+                    .then(pl.lit(label))
+                    .otherwise(pl.lit(None, dtype=pl.String))
+                    .alias(col)
+                    for col, label in zip(columns, labels, strict=True)
+                ]
+            )
+
+            updated_prep_args = {
+                "action": PrepActions.redact_column.value,
+                "column_names": None,
+                "affected_count": len(columns),
+                "remaining_count": results.width,
+                "value": labels,
+                "method": None,
+                "source_columns": columns,
+                "condition": None,
+                "failed_count": 0,
+                "additional_info": None,
+            }
+
+            return results, PrepActionResult(**updated_prep_args)
+
+        except (ValidationError, OperationError):
+            raise
+        except Exception as e:
+            raise OperationError(f"Failed to redact columns: {e}") from e
+
+
 class RemoveRowsOperation(PrepOperation):
     """Remove rows based on various conditions."""
 
@@ -821,6 +878,7 @@ class PrepProcessor:
             PrepActions.remove_row: RemoveRowsOperation(),
             PrepActions.transform_column: TransformColumnsOperation(),
             PrepActions.add_column: AddNewColumnOperation(),
+            PrepActions.redact_column: RedactColumnsOperation(),
         }
 
     def execute_single_action(
@@ -891,6 +949,7 @@ def _generate_action_description(prep_args: PrepActionResult) -> str:
         PrepActions.remove_row.value: PrepConfirmationMessages.remove_rows,
         PrepActions.transform_column.value: PrepConfirmationMessages.transform_columns,
         PrepActions.add_column.value: PrepConfirmationMessages.add_new_column,
+        PrepActions.redact_column.value: PrepConfirmationMessages.redact_columns,
     }
     description_func = action_description_map.get(prep_args.action)
     if description_func:

@@ -16,6 +16,7 @@ from datasure.processing.prep import (
     PrepAction,
     PrepError,
     PrepProcessor,
+    RedactColumnsOperation,
     RemoveColumnsOperation,
     RemoveRowsOperation,
     TransformColumnsOperation,
@@ -84,6 +85,7 @@ class TestPrepAction:
             ("remove row(s)", PrepActions.remove_row),
             ("transform column(s)", PrepActions.transform_column),
             ("add new column", PrepActions.add_column),
+            ("redact column(s)", PrepActions.redact_column),
         ]
         for action_str, expected in cases:
             action = PrepAction.from_args(PrepActionResult(action=action_str))
@@ -160,6 +162,68 @@ class TestDescriptionParser:
 
 
 # === REMOVE COLUMNS OPERATION TESTS === #
+
+
+class TestRedactColumnsOperation:
+    """Test RedactColumnsOperation (PII masking)."""
+
+    def test_redact_single_column(self):
+        op = RedactColumnsOperation()
+        data = pl.DataFrame({"name": ["Alice", "Bob"], "age": [1, 2]})
+        prep_args = PrepActionResult(
+            action="redact column(s)", source_columns=["name"], value=["[PERSON]"]
+        )
+        result, args = op.execute(data, prep_args)
+        assert result["name"].to_list() == ["[PERSON]", "[PERSON]"]
+        assert result["age"].to_list() == [1, 2]
+        assert args.affected_count == 1
+
+    def test_nulls_stay_null(self):
+        op = RedactColumnsOperation()
+        data = pl.DataFrame({"name": ["Alice", None]})
+        prep_args = PrepActionResult(
+            action="redact column(s)", source_columns=["name"], value=["*****"]
+        )
+        result, _ = op.execute(data, prep_args)
+        assert result["name"].to_list() == ["*****", None]
+
+    def test_numeric_column_cast_to_string(self):
+        op = RedactColumnsOperation()
+        data = pl.DataFrame({"latitude": [26.08, 25.91]})
+        prep_args = PrepActionResult(
+            action="redact column(s)", source_columns=["latitude"], value=["*****"]
+        )
+        result, _ = op.execute(data, prep_args)
+        assert result["latitude"].dtype == pl.String
+
+    def test_single_string_label_applies_to_all_columns(self):
+        op = RedactColumnsOperation()
+        data = pl.DataFrame({"a": ["x"], "b": ["y"]})
+        prep_args = PrepActionResult(
+            action="redact column(s)", source_columns=["a", "b"], value="[REDACTED]"
+        )
+        result, args = op.execute(data, prep_args)
+        assert result["a"].to_list() == ["[REDACTED]"]
+        assert result["b"].to_list() == ["[REDACTED]"]
+        assert args.value == ["[REDACTED]", "[REDACTED]"]
+
+    def test_missing_column_raises(self):
+        op = RedactColumnsOperation()
+        data = pl.DataFrame({"a": ["x"]})
+        prep_args = PrepActionResult(
+            action="redact column(s)", source_columns=["ghost"], value=["*"]
+        )
+        with pytest.raises(OperationError, match="Columns not found"):
+            op.execute(data, prep_args)
+
+    def test_mismatched_label_count_raises(self):
+        op = RedactColumnsOperation()
+        data = pl.DataFrame({"a": ["x"], "b": ["y"]})
+        prep_args = PrepActionResult(
+            action="redact column(s)", source_columns=["a", "b"], value=["*"]
+        )
+        with pytest.raises(ValidationError, match="mask labels"):
+            op.execute(data, prep_args)
 
 
 class TestRemoveColumnsOperation:
