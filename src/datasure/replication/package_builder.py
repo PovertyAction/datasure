@@ -125,7 +125,15 @@ def _select_import_script(
 
 
 def _to_parquet_bytes(df: pl.DataFrame) -> bytes:
-    if df.is_empty():
+    """Serialize a DataFrame to Parquet bytes.
+
+    A DataFrame with columns but zero rows still has a schema and is written
+    as a valid (empty) Parquet file, so downstream `pl.read_parquet()` calls
+    in the generated scripts succeed. Only a DataFrame with no columns at all
+    (e.g. a table that failed to load) has no schema to serialize, so that
+    case alone returns ``b""``.
+    """
+    if not df.columns:
         return b""
     buf = io.BytesIO()
     df.write_parquet(buf)
@@ -385,7 +393,8 @@ def build_replication_package(
 
         # 3_data/
         zf.writestr(f"{root}/3_data/1_raw/{safe_survey}_raw.csv", raw_csv)
-        zf.writestr(f"{root}/3_data/1_raw/{safe_survey}_raw.parquet", raw_parquet)
+        if raw_parquet:
+            zf.writestr(f"{root}/3_data/1_raw/{safe_survey}_raw.parquet", raw_parquet)
         if prepped_parquet:
             zf.writestr(
                 f"{root}/3_data/2_intermediate/{safe_survey}_prepped.parquet",

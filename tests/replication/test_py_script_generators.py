@@ -170,3 +170,12 @@ class TestGenerateMasterScriptPy:
 
     def test_no_install_packages_step(self, script):
         assert "install_packages" not in script
+
+    def test_steps_invoked_via_uv_run(self, script):
+        # Each step must go through `uv run` (not the current interpreter)
+        # so its own PEP 723 inline dependencies are honored.
+        assert '["uv", "run", str(SCRIPTS_DIR / step)]' in script
+        assert "sys.executable" not in script
+
+    def test_does_not_import_unused_sys(self, script):
+        assert "import sys" not in script

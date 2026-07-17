@@ -17,6 +17,7 @@ from datasure.replication.package_builder import (
     _load_dataset,
     _load_prep_log,
     _serialize_prep_args,
+    _to_parquet_bytes,
     build_replication_package,
 )
 
@@ -148,6 +149,25 @@ class TestActionSummary:
         result = _action_summary(log)
         assert result["modify value"] == 2
         assert result["remove row"] == 1
+
+
+class TestToParquetBytes:
+    def test_columnless_dataframe_returns_empty_bytes(self):
+        assert _to_parquet_bytes(pl.DataFrame()) == b""
+
+    def test_empty_but_schema_dataframe_returns_valid_parquet(self):
+        df = pl.DataFrame(schema={"key": pl.String, "age": pl.Int64})
+        result = _to_parquet_bytes(df)
+        assert result != b""
+        read_back = pl.read_parquet(BytesIO(result))
+        assert read_back.schema == df.schema
+        assert read_back.height == 0
+
+    def test_non_empty_dataframe_round_trips(self):
+        df = pl.DataFrame({"key": ["k1", "k2"], "age": [25, 30]})
+        result = _to_parquet_bytes(df)
+        read_back = pl.read_parquet(BytesIO(result))
+        assert read_back.equals(df)
 
 
 class TestSerializePrepArgs:
@@ -292,3 +312,36 @@ class TestBuildReplicationPackage:
                 on_progress=progress_messages.append,
             )
         assert len(progress_messages) > 0
+
+
+class TestBuildReplicationPackageNoRawData:
+    """Regression test: a truly columnless raw table must not produce an
+    invalid 0-byte "_raw.parquet" entry (see _to_parquet_bytes).
+    """
+
+    @pytest.fixture()
+    def zip_bytes(self):
+        def _duckdb_get(project_id, table, db_name):
+            return pl.DataFrame()
+
+        with patch(
+            "datasure.replication.package_builder.duckdb_get_table",
+            side_effect=_duckdb_get,
+        ):
+            return build_replication_package(
+                project_id="test-proj",
+                project_name="Test Project",
+                survey_name="Baseline Survey",
+                alias="baseline",
+                key_col="key",
+            )
+
+    def test_is_valid_zip(self, zip_bytes):
+        with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
+            assert zf.testzip() is None
+
+    def test_no_raw_parquet_written(self, zip_bytes):
+        with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
+            names = zf.namelist()
+        assert not any("_raw.parquet" in n for n in names)
+        assert any("_raw.csv" in n for n in names)

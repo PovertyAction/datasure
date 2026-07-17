@@ -266,7 +266,6 @@ def generate_master_script_py(
     lines = [
         header,
         "import subprocess",
-        "import sys",
         "from pathlib import Path",
         "",
         "# -------------------------------------------------------",
@@ -275,6 +274,10 @@ def generate_master_script_py(
         "# Run with:      uv run 0_main.py",
         "# Each step is also independently runnable on its own, e.g.:",
         "#                uv run 4_corrections.py",
+        "#",
+        "# Steps are invoked via `uv run` (not the current interpreter) so",
+        "# each step's own PEP 723 inline dependencies are honored, even if a",
+        "# future step declares packages beyond what this master script needs.",
         "# -------------------------------------------------------",
         "",
         "SCRIPTS_DIR = Path(__file__).resolve().parent",
@@ -286,7 +289,7 @@ def generate_master_script_py(
         "",
         "for step in STEPS:",
         '    print(f"--- Running {step} ---")',
-        "    subprocess.run([sys.executable, str(SCRIPTS_DIR / step)], check=True)",
+        '    subprocess.run(["uv", "run", str(SCRIPTS_DIR / step)], check=True)',
         "",
         'print("Done. Datasets written to 3_data/2_intermediate/ and 3_data/3_final/.")',
     ]
