@@ -87,7 +87,7 @@ def generate_readme(
         "",
         "```text",
         f"replication_{safe_project}_{safe_survey}/",
-        "├── 0_README.md",
+        "├── README.md",
         "├── 1_docs/",
         survey_line,
         "    ├── 2_codebooks/        # codebook.csv, data-dict.yaml (pre-generated);",

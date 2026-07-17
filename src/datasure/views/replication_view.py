@@ -97,7 +97,7 @@ def _package_tree(safe_project: str, safe_page: str, is_scto: bool) -> str:
     )
     return (
         f"replication_{safe_project}_{safe_page}/\n"
-        f"├── 0_README.md\n"
+        f"├── README.md\n"
         f"├── 1_docs/\n"
         f"{surveys_line}"
         f"│   ├── 2_codebooks/\n"
