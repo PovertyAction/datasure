@@ -12,9 +12,13 @@ import polars as pl
 
 from datasure.processing.pii import (
     apply_pii_decisions,
+    build_code_maps,
     empty_flags,
+    get_or_create_pii_salt,
+    load_code_maps,
     load_pii_flags,
     redact_correction_log,
+    save_code_maps,
 )
 from datasure.replication.codebook import generate_codebook
 from datasure.replication.data_dict import generate_data_dict
@@ -140,27 +144,35 @@ def _load_pii_flags(project_id: str, alias: str) -> pl.DataFrame:
 
 def _pii_column_lists(
     pii_flags: pl.DataFrame, protect: tuple[str, ...]
-) -> tuple[list[str], list[str], list[str]]:
-    """Split flags into (masked, dropped, flagged-but-kept) column lists.
+) -> dict[str, list[str]]:
+    """Split flags into per-decision column lists.
 
-    "undecided" flags count as masked — the export gate's conservative
-    default. Protected columns (e.g. the survey key) are never redacted.
+    Returns a dict with keys "masked", "hashed", "coded", "dropped", and
+    "kept". "undecided" flags count as masked — the export gate's
+    conservative default. Protected columns (e.g. the survey key) are never
+    redacted.
     """
-    masked: list[str] = []
-    dropped: list[str] = []
-    kept: list[str] = []
+    lists: dict[str, list[str]] = {
+        "masked": [],
+        "hashed": [],
+        "coded": [],
+        "dropped": [],
+        "kept": [],
+    }
+    bucket = {
+        "mask": "masked",
+        "undecided": "masked",
+        "hash": "hashed",
+        "code": "coded",
+        "drop": "dropped",
+        "keep": "kept",
+    }
     for row in pii_flags.iter_rows(named=True):
         if row["column"] in protect:
-            kept.append(row["column"])
+            lists["kept"].append(row["column"])
             continue
-        decision = row["decision"]
-        if decision in ("mask", "undecided"):
-            masked.append(row["column"])
-        elif decision == "drop":
-            dropped.append(row["column"])
-        else:
-            kept.append(row["column"])
-    return masked, dropped, kept
+        lists[bucket.get(row["decision"], "kept")].append(row["column"])
+    return lists
 
 
 def _to_parquet_bytes(df: pl.DataFrame) -> bytes:
@@ -283,25 +295,55 @@ def build_replication_package(
     # covered. The survey key column is protected (corrections need it).
     pii_flags = _load_pii_flags(project_id, alias)
     protect = (key_col,) if key_col else ()
-    pii_masked, pii_dropped, pii_kept = _pii_column_lists(pii_flags, protect)
+    pii_cols = _pii_column_lists(pii_flags, protect)
+
+    # The salt and code maps live only in the local cache. The salt is
+    # embedded in 5_deidentify_data.py for with-PII exports (which carry the
+    # raw data anyway) so its pseudonyms stay consistent with in-app exports.
+    pii_salt = (
+        get_or_create_pii_salt(project_id)
+        if (pii_cols["hashed"] or include_pii)
+        else None
+    )
+    code_maps: dict[str, dict[str, str]] = {}
+    if pii_cols["coded"]:
+        code_maps = build_code_maps(
+            [raw_df, prepped_df, corrected_df],
+            pii_flags,
+            existing=load_code_maps(project_id, alias),
+            mask_undecided=True,
+            protect=protect,
+        )
+        save_code_maps(project_id, alias, code_maps)
 
     if not include_pii and not pii_flags.is_empty():
-        raw_df = apply_pii_decisions(
-            raw_df, pii_flags, mask_undecided=True, protect=protect
-        )
-        prepped_df = apply_pii_decisions(
-            prepped_df, pii_flags, mask_undecided=True, protect=protect
-        )
-        corrected_df = apply_pii_decisions(
-            corrected_df, pii_flags, mask_undecided=True, protect=protect
-        )
+        redact_kwargs = {
+            "mask_undecided": True,
+            "protect": protect,
+            "salt": pii_salt,
+            "code_maps": code_maps,
+        }
+        raw_df = apply_pii_decisions(raw_df, pii_flags, **redact_kwargs)
+        prepped_df = apply_pii_decisions(prepped_df, pii_flags, **redact_kwargs)
+        corrected_df = apply_pii_decisions(corrected_df, pii_flags, **redact_kwargs)
         correction_log = redact_correction_log(
-            correction_log, pii_flags, mask_undecided=True, protect=protect
+            correction_log,
+            pii_flags,
+            mask_undecided=True,
+            protect=protect,
+            salt=pii_salt,
         )
         _step(
-            f"De-identification applied — {len(pii_masked)} column(s) masked, "
-            f"{len(pii_dropped)} dropped"
-            + (f", {len(pii_kept)} flagged column(s) kept" if pii_kept else "")
+            "De-identification applied — "
+            f"{len(pii_cols['masked'])} column(s) masked, "
+            f"{len(pii_cols['hashed'])} hashed, "
+            f"{len(pii_cols['coded'])} recoded, "
+            f"{len(pii_cols['dropped'])} dropped"
+            + (
+                f", {len(pii_cols['kept'])} flagged column(s) kept"
+                if pii_cols["kept"]
+                else ""
+            )
         )
     elif include_pii:
         _step(
@@ -378,6 +420,7 @@ def build_replication_package(
             project_name=project_name,
             survey_name=survey_name,
             datasure_version=datasure_version,
+            salt=pii_salt,
         )
         if include_pii
         else None
@@ -397,9 +440,11 @@ def build_replication_package(
         n_corrections_by_action=n_by_action,
         include_scto_form=scto_form_xlsx is not None,
         include_pii=include_pii,
-        pii_masked_columns=pii_masked,
-        pii_dropped_columns=pii_dropped,
-        pii_kept_columns=pii_kept,
+        pii_masked_columns=pii_cols["masked"],
+        pii_hashed_columns=pii_cols["hashed"],
+        pii_coded_columns=pii_cols["coded"],
+        pii_dropped_columns=pii_cols["dropped"],
+        pii_kept_columns=pii_cols["kept"],
     )
     _step("README generated")
 
@@ -418,7 +463,11 @@ def build_replication_package(
         key_col=key_col,
         parquet_path=corrected_parquet_path,
         datasure_version=datasure_version,
-        redacted_columns=tuple(pii_masked) if not include_pii else (),
+        redacted_columns=(
+            tuple(pii_cols["masked"] + pii_cols["hashed"] + pii_cols["coded"])
+            if not include_pii
+            else ()
+        ),
     )
     _step("data-dict.yaml generated")
 

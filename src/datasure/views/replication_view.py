@@ -286,6 +286,10 @@ def _render_pii_flags_summary(project_id: str, alias: str, include_pii: bool) ->
         action_expr = (
             pl.when(pl.col("decision").is_in(["mask", "undecided"]))
             .then(pl.lit("masked"))
+            .when(pl.col("decision") == "hash")
+            .then(pl.lit("hashed (salted pseudonyms)"))
+            .when(pl.col("decision") == "code")
+            .then(pl.lit("recoded (category codes)"))
             .when(pl.col("decision") == "drop")
             .then(pl.lit("dropped"))
             .otherwise(pl.lit("kept (reviewer decision)"))

@@ -397,7 +397,7 @@ def _pii_duckdb_get(project_id, table, db_name, **kwargs):
         return _PII_FLAGS
     if "corr_log" in name:
         return _PII_CORR_LOG
-    if "prep_log" in name:
+    if "prep_log" in name or name == "pii_salt" or "pii_code_map" in name:
         return pl.DataFrame()
     return _PII_RAW
 
@@ -412,6 +412,7 @@ def _build_pii_package(include_pii: bool) -> bytes:
             "datasure.utils.duckdb_utils.duckdb_get_table",
             side_effect=_pii_duckdb_get,
         ),
+        patch("datasure.utils.duckdb_utils.duckdb_save_table"),
     ):
         return build_replication_package(
             project_id="test-proj",
@@ -501,3 +502,94 @@ class TestBuildReplicationPackageWithPii:
         readme = self._read(zip_file, "README.md")
         assert "WITH personally identifiable" in readme
         assert "5_deidentify_data.py" in readme
+
+
+class TestBuildReplicationPackagePseudonyms:
+    """Hash and code decisions produce deterministic pseudonyms in exports."""
+
+    _RAW = pl.DataFrame(
+        {
+            "key": ["k1", "k2", "k3"],
+            "enum_name": ["Kailash Khosla", "Arjun Patel", "Kailash Khosla"],
+            "village_name": ["Rampur", "Sitapur", "Rampur"],
+        }
+    )
+    _FLAGS = pl.DataFrame(
+        {
+            "column": ["enum_name", "village_name"],
+            "source": ["fuzzy"] * 2,
+            "entity_type": ["PERSON", None],
+            "hit_rate": [1.0] * 2,
+            "sample_matches": [""] * 2,
+            "decision": ["hash", "code"],
+            "mask_label": ["[PERSON]", "*****"],
+            "scanned_at": ["2026-01-01T00:00:00"] * 2,
+        }
+    )
+
+    @pytest.fixture()
+    def zip_file(self):
+        state: dict = {}
+
+        def _get(project_id, table, db_name, **kwargs):
+            name = str(table)
+            if "pii_flags" in name:
+                return self._FLAGS
+            if name == "pii_salt":
+                return state.get("salt", pl.DataFrame())
+            if "pii_code_map" in name:
+                return state.get("codes", pl.DataFrame())
+            if "prep_log" in name or "corr_log" in name:
+                return pl.DataFrame()
+            return self._RAW
+
+        def _save(project_id, data, alias="", db_name="", **kwargs):
+            if alias == "pii_salt":
+                state["salt"] = data
+            if "pii_code_map" in alias:
+                state["codes"] = data
+
+        with (
+            patch(
+                "datasure.replication.package_builder.duckdb_get_table",
+                side_effect=_get,
+            ),
+            patch("datasure.utils.duckdb_utils.duckdb_get_table", side_effect=_get),
+            patch("datasure.utils.duckdb_utils.duckdb_save_table", side_effect=_save),
+        ):
+            blob = build_replication_package(
+                project_id="test-proj",
+                project_name="Test Project",
+                survey_name="Baseline Survey",
+                alias="baseline",
+                key_col="key",
+                include_pii=False,
+            )
+        return zipfile.ZipFile(BytesIO(blob))
+
+    def _read(self, zip_file, suffix: str) -> str:
+        name = next(n for n in zip_file.namelist() if n.endswith(suffix))
+        return zip_file.read(name).decode()
+
+    def test_hash_tokens_deterministic_in_raw_csv(self, zip_file):
+        raw_csv = self._read(zip_file, "_raw.csv")
+        assert "Kailash" not in raw_csv
+        person_tokens = [
+            cell
+            for line in raw_csv.splitlines()[1:]
+            for cell in line.split(",")
+            if cell.startswith("PERSON_")
+        ]
+        assert len(person_tokens) == 3
+        # k1 and k3 share the same name → identical pseudonyms
+        assert person_tokens[0] == person_tokens[2] != person_tokens[1]
+
+    def test_code_tokens_in_raw_csv(self, zip_file):
+        raw_csv = self._read(zip_file, "_raw.csv")
+        assert "Rampur" not in raw_csv
+        assert "VILLAGE_NAME_" in raw_csv
+
+    def test_readme_lists_pseudonym_columns(self, zip_file):
+        readme = self._read(zip_file, "README.md")
+        assert "Hashed columns" in readme
+        assert "Recoded columns" in readme

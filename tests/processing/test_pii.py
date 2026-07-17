@@ -11,13 +11,18 @@ from datasure.processing.pii import (
     DEFAULT_MASK,
     PII_MODEL_OPTIONS,
     apply_pii_decisions,
+    build_code_maps,
     empty_flags,
+    get_or_create_pii_salt,
+    hash_token,
     installed_models,
+    load_code_maps,
     load_pii_flags,
     mask_label_for,
     merge_with_existing,
     redact_correction_log,
     run_pii_scan,
+    save_code_maps,
     save_pii_flags,
     scan_column_names,
     scan_values,
@@ -256,6 +261,133 @@ class TestApplyPiiDecisions:
         assert apply_pii_decisions(df, empty_flags()).equals(df)
 
 
+class TestHashToken:
+    def test_deterministic(self):
+        assert hash_token("Alice", "salt", "PERSON") == hash_token(
+            "Alice", "salt", "PERSON"
+        )
+
+    def test_distinct_values_distinct_tokens(self):
+        assert hash_token("Alice", "salt", "PERSON") != hash_token(
+            "Bob", "salt", "PERSON"
+        )
+
+    def test_salt_changes_tokens(self):
+        assert hash_token("Alice", "salt-a", "PERSON") != hash_token(
+            "Alice", "salt-b", "PERSON"
+        )
+
+    def test_prefix_format(self):
+        token = hash_token("Alice", "salt", "PERSON")
+        assert token.startswith("PERSON_")
+        assert len(token) == len("PERSON_") + 8
+
+
+class TestPiiSalt:
+    @patch("datasure.utils.duckdb_utils.duckdb_save_table")
+    @patch("datasure.utils.duckdb_utils.duckdb_get_table")
+    def test_creates_and_persists_salt(self, mock_get, mock_save):
+        mock_get.return_value = pl.DataFrame()
+        salt = get_or_create_pii_salt("proj")
+        assert len(salt) == 32  # token_hex(16)
+        assert mock_save.call_args.kwargs["alias"] == "pii_salt"
+
+    @patch("datasure.utils.duckdb_utils.duckdb_save_table")
+    @patch("datasure.utils.duckdb_utils.duckdb_get_table")
+    def test_returns_existing_salt(self, mock_get, mock_save):
+        mock_get.return_value = pl.DataFrame({"salt": ["existing-salt"]})
+        assert get_or_create_pii_salt("proj") == "existing-salt"
+        mock_save.assert_not_called()
+
+
+class TestCodeMaps:
+    def test_build_covers_all_distinct_values(self):
+        df = pl.DataFrame({"village": ["a", "b", "a", None]})
+        flags = _flags([{"column": "village", "decision": "code"}])
+        maps = build_code_maps([df], flags)
+        assert set(maps["village"]) == {"a", "b"}
+        assert all(code.startswith("VILLAGE_") for code in maps["village"].values())
+        assert len(set(maps["village"].values())) == 2
+
+    def test_values_collected_across_dataframes(self):
+        df1 = pl.DataFrame({"village": ["a"]})
+        df2 = pl.DataFrame({"village": ["b"]})
+        flags = _flags([{"column": "village", "decision": "code"}])
+        maps = build_code_maps([df1, df2], flags)
+        assert set(maps["village"]) == {"a", "b"}
+
+    def test_existing_codes_preserved_and_extended(self):
+        df = pl.DataFrame({"village": ["a", "b", "c"]})
+        flags = _flags([{"column": "village", "decision": "code"}])
+        existing = {"village": {"a": "VILLAGE_001"}}
+        maps = build_code_maps([df], flags, existing=existing)
+        assert maps["village"]["a"] == "VILLAGE_001"
+        assert set(maps["village"]) == {"a", "b", "c"}
+
+    def test_non_code_decisions_ignored(self):
+        df = pl.DataFrame({"village": ["a"]})
+        flags = _flags([{"column": "village", "decision": "mask"}])
+        assert build_code_maps([df], flags) == {}
+
+    @patch("datasure.utils.duckdb_utils.duckdb_save_table")
+    def test_save_uses_code_map_table(self, mock_save):
+        save_code_maps("proj", "baseline", {"village": {"a": "VILLAGE_001"}})
+        assert mock_save.call_args.kwargs["alias"] == "pii_code_map_baseline"
+
+    @patch("datasure.utils.duckdb_utils.duckdb_get_table")
+    def test_load_round_trip(self, mock_get):
+        mock_get.return_value = pl.DataFrame(
+            {"column": ["village"], "value": ["a"], "code": ["VILLAGE_001"]}
+        )
+        assert load_code_maps("proj", "baseline") == {"village": {"a": "VILLAGE_001"}}
+
+
+class TestApplyPseudonymDecisions:
+    def test_hash_is_deterministic_and_null_safe(self):
+        df = pl.DataFrame({"name": ["Alice", "Bob", "Alice", None]})
+        flags = _flags(
+            [{"column": "name", "decision": "hash", "entity_type": "PERSON"}]
+        )
+        result = apply_pii_decisions(df, flags, salt="s")
+        values = result["name"].to_list()
+        assert values[0] == values[2] != values[1]
+        assert values[3] is None
+        assert values[0].startswith("PERSON_")
+
+    def test_hash_numeric_column_cast_to_string(self):
+        df = pl.DataFrame({"phone": [5551234, 5555678]})
+        flags = _flags([{"column": "phone", "decision": "hash"}])
+        result = apply_pii_decisions(df, flags, salt="s")
+        assert result["phone"].dtype == pl.String
+        assert result["phone"][0].startswith("PHONE_")
+
+    def test_hash_without_salt_falls_back_to_mask(self):
+        df = pl.DataFrame({"name": ["Alice"]})
+        flags = _flags([{"column": "name", "decision": "hash"}])
+        result = apply_pii_decisions(df, flags, salt=None)
+        assert result["name"].to_list() == [DEFAULT_MASK]
+
+    def test_code_uses_mapping(self):
+        df = pl.DataFrame({"village": ["a", "b", None]})
+        flags = _flags([{"column": "village", "decision": "code"}])
+        maps = {"village": {"a": "VILLAGE_001", "b": "VILLAGE_002"}}
+        result = apply_pii_decisions(df, flags, code_maps=maps)
+        assert result["village"].to_list() == ["VILLAGE_001", "VILLAGE_002", None]
+
+    def test_code_unmapped_value_masked(self):
+        df = pl.DataFrame({"village": ["a", "surprise"]})
+        flags = _flags([{"column": "village", "decision": "code"}])
+        maps = {"village": {"a": "VILLAGE_001"}}
+        result = apply_pii_decisions(df, flags, code_maps=maps)
+        assert result["village"].to_list() == ["VILLAGE_001", DEFAULT_MASK]
+
+    def test_code_without_map_falls_back_to_mask(self):
+        df = pl.DataFrame({"village": ["a"]})
+        flags = _flags([{"column": "village", "decision": "code"}])
+        result = apply_pii_decisions(df, flags, code_maps=None)
+        assert result["village"].to_list() == [DEFAULT_MASK]
+
+
 class TestRedactCorrectionLog:
     def _corr_log(self) -> pl.DataFrame:
         return pl.DataFrame(
@@ -291,6 +423,25 @@ class TestRedactCorrectionLog:
         flags = _flags([{"column": "name", "decision": "mask"}])
         empty = pl.DataFrame()
         assert redact_correction_log(empty, flags).is_empty()
+
+    def test_hash_columns_get_pseudonyms(self):
+        flags = _flags(
+            [{"column": "name", "decision": "hash", "entity_type": "PERSON"}]
+        )
+        result = redact_correction_log(self._corr_log(), flags, salt="s")
+        assert result["current_value"][0].startswith("PERSON_")
+        assert result["current_value"][0] == hash_token("Alice", "s", "PERSON")
+        assert result["current_value"][1] == "no"
+
+    def test_hash_without_salt_masks(self):
+        flags = _flags([{"column": "name", "decision": "hash"}])
+        result = redact_correction_log(self._corr_log(), flags, salt=None)
+        assert result["current_value"].to_list() == [DEFAULT_MASK, "no"]
+
+    def test_code_columns_masked(self):
+        flags = _flags([{"column": "name", "decision": "code"}])
+        result = redact_correction_log(self._corr_log(), flags)
+        assert result["current_value"].to_list() == [DEFAULT_MASK, "no"]
 
 
 # ---------------------------------------------------------------------------

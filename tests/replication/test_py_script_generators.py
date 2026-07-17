@@ -184,6 +184,40 @@ class TestGenerateDeidentifyScriptPy:
         script = self._script(empty_flags())
         assert "not anonymization" in script
 
+    def test_hash_decision_embeds_salt_and_helper(self):
+        flags = _pii_flags(
+            [{"column": "name", "decision": "hash", "entity_type": "PERSON"}]
+        )
+        script = generate_deidentify_script_py(
+            flags, "P", "Baseline Survey", "1.0.0", salt="secret-salt"
+        )
+        ast.parse(script)
+        assert "SALT = 'secret-salt'" in script
+        assert "def hash_token(" in script
+        assert "('name', 'hash', 'PERSON')" in script
+
+    def test_hash_without_salt_falls_back_to_mask(self):
+        flags = _pii_flags(
+            [
+                {
+                    "column": "name",
+                    "decision": "hash",
+                    "mask_label": "[PERSON]",
+                }
+            ]
+        )
+        script = generate_deidentify_script_py(flags, "P", "S", "1.0.0", salt=None)
+        ast.parse(script)
+        assert "('name', 'mask', '[PERSON]')" in script
+        assert "SALT =" not in script
+
+    def test_code_decision_embeds_prefix(self):
+        flags = _pii_flags([{"column": "village_name", "decision": "code"}])
+        script = self._script(flags)
+        ast.parse(script)
+        assert "('village_name', 'code', 'VILLAGE_NAME')" in script
+        assert "code_maps" in script
+
 
 # ---------------------------------------------------------------------------
 # generate_master_script_py

@@ -145,10 +145,14 @@ pattern `output_view_?.py` - never commit them, and never edit them directly
    package that reproduces the pipeline outside DataSure
 7. **PII gate** (`processing/pii.py`): column-name heuristics + Presidio
    value scanning flag PII per dataset (`pii_flags_{alias}` in logs db);
-   flags drive the "redact column(s)" prep action and the export-time
-   de-identification in `package_builder.py` (de-identified is the default
-   export mode; the survey key column is never redacted). spaCy models are
-   downloaded at runtime from the UI, never bundled
+   per-column decisions are mask / hash (HMAC pseudonyms keyed by a
+   per-project salt in `pii_salt`) / code (persisted category codes in
+   `pii_code_map_{alias}`) / drop / keep. Mask+drop can become prep steps;
+   hash+code apply at export time in `package_builder.py` (de-identified
+   is the default export mode; the survey key column is never redacted;
+   salt and code maps never leave the local cache in de-identified
+   exports). spaCy models are downloaded at runtime from the UI, never
+   bundled
 
 ### Cache and data locations (`utils/cache_utils.py`)
 

@@ -18,6 +18,8 @@ def generate_readme(
     include_scto_form: bool = False,
     include_pii: bool = True,
     pii_masked_columns: list[str] | None = None,
+    pii_hashed_columns: list[str] | None = None,
+    pii_coded_columns: list[str] | None = None,
     pii_dropped_columns: list[str] | None = None,
     pii_kept_columns: list[str] | None = None,
 ) -> str:
@@ -51,6 +53,11 @@ def generate_readme(
     pii_masked_columns : list[str] | None
         Columns masked in a de-identified export (or slated for masking by
         ``5_deidentify_data.py`` in a with-PII export).
+    pii_hashed_columns : list[str] | None
+        Columns replaced with salted hash pseudonyms (deterministic tokens
+        that preserve categorical structure).
+    pii_coded_columns : list[str] | None
+        Columns recoded with sequential category codes.
     pii_dropped_columns : list[str] | None
         Columns dropped in a de-identified export (or slated for dropping).
     pii_kept_columns : list[str] | None
@@ -66,6 +73,8 @@ def generate_readme(
     safe_project = project_name.lower().replace(" ", "_")
 
     pii_masked_columns = pii_masked_columns or []
+    pii_hashed_columns = pii_hashed_columns or []
+    pii_coded_columns = pii_coded_columns or []
     pii_dropped_columns = pii_dropped_columns or []
     pii_kept_columns = pii_kept_columns or []
 
@@ -98,6 +107,8 @@ def generate_readme(
             "```",
             "",
             f"- Columns to be masked: {_fmt_cols(pii_masked_columns)}",
+            f"- Columns to be hashed (salted pseudonyms): {_fmt_cols(pii_hashed_columns)}",
+            f"- Columns to be recoded (category codes): {_fmt_cols(pii_coded_columns)}",
             f"- Columns to be dropped: {_fmt_cols(pii_dropped_columns)}",
             f"- Flagged but kept by reviewer decision: {_fmt_cols(pii_kept_columns)}",
             "",
@@ -116,6 +127,9 @@ def generate_readme(
             "log before export.",
             "",
             f"- Masked columns: {_fmt_cols(pii_masked_columns)}",
+            "- Hashed columns (salted pseudonyms — deterministic, so",
+            f"  group-bys/joins/frequencies still work): {_fmt_cols(pii_hashed_columns)}",
+            f"- Recoded columns (category codes): {_fmt_cols(pii_coded_columns)}",
             f"- Dropped columns: {_fmt_cols(pii_dropped_columns)}",
             f"- Flagged but kept by reviewer decision: {_fmt_cols(pii_kept_columns)}",
             "",

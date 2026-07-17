@@ -1126,9 +1126,12 @@ def pii_review_section(prep_data: pl.DataFrame, alias: str, section_index: int) 
         section_header("PII Review", icon=":material/shield:")
         st.caption(
             "Scan this dataset for columns and values suspected to contain "
-            "personally identifiable information (PII), then decide per column "
-            "whether to **mask** (replace values with a label), **drop** "
-            "(remove the column), or **keep**."
+            "personally identifiable information (PII), then decide per column: "
+            "**mask** (replace values with a label), **hash** (salted "
+            "pseudonyms — deterministic tokens that keep categorical analysis "
+            "working), **code** (readable category codes like VILLAGE_001), "
+            "**drop** (remove the column), or **keep**. Mask and drop can be "
+            "applied as prep steps; hash and code are applied at export time."
         )
 
         language, model_ready = _pii_model_controls(section_index)
@@ -1212,13 +1215,22 @@ def pii_review_section(prep_data: pl.DataFrame, alias: str, section_index: int) 
                 try:
                     edited_flags = pl.DataFrame(edited)
                     pii.save_pii_flags(project_id, alias, edited_flags)
+                    deferred = edited_flags.filter(
+                        pl.col("decision").is_in(["hash", "code"])
+                    ).height
+                    if deferred:
+                        st.info(
+                            f"{deferred} hash/code decision(s) saved — they are "
+                            "applied at export time on the Export Replication "
+                            "Package page, not as prep steps."
+                        )
                     steps = _apply_pii_decisions_as_prep_steps(
                         edited_flags, prep_data.columns, alias
                     )
                     if steps:
                         st.success(f"{steps} preparation step(s) added.")
                         st.rerun()
-                    else:
+                    elif not deferred:
                         st.info("No mask or drop decisions to apply.")
                 except Exception as e:
                     # UI boundary: surface and log, never crash the page.

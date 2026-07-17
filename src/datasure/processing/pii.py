@@ -13,8 +13,23 @@ Two detection passes:
 
 Flags persist per dataset in ``pii_flags_{alias}`` (logs db), following the
 ``prep_log_{alias}`` convention. Redaction helpers apply the reviewer's
-per-column decisions (mask / drop / keep) to DataFrames and to the
-correction log before export.
+per-column decisions to DataFrames and to the correction log before export:
+
+- **mask** — every value replaced with a constant label (``[PERSON]``)
+- **hash** — HMAC-SHA256 pseudonyms (``PERSON_3fa1b9c2``) keyed with a
+  per-project secret salt kept in the local cache and never exported;
+  deterministic, so categorical analysis (group-bys, joins, frequencies)
+  still works, and dictionary attacks fail without the salt
+- **code** — sequential category codes (``VILLAGE_NAME_001``) assigned in
+  random order and persisted per project, the most readable option for
+  categorical analysis with no cryptanalytic surface
+- **drop** — column removed
+- **keep** — untouched
+
+Note: any deterministic pseudonym (hash or code) preserves the frequency
+distribution, so rare categories remain identifiable by their rarity —
+part of why de-identified output always carries the indirect-identifier
+warning.
 
 Presidio and spaCy are imported lazily inside functions: they are heavy and
 only needed when a scan or model operation actually runs.
@@ -22,7 +37,11 @@ only needed when a scan or model operation actually runs.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
+import random
+import secrets
 from datetime import datetime
 
 import polars as pl
@@ -66,7 +85,10 @@ SPARSITY_THRESHOLD = 0.9  # unique/non-null ratio → likely free text
 SPARSITY_MIN_ROWS = 20  # skip the heuristic on tiny columns
 
 DEFAULT_MASK = "*****"
-FLAG_DECISIONS = ("undecided", "mask", "drop", "keep")
+FLAG_DECISIONS = ("undecided", "mask", "hash", "code", "drop", "keep")
+
+# Hex digits kept from the HMAC digest in hash pseudonyms
+HASH_TOKEN_LENGTH = 8
 
 # --- Restricted-word lists --------------------------------------------------
 # Ported in spirit from PovertyAction/PII_detection (MIT), restricted_words.py,
@@ -517,6 +539,122 @@ def save_pii_flags(project_id: str, alias: str, flags: pl.DataFrame) -> None:
     )
 
 
+# --- Pseudonymization: salted hash tokens ----------------------------------------
+
+
+def get_or_create_pii_salt(project_id: str) -> str:
+    """Return the project's secret PII salt, generating it on first use.
+
+    The salt lives in the local cache (logs db) like other project settings
+    and is never included in de-identified exports, so recipients cannot
+    dictionary-attack hash pseudonyms. It is stable for the project's
+    lifetime, keeping hash tokens consistent across repeated exports.
+    """
+    try:
+        stored = duckdb_utils.duckdb_get_table(project_id, "pii_salt", "logs")
+        if not stored.is_empty():
+            return stored["salt"][0]
+    except Exception:
+        logger.warning("PII salt for project %s not found; generating one", project_id)
+
+    salt = secrets.token_hex(16)
+    duckdb_utils.duckdb_save_table(
+        project_id, pl.DataFrame({"salt": [salt]}), alias="pii_salt", db_name="logs"
+    )
+    return salt
+
+
+def _token_prefix(column: str, entity_type: str | None) -> str:
+    raw = entity_type or column
+    return "".join(ch if ch.isalnum() else "_" for ch in raw).upper()
+
+
+def hash_token(value: object, salt: str, prefix: str) -> str:
+    """Return a deterministic salted pseudonym like ``PERSON_3fa1b9c2``."""
+    digest = hmac.new(salt.encode(), str(value).encode(), hashlib.sha256).hexdigest()
+    return f"{prefix}_{digest[:HASH_TOKEN_LENGTH]}"
+
+
+# --- Pseudonymization: category codes ---------------------------------------------
+
+
+def load_code_maps(project_id: str, alias: str) -> dict[str, dict[str, str]]:
+    """Load persisted value→code maps for *alias*: {column: {value: code}}."""
+    try:
+        stored = duckdb_utils.duckdb_get_table(
+            project_id, f"pii_code_map_{alias}", "logs"
+        )
+    except Exception:
+        logger.warning("PII code maps for %s not found; returning empty", alias)
+        return {}
+    if stored.is_empty():
+        return {}
+    maps: dict[str, dict[str, str]] = {}
+    for row in stored.iter_rows(named=True):
+        maps.setdefault(row["column"], {})[row["value"]] = row["code"]
+    return maps
+
+
+def save_code_maps(
+    project_id: str, alias: str, maps: dict[str, dict[str, str]]
+) -> None:
+    """Persist value→code maps for *alias* to the logs db."""
+    rows = [
+        {"column": column, "value": value, "code": code}
+        for column, mapping in maps.items()
+        for value, code in mapping.items()
+    ]
+    if not rows:
+        return
+    duckdb_utils.duckdb_save_table(
+        project_id,
+        pl.DataFrame(rows),
+        alias=f"pii_code_map_{alias}",
+        db_name="logs",
+    )
+
+
+def build_code_maps(
+    dfs: list[pl.DataFrame],
+    flags: pl.DataFrame,
+    existing: dict[str, dict[str, str]] | None = None,
+    mask_undecided: bool = False,
+    protect: tuple[str, ...] = (),
+) -> dict[str, dict[str, str]]:
+    """Assign sequential codes to every distinct value of code-decision columns.
+
+    Distinct values are collected across all provided DataFrames (so the raw,
+    prepped, and corrected datasets get consistent codes), new values are
+    assigned in random order (no alphabetical-rank leak), and previously
+    assigned codes from *existing* are preserved so re-exports stay stable.
+    """
+    maps: dict[str, dict[str, str]] = {
+        column: dict(mapping) for column, mapping in (existing or {}).items()
+    }
+    for row in flags.iter_rows(named=True):
+        column = row["column"]
+        if column in protect:
+            continue
+        if _effective_decision(row["decision"], mask_undecided) != "code":
+            continue
+
+        values: set[str] = set()
+        for df in dfs:
+            if column in df.columns:
+                values.update(
+                    df[column].drop_nulls().cast(pl.String).unique().to_list()
+                )
+
+        mapping = maps.setdefault(column, {})
+        new_values = sorted(values - set(mapping))
+        random.shuffle(new_values)
+        prefix = _token_prefix(column, None)
+        next_index = len(mapping) + 1
+        for offset, value in enumerate(new_values):
+            mapping[value] = f"{prefix}_{next_index + offset:03d}"
+    return maps
+
+
 # --- Redaction -------------------------------------------------------------------
 
 
@@ -531,6 +669,8 @@ def apply_pii_decisions(
     flags: pl.DataFrame,
     mask_undecided: bool = False,
     protect: tuple[str, ...] = (),
+    salt: str | None = None,
+    code_maps: dict[str, dict[str, str]] | None = None,
 ) -> pl.DataFrame:
     """Apply per-column PII decisions to a DataFrame.
 
@@ -546,12 +686,18 @@ def apply_pii_decisions(
     protect : tuple[str, ...]
         Columns never redacted regardless of flags (e.g. the survey key
         column, which the corrections pipeline requires).
+    salt : str | None
+        Project secret for "hash" decisions. When missing, hash columns
+        fall back to masking (the privacy-safe failure mode).
+    code_maps : dict[str, dict[str, str]] | None
+        Value→code maps for "code" decisions (see ``build_code_maps``).
+        Columns without a map fall back to masking.
 
     Returns
     -------
     pl.DataFrame
-        Copy of *df* with masked columns replaced by their mask label
-        (cast to String) and dropped columns removed.
+        Copy of *df* with masked/hashed/coded columns replaced (cast to
+        String) and dropped columns removed.
     """
     if df.is_empty() or flags.is_empty():
         return df
@@ -562,6 +708,14 @@ def apply_pii_decisions(
         if column not in result.columns or column in protect:
             continue
         decision = _effective_decision(row["decision"], mask_undecided)
+
+        if decision == "hash" and salt is None:
+            logger.warning("No salt provided; masking %s instead of hashing", column)
+            decision = "mask"
+        if decision == "code" and not (code_maps or {}).get(column):
+            logger.warning("No code map for %s; masking instead of coding", column)
+            decision = "mask"
+
         if decision == "drop":
             result = result.drop(column)
         elif decision == "mask":
@@ -569,6 +723,29 @@ def apply_pii_decisions(
             result = result.with_columns(
                 pl.when(pl.col(column).is_not_null())
                 .then(pl.lit(label))
+                .otherwise(pl.lit(None, dtype=pl.String))
+                .alias(column)
+            )
+        elif decision == "hash":
+            prefix = _token_prefix(column, row["entity_type"])
+            result = result.with_columns(
+                pl.col(column)
+                .cast(pl.String)
+                .map_elements(
+                    lambda v, s=salt, p=prefix: hash_token(v, s, p),
+                    return_dtype=pl.String,
+                )
+                .alias(column)
+            )
+        elif decision == "code":
+            mapping = code_maps[column]
+            result = result.with_columns(
+                pl.when(pl.col(column).is_not_null())
+                .then(
+                    pl.col(column)
+                    .cast(pl.String)
+                    .replace_strict(mapping, default=DEFAULT_MASK)
+                )
                 .otherwise(pl.lit(None, dtype=pl.String))
                 .alias(column)
             )
@@ -580,34 +757,53 @@ def redact_correction_log(
     flags: pl.DataFrame,
     mask_undecided: bool = False,
     protect: tuple[str, ...] = (),
+    salt: str | None = None,
 ) -> pl.DataFrame:
-    """Mask correction-log values for corrections that touch redacted columns.
+    """Redact correction-log values for corrections that touch redacted columns.
 
     The correction log's ``current_value``/``new_value`` columns carry actual
-    data values; when the corrected column is masked or dropped, those values
-    must not leave the app (they are also embedded as literals in generated
-    correction scripts).
+    data values; when the corrected column is redacted, those values must not
+    leave the app (they are also embedded as literals in generated correction
+    scripts). Hash-decision columns get hash pseudonyms (keeping the log
+    analyzable); mask/drop/code columns get the mask label — code maps are
+    built from dataset values, so a correction's old/new values may not be
+    in them, and masking is the safe default.
     """
     if corr_log.is_empty() or flags.is_empty() or "column" not in corr_log.columns:
         return corr_log
 
-    redacted_columns = [
-        row["column"]
-        for row in flags.iter_rows(named=True)
-        if row["column"] not in protect
-        and _effective_decision(row["decision"], mask_undecided) in ("mask", "drop")
-    ]
-    if not redacted_columns:
+    masked_columns: list[str] = []
+    hash_prefixes: dict[str, str] = {}
+    for row in flags.iter_rows(named=True):
+        column = row["column"]
+        if column in protect:
+            continue
+        decision = _effective_decision(row["decision"], mask_undecided)
+        if decision == "hash" and salt is not None:
+            hash_prefixes[column] = _token_prefix(column, row["entity_type"])
+        elif decision in ("mask", "drop", "code", "hash"):
+            masked_columns.append(column)
+
+    if not masked_columns and not hash_prefixes:
         return corr_log
 
-    updates = [
-        pl.when(pl.col("column").is_in(redacted_columns) & pl.col(field).is_not_null())
-        .then(pl.lit(DEFAULT_MASK))
-        .otherwise(pl.col(field))
-        .alias(field)
-        for field in ("current_value", "new_value")
-        if field in corr_log.columns
-    ]
-    if not updates:
+    def _redact_field(row: dict, field: str) -> str | None:
+        value = row.get(field)
+        if value is None:
+            return None
+        column = row.get("column")
+        if column in hash_prefixes:
+            return hash_token(value, salt, hash_prefixes[column])
+        if column in masked_columns:
+            return DEFAULT_MASK
+        return value
+
+    fields = [f for f in ("current_value", "new_value") if f in corr_log.columns]
+    if not fields:
         return corr_log
-    return corr_log.with_columns(updates)
+
+    rows = [
+        {**row, **{field: _redact_field(row, field) for field in fields}}
+        for row in corr_log.iter_rows(named=True)
+    ]
+    return pl.DataFrame(rows, schema=corr_log.schema)

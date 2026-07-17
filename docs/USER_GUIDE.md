@@ -287,16 +287,30 @@ values suspected to contain personally identifiable information (PII):
 2. Click **Scan for PII**
 3. Review flagged columns: what flagged them, the detected entity type,
    and sample matched values
-4. Set a per-column decision: **mask**, **drop**, or **keep**
-5. Click **Apply mask/drop decisions as prep steps** — the redactions
+4. Set a per-column decision:
+   - **mask** — replace every value with a constant label (`[PERSON]`)
+   - **hash** — replace values with deterministic salted pseudonyms
+     (`PERSON_3fa1b9c2`); the same value always gets the same token, so
+     group-bys, joins, and frequency analysis keep working, while the
+     secret salt (kept in the local cache, never exported) prevents
+     dictionary attacks
+   - **code** — replace values with readable sequential category codes
+     (`VILLAGE_NAME_001`), assigned in random order and persisted so
+     repeated exports stay consistent
+   - **drop** — remove the column entirely
+   - **keep** — leave the column untouched
+5. Click **Apply mask/drop decisions as prep steps** — masks and drops
    land in the change log like any other prep step (replayable and
-   removable), and the decisions also drive the export-time PII gate on
-   the Export Replication Package page
+   removable). Hash and code decisions are applied at export time on the
+   Export Replication Package page (they need the project salt and code
+   maps, which never leave the local cache in de-identified exports)
 
 > **Warning**: De-identification is not anonymization. Even with direct
 > identifiers masked or dropped, respondents may remain identifiable
 > through combinations of the remaining variables (age, location,
-> occupation, household composition). Review data before sharing.
+> occupation, household composition). Deterministic pseudonyms (hash and
+> code) also preserve the frequency distribution, so rare categories stay
+> recognizable by their rarity. Review data before sharing.
 
 #### Change Log
 

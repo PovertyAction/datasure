@@ -187,13 +187,14 @@ def generate_deidentify_script_py(
     project_name: str,
     survey_name: str,
     datasure_version: str,
+    salt: str | None = None,
 ) -> str:
     """Generate a Python script that de-identifies the bundled datasets.
 
     Included in packages exported *with* PII: it encodes the PII decisions
-    recorded in DataSure (mask/drop per column; undecided treated as mask)
-    so a recipient can produce de-identified copies of every bundled
-    Parquet dataset with ``uv run 5_deidentify_data.py``.
+    recorded in DataSure (mask/hash/code/drop per column; undecided treated
+    as mask) so a recipient can produce de-identified copies of every
+    bundled Parquet dataset with ``uv run 5_deidentify_data.py``.
 
     Parameters
     ----------
@@ -205,6 +206,11 @@ def generate_deidentify_script_py(
         Human-readable survey name.
     datasure_version : str
         Version of DataSure that generated this package.
+    salt : str | None
+        The project's PII salt, embedded so hash pseudonyms match in-app
+        de-identified exports. Only ever passed for with-PII packages,
+        which carry the raw data anyway; keep the package (and this
+        script) confidential.
 
     Returns
     -------
@@ -220,13 +226,23 @@ def generate_deidentify_script_py(
     )
     safe_survey = _safe_survey(survey_name)
 
+    def _prefix(column: str, entity_type: str | None) -> str:
+        raw = entity_type or column
+        return "".join(ch if ch.isalnum() else "_" for ch in raw).upper()
+
     decisions: list[tuple[str, str, str]] = []
     for row in pii_flags.iter_rows(named=True):
         decision = row["decision"]
         if decision == "undecided":
             decision = "mask"  # conservative default
+        if decision == "hash" and salt is None:
+            decision = "mask"  # no salt available — privacy-safe fallback
         if decision in ("mask", "drop"):
             decisions.append((row["column"], decision, row["mask_label"] or "*****"))
+        elif decision in ("hash", "code"):
+            decisions.append(
+                (row["column"], decision, _prefix(row["column"], row["entity_type"]))
+            )
 
     decision_lines = (
         ["DECISIONS = ["] + [f"    {d!r}," for d in decisions] + ["]"]
@@ -234,8 +250,12 @@ def generate_deidentify_script_py(
         else ["DECISIONS = []  # no PII flags were recorded in DataSure"]
     )
 
+    has_hash = any(action == "hash" for _, action, _ in decisions)
+
     lines = [
         header,
+        "import hashlib",
+        "import hmac",
         "from pathlib import Path",
         "",
         "import polars as pl",
@@ -247,10 +267,52 @@ def generate_deidentify_script_py(
         f'    PKG_ROOT / "3_data" / "3_final" / "{safe_survey}_corrected.parquet",',
         "]",
         "",
-        "# (column, action, mask_label) decisions recorded in DataSure's PII",
+        "# (column, action, label) decisions recorded in DataSure's PII",
         '# review. "mask" replaces every non-null value with the label;',
-        '# "drop" removes the column.',
+        '# "hash" replaces values with deterministic salted pseudonyms',
+        '# (label is the token prefix); "code" assigns sequential category',
+        '# codes; "drop" removes the column.',
         *decision_lines,
+        "",
+        *(
+            [
+                "# Project PII salt — embedded because this package already",
+                "# contains the raw data; it keeps hash pseudonyms consistent",
+                "# with DataSure's own de-identified exports. Do not share it",
+                "# separately from the package.",
+                f"SALT = {salt!r}",
+                "",
+                "",
+                "def hash_token(value, prefix):",
+                "    digest = hmac.new(",
+                "        SALT.encode(), str(value).encode(), hashlib.sha256",
+                "    ).hexdigest()",
+                '    return f"{prefix}_{digest[:8]}"',
+                "",
+            ]
+            if has_hash
+            else []
+        ),
+        "",
+        "# Category codes are assigned from the sorted distinct values across",
+        "# all bundled datasets (consistent within this run; note in-app",
+        "# exports use a persisted random-order map, so tokens differ).",
+        "code_maps: dict = {}",
+        'for column, action, _label in [d for d in DECISIONS if d[1] == "code"]:',
+        "    values: set = set()",
+        "    for path in DATASETS:",
+        "        if not path.exists():",
+        "            continue",
+        "        frame = pl.read_parquet(path)",
+        "        if column in frame.columns:",
+        "            values.update(",
+        "                frame[column].drop_nulls().cast(pl.String).unique().to_list()",
+        "            )",
+        "    prefix = _label",
+        "    code_maps[column] = {",
+        '        value: f"{prefix}_{i:03d}"',
+        "        for i, value in enumerate(sorted(values), start=1)",
+        "    }",
         "",
         "for path in DATASETS:",
         "    if not path.exists():",
@@ -261,6 +323,27 @@ def generate_deidentify_script_py(
         "            continue",
         '        if action == "drop":',
         "            df = df.drop(column)",
+        '        elif action == "hash":',
+        "            df = df.with_columns(",
+        "                pl.col(column)",
+        "                .cast(pl.String)",
+        "                .map_elements(",
+        "                    lambda v, p=label: hash_token(v, p),",
+        "                    return_dtype=pl.String,",
+        "                )",
+        "                .alias(column)",
+        "            )",
+        '        elif action == "code":',
+        "            df = df.with_columns(",
+        "                pl.when(pl.col(column).is_not_null())",
+        "                .then(",
+        "                    pl.col(column)",
+        "                    .cast(pl.String)",
+        '                    .replace_strict(code_maps[column], default="*****")',
+        "                )",
+        "                .otherwise(pl.lit(None, dtype=pl.String))",
+        "                .alias(column)",
+        "            )",
         "        else:",
         "            df = df.with_columns(",
         "                pl.when(pl.col(column).is_not_null())",
@@ -276,7 +359,9 @@ def generate_deidentify_script_py(
         'print("WARNING: De-identification is not anonymization. Even with")',
         'print("direct identifiers masked or dropped, subjects may remain")',
         'print("identifiable through combinations of remaining variables")',
-        'print("(e.g. age, location, occupation). Review before sharing.")',
+        'print("(e.g. age, location, occupation). Deterministic pseudonyms")',
+        'print("(hash/code) also preserve frequencies, so rare categories")',
+        'print("stay recognizable by rarity. Review before sharing.")',
     ]
     return "\n".join(lines) + "\n"
 
