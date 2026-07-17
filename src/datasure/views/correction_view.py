@@ -22,6 +22,12 @@ from datasure.utils.navigations_utils import (
 )
 from datasure.utils.onboarding_utils import ImportDemoInfo, demo_expander
 from datasure.utils.settings_utils import get_check_config_settings
+from datasure.utils.ui_utils import (
+    confirm_dialog,
+    metric_row,
+    page_header,
+    section_header,
+)
 
 # DEFINE CONSTANTS FOR CORRECTION
 CORRECTION_ACTIONS = ("modify value", "remove value", "remove row")
@@ -778,12 +784,7 @@ def render_remove_correction_form(
     correction_summaries = correction_processor.get_correction_summary(alias)
 
     with st.popover(":material/delete: Remove correction step", width="stretch"):
-        if correction_summaries:
-            st.warning(
-                "This will remove a correction step from the log and reapply "
-                "remaining corrections."
-            )
-        else:
+        if not correction_summaries:
             st.info("No correction steps available to remove.")
 
         # Create selectbox with action descriptions
@@ -810,8 +811,14 @@ def render_remove_correction_form(
             help="Remove the selected correction step from the log",
             disabled=not selected_action,
         ):
-            _handle_remove_correction(
-                correction_processor, correction_summaries, alias, selected_action
+            confirm_dialog(
+                "Remove correction step",
+                "This removes the selected correction step from the log and "
+                "reapplies the remaining corrections. This cannot be undone.",
+                confirm_label="Remove",
+                on_confirm=lambda: _handle_remove_correction(
+                    correction_processor, correction_summaries, alias, selected_action
+                ),
             )
 
 
@@ -903,9 +910,8 @@ def render_correction_log(
                 "using the form above."
             )
         else:
-            with st.container(border=True):
-                st.subheader("Correction Log")
-                st.dataframe(data=correction_log, width="stretch")
+            section_header("Correction Log")
+            st.dataframe(data=correction_log, width="stretch")
 
 
 @st.fragment
@@ -925,14 +931,16 @@ def render_data_summary(
     summary = correction_processor.get_data_summary(data)
 
     with st.container(border=True):
-        st.subheader("Preview Corrected Data")
-        st.write("---")
+        section_header("Preview Corrected Data")
+        st.divider()
 
-        mc1, mc2, mc3 = st.columns((0.3, 0.3, 0.4))
-
-        mc1.metric(label="Rows", value=summary["rows"])
-        mc2.metric(label="Columns", value=summary["columns"])
-        mc3.metric(label="Missing Values", value=f"{summary['missing_percentage']}%")
+        metric_row(
+            [
+                ("Rows", summary["rows"]),
+                ("Columns", summary["columns"]),
+                ("Missing Values", f"{summary['missing_percentage']}%"),
+            ]
+        )
 
         st.dataframe(data=data, width="stretch")
 
@@ -959,7 +967,7 @@ def render_correction_tab(
         st.error(f"Error loading configuration for tab {tab_index}")
         return
 
-    st.subheader(f"{config.page_name}")
+    section_header(f"{config.page_name}")
     st.write("Add corrections to the data based on issues identified in checks.")
 
     # Ensure corrected data exists
@@ -991,9 +999,9 @@ def render_correction_tab(
 
 def render_page_header() -> None:
     """Render the page header and demo information."""
-    st.title("Correct Data")
-    st.markdown(
-        "Make necessary corrections to data based on issues identified in checks."
+    page_header(
+        "Correct Data",
+        "Make corrections to data based on issues identified in checks.",
     )
 
     demo_expander(
