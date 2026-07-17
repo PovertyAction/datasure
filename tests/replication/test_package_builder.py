@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import polars as pl
 import pytest
+import yaml
 
 from datasure.replication.package_builder import (
     _action_summary,
@@ -231,6 +232,31 @@ class TestBuildReplicationPackage:
         with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
             names = zf.namelist()
         assert any("codebook.csv" in n for n in names)
+
+    def test_zip_contains_data_dict_yaml(self, zip_bytes):
+        with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
+            names = zf.namelist()
+            assert any("data-dict.yaml" in n for n in names)
+            yaml_name = next(n for n in names if n.endswith("data-dict.yaml"))
+            content = zf.read(yaml_name).decode()
+        parsed = yaml.safe_load(content)
+        assert parsed["$version"] == "0.1.0"
+
+    def test_zip_contains_raw_parquet(self, zip_bytes):
+        with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
+            names = zf.namelist()
+        assert any("_raw.parquet" in n for n in names)
+
+    def test_zip_contains_python_scripts(self, zip_bytes):
+        with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
+            names = zf.namelist()
+        for script in [
+            "0_main.py",
+            "2_import_data.py",
+            "3_prepare_data.py",
+            "4_corrections.py",
+        ]:
+            assert any(script in n for n in names), f"{script} missing from zip"
 
     def test_zip_contains_audit_logs(self, zip_bytes):
         with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
