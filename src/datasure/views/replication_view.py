@@ -108,7 +108,7 @@ def _package_tree(safe_project: str, safe_page: str, is_scto: bool) -> str:
         f"├── 2_scripts/\n"
         f"│   ├── 0_main.do / 0_main.py\n"
         f"│   ├── 1_install_packages.do\n"
-        f"│   ├── 2_import_data.do / .py\n"
+        f"│   ├── 2_import_data.do       (Stata only)\n"
         f"│   ├── 3_prepare_data.do / .py\n"
         f"│   └── 4_corrections.do / .py\n"
         f"├── 3_data/\n"

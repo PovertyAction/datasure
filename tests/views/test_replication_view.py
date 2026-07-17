@@ -169,11 +169,15 @@ class TestPackageTree:
         tree = _package_tree("p", "s", is_scto=False)
         for script in [
             "0_main.py",
-            "2_import_data.do / .py",
             "3_prepare_data.do / .py",
             "4_corrections.do / .py",
         ]:
             assert script in tree
+
+    def test_import_script_is_stata_only(self):
+        tree = _package_tree("p", "s", is_scto=False)
+        assert "2_import_data.do" in tree
+        assert "2_import_data.do / .py" not in tree
 
 
 # ---------------------------------------------------------------------------

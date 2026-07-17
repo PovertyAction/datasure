@@ -272,11 +272,17 @@ class TestBuildReplicationPackage:
             names = zf.namelist()
         for script in [
             "0_main.py",
-            "2_import_data.py",
             "3_prepare_data.py",
             "4_corrections.py",
         ]:
             assert any(script in n for n in names), f"{script} missing from zip"
+
+    def test_zip_has_no_python_import_script(self, zip_bytes):
+        # Unlike Stata, the Python pipeline reads the already-bundled,
+        # correctly-typed raw Parquet directly — no import step needed.
+        with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
+            names = zf.namelist()
+        assert not any("2_import_data.py" in n for n in names)
 
     def test_zip_contains_audit_logs(self, zip_bytes):
         with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:

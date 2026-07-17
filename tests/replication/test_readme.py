@@ -113,9 +113,11 @@ class TestGenerateReadme:
 
     def test_mentions_python_scripts(self, readme):
         assert "0_main.py" in readme
-        assert "2_import_data.py" in readme
         assert "3_prepare_data.py" in readme
         assert "4_corrections.py" in readme
+
+    def test_no_python_import_script(self, readme):
+        assert "2_import_data.py" not in readme
 
     def test_contains_python_how_to_run_section(self, readme):
         assert "How to Run (Python" in readme

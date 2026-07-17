@@ -1,4 +1,4 @@
-"""Tests for Python script generators (corrections, master, import)."""
+"""Tests for Python script generators (corrections, master)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from datasure.replication.py_script_generators import (
     _emit_py,
     _py_lit,
     generate_corrections_script_py,
-    generate_import_script_py,
     generate_master_script_py,
 )
 
@@ -74,38 +73,6 @@ class TestEmitPy:
 
 
 # ---------------------------------------------------------------------------
-# generate_import_script_py
-# ---------------------------------------------------------------------------
-
-
-class TestGenerateImportScriptPy:
-    @pytest.fixture()
-    def script(self):
-        return generate_import_script_py("Test Project", "Baseline Survey", "1.0.0")
-
-    def test_returns_string(self, script):
-        assert isinstance(script, str)
-
-    def test_parses_as_valid_python(self, script):
-        ast.parse(script)
-
-    def test_has_pep723_header(self, script):
-        assert "# /// script" in script
-        assert "dependencies = [" in script
-        assert '"polars"' in script
-
-    def test_uses_safe_survey_filename(self, script):
-        assert "baseline_survey_raw.csv" in script
-        assert "baseline_survey_raw.parquet" in script
-
-    def test_preserves_schema_inference(self, script):
-        # Must NOT force all-string columns — downstream prep/correction
-        # steps assume the real numeric/date dtypes DataSure infers on import.
-        assert "infer_schema_length=0" not in script
-        assert "infer_schema_length=10000" in script
-
-
-# ---------------------------------------------------------------------------
 # generate_corrections_script_py
 # ---------------------------------------------------------------------------
 
@@ -163,10 +130,15 @@ class TestGenerateMasterScriptPy:
 
     def test_runs_steps_in_order(self, script):
         steps_block = script[script.index("STEPS = [") :]
-        idx_import = steps_block.index("2_import_data.py")
         idx_prepare = steps_block.index("3_prepare_data.py")
         idx_corrections = steps_block.index("4_corrections.py")
-        assert idx_import < idx_prepare < idx_corrections
+        assert idx_prepare < idx_corrections
+
+    def test_no_import_step(self, script):
+        # The raw dataset is already bundled as a correctly-typed Parquet
+        # file, so there's nothing for a Python import step to do.
+        steps_block = script[script.index("STEPS = [") :]
+        assert "2_import_data" not in steps_block
 
     def test_no_install_packages_step(self, script):
         assert "install_packages" not in script

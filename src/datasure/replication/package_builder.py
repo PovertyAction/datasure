@@ -21,7 +21,6 @@ from datasure.replication.py_prep_script_generator import (
 from datasure.replication.py_script_generators import (
     SCRIPT_EXT_PY,
     generate_corrections_script_py,
-    generate_import_script_py,
     generate_master_script_py,
 )
 from datasure.replication.readme import generate_readme
@@ -271,11 +270,6 @@ def build_replication_package(
     )
     _step("`0_main.do` generated")
 
-    import_script_py = generate_import_script_py(
-        project_name=project_name,
-        survey_name=survey_name,
-        datasure_version=datasure_version,
-    )
     prepare_data_script_py = generate_prepare_data_script_py(
         prep_log=prep_log,
         project_name=project_name,
@@ -383,7 +377,6 @@ def build_replication_package(
         )
         zf.writestr(f"{root}/2_scripts/4_corrections.{SCRIPT_EXT}", corrections_script)
         zf.writestr(f"{root}/2_scripts/0_main.{SCRIPT_EXT_PY}", master_script_py)
-        zf.writestr(f"{root}/2_scripts/2_import_data.{SCRIPT_EXT_PY}", import_script_py)
         zf.writestr(
             f"{root}/2_scripts/3_prepare_data.{SCRIPT_EXT_PY}", prepare_data_script_py
         )

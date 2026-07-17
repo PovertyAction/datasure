@@ -111,58 +111,6 @@ def _emit_py(
 # ── Public API ────────────────────────────────────────────────────────────────
 
 
-def generate_import_script_py(
-    project_name: str,
-    survey_name: str,
-    datasure_version: str,
-) -> str:
-    """Generate a Python import script that loads the raw CSV and saves Parquet.
-
-    Parameters
-    ----------
-    project_name : str
-        Human-readable project name.
-    survey_name : str
-        Human-readable survey name.
-    datasure_version : str
-        Version of DataSure.
-
-    Returns
-    -------
-    str
-        Python script content as a string.
-    """
-    header = _py_header(
-        "Import Script (Python)",
-        project_name,
-        survey_name,
-        datasure_version,
-        ["polars"],
-    )
-    safe_survey = _safe_survey(survey_name)
-
-    lines = [
-        header,
-        "from pathlib import Path",
-        "",
-        "import polars as pl",
-        "",
-        "PKG_ROOT = Path(__file__).resolve().parents[1]",
-        f'RAW_CSV = PKG_ROOT / "3_data" / "1_raw" / "{safe_survey}_raw.csv"',
-        f'RAW_PARQUET = PKG_ROOT / "3_data" / "1_raw" / "{safe_survey}_raw.parquet"',
-        "",
-        "# Same schema inference DataSure itself uses on import (see",
-        "# datasure.connectors.local.load_data_efficiently), so columns keep",
-        "# the numeric/date types the recorded prep/correction steps expect.",
-        "df = pl.read_csv(",
-        '    RAW_CSV, encoding="utf8-lossy", ignore_errors=True, infer_schema_length=10000',
-        ")",
-        "df.write_parquet(RAW_PARQUET)",
-        'print(f"Wrote {RAW_PARQUET} — {df.height:,} rows")',
-    ]
-    return "\n".join(lines) + "\n"
-
-
 def generate_corrections_script_py(
     correction_log: pl.DataFrame,
     key_col: str,
@@ -278,11 +226,16 @@ def generate_master_script_py(
         "# Steps are invoked via `uv run` (not the current interpreter) so",
         "# each step's own PEP 723 inline dependencies are honored, even if a",
         "# future step declares packages beyond what this master script needs.",
+        "#",
+        "# There is no 2_import_data.py: the raw dataset is already bundled as",
+        "# a Parquet file (3_data/1_raw/*_raw.parquet) with the real dtypes",
+        "# DataSure resolved on import, so 3_prepare_data.py reads it directly",
+        "# instead of re-deriving types from the CSV (that's only needed on",
+        "# the Stata side, since Stata can't read Parquet).",
         "# -------------------------------------------------------",
         "",
         "SCRIPTS_DIR = Path(__file__).resolve().parent",
         "STEPS = [",
-        '    "2_import_data.py",',
         '    "3_prepare_data.py",',
         '    "4_corrections.py",',
         "]",
