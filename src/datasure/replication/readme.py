@@ -16,6 +16,12 @@ def generate_readme(
     corrected_rows: int,
     n_corrections_by_action: dict[str, int],
     include_scto_form: bool = False,
+    include_pii: bool = True,
+    pii_masked_columns: list[str] | None = None,
+    pii_hashed_columns: list[str] | None = None,
+    pii_coded_columns: list[str] | None = None,
+    pii_dropped_columns: list[str] | None = None,
+    pii_kept_columns: list[str] | None = None,
 ) -> str:
     """Generate a Markdown README for the replication package.
 
@@ -41,6 +47,21 @@ def generate_readme(
         Count of corrections keyed by action type.
     include_scto_form : bool
         Whether the SurveyCTO XLS questionnaire was included in the package.
+    include_pii : bool
+        Whether the package was exported with PII (True) or de-identified
+        (False).
+    pii_masked_columns : list[str] | None
+        Columns masked in a de-identified export (or slated for masking by
+        ``5_deidentify_data.py`` in a with-PII export).
+    pii_hashed_columns : list[str] | None
+        Columns replaced with salted hash pseudonyms (deterministic tokens
+        that preserve categorical structure).
+    pii_coded_columns : list[str] | None
+        Columns recoded with sequential category codes.
+    pii_dropped_columns : list[str] | None
+        Columns dropped in a de-identified export (or slated for dropping).
+    pii_kept_columns : list[str] | None
+        Columns flagged in the PII review but kept by reviewer decision.
 
     Returns
     -------
@@ -50,6 +71,71 @@ def generate_readme(
     today = date.today().isoformat()
     safe_survey = survey_name.lower().replace(" ", "_")
     safe_project = project_name.lower().replace(" ", "_")
+
+    pii_masked_columns = pii_masked_columns or []
+    pii_hashed_columns = pii_hashed_columns or []
+    pii_coded_columns = pii_coded_columns or []
+    pii_dropped_columns = pii_dropped_columns or []
+    pii_kept_columns = pii_kept_columns or []
+
+    def _fmt_cols(columns: list[str]) -> str:
+        return ", ".join(f"`{c}`" for c in columns) if columns else "none"
+
+    indirect_warning = [
+        "> **Warning — indirect identifiers.** De-identification is not",
+        "> anonymization: even with direct identifiers masked or dropped,",
+        "> subjects may remain identifiable through combinations of the",
+        "> remaining variables (e.g. age, location, occupation, household",
+        "> composition). Review the data before sharing it further.",
+    ]
+    if include_pii:
+        pii_section = [
+            "## PII & De-identification",
+            "",
+            "**This package was exported WITH personally identifiable",
+            "information (PII).** Store it only in encrypted,",
+            "access-controlled locations, in line with your organization's",
+            "data-security policy.",
+            "",
+            "The PII decisions recorded in DataSure are encoded in",
+            "`2_scripts/5_deidentify_data.py`. Run it to produce",
+            "de-identified copies of every bundled dataset",
+            "(`*_deidentified.parquet`):",
+            "",
+            "```",
+            "uv run 5_deidentify_data.py",
+            "```",
+            "",
+            f"- Columns to be masked: {_fmt_cols(pii_masked_columns)}",
+            f"- Columns to be hashed (salted pseudonyms): {_fmt_cols(pii_hashed_columns)}",
+            f"- Columns to be recoded (category codes): {_fmt_cols(pii_coded_columns)}",
+            f"- Columns to be dropped: {_fmt_cols(pii_dropped_columns)}",
+            f"- Flagged but kept by reviewer decision: {_fmt_cols(pii_kept_columns)}",
+            "",
+            "The full flag audit trail is in `4_output/3_logs/pii_flags.csv`.",
+            "",
+            *indirect_warning,
+            "",
+        ]
+    else:
+        pii_section = [
+            "## PII & De-identification",
+            "",
+            "**This package was exported de-identified.** Columns flagged in",
+            "DataSure's PII review were masked or dropped in every bundled",
+            "dataset, the codebook, the data dictionary, and the correction",
+            "log before export.",
+            "",
+            f"- Masked columns: {_fmt_cols(pii_masked_columns)}",
+            "- Hashed columns (salted pseudonyms — deterministic, so",
+            f"  group-bys/joins/frequencies still work): {_fmt_cols(pii_hashed_columns)}",
+            f"- Recoded columns (category codes): {_fmt_cols(pii_coded_columns)}",
+            f"- Dropped columns: {_fmt_cols(pii_dropped_columns)}",
+            f"- Flagged but kept by reviewer decision: {_fmt_cols(pii_kept_columns)}",
+            "",
+            *indirect_warning,
+            "",
+        ]
 
     if n_corrections_by_action:
         action_rows = "\n".join(
@@ -83,6 +169,7 @@ def generate_readme(
         "data dictionary are also included, along with Parquet copies of the",
         "raw/prepped/corrected datasets so the package is usable without Stata.",
         "",
+        *pii_section,
         "## Folder Structure",
         "",
         "```text",
@@ -98,7 +185,14 @@ def generate_readme(
         "│   ├── 1_install_packages.do",
         "│   ├── 2_import_data.do      # Stata only — imports raw CSV as DTA",
         "│   ├── 3_prepare_data.do / .py",
-        "│   └── 4_corrections.do / .py",
+        *(
+            [
+                "│   ├── 4_corrections.do / .py",
+                "│   └── 5_deidentify_data.py  # De-identify bundled datasets",
+            ]
+            if include_pii
+            else ["│   └── 4_corrections.do / .py"]
+        ),
         "├── 3_data/",
         f"│   ├── 1_raw/              # {safe_survey}_raw.csv/.parquet (pre-generated);",
         "│   │                       # .dta (generated by the do-files)",
@@ -181,6 +275,14 @@ def generate_readme(
         f"| {'2_scripts/3_prepare_data.py':<45} | {'Data preparation steps (Python)':<40} |",
         f"| {'2_scripts/4_corrections.do':<45} | {'All data corrections (Stata)':<40} |",
         f"| {'2_scripts/4_corrections.py':<45} | {'All data corrections (Python)':<40} |",
+        *(
+            [
+                f"| {'2_scripts/5_deidentify_data.py':<45} | {'De-identifies bundled datasets':<40} |",
+                f"| {'4_output/3_logs/pii_flags.csv':<45} | {'PII review flag audit trail':<40} |",
+            ]
+            if include_pii
+            else []
+        ),
         f"| {'3_data/2_intermediate/' + safe_survey + '_prepped.dta':<45} | {'Dataset after prep steps (generated)':<40} |",
         f"| {'3_data/2_intermediate/' + safe_survey + '_prepped.parquet':<45} | {'Same, pre-generated as Parquet':<40} |",
         f"| {'3_data/3_final/' + safe_survey + '_corrected.dta':<45} | {'Final corrected dataset (generated)':<40} |",

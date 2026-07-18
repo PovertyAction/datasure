@@ -1616,11 +1616,16 @@ class TestModuleLevelPageLayout:
         mock_tab.__exit__ = MagicMock(return_value=False)
         _st.tabs = MagicMock(return_value=[mock_tab])
 
-        # Mock columns with context manager support
+        # Mock columns with context manager support (spec-aware: return as
+        # many columns as requested)
         mock_col = MagicMock()
         mock_col.__enter__ = MagicMock(return_value=mock_col)
         mock_col.__exit__ = MagicMock(return_value=False)
-        _st.columns = MagicMock(return_value=[mock_col, mock_col, mock_col])
+        _st.columns = MagicMock(
+            side_effect=lambda spec, **kw: (
+                [mock_col] * (spec if isinstance(spec, int) else len(spec))
+            )
+        )
 
         # Mock container context manager
         mock_container = MagicMock()
@@ -1639,6 +1644,13 @@ class TestModuleLevelPageLayout:
         _st.selectbox = MagicMock(return_value=None)
         _st.multiselect = MagicMock(return_value=[])
 
+        def _get_table(project_id, alias, db_name, **kwargs):
+            if "pii_flags" in str(alias):
+                return pl.DataFrame()
+            if "prep_log" in str(alias):
+                return prep_log_df
+            return sample_df
+
         with (
             patch(
                 "datasure.utils.duckdb_utils.duckdb_get_aliases",
@@ -1646,12 +1658,7 @@ class TestModuleLevelPageLayout:
             ),
             patch(
                 "datasure.utils.duckdb_utils.duckdb_get_table",
-                side_effect=[
-                    prep_log_df,  # prep_log for tab
-                    sample_df,  # prep_data for tab
-                    prep_log_df,  # prep_log re-fetch in change log
-                    prep_log_df,  # prep_log in prep_remove_step
-                ],
+                side_effect=_get_table,
             ),
             patch("datasure.utils.duckdb_utils.duckdb_save_table"),
             patch("datasure.utils.navigations_utils.page_navigation"),
@@ -1701,7 +1708,11 @@ class TestModuleLevelPageLayout:
         mock_col = MagicMock()
         mock_col.__enter__ = MagicMock(return_value=mock_col)
         mock_col.__exit__ = MagicMock(return_value=False)
-        _st.columns = MagicMock(return_value=[mock_col, mock_col, mock_col])
+        _st.columns = MagicMock(
+            side_effect=lambda spec, **kw: (
+                [mock_col] * (spec if isinstance(spec, int) else len(spec))
+            )
+        )
 
         mock_container = MagicMock()
         mock_container.__enter__ = MagicMock(return_value=mock_container)
@@ -1718,6 +1729,15 @@ class TestModuleLevelPageLayout:
         _st.selectbox = MagicMock(return_value=None)
         _st.multiselect = MagicMock(return_value=[])
 
+        def _get_table(project_id, alias, db_name, **kwargs):
+            if "pii_flags" in str(alias):
+                return pl.DataFrame()
+            if "prep_log" in str(alias):
+                return empty_log
+            if db_name == "raw":
+                return raw_df
+            return empty_df  # prep data (empty → raw fallback)
+
         with (
             patch(
                 "datasure.utils.duckdb_utils.duckdb_get_aliases",
@@ -1725,13 +1745,7 @@ class TestModuleLevelPageLayout:
             ),
             patch(
                 "datasure.utils.duckdb_utils.duckdb_get_table",
-                side_effect=[
-                    empty_log,  # prep_log
-                    empty_df,  # prep_data (empty)
-                    raw_df,  # raw data fallback
-                    empty_log,  # prep_log in prep_remove_step
-                    empty_log,  # prep_log re-fetch in change log
-                ],
+                side_effect=_get_table,
             ),
             patch("datasure.utils.duckdb_utils.duckdb_save_table") as mock_save,
             patch("datasure.utils.navigations_utils.page_navigation"),

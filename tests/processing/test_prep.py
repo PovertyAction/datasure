@@ -16,6 +16,7 @@ from datasure.processing.prep import (
     PrepAction,
     PrepError,
     PrepProcessor,
+    RedactColumnsOperation,
     RemoveColumnsOperation,
     RemoveRowsOperation,
     TransformColumnsOperation,
@@ -84,6 +85,7 @@ class TestPrepAction:
             ("remove row(s)", PrepActions.remove_row),
             ("transform column(s)", PrepActions.transform_column),
             ("add new column", PrepActions.add_column),
+            ("redact column(s)", PrepActions.redact_column),
         ]
         for action_str, expected in cases:
             action = PrepAction.from_args(PrepActionResult(action=action_str))
@@ -160,6 +162,130 @@ class TestDescriptionParser:
 
 
 # === REMOVE COLUMNS OPERATION TESTS === #
+
+
+class TestRedactColumnsOperation:
+    """Test RedactColumnsOperation (PII masking)."""
+
+    def test_redact_single_column(self):
+        op = RedactColumnsOperation()
+        data = pl.DataFrame({"name": ["Alice", "Bob"], "age": [1, 2]})
+        prep_args = PrepActionResult(
+            action="redact column(s)", source_columns=["name"], value=["[PERSON]"]
+        )
+        result, args = op.execute(data, prep_args)
+        assert result["name"].to_list() == ["[PERSON]", "[PERSON]"]
+        assert result["age"].to_list() == [1, 2]
+        assert args.affected_count == 1
+
+    def test_nulls_stay_null(self):
+        op = RedactColumnsOperation()
+        data = pl.DataFrame({"name": ["Alice", None]})
+        prep_args = PrepActionResult(
+            action="redact column(s)", source_columns=["name"], value=["*****"]
+        )
+        result, _ = op.execute(data, prep_args)
+        assert result["name"].to_list() == ["*****", None]
+
+    def test_numeric_column_cast_to_string(self):
+        op = RedactColumnsOperation()
+        data = pl.DataFrame({"latitude": [26.08, 25.91]})
+        prep_args = PrepActionResult(
+            action="redact column(s)", source_columns=["latitude"], value=["*****"]
+        )
+        result, _ = op.execute(data, prep_args)
+        assert result["latitude"].dtype == pl.String
+
+    def test_single_string_label_applies_to_all_columns(self):
+        op = RedactColumnsOperation()
+        data = pl.DataFrame({"a": ["x"], "b": ["y"]})
+        prep_args = PrepActionResult(
+            action="redact column(s)", source_columns=["a", "b"], value="[REDACTED]"
+        )
+        result, args = op.execute(data, prep_args)
+        assert result["a"].to_list() == ["[REDACTED]"]
+        assert result["b"].to_list() == ["[REDACTED]"]
+        assert args.value == ["[REDACTED]", "[REDACTED]"]
+
+    def test_missing_column_raises(self):
+        op = RedactColumnsOperation()
+        data = pl.DataFrame({"a": ["x"]})
+        prep_args = PrepActionResult(
+            action="redact column(s)", source_columns=["ghost"], value=["*"]
+        )
+        with pytest.raises(OperationError, match="Columns not found"):
+            op.execute(data, prep_args)
+
+    def test_mismatched_label_count_raises(self):
+        op = RedactColumnsOperation()
+        data = pl.DataFrame({"a": ["x"], "b": ["y"]})
+        prep_args = PrepActionResult(
+            action="redact column(s)", source_columns=["a", "b"], value=["*"]
+        )
+        with pytest.raises(ValidationError, match="mask labels"):
+            op.execute(data, prep_args)
+
+    @patch("datasure.utils.duckdb_utils.duckdb_save_table")
+    @patch("datasure.utils.duckdb_utils.duckdb_get_table")
+    @patch("datasure.processing.prep.st")
+    def test_hash_method(self, mock_st, mock_get, mock_save):
+        mock_st.session_state.st_project_id = "proj"
+        mock_get.return_value = pl.DataFrame()  # no stored salt → generated
+        op = RedactColumnsOperation()
+        data = pl.DataFrame({"name": ["Alice", "Bob", "Alice", None]})
+        prep_args = PrepActionResult(
+            action="redact column(s)",
+            source_columns=["name"],
+            value=["PERSON"],
+            method="hash",
+        )
+        result, args = op.execute(data, prep_args)
+        values = result["name"].to_list()
+        assert values[0] == values[2] != values[1]
+        assert values[0].startswith("PERSON_")
+        assert values[3] is None
+        assert args.method == "hash"
+
+    @patch("datasure.utils.duckdb_utils.duckdb_save_table")
+    @patch("datasure.utils.duckdb_utils.duckdb_get_table")
+    @patch("datasure.processing.prep.st")
+    def test_hash_method_idempotent_on_replay(self, mock_st, mock_get, mock_save):
+        mock_st.session_state.st_project_id = "proj"
+        mock_get.return_value = pl.DataFrame({"salt": ["stable-salt"]})
+        op = RedactColumnsOperation()
+        data = pl.DataFrame({"name": ["Alice", "Bob"]})
+        prep_args = PrepActionResult(
+            action="redact column(s)",
+            source_columns=["name"],
+            value=["PERSON"],
+            method="hash",
+        )
+        once, _ = op.execute(data, prep_args)
+        twice, _ = op.execute(once, prep_args)
+        assert twice["name"].to_list() == once["name"].to_list()
+
+    @patch("datasure.utils.duckdb_utils.duckdb_save_table")
+    @patch("datasure.utils.duckdb_utils.duckdb_get_table")
+    @patch("datasure.processing.prep.st")
+    def test_code_method(self, mock_st, mock_get, mock_save):
+        mock_st.session_state.st_project_id = "proj"
+        mock_get.return_value = pl.DataFrame()  # no stored map → built fresh
+        op = RedactColumnsOperation()
+        data = pl.DataFrame({"village": ["a", "b", "a", None]})
+        prep_args = PrepActionResult(
+            action="redact column(s)",
+            source_columns=["village"],
+            method="code",
+            additional_info="baseline",
+        )
+        result, _args = op.execute(data, prep_args)
+        values = result["village"].to_list()
+        assert values[0] == values[2] != values[1]
+        assert values[0].startswith("VILLAGE_")
+        assert values[3] is None
+        # the extended map is persisted for replay/export stability
+        saved_aliases = [c.kwargs.get("alias") for c in mock_save.call_args_list]
+        assert "pii_code_map_baseline" in saved_aliases
 
 
 class TestRemoveColumnsOperation:

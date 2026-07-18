@@ -60,7 +60,9 @@ def _range_values(series: pl.Series, col_type: str) -> list:
     return [lo, hi]
 
 
-def _describe_column(df: pl.DataFrame, col: str, key_col: str) -> dict:
+def _describe_column(
+    df: pl.DataFrame, col: str, key_col: str, redacted_columns: tuple[str, ...] = ()
+) -> dict:
     series = df[col]
     col_type = _column_type(series.dtype)
     is_key = bool(key_col) and col == key_col
@@ -71,6 +73,9 @@ def _describe_column(df: pl.DataFrame, col: str, key_col: str) -> dict:
         column["type"] = "number(id)"
     else:
         column["type"] = col_type
+
+    if col in redacted_columns:
+        column["description"] = "Redacted (PII)"
 
     if is_key:
         column["constraints"] = ["primary_key"]
@@ -99,6 +104,7 @@ def generate_data_dict(
     key_col: str,
     parquet_path: str,
     datasure_version: str,
+    redacted_columns: tuple[str, ...] = (),
 ) -> str:
     """Generate a data-dict.yaml compliant data dictionary from a DataFrame.
 
@@ -118,6 +124,9 @@ def generate_data_dict(
         Path to the Parquet file, relative to the yaml file's location.
     datasure_version : str
         Version of DataSure that generated this file (used in a comment).
+    redacted_columns : tuple[str, ...]
+        Columns whose values were masked for PII; annotated with a
+        "Redacted (PII)" description.
 
     Returns
     -------
@@ -127,7 +136,7 @@ def generate_data_dict(
     today = date.today().isoformat()
 
     columns = (
-        [_describe_column(df, col, key_col) for col in df.columns]
+        [_describe_column(df, col, key_col, redacted_columns) for col in df.columns]
         if not df.is_empty()
         else []
     )

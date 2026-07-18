@@ -10,6 +10,7 @@ from datasure.replication.prep_script_generator import (
     _fmt_val,
     _is_numeric_val,
     _stata_add_column,
+    _stata_redact_columns,
     _stata_remove_columns,
     _stata_remove_rows,
     _stata_transform_column,
@@ -108,6 +109,43 @@ class TestStataRemoveColumns:
     def test_multiple_columns(self):
         lines = _stata_remove_columns({"source_columns": ["a", "b"]}, "")
         assert lines == ["drop a b"]
+
+
+class TestStataRedactColumns:
+    def test_single_column(self):
+        lines = _stata_redact_columns(
+            {"source_columns": ["name"], "value": ["[PERSON]"]}, ""
+        )
+        assert lines == [
+            "tostring name, replace force",
+            'replace name = "[PERSON]" if name != ""',
+        ]
+
+    def test_single_string_label_applies_to_all(self):
+        lines = _stata_redact_columns(
+            {"source_columns": ["a", "b"], "value": "*****"}, ""
+        )
+        assert 'replace a = "*****" if a != ""' in lines
+        assert 'replace b = "*****" if b != ""' in lines
+
+    def test_mismatched_labels_fall_back_to_default(self):
+        lines = _stata_redact_columns(
+            {"source_columns": ["a", "b"], "value": ["only-one"]}, ""
+        )
+        assert 'replace a = "*****" if a != ""' in lines
+
+    def test_hash_method_emits_note(self):
+        lines = _stata_redact_columns(
+            {"source_columns": ["name"], "value": ["PERSON"], "method": "hash"}, ""
+        )
+        assert all(line.startswith("*") for line in lines)
+        assert "cannot be reproduced" in lines[0]
+
+    def test_code_method_emits_note(self):
+        lines = _stata_redact_columns(
+            {"source_columns": ["village"], "method": "code"}, ""
+        )
+        assert all(line.startswith("*") for line in lines)
 
 
 class TestStataRemoveRows:

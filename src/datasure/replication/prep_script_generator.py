@@ -27,6 +27,7 @@ _ACT_REMOVE_COL = "remove column(s)"
 _ACT_REMOVE_ROW = "remove row(s)"
 _ACT_TRANSFORM = "transform column(s)"
 _ACT_ADD_COL = "add new column"
+_ACT_REDACT_COL = "redact column(s)"
 
 _METH_BY_INDEX = "by row index"
 
@@ -106,6 +107,37 @@ def _col_list(cols: list[str]) -> str:
 def _stata_remove_columns(args: dict, _desc: str) -> list[str]:
     cols = _cols(args)
     return [f"drop {_col_list(cols)}"]
+
+
+def _stata_redact_columns(args: dict, _desc: str) -> list[str]:
+    """Mask every value in the given columns with its redaction label."""
+    cols = _cols(args)
+    method = (args.get("method") or "mask").lower()
+
+    if method in ("hash", "code"):
+        # Salted HMAC pseudonyms / persisted category codes cannot be
+        # reproduced in Stata (no salt or code map is ever exported). The
+        # bundled raw dataset already carries the tokens in de-identified
+        # exports, so downstream steps still line up.
+        return [
+            f"{_C} NOTE: '{method}' redaction of {_col_list(cols)} was applied "
+            "in DataSure and cannot be reproduced here.",
+            f"{_C} The exported datasets already contain the pseudonym tokens.",
+        ]
+
+    labels = args.get("value") or []
+    if isinstance(labels, str):
+        labels = [labels] * len(cols)
+    if len(labels) != len(cols):
+        labels = ["*****"] * len(cols)
+
+    lines: list[str] = []
+    for col, label in zip(cols, labels, strict=True):
+        lines += [
+            f"tostring {col}, replace force",
+            f'replace {col} = "{label}" if {col} != ""',
+        ]
+    return lines
 
 
 def _drop_by_index(values: list) -> list[str]:
@@ -265,6 +297,7 @@ _EMITTERS = {
     _ACT_REMOVE_ROW: _stata_remove_rows,
     _ACT_TRANSFORM: _stata_transform_column,
     _ACT_ADD_COL: _stata_add_column,
+    _ACT_REDACT_COL: _stata_redact_columns,
 }
 
 # ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@ import polars as pl
 
 from datasure.replication.prep_script_generator import (
     _ACT_ADD_COL,
+    _ACT_REDACT_COL,
     _ACT_REMOVE_COL,
     _ACT_REMOVE_ROW,
     _ACT_TRANSFORM,
@@ -160,6 +161,39 @@ def _drop_by_condition_py(cols: list[str], condition: str, values: list) -> list
 def _py_remove_columns(args: dict, _desc: str) -> list[str]:
     cols = _cols(args)
     return [f"df = df.drop({cols!r})"]
+
+
+def _py_redact_columns(args: dict, _desc: str) -> list[str]:
+    """Mask every value in the given columns with its redaction label."""
+    cols = _cols(args)
+    method = (args.get("method") or "mask").lower()
+
+    if method in ("hash", "code"):
+        # The project salt / code maps live only in DataSure's local cache
+        # and are never exported, so this step cannot be re-derived here.
+        # De-identified exports already carry the tokens in the bundled raw
+        # dataset (the transformation is inherited on replay); with-PII
+        # exports include 5_deidentify_data.py for consistent pseudonyms.
+        return [
+            f"# NOTE: {method!r} redaction of {cols!r} was applied in DataSure",
+            "# and cannot be reproduced here; exported datasets already carry",
+            "# the pseudonym tokens.",
+        ]
+
+    labels = args.get("value") or []
+    if isinstance(labels, str):
+        labels = [labels] * len(cols)
+    if len(labels) != len(cols):
+        labels = ["*****"] * len(cols)
+
+    lines: list[str] = []
+    for col, label in zip(cols, labels, strict=True):
+        lines.append(
+            f"df = df.with_columns(pl.when(pl.col({col!r}).is_not_null())"
+            f".then(pl.lit({label!r}))"
+            f".otherwise(pl.lit(None, dtype=pl.String)).alias({col!r}))"
+        )
+    return lines
 
 
 def _py_remove_rows(args: dict, _desc: str) -> list[str]:
@@ -470,6 +504,8 @@ def generate_prepare_data_script_py(
             lines += _py_transform_column(args, description)
         elif action == _ACT_ADD_COL:
             lines += _py_add_column(args, description, seed=survey_name)
+        elif action == _ACT_REDACT_COL:
+            lines += _py_redact_columns(args, description)
         else:
             lines.append(f"# NOTE: unknown action {action!r}")
         lines.append("")

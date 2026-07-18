@@ -192,6 +192,118 @@ class RemoveColumnsOperation(PrepOperation):
             raise OperationError(f"Failed to remove columns: {e}") from e
 
 
+class RedactColumnsOperation(PrepOperation):
+    """Redact all values in specified columns (PII removal).
+
+    Three methods, selected by ``prep_args.method``:
+
+    - ``None``/``"mask"`` — every non-null value replaced with the column's
+      label from ``prep_args.value`` (a list aligned with ``source_columns``;
+      a single string applies to all columns).
+    - ``"hash"`` — values replaced with deterministic salted pseudonyms
+      (``PERSON_3fa1b9c2``); ``prep_args.value`` carries the token prefixes.
+      The project salt comes from the local cache (never from prep_args, so
+      it cannot leak through the exported prep log). Idempotent: existing
+      tokens pass through on replay.
+    - ``"code"`` — values replaced with persisted sequential category codes
+      (``VILLAGE_NAME_001``). ``prep_args.additional_info`` carries the
+      dataset alias whose code map to load/extend. Idempotent on replay.
+
+    All methods cast the column to String and keep nulls null.
+    """
+
+    def execute(
+        self, data: pl.DataFrame, prep_args: PrepActionResult
+    ) -> tuple[pl.DataFrame, PrepActionResult]:
+        """Redact columns specified in prep_args."""
+        try:
+            columns = prep_args.source_columns
+            self._validate_columns_exist(data, columns)
+
+            labels = prep_args.value
+            if isinstance(labels, str) or labels is None:
+                labels = [labels or "*****"] * len(columns)
+            if len(labels) != len(columns):
+                raise ValidationError(  # noqa: TRY301
+                    "Number of mask labels must match number of columns"
+                )
+
+            method = (prep_args.method or "mask").lower()
+            if method == "hash":
+                results = self._apply_hash(data, columns, labels)
+            elif method == "code":
+                results = self._apply_code(
+                    data, columns, prep_args.additional_info or ""
+                )
+            else:
+                results = data.with_columns(
+                    [
+                        pl.when(pl.col(col).is_not_null())
+                        .then(pl.lit(label))
+                        .otherwise(pl.lit(None, dtype=pl.String))
+                        .alias(col)
+                        for col, label in zip(columns, labels, strict=True)
+                    ]
+                )
+
+            updated_prep_args = {
+                "action": PrepActions.redact_column.value,
+                "column_names": None,
+                "affected_count": len(columns),
+                "remaining_count": results.width,
+                "value": labels,
+                "method": prep_args.method,
+                "source_columns": columns,
+                "condition": None,
+                "failed_count": 0,
+                "additional_info": prep_args.additional_info,
+            }
+
+            return results, PrepActionResult(**updated_prep_args)
+
+        except (ValidationError, OperationError):
+            raise
+        except Exception as e:
+            raise OperationError(f"Failed to redact columns: {e}") from e
+
+    @staticmethod
+    def _apply_hash(
+        data: pl.DataFrame, columns: list[str], prefixes: list[str]
+    ) -> pl.DataFrame:
+        """Hash columns with the project salt (from the local cache)."""
+        from datasure.processing.pii import get_or_create_pii_salt, hash_column_expr
+
+        project_id = st.session_state.st_project_id
+        salt = get_or_create_pii_salt(project_id)
+        return data.with_columns(
+            [
+                hash_column_expr(col, salt, prefix or "HASH")
+                for col, prefix in zip(columns, prefixes, strict=True)
+            ]
+        )
+
+    @staticmethod
+    def _apply_code(data: pl.DataFrame, columns: list[str], alias: str) -> pl.DataFrame:
+        """Recode columns via the persisted per-alias code maps."""
+        from datasure.processing.pii import (
+            code_column_expr,
+            extend_code_map,
+            load_code_maps,
+            save_code_maps,
+            token_prefix,
+        )
+
+        project_id = st.session_state.st_project_id
+        maps = load_code_maps(project_id, alias)
+        for col in columns:
+            values = data[col].drop_nulls().cast(pl.String).unique().to_list()
+            maps[col] = extend_code_map(
+                maps.get(col, {}), values, token_prefix(col, None)
+            )
+        save_code_maps(project_id, alias, maps)
+        return data.with_columns([code_column_expr(col, maps[col]) for col in columns])
+
+
 class RemoveRowsOperation(PrepOperation):
     """Remove rows based on various conditions."""
 
@@ -821,6 +933,7 @@ class PrepProcessor:
             PrepActions.remove_row: RemoveRowsOperation(),
             PrepActions.transform_column: TransformColumnsOperation(),
             PrepActions.add_column: AddNewColumnOperation(),
+            PrepActions.redact_column: RedactColumnsOperation(),
         }
 
     def execute_single_action(
@@ -891,6 +1004,7 @@ def _generate_action_description(prep_args: PrepActionResult) -> str:
         PrepActions.remove_row.value: PrepConfirmationMessages.remove_rows,
         PrepActions.transform_column.value: PrepConfirmationMessages.transform_columns,
         PrepActions.add_column.value: PrepConfirmationMessages.add_new_column,
+        PrepActions.redact_column.value: PrepConfirmationMessages.redact_columns,
     }
     description_func = action_description_map.get(prep_args.action)
     if description_func:

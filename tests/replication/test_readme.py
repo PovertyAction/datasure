@@ -128,3 +128,54 @@ class TestGenerateReadme:
     def test_folder_tree_is_fenced(self, readme):
         assert "```text" in readme
         assert readme.count("```") >= 2
+
+
+class TestReadmePiiSection:
+    def _readme(self, include_pii: bool) -> str:
+        return generate_readme(
+            project_name="P",
+            survey_name="S",
+            datasure_version="1.0",
+            correction_count=0,
+            prep_count=0,
+            raw_rows=10,
+            prepped_rows=10,
+            corrected_rows=10,
+            n_corrections_by_action={},
+            include_pii=include_pii,
+            pii_masked_columns=["enum_name"],
+            pii_dropped_columns=["latitude"],
+            pii_kept_columns=["age"],
+        )
+
+    def test_with_pii_mentions_deidentify_script(self):
+        readme = self._readme(include_pii=True)
+        assert "WITH personally identifiable" in readme
+        assert "5_deidentify_data.py" in readme
+        assert "pii_flags.csv" in readme
+
+    def test_deidentified_lists_redactions(self):
+        readme = self._readme(include_pii=False)
+        assert "exported de-identified" in readme
+        assert "`enum_name`" in readme
+        assert "`latitude`" in readme
+        assert "`age`" in readme
+        assert "5_deidentify_data.py" not in readme
+
+    def test_indirect_identifier_warning_in_both_modes(self):
+        for include_pii in (True, False):
+            assert "indirect identifiers" in self._readme(include_pii)
+
+    def test_default_is_with_pii_for_backward_compat(self):
+        readme = generate_readme(
+            project_name="P",
+            survey_name="S",
+            datasure_version="1.0",
+            correction_count=0,
+            prep_count=0,
+            raw_rows=0,
+            prepped_rows=0,
+            corrected_rows=0,
+            n_corrections_by_action={},
+        )
+        assert "PII & De-identification" in readme

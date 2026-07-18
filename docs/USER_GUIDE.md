@@ -255,6 +255,66 @@ Delete unnecessary or problematic data:
 3. Select column(s) or define row filter
 4. Click "Add"
 
+##### Redact Column
+
+Mask all values in a column with a redaction label (e.g. `[PERSON]`,
+`*****`) while keeping the column in place — the primary tool for
+removing PII without losing the dataset's structure:
+
+1. Click "Add data prep step"
+2. Choose "Redact Column(s)"
+3. Select column(s) and set the redaction label
+4. Click "Add"
+
+#### PII Review
+
+Each dataset tab has a **PII Review** section that scans for columns and
+values suspected to contain personally identifiable information (PII):
+
+- **Column-name heuristics** run instantly with no setup: multilingual
+  restricted-word matching (English, Spanish, French, Swahili terms for
+  names, addresses, phones, GPS, ages, SurveyCTO device metadata) plus a
+  sparsity check that flags high-cardinality free-text columns.
+- **Value scanning** uses Microsoft Presidio with a spaCy language model
+  to detect PII *inside* values (person names, phone numbers, emails,
+  locations) on a sample of each text column. Models are small
+  (~15–40 MB) and downloaded from within the app — English is the
+  default; Spanish and French are available from the language selector.
+
+**Workflow**:
+
+1. (Optional) Download the language model to enable value scanning
+2. Click **Scan for PII**
+3. Review flagged columns: what flagged them, the detected entity type,
+   and sample matched values
+4. Set a per-column decision:
+   - **mask** — replace every value with a constant label (`[PERSON]`)
+   - **hash** — replace values with deterministic salted pseudonyms
+     (`PERSON_3fa1b9c2`); the same value always gets the same token, so
+     group-bys, joins, and frequency analysis keep working, while the
+     secret salt (kept in the local cache, never exported) prevents
+     dictionary attacks
+   - **code** — replace values with readable sequential category codes
+     (`VILLAGE_NAME_001`), assigned in random order and persisted so
+     repeated exports stay consistent
+   - **drop** — remove the column entirely
+   - **keep** — leave the column untouched
+5. Click **Apply decisions as prep steps** — masks, hash pseudonyms,
+   category codes, and drops all land in the change log like any other
+   prep step (replayable and removable), and the decisions are also
+   enforced at export time. The project salt and code maps stay in the
+   local cache and never leave it in de-identified exports, so the
+   generated replication scripts note hash/code steps as
+   applied-in-DataSure rather than reproducing them (the exported
+   datasets already carry the tokens)
+
+> **Warning**: De-identification is not anonymization. Even with direct
+> identifiers masked or dropped, respondents may remain identifiable
+> through combinations of the remaining variables (age, location,
+> occupation, household composition). Deterministic pseudonyms (hash and
+> code) also preserve the frequency distribution, so rare categories stay
+> recognizable by their rarity. Review data before sharing.
+
 #### Change Log
 
 All preparation steps are tracked:
