@@ -166,6 +166,20 @@ def _py_remove_columns(args: dict, _desc: str) -> list[str]:
 def _py_redact_columns(args: dict, _desc: str) -> list[str]:
     """Mask every value in the given columns with its redaction label."""
     cols = _cols(args)
+    method = (args.get("method") or "mask").lower()
+
+    if method in ("hash", "code"):
+        # The project salt / code maps live only in DataSure's local cache
+        # and are never exported, so this step cannot be re-derived here.
+        # De-identified exports already carry the tokens in the bundled raw
+        # dataset (the transformation is inherited on replay); with-PII
+        # exports include 5_deidentify_data.py for consistent pseudonyms.
+        return [
+            f"# NOTE: {method!r} redaction of {cols!r} was applied in DataSure",
+            "# and cannot be reproduced here; exported datasets already carry",
+            "# the pseudonym tokens.",
+        ]
+
     labels = args.get("value") or []
     if isinstance(labels, str):
         labels = [labels] * len(cols)

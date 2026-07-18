@@ -112,6 +112,19 @@ def _stata_remove_columns(args: dict, _desc: str) -> list[str]:
 def _stata_redact_columns(args: dict, _desc: str) -> list[str]:
     """Mask every value in the given columns with its redaction label."""
     cols = _cols(args)
+    method = (args.get("method") or "mask").lower()
+
+    if method in ("hash", "code"):
+        # Salted HMAC pseudonyms / persisted category codes cannot be
+        # reproduced in Stata (no salt or code map is ever exported). The
+        # bundled raw dataset already carries the tokens in de-identified
+        # exports, so downstream steps still line up.
+        return [
+            f"{_C} NOTE: '{method}' redaction of {_col_list(cols)} was applied "
+            "in DataSure and cannot be reproduced here.",
+            f"{_C} The exported datasets already contain the pseudonym tokens.",
+        ]
+
     labels = args.get("value") or []
     if isinstance(labels, str):
         labels = [labels] * len(cols)

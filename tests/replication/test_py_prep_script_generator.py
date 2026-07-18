@@ -52,6 +52,21 @@ class TestPyRedactColumns:
         )
         ast.parse("\n".join(lines))
 
+    def test_hash_method_emits_note(self):
+        lines = _py_redact_columns(
+            {"source_columns": ["name"], "value": ["PERSON"], "method": "hash"}, ""
+        )
+        assert all(line.startswith("#") for line in lines)
+        assert "cannot be reproduced" in "\n".join(lines)
+        ast.parse("\n".join(lines))
+
+    def test_code_method_emits_note(self):
+        lines = _py_redact_columns(
+            {"source_columns": ["village"], "method": "code"}, ""
+        )
+        assert all(line.startswith("#") for line in lines)
+        ast.parse("\n".join(lines))
+
 
 # ---------------------------------------------------------------------------
 # _py_remove_rows

@@ -329,6 +329,15 @@ class TestCodeMaps:
         flags = _flags([{"column": "village", "decision": "mask"}])
         assert build_code_maps([df], flags) == {}
 
+    def test_existing_code_tokens_not_reenumerated(self):
+        # A prepped dataset already coded as a prep step must not have its
+        # tokens treated as new data values when the export gate builds maps.
+        df = pl.DataFrame({"village": ["a", "VILLAGE_001"]})
+        flags = _flags([{"column": "village", "decision": "code"}])
+        existing = {"village": {"a": "VILLAGE_001"}}
+        maps = build_code_maps([df], flags, existing=existing)
+        assert maps["village"] == {"a": "VILLAGE_001"}
+
     @patch("datasure.utils.duckdb_utils.duckdb_save_table")
     def test_save_uses_code_map_table(self, mock_save):
         save_code_maps("proj", "baseline", {"village": {"a": "VILLAGE_001"}})
@@ -386,6 +395,23 @@ class TestApplyPseudonymDecisions:
         flags = _flags([{"column": "village", "decision": "code"}])
         result = apply_pii_decisions(df, flags, code_maps=None)
         assert result["village"].to_list() == [DEFAULT_MASK]
+
+    def test_hash_idempotent_on_already_hashed_data(self):
+        df = pl.DataFrame({"name": ["Alice", "Bob"]})
+        flags = _flags(
+            [{"column": "name", "decision": "hash", "entity_type": "PERSON"}]
+        )
+        once = apply_pii_decisions(df, flags, salt="s")
+        twice = apply_pii_decisions(once, flags, salt="s")
+        assert twice["name"].to_list() == once["name"].to_list()
+
+    def test_code_idempotent_on_already_coded_data(self):
+        df = pl.DataFrame({"village": ["a", "b"]})
+        flags = _flags([{"column": "village", "decision": "code"}])
+        maps = {"village": {"a": "VILLAGE_001", "b": "VILLAGE_002"}}
+        once = apply_pii_decisions(df, flags, code_maps=maps)
+        twice = apply_pii_decisions(once, flags, code_maps=maps)
+        assert twice["village"].to_list() == once["village"].to_list()
 
 
 class TestRedactCorrectionLog:

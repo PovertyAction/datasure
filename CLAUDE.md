@@ -147,12 +147,14 @@ pattern `output_view_?.py` - never commit them, and never edit them directly
    value scanning flag PII per dataset (`pii_flags_{alias}` in logs db);
    per-column decisions are mask / hash (HMAC pseudonyms keyed by a
    per-project salt in `pii_salt`) / code (persisted category codes in
-   `pii_code_map_{alias}`) / drop / keep. Mask+drop can become prep steps;
-   hash+code apply at export time in `package_builder.py` (de-identified
-   is the default export mode; the survey key column is never redacted;
-   salt and code maps never leave the local cache in de-identified
-   exports). spaCy models are downloaded at runtime from the UI, never
-   bundled
+   `pii_code_map_{alias}`) / drop / keep. All four can become prep steps
+   (hash/code are idempotent so the export gate can safely re-apply), and
+   the export gate in `package_builder.py` enforces the flags regardless
+   (de-identified is the default export mode; the survey key column is
+   never redacted; salt and code maps never leave the local cache in
+   de-identified exports — generated scripts note hash/code steps rather
+   than reproducing them). spaCy models are downloaded at runtime from
+   the UI, never bundled
 
 ### Cache and data locations (`utils/cache_utils.py`)
 

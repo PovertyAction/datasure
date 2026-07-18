@@ -193,13 +193,23 @@ class RemoveColumnsOperation(PrepOperation):
 
 
 class RedactColumnsOperation(PrepOperation):
-    """Mask all values in specified columns with a redaction label.
+    """Redact all values in specified columns (PII removal).
 
-    Used for PII removal: every non-null value in each source column is
-    replaced with the column's mask label (e.g. ``[PERSON]``, ``*****``),
-    and the column is cast to String. ``prep_args.value`` carries the labels
-    as a list aligned with ``source_columns`` (a single string applies to
-    all columns).
+    Three methods, selected by ``prep_args.method``:
+
+    - ``None``/``"mask"`` — every non-null value replaced with the column's
+      label from ``prep_args.value`` (a list aligned with ``source_columns``;
+      a single string applies to all columns).
+    - ``"hash"`` — values replaced with deterministic salted pseudonyms
+      (``PERSON_3fa1b9c2``); ``prep_args.value`` carries the token prefixes.
+      The project salt comes from the local cache (never from prep_args, so
+      it cannot leak through the exported prep log). Idempotent: existing
+      tokens pass through on replay.
+    - ``"code"`` — values replaced with persisted sequential category codes
+      (``VILLAGE_NAME_001``). ``prep_args.additional_info`` carries the
+      dataset alias whose code map to load/extend. Idempotent on replay.
+
+    All methods cast the column to String and keep nulls null.
     """
 
     def execute(
@@ -218,15 +228,23 @@ class RedactColumnsOperation(PrepOperation):
                     "Number of mask labels must match number of columns"
                 )
 
-            results = data.with_columns(
-                [
-                    pl.when(pl.col(col).is_not_null())
-                    .then(pl.lit(label))
-                    .otherwise(pl.lit(None, dtype=pl.String))
-                    .alias(col)
-                    for col, label in zip(columns, labels, strict=True)
-                ]
-            )
+            method = (prep_args.method or "mask").lower()
+            if method == "hash":
+                results = self._apply_hash(data, columns, labels)
+            elif method == "code":
+                results = self._apply_code(
+                    data, columns, prep_args.additional_info or ""
+                )
+            else:
+                results = data.with_columns(
+                    [
+                        pl.when(pl.col(col).is_not_null())
+                        .then(pl.lit(label))
+                        .otherwise(pl.lit(None, dtype=pl.String))
+                        .alias(col)
+                        for col, label in zip(columns, labels, strict=True)
+                    ]
+                )
 
             updated_prep_args = {
                 "action": PrepActions.redact_column.value,
@@ -234,11 +252,11 @@ class RedactColumnsOperation(PrepOperation):
                 "affected_count": len(columns),
                 "remaining_count": results.width,
                 "value": labels,
-                "method": None,
+                "method": prep_args.method,
                 "source_columns": columns,
                 "condition": None,
                 "failed_count": 0,
-                "additional_info": None,
+                "additional_info": prep_args.additional_info,
             }
 
             return results, PrepActionResult(**updated_prep_args)
@@ -247,6 +265,43 @@ class RedactColumnsOperation(PrepOperation):
             raise
         except Exception as e:
             raise OperationError(f"Failed to redact columns: {e}") from e
+
+    @staticmethod
+    def _apply_hash(
+        data: pl.DataFrame, columns: list[str], prefixes: list[str]
+    ) -> pl.DataFrame:
+        """Hash columns with the project salt (from the local cache)."""
+        from datasure.processing.pii import get_or_create_pii_salt, hash_column_expr
+
+        project_id = st.session_state.st_project_id
+        salt = get_or_create_pii_salt(project_id)
+        return data.with_columns(
+            [
+                hash_column_expr(col, salt, prefix or "HASH")
+                for col, prefix in zip(columns, prefixes, strict=True)
+            ]
+        )
+
+    @staticmethod
+    def _apply_code(data: pl.DataFrame, columns: list[str], alias: str) -> pl.DataFrame:
+        """Recode columns via the persisted per-alias code maps."""
+        from datasure.processing.pii import (
+            code_column_expr,
+            extend_code_map,
+            load_code_maps,
+            save_code_maps,
+            token_prefix,
+        )
+
+        project_id = st.session_state.st_project_id
+        maps = load_code_maps(project_id, alias)
+        for col in columns:
+            values = data[col].drop_nulls().cast(pl.String).unique().to_list()
+            maps[col] = extend_code_map(
+                maps.get(col, {}), values, token_prefix(col, None)
+            )
+        save_code_maps(project_id, alias, maps)
+        return data.with_columns([code_column_expr(col, maps[col]) for col in columns])
 
 
 class RemoveRowsOperation(PrepOperation):

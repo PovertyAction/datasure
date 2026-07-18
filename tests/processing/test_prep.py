@@ -225,6 +225,68 @@ class TestRedactColumnsOperation:
         with pytest.raises(ValidationError, match="mask labels"):
             op.execute(data, prep_args)
 
+    @patch("datasure.utils.duckdb_utils.duckdb_save_table")
+    @patch("datasure.utils.duckdb_utils.duckdb_get_table")
+    @patch("datasure.processing.prep.st")
+    def test_hash_method(self, mock_st, mock_get, mock_save):
+        mock_st.session_state.st_project_id = "proj"
+        mock_get.return_value = pl.DataFrame()  # no stored salt → generated
+        op = RedactColumnsOperation()
+        data = pl.DataFrame({"name": ["Alice", "Bob", "Alice", None]})
+        prep_args = PrepActionResult(
+            action="redact column(s)",
+            source_columns=["name"],
+            value=["PERSON"],
+            method="hash",
+        )
+        result, args = op.execute(data, prep_args)
+        values = result["name"].to_list()
+        assert values[0] == values[2] != values[1]
+        assert values[0].startswith("PERSON_")
+        assert values[3] is None
+        assert args.method == "hash"
+
+    @patch("datasure.utils.duckdb_utils.duckdb_save_table")
+    @patch("datasure.utils.duckdb_utils.duckdb_get_table")
+    @patch("datasure.processing.prep.st")
+    def test_hash_method_idempotent_on_replay(self, mock_st, mock_get, mock_save):
+        mock_st.session_state.st_project_id = "proj"
+        mock_get.return_value = pl.DataFrame({"salt": ["stable-salt"]})
+        op = RedactColumnsOperation()
+        data = pl.DataFrame({"name": ["Alice", "Bob"]})
+        prep_args = PrepActionResult(
+            action="redact column(s)",
+            source_columns=["name"],
+            value=["PERSON"],
+            method="hash",
+        )
+        once, _ = op.execute(data, prep_args)
+        twice, _ = op.execute(once, prep_args)
+        assert twice["name"].to_list() == once["name"].to_list()
+
+    @patch("datasure.utils.duckdb_utils.duckdb_save_table")
+    @patch("datasure.utils.duckdb_utils.duckdb_get_table")
+    @patch("datasure.processing.prep.st")
+    def test_code_method(self, mock_st, mock_get, mock_save):
+        mock_st.session_state.st_project_id = "proj"
+        mock_get.return_value = pl.DataFrame()  # no stored map → built fresh
+        op = RedactColumnsOperation()
+        data = pl.DataFrame({"village": ["a", "b", "a", None]})
+        prep_args = PrepActionResult(
+            action="redact column(s)",
+            source_columns=["village"],
+            method="code",
+            additional_info="baseline",
+        )
+        result, _args = op.execute(data, prep_args)
+        values = result["village"].to_list()
+        assert values[0] == values[2] != values[1]
+        assert values[0].startswith("VILLAGE_")
+        assert values[3] is None
+        # the extended map is persisted for replay/export stability
+        saved_aliases = [c.kwargs.get("alias") for c in mock_save.call_args_list]
+        assert "pii_code_map_baseline" in saved_aliases
+
 
 class TestRemoveColumnsOperation:
     """Test RemoveColumnsOperation."""

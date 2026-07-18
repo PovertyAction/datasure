@@ -1082,9 +1082,15 @@ def _pii_model_controls(section_index: int) -> tuple[str, bool]:
 def _apply_pii_decisions_as_prep_steps(
     flags: pl.DataFrame, prep_columns: list[str], alias: str
 ) -> int:
-    """Convert mask/drop decisions into prep actions; return steps applied."""
+    """Convert mask/hash/code/drop decisions into prep actions.
+
+    Returns the number of prep steps applied.
+    """
     mask_cols: list[str] = []
     mask_labels: list[str] = []
+    hash_cols: list[str] = []
+    hash_prefixes: list[str] = []
+    code_cols: list[str] = []
     drop_cols: list[str] = []
     for row in flags.iter_rows(named=True):
         if row["column"] not in prep_columns:
@@ -1092,6 +1098,11 @@ def _apply_pii_decisions_as_prep_steps(
         if row["decision"] == "mask":
             mask_cols.append(row["column"])
             mask_labels.append(row["mask_label"] or pii.DEFAULT_MASK)
+        elif row["decision"] == "hash":
+            hash_cols.append(row["column"])
+            hash_prefixes.append(pii.token_prefix(row["column"], row["entity_type"]))
+        elif row["decision"] == "code":
+            code_cols.append(row["column"])
         elif row["decision"] == "drop":
             drop_cols.append(row["column"])
 
@@ -1104,6 +1115,30 @@ def _apply_pii_decisions_as_prep_steps(
                 action=PrepActions.redact_column.value,
                 source_columns=mask_cols,
                 value=mask_labels,
+            ),
+        )
+        steps += 1
+    if hash_cols:
+        prep_apply_action(
+            project_id,
+            alias,
+            PrepActionResult(
+                action=PrepActions.redact_column.value,
+                source_columns=hash_cols,
+                value=hash_prefixes,
+                method="hash",
+            ),
+        )
+        steps += 1
+    if code_cols:
+        prep_apply_action(
+            project_id,
+            alias,
+            PrepActionResult(
+                action=PrepActions.redact_column.value,
+                source_columns=code_cols,
+                method="code",
+                additional_info=alias,
             ),
         )
         steps += 1
@@ -1130,8 +1165,8 @@ def pii_review_section(prep_data: pl.DataFrame, alias: str, section_index: int) 
             "**mask** (replace values with a label), **hash** (salted "
             "pseudonyms — deterministic tokens that keep categorical analysis "
             "working), **code** (readable category codes like VILLAGE_001), "
-            "**drop** (remove the column), or **keep**. Mask and drop can be "
-            "applied as prep steps; hash and code are applied at export time."
+            "**drop** (remove the column), or **keep**. All decisions can be "
+            "applied as prep steps and are also enforced at export time."
         )
 
         language, model_ready = _pii_model_controls(section_index)
@@ -1203,35 +1238,27 @@ def pii_review_section(prep_data: pl.DataFrame, alias: str, section_index: int) 
                 st.success("PII decisions saved.")
         with apply_col:
             if st.button(
-                "Apply mask/drop decisions as prep steps",
+                "Apply decisions as prep steps",
                 key=f"st_pii_apply_{section_index}",
                 width="stretch",
                 type="primary",
                 help=(
-                    "Masks and column drops are added to the change log below, "
-                    "so they are replayable and removable like any prep step."
+                    "Masks, hash pseudonyms, category codes, and column drops "
+                    "are added to the change log below, so they are replayable "
+                    "and removable like any prep step."
                 ),
             ):
                 try:
                     edited_flags = pl.DataFrame(edited)
                     pii.save_pii_flags(project_id, alias, edited_flags)
-                    deferred = edited_flags.filter(
-                        pl.col("decision").is_in(["hash", "code"])
-                    ).height
-                    if deferred:
-                        st.info(
-                            f"{deferred} hash/code decision(s) saved — they are "
-                            "applied at export time on the Export Replication "
-                            "Package page, not as prep steps."
-                        )
                     steps = _apply_pii_decisions_as_prep_steps(
                         edited_flags, prep_data.columns, alias
                     )
                     if steps:
                         st.success(f"{steps} preparation step(s) added.")
                         st.rerun()
-                    elif not deferred:
-                        st.info("No mask or drop decisions to apply.")
+                    else:
+                        st.info("No mask, hash, code, or drop decisions to apply.")
                 except Exception as e:
                     # UI boundary: surface and log, never crash the page.
                     logger.exception(

@@ -299,11 +299,14 @@ values suspected to contain personally identifiable information (PII):
      repeated exports stay consistent
    - **drop** — remove the column entirely
    - **keep** — leave the column untouched
-5. Click **Apply mask/drop decisions as prep steps** — masks and drops
-   land in the change log like any other prep step (replayable and
-   removable). Hash and code decisions are applied at export time on the
-   Export Replication Package page (they need the project salt and code
-   maps, which never leave the local cache in de-identified exports)
+5. Click **Apply decisions as prep steps** — masks, hash pseudonyms,
+   category codes, and drops all land in the change log like any other
+   prep step (replayable and removable), and the decisions are also
+   enforced at export time. The project salt and code maps stay in the
+   local cache and never leave it in de-identified exports, so the
+   generated replication scripts note hash/code steps as
+   applied-in-DataSure rather than reproducing them (the exported
+   datasets already carry the tokens)
 
 > **Warning**: De-identification is not anonymization. Even with direct
 > identifiers masked or dropped, respondents may remain identifiable

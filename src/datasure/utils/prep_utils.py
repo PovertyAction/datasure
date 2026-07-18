@@ -266,9 +266,14 @@ class PrepConfirmationMessages:
         )
         column_text = cls._pluralize(column_count, "column")
         column_display = cls._format_column_names(result.source_columns)
+        method = (result.method or "mask").lower()
+        how = {
+            "hash": "replaced with salted hash pseudonyms",
+            "code": "replaced with category codes",
+        }.get(method, "masked with a redaction label")
         return (
             f"✓ {column_count} {column_text} redacted. All values in "
-            f"{column_display} were masked with a redaction label."
+            f"{column_display} were {how}."
         )
 
     @classmethod

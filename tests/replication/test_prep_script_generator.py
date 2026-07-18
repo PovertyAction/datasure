@@ -134,6 +134,19 @@ class TestStataRedactColumns:
         )
         assert 'replace a = "*****" if a != ""' in lines
 
+    def test_hash_method_emits_note(self):
+        lines = _stata_redact_columns(
+            {"source_columns": ["name"], "value": ["PERSON"], "method": "hash"}, ""
+        )
+        assert all(line.startswith("*") for line in lines)
+        assert "cannot be reproduced" in lines[0]
+
+    def test_code_method_emits_note(self):
+        lines = _stata_redact_columns(
+            {"source_columns": ["village"], "method": "code"}, ""
+        )
+        assert all(line.startswith("*") for line in lines)
+
 
 class TestStataRemoveRows:
     def test_by_index_single(self):

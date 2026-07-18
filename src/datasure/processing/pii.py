@@ -41,6 +41,7 @@ import hashlib
 import hmac
 import logging
 import random
+import re
 import secrets
 from datetime import datetime
 
@@ -564,7 +565,8 @@ def get_or_create_pii_salt(project_id: str) -> str:
     return salt
 
 
-def _token_prefix(column: str, entity_type: str | None) -> str:
+def token_prefix(column: str, entity_type: str | None) -> str:
+    """Return the pseudonym-token prefix for a column (e.g. ``PERSON``)."""
     raw = entity_type or column
     return "".join(ch if ch.isalnum() else "_" for ch in raw).upper()
 
@@ -573,6 +575,50 @@ def hash_token(value: object, salt: str, prefix: str) -> str:
     """Return a deterministic salted pseudonym like ``PERSON_3fa1b9c2``."""
     digest = hmac.new(salt.encode(), str(value).encode(), hashlib.sha256).hexdigest()
     return f"{prefix}_{digest[:HASH_TOKEN_LENGTH]}"
+
+
+def hash_column_expr(column: str, salt: str, prefix: str) -> pl.Expr:
+    """Polars expression hashing a column's values into salted pseudonyms.
+
+    Idempotent: values that already look like this column's tokens are
+    passed through unchanged, so hashing applied as a prep step is not
+    hashed a second time by the export gate (HMAC is not idempotent by
+    itself). Nulls stay null.
+    """
+    token_pattern = re.compile(
+        rf"^{re.escape(prefix)}_[0-9a-f]{{{HASH_TOKEN_LENGTH}}}$"
+    )
+
+    def _tokenize(value: str) -> str:
+        if token_pattern.match(value):
+            return value
+        return hash_token(value, salt, prefix)
+
+    return (
+        pl.col(column)
+        .cast(pl.String)
+        .map_elements(_tokenize, return_dtype=pl.String)
+        .alias(column)
+    )
+
+
+def code_column_expr(column: str, mapping: dict[str, str]) -> pl.Expr:
+    """Polars expression recoding a column's values via a code map.
+
+    Idempotent: values that already are codes of this mapping pass through
+    unchanged (so the export gate does not re-map an already-coded prep
+    dataset). Values missing from the map are masked — never leaked.
+    """
+    code_values = list(set(mapping.values()))
+    as_string = pl.col(column).cast(pl.String)
+    return (
+        pl.when(pl.col(column).is_null())
+        .then(pl.lit(None, dtype=pl.String))
+        .when(as_string.is_in(code_values))
+        .then(as_string)
+        .otherwise(as_string.replace_strict(mapping, default=DEFAULT_MASK))
+        .alias(column)
+    )
 
 
 # --- Pseudonymization: category codes ---------------------------------------------
@@ -645,14 +691,27 @@ def build_code_maps(
                     df[column].drop_nulls().cast(pl.String).unique().to_list()
                 )
 
-        mapping = maps.setdefault(column, {})
-        new_values = sorted(values - set(mapping))
-        random.shuffle(new_values)
-        prefix = _token_prefix(column, None)
-        next_index = len(mapping) + 1
-        for offset, value in enumerate(new_values):
-            mapping[value] = f"{prefix}_{next_index + offset:03d}"
+        maps[column] = extend_code_map(
+            maps.get(column, {}), sorted(values), token_prefix(column, None)
+        )
     return maps
+
+
+def extend_code_map(
+    mapping: dict[str, str], values: list[str], prefix: str
+) -> dict[str, str]:
+    """Return *mapping* extended with codes for any new *values*.
+
+    Existing assignments are preserved; values that already are codes of
+    this mapping are skipped. New values are assigned in random order.
+    """
+    extended = dict(mapping)
+    new_values = sorted(set(values) - set(extended) - set(extended.values()))
+    random.shuffle(new_values)
+    next_index = len(extended) + 1
+    for offset, value in enumerate(new_values):
+        extended[value] = f"{prefix}_{next_index + offset:03d}"
+    return extended
 
 
 # --- Redaction -------------------------------------------------------------------
@@ -727,28 +786,10 @@ def apply_pii_decisions(
                 .alias(column)
             )
         elif decision == "hash":
-            prefix = _token_prefix(column, row["entity_type"])
-            result = result.with_columns(
-                pl.col(column)
-                .cast(pl.String)
-                .map_elements(
-                    lambda v, s=salt, p=prefix: hash_token(v, s, p),
-                    return_dtype=pl.String,
-                )
-                .alias(column)
-            )
+            prefix = token_prefix(column, row["entity_type"])
+            result = result.with_columns(hash_column_expr(column, salt, prefix))
         elif decision == "code":
-            mapping = code_maps[column]
-            result = result.with_columns(
-                pl.when(pl.col(column).is_not_null())
-                .then(
-                    pl.col(column)
-                    .cast(pl.String)
-                    .replace_strict(mapping, default=DEFAULT_MASK)
-                )
-                .otherwise(pl.lit(None, dtype=pl.String))
-                .alias(column)
-            )
+            result = result.with_columns(code_column_expr(column, code_maps[column]))
     return result
 
 
@@ -780,7 +821,7 @@ def redact_correction_log(
             continue
         decision = _effective_decision(row["decision"], mask_undecided)
         if decision == "hash" and salt is not None:
-            hash_prefixes[column] = _token_prefix(column, row["entity_type"])
+            hash_prefixes[column] = token_prefix(column, row["entity_type"])
         elif decision in ("mask", "drop", "code", "hash"):
             masked_columns.append(column)
 
