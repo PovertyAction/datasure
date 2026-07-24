@@ -86,13 +86,14 @@ src/datasure/
 │   └── backchecks.py       #   Back-check comparison workflows
 ├── connectors/
 │   ├── scto.py             # SurveyCTO download/UI (uses utils/scto_api.py)
-│   └── local.py            # Local file import (csv/xlsx/xls/json/dta)
+│   └── local.py            # Local file import (csv/xlsx/xls/json/dta/parquet)
 ├── processing/
 │   ├── prep.py             # Data preparation operations (Polars)
 │   └── corrections.py      # Data correction application
 ├── replication/            # Stata/Python replication package export
 │   ├── package_builder.py, script_generators.py, prep_script_generator.py,
-│   ├── scto_import_generator.py, codebook.py, readme.py
+│   ├── py_script_generators.py, py_prep_script_generator.py,
+│   ├── scto_import_generator.py, codebook.py, data_dict.py, readme.py
 ├── models/
 │   ├── schemas.py          # Pydantic models
 │   └── enums.py            # Prep action/method enums

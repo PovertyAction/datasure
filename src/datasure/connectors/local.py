@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # --- Pydantic Models for Validation ---
 
 # VALID FILE TYPES
-VALID_FILE_TYPES = {".csv", ".xlsx", ".xls", ".json", ".dta"}
+VALID_FILE_TYPES = {".csv", ".xlsx", ".xls", ".json", ".dta", ".parquet"}
 
 
 class FileConfig(BaseModel):
@@ -132,6 +132,9 @@ def load_data_efficiently(filename: str, sheet_name: str | None = None) -> pl.Da
 
         elif file_ext == ".dta":
             return scan_readstat(filename).collect()
+
+        elif file_ext == ".parquet":
+            return pl.read_parquet(filename)
 
         else:
             raise ValueError(f"Unsupported file format: {file_ext}")  # noqa: TRY301
