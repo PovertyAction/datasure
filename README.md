@@ -72,7 +72,7 @@ uv tool upgrade datasure
 
 3. **Import survey data**:
    - Connect directly to your SurveyCTO server
-   - Upload CSV, Excel, Stata (.dta), or JSON files from local storage
+   - Upload CSV, Excel, Stata (.dta), JSON, or Parquet files from local storage
 
 4. **Prepare your data** with the built-in cleaning and transformation tools
 
@@ -111,7 +111,7 @@ DataSure includes 9 specialized modules for comprehensive survey data quality mo
 ### Data Import and Management
 
 - **SurveyCTO Integration**: Direct API connection with form metadata and authentication
-- **Local File Support**: CSV, Excel, Stata (.dta), and JSON upload with automatic type detection
+- **Local File Support**: CSV, Excel, Stata (.dta), JSON, and Parquet upload with automatic type detection
 - **Multi-Project Organization**: Manage multiple surveys simultaneously
 - **Data Preparation**: Cleaning and transformation workflows
 
@@ -150,7 +150,7 @@ The web interface will open in your default browser (typically at `http://localh
 
 - **Import Data Page**: Connect your data sources
 - **SurveyCTO Integration**: Connect to your SurveyCTO server with authentication
-- **Local Files**: Upload CSV, Excel (.xlsx/.xls), Stata (.dta), or JSON files
+- **Local Files**: Upload CSV, Excel (.xlsx/.xls), Stata (.dta), JSON, or Parquet files
 - **Multiple Datasets**: Import and manage up to 10 datasets per project
 
 ### 4. Prepare Data
