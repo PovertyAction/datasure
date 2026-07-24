@@ -16,6 +16,7 @@ from datasure.utils.onboarding_utils import (
     set_onboarding_step,
     show_demo_intro,
 )
+from datasure.utils.ui_utils import confirm_dialog
 
 PROJECTS_FILE: str = "projects.json"
 
@@ -183,18 +184,14 @@ def _handle_demo_project():
                 st.switch_page(st.session_state.st_import_data_page)
         with col2:
             if st.button("Restart Demo", type="secondary", width="stretch"):
-                st.session_state["_demo_confirm_restart"] = True
-
-        if st.session_state.get("_demo_confirm_restart"):
-            st.warning(
-                "**Restarting will permanently delete all your demo progress**, "
-                "including any corrections and data preparation steps you have made. "
-                "This cannot be undone.",
-                icon=":material/warning:",
-            )
-            if st.button("Confirm Restart", type="primary"):
-                st.session_state.pop("_demo_confirm_restart", None)
-                _launch_fresh_demo()
+                confirm_dialog(
+                    "Restart demo",
+                    "Restarting will permanently delete all your demo progress, "
+                    "including any corrections and data preparation steps you have "
+                    "made. This cannot be undone.",
+                    confirm_label="Restart demo",
+                    on_confirm=_launch_fresh_demo,
+                )
     else:
         if st.button("Start Demo", type="primary", width="stretch"):
             _launch_fresh_demo()
@@ -241,20 +238,23 @@ def _handle_existing_project_selection(project: str):
         _show_delete_project_option(project, project_id, projects)
 
 
+def _delete_project_and_reset(project_id: str):
+    """Delete a project and clear it from session state."""
+    delete_project(project_id)
+    if "st_project_id" in st.session_state:
+        st.session_state.st_project_id = ""
+
+
 def _show_delete_project_option(project: str, project_id: str, projects: dict):
     """Show delete project option for non-demo projects."""
-    with st.expander(":material/delete: delete project"):
-        st.warning(
-            f"Permanently deletes **{project}** and all its data, corrections, and logs. "
-            "This cannot be undone.",
-            icon=":material/warning:",
+    if st.button(":material/delete: Delete project", width="stretch"):
+        confirm_dialog(
+            "Delete project",
+            f"This permanently deletes **{project}** and all its data, corrections, "
+            "and logs. This cannot be undone.",
+            confirm_label="Delete project",
+            on_confirm=lambda: _delete_project_and_reset(project_id),
         )
-        if st.button("Confirm delete", width="stretch") and project_id in projects:
-            delete_project(project_id)
-            st.success(f"Project '{project}' deleted successfully!")
-            if "st_project_id" in st.session_state:
-                st.session_state.st_project_id = ""
-            st.rerun()
 
 
 def _render_project_selection_ui():
@@ -413,7 +413,7 @@ _, page_canvas, _ = st.columns([0.1, 0.8, 0.1])
 with page_canvas:
     _render_page_header()
     _render_learn_more_section()
-    st.write("---")
+    st.divider()
     _render_project_selection_ui()
 
 try:

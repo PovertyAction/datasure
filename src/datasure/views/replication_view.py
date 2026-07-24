@@ -24,6 +24,7 @@ from datasure.utils.scto_api import (
     SurveyCTOAPIError,
 )
 from datasure.utils.secure_credentials import retrieve_scto_credentials
+from datasure.utils.ui_utils import page_header, section_header
 
 _PROJECTS_FILE = "projects.json"
 
@@ -207,7 +208,7 @@ def _fetch_scto_assets(
 
 
 def _on_progress(msg: str) -> None:
-    st.write(f":white_check_mark: {msg}")
+    st.write(f":material/check_circle: {msg}")
 
 
 def _render_config_details(page_configs: pl.DataFrame) -> None:
@@ -263,10 +264,10 @@ if configs.is_empty():
 demo_sidebar_help()
 add_demo_navigation("replication_view.py", step=7)
 
-st.title("Replication Package")
-st.markdown(
-    "Export a self-contained Stata replication package that allows anyone to "
-    "reproduce your corrected dataset from the raw source data."
+page_header(
+    "Export Replication Package",
+    "Bundle a self-contained Stata replication package so anyone can reproduce "
+    "your corrected dataset from the raw source data.",
 )
 
 demo_callout(
@@ -302,7 +303,7 @@ st.divider()
 
 # ── Page selector ─────────────────────────────────────────────────────────────
 
-st.subheader("Configure export")
+section_header("Configure export")
 
 page_name_col, _ = st.columns(2)
 with page_name_col:
@@ -358,7 +359,7 @@ if st.button(
         if scto_error:
             st.warning(f"Questionnaire not included: {scto_error}")
         elif scto_xlsx:
-            st.write(":white_check_mark: Questionnaire downloaded")
+            st.write(":material/check_circle: Questionnaire downloaded")
 
         zip_bytes = build_replication_package(
             project_id=project_id,
@@ -381,12 +382,7 @@ if st.button(
 # ── Download ──────────────────────────────────────────────────────────────────
 
 if "_replication_zip" in st.session_state:
-    st.success("Package ready — confirm below before downloading.")
-    st.warning(
-        "**Before downloading:** this zip contains PII. "
-        "Confirm you are saving it to an encrypted location.",
-        icon=":material/lock:",
-    )
+    st.success("Package ready — confirm the PII notice above, then download.")
     pii_confirmed = st.checkbox(
         "I confirm I am downloading this package to an encrypted, "
         "access-controlled storage location.",

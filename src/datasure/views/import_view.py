@@ -34,9 +34,7 @@ from datasure.utils.secure_credentials import (
     test_keyring_availability,
 )
 from datasure.utils.settings_utils import trigger_save
-
-# --- Constants --- #
-CREDENTIAL_TYPE = ("SurveyCTO Login", "SurveyCTO Private Key")
+from datasure.utils.ui_utils import confirm_dialog, page_header, section_header
 
 # --- CONFIGURE PAGE --- #
 # Page title and layout are set globally in app.py via st.set_page_config; the
@@ -46,8 +44,10 @@ CREDENTIAL_TYPE = ("SurveyCTO Login", "SurveyCTO Private Key")
 add_demo_navigation("import_view.py", step=2)
 demo_sidebar_help()
 
-st.title("Import Data")
-st.write("---")
+page_header(
+    "Import Data",
+    "Connect a data source and load survey data into your project.",
+)
 
 # --- define project ID --- #
 project_id = st.session_state.st_project_id
@@ -236,7 +236,7 @@ if is_demo_project():
         "to **Preview Imported Data** to explore it."
     )
 with st.container(border=True):
-    st.subheader(":material/key: Manage Credentials")
+    section_header("Manage Credentials", icon=":material/key:")
     st.write("Import and manage your credentials for data import.")
 
     kc1, kc2, kc3 = st.columns([0.4, 0.3, 0.3])
@@ -245,16 +245,8 @@ with st.container(border=True):
         kc1,
         st.popover("Add Credentials", width="stretch", icon=":material/add:"),
     ):
-        st.write("Add your credentials for data import.")
-        select_cred_type = st.selectbox(
-            "Select Credential Type",
-            options=CREDENTIAL_TYPE,
-            index=0,
-            key="cred_type_select",
-            disabled=True,
-        )
-        if select_cred_type == "SurveyCTO Login":
-            SurveyCTOUI(project_id).render_login_form()
+        st.write("Add your SurveyCTO login credentials for data import.")
+        SurveyCTOUI(project_id).render_login_form()
 
     with (
         kc2,
@@ -303,80 +295,101 @@ with st.container(border=True):
                 - **Linux**: Install and configure a keyring backend (gnome-keyring, kwallet)
                 """)
 
-st.subheader("Import data from multiple sources")
+with st.container(border=True):
+    section_header("Import Data From Sources", icon=":material/database:")
+    st.write("Add, edit, or remove the data sources for this project.")
 
-# -- Add configurations for import data -- #
-ac1, ac2, ac3 = st.columns([0.4, 0.4, 0.2])
-aliases = duckdb_get_aliases(project_id, to_load=False)
-with (
-    ac1,
-    st.popover("Add Import Configuration", width="stretch", icon=":material/add:"),
-):
-    import_type = st.selectbox(
-        "Import Type", options=["local storage", "SurveyCTO"], index=None
-    )
-    if import_type == "local storage":
-        render_local_file_form(project_id)
-    elif import_type == "SurveyCTO":
-        SurveyCTOUI(project_id).render_form_config()
-with (
-    ac2,
-    st.popover(
-        "Edit Import Configuration",
-        width="stretch",
-        icon=":material/edit:",
-        disabled=not aliases,
-    ),
-):
-    edit_config = st.selectbox(
-        "Select Data to Edit",
-        options=aliases,
-        index=None,
-    )
-    if edit_config:
-        import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
-        # -- Get the selected import configuration details -- #
-        selected_config = import_log.filter(pl.col("alias") == edit_config).to_dicts()[
-            0
-        ]
-        if selected_config["source"] == "local storage":
-            render_local_file_form(project_id, edit_mode=True, defaults=selected_config)
-        elif selected_config["source"] == "SurveyCTO":
-            SurveyCTOUI(project_id).render_form_config(
-                edit_mode=True, defaults=selected_config
-            )
-        else:
-            st.error("Invalid import source.")
-with (
-    ac3,
-    st.popover(
-        "Remove Import Configuration",
-        width="stretch",
-        icon=":material/clear:",
-        disabled=not aliases,
-    ),
-):
-    st.warning("This will remove the import configuration.")
-    remove_column_options = duckdb_get_aliases(project_id, to_load=False)
-    remove_data = st.selectbox(
-        "Select Data to Remove", options=remove_column_options, index=None
-    )
-    if st.button("Remove Data", type="primary", width="stretch"):
-        duckdb_delete_rows(
-            project_id=project_id,
-            alias="import_log",
-            db_name="logs",
-            column="alias",
-            value=remove_data,
+    # -- Add configurations for import data -- #
+    ac1, ac2, ac3 = st.columns([0.4, 0.4, 0.2])
+    aliases = duckdb_get_aliases(project_id, to_load=False)
+    with (
+        ac1,
+        st.popover("Add Import Configuration", width="stretch", icon=":material/add:"),
+    ):
+        import_type = st.selectbox(
+            "Import Type", options=["local storage", "SurveyCTO"], index=None
         )
-        duckdb_remove_table(project_id, alias=remove_data, db_name="raw")
-        # check if the table exist in prep, if yes remove it
-        if duckdb_table_exists(project_id, alias=remove_data, db_name="prep"):
-            duckdb_remove_table(project_id, alias=remove_data, db_name="prep")
-        # check if the table exist in corrected db, if yes remove it
-        if duckdb_table_exists(project_id, alias=remove_data, db_name="corrected"):
-            duckdb_remove_table(project_id, alias=remove_data, db_name="corrected")
-        st.session_state.st_raw_dataset_list = duckdb_get_aliases(project_id)
+        if import_type == "local storage":
+            render_local_file_form(project_id)
+        elif import_type == "SurveyCTO":
+            SurveyCTOUI(project_id).render_form_config()
+    with (
+        ac2,
+        st.popover(
+            "Edit Import Configuration",
+            width="stretch",
+            icon=":material/edit:",
+            disabled=not aliases,
+        ),
+    ):
+        edit_config = st.selectbox(
+            "Select Data to Edit",
+            options=aliases,
+            index=None,
+        )
+        if edit_config:
+            import_log = duckdb_get_table(
+                project_id, alias="import_log", db_name="logs"
+            )
+            # -- Get the selected import configuration details -- #
+            selected_config = import_log.filter(
+                pl.col("alias") == edit_config
+            ).to_dicts()[0]
+            if selected_config["source"] == "local storage":
+                render_local_file_form(
+                    project_id, edit_mode=True, defaults=selected_config
+                )
+            elif selected_config["source"] == "SurveyCTO":
+                SurveyCTOUI(project_id).render_form_config(
+                    edit_mode=True, defaults=selected_config
+                )
+            else:
+                st.error("Invalid import source.")
+    with (
+        ac3,
+        st.popover(
+            "Remove Import Configuration",
+            width="stretch",
+            icon=":material/clear:",
+            disabled=not aliases,
+        ),
+    ):
+        remove_column_options = duckdb_get_aliases(project_id, to_load=False)
+        remove_data = st.selectbox(
+            "Select Data to Remove",
+            options=remove_column_options,
+            index=None,
+            key="remove_import_config_select",
+        )
+
+        def _remove_import_configuration(alias: str):
+            """Remove an import configuration and its raw/prep/corrected data."""
+            duckdb_delete_rows(
+                project_id=project_id,
+                alias="import_log",
+                db_name="logs",
+                column="alias",
+                value=alias,
+            )
+            duckdb_remove_table(project_id, alias=alias, db_name="raw")
+            # check if the table exist in prep, if yes remove it
+            if duckdb_table_exists(project_id, alias=alias, db_name="prep"):
+                duckdb_remove_table(project_id, alias=alias, db_name="prep")
+            # check if the table exist in corrected db, if yes remove it
+            if duckdb_table_exists(project_id, alias=alias, db_name="corrected"):
+                duckdb_remove_table(project_id, alias=alias, db_name="corrected")
+            st.session_state.st_raw_dataset_list = duckdb_get_aliases(project_id)
+
+        if st.button(
+            "Remove Data", type="primary", width="stretch", disabled=not remove_data
+        ):
+            confirm_dialog(
+                "Remove import configuration",
+                f"This permanently removes **{remove_data}** and its imported, "
+                "prepared, and corrected data. This cannot be undone.",
+                confirm_label="Remove",
+                on_confirm=lambda: _remove_import_configuration(remove_data),
+            )
 
 import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
 if not import_log.is_empty():
@@ -416,7 +429,7 @@ if not import_log.is_empty():
         # --- Preview imported data --- #
         # activate prep section
 
-        st.subheader("Preview Imported Data")
+        section_header("Preview Imported Data")
 
         # Demo guidance
         if is_demo_project():
@@ -468,7 +481,7 @@ if not import_log.is_empty():
 
         # Demo next action
         if is_demo_project():
-            st.write("---")
+            st.divider()
             show_demo_next_action(2, "st_prep_data_page", "Prepare Your Data")
 
 else:

@@ -36,6 +36,7 @@ from datasure.utils.navigations_utils import (
 from datasure.utils.settings_utils import (
     get_check_config_settings,
 )
+from datasure.utils.ui_utils import page_header
 
 
 @dataclass
@@ -502,7 +503,10 @@ def main() -> None:
 
     # Set page title
     page_title = get_page_title(page_number, check_log)
-    st.title(page_title)
+    page_header(
+        page_title,
+        "Review the results of the data quality checks configured for this page.",
+    )
 
     # Load page configuration
     config = load_page_config(project_id, page_number)

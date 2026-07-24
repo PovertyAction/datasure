@@ -24,6 +24,7 @@ from datasure.utils.onboarding_utils import (
     demo_expander,
     is_demo_project,
 )
+from datasure.utils.ui_utils import page_header, section_header
 
 # Add demo navigation and guidance (skip during tests)
 if "pytest" not in sys.modules:
@@ -57,13 +58,10 @@ def _get_project_id() -> str:
 
 def _render_header() -> None:
     """Render page header and description."""
-    st.title("Configure Checks")
-    st.markdown("Set up the quality checks DataSure will run on your survey data.")
-
-
-def _render_demo_guidance() -> None:
-    """Render demo project guidance if applicable."""
-    pass
+    page_header(
+        "Configure Checks",
+        "Set up the quality checks DataSure will run on your survey data.",
+    )
 
 
 def _render_configuration_actions(project_id: str, alias_list: list[str]) -> None:
@@ -124,7 +122,7 @@ def _render_navigation(config_service: ConfigurationService) -> None:
     check_config_log = config_service.get_all_configurations()
 
     if is_demo_project():
-        st.write("---")
+        st.divider()
 
         if check_config_log.is_empty():
             demo_callout(
@@ -167,8 +165,7 @@ def main() -> None:
     # Render page sections
     _render_header()
 
-    st.subheader("Check Configurations")
-    _render_demo_guidance()
+    section_header("Check Configurations")
 
     _render_configuration_actions(project_id, alias_list)
     _render_configurations_display(config_service)
