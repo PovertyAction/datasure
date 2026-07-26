@@ -7,6 +7,8 @@ from datasure.connectors.scto import (
     SurveyCTOUI,
     download_forms,
 )
+from datasure.processing.corrections import CorrectionProcessor
+from datasure.processing.prep import prep_apply_action
 from datasure.utils.duckdb_utils import (
     duckdb_delete_rows,
     duckdb_get_aliases,
@@ -121,8 +123,23 @@ def _process_single_import(project_id: str, row: dict) -> None:
     """Process a single import configuration row."""
     if row["refresh"]:
         _load_dataset_by_source(project_id, row)
+        _refresh_downstream_data(project_id, row["alias"])
 
     _add_to_session_state(row["alias"])
+
+
+def _refresh_downstream_data(project_id: str, alias: str) -> None:
+    """Rebuild prep and corrected data after a raw dataset refresh.
+
+    Without this, the Prep and Correction pages keep showing data derived
+    from the previous import, since both stages are cached copies that are
+    otherwise only rebuilt when a prep step or correction is removed.
+    """
+    if duckdb_table_exists(project_id, alias=alias, db_name="prep"):
+        prep_apply_action(project_id, alias)
+
+    if duckdb_table_exists(project_id, alias=alias, db_name="corrected"):
+        CorrectionProcessor(project_id).refresh_corrected_data(alias)
 
 
 def _load_dataset_by_source(project_id: str, row: dict) -> None:

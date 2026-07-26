@@ -513,6 +513,20 @@ class CorrectionProcessor:
         # Reapply all remaining corrections
         self._reapply_all_corrections(alias)
 
+    def refresh_corrected_data(self, alias: str) -> None:
+        """Rebuild corrected data from the current prep data.
+
+        Used after an upstream refresh (e.g. re-importing raw data)
+        invalidates the corrected table, so downstream pages stop serving
+        cached results built on stale prep data.
+
+        Parameters
+        ----------
+        alias : str
+            The data alias/table name
+        """
+        self._reapply_all_corrections(alias)
+
     def _reapply_all_corrections(self, alias: str) -> None:
         """Reapply all corrections from the log to fresh data.
 
@@ -521,7 +535,6 @@ class CorrectionProcessor:
         alias : str
             The data alias/table name
         """
-        # Get fresh data from prep database
         fresh_data = duckdb_get_table(
             project_id=self.project_id,
             alias=alias,
@@ -532,52 +545,79 @@ class CorrectionProcessor:
             # If no prep data, nothing to correct
             return
 
-        # Get updated correction log
         correction_log = self.get_correction_log(alias)
 
-        if correction_log.is_empty():
-            # No corrections to apply, save fresh data as corrected
-            self.save_corrected_data(alias, fresh_data)
-            return
-
-        # Apply all corrections in sequence
         corrected_data = fresh_data
-
         for row in correction_log.iter_rows(named=True):
-            action = row["action"]
-            key_col = None  # We need to get this from the first non-null column
-            key_value = row["KEY"]
-            column = row["column"]
-            new_value = row["new_value"]
+            corrected_data = self._apply_correction_row(corrected_data, row)
 
-            # Find key column by looking for a column that contains the key value
-            for col in corrected_data.columns:
-                if key_value in corrected_data[col].to_list():
-                    key_col = col
-                    break
-
-            if not key_col:
-                continue  # Skip if key column not found
-
-            try:
-                if action == "modify value" and column and new_value is not None:
-                    corrected_data = self._apply_modify_value(
-                        corrected_data, key_col, key_value, column, new_value
-                    )
-                elif action == "remove value" and column:
-                    corrected_data = self._apply_remove_value(
-                        corrected_data, key_col, key_value, column
-                    )
-                elif action == "remove row":
-                    corrected_data = self._apply_remove_row(
-                        corrected_data, key_col, key_value
-                    )
-            except Exception:
-                # Skip corrections that fail (data may have changed)
-                continue
-
-        # Save the reapplied corrections
         self.save_corrected_data(alias, corrected_data)
+
+    def _apply_correction_row(
+        self, data: pl.DataFrame, row: dict[str, Any]
+    ) -> pl.DataFrame:
+        """Apply one correction-log row to data.
+
+        Returns `data` unchanged if the row's key can't be located, or if
+        applying the correction fails (the underlying data may have changed
+        since the correction was logged).
+
+        Parameters
+        ----------
+        data : pl.DataFrame
+            The data to apply the correction to
+        row : dict[str, Any]
+            A single row from the correction log
+
+        Returns
+        -------
+        pl.DataFrame
+            The data with the correction applied, or unchanged on failure
+        """
+        key_value = row["KEY"]
+        key_col = self._find_key_column(data, key_value)
+        if not key_col:
+            return data
+
+        action = row["action"]
+        column = row["column"]
+        new_value = row["new_value"]
+
+        try:
+            if action == "modify value" and column and new_value is not None:
+                return self._apply_modify_value(
+                    data, key_col, key_value, column, new_value
+                )
+            if action == "remove value" and column:
+                return self._apply_remove_value(data, key_col, key_value, column)
+            if action == "remove row":
+                return self._apply_remove_row(data, key_col, key_value)
+        except Exception:
+            # Skip corrections that fail (data may have changed)
+            pass
+
+        return data
+
+    @staticmethod
+    def _find_key_column(data: pl.DataFrame, key_value: str) -> str | None:
+        """Find the first column containing the given key value.
+
+        Parameters
+        ----------
+        data : pl.DataFrame
+            The data to search
+        key_value : str
+            The key value to look for
+
+        Returns
+        -------
+        str | None
+            The matching column name, or None if not found
+        """
+        for col in data.columns:
+            if key_value in data[col].to_list():
+                return col
+        return None
 
     @st.cache_data(ttl=30, show_spinner=False)
     def get_correction_summary(_self, alias: str) -> list[dict[str, Any]]:
