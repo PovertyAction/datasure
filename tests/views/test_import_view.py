@@ -726,7 +726,7 @@ class TestCredentialsSection:
                 ),
             },
             button_labels={"Delete Credentials"},
-            selectbox_map={"Select Crendetials to Deleted": "Test Cred"},
+            selectbox_map={"Select Credentials to Delete": "Test Cred"},
         ) as iv:
             iv.delete_stored_credentials.assert_called_once()
 

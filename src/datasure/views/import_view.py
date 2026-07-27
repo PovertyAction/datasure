@@ -272,7 +272,7 @@ with st.container(border=True):
         st.write("**Remove Credentials**")
         saved_credentials = list_stored_credentials(project_id).get("credentials", {})
         select_credentials = st.selectbox(
-            "Select Crendetials to Deleted",
+            "Select Credentials to Delete",
             options=saved_credentials.keys(),
             index=None,
         )
