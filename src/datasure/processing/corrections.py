@@ -615,8 +615,11 @@ class CorrectionProcessor:
             The matching column name, or None if not found
         """
         for col in data.columns:
-            if key_value in data[col].to_list():
-                return col
+            try:
+                if data[col].is_in([key_value]).any():
+                    return col
+            except Exception:
+                continue
         return None
 
     @st.cache_data(ttl=30, show_spinner=False)
