@@ -38,6 +38,7 @@ from datasure.utils.prep_utils import (
     PrepActionResult,
     PrepDescriptions,
 )
+from datasure.utils.reapply_utils import warn_reapply_failures
 from datasure.utils.ui_utils import (
     confirm_dialog,
     metric_row,
@@ -967,8 +968,11 @@ def prep_remove_step():
                     alias=f"prep_log_{alias}",
                     db_name="logs",
                 )
-                prep_apply_action(project_id, alias)
+                failures = prep_apply_action(project_id, alias)
                 st.success(f"Action '{action_desc}' removed successfully!")
+                warn_reapply_failures(
+                    failures, "Some preparation steps could not be reapplied"
+                )
 
             if st.button(
                 label="Remove",

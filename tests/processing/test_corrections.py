@@ -609,10 +609,11 @@ class TestCorrectionProcessor:
             pl.DataFrame(),  # empty log after removal
         ]
 
-        processor.remove_correction_entry("test_alias", 1)
+        failures = processor.remove_correction_entry("test_alias", 1)
 
         # Should save the updated log and reapplied data
         assert mock_save.call_count == 2
+        assert failures == []
 
     def test_remove_correction_entry_invalid_index(
         self, correction_processor, sample_corrections_log
@@ -647,10 +648,11 @@ class TestCorrectionProcessor:
         processor, mock_get, mock_save = correction_processor
         mock_get.return_value = pl.DataFrame()  # Empty prep data
 
-        processor._reapply_all_corrections("test_alias")
+        failures = processor._reapply_all_corrections("test_alias")
 
         # Should not save anything when prep data is empty
         mock_save.assert_not_called()
+        assert failures == []
 
     def test_reapply_all_corrections_empty_log(self, correction_processor, sample_data):
         """Test reapplying corrections when correction log is empty."""
@@ -658,10 +660,11 @@ class TestCorrectionProcessor:
         # Mock sequence: get prep data, get empty log
         mock_get.side_effect = [sample_data, pl.DataFrame()]
 
-        processor._reapply_all_corrections("test_alias")
+        failures = processor._reapply_all_corrections("test_alias")
 
         # Should save the fresh prep data as corrected data
         mock_save.assert_called_once()
+        assert failures == []
 
     def test_reapply_all_corrections_with_data(
         self, correction_processor, sample_data, sample_corrections_log
@@ -671,13 +674,14 @@ class TestCorrectionProcessor:
         # Mock sequence: get prep data, get correction log
         mock_get.side_effect = [sample_data, sample_corrections_log]
 
-        processor._reapply_all_corrections("test_alias")
+        failures = processor._reapply_all_corrections("test_alias")
 
         # Should save corrected data after applying all corrections
         mock_save.assert_called_once()
         call_args = mock_save.call_args
         assert call_args[1]["alias"] == "test_alias"
         assert call_args[1]["db_name"] == "corrected"
+        assert failures == []
 
     def test_reapply_corrections_key_not_found(self, correction_processor, sample_data):
         """Test reapplying corrections when key value not found in data."""
@@ -699,10 +703,42 @@ class TestCorrectionProcessor:
 
         mock_get.side_effect = [sample_data, invalid_log]
 
-        processor._reapply_all_corrections("test_alias")
+        failures = processor._reapply_all_corrections("test_alias")
 
         # Should still save data even if some corrections fail
         mock_save.assert_called_once()
+        # ... and the skipped correction should be reported, not swallowed
+        assert len(failures) == 1
+        assert "nonexistent_key" in failures[0].reason
+
+    def test_reapply_corrections_partial_failure_continues(
+        self, correction_processor, sample_data
+    ):
+        """One bad correction is skipped and reported; the rest still apply."""
+        processor, mock_get, mock_save = correction_processor
+
+        mixed_log = pl.DataFrame(
+            {
+                "date": [datetime.now()] * 2,
+                "KEY": ["nonexistent_key", "key1"],
+                "ID": [None, None],
+                "action": ["modify value", "modify value"],
+                "column": ["name", "name"],
+                "current_value": ["test", "John"],
+                "new_value": ["changed", "Johnny"],
+                "reason": ["bad correction", "good correction"],
+            }
+        )
+
+        mock_get.side_effect = [sample_data, mixed_log]
+
+        failures = processor._reapply_all_corrections("test_alias")
+
+        mock_save.assert_called_once()
+        saved_data = mock_save.call_args[1]["table_data"]
+        assert saved_data.filter(pl.col("survey_key") == "key1")["name"][0] == "Johnny"
+        assert len(failures) == 1
+        assert "nonexistent_key" in failures[0].reason
 
     def test_reapply_corrections_exception_handling(
         self, correction_processor, sample_data
@@ -727,10 +763,14 @@ class TestCorrectionProcessor:
         mock_get.side_effect = [sample_data, problematic_log]
 
         # Should not raise exception, just skip problematic corrections
-        processor._reapply_all_corrections("test_alias")
+        failures = processor._reapply_all_corrections("test_alias")
 
         # Should still save data
         mock_save.assert_called_once()
+        # ... and report the skipped correction instead of swallowing it
+        assert len(failures) == 1
+        assert failures[0].reason
+        assert "key1" in failures[0].step
 
     def test_private_apply_modify_value_string(self, correction_processor, sample_data):
         """Test private method _apply_modify_value with string column."""

@@ -21,6 +21,7 @@ from datasure.utils.navigations_utils import (
     page_navigation,
 )
 from datasure.utils.onboarding_utils import ImportDemoInfo, demo_expander
+from datasure.utils.reapply_utils import warn_reapply_failures
 from datasure.utils.settings_utils import get_check_config_settings
 from datasure.utils.ui_utils import (
     confirm_dialog,
@@ -876,9 +877,12 @@ def _handle_remove_correction(
         )
 
         # Remove the correction
-        correction_processor.remove_correction_entry(alias, correction_index)
+        failures = correction_processor.remove_correction_entry(alias, correction_index)
 
         st.success(f"Correction '{selected_action}' removed successfully!")
+        warn_reapply_failures(
+            failures, "Some remaining corrections could not be reapplied"
+        )
         st.rerun()
 
     except Exception as e:
