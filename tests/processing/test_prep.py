@@ -1372,16 +1372,18 @@ class TestPrepProcessor:
                 )
             ),
         ]
-        result = processor.execute_all_actions(data, actions)
+        result, failures = processor.execute_all_actions(data, actions)
         assert "c" not in result.columns
         assert "new" in result.columns
+        assert failures == []
 
     def test_execute_all_actions_empty(self):
         """Test Execute all actions empty."""
         processor = PrepProcessor()
         data = pl.DataFrame({"a": [1, 2]})
-        result = processor.execute_all_actions(data, [])
+        result, failures = processor.execute_all_actions(data, [])
         assert result.equals(data)
+        assert failures == []
 
     def test_execute_all_actions_failure(self):
         """Test Execute all actions failure."""
@@ -1394,9 +1396,31 @@ class TestPrepProcessor:
                 )
             )
         ]
-        # Domain errors raised by individual actions propagate unwrapped
-        with pytest.raises(OperationError, match="Columns not found"):
-            processor.execute_all_actions(data, actions)
+        # A failing action is skipped (not raised) and reported as a failure
+        result, failures = processor.execute_all_actions(data, actions)
+        assert result.equals(data)
+        assert len(failures) == 1
+        assert "Columns not found" in failures[0].reason
+
+    def test_execute_all_actions_partial_failure_continues(self):
+        """A failing action is skipped but later actions still apply."""
+        processor = PrepProcessor()
+        data = pl.DataFrame({"a": [1, 2], "b": [3, 4]})
+        actions = [
+            PrepAction.from_args(
+                PrepActionResult(
+                    action="remove column(s)", source_columns=["nonexistent"]
+                )
+            ),
+            PrepAction.from_args(
+                PrepActionResult(action="remove column(s)", source_columns=["b"])
+            ),
+        ]
+        result, failures = processor.execute_all_actions(data, actions)
+        assert "b" not in result.columns
+        assert "a" in result.columns
+        assert len(failures) == 1
+        assert "Columns not found" in failures[0].reason
 
 
 # === LOG MANAGEMENT TESTS === #
@@ -1612,10 +1636,64 @@ class TestLogManagement:
             }
         )
         processor = PrepProcessor()
-        _reapply_all_actions("proj", "alias", log, processor)
+        failures = _reapply_all_actions("proj", "alias", log, processor)
         mock_save.assert_called_once()
         saved_data = mock_save.call_args[0][1]
         assert "b" not in saved_data.columns
+        assert failures == []
+
+    @patch("datasure.processing.prep.duckdb_get_table")
+    @patch("datasure.processing.prep.duckdb_save_table")
+    def test_reapply_all_actions_partial_failure(self, mock_save, mock_get):
+        """A step referencing a column dropped upstream is skipped, not raised.
+
+        The rest of the log (a step on a still-present column) still applies,
+        and the save reflects that partial result plus the reported failure.
+        """
+        raw_data = pl.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
+        mock_get.return_value = raw_data
+        log = pl.DataFrame(
+            {
+                "prep_args": [
+                    str(
+                        {
+                            "action": "remove column(s)",
+                            "source_columns": ["missing_column"],
+                            "column_names": None,
+                            "affected_count": None,
+                            "remaining_count": None,
+                            "value": None,
+                            "method": None,
+                            "condition": None,
+                            "failed_count": None,
+                            "additional_info": None,
+                        }
+                    ),
+                    str(
+                        {
+                            "action": "remove column(s)",
+                            "source_columns": ["b"],
+                            "column_names": None,
+                            "affected_count": None,
+                            "remaining_count": None,
+                            "value": None,
+                            "method": None,
+                            "condition": None,
+                            "failed_count": None,
+                            "additional_info": None,
+                        }
+                    ),
+                ]
+            }
+        )
+        processor = PrepProcessor()
+        failures = _reapply_all_actions("proj", "alias", log, processor)
+
+        saved_data = mock_save.call_args[0][1]
+        assert "b" not in saved_data.columns
+        assert "a" in saved_data.columns
+        assert len(failures) == 1
+        assert "Columns not found" in failures[0].reason
 
     @patch("datasure.processing.prep.duckdb_get_table")
     @patch("datasure.processing.prep.duckdb_save_table")
@@ -1688,9 +1766,41 @@ class TestPrepApplyAction:
         )
         raw_data = pl.DataFrame({"a": [1, 2], "b": [3, 4]})
         mock_get.side_effect = [log, raw_data]
-        prep_apply_action("proj", "alias", prep_args=None)
+        failures = prep_apply_action("proj", "alias", prep_args=None)
         assert mock_get.call_count == 2
         mock_save.assert_called()
+        assert failures == []
+
+    @patch("datasure.processing.prep.duckdb_get_table")
+    @patch("datasure.processing.prep.duckdb_save_table")
+    def test_reapply_all_reports_partial_failure(self, mock_save, mock_get):
+        """A failing step during reapply-all is reported, not raised."""
+        log = pl.DataFrame(
+            {
+                "prep_args": [
+                    str(
+                        {
+                            "action": "remove column(s)",
+                            "source_columns": ["missing_column"],
+                            "column_names": None,
+                            "affected_count": None,
+                            "remaining_count": None,
+                            "value": None,
+                            "method": None,
+                            "condition": None,
+                            "failed_count": None,
+                            "additional_info": None,
+                        }
+                    )
+                ]
+            }
+        )
+        raw_data = pl.DataFrame({"a": [1, 2], "b": [3, 4]})
+        mock_get.side_effect = [log, raw_data]
+        failures = prep_apply_action("proj", "alias", prep_args=None)
+        assert mock_save.called  # data still saved, unmodified
+        assert len(failures) == 1
+        assert "Columns not found" in failures[0].reason
 
     @patch("datasure.processing.prep.duckdb_get_table")
     @patch("datasure.processing.prep.duckdb_save_table")

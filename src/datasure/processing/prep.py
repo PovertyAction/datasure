@@ -28,6 +28,7 @@ from datasure.utils.prep_utils import (
     PrepActionResult,
     PrepConfirmationMessages,
 )
+from datasure.utils.reapply_utils import ReapplyFailure
 
 # === EXCEPTIONS === #
 
@@ -835,19 +836,32 @@ class PrepProcessor:
 
     def execute_all_actions(
         self, data: pl.DataFrame, actions: list[PrepAction]
-    ) -> pl.DataFrame:
-        """Execute a sequence of preparation actions."""
+    ) -> tuple[pl.DataFrame, list[ReapplyFailure]]:
+        """Execute a sequence of preparation actions.
+
+        An action that fails is skipped - the data is left as it was before
+        that action - so a single step made incompatible by upstream changes
+        (e.g. a re-import that renames/drops a column an earlier step relied
+        on) does not abort the rest of the sequence.
+
+        Returns
+        -------
+            Tuple of the resulting data and the list of actions that were
+            skipped because they failed.
+        """
         result_data = data
+        failures: list[ReapplyFailure] = []
 
         for action in actions:
+            step_description = _generate_action_description(action.prep_args)
             try:
                 result_data, _ = self.execute_single_action(result_data, action)
-            except (ValidationError, OperationError):
-                raise
+            except (ValidationError, OperationError) as e:
+                failures.append(ReapplyFailure(step=step_description, reason=str(e)))
             except Exception as e:
-                raise OperationError(f"Failed to execute action '{action}': {e}") from e
+                failures.append(ReapplyFailure(step=step_description, reason=str(e)))
 
-        return result_data
+        return result_data, failures
 
 
 # === LOG MANAGEMENT (PRIVATE) === #
@@ -869,7 +883,7 @@ def _parse_prep_log_to_actions(prep_log_df: pl.DataFrame) -> list[PrepAction]:
         if isinstance(args, str):
             try:
                 args = json.loads(args)
-            except (json.JSONDecodeError, ValueError):
+            except ValueError:
                 args = ast.literal_eval(args)
         prep_action = PrepActionResult(**args)
         actions.append(PrepAction.from_args(prep_action))
@@ -967,7 +981,7 @@ def _reapply_all_actions(
     alias: str,
     prep_log_df: pl.DataFrame,
     processor: PrepProcessor,
-) -> None:
+) -> list[ReapplyFailure]:
     """Re-apply all actions from the log to the raw data.
 
     Args:
@@ -975,16 +989,21 @@ def _reapply_all_actions(
         alias: Dataset alias
         prep_log_df: DataFrame containing the preparation log
         processor: PrepProcessor instance for executing actions
+
+    Returns
+    -------
+        List of actions that were skipped because they failed to reapply.
     """
     raw_data = duckdb_get_table(project_id, alias, db_name="raw")
 
     if prep_log_df.is_empty():
         duckdb_save_table(project_id, raw_data, alias, db_name="prep")
-        return
+        return []
 
     existing_actions = _parse_prep_log_to_actions(prep_log_df)
-    result_data = processor.execute_all_actions(raw_data, existing_actions)
+    result_data, failures = processor.execute_all_actions(raw_data, existing_actions)
     duckdb_save_table(project_id, result_data, alias, db_name="prep")
+    return failures
 
 
 def _apply_single_action(
@@ -1029,7 +1048,7 @@ def prep_apply_action(
     project_id: str,
     alias: str,
     prep_args: PrepActionResult | None = None,
-) -> None:
+) -> list[ReapplyFailure]:
     """Apply data preparation action to dataset.
 
     When prep_args is provided, applies the single new action to the current
@@ -1041,15 +1060,23 @@ def prep_apply_action(
         alias: Dataset alias
         prep_args: Optional action to apply. If None, re-applies all logged actions.
 
+    Returns
+    -------
+        List of actions skipped while re-applying the full log. Always empty
+        when applying a single new action (prep_args is not None).
+
     Raises
     ------
-        ValidationError: If action/description validation fails
-        OperationError: If data operation fails
+        ValidationError: If action/description validation fails (only when
+            applying a single new action)
+        OperationError: If data operation fails (only when applying a single
+            new action)
     """
     processor = PrepProcessor()
     prep_log_df = duckdb_get_table(project_id, f"prep_log_{alias}", db_name="logs")
 
     if prep_args is None:
-        _reapply_all_actions(project_id, alias, prep_log_df, processor)
-    else:
-        _apply_single_action(project_id, alias, prep_args, prep_log_df, processor)
+        return _reapply_all_actions(project_id, alias, prep_log_df, processor)
+
+    _apply_single_action(project_id, alias, prep_args, prep_log_df, processor)
+    return []
