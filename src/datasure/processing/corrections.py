@@ -541,8 +541,8 @@ class CorrectionProcessor:
             db_name="prep",
         )
 
-        if fresh_data.is_empty():
-            # If no prep data, nothing to correct
+        if fresh_data.width == 0:
+            # Prep table doesn't exist yet, nothing to correct
             return
 
         correction_log = self.get_correction_log(alias)
