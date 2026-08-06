@@ -991,10 +991,12 @@ def prep_remove_step():
                 )
 
 
-def _highlight_failed_status(value: str) -> str:
-    """Style a Change Log status cell; highlights failed steps in red."""
+def _highlight_status(value: str) -> str:
+    """Style a Change Log status cell: green text for Successful, red for Failed."""
     if value == "Failed":
-        return "background-color: #dc3545; color: white; font-weight: 600"
+        return "color: #dc3545; font-weight: 600"
+    if value == "Successful":
+        return "color: #198754; font-weight: 600"
     return ""
 
 
@@ -1101,9 +1103,7 @@ if show_prep_page_info:
                         ["action", "status", "description"]
                     ].to_pandas()
                     st.dataframe(
-                        change_log.style.map(
-                            _highlight_failed_status, subset=["status"]
-                        ),
+                        change_log.style.map(_highlight_status, subset=["status"]),
                         width="stretch",
                         key=label,
                         hide_index=False,
