@@ -198,6 +198,9 @@ class CorrectionProcessor:
             alias=f"corr_log_{alias}",
             db_name="logs",
         )
+        # Clear correction log cache so the new entry shows immediately
+        self.get_correction_log.clear()
+        self.get_correction_summary.clear()
 
     def apply_correction(
         self,
