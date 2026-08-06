@@ -198,6 +198,51 @@ class TestCorrectionProcessor:
         assert saved_df["new_value"][0] == "Johnny"
         assert saved_df["KEY"][0] == "key1"
 
+    def test_add_correction_entry_clears_log_cache(self, correction_processor):
+        """Adding an entry must invalidate the cached log/summary.
+
+        Without clearing the cache, the correction log and summary keep
+        serving the pre-add snapshot for up to the cache TTL, so a freshly
+        added correction doesn't show up right away.
+        """
+        processor, mock_get, _ = correction_processor
+
+        empty_log = pl.DataFrame(
+            {
+                "date": [],
+                "KEY": [],
+                "ID": [],
+                "action": [],
+                "column": [],
+                "current_value": [],
+                "new_value": [],
+                "reason": [],
+            }
+        )
+        mock_get.return_value = empty_log
+
+        # Prime the cache (simulates the log already having been displayed)
+        processor.get_correction_log("test_alias")
+        processor.get_correction_summary("test_alias")
+        calls_before = mock_get.call_count
+
+        processor.add_correction_entry(
+            alias="test_alias",
+            key_value="key1",
+            current_id=None,
+            action="modify value",
+            column="name",
+            current_value="John",
+            new_value="Johnny",
+            reason="Name correction",
+        )
+
+        # A fresh read after adding must hit the database again, not the
+        # stale cached snapshot from before the correction was added.
+        processor.get_correction_log("test_alias")
+        processor.get_correction_summary("test_alias")
+        assert mock_get.call_count > calls_before
+
     def test_add_correction_entry_with_existing_log(
         self, correction_processor, sample_corrections_log
     ):
