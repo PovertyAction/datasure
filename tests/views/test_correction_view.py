@@ -2,6 +2,8 @@
 
 import polars as pl
 
+from datasure.views.correction_view import _build_correction_log_display
+
 
 class TestCorrectionInputFormLogic:
     """Test the correction_input_form function logic patterns."""
@@ -350,3 +352,58 @@ class TestCorrectionInputFormLogic:
         assert expected_project_id == "test_project_123"
         assert expected_alias == "survey_data"
         assert expected_db_name == "corrected"
+
+
+class TestBuildCorrectionLogDisplay:
+    """Test _build_correction_log_display: status columns and ordering."""
+
+    def _base_log(self, **overrides) -> pl.DataFrame:
+        data = {
+            "date": ["2026-01-01"],
+            "KEY": ["key1"],
+            "ID": [None],
+            "action": ["modify value"],
+            "column": ["name"],
+            "current_value": ["John"],
+            "new_value": ["Johnny"],
+            "reason": ["typo"],
+        }
+        data.update(overrides)
+        return pl.DataFrame(data)
+
+    def test_backfills_missing_status_columns(self):
+        """A legacy log without status columns gets defaults applied."""
+        log = self._base_log()
+
+        result = _build_correction_log_display(log)
+
+        assert result["status"].to_list() == ["Successful"]
+        assert result["status_reason"].to_list() == [None]
+
+    def test_preserves_existing_status_columns(self):
+        """An already-refreshed log keeps its real status/reason values."""
+        log = self._base_log(status=["Failed"], status_reason=["Key not found"])
+
+        result = _build_correction_log_display(log)
+
+        assert result["status"].to_list() == ["Failed"]
+        assert result["status_reason"].to_list() == ["Key not found"]
+
+    def test_status_columns_ordered_right_after_action(self):
+        """status/status_reason are positioned right after action."""
+        log = self._base_log()
+
+        result = _build_correction_log_display(log)
+
+        assert result.columns == [
+            "date",
+            "KEY",
+            "ID",
+            "action",
+            "status",
+            "status_reason",
+            "column",
+            "current_value",
+            "new_value",
+            "reason",
+        ]

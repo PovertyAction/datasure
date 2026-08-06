@@ -55,7 +55,6 @@ with (
         _get_column_options_for_condition,
         _get_unique_values_from_columns,
         _has_none_values,
-        _highlight_status,
         _is_add_column_incomplete,
         _is_prep_form_incomplete,
         _is_remove_row_incomplete,
@@ -1582,23 +1581,6 @@ class TestPrepAddStep:
         mock_prep_apply.assert_called_once()
         _st.success.assert_called_once()
         _st.rerun.assert_called_once()
-
-
-class TestHighlightStatus:
-    """Test the Change Log status-cell styling helper."""
-
-    def test_failed_is_highlighted_red(self):
-        style = _highlight_status("Failed")
-        assert "background-color" not in style
-        assert "color: #dc3545" in style
-
-    def test_successful_is_highlighted_green(self):
-        style = _highlight_status("Successful")
-        assert "background-color" not in style
-        assert "color: #198754" in style
-
-    def test_unknown_status_is_not_highlighted(self):
-        assert _highlight_status("") == ""
 
 
 class TestModuleLevelPageLayout:

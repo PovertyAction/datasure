@@ -197,6 +197,9 @@ class TestCorrectionProcessor:
         assert saved_df["action"][0] == "modify value"
         assert saved_df["new_value"][0] == "Johnny"
         assert saved_df["KEY"][0] == "key1"
+        # A freshly applied correction is always logged as successful
+        assert saved_df["status"][0] == "Successful"
+        assert saved_df["status_reason"][0] is None
 
     def test_add_correction_entry_clears_log_cache(self, correction_processor):
         """Adding an entry must invalidate the cached log/summary.
@@ -246,7 +249,11 @@ class TestCorrectionProcessor:
     def test_add_correction_entry_with_existing_log(
         self, correction_processor, sample_corrections_log
     ):
-        """Test adding correction entry to existing log."""
+        """Test adding correction entry to existing log.
+
+        `sample_corrections_log` predates the status columns, so this also
+        exercises backfilling a legacy log before concatenating the new row.
+        """
         processor, mock_get, mock_save = correction_processor
         mock_get.return_value = sample_corrections_log
 
@@ -267,6 +274,9 @@ class TestCorrectionProcessor:
         call_args = mock_save.call_args
         saved_df = call_args[1]["table_data"]
         assert len(saved_df) == 4  # 3 original + 1 new
+        # Legacy rows backfilled, new row logged as successful
+        assert saved_df["status"].to_list() == ["Successful"] * 4
+        assert saved_df["status_reason"].to_list() == [None] * 4
 
     def test_apply_correction_modify_value_string(
         self, correction_processor, sample_data
@@ -656,8 +666,9 @@ class TestCorrectionProcessor:
 
         failures = processor.remove_correction_entry("test_alias", 1)
 
-        # Should save the updated log and reapplied data
-        assert mock_save.call_count == 2
+        # Should save: the trimmed log, the reapply's refreshed log (with
+        # status), and the reapplied corrected data
+        assert mock_save.call_count == 3
         assert failures == []
 
     def test_remove_correction_entry_invalid_index(
@@ -707,8 +718,8 @@ class TestCorrectionProcessor:
 
         failures = processor._reapply_all_corrections("test_alias")
 
-        # Should save the fresh prep data as corrected data
-        mock_save.assert_called_once()
+        # Should save the refreshed (empty) log and the fresh prep data
+        assert mock_save.call_count == 2
         assert failures == []
 
     def test_reapply_all_corrections_with_data(
@@ -721,12 +732,17 @@ class TestCorrectionProcessor:
 
         failures = processor._reapply_all_corrections("test_alias")
 
-        # Should save corrected data after applying all corrections
-        mock_save.assert_called_once()
-        call_args = mock_save.call_args
+        # Should save the refreshed log, then corrected data after applying
+        # all corrections
+        assert mock_save.call_count == 2
+        call_args = mock_save.call_args_list[-1]
         assert call_args[1]["alias"] == "test_alias"
         assert call_args[1]["db_name"] == "corrected"
         assert failures == []
+
+        # The refreshed log records every step as successful
+        saved_log = mock_save.call_args_list[0][1]["table_data"]
+        assert saved_log["status"].to_list() == ["Successful"] * 3
 
     def test_reapply_corrections_key_not_found(self, correction_processor, sample_data):
         """Test reapplying corrections when key value not found in data."""
@@ -751,10 +767,106 @@ class TestCorrectionProcessor:
         failures = processor._reapply_all_corrections("test_alias")
 
         # Should still save data even if some corrections fail
-        mock_save.assert_called_once()
+        assert mock_save.call_count == 2
         # ... and the skipped correction should be reported, not swallowed
         assert len(failures) == 1
         assert "nonexistent_key" in failures[0].reason
+
+        # ... and the log itself records the failure
+        saved_log = mock_save.call_args_list[0][1]["table_data"]
+        assert saved_log["status"][0] == "Failed"
+        assert "nonexistent_key" in saved_log["status_reason"][0]
+
+    def test_reapply_corrections_column_no_longer_available(
+        self, correction_processor, sample_data
+    ):
+        """Failure reason 1: the targeted column was dropped upstream."""
+        processor, mock_get, mock_save = correction_processor
+
+        log = pl.DataFrame(
+            {
+                "date": [datetime.now()],
+                "KEY": ["key1"],
+                "ID": [None],
+                "action": ["modify value"],
+                "column": ["retired_column"],
+                "current_value": ["old"],
+                "new_value": ["new"],
+                "reason": ["test correction"],
+            }
+        )
+        mock_get.side_effect = [sample_data, log]
+
+        failures = processor._reapply_all_corrections("test_alias")
+
+        assert len(failures) == 1
+        assert "retired_column" in failures[0].reason
+        assert "no longer available" in failures[0].reason
+
+        saved_log = mock_save.call_args_list[0][1]["table_data"]
+        assert saved_log["status"][0] == "Failed"
+        assert "no longer available" in saved_log["status_reason"][0]
+
+    def test_reapply_corrections_current_value_changed(
+        self, correction_processor, sample_data
+    ):
+        """Failure reason 2: the value has changed since the correction was
+        logged, so blindly reapplying could clobber a legitimate update.
+        """
+        processor, mock_get, mock_save = correction_processor
+
+        # Recorded current_value ("Something Else") no longer matches
+        # sample_data's actual value for key1's name column ("John").
+        log = pl.DataFrame(
+            {
+                "date": [datetime.now()],
+                "KEY": ["key1"],
+                "ID": [None],
+                "action": ["modify value"],
+                "column": ["name"],
+                "current_value": ["Something Else"],
+                "new_value": ["Johnny"],
+                "reason": ["test correction"],
+            }
+        )
+        mock_get.side_effect = [sample_data, log]
+
+        failures = processor._reapply_all_corrections("test_alias")
+
+        assert len(failures) == 1
+        assert "changed since this correction was recorded" in failures[0].reason
+        assert "Something Else" in failures[0].reason
+        assert "John" in failures[0].reason
+
+        # The name column must be untouched since the correction was skipped
+        saved_data = mock_save.call_args_list[-1][1]["table_data"]
+        assert saved_data.filter(pl.col("survey_key") == "key1")["name"][0] == "John"
+
+    def test_reapply_corrections_current_value_unchanged_still_applies(
+        self, correction_processor, sample_data
+    ):
+        """No recorded current_value, or a matching one, applies normally."""
+        processor, mock_get, mock_save = correction_processor
+
+        log = pl.DataFrame(
+            {
+                "date": [datetime.now()],
+                "KEY": ["key1"],
+                "ID": [None],
+                "action": ["modify value"],
+                "column": ["name"],
+                "current_value": ["John"],
+                "new_value": ["Johnny"],
+                "reason": ["test correction"],
+            }
+        )
+        mock_get.side_effect = [sample_data, log]
+
+        failures = processor._reapply_all_corrections("test_alias")
+
+        assert failures == []
+        saved_data = mock_save.call_args_list[-1][1]["table_data"]
+        assert saved_data.filter(pl.col("survey_key") == "key1")["name"][0] == "Johnny"
 
     def test_reapply_corrections_partial_failure_continues(
         self, correction_processor, sample_data
@@ -779,11 +891,14 @@ class TestCorrectionProcessor:
 
         failures = processor._reapply_all_corrections("test_alias")
 
-        mock_save.assert_called_once()
-        saved_data = mock_save.call_args[1]["table_data"]
+        assert mock_save.call_count == 2
+        saved_data = mock_save.call_args_list[-1][1]["table_data"]
         assert saved_data.filter(pl.col("survey_key") == "key1")["name"][0] == "Johnny"
         assert len(failures) == 1
         assert "nonexistent_key" in failures[0].reason
+
+        saved_log = mock_save.call_args_list[0][1]["table_data"]
+        assert saved_log["status"].to_list() == ["Failed", "Successful"]
 
     def test_reapply_corrections_exception_handling(
         self, correction_processor, sample_data
@@ -811,10 +926,11 @@ class TestCorrectionProcessor:
         failures = processor._reapply_all_corrections("test_alias")
 
         # Should still save data
-        mock_save.assert_called_once()
+        assert mock_save.call_count == 2
         # ... and report the skipped correction instead of swallowing it
         assert len(failures) == 1
         assert failures[0].reason
+        assert "nonexistent_column" in failures[0].reason
         assert "key1" in failures[0].step
 
     def test_private_apply_modify_value_string(self, correction_processor, sample_data):
