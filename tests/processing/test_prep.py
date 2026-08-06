@@ -196,6 +196,22 @@ class TestRemoveColumnsOperation:
         with pytest.raises(OperationError, match="Columns not found"):
             op.execute(data, prep_args)
 
+    def test_remove_columns_partial_missing(self):
+        """Removing 4 columns where 2 no longer exist removes the other 2."""
+        op = RemoveColumnsOperation()
+        data = pl.DataFrame({"a": [1], "b": [2], "c": [3], "d": [4]})
+        prep_args = PrepActionResult(
+            action="remove column(s)",
+            source_columns=["a", "c", "missing1", "missing2"],
+        )
+        result, args = op.execute(data, prep_args)
+        assert set(result.columns) == {"b", "d"}
+        assert args.affected_count == 2
+        assert args.failed_count == 2
+        assert args.source_columns == ["a", "c"]
+        assert "missing1" in args.additional_info
+        assert "missing2" in args.additional_info
+
     def test_validate_columns_exist_valid(self):
         """Test Validate columns exist valid."""
         op = RemoveColumnsOperation()
@@ -1372,18 +1388,18 @@ class TestPrepProcessor:
                 )
             ),
         ]
-        result, failures = processor.execute_all_actions(data, actions)
+        result, outcomes = processor.execute_all_actions(data, actions)
         assert "c" not in result.columns
         assert "new" in result.columns
-        assert failures == []
+        assert [o.status for o in outcomes] == ["Successful", "Successful"]
 
     def test_execute_all_actions_empty(self):
         """Test Execute all actions empty."""
         processor = PrepProcessor()
         data = pl.DataFrame({"a": [1, 2]})
-        result, failures = processor.execute_all_actions(data, [])
+        result, outcomes = processor.execute_all_actions(data, [])
         assert result.equals(data)
-        assert failures == []
+        assert outcomes == []
 
     def test_execute_all_actions_failure(self):
         """Test Execute all actions failure."""
@@ -1397,10 +1413,11 @@ class TestPrepProcessor:
             )
         ]
         # A failing action is skipped (not raised) and reported as a failure
-        result, failures = processor.execute_all_actions(data, actions)
+        result, outcomes = processor.execute_all_actions(data, actions)
         assert result.equals(data)
-        assert len(failures) == 1
-        assert "Columns not found" in failures[0].reason
+        assert len(outcomes) == 1
+        assert outcomes[0].status == "Failed"
+        assert "Columns not found" in outcomes[0].error
 
     def test_execute_all_actions_partial_failure_continues(self):
         """A failing action is skipped but later actions still apply."""
@@ -1416,11 +1433,30 @@ class TestPrepProcessor:
                 PrepActionResult(action="remove column(s)", source_columns=["b"])
             ),
         ]
-        result, failures = processor.execute_all_actions(data, actions)
+        result, outcomes = processor.execute_all_actions(data, actions)
         assert "b" not in result.columns
         assert "a" in result.columns
-        assert len(failures) == 1
-        assert "Columns not found" in failures[0].reason
+        assert [o.status for o in outcomes] == ["Failed", "Successful"]
+        assert "Columns not found" in outcomes[0].error
+
+    def test_execute_all_actions_partial_column_removal(self):
+        """Removing 4 columns where 2 no longer exist removes the other 2."""
+        processor = PrepProcessor()
+        data = pl.DataFrame({"a": [1], "b": [2], "c": [3], "d": [4]})
+        actions = [
+            PrepAction.from_args(
+                PrepActionResult(
+                    action="remove column(s)",
+                    source_columns=["a", "b", "missing1", "missing2"],
+                )
+            )
+        ]
+        result, outcomes = processor.execute_all_actions(data, actions)
+        assert set(result.columns) == {"c", "d"}
+        assert outcomes[0].status == "Successful"
+        assert outcomes[0].prep_args.affected_count == 2
+        assert outcomes[0].prep_args.failed_count == 2
+        assert outcomes[0].prep_args.source_columns == ["a", "b"]
 
 
 # === LOG MANAGEMENT TESTS === #
@@ -1637,8 +1673,9 @@ class TestLogManagement:
         )
         processor = PrepProcessor()
         failures = _reapply_all_actions("proj", "alias", log, processor)
-        mock_save.assert_called_once()
-        saved_data = mock_save.call_args[0][1]
+        # Saves both the reapplied data and the refreshed log
+        assert mock_save.call_count == 2
+        saved_data = mock_save.call_args_list[0][0][1]
         assert "b" not in saved_data.columns
         assert failures == []
 
@@ -1689,11 +1726,16 @@ class TestLogManagement:
         processor = PrepProcessor()
         failures = _reapply_all_actions("proj", "alias", log, processor)
 
-        saved_data = mock_save.call_args[0][1]
+        saved_data = mock_save.call_args_list[0][0][1]
         assert "b" not in saved_data.columns
         assert "a" in saved_data.columns
         assert len(failures) == 1
         assert "Columns not found" in failures[0].reason
+
+        # The refreshed log records the failed step's status and description
+        saved_log = mock_save.call_args_list[1][0][1]
+        assert saved_log["status"].to_list() == ["Failed", "Successful"]
+        assert "Failed to reapply" in saved_log["description"][0]
 
     @patch("datasure.processing.prep.duckdb_get_table")
     @patch("datasure.processing.prep.duckdb_save_table")

@@ -991,6 +991,13 @@ def prep_remove_step():
                 )
 
 
+def _highlight_failed_status(value: str) -> str:
+    """Style a Change Log status cell; highlights failed steps in red."""
+    if value == "Failed":
+        return "background-color: #dc3545; color: white; font-weight: 600"
+    return ""
+
+
 # === PAGE LAYOUT === #
 
 # -- DATA PREP PAGE --#
@@ -1085,8 +1092,18 @@ if show_prep_page_info:
                         "No changes added yet. Click on the **Add**(:material/add:) button above to add a new data preparation step."
                     )
                 else:
-                    prep_logs_mod = st.dataframe(
-                        prep_log[["action", "description"]],
+                    if "status" not in prep_log.columns:
+                        prep_log = prep_log.with_columns(
+                            pl.lit("Successful").alias("status")
+                        )
+
+                    change_log = prep_log[
+                        ["action", "status", "description"]
+                    ].to_pandas()
+                    st.dataframe(
+                        change_log.style.map(
+                            _highlight_failed_status, subset=["status"]
+                        ),
                         width="stretch",
                         key=label,
                         hide_index=False,

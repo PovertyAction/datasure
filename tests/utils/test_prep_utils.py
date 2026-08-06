@@ -483,6 +483,23 @@ class TestPrepConfirmationMessages:
         assert "✓ 1 column removed" in message
         assert "5 columns remaining" in message
 
+    def test_remove_columns_message_partial_failure(self):
+        """Test remove_columns message notes columns skipped as missing."""
+        result = PrepActionResult(
+            action="remove column(s)",
+            source_columns=["col1", "col2"],
+            affected_count=2,
+            remaining_count=8,
+            failed_count=2,
+            additional_info="Columns not found and skipped: ['col3', 'col4']",
+        )
+
+        message = PrepConfirmationMessages.remove_columns(result)
+
+        assert "✓ 2 columns removed" in message
+        assert '"col1", "col2"' in message
+        assert "Columns not found and skipped: ['col3', 'col4']" in message
+
     def test_remove_rows_message(self):
         """Test remove_rows message generation."""
         result = PrepActionResult(
