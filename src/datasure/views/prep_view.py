@@ -38,7 +38,7 @@ from datasure.utils.prep_utils import (
     PrepActionResult,
     PrepDescriptions,
 )
-from datasure.utils.reapply_utils import warn_reapply_failures
+from datasure.utils.reapply_utils import highlight_status, warn_reapply_failures
 from datasure.utils.ui_utils import (
     confirm_dialog,
     metric_row,
@@ -991,15 +991,6 @@ def prep_remove_step():
                 )
 
 
-def _highlight_status(value: str) -> str:
-    """Style a Change Log status cell: green text for Successful, red for Failed."""
-    if value == "Failed":
-        return "color: #dc3545; font-weight: 600"
-    if value == "Successful":
-        return "color: #198754; font-weight: 600"
-    return ""
-
-
 # === PAGE LAYOUT === #
 
 # -- DATA PREP PAGE --#
@@ -1103,7 +1094,7 @@ if show_prep_page_info:
                         ["action", "status", "description"]
                     ].to_pandas()
                     st.dataframe(
-                        change_log.style.map(_highlight_status, subset=["status"]),
+                        change_log.style.map(highlight_status, subset=["status"]),
                         width="stretch",
                         key=label,
                         hide_index=False,

@@ -20,6 +20,19 @@ class ReapplyFailure:
     reason: str
 
 
+def highlight_status(value: str) -> str:
+    """Style a log status cell: green text for Successful, red for Failed.
+
+    Used with a pandas ``Styler`` (``df.style.map(highlight_status,
+    subset=["status"])``) on the prep and correction Change Log tables.
+    """
+    if value == "Failed":
+        return "color: #dc3545; font-weight: 600"
+    if value == "Successful":
+        return "color: #198754; font-weight: 600"
+    return ""
+
+
 def warn_reapply_failures(failures: list[ReapplyFailure], context: str) -> None:
     """Render one warning summarizing steps skipped during a bulk reapply.
 

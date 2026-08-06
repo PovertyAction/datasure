@@ -35,6 +35,17 @@ def _describe_correction_row(row: dict[str, Any]) -> str:
     return f"{action} for key {key_value}"
 
 
+def _ensure_status_columns(df: pl.DataFrame) -> pl.DataFrame:
+    """Backfill status/status_reason columns for logs persisted before they existed."""
+    if df.is_empty():
+        return df
+    if "status" not in df.columns:
+        df = df.with_columns(pl.lit("Successful").alias("status"))
+    if "status_reason" not in df.columns:
+        df = df.with_columns(pl.lit(None, dtype=pl.String).alias("status_reason"))
+    return df
+
+
 class CorrectionProcessor:
     """Handles all data correction operations and persistence."""
 
@@ -157,7 +168,9 @@ class CorrectionProcessor:
         """
         current_log = self.get_correction_log(alias)
 
-        # Create new entry DataFrame with proper schema
+        # Create new entry DataFrame with proper schema. A freshly added
+        # correction has just been applied successfully (apply_correction
+        # would have raised before reaching this point otherwise).
         new_entry_data = {
             "date": [datetime.now()],
             "KEY": [str(key_value)],
@@ -169,8 +182,12 @@ class CorrectionProcessor:
             ],
             "new_value": [str(new_value) if new_value is not None else None],
             "reason": [str(reason)],
+            "status": ["Successful"],
+            "status_reason": [None],
         }
-        new_entry_df = pl.DataFrame(new_entry_data)
+        new_entry_df = pl.DataFrame(new_entry_data).with_columns(
+            pl.col("status_reason").cast(pl.String)
+        )
 
         if current_log.is_empty():
             # If no existing log, use the new entry schema
@@ -178,7 +195,7 @@ class CorrectionProcessor:
         else:
             # Ensure schema compatibility before concatenating
             # Cast columns to match the new entry schema
-            aligned_current_log = current_log.with_columns(
+            aligned_current_log = _ensure_status_columns(current_log).with_columns(
                 [
                     pl.col("date").cast(pl.Datetime("us")),
                     pl.col("KEY").cast(pl.String),
@@ -188,6 +205,8 @@ class CorrectionProcessor:
                     pl.col("current_value").cast(pl.String),
                     pl.col("new_value").cast(pl.String),
                     pl.col("reason").cast(pl.String),
+                    pl.col("status").cast(pl.String),
+                    pl.col("status_reason").cast(pl.String),
                 ]
             )
             updated_log = pl.concat([aligned_current_log, new_entry_df])
@@ -595,12 +614,32 @@ class CorrectionProcessor:
 
         corrected_data = fresh_data
         failures: list[ReapplyFailure] = []
+        statuses: list[str] = []
+        status_reasons: list[str | None] = []
         for row in correction_log.iter_rows(named=True):
             corrected_data, error = self._apply_correction_row(corrected_data, row)
             if error:
+                statuses.append("Failed")
+                status_reasons.append(error)
                 failures.append(
                     ReapplyFailure(step=_describe_correction_row(row), reason=error)
                 )
+            else:
+                statuses.append("Successful")
+                status_reasons.append(None)
+
+        refreshed_log = correction_log.with_columns(
+            pl.Series("status", statuses, dtype=pl.String),
+            pl.Series("status_reason", status_reasons, dtype=pl.String),
+        )
+        duckdb_save_table(
+            project_id=self.project_id,
+            table_data=refreshed_log,
+            alias=f"corr_log_{alias}",
+            db_name="logs",
+        )
+        self.get_correction_log.clear()
+        self.get_correction_summary.clear()
 
         self.save_corrected_data(alias, corrected_data)
         return failures
@@ -635,7 +674,18 @@ class CorrectionProcessor:
 
         action = row["action"]
         column = row["column"]
+        recorded_value = row["current_value"]
         new_value = row["new_value"]
+
+        if action in ("modify value", "remove value") and column:
+            if column not in data.columns:
+                return data, f"Column '{column}' no longer available in the data"
+
+            mismatch = self._current_value_mismatch(
+                data, key_col, key_value, column, recorded_value
+            )
+            if mismatch:
+                return data, mismatch
 
         try:
             if action == "modify value" and column and new_value is not None:
@@ -654,6 +704,50 @@ class CorrectionProcessor:
             return data, str(e)
 
         return data, None
+
+    @staticmethod
+    def _current_value_mismatch(
+        data: pl.DataFrame,
+        key_col: str,
+        key_value: str,
+        column: str,
+        recorded_value: str | None,
+    ) -> str | None:
+        """Check whether `column`'s value at `key_value` still matches what
+        was recorded when the correction was logged.
+
+        Parameters
+        ----------
+        data : pl.DataFrame
+            The data to check against
+        key_col : str
+            The key column name
+        key_value : str
+            The key value to match
+        column : str
+            The column the correction targets
+        recorded_value : str | None
+            The value recorded in the log at the time the correction was
+            made, or None if no value was recorded
+
+        Returns
+        -------
+        str | None
+            A description of the mismatch, or None if the value still
+            matches (or there is nothing recorded to compare against)
+        """
+        if recorded_value is None:
+            return None
+
+        actual_value = data.filter(pl.col(key_col) == key_value)[0, column]
+        actual_str = None if actual_value is None else str(actual_value)
+
+        if actual_str != recorded_value:
+            return (
+                f"Current value for '{column}' has changed since this correction "
+                f"was recorded (expected '{recorded_value}', found '{actual_str}')"
+            )
+        return None
 
     @staticmethod
     def _find_key_column(data: pl.DataFrame, key_value: str) -> str | None:
