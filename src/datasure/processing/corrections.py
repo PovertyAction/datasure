@@ -154,7 +154,8 @@ class CorrectionProcessor:
         key_value : str
             The key value being corrected
         current_id : str | None
-            The current ID value
+            The Survey ID value for this KEY, if a Survey ID column is
+            configured for the dataset
         action : str
             The correction action
         column : str | None
@@ -231,6 +232,7 @@ class CorrectionProcessor:
         current_value: Any | None = None,
         new_value: Any | None = None,
         reason: str | None = None,
+        survey_id_value: Any | None = None,
     ) -> pl.DataFrame:
         """Apply a single correction to the data.
 
@@ -252,6 +254,9 @@ class CorrectionProcessor:
             The new value
         reason : str | None
             The reason for correction
+        survey_id_value : Any | None
+            The Survey ID value for this KEY, if a Survey ID column is
+            configured, recorded in the log's ID column
 
         Returns
         -------
@@ -278,7 +283,7 @@ class CorrectionProcessor:
             self.add_correction_entry(
                 alias=alias,
                 key_value=key_value,
-                current_id=None,  # Legacy field, not used in new implementation
+                current_id=survey_id_value,
                 action=action,
                 column=column,
                 current_value=current_value,
