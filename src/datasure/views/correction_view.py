@@ -21,6 +21,7 @@ from datasure.utils.navigations_utils import (
     page_navigation,
 )
 from datasure.utils.onboarding_utils import ImportDemoInfo, demo_expander
+from datasure.utils.reapply_utils import highlight_status, warn_reapply_failures
 from datasure.utils.settings_utils import get_check_config_settings
 from datasure.utils.ui_utils import (
     confirm_dialog,
@@ -876,13 +877,56 @@ def _handle_remove_correction(
         )
 
         # Remove the correction
-        correction_processor.remove_correction_entry(alias, correction_index)
+        failures = correction_processor.remove_correction_entry(alias, correction_index)
 
         st.success(f"Correction '{selected_action}' removed successfully!")
+        warn_reapply_failures(
+            failures, "Some remaining corrections could not be reapplied"
+        )
         st.rerun()
 
     except Exception as e:
         st.error(f"Error removing correction: {e!s}")
+
+
+def _build_correction_log_display(correction_log: pl.DataFrame) -> pl.DataFrame:
+    """Prepare a correction log for display in the Correction Log table.
+
+    Backfills the status columns for logs saved before they existed, and
+    orders columns so status/status_reason sit right after action.
+
+    Parameters
+    ----------
+    correction_log : pl.DataFrame
+        The raw correction log, as persisted.
+
+    Returns
+    -------
+    pl.DataFrame
+        The log with status columns present, in display column order.
+    """
+    if "status" not in correction_log.columns:
+        correction_log = correction_log.with_columns(
+            pl.lit("Successful").alias("status")
+        )
+    if "status_reason" not in correction_log.columns:
+        correction_log = correction_log.with_columns(
+            pl.lit(None, dtype=pl.String).alias("status_reason")
+        )
+
+    display_columns = [
+        "date",
+        "KEY",
+        "ID",
+        "action",
+        "status",
+        "status_reason",
+        "column",
+        "current_value",
+        "new_value",
+        "reason",
+    ]
+    return correction_log.select(display_columns)
 
 
 @st.fragment
@@ -911,7 +955,12 @@ def render_correction_log(
             )
         else:
             section_header("Correction Log")
-            st.dataframe(data=correction_log, width="stretch")
+
+            log_display = _build_correction_log_display(correction_log).to_pandas()
+            st.dataframe(
+                log_display.style.map(highlight_status, subset=["status"]),
+                width="stretch",
+            )
 
 
 @st.fragment

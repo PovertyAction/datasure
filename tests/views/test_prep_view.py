@@ -1672,6 +1672,92 @@ class TestModuleLevelPageLayout:
         _st.session_state["st_project_id"] = None
         _st.stop = _orig_stop
 
+    def test_page_layout_with_failed_status_in_log(self):
+        """Change Log renders a status column and styles a Failed row."""
+        import importlib
+
+        import datasure.views.prep_view as pv_mod
+
+        _st.session_state["st_project_id"] = "test_project"
+        _st.session_state["st_import_data_page"] = "import_page"
+        _st.session_state["st_config_checks_page"] = "config_page"
+        _st.stop = MagicMock()
+
+        sample_df = pl.DataFrame({"name": ["Alice", "Bob"], "age": [25, 30]})
+        # A log with one failed and one successful step (mixed status column)
+        prep_log_df = pl.DataFrame(
+            {
+                "action": ["remove column(s)", "add column"],
+                "description": [
+                    "✗ Failed to reapply: Columns not found: ['missing']",
+                    "✓ 1 column added.",
+                ],
+                "status": ["Failed", "Successful"],
+            }
+        )
+
+        mock_tab = MagicMock()
+        mock_tab.__enter__ = MagicMock(return_value=mock_tab)
+        mock_tab.__exit__ = MagicMock(return_value=False)
+        _st.tabs = MagicMock(return_value=[mock_tab])
+
+        mock_col = MagicMock()
+        mock_col.__enter__ = MagicMock(return_value=mock_col)
+        mock_col.__exit__ = MagicMock(return_value=False)
+        _st.columns = MagicMock(return_value=[mock_col, mock_col, mock_col])
+
+        mock_container = MagicMock()
+        mock_container.__enter__ = MagicMock(return_value=mock_container)
+        mock_container.__exit__ = MagicMock(return_value=False)
+        _st.container = MagicMock(return_value=mock_container)
+
+        mock_popover = MagicMock()
+        mock_popover.__enter__ = MagicMock(return_value=mock_popover)
+        mock_popover.__exit__ = MagicMock(return_value=False)
+        _st.popover = MagicMock(return_value=mock_popover)
+
+        _st.button = MagicMock(return_value=False)
+        _st.selectbox = MagicMock(return_value=None)
+        _st.multiselect = MagicMock(return_value=[])
+        _st.dataframe = MagicMock()
+
+        with (
+            patch(
+                "datasure.utils.duckdb_utils.duckdb_get_aliases",
+                return_value=["test_data"],
+            ),
+            patch(
+                "datasure.utils.duckdb_utils.duckdb_get_table",
+                side_effect=[
+                    prep_log_df,
+                    sample_df,
+                    prep_log_df,
+                    prep_log_df,
+                ],
+            ),
+            patch("datasure.utils.duckdb_utils.duckdb_save_table"),
+            patch("datasure.utils.navigations_utils.page_navigation"),
+            patch("datasure.utils.navigations_utils.add_demo_navigation"),
+            patch("datasure.utils.navigations_utils.demo_sidebar_help"),
+            patch("datasure.utils.navigations_utils.demo_callout"),
+            patch("datasure.utils.navigations_utils.show_demo_next_action"),
+            patch(
+                "datasure.utils.onboarding_utils.is_demo_project",
+                return_value=False,
+            ),
+            patch("datasure.utils.onboarding_utils.demo_expander"),
+            patch("datasure.processing.prep.prep_apply_action"),
+        ):
+            importlib.reload(pv_mod)
+
+        # The Change Log table (first st.dataframe call) is a styled pandas
+        # DataFrame with the status column positioned right after action
+        rendered = _st.dataframe.call_args_list[0][0][0]
+        assert list(rendered.data.columns) == ["action", "status", "description"]
+
+        _st.session_state["st_project_id"] = None
+        _st.stop = _orig_stop
+
     def test_page_layout_with_empty_prep_data(self):
         """Test when prep_data and prep_log are both empty (falls back to raw)."""
         import importlib

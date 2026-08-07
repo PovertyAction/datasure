@@ -38,6 +38,7 @@ from datasure.utils.prep_utils import (
     PrepActionResult,
     PrepDescriptions,
 )
+from datasure.utils.reapply_utils import highlight_status, warn_reapply_failures
 from datasure.utils.ui_utils import (
     confirm_dialog,
     metric_row,
@@ -967,8 +968,11 @@ def prep_remove_step():
                     alias=f"prep_log_{alias}",
                     db_name="logs",
                 )
-                prep_apply_action(project_id, alias)
+                failures = prep_apply_action(project_id, alias)
                 st.success(f"Action '{action_desc}' removed successfully!")
+                warn_reapply_failures(
+                    failures, "Some preparation steps could not be reapplied"
+                )
 
             if st.button(
                 label="Remove",
@@ -1081,8 +1085,16 @@ if show_prep_page_info:
                         "No changes added yet. Click on the **Add**(:material/add:) button above to add a new data preparation step."
                     )
                 else:
-                    prep_logs_mod = st.dataframe(
-                        prep_log[["action", "description"]],
+                    if "status" not in prep_log.columns:
+                        prep_log = prep_log.with_columns(
+                            pl.lit("Successful").alias("status")
+                        )
+
+                    change_log = prep_log[
+                        ["action", "status", "description"]
+                    ].to_pandas()
+                    st.dataframe(
+                        change_log.style.map(highlight_status, subset=["status"]),
                         width="stretch",
                         key=label,
                         hide_index=False,

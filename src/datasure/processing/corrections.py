@@ -5,6 +5,45 @@ import polars as pl
 import streamlit as st
 
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.reapply_utils import ReapplyFailure
+
+
+def _describe_correction_row(row: dict[str, Any]) -> str:
+    """Build a human-readable description of a correction-log row.
+
+    Parameters
+    ----------
+    row : dict[str, Any]
+        A single row from the correction log
+
+    Returns
+    -------
+    str
+        Description such as "Modify {column} for key {key_value} to '{new_value}'"
+    """
+    action = row["action"]
+    key_value = row["KEY"]
+    column = row["column"]
+    new_value = row["new_value"]
+
+    if action == "modify value":
+        return f"Modify {column} for key {key_value} to '{new_value}'"
+    if action == "remove value":
+        return f"Remove {column} value for key {key_value}"
+    if action == "remove row":
+        return f"Remove entire row for key {key_value}"
+    return f"{action} for key {key_value}"
+
+
+def _ensure_status_columns(df: pl.DataFrame) -> pl.DataFrame:
+    """Backfill status/status_reason columns for logs persisted before they existed."""
+    if df.is_empty():
+        return df
+    if "status" not in df.columns:
+        df = df.with_columns(pl.lit("Successful").alias("status"))
+    if "status_reason" not in df.columns:
+        df = df.with_columns(pl.lit(None, dtype=pl.String).alias("status_reason"))
+    return df
 
 
 class CorrectionProcessor:
@@ -129,7 +168,9 @@ class CorrectionProcessor:
         """
         current_log = self.get_correction_log(alias)
 
-        # Create new entry DataFrame with proper schema
+        # Create new entry DataFrame with proper schema. A freshly added
+        # correction has just been applied successfully (apply_correction
+        # would have raised before reaching this point otherwise).
         new_entry_data = {
             "date": [datetime.now()],
             "KEY": [str(key_value)],
@@ -141,8 +182,12 @@ class CorrectionProcessor:
             ],
             "new_value": [str(new_value) if new_value is not None else None],
             "reason": [str(reason)],
+            "status": ["Successful"],
+            "status_reason": [None],
         }
-        new_entry_df = pl.DataFrame(new_entry_data)
+        new_entry_df = pl.DataFrame(new_entry_data).with_columns(
+            pl.col("status_reason").cast(pl.String)
+        )
 
         if current_log.is_empty():
             # If no existing log, use the new entry schema
@@ -150,7 +195,7 @@ class CorrectionProcessor:
         else:
             # Ensure schema compatibility before concatenating
             # Cast columns to match the new entry schema
-            aligned_current_log = current_log.with_columns(
+            aligned_current_log = _ensure_status_columns(current_log).with_columns(
                 [
                     pl.col("date").cast(pl.Datetime("us")),
                     pl.col("KEY").cast(pl.String),
@@ -160,6 +205,8 @@ class CorrectionProcessor:
                     pl.col("current_value").cast(pl.String),
                     pl.col("new_value").cast(pl.String),
                     pl.col("reason").cast(pl.String),
+                    pl.col("status").cast(pl.String),
+                    pl.col("status_reason").cast(pl.String),
                 ]
             )
             updated_log = pl.concat([aligned_current_log, new_entry_df])
@@ -170,6 +217,9 @@ class CorrectionProcessor:
             alias=f"corr_log_{alias}",
             db_name="logs",
         )
+        # Clear correction log cache so the new entry shows immediately
+        self.get_correction_log.clear()
+        self.get_correction_summary.clear()
 
     def apply_correction(
         self,
@@ -441,7 +491,7 @@ class CorrectionProcessor:
         self,
         alias: str,
         correction_index: int,
-    ) -> None:
+    ) -> list[ReapplyFailure]:
         """Remove a correction entry from the log and reapply corrections.
 
         Parameters
@@ -450,6 +500,11 @@ class CorrectionProcessor:
             The data alias/table name
         correction_index : int
             The index of the correction entry to remove
+
+        Returns
+        -------
+        list[ReapplyFailure]
+            Remaining corrections that failed to reapply after the removal.
         """
         correction_log = self.get_correction_log(alias)
 
@@ -511,9 +566,9 @@ class CorrectionProcessor:
         self.get_correction_summary.clear()
 
         # Reapply all remaining corrections
-        self._reapply_all_corrections(alias)
+        return self._reapply_all_corrections(alias)
 
-    def refresh_corrected_data(self, alias: str) -> None:
+    def refresh_corrected_data(self, alias: str) -> list[ReapplyFailure]:
         """Rebuild corrected data from the current prep data.
 
         Used after an upstream refresh (e.g. re-importing raw data)
@@ -524,16 +579,26 @@ class CorrectionProcessor:
         ----------
         alias : str
             The data alias/table name
-        """
-        self._reapply_all_corrections(alias)
 
-    def _reapply_all_corrections(self, alias: str) -> None:
+        Returns
+        -------
+        list[ReapplyFailure]
+            Corrections that failed to reapply against the refreshed data.
+        """
+        return self._reapply_all_corrections(alias)
+
+    def _reapply_all_corrections(self, alias: str) -> list[ReapplyFailure]:
         """Reapply all corrections from the log to fresh data.
 
         Parameters
         ----------
         alias : str
             The data alias/table name
+
+        Returns
+        -------
+        list[ReapplyFailure]
+            Corrections that failed to reapply and were skipped, in log order.
         """
         fresh_data = duckdb_get_table(
             project_id=self.project_id,
@@ -543,19 +608,45 @@ class CorrectionProcessor:
 
         if fresh_data.width == 0:
             # Prep table doesn't exist yet, nothing to correct
-            return
+            return []
 
         correction_log = self.get_correction_log(alias)
 
         corrected_data = fresh_data
+        failures: list[ReapplyFailure] = []
+        statuses: list[str] = []
+        status_reasons: list[str | None] = []
         for row in correction_log.iter_rows(named=True):
-            corrected_data = self._apply_correction_row(corrected_data, row)
+            corrected_data, error = self._apply_correction_row(corrected_data, row)
+            if error:
+                statuses.append("Failed")
+                status_reasons.append(error)
+                failures.append(
+                    ReapplyFailure(step=_describe_correction_row(row), reason=error)
+                )
+            else:
+                statuses.append("Successful")
+                status_reasons.append(None)
+
+        refreshed_log = correction_log.with_columns(
+            pl.Series("status", statuses, dtype=pl.String),
+            pl.Series("status_reason", status_reasons, dtype=pl.String),
+        )
+        duckdb_save_table(
+            project_id=self.project_id,
+            table_data=refreshed_log,
+            alias=f"corr_log_{alias}",
+            db_name="logs",
+        )
+        self.get_correction_log.clear()
+        self.get_correction_summary.clear()
 
         self.save_corrected_data(alias, corrected_data)
+        return failures
 
     def _apply_correction_row(
         self, data: pl.DataFrame, row: dict[str, Any]
-    ) -> pl.DataFrame:
+    ) -> tuple[pl.DataFrame, str | None]:
         """Apply one correction-log row to data.
 
         Returns `data` unchanged if the row's key can't be located, or if
@@ -571,32 +662,92 @@ class CorrectionProcessor:
 
         Returns
         -------
-        pl.DataFrame
-            The data with the correction applied, or unchanged on failure
+        tuple[pl.DataFrame, str | None]
+            The data (updated on success, unchanged on failure) and an error
+            message describing why the correction was skipped, or None on
+            success.
         """
         key_value = row["KEY"]
         key_col = self._find_key_column(data, key_value)
         if not key_col:
-            return data
+            return data, f"Key '{key_value}' not found in current data"
 
         action = row["action"]
         column = row["column"]
+        recorded_value = row["current_value"]
         new_value = row["new_value"]
+
+        if action in ("modify value", "remove value") and column:
+            if column not in data.columns:
+                return data, f"Column '{column}' no longer available in the data"
+
+            mismatch = self._current_value_mismatch(
+                data, key_col, key_value, column, recorded_value
+            )
+            if mismatch:
+                return data, mismatch
 
         try:
             if action == "modify value" and column and new_value is not None:
-                return self._apply_modify_value(
-                    data, key_col, key_value, column, new_value
+                return (
+                    self._apply_modify_value(
+                        data, key_col, key_value, column, new_value
+                    ),
+                    None,
                 )
             if action == "remove value" and column:
-                return self._apply_remove_value(data, key_col, key_value, column)
+                return self._apply_remove_value(data, key_col, key_value, column), None
             if action == "remove row":
-                return self._apply_remove_row(data, key_col, key_value)
-        except Exception:
+                return self._apply_remove_row(data, key_col, key_value), None
+        except Exception as e:
             # Skip corrections that fail (data may have changed)
-            pass
+            return data, str(e)
 
-        return data
+        return data, None
+
+    @staticmethod
+    def _current_value_mismatch(
+        data: pl.DataFrame,
+        key_col: str,
+        key_value: str,
+        column: str,
+        recorded_value: str | None,
+    ) -> str | None:
+        """Check whether `column`'s value at `key_value` still matches what
+        was recorded when the correction was logged.
+
+        Parameters
+        ----------
+        data : pl.DataFrame
+            The data to check against
+        key_col : str
+            The key column name
+        key_value : str
+            The key value to match
+        column : str
+            The column the correction targets
+        recorded_value : str | None
+            The value recorded in the log at the time the correction was
+            made, or None if no value was recorded
+
+        Returns
+        -------
+        str | None
+            A description of the mismatch, or None if the value still
+            matches (or there is nothing recorded to compare against)
+        """
+        if recorded_value is None:
+            return None
+
+        actual_value = data.filter(pl.col(key_col) == key_value)[0, column]
+        actual_str = None if actual_value is None else str(actual_value)
+
+        if actual_str != recorded_value:
+            return (
+                f"Current value for '{column}' has changed since this correction "
+                f"was recorded (expected '{recorded_value}', found '{actual_str}')"
+            )
+        return None
 
     @staticmethod
     def _find_key_column(data: pl.DataFrame, key_value: str) -> str | None:
@@ -650,15 +801,7 @@ class CorrectionProcessor:
             reason = row["reason"]
             date = row["date"]
 
-            # Create description based on action type
-            if action == "modify value":
-                description = f"Modify {column} for key {key_value} to '{new_value}'"
-            elif action == "remove value":
-                description = f"Remove {column} value for key {key_value}"
-            elif action == "remove row":
-                description = f"Remove entire row for key {key_value}"
-            else:
-                description = f"{action} for key {key_value}"
+            description = _describe_correction_row(row)
 
             summaries.append(
                 {
