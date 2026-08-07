@@ -1,8 +1,18 @@
 """Tests for correction_view.py logic patterns."""
 
+import sys
+from contextlib import contextmanager
+from unittest.mock import MagicMock, patch
+
 import polars as pl
 
-from datasure.views.correction_view import _build_correction_log_display
+from datasure.views.correction_view import (
+    _build_correction_log_display,
+    load_tab_config,
+    render_add_correction_form,
+)
+
+_st = sys.modules["streamlit"]
 
 
 class TestCorrectionInputFormLogic:
@@ -398,7 +408,7 @@ class TestBuildCorrectionLogDisplay:
         assert result.columns == [
             "date",
             "KEY",
-            "ID",
+            "Survey ID",
             "action",
             "status",
             "status_reason",
@@ -407,3 +417,149 @@ class TestBuildCorrectionLogDisplay:
             "new_value",
             "reason",
         ]
+
+
+class TestLoadTabConfig:
+    """Test that load_tab_config threads the configured Survey ID column."""
+
+    @patch("datasure.views.correction_view.get_check_config_settings")
+    def test_includes_survey_id_when_configured(self, mock_get_settings):
+        mock_get_settings.return_value = {
+            "page_name": "Household Survey",
+            "survey_data_name": "household_survey",
+            "survey_key": "KEY",
+            "survey_id": "hhid",
+        }
+
+        config = load_tab_config("proj1", 0)
+
+        assert config.survey_id == "hhid"
+
+    @patch("datasure.views.correction_view.get_check_config_settings")
+    def test_survey_id_none_when_not_configured(self, mock_get_settings):
+        mock_get_settings.return_value = {
+            "page_name": "Household Survey",
+            "survey_data_name": "household_survey",
+            "survey_key": "KEY",
+        }
+
+        config = load_tab_config("proj1", 0)
+
+        assert config.survey_id is None
+
+
+class TestRenderAddCorrectionFormSurveyId:
+    """Test the Survey ID display shown after a KEY is selected."""
+
+    def _mock_processor(self, data: pl.DataFrame) -> MagicMock:
+        processor = MagicMock()
+        processor.get_corrected_data.return_value = data
+        return processor
+
+    @contextmanager
+    def _mocked_widgets(
+        self, selected_key: str, click_apply: bool = False, reason: str = ""
+    ):
+        """Mock the widgets this form uses, restoring originals afterward.
+
+        `_st` is a single mock shared across every view test file, so
+        leaving these bound after the test (e.g. an exhausted list
+        `side_effect` on `selectbox`) can crash unrelated tests in
+        test_import_view.py that inherit the same mock later in the run.
+        """
+        originals = {
+            "popover": _st.popover,
+            "markdown": _st.markdown,
+            "warning": _st.warning,
+            "write": _st.write,
+            "text_input": _st.text_input,
+            "button": _st.button,
+            "selectbox": _st.selectbox,
+        }
+        try:
+            mock_popover = MagicMock()
+            mock_popover.__enter__ = MagicMock(return_value=None)
+            mock_popover.__exit__ = MagicMock(return_value=False)
+            _st.popover = MagicMock(return_value=mock_popover)
+            _st.markdown = MagicMock()
+            _st.warning = MagicMock()
+            _st.write = MagicMock()
+            _st.text_input = MagicMock(return_value=reason)
+            _st.button = MagicMock(return_value=click_apply)
+            # First selectbox call selects the KEY, second selects the action.
+            _st.selectbox = MagicMock(side_effect=[selected_key, "remove row"])
+            yield
+        finally:
+            for name, value in originals.items():
+                setattr(_st, name, value)
+
+    def test_shows_survey_id_when_configured(self):
+        """The configured Survey ID column's value is displayed for the KEY."""
+        data = pl.DataFrame({"KEY": ["uuid:1", "uuid:2"], "hhid": ["HH001", "HH002"]})
+        processor = self._mock_processor(data)
+
+        with self._mocked_widgets(selected_key="uuid:1"):
+            render_add_correction_form(
+                correction_processor=processor,
+                key_col="KEY",
+                alias="survey",
+                tab_index=0,
+                survey_id_col="hhid",
+            )
+
+            written = [str(c.args[0]) for c in _st.write.call_args_list]
+            assert any("Survey ID" in text and "HH001" in text for text in written)
+
+    def test_no_survey_id_display_when_not_configured(self):
+        """No Survey ID row is shown when no Survey ID column is configured."""
+        data = pl.DataFrame({"KEY": ["uuid:1", "uuid:2"], "hhid": ["HH001", "HH002"]})
+        processor = self._mock_processor(data)
+
+        with self._mocked_widgets(selected_key="uuid:1"):
+            render_add_correction_form(
+                correction_processor=processor,
+                key_col="KEY",
+                alias="survey",
+                tab_index=0,
+                survey_id_col=None,
+            )
+
+            written = [str(c.args[0]) for c in _st.write.call_args_list]
+            assert not any("Survey ID" in text for text in written)
+
+    def test_no_survey_id_display_when_column_missing_from_data(self):
+        """A configured but nonexistent Survey ID column is skipped, not an error."""
+        data = pl.DataFrame({"KEY": ["uuid:1", "uuid:2"]})
+        processor = self._mock_processor(data)
+
+        with self._mocked_widgets(selected_key="uuid:1"):
+            render_add_correction_form(
+                correction_processor=processor,
+                key_col="KEY",
+                alias="survey",
+                tab_index=0,
+                survey_id_col="hhid",
+            )
+
+            written = [str(c.args[0]) for c in _st.write.call_args_list]
+            assert not any("Survey ID" in text for text in written)
+
+    def test_apply_passes_survey_id_to_processor(self):
+        """Clicking Apply forwards the looked-up Survey ID to apply_correction."""
+        data = pl.DataFrame({"KEY": ["uuid:1", "uuid:2"], "hhid": ["HH001", "HH002"]})
+        processor = self._mock_processor(data)
+        processor.validate_correction_input.return_value = (True, "")
+
+        with self._mocked_widgets(
+            selected_key="uuid:1", click_apply=True, reason="Test reason"
+        ):
+            render_add_correction_form(
+                correction_processor=processor,
+                key_col="KEY",
+                alias="survey",
+                tab_index=0,
+                survey_id_col="hhid",
+            )
+
+            processor.apply_correction.assert_called_once()
+            assert processor.apply_correction.call_args[1]["survey_id_value"] == "HH001"

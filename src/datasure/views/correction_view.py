@@ -528,6 +528,7 @@ def render_add_correction_form(
         if not corr_key_val:
             return
 
+        survey_id_value = None
         if survey_id_col and survey_id_col in corrected_data.columns:
             survey_id_value = get_current_value(
                 corrected_data, key_col, corr_key_val, survey_id_col
@@ -562,6 +563,7 @@ def render_add_correction_form(
             form_state=form_state,
             reason=reason,
             tab_index=tab_index,
+            survey_id_value=survey_id_value,
         )
 
 
@@ -615,6 +617,7 @@ def _render_apply_button(
     form_state: CorrectionFormState,
     reason: str,
     tab_index: int,
+    survey_id_value: Any = None,
 ) -> None:
     """
     Render apply button and handle correction application.
@@ -635,6 +638,9 @@ def _render_apply_button(
         Reason for correction.
     tab_index : int
         The tab index for unique widget keys.
+    survey_id_value : Any
+        The Survey ID value for the selected KEY, if a Survey ID column is
+        configured, to record alongside the correction log entry.
     """
     apply_enabled = should_enable_apply_button(
         form_state.action, reason, form_state.new_value
@@ -660,6 +666,7 @@ def _render_apply_button(
             current_value=form_state.current_value,
             new_value=form_state.new_value,
             reason=reason,
+            survey_id_value=survey_id_value,
         )
 
 
@@ -674,6 +681,7 @@ def _handle_apply_correction(
     current_value: Any,
     new_value: Any,
     reason: str,
+    survey_id_value: Any = None,
 ) -> None:
     """
     Handle the application of a correction with validation.
@@ -700,6 +708,9 @@ def _handle_apply_correction(
         The new value (if applicable).
     reason : str
         The reason for correction.
+    survey_id_value : Any
+        The Survey ID value for this KEY, if a Survey ID column is
+        configured, to record alongside the correction log entry.
     """
     try:
         # Validate input
@@ -726,6 +737,7 @@ def _handle_apply_correction(
             current_value=current_value,
             new_value=new_value,
             reason=reason,
+            survey_id_value=survey_id_value,
         )
 
         st.success("Correction applied successfully!")
@@ -911,8 +923,9 @@ def _handle_remove_correction(
 def _build_correction_log_display(correction_log: pl.DataFrame) -> pl.DataFrame:
     """Prepare a correction log for display in the Correction Log table.
 
-    Backfills the status columns for logs saved before they existed, and
-    orders columns so status/status_reason sit right after action.
+    Backfills the status columns for logs saved before they existed, orders
+    columns so status/status_reason sit right after action, and relabels the
+    "ID" column as "Survey ID" for display.
 
     Parameters
     ----------
@@ -922,7 +935,8 @@ def _build_correction_log_display(correction_log: pl.DataFrame) -> pl.DataFrame:
     Returns
     -------
     pl.DataFrame
-        The log with status columns present, in display column order.
+        The log with status columns present, in display column order, ready
+        for display.
     """
     if "status" not in correction_log.columns:
         correction_log = correction_log.with_columns(
@@ -945,7 +959,9 @@ def _build_correction_log_display(correction_log: pl.DataFrame) -> pl.DataFrame:
         "new_value",
         "reason",
     ]
-    return correction_log.select(display_columns)
+    # "ID" holds the Survey ID value recorded for the KEY, if one was
+    # configured - rename it for display so the column reads clearly.
+    return correction_log.select(display_columns).rename({"ID": "Survey ID"})
 
 
 @st.fragment
