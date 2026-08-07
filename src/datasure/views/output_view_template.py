@@ -14,7 +14,7 @@ import pandas as pd
 import polars as pl
 import streamlit as st
 
-from datasure.checks.backchecks import backchecks_report
+from datasure.checks.backchecks.report_ui import backchecks_report
 from datasure.checks.descriptive import descriptive_report
 from datasure.checks.duplicates import duplicates_report
 from datasure.checks.enumerator.report_ui import enumerator_report
