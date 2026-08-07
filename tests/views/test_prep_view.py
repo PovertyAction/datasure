@@ -1582,6 +1582,39 @@ class TestPrepAddStep:
         _st.success.assert_called_once()
         _st.rerun.assert_called_once()
 
+    @patch("datasure.views.prep_view.prep_apply_action")
+    def test_add_button_clicked_shows_error_on_failure(
+        self, mock_prep_apply, sample_polars_df
+    ):
+        """A failing transform shows st.error instead of crashing the app."""
+        import datasure.views.prep_view as pv
+        from datasure.processing.prep import ValidationError
+
+        pv.project_id = "test_project"
+        pv.label = "test_label"
+
+        mock_prep_apply.side_effect = ValidationError("Failed to parse datetime")
+
+        mock_popover = MagicMock()
+        mock_popover.__enter__ = MagicMock(return_value=None)
+        mock_popover.__exit__ = MagicMock(return_value=False)
+        _st.popover = MagicMock(return_value=mock_popover)
+        _st.selectbox = MagicMock(return_value=PrepActions.remove_column.value)
+        _st.multiselect = MagicMock(return_value=["name"])
+        _st.info = MagicMock()
+        _st.button = MagicMock(return_value=True)
+        _st.success = MagicMock()
+        _st.error = MagicMock()
+        _st.rerun = MagicMock()
+
+        prep_add_step(sample_polars_df, step_index=0)
+
+        mock_prep_apply.assert_called_once()
+        _st.error.assert_called_once()
+        assert "Failed to parse datetime" in _st.error.call_args[0][0]
+        _st.success.assert_not_called()
+        _st.rerun.assert_not_called()
+
 
 class TestModuleLevelPageLayout:
     """Test the module-level page layout code by reloading the module."""

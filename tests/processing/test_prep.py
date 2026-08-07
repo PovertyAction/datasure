@@ -858,6 +858,48 @@ class TestTransformColumnsOperation:
         result, _ = op.execute(data, prep_args)
         assert result["d"].dtype == pl.Datetime
 
+    def test_string_to_datetime_slash_format_no_seconds(self):
+        """A timestamp with no seconds (e.g. spreadsheet exports) still parses."""
+        from datetime import datetime
+
+        op = TransformColumnsOperation()
+        data = pl.DataFrame({"d": ["3/15/2026 17:28", "4/1/2026 9:05"]})
+        prep_args = PrepActionResult(
+            action="transform column(s)",
+            source_columns=["d"],
+            method="string to datetime",
+        )
+        result, _ = op.execute(data, prep_args)
+        assert result["d"].dtype == pl.Datetime
+        assert result["d"].to_list()[0] == datetime(2026, 3, 15, 17, 28)
+
+    def test_string_to_datetime_iso_format_no_seconds(self):
+        """ISO-shaped timestamps with no seconds also parse."""
+        from datetime import datetime
+
+        op = TransformColumnsOperation()
+        data = pl.DataFrame({"d": ["2026-03-15 17:28", "2026-04-01 09:05"]})
+        prep_args = PrepActionResult(
+            action="transform column(s)",
+            source_columns=["d"],
+            method="string to datetime",
+        )
+        result, _ = op.execute(data, prep_args)
+        assert result["d"].dtype == pl.Datetime
+        assert result["d"].to_list()[0] == datetime(2026, 3, 15, 17, 28)
+
+    def test_string_to_datetime_stata_format_no_seconds(self):
+        """Stata-shaped timestamps with no seconds also parse."""
+        op = TransformColumnsOperation()
+        data = pl.DataFrame({"d": ["18aug2025 19:49", "20sep2025 10:00"]})
+        prep_args = PrepActionResult(
+            action="transform column(s)",
+            source_columns=["d"],
+            method="string to datetime",
+        )
+        result, _ = op.execute(data, prep_args)
+        assert result["d"].dtype == pl.Datetime
+
     def test_string_to_datetime_stata_format(self):
         """Test String to datetime stata format."""
         op = TransformColumnsOperation()
