@@ -1676,8 +1676,6 @@ class TestModuleLevelPageLayout:
         """Change Log renders a status column and styles a Failed row."""
         import importlib
 
-        import datasure.views.prep_view as pv_mod
-
         _st.session_state["st_project_id"] = "test_project"
         _st.session_state["st_import_data_page"] = "import_page"
         _st.session_state["st_config_checks_page"] = "config_page"
