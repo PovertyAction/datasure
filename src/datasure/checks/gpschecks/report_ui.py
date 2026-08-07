@@ -2,310 +2,35 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import numpy as np
 import polars as pl
 import pydeck
 import streamlit as st
 from geopy.distance import geodesic
 from pydantic import ValidationError
-from sklearn.neighbors import LocalOutlierFactor
 
 if TYPE_CHECKING:
     import pandas as pd
 
+from datasure.checks.gpschecks.compute import (
+    _build_map_dataframe,
+    _build_tooltip_config,
+    _collect_optional_fields,
+    _get_gps_column_settings,
+    _get_mapbox_key,
+    _has_parsed_coords,
+    _identity_optional_fields,
+    _parse_gps_data,
+    _save_gps_column_settings,
+    detect_outliers_with_clusters,
+    detect_outliers_with_lof,
+)
+from datasure.checks.gpschecks.models import MAPBOX_STYLE
+from datasure.checks.gpschecks.settings_ui import gpschecks_report_settings
 from datasure.models.enums import DelimiterType, GPSFormatType, GPSOutlierMethod
 from datasure.models.schemas import GPSColumnConfig, GPSSettings
 from datasure.utils.dataframe_utils import ColumnByType, get_df_columns
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.navigations_utils import demo_callout
-from datasure.utils.onboarding_utils import demo_output_onboarding, is_demo_project
-from datasure.utils.settings_utils import (
-    load_check_settings,
-    save_check_settings,
-    save_secrets,
-    trigger_save,
-)
-
-TAB_NAME: str = "gpschecks"
-
-
-## Constants
-
-MAPBOX_STYLE = "mapbox://styles/mapbox/light-v9"
-
-# Distinct color palette (RGBA) for categorical coloring on maps
-_CATEGORY_COLORS: list[list[int]] = [
-    [31, 119, 180, 200],
-    [255, 127, 14, 200],
-    [44, 160, 44, 200],
-    [214, 39, 40, 200],
-    [148, 103, 189, 200],
-    [140, 86, 75, 200],
-    [227, 119, 194, 200],
-    [127, 127, 127, 200],
-    [188, 189, 34, 200],
-    [23, 190, 207, 200],
-]
-
-
-def _get_mapbox_key() -> str | None:
-    """Resolve Mapbox API key from pydeck settings or Streamlit secrets.
-
-    Returns
-    -------
-    str | None
-        Mapbox API key if found, None otherwise.
-    """
-    mapbox_key = pydeck.settings.mapbox_key
-    if mapbox_key:
-        return mapbox_key
-    if "mapbox_custom_key" in st.secrets:
-        return st.secrets["mapbox_custom_key"]
-    if "default_mapbox_api_key" in st.secrets:
-        return st.secrets["default_mapbox_api_key"]
-    return None
-
-
-def _build_tooltip_config(fields: list[str]) -> dict:
-    """Build pydeck tooltip configuration from a list of field names.
-
-    Parameters
-    ----------
-    fields : list[str]
-        Field names to include in the tooltip.
-
-    Returns
-    -------
-    dict
-        Tooltip configuration for pydeck.
-    """
-    return {
-        "html": "<br>".join([f"<b>{field}:</b> {{{field}}}" for field in fields]),
-        "style": {"backgroundColor": "steelblue", "color": "white"},
-    }
-
-
-@st.cache_data(ttl=60)
-def load_default_gpschecks_settings(
-    settings_file: str, config: GPSSettings
-) -> GPSSettings:
-    """Load and merge saved settings with default configuration.
-
-    Loads previously saved gps report settings from the settings file
-    and merges them with the provided default configuration. Saved settings
-    take precedence over defaults.
-
-    Cached for 60 seconds to reduce file I/O operations.
-
-    Parameters
-    ----------
-    settings_file : str
-        Path to the settings file containing saved configurations.
-    config : DuplicatesSettings
-        Default configuration to use as fallback for missing settings.
-
-    Returns
-    -------
-    DuplicatesSettings
-        Merged settings combining saved and default configurations.
-    """
-    saved_settings = load_check_settings(settings_file, TAB_NAME)
-
-    default_settings: dict = dict(config)
-    default_settings.update(saved_settings)
-
-    return GPSSettings(**default_settings)
-
-
-#  gps check settings
-@demo_output_onboarding(TAB_NAME)
-def gpschecks_report_settings(
-    settings_file: str,
-    config: GPSSettings,
-    categorical_columns: list[str],
-    datetime_columns: list[str],
-) -> GPSSettings:
-    """Create and render the settings UI for gpschecks report configuration.
-
-    This function creates a comprehensive Streamlit UI for configuring
-    gpschecks report settings. It includes:
-    - Survey identifiers (key and ID columns)
-    - Survey date column selection
-    - Enumerator ID column
-
-    Settings are automatically saved to the settings file when changed
-    and loaded from previous sessions if available.
-
-    Parameters
-    ----------
-    project_id : str
-        Unique project identifier for database operations.
-    settings_file : str
-        Path to settings file for saving/loading configurations.
-    data : pl.DataFrame
-        Dataset to analyze for duplicates.
-    config : DuplicatesSettings
-        Default configuration used as fallback values.
-    categorical_columns : list[str]
-        Available categorical columns for selection (survey key, ID, enumerator).
-    datetime_columns : list[str]
-        Available datetime columns for date selection.
-
-    Returns
-    -------
-    GPSSettings
-        User-configured settings from the UI.
-    """
-    with st.expander("settings", icon=":material/settings:"):
-        st.markdown("## Configure settings for GPS CHecks report")
-        st.write("---")
-
-        default_settings = load_default_gpschecks_settings(settings_file, config)
-
-        # Survey Identifiers
-        with st.container(border=True):
-            st.subheader("Survey Identifiers")
-            si1, si2, _ = st.columns(3)
-
-            with si1:
-                default_survey_key = default_settings.survey_key
-                default_survey_key_index = (
-                    categorical_columns.index(default_survey_key)
-                    if default_survey_key and default_survey_key in categorical_columns
-                    else None
-                )
-                survey_key = st.selectbox(
-                    "Survey Key",
-                    options=categorical_columns,
-                    key="survey_key_gpschecks",
-                    help="Select the column that contains the survey key",
-                    index=default_survey_key_index,
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_survey_key"},
-                )
-                save_check_settings(settings_file, TAB_NAME, {"survey_key": survey_key})
-
-            with si2:
-                default_survey_id = default_settings.survey_id
-                default_survey_id_index = (
-                    categorical_columns.index(default_survey_id)
-                    if default_survey_id and default_survey_id in categorical_columns
-                    else None
-                )
-                survey_id = st.selectbox(
-                    "Survey ID",
-                    options=categorical_columns,
-                    help="Select the column that contains the survey ID",
-                    key="survey_id_gpschecks",
-                    index=default_survey_id_index,
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_survey_id"},
-                )
-                save_check_settings(settings_file, TAB_NAME, {"survey_id": survey_id})
-
-        with st.container(border=True):
-            st.subheader("Survey Date")
-
-            sd1, _, _ = st.columns(3)
-
-            with sd1:
-                default_survey_date = default_settings.survey_date
-                default_survey_date_index = (
-                    datetime_columns.index(default_survey_date)
-                    if default_survey_date and default_survey_date in datetime_columns
-                    else None
-                )
-
-                survey_date = st.selectbox(
-                    "Survey Date",
-                    options=datetime_columns,
-                    help="Select the column that contains the survey date",
-                    key="survey_date_gpschecks",
-                    index=default_survey_date_index,
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_survey_date"},
-                )
-                save_check_settings(
-                    settings_file, TAB_NAME, {"survey_date": survey_date}
-                )
-
-        with st.container(border=True):
-            st.subheader("Enumerator")
-            ec1, ec2, _ = st.columns(3)
-            with ec1:
-                default_enumerator = default_settings.enumerator
-                default_enumerator_index = (
-                    categorical_columns.index(default_enumerator)
-                    if default_enumerator and default_enumerator in categorical_columns
-                    else None
-                )
-                enumerator = st.selectbox(
-                    "Enumerator ID",
-                    options=categorical_columns,
-                    key="enumerator_gpschecks",
-                    help="Select the column that contains the enumerator ID",
-                    index=default_enumerator_index,
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_enumerator"},
-                )
-                save_check_settings(settings_file, TAB_NAME, {"enumerator": enumerator})
-
-            with ec2:
-                default_team = default_settings.team
-                default_team_index = (
-                    categorical_columns.index(default_team)
-                    if default_team and default_team in categorical_columns
-                    else None
-                )
-                team = st.selectbox(
-                    "Team",
-                    options=categorical_columns,
-                    key="team_gpschecks",
-                    help="Select the column that contains the team identifier",
-                    index=default_team_index,
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_team"},
-                )
-                save_check_settings(settings_file, TAB_NAME, {"team": team})
-
-        # Mapbox API Key Configuration
-        with st.container(border=True):
-            st.subheader("Mapbox API Token Configuration")
-            st.caption("Configure your Mapbox API key for map visualizations. ")
-
-            current_mapbox_token = st.secrets.get("mapbox_token", None)
-
-            # Show text input if user wants to add own key
-            mt1, mt2 = st.columns([0.7, 0.3])
-            with mt1:
-                mapbox_custom_token = st.text_input(
-                    "Your Mapbox API Key",
-                    value=current_mapbox_token,
-                    type="password",
-                    key="mapbox_custom_token_gpschecks",
-                    help="Enter your Mapbox API key. Get one free at https://account.mapbox.com/",
-                )
-            with mt2:
-                st.write("")
-                if st.button(
-                    "Save Mapbox Token",
-                    key="save_mapbox_token_gpschecks",
-                    type="primary",
-                    width="stretch",
-                    disabled=not mapbox_custom_token,
-                ):
-                    save_secrets("mapbox_token", mapbox_custom_token)
-                    st.success("Mapbox Token saved successfully.")
-
-    return GPSSettings(
-        survey_key=survey_key,
-        survey_id=survey_id,
-        survey_date=survey_date,
-        enumerator=enumerator,
-        team=team,
-        mapbox_custom_key=mapbox_custom_token,
-    )
-
+from datasure.utils.onboarding_utils import is_demo_project
 
 # =============================================================================
 # GPS Column Configuration Functions
@@ -329,11 +54,7 @@ def _render_gps_column_actions(
     all_columns : list[str]
         List of all available columns in the dataset.
     """
-    gps_settings = duckdb_get_table(
-        project_id,
-        f"gps_columns_{page_name_id}",
-        "logs",
-    )
+    gps_settings = _get_gps_column_settings(project_id, page_name_id)
 
     gs1, gs2, _ = st.columns([0.4, 0.3, 0.3])
     with gs1:
@@ -521,11 +242,7 @@ def _update_gps_column_config(
         Validated GPS column configuration.
     """
     # Get existing config
-    existing_config = duckdb_get_table(
-        project_id=project_id,
-        alias=f"gps_columns_{page_name_id}",
-        db_name="logs",
-    )
+    existing_config = _get_gps_column_settings(project_id, page_name_id)
 
     # Prepare new configuration
     new_config = {
@@ -560,12 +277,7 @@ def _update_gps_column_config(
         updated_config = new_config_df
 
     # Save updated configuration
-    duckdb_save_table(
-        project_id,
-        updated_config,
-        f"gps_columns_{page_name_id}",
-        db_name="logs",
-    )
+    _save_gps_column_settings(project_id, page_name_id, updated_config)
 
 
 def _render_gps_settings_table(gps_settings: pl.DataFrame) -> None:
@@ -651,12 +363,7 @@ def _delete_gps_column(
                     pl.col("composite_index") != selected_index
                 ).drop("composite_index", "index")
 
-                duckdb_save_table(
-                    project_id,
-                    updated_settings,
-                    f"gps_columns_{page_name_id}",
-                    "logs",
-                )
+                _save_gps_column_settings(project_id, page_name_id, updated_settings)
 
                 st.rerun()
 
@@ -664,114 +371,6 @@ def _delete_gps_column(
 # =============================================================================
 # GPS Plotting and Analysis Functions
 # =============================================================================
-
-
-def _parse_gps_data(
-    data: pl.DataFrame,
-    gps_config: dict,
-) -> pl.DataFrame:
-    """Parse GPS data based on configuration.
-
-    Extracts latitude and longitude from either single column (delimited)
-    or separate columns format.
-
-    Parameters
-    ----------
-    data : pl.DataFrame
-        Input dataframe containing GPS data.
-    gps_config : dict
-        GPS configuration dictionary with format_type, delimiter, and columns.
-
-    Returns
-    -------
-    pl.DataFrame
-        DataFrame with added 'latitude' and 'longitude' columns.
-    """
-    result_df = data.clone()
-
-    if gps_config["format_type"] == GPSFormatType.SINGLE_COLUMN.value:
-        # Single column format - split by delimiter
-        gps_col = gps_config["gps_column"]
-        delimiter = gps_config["delimiter"]
-
-        separator = " " if delimiter == DelimiterType.SPACE.value else ","
-
-        # Check if column exists
-        if gps_col not in result_df.columns:
-            # Return empty lat/lon columns if GPS column doesn't exist
-            result_df = result_df.with_columns(
-                [
-                    pl.lit(None).cast(pl.Float64).alias("latitude"),
-                    pl.lit(None).cast(pl.Float64).alias("longitude"),
-                ]
-            )
-        else:
-            # Convert to string first (in case column is numeric or other type)
-            # Then split GPS column and extract lat/lon
-            result_df = result_df.with_columns(
-                [
-                    pl.col(gps_col)
-                    .cast(pl.Utf8, strict=False)
-                    .str.split(separator)
-                    .list.get(0)
-                    .cast(pl.Float64, strict=False)
-                    .alias("latitude"),
-                    pl.col(gps_col)
-                    .cast(pl.Utf8, strict=False)
-                    .str.split(separator)
-                    .list.get(1)
-                    .cast(pl.Float64, strict=False)
-                    .alias("longitude"),
-                ]
-            )
-    else:
-        # Separate columns format
-        lat_col = gps_config["latitude_column"]
-        lon_col = gps_config["longitude_column"]
-
-        # Check if columns exist
-        if lat_col not in result_df.columns or lon_col not in result_df.columns:
-            # Return empty lat/lon columns if either column doesn't exist
-            result_df = result_df.with_columns(
-                [
-                    pl.lit(None).cast(pl.Float64).alias("latitude"),
-                    pl.lit(None).cast(pl.Float64).alias("longitude"),
-                ]
-            )
-        else:
-            result_df = result_df.with_columns(
-                [
-                    pl.col(lat_col).cast(pl.Float64, strict=False).alias("latitude"),
-                    pl.col(lon_col).cast(pl.Float64, strict=False).alias("longitude"),
-                ]
-            )
-
-    return result_df
-
-
-def _collect_optional_fields(
-    df, field_pairs: list[tuple[str | None, str]]
-) -> list[str]:
-    """Collect field names that are non-None and present in the dataframe.
-
-    Parameters
-    ----------
-    df : pd.DataFrame or pl.DataFrame
-        DataFrame to check column presence against.
-    field_pairs : list[tuple[str | None, str]]
-        Pairs of (column_name, tooltip_label). If column_name is truthy and
-        present in df.columns, tooltip_label is included in the result.
-
-    Returns
-    -------
-    list[str]
-        List of tooltip field names.
-    """
-    fields: list[str] = []
-    for col, label in field_pairs:
-        if col and col in df.columns:
-            fields.append(label)
-    return fields
 
 
 def _apply_category_filter(data: pl.DataFrame, filter_by: str | None) -> pl.DataFrame:
@@ -803,74 +402,6 @@ def _apply_category_filter(data: pl.DataFrame, filter_by: str | None) -> pl.Data
     if filter_values:
         return data.filter(pl.col(filter_by).is_in(filter_values))
     return data
-
-
-def _build_map_dataframe(
-    data: pl.DataFrame,
-    survey_key: str | None,
-    survey_date: str | None,
-    enumerator: str | None,
-    team: str | None,
-    color_by: str | None,
-) -> tuple[object, list[str]]:
-    """Build a pandas DataFrame and tooltip fields for pydeck visualization.
-
-    Parameters
-    ----------
-    data : pl.DataFrame
-        Filtered data with latitude and longitude columns.
-    survey_key : str | None
-        Survey key column name.
-    survey_date : str | None
-        Survey date column name.
-    enumerator : str | None
-        Enumerator column name.
-    team : str | None
-        Team column name.
-    color_by : str | None
-        Column name to color points by.
-
-    Returns
-    -------
-    tuple[pd.DataFrame, list[str]]
-        Pandas DataFrame for pydeck and list of tooltip field names.
-    """
-    map_df = data.select(
-        pl.col("latitude").alias("lat"),
-        pl.col("longitude").alias("lon"),
-    )
-
-    # Map source column -> tooltip alias for hover labels
-    column_aliases = [
-        (survey_key, "ID"),
-        (survey_date, "Date"),
-        (enumerator, "Enumerator"),
-        (team, "Team"),
-    ]
-
-    tooltip_fields: list[str] = []
-    for col, alias in column_aliases:
-        if col:
-            map_df = map_df.with_columns(data[col].alias(alias))
-            tooltip_fields.append(alias)
-
-    tooltip_fields.extend(["lat", "lon"])
-
-    if color_by:
-        map_df = map_df.with_columns(data[color_by].alias("color_group"))
-        tooltip_fields.append(color_by)
-
-    map_pd = map_df.to_pandas()
-
-    if color_by:
-        unique_vals = map_pd["color_group"].unique()
-        color_map = {
-            val: _CATEGORY_COLORS[i % len(_CATEGORY_COLORS)]
-            for i, val in enumerate(unique_vals)
-        }
-        map_pd["color"] = map_pd["color_group"].map(color_map)
-
-    return map_pd, tooltip_fields
 
 
 def _render_scatterplot_map(
@@ -957,11 +488,7 @@ def _load_and_parse_gps_data(
         (gps_settings, selected_alias, parsed_data) where any value may be
         None if a precondition failed (with appropriate UI messages shown).
     """
-    gps_settings = duckdb_get_table(
-        project_id,
-        f"gps_columns_{page_name_id}",
-        "logs",
-    )
+    gps_settings = _get_gps_column_settings(project_id, page_name_id)
 
     if gps_settings is None or gps_settings.is_empty():
         st.info(
@@ -1110,6 +637,61 @@ def _run_cluster_detection(
     return outlier_df, clustering_col
 
 
+def _filter_available_columns(df, columns: list[str]) -> list[str]:
+    """Return the subset of `columns` that are present in `df`.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame to check column presence against.
+    columns : list[str]
+        Candidate column names.
+
+    Returns
+    -------
+    list[str]
+        Columns from `columns` that exist in `df.columns`.
+    """
+    return [col for col in columns if col in df.columns]
+
+
+def _render_table_with_csv_download(
+    df,
+    columns: list[str],
+    download_label: str,
+    file_name: str,
+) -> None:
+    """Render a dataframe restricted to available columns with a CSV download button.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame to display and download.
+    columns : list[str]
+        Candidate columns to display (filtered to those present in `df`).
+    download_label : str
+        Label for the download button.
+    file_name : str
+        File name for the downloaded CSV.
+    """
+    available_cols = _filter_available_columns(df, columns)
+    display_df = df[available_cols]
+
+    st.dataframe(
+        display_df,
+        width="stretch",
+        hide_index=True,
+    )
+
+    csv = display_df.to_csv(index=False)
+    st.download_button(
+        label=download_label,
+        data=csv,
+        file_name=file_name,
+        mime="text/csv",
+    )
+
+
 def _render_outliers_data_table(
     outlier_df,
     selected_alias: str,
@@ -1145,13 +727,8 @@ def _render_outliers_data_table(
             st.success("No outliers detected!")
             return
 
-        display_cols = _collect_optional_fields(
-            outliers_only,
-            [
-                (survey_key, survey_key),
-                (survey_date, survey_date),
-                (enumerator, enumerator),
-            ],
+        display_cols = _identity_optional_fields(
+            outliers_only, [survey_key, survey_date, enumerator]
         )
         display_cols.extend(["latitude", "longitude"])
 
@@ -1166,20 +743,11 @@ def _render_outliers_data_table(
                 )
             )
 
-        available_cols = [col for col in display_cols if col in outliers_only.columns]
-
-        st.dataframe(
-            outliers_only[available_cols],
-            width="stretch",
-            hide_index=True,
-        )
-
-        csv = outliers_only[available_cols].to_csv(index=False)
-        st.download_button(
-            label="Download Outliers Data",
-            data=csv,
-            file_name=f"gps_outliers_{selected_alias}.csv",
-            mime="text/csv",
+        _render_table_with_csv_download(
+            outliers_only,
+            display_cols,
+            "Download Outliers Data",
+            f"gps_outliers_{selected_alias}.csv",
         )
 
 
@@ -1390,11 +958,7 @@ def _load_comparison_aliases(
     list[str] | None
         List of aliases if at least 2 exist, otherwise None (with UI messages shown).
     """
-    gps_settings = duckdb_get_table(
-        project_id,
-        f"gps_columns_{page_name_id}",
-        "logs",
-    )
+    gps_settings = _get_gps_column_settings(project_id, page_name_id)
 
     if gps_settings is None or gps_settings.is_empty():
         st.info(
@@ -1461,11 +1025,6 @@ def _render_comparison_selectors(
         )
 
     return gps_config_1, gps_config_2, distance_threshold
-
-
-def _has_parsed_coords(parsed_data: pl.DataFrame) -> bool:
-    """Check whether a parsed GPS DataFrame contains latitude and longitude columns."""
-    return "latitude" in parsed_data.columns and "longitude" in parsed_data.columns
 
 
 def _merge_parsed_gps_data(
@@ -1590,13 +1149,8 @@ def _render_comparison_map(
         {True: "Exceeds Threshold", False: "Within Threshold"}
     )
 
-    tooltip_fields = _collect_optional_fields(
-        map_df,
-        [
-            (survey_key, survey_key),
-            (survey_date, survey_date),
-            (enumerator, enumerator),
-        ],
+    tooltip_fields = _identity_optional_fields(
+        map_df, [survey_key, survey_date, enumerator]
     )
     tooltip_fields.extend(["lat", "lon", "distance_meters", "status"])
 
@@ -1617,19 +1171,14 @@ def _render_comparison_details_table(
 ) -> None:
     """Render the expandable comparison details table with download button."""
     with st.expander("View Comparison Details", expanded=False):
-        display_cols = _collect_optional_fields(
-            comparison_df,
-            [
-                (survey_key, survey_key),
-                (survey_date, survey_date),
-                (enumerator, enumerator),
-            ],
+        display_cols = _identity_optional_fields(
+            comparison_df, [survey_key, survey_date, enumerator]
         )
         display_cols.extend(
             ["lat_1", "lon_1", "lat_2", "lon_2", "distance_meters", "exceeds_threshold"]
         )
 
-        available_cols = [col for col in display_cols if col in comparison_df.columns]
+        available_cols = _filter_available_columns(comparison_df, display_cols)
 
         display_df = comparison_df[available_cols].copy()
         display_df = display_df.rename(
@@ -1644,14 +1193,11 @@ def _render_comparison_details_table(
         )
         display_df = display_df.sort_values("Distance (m)", ascending=False)
 
-        st.dataframe(display_df, width="stretch", hide_index=True)
-
-        csv = display_df.to_csv(index=False)
-        st.download_button(
-            label="Download Comparison Data",
-            data=csv,
-            file_name=f"gps_comparison_{gps_config_1}_vs_{gps_config_2}.csv",
-            mime="text/csv",
+        _render_table_with_csv_download(
+            display_df,
+            list(display_df.columns),
+            "Download Comparison Data",
+            f"gps_comparison_{gps_config_1}_vs_{gps_config_2}.csv",
         )
 
 
@@ -1702,7 +1248,7 @@ def _render_gps_comparison_checks(
 
     gps_config_1, gps_config_2, distance_threshold = selections
 
-    gps_settings = duckdb_get_table(project_id, f"gps_columns_{page_name_id}", "logs")
+    gps_settings = _get_gps_column_settings(project_id, page_name_id)
     config_1 = gps_settings.filter(pl.col("alias") == gps_config_1).to_dicts()[0]
     config_2 = gps_settings.filter(pl.col("alias") == gps_config_2).to_dicts()[0]
 
@@ -1780,218 +1326,14 @@ def plot_gps_coordinates(
     plot_df = plot_df.rename(columns={gps_lat_col: "lat", gps_lon_col: "lon"})
 
     # Build tooltip fields
-    tooltip_fields = _collect_optional_fields(
-        plot_df,
-        [
-            (survey_id, survey_id),
-            (submissiondate, submissiondate),
-            (enumerator, enumerator),
-        ],
+    tooltip_fields = _identity_optional_fields(
+        plot_df, [survey_id, submissiondate, enumerator]
     )
     tooltip_fields.extend(["lat", "lon"])
     if color_col and color_col in plot_df.columns:
         tooltip_fields.append(color_col)
 
     _render_scatterplot_map(plot_df, tooltip_fields, fill_color=[255, 0, 0, 160])
-
-
-# detect outliers using a clustering column
-@st.cache_data
-def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
-    """
-    Detect outliers using clustering and visualize them on a map.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        The input dataframe containing GPS data.
-    gps_lat_col : str
-        The name of the latitude column.
-    gps_lon_col : str
-        The name of the longitude column.
-    clustering_col : str
-        The name of the column to group data for clustering.
-
-    Returns
-    -------
-    pd.DataFrame
-        The input dataframe with an additional column indicating outliers.
-    """
-    outlier_df = df.copy(deep=True)
-    if not clustering_col:
-        # If no clustering column is provided, treat the entire DataFrame
-        # as a single group
-        # create a dummy clustering column
-        outlier_df["dummy_cluster"] = "all"
-        clustering_col = "dummy_cluster"
-
-    # replace missing values in clustering column with a placeholder
-    outlier_df[clustering_col] = outlier_df[clustering_col].fillna("Unknown")
-
-    # Drop rows with missing latitude values or longitude values
-    outlier_df = outlier_df.dropna(subset=[gps_lat_col, gps_lon_col])
-
-    grouped_df = outlier_df.groupby(clustering_col)
-
-    # Calculate centroids for each group
-    centroids = grouped_df[[gps_lat_col, gps_lon_col]].mean()
-
-    # Calculate distances from centroids using geopy
-    def calculate_distance(row):
-        centroid = centroids.loc[row[clustering_col]]
-        return geodesic(
-            (row[gps_lat_col], row[gps_lon_col]),
-            (centroid[gps_lat_col], centroid[gps_lon_col]),
-        ).meters
-
-    outlier_df["distance_from_centroid"] = outlier_df.apply(calculate_distance, axis=1)
-
-    # Flag outliers using IQR for each group
-    def flag_outliers(group):
-        # Skip outlier detection for groups with too few points
-        if len(group) < 4:
-            group["Outlier"] = False
-            return group
-
-        Q1 = group["distance_from_centroid"].quantile(0.25)
-        Q3 = group["distance_from_centroid"].quantile(0.75)
-        IQR = Q3 - Q1
-
-        # If IQR is 0 (all points at same distance), mark none as outliers
-        if IQR == 0:
-            group["Outlier"] = False
-            return group
-
-        lower_bound = Q1 - 1.5 * IQR
-        upper_bound = Q3 + 1.5 * IQR
-        group["Outlier"] = (group["distance_from_centroid"] < lower_bound) | (
-            group["distance_from_centroid"] > upper_bound
-        )
-        return group
-
-    outlier_df = grouped_df.apply(flag_outliers, include_groups=False).reset_index(
-        drop=True
-    )
-
-    return outlier_df
-
-
-# automatically detect outliers using Local Outlier Factor (LOF)
-@st.cache_data
-def detect_outliers_with_lof(df, gps_lat_col, gps_lon_col, n_neighbors, contamination):
-    """
-    Automatically detect GPS outliers using Local Outlier Factor (LOF).
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        The input dataframe containing GPS data.
-    gps_lat_col : str
-        The name of the latitude column.
-    gps_lon_col : str
-        The name of the longitude column.
-    n_neighbors : int
-        Number of neighbors to use for LOF.
-    contamination : float
-        The proportion of outliers in the data.
-
-    Returns
-    -------
-    pd.DataFrame
-        The input dataframe with an additional 'Outlier' column indicating GPS outliers.
-    """
-    # Drop rows with missing latitude or longitude values
-    df = df.dropna(subset=[gps_lat_col, gps_lon_col])
-
-    # Check if we have enough samples for LOF
-    n_samples = len(df)
-    if n_samples < 2:
-        # Not enough data for outlier detection
-        df["Outlier"] = False
-        return df
-
-    # Adjust n_neighbors if necessary
-    # LOF requires n_neighbors < n_samples
-    adjusted_n_neighbors = min(n_neighbors, n_samples - 1)
-
-    # Convert coordinates to a numpy array
-    coords = df[[gps_lat_col, gps_lon_col]].values
-
-    # Apply Local Outlier Factor
-    lof = LocalOutlierFactor(
-        n_neighbors=adjusted_n_neighbors, contamination=contamination
-    )
-    df["Outlier"] = lof.fit_predict(coords) == -1  # LOF assigns -1 to outliers
-
-    return df
-
-
-# calculate gps accuracy statistics
-@st.cache_data
-def calculate_gps_accuracy_statistics(
-    df, gps_accuracy, accuracy_cluster_col, accuracy_stats_list
-):
-    """
-    Calculate GPS accuracy statistics grouped by a specified column.
-
-    Parameters
-    ----------
-    data : pd.DataFrame
-        The input dataframe containing GPS data.
-    gps_accuracy : str
-        The name of the GPS accuracy column.
-    accuracy_cluster_col : str
-        The name of the column to group data for calculating statistics.
-    accuracy_stats_list : list
-        List of statistics to calculate (e.g., ['min', 'median', 'mean', 'max', 'std']).
-
-    Returns
-    -------
-    pd.DataFrame
-        A dataframe containing grouped GPS accuracy statistics.
-    """
-    allowed_stats = [
-        "min",
-        "median",
-        "mean",
-        "max",
-        "std",
-        "25th percentile",
-        "75th percentile",
-        "95th percentile",
-    ]
-    # Validate the accuracy_stats_list
-    accuracy_stats_list = [
-        stat for stat in accuracy_stats_list if stat in allowed_stats
-    ]
-    # update percentile statistics with numpy percentile function
-    percentile_map = {
-        "25th percentile": lambda x: np.percentile(x, 25),
-        "75th percentile": lambda x: np.percentile(x, 75),
-        "95th percentile": lambda x: np.percentile(x, 95),
-    }
-
-    accuracy_stats_list = [
-        percentile_map.get(stat, stat) for stat in accuracy_stats_list
-    ]
-
-    # Group GPS accuracy statistics by the selected column
-    gps_accuracy_stats = df.groupby(accuracy_cluster_col)[gps_accuracy].agg(
-        accuracy_stats_list
-    )
-    # Rename lambda_* columns back to their correct percentile names if present
-    for col in gps_accuracy_stats.columns:
-        if "lambda" in col:
-            for percentile_name, func in percentile_map.items():
-                if gps_accuracy_stats[col].equals(
-                    df.groupby(accuracy_cluster_col)[gps_accuracy].agg(func)
-                ):
-                    gps_accuracy_stats = gps_accuracy_stats.rename(
-                        columns={col: percentile_name}
-                    )
-                    break
-
-    return gps_accuracy_stats
 
 
 # plot clusters on map
@@ -2036,13 +1378,8 @@ def plot_clusters_on_map(
     df["outlier_status"] = df[outlier_col].map({True: "Outlier", False: "Normal"})
 
     # Build tooltip fields
-    tooltip_fields = _collect_optional_fields(
-        df,
-        [
-            (survey_id, survey_id),
-            (submission_date, submission_date),
-            (enumerator, enumerator),
-        ],
+    tooltip_fields = _identity_optional_fields(
+        df, [survey_id, submission_date, enumerator]
     )
     tooltip_fields.extend(["lat", "lon", "outlier_status"])
     if clustering_col and clustering_col in df.columns:

@@ -18,7 +18,7 @@ from datasure.checks.backchecks.report_ui import backchecks_report
 from datasure.checks.descriptive import descriptive_report
 from datasure.checks.duplicates import duplicates_report
 from datasure.checks.enumerator.report_ui import enumerator_report
-from datasure.checks.gpschecks import gpschecks_report
+from datasure.checks.gpschecks.report_ui import gpschecks_report
 from datasure.checks.missing import missing_report
 from datasure.checks.outliers import outliers_report
 from datasure.checks.progress import progress_report
