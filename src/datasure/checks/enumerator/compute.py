@@ -14,6 +14,92 @@ from datasure.checks.enumerator.models import (
 from datasure.utils.duckdb_utils import load_missing_codes_from_db
 
 # =============================================================================
+# Shared Time-Period Helpers
+# =============================================================================
+
+_LEGACY_PERIOD_ALIASES = {"Day": "Daily", "Week": "Weekly", "Month": "Monthly"}
+
+
+def _add_time_period_column(
+    df: pl.DataFrame, date: str, period: str, weekstartday: str
+) -> pl.DataFrame:
+    """Add a user-friendly "TIME PERIOD" column for the selected granularity.
+
+    Shared by compute_enumerator_productivity and
+    compute_enumerator_statistics_overtime, which both bucket submissions
+    into daily/weekly/monthly periods the same way before aggregating.
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        DataFrame containing the date column to bucket.
+    date : str
+        Date column name.
+    period : str
+        Time period: "Daily", "Weekly", "Monthly", "Day", "Week", or "Month".
+    weekstartday : str
+        Start day of the week (e.g., "SUN", "MON") for weekly analysis.
+
+    Returns
+    -------
+    pl.DataFrame
+        `df` with a "TIME PERIOD" column added (unchanged if `period` is
+        not recognized).
+    """
+    period_normalized = _LEGACY_PERIOD_ALIASES.get(period, period)
+
+    if period_normalized == "Daily":
+        # Format as "Jan 1, 2025"
+        return df.with_columns(
+            pl.col(date).dt.strftime("%b %d, %Y").alias("TIME PERIOD")
+        )
+
+    if period_normalized == "Weekly":
+        # Calculate week start and end dates for user-friendly display
+        offset = WEEKDAY_OFFSET_TO_NUMERIC.get(weekstartday, 1)
+
+        # Calculate the week start date (beginning of the week containing this date)
+        # weekday() returns 0=Monday, 6=Sunday
+        df = df.with_columns(
+            [
+                # Calculate days since the start of the week
+                ((pl.col(date).dt.weekday() - offset + 7) % 7).alias(
+                    "_days_since_week_start"
+                ),
+            ]
+        )
+
+        # Calculate week_start_date by subtracting days_since_week_start
+        df = df.with_columns(
+            [
+                (
+                    pl.col(date) - pl.duration(days=pl.col("_days_since_week_start"))
+                ).alias("_week_start"),
+                (
+                    pl.col(date)
+                    - pl.duration(days=pl.col("_days_since_week_start"))
+                    + pl.duration(days=6)
+                ).alias("_week_end"),
+            ]
+        )
+
+        # Format as "Jan 1, 2025 to Jan 7, 2025"
+        return df.with_columns(
+            (
+                pl.col("_week_start").dt.strftime("%b %d, %Y")
+                + " to "
+                + pl.col("_week_end").dt.strftime("%b %d, %Y")
+            ).alias("TIME PERIOD")
+        )
+
+    if period_normalized == "Monthly":
+        # Format as "January 2025"
+        return df.with_columns(pl.col(date).dt.strftime("%B %Y").alias("TIME PERIOD"))
+
+    return df
+
+
+# =============================================================================
 # Overview Computation Functions
 # =============================================================================
 
@@ -448,64 +534,7 @@ def compute_enumerator_productivity(
         Pivoted DataFrame with enumerators as rows and time periods as columns.
     """
     prod_df = data.clone()
-
-    # Normalize period values to handle both old and new formats
-    period_normalized = period
-    if period == "Day":
-        period_normalized = "Daily"
-    elif period == "Week":
-        period_normalized = "Weekly"
-    elif period == "Month":
-        period_normalized = "Monthly"
-
-    # Create time period column based on selection with user-friendly formatting
-    if period_normalized == "Daily":
-        # Format as "Jan 1, 2025"
-        prod_df = prod_df.with_columns(
-            pl.col(date).dt.strftime("%b %d, %Y").alias("TIME PERIOD")
-        )
-    elif period_normalized == "Weekly":
-        # Calculate week start and end dates for user-friendly display
-        offset = WEEKDAY_OFFSET_TO_NUMERIC.get(weekstartday, 1)
-
-        # Calculate the week start date (beginning of the week containing this date)
-        # weekday() returns 0=Monday, 6=Sunday
-        prod_df = prod_df.with_columns(
-            [
-                # Calculate days since the start of the week
-                ((pl.col(date).dt.weekday() - offset + 7) % 7).alias(
-                    "_days_since_week_start"
-                ),
-            ]
-        )
-
-        # Calculate week_start_date by subtracting days_since_week_start
-        prod_df = prod_df.with_columns(
-            [
-                (
-                    pl.col(date) - pl.duration(days=pl.col("_days_since_week_start"))
-                ).alias("_week_start"),
-                (
-                    pl.col(date)
-                    - pl.duration(days=pl.col("_days_since_week_start"))
-                    + pl.duration(days=6)
-                ).alias("_week_end"),
-            ]
-        )
-
-        # Format as "Jan 1, 2025 to Jan 7, 2025"
-        prod_df = prod_df.with_columns(
-            (
-                pl.col("_week_start").dt.strftime("%b %d, %Y")
-                + " to "
-                + pl.col("_week_end").dt.strftime("%b %d, %Y")
-            ).alias("TIME PERIOD")
-        )
-    elif period_normalized == "Monthly":
-        # Format as "January 2025"
-        prod_df = prod_df.with_columns(
-            pl.col(date).dt.strftime("%B %Y").alias("TIME PERIOD")
-        )
+    prod_df = _add_time_period_column(prod_df, date, period, weekstartday)
 
     # Count submissions per period and enumerator
     prod_df = prod_df.with_row_index(name="TOKEN KEY")
@@ -626,64 +655,9 @@ def compute_enumerator_statistics_overtime(
         periods as columns.
     """
     stats_overtime_df = data.select([date] + group_by_cols + [statscol]).clone()
-
-    # Normalize period values to handle both old and new formats
-    period_normalized = period
-    if period == "Day":
-        period_normalized = "Daily"
-    elif period == "Week":
-        period_normalized = "Weekly"
-    elif period == "Month":
-        period_normalized = "Monthly"
-
-    # Create time period column with user-friendly formatting
-    if period_normalized == "Daily":
-        # Format as "Jan 1, 2025"
-        stats_overtime_df = stats_overtime_df.with_columns(
-            pl.col(date).dt.strftime("%b %d, %Y").alias("TIME PERIOD")
-        )
-    elif period_normalized == "Weekly":
-        # Calculate week start and end dates for user-friendly display
-        offset = WEEKDAY_OFFSET_TO_NUMERIC.get(weekstartday, 1)
-
-        # Calculate the week start date (beginning of the week containing this date)
-        # weekday() returns 0=Monday, 6=Sunday
-        stats_overtime_df = stats_overtime_df.with_columns(
-            [
-                # Calculate days since the start of the week
-                ((pl.col(date).dt.weekday() - offset + 7) % 7).alias(
-                    "_days_since_week_start"
-                ),
-            ]
-        )
-
-        # Calculate week_start_date by subtracting days_since_week_start
-        stats_overtime_df = stats_overtime_df.with_columns(
-            [
-                (
-                    pl.col(date) - pl.duration(days=pl.col("_days_since_week_start"))
-                ).alias("_week_start"),
-                (
-                    pl.col(date)
-                    - pl.duration(days=pl.col("_days_since_week_start"))
-                    + pl.duration(days=6)
-                ).alias("_week_end"),
-            ]
-        )
-
-        # Format as "Jan 1, 2025 to Jan 7, 2025"
-        stats_overtime_df = stats_overtime_df.with_columns(
-            (
-                pl.col("_week_start").dt.strftime("%b %d, %Y")
-                + " to "
-                + pl.col("_week_end").dt.strftime("%b %d, %Y")
-            ).alias("TIME PERIOD")
-        )
-    elif period_normalized == "Monthly":
-        # Format as "January 2025"
-        stats_overtime_df = stats_overtime_df.with_columns(
-            pl.col(date).dt.strftime("%B %Y").alias("TIME PERIOD")
-        )
+    stats_overtime_df = _add_time_period_column(
+        stats_overtime_df, date, period, weekstartday
+    )
 
     # Calculate statistic
     if stat == "missing":

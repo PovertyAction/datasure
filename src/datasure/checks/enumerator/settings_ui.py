@@ -21,6 +21,60 @@ from datasure.utils.settings_utils import (
 # =============================================================================
 
 
+def _render_column_select(
+    label: str,
+    field_key: str,
+    options: list[str],
+    help_text: str,
+    default_settings: EnumeratorSettings,
+    settings_file: str,
+) -> str | None:
+    """Render a settings selectbox bound to an EnumeratorSettings field.
+
+    Every single-column picker in the settings UI (survey key, survey ID,
+    survey date, enumerator, team, duration, form version) shares this same
+    default-index-lookup + selectbox + save_check_settings shape.
+
+    Parameters
+    ----------
+    label : str
+        Widget label shown above the selectbox.
+    field_key : str
+        Name of the EnumeratorSettings field this selectbox configures; also
+        used to derive the widget key and the saved settings key.
+    options : list[str]
+        Columns to offer as selectbox options.
+    help_text : str
+        Tooltip text for the selectbox.
+    default_settings : EnumeratorSettings
+        Previously saved settings, used to preselect a default option.
+    settings_file : str
+        Path to settings file for saving the selected value.
+
+    Returns
+    -------
+    str | None
+        The selected column name.
+    """
+    default_value = getattr(default_settings, field_key)
+    default_index = (
+        options.index(default_value)
+        if default_value and default_value in options
+        else None
+    )
+    selected = st.selectbox(
+        label,
+        options=options,
+        key=f"{field_key}_enumerator",
+        help=help_text,
+        index=default_index,
+        on_change=trigger_save,
+        kwargs={"state_name": TAB_NAME + f"_{field_key}"},
+    )
+    save_check_settings(settings_file, TAB_NAME, {field_key: selected})
+    return selected
+
+
 @st.cache_data(ttl=60)
 def load_default_enumerator_settings(
     settings_file: str, config: EnumeratorSettings
@@ -106,40 +160,24 @@ def enumerator_report_settings(
             si1, si2, _ = st.columns(3)
 
             with si1:
-                default_survey_key = default_settings.survey_key
-                default_survey_key_index = (
-                    categorical_columns.index(default_survey_key)
-                    if default_survey_key and default_survey_key in categorical_columns
-                    else None
-                )
-                survey_key = st.selectbox(
+                survey_key = _render_column_select(
                     "Survey Key",
-                    options=categorical_columns,
-                    key="survey_key_enumerator",
-                    help="Select the column that contains the survey key",
-                    index=default_survey_key_index,
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_survey_key"},
+                    "survey_key",
+                    categorical_columns,
+                    "Select the column that contains the survey key",
+                    default_settings,
+                    settings_file,
                 )
-                save_check_settings(settings_file, TAB_NAME, {"survey_key": survey_key})
 
             with si2:
-                default_survey_id = default_settings.survey_id
-                default_survey_id_index = (
-                    categorical_columns.index(default_survey_id)
-                    if default_survey_id and default_survey_id in categorical_columns
-                    else None
-                )
-                survey_id = st.selectbox(
+                survey_id = _render_column_select(
                     "Survey ID",
-                    options=categorical_columns,
-                    help="Select the column that contains the survey ID",
-                    key="survey_id_enumerator",
-                    index=default_survey_id_index,
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_survey_id"},
+                    "survey_id",
+                    categorical_columns,
+                    "Select the column that contains the survey ID",
+                    default_settings,
+                    settings_file,
                 )
-                save_check_settings(settings_file, TAB_NAME, {"survey_id": survey_id})
 
         with st.container(border=True):
             st.subheader("Survey Date")
@@ -147,85 +185,50 @@ def enumerator_report_settings(
             sd1, _, _ = st.columns(3)
 
             with sd1:
-                default_survey_date = default_settings.survey_date
-                default_survey_date_index = (
-                    datetime_columns.index(default_survey_date)
-                    if default_survey_date and default_survey_date in datetime_columns
-                    else None
-                )
-
-                survey_date = st.selectbox(
+                survey_date = _render_column_select(
                     "Survey Date",
-                    options=datetime_columns,
-                    help="Select the column that contains the survey date",
-                    key="survey_date_enumerator",
-                    index=default_survey_date_index,
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_survey_date"},
-                )
-                save_check_settings(
-                    settings_file, TAB_NAME, {"survey_date": survey_date}
+                    "survey_date",
+                    datetime_columns,
+                    "Select the column that contains the survey date",
+                    default_settings,
+                    settings_file,
                 )
 
         with st.container(border=True):
             st.subheader("Enumerator")
             ec1, ec2, _ = st.columns(3)
             with ec1:
-                default_enumerator = default_settings.enumerator
-                default_enumerator_index = (
-                    categorical_columns.index(default_enumerator)
-                    if default_enumerator and default_enumerator in categorical_columns
-                    else None
-                )
-                enumerator = st.selectbox(
+                enumerator = _render_column_select(
                     "Enumerator ID",
-                    options=categorical_columns,
-                    key="enumerator_enumerator",
-                    help="Select the column that contains the enumerator ID",
-                    index=default_enumerator_index,
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_enumerator"},
+                    "enumerator",
+                    categorical_columns,
+                    "Select the column that contains the enumerator ID",
+                    default_settings,
+                    settings_file,
                 )
-                save_check_settings(settings_file, TAB_NAME, {"enumerator": enumerator})
 
             with ec2:
-                default_team = default_settings.team
-                default_team_index = (
-                    categorical_columns.index(default_team)
-                    if default_team and default_team in categorical_columns
-                    else None
-                )
-                team = st.selectbox(
+                team = _render_column_select(
                     "Team",
-                    options=categorical_columns,
-                    key="team_enumerator",
-                    help="Select the column that contains the team identifier",
-                    index=default_team_index,
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_team"},
+                    "team",
+                    categorical_columns,
+                    "Select the column that contains the team identifier",
+                    default_settings,
+                    settings_file,
                 )
-                save_check_settings(settings_file, TAB_NAME, {"team": team})
 
         with st.container(border=True):
             st.subheader("Survey Duration")
             dc1, dc2, _ = st.columns(3)
             with dc1:
-                default_duration = default_settings.duration
-                default_duration_index = (
-                    categorical_columns.index(default_duration)
-                    if default_duration and default_duration in categorical_columns
-                    else None
-                )
-                duration = st.selectbox(
+                duration = _render_column_select(
                     "Duration Column",
-                    options=categorical_columns,
-                    key="duration_enumerator",
-                    help="Select the column that contains the survey duration in seconds",
-                    index=default_duration_index,
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_duration"},
+                    "duration",
+                    categorical_columns,
+                    "Select the column that contains the survey duration in seconds",
+                    default_settings,
+                    settings_file,
                 )
-                save_check_settings(settings_file, TAB_NAME, {"duration": duration})
 
             with dc2:
                 default_duration_unit = default_settings.duration_unit
@@ -251,24 +254,13 @@ def enumerator_report_settings(
             st.subheader("Form Version")
             fv1, _ = st.columns([1, 2])
             with fv1:
-                default_formversion = default_settings.formversion
-                default_formversion_index = (
-                    categorical_columns.index(default_formversion)
-                    if default_formversion
-                    and default_formversion in categorical_columns
-                    else None
-                )
-                formversion = st.selectbox(
+                formversion = _render_column_select(
                     "Form Version Column",
-                    options=categorical_columns,
-                    key="formversion_enumerator",
-                    help="Select the column that contains the form version",
-                    index=default_formversion_index,
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_formversion"},
-                )
-                save_check_settings(
-                    settings_file, TAB_NAME, {"formversion": formversion}
+                    "formversion",
+                    categorical_columns,
+                    "Select the column that contains the form version",
+                    default_settings,
+                    settings_file,
                 )
 
         with st.container(border=True):
@@ -296,6 +288,87 @@ def enumerator_report_settings(
     )
 
 
+def _render_category_settings(
+    column_label: str,
+    field_key: str,
+    column_help: str,
+    values_label: str,
+    values_help: str,
+    categorical_columns: list,
+    default_settings: dict,
+    data: pl.DataFrame,
+    settings_file: str,
+) -> tuple[str | None, list[str]]:
+    """Render a column selector + valid-values multiselect pair.
+
+    The consent and outcome settings sections share this same
+    column-then-values-multiselect layout, differing only in labels,
+    help text, and which EnumeratorSettings field they populate.
+
+    Parameters
+    ----------
+    column_label : str
+        Widget label for the column selectbox.
+    field_key : str
+        Base settings key (e.g. "consent" or "outcome"); the values
+        multiselect is saved under f"{field_key}_vals".
+    column_help : str
+        Tooltip text for the column selectbox.
+    values_label : str
+        Widget label for the values multiselect.
+    values_help : str
+        Tooltip text for the values multiselect.
+    categorical_columns : list
+        Columns to offer as selectbox options.
+    default_settings : dict
+        Previously saved settings, used to preselect defaults.
+    data : pl.DataFrame
+        DataFrame containing survey data, used to derive value options.
+    settings_file : str
+        Path to settings file for saving/loading configurations.
+
+    Returns
+    -------
+    tuple[str | None, list[str]]
+        The selected column name and selected valid values.
+    """
+    col1, col2 = st.columns([0.3, 0.7])
+    with col1:
+        default_col = default_settings.get(field_key)
+        default_index = (
+            categorical_columns.index(default_col)
+            if default_col and default_col in categorical_columns
+            else 0
+        )
+        selected_col = st.selectbox(
+            column_label,
+            options=categorical_columns,
+            help=column_help,
+            key=f"{field_key}_enumerator",
+            index=default_index,
+            on_change=trigger_save,
+            kwargs={"state_name": TAB_NAME + f"_{field_key}"},
+        )
+        save_check_settings(settings_file, TAB_NAME, {field_key: selected_col})
+
+    with col2:
+        vals_key = f"{field_key}_vals"
+        default_vals = default_settings.get(vals_key, [])
+        val_options = data[selected_col].unique().to_list()
+        selected_vals = st.multiselect(
+            values_label,
+            options=val_options,
+            default=default_vals,
+            help=values_help,
+            key=f"{vals_key}_enumerator",
+            on_change=trigger_save,
+            kwargs={"state_name": TAB_NAME + f"_{vals_key}"},
+        )
+        save_check_settings(settings_file, TAB_NAME, {vals_key: selected_vals})
+
+    return selected_col, selected_vals
+
+
 @st.fragment
 def _render_consent_outcome_settings(
     project_id: str, data: pl.DataFrame, categorical_columns: list, settings_file: str
@@ -318,73 +391,31 @@ def _render_consent_outcome_settings(
 
     with st.container(border=True):
         st.subheader("Consent Settings")
-        co1, co2 = st.columns([0.3, 0.7])
-        with co1:
-            default_consent_col = default_settings.get("consent")
-            default_consent_index = (
-                categorical_columns.index(default_consent_col)
-                if default_consent_col and default_consent_col in categorical_columns
-                else 0
-            )
-            consent_col = st.selectbox(
-                "Consent Column",
-                options=categorical_columns,
-                help="Select the column that contains consent status",
-                key="consent_enumerator",
-                index=default_consent_index,
-                on_change=trigger_save,
-                kwargs={"state_name": TAB_NAME + "_consent"},
-            )
-            save_check_settings(settings_file, TAB_NAME, {"consent": consent_col})
-
-        with co2:
-            default_consent_vals = default_settings.get("consent_vals", [])
-            consent_val_options = data[consent_col].unique().to_list()
-            consent_vals = st.multiselect(
-                "Valid Consent Values",
-                options=consent_val_options,
-                default=default_consent_vals,
-                help="Select values that indicate valid consent",
-                key="consent_vals_enumerator",
-                on_change=trigger_save,
-                kwargs={"state_name": TAB_NAME + "_consent_vals"},
-            )
-            save_check_settings(settings_file, TAB_NAME, {"consent_vals": consent_vals})
+        consent_col, consent_vals = _render_category_settings(
+            "Consent Column",
+            "consent",
+            "Select the column that contains consent status",
+            "Valid Consent Values",
+            "Select values that indicate valid consent",
+            categorical_columns,
+            default_settings,
+            data,
+            settings_file,
+        )
 
     with st.container(border=True):
         st.subheader("Outcome Settings")
-        oo1, oo2 = st.columns([0.3, 0.7])
-        with oo1:
-            default_outcome_col = default_settings.get("outcome")
-            default_outcome_index = (
-                categorical_columns.index(default_outcome_col)
-                if default_outcome_col and default_outcome_col in categorical_columns
-                else 0
-            )
-            outcome_col = st.selectbox(
-                "Outcome Column",
-                options=categorical_columns,
-                help="Select the column that contains survey outcome status",
-                key="outcome_enumerator",
-                index=default_outcome_index,
-                on_change=trigger_save,
-                kwargs={"state_name": TAB_NAME + "_outcome"},
-            )
-            save_check_settings(settings_file, TAB_NAME, {"outcome": outcome_col})
-
-        with oo2:
-            default_outcome_vals = default_settings.get("outcome_vals", [])
-            outcome_val_options = data[outcome_col].unique().to_list()
-            outcome_vals = st.multiselect(
-                "Completed Survey Values",
-                options=outcome_val_options,
-                default=default_outcome_vals,
-                help="Select values that indicate completed surveys",
-                key="outcome_vals_enumerator",
-                on_change=trigger_save,
-                kwargs={"state_name": TAB_NAME + "_outcome_vals"},
-            )
-            save_check_settings(settings_file, TAB_NAME, {"outcome_vals": outcome_vals})
+        outcome_col, outcome_vals = _render_category_settings(
+            "Outcome Column",
+            "outcome",
+            "Select the column that contains survey outcome status",
+            "Completed Survey Values",
+            "Select values that indicate completed surveys",
+            categorical_columns,
+            default_settings,
+            data,
+            settings_file,
+        )
 
         config_dict = {
             "consent": consent_col,
