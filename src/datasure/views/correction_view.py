@@ -40,6 +40,9 @@ class TabConfig(BaseModel):
     page_name: str = Field(..., description="Name of the page/check")
     survey_data_name: str = Field(..., description="Name of the survey data alias")
     survey_key: str = Field(..., description="Name of the survey KEY column")
+    survey_id: str | None = Field(
+        None, description="Name of the survey ID column, if configured"
+    )
 
 
 class CorrectionFormState(BaseModel):
@@ -231,6 +234,7 @@ def load_tab_config(project_id: str, tab_index: int) -> TabConfig | None:
         page_name=page_config.get("page_name"),
         survey_data_name=page_config.get("survey_data_name"),
         survey_key=page_config.get("survey_key"),
+        survey_id=page_config.get("survey_id"),
     )
 
 
@@ -481,6 +485,7 @@ def render_add_correction_form(
     key_col: str,
     alias: str,
     tab_index: int,
+    survey_id_col: str | None = None,
 ) -> None:
     """
     Render the add correction step form.
@@ -498,6 +503,10 @@ def render_add_correction_form(
         The data alias/table name.
     tab_index : int
         The tab index for unique widget keys.
+    survey_id_col : str | None
+        The name of the configured Survey ID column, if any. When set (and
+        present in the data), the corresponding Survey ID is shown once a
+        KEY is selected.
     """
     corrected_data = correction_processor.get_corrected_data(alias)
 
@@ -518,6 +527,12 @@ def render_add_correction_form(
 
         if not corr_key_val:
             return
+
+        if survey_id_col and survey_id_col in corrected_data.columns:
+            survey_id_value = get_current_value(
+                corrected_data, key_col, corr_key_val, survey_id_col
+            )
+            st.write(f"**Survey ID:** {survey_id_value}")
 
         # Step 2: Select action
         corr_action = st.selectbox(
@@ -725,6 +740,7 @@ def render_correction_input_form(
     key_col: str,
     alias: str,
     tab_index: int,
+    survey_id_col: str | None = None,
 ) -> None:
     """
     Render input form for corrections with add and remove functionality.
@@ -739,6 +755,8 @@ def render_correction_input_form(
         The data alias/table name.
     tab_index : int
         The tab index for unique widget keys.
+    survey_id_col : str | None
+        The name of the configured Survey ID column, if any.
     """
     corrected_data = correction_processor.get_corrected_data(alias)
 
@@ -754,6 +772,7 @@ def render_correction_input_form(
             key_col=key_col,
             alias=alias,
             tab_index=tab_index,
+            survey_id_col=survey_id_col,
         )
 
     with fc2:
@@ -1032,6 +1051,7 @@ def render_correction_tab(
         key_col=config.survey_key,
         alias=config.survey_data_name,
         tab_index=tab_index,
+        survey_id_col=config.survey_id,
     )
 
     render_correction_log(
