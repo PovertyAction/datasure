@@ -311,8 +311,8 @@ class TestRemoveRowsOperation:
             value=[2],
         )
         result, _ = op.execute(data, prep_args)
-        # equal_to keeps matching rows (removes non-matching)
-        assert result.shape[0] == 2
+        # equal_to removes matching rows, keeps everything else
+        assert sorted(result["a"].to_list()) == [1, 3, 5]
 
     def test_remove_by_condition_not_equal_to(self):
         """Test Remove by condition not equal to."""
@@ -326,8 +326,8 @@ class TestRemoveRowsOperation:
             value=[2],
         )
         result, _ = op.execute(data, prep_args)
-        # not_equal_to removes matching rows
-        assert result.shape[0] == 3
+        # not_equal_to removes non-matching rows, keeps only matches
+        assert result["a"].to_list() == [2, 2]
 
     def test_remove_by_condition_greater_than(self):
         """Test Remove by condition greater than."""
@@ -516,7 +516,8 @@ class TestRemoveRowsOperation:
             value=[2, 4],
         )
         result, _ = op.execute(data, prep_args)
-        assert sorted(result["a"].to_list()) == [2, 4]
+        # removes rows matching any value in the list, keeps the rest
+        assert sorted(result["a"].to_list()) == [1, 3, 5]
 
     def test_filter_by_range_single_value(self):
         """Test range filter with single value (not a list) - uses [val, val]."""
@@ -1264,7 +1265,7 @@ class TestAddNewColumnOperation:
         assert result["l"].to_list() == [3.0, 4.0]
 
     def test_add_count_column(self):
-        """Test Add count column."""
+        """Count should tally non-null values, not just the column count."""
         op = AddNewColumnOperation()
         data = pl.DataFrame({"a": [1.0, None], "b": [3.0, 4.0]})
         prep_args = PrepActionResult(
@@ -1274,7 +1275,22 @@ class TestAddNewColumnOperation:
             source_columns=["a", "b"],
         )
         result, _ = op.execute(data, prep_args)
-        assert result["cnt"].to_list() == [2, 2]
+        assert result["cnt"].to_list() == [2, 1]
+
+    def test_add_count_column_all_missing(self):
+        """A row with no non-null values across the source columns counts 0."""
+        op = AddNewColumnOperation()
+        data = pl.DataFrame(
+            {"a": [1.0, None, None], "b": [3.0, None, 4.0], "c": [5.0, None, None]}
+        )
+        prep_args = PrepActionResult(
+            action="add new column",
+            column_names="cnt",
+            method="count",
+            source_columns=["a", "b", "c"],
+        )
+        result, _ = op.execute(data, prep_args)
+        assert result["cnt"].to_list() == [3, 0, 1]
 
     def test_add_nunique_column(self):
         """Test Add nunique column."""

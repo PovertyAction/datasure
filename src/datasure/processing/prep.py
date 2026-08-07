@@ -323,18 +323,18 @@ class RemoveRowsOperation(PrepOperation):
         # Ensure value is a list for is_in() to treat as literal values
         value_list = value if isinstance(value, list) else [value]
 
+        filter_expr = pl.any_horizontal(
+            [pl.col(col).is_in(value_list) for col in columns]
+        )
+
         if condition == PrepRowConditions.not_equal_to.value:
-            # Keep rows where value is NOT in the list (remove matching rows)
-            filter_expr = pl.any_horizontal(
-                [pl.col(col).is_in(value_list) for col in columns]
-            )
-            return data.filter(~filter_expr)
-        else:
-            # Keep rows where value IS in the list (remove non-matching rows)
-            filter_expr = pl.any_horizontal(
-                [pl.col(col).is_in(value_list) for col in columns]
-            )
+            # "Remove rows where value is not equal to X" - keep only the
+            # matching rows, i.e. drop everything the filter doesn't match.
             return data.filter(filter_expr)
+        else:
+            # "Remove rows where value is equal to X" - keep everything
+            # that doesn't match.
+            return data.filter(~filter_expr)
 
     def _filter_by_comparison(
         self, data: pl.DataFrame, condition: str, columns: list[str], value: Any
@@ -826,7 +826,9 @@ class AddNewColumnOperation(PrepOperation):
             PrepFunctions.var.value: lambda cols: pl.concat_list(cols).list.var(),
             PrepFunctions.first.value: lambda cols: pl.concat_list(cols).list.first(),
             PrepFunctions.last.value: lambda cols: pl.concat_list(cols).list.last(),
-            PrepFunctions.count.value: lambda cols: pl.concat_list(cols).list.len(),
+            PrepFunctions.count.value: lambda cols: (
+                pl.concat_list(cols).list.drop_nulls().list.len()
+            ),
             PrepFunctions.nunique.value: lambda cols: (
                 pl.concat_list(cols).list.unique().list.len()
             ),
