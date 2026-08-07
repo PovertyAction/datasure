@@ -468,9 +468,19 @@ class TransformColumnsOperation(PrepOperation):
                 "example": "18aug2025 19:49:00",
             },
             {
+                "format": "%d%b%Y %H:%M",
+                "validator": r"^\d{1,2}[a-zA-Z]{3}\d{4} \d{1,2}:\d{2}$",
+                "example": "18aug2025 19:49",
+            },
+            {
                 "format": "%d-%b-%Y %H:%M:%S",
                 "validator": r"^\d{1,2}-[a-zA-Z]{3}-\d{4} \d{2}:\d{2}:\d{2}$",
                 "example": "18-aug-2025 19:49:00",
+            },
+            {
+                "format": "%d-%b-%Y %H:%M",
+                "validator": r"^\d{1,2}-[a-zA-Z]{3}-\d{4} \d{1,2}:\d{2}$",
+                "example": "18-aug-2025 19:49",
             },
             {
                 "format": "%Y-%m-%d %H:%M:%S",
@@ -478,14 +488,29 @@ class TransformColumnsOperation(PrepOperation):
                 "example": "2025-08-18 19:49:00",
             },
             {
+                "format": "%Y-%m-%d %H:%M",
+                "validator": r"^\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}$",
+                "example": "2025-08-18 19:49",
+            },
+            {
                 "format": "%m/%d/%Y %H:%M:%S",
                 "validator": r"^\d{1,2}/\d{1,2}/\d{4} \d{2}:\d{2}:\d{2}$",
                 "example": "08/18/2025 19:49:00",
             },
             {
+                "format": "%m/%d/%Y %H:%M",
+                "validator": r"^\d{1,2}/\d{1,2}/\d{4} \d{1,2}:\d{2}$",
+                "example": "3/15/2026 17:28",
+            },
+            {
                 "format": "%d/%m/%Y %H:%M:%S",
                 "validator": r"^\d{1,2}/\d{1,2}/\d{4} \d{2}:\d{2}:\d{2}$",
                 "example": "18/08/2025 19:49:00",
+            },
+            {
+                "format": "%d/%m/%Y %H:%M",
+                "validator": r"^\d{1,2}/\d{1,2}/\d{4} \d{1,2}:\d{2}$",
+                "example": "18/08/2025 19:49",
             },
             {
                 "format": "%Y-%m-%d",
