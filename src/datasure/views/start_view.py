@@ -197,6 +197,14 @@ def _handle_demo_project():
             _launch_fresh_demo()
 
 
+def _create_and_load_project(project_name: str, project_id: str):
+    """Create a new project, set it as active, and navigate to the import page."""
+    save_project(project_name, project_id)
+    st.session_state.st_project_id = project_id
+    ConfigurationService(project_id).sync_output_view_files()
+    st.switch_page(st.session_state.st_import_data_page)
+
+
 def _handle_create_new_project():
     """Handle new project creation workflow."""
     project_name = st.text_input("Enter Project Name", placeholder="My New Project")
@@ -210,9 +218,14 @@ def _handle_create_new_project():
                 f"Project '{project_name}' already exists. Please choose a different name."
             )
             st.stop()
-        save_project(project_name, project_id)
-        st.success(f"Project '{project_name}' created successfully!")
-        st.rerun()
+        confirm_dialog(
+            "Create new project",
+            f"Create **{project_name}** and load it now? You'll be taken "
+            "straight to the Import Data page.",
+            confirm_label="Create & Load New Project",
+            danger=False,
+            on_confirm=lambda: _create_and_load_project(project_name, project_id),
+        )
 
 
 def _handle_existing_project_selection(project: str):
