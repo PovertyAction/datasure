@@ -35,27 +35,19 @@ def get_project_id(project_name: str) -> str:
 
 def get_project_names() -> list[str]:
     """Get a list of project names sorted by last used date (most recent first)."""
-    projects_file = get_cache_path(PROJECTS_FILE)
-    project_names: list[str] = []
-    if projects_file.exists():
-        with open(projects_file) as f:
-            projects = json.load(f)
-        sorted_projects = sorted(
-            (p for p in projects.values() if not p.get("is_demo", False)),
-            key=lambda p: p.get("last_used", ""),
-            reverse=True,
-        )
-        project_names = [p["name"] for p in sorted_projects]
+    projects = load_projects()
+    sorted_projects = sorted(
+        (p for p in projects.values() if not p.get("is_demo", False)),
+        key=lambda p: p.get("last_used", ""),
+        reverse=True,
+    )
+    project_names = [p["name"] for p in sorted_projects]
     return ["DataSure Demo"] + project_names + ["Create New Project"]
 
 
 def _get_last_used_project_name() -> str | None:
     """Return the name of the most recently used non-demo project, or None."""
-    projects_file = get_cache_path(PROJECTS_FILE)
-    if not projects_file.exists():
-        return None
-    with open(projects_file) as f:
-        projects = json.load(f)
+    projects = load_projects()
     candidates = [
         p
         for p in projects.values()
@@ -92,6 +84,18 @@ def load_projects() -> dict:
     return {}
 
 
+def _now_str() -> str:
+    """Return the current timestamp in the project metadata format."""
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _save_projects(projects: dict) -> None:
+    """Write the full projects registry back to disk."""
+    projects_file = get_cache_path(PROJECTS_FILE)
+    with open(projects_file, "w") as f:
+        json.dump(projects, f, indent=4)
+
+
 def save_project(project_name: str, project_id: str):
     """Save a new project to the local directory."""
     if not _validate_project_id(project_id):
@@ -104,22 +108,19 @@ def save_project(project_name: str, project_id: str):
         project_path.mkdir(parents=True, exist_ok=True)
         (project_path / "data").mkdir(exist_ok=True)
         (project_path / "settings").mkdir(exist_ok=True)
-        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        last_used = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        created_at = _now_str()
         with open(project_info_path, "w") as f:
             json.dump({"created_at": created_at}, f, indent=4)
     else:
         if project_info_path.exists():
             with open(project_info_path) as f:
                 project_info = json.load(f)
-            created_at = project_info.get(
-                "created_at", datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            )
+            created_at = project_info.get("created_at", _now_str())
         else:
-            created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            created_at = _now_str()
             with open(project_info_path, "w") as f:
                 json.dump({"created_at": created_at}, f, indent=4)
-        last_used = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    last_used = _now_str()
     projects = load_projects() or {}
     new_project = {
         "name": project_name,
@@ -127,10 +128,7 @@ def save_project(project_name: str, project_id: str):
         "last_used": last_used,
     }
     projects[project_id] = new_project
-
-    projects_file = get_cache_path(PROJECTS_FILE)
-    with open(projects_file, "w") as f:
-        json.dump(projects, f, indent=4)
+    _save_projects(projects)
 
 
 def delete_project(project_id: str):
@@ -142,9 +140,7 @@ def delete_project(project_id: str):
     projects = load_projects()
     if project_id in projects:
         projects.pop(project_id)
-        projects_file = get_cache_path(PROJECTS_FILE)
-        with open(projects_file, "w") as f:
-            json.dump(projects, f, indent=4)
+        _save_projects(projects)
 
         project_path = get_cache_path(project_id)
 
@@ -153,6 +149,13 @@ def delete_project(project_id: str):
         st.success(f"Project '{project_id}' deleted successfully!")
     else:
         st.error(f"Project '{project_id}' does not exist.")
+
+
+def _activate_project(project_id: str) -> None:
+    """Set the active project and jump to the Import Data page."""
+    st.session_state.st_project_id = project_id
+    ConfigurationService(project_id).sync_output_view_files()
+    st.switch_page(st.session_state.st_import_data_page)
 
 
 def _launch_fresh_demo():
@@ -179,9 +182,7 @@ def _handle_demo_project():
         col1, col2 = st.columns(2)
         with col1:
             if st.button("Resume Demo", type="primary", width="stretch"):
-                st.session_state.st_project_id = DEMO_PROJECT_ID
-                ConfigurationService(DEMO_PROJECT_ID).sync_output_view_files()
-                st.switch_page(st.session_state.st_import_data_page)
+                _activate_project(DEMO_PROJECT_ID)
         with col2:
             if st.button("Restart Demo", type="secondary", width="stretch"):
                 confirm_dialog(
@@ -200,9 +201,7 @@ def _handle_demo_project():
 def _create_and_load_project(project_name: str, project_id: str):
     """Create a new project, set it as active, and navigate to the import page."""
     save_project(project_name, project_id)
-    st.session_state.st_project_id = project_id
-    ConfigurationService(project_id).sync_output_view_files()
-    st.switch_page(st.session_state.st_import_data_page)
+    _activate_project(project_id)
 
 
 def _handle_create_new_project():
@@ -242,9 +241,7 @@ def _handle_existing_project_selection(project: str):
     if select_project:
         st.write(f"Loading project '{project}'...")
         save_project(project, project_id)
-        st.session_state.st_project_id = project_id
-        ConfigurationService(project_id).sync_output_view_files()
-        st.switch_page(st.session_state.st_import_data_page)
+        _activate_project(project_id)
 
     # Only show delete option for non-demo projects
     if project_id != DEMO_PROJECT_ID:
