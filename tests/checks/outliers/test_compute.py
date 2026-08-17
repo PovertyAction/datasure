@@ -232,9 +232,6 @@ class TestStackOutlierColumns:
         result = stack_outlier_columns(sample_polars_df, ["numeric_col1"])
         assert result.len() == 5
 
-    @pytest.mark.skip(
-        reason="Empty DataFrame causes Rust panic in Polars/Streamlit caching"
-    )
     def test_stack_empty_dataframe(self):
         """Test with empty DataFrame."""
         df = pl.DataFrame()
