@@ -469,6 +469,73 @@ class TestCorrectionProcessor:
         # Should only save data, not log (since no reason)
         assert mock_save.call_count == 1
 
+    def test_apply_correction_records_survey_id(
+        self, correction_processor, sample_data
+    ):
+        """The Survey ID for the corrected KEY is recorded in the log's ID column."""
+        processor, mock_get, mock_save = correction_processor
+        empty_log = pl.DataFrame(
+            {
+                "date": [],
+                "KEY": [],
+                "ID": [],
+                "action": [],
+                "column": [],
+                "current_value": [],
+                "new_value": [],
+                "reason": [],
+            }
+        )
+        mock_get.side_effect = [sample_data, empty_log]
+
+        processor.apply_correction(
+            alias="test_alias",
+            key_col="survey_key",
+            key_value="key2",
+            action="modify value",
+            column="name",
+            current_value="Jane",
+            new_value="Janet",
+            reason="Name correction",
+            survey_id_value="HH002",
+        )
+
+        saved_log = mock_save.call_args[1]["table_data"]
+        assert saved_log["ID"][0] == "HH002"
+
+    def test_apply_correction_without_survey_id_leaves_id_blank(
+        self, correction_processor, sample_data
+    ):
+        """No Survey ID configured/available means the ID column stays blank."""
+        processor, mock_get, mock_save = correction_processor
+        empty_log = pl.DataFrame(
+            {
+                "date": [],
+                "KEY": [],
+                "ID": [],
+                "action": [],
+                "column": [],
+                "current_value": [],
+                "new_value": [],
+                "reason": [],
+            }
+        )
+        mock_get.side_effect = [sample_data, empty_log]
+
+        processor.apply_correction(
+            alias="test_alias",
+            key_col="survey_key",
+            key_value="key2",
+            action="modify value",
+            column="name",
+            current_value="Jane",
+            new_value="Janet",
+            reason="Name correction",
+        )
+
+        saved_log = mock_save.call_args[1]["table_data"]
+        assert saved_log["ID"][0] is None
+
     def test_get_data_summary(self, correction_processor, sample_data):
         """Test getting data summary."""
         processor, _, _ = correction_processor
