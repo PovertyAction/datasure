@@ -245,17 +245,28 @@ class PrepConfirmationMessages:
 
     @classmethod
     def remove_columns(cls, result: PrepActionResult) -> str:
-        """Generate message for removing columns."""
+        """Generate message for removing columns.
+
+        `result.source_columns` and `result.affected_count` reflect only the
+        columns actually removed - e.g. if 2 of 4 requested columns no longer
+        exist, this reports 2 removed, not 4.
+        """
+        removed_columns = result.source_columns
         column_count = (
-            len(result.source_columns) if isinstance(result.source_columns, list) else 1
+            result.affected_count
+            if result.affected_count is not None
+            else (len(removed_columns) if isinstance(removed_columns, list) else 1)
         )
         column_text = cls._pluralize(column_count, "column")
         remaining_text = cls._pluralize(result.remaining_count, "column")
-        column_display = cls._format_column_names(result.source_columns)
-        return (
+        column_display = cls._format_column_names(removed_columns)
+        message = (
             f"✓ {column_count} {column_text} removed. {column_display} deleted from "
             f"your dataset. {result.remaining_count} {remaining_text} remaining."
         )
+        if result.failed_count:
+            message = f"{message} {result.additional_info}"
+        return message
 
     @classmethod
     def remove_rows(cls, result: PrepActionResult) -> str:

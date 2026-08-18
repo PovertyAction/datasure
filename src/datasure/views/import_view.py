@@ -30,6 +30,7 @@ from datasure.utils.onboarding_utils import (
     ImportDemoInfo,
     is_demo_project,
 )
+from datasure.utils.reapply_utils import ReapplyFailure, warn_reapply_failures
 from datasure.utils.secure_credentials import (
     delete_stored_credentials,
     list_stored_credentials,
@@ -111,35 +112,46 @@ def _get_filtered_import_log(project_id: str) -> pl.DataFrame:
 
 def _process_import_log(project_id: str, import_log: pl.DataFrame) -> None:
     """Process all rows in import log with status updates."""
+    all_failures: list[ReapplyFailure] = []
     with st.status("Loading datasets ...", expanded=True) as status:
         for row in import_log.iter_rows(named=True):
-            _process_single_import(project_id, row)
+            all_failures.extend(_process_single_import(project_id, row))
         status.update(
             label="Data loaded successfully!", state="complete", expanded=True
         )
+    warn_reapply_failures(
+        all_failures,
+        "Some downstream data could not be fully reapplied after import",
+    )
 
 
-def _process_single_import(project_id: str, row: dict) -> None:
+def _process_single_import(project_id: str, row: dict) -> list[ReapplyFailure]:
     """Process a single import configuration row."""
+    failures: list[ReapplyFailure] = []
     if row["refresh"]:
         _load_dataset_by_source(project_id, row)
-        _refresh_downstream_data(project_id, row["alias"])
+        failures = _refresh_downstream_data(project_id, row["alias"])
 
     _add_to_session_state(row["alias"])
+    return failures
 
 
-def _refresh_downstream_data(project_id: str, alias: str) -> None:
+def _refresh_downstream_data(project_id: str, alias: str) -> list[ReapplyFailure]:
     """Rebuild prep and corrected data after a raw dataset refresh.
 
     Without this, the Prep and Correction pages keep showing data derived
     from the previous import, since both stages are cached copies that are
     otherwise only rebuilt when a prep step or correction is removed.
     """
+    failures: list[ReapplyFailure] = []
+
     if duckdb_table_exists(project_id, alias=alias, db_name="prep"):
-        prep_apply_action(project_id, alias)
+        failures.extend(prep_apply_action(project_id, alias))
 
     if duckdb_table_exists(project_id, alias=alias, db_name="corrected"):
-        CorrectionProcessor(project_id).refresh_corrected_data(alias)
+        failures.extend(CorrectionProcessor(project_id).refresh_corrected_data(alias))
+
+    return failures
 
 
 def _load_dataset_by_source(project_id: str, row: dict) -> None:

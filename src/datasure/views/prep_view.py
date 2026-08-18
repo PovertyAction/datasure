@@ -15,7 +15,11 @@ from datasure.models.enums import (
     PrepOperations,
     PrepRowConditions,
 )
-from datasure.processing.prep import prep_apply_action
+from datasure.processing.prep import (
+    OperationError,
+    ValidationError,
+    prep_apply_action,
+)
 from datasure.utils.dataframe_utils import ColumnByType, get_df_columns
 from datasure.utils.duckdb_utils import (
     duckdb_get_aliases,
@@ -38,6 +42,7 @@ from datasure.utils.prep_utils import (
     PrepActionResult,
     PrepDescriptions,
 )
+from datasure.utils.reapply_utils import highlight_status, warn_reapply_failures
 from datasure.utils.ui_utils import (
     confirm_dialog,
     metric_row,
@@ -920,10 +925,13 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
             disabled=disable_add,
         ):
             # apply action and re-run
-            prep_apply_action(project_id, label, PrepActionResult(**prep_args))
-
-            st.success("Preparation step added successfully!")
-            st.rerun()
+            try:
+                prep_apply_action(project_id, label, PrepActionResult(**prep_args))
+            except (ValidationError, OperationError) as e:
+                st.error(f"Error adding preparation step: {e!s}")
+            else:
+                st.success("Preparation step added successfully!")
+                st.rerun()
 
 
 # --- Remove Preparation Step ---#
@@ -967,8 +975,11 @@ def prep_remove_step():
                     alias=f"prep_log_{alias}",
                     db_name="logs",
                 )
-                prep_apply_action(project_id, alias)
+                failures = prep_apply_action(project_id, alias)
                 st.success(f"Action '{action_desc}' removed successfully!")
+                warn_reapply_failures(
+                    failures, "Some preparation steps could not be reapplied"
+                )
 
             if st.button(
                 label="Remove",
@@ -1081,8 +1092,16 @@ if show_prep_page_info:
                         "No changes added yet. Click on the **Add**(:material/add:) button above to add a new data preparation step."
                     )
                 else:
-                    prep_logs_mod = st.dataframe(
-                        prep_log[["action", "description"]],
+                    if "status" not in prep_log.columns:
+                        prep_log = prep_log.with_columns(
+                            pl.lit("Successful").alias("status")
+                        )
+
+                    change_log = prep_log[
+                        ["action", "status", "description"]
+                    ].to_pandas()
+                    st.dataframe(
+                        change_log.style.map(highlight_status, subset=["status"]),
                         width="stretch",
                         key=label,
                         hide_index=False,

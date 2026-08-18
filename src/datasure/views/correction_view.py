@@ -21,6 +21,7 @@ from datasure.utils.navigations_utils import (
     page_navigation,
 )
 from datasure.utils.onboarding_utils import ImportDemoInfo, demo_expander
+from datasure.utils.reapply_utils import highlight_status, warn_reapply_failures
 from datasure.utils.settings_utils import get_check_config_settings
 from datasure.utils.ui_utils import (
     confirm_dialog,
@@ -39,6 +40,9 @@ class TabConfig(BaseModel):
     page_name: str = Field(..., description="Name of the page/check")
     survey_data_name: str = Field(..., description="Name of the survey data alias")
     survey_key: str = Field(..., description="Name of the survey KEY column")
+    survey_id: str | None = Field(
+        None, description="Name of the survey ID column, if configured"
+    )
 
 
 class CorrectionFormState(BaseModel):
@@ -230,6 +234,7 @@ def load_tab_config(project_id: str, tab_index: int) -> TabConfig | None:
         page_name=page_config.get("page_name"),
         survey_data_name=page_config.get("survey_data_name"),
         survey_key=page_config.get("survey_key"),
+        survey_id=page_config.get("survey_id"),
     )
 
 
@@ -480,6 +485,7 @@ def render_add_correction_form(
     key_col: str,
     alias: str,
     tab_index: int,
+    survey_id_col: str | None = None,
 ) -> None:
     """
     Render the add correction step form.
@@ -497,6 +503,10 @@ def render_add_correction_form(
         The data alias/table name.
     tab_index : int
         The tab index for unique widget keys.
+    survey_id_col : str | None
+        The name of the configured Survey ID column, if any. When set (and
+        present in the data), the corresponding Survey ID is shown once a
+        KEY is selected.
     """
     corrected_data = correction_processor.get_corrected_data(alias)
 
@@ -517,6 +527,13 @@ def render_add_correction_form(
 
         if not corr_key_val:
             return
+
+        survey_id_value = None
+        if survey_id_col and survey_id_col in corrected_data.columns:
+            survey_id_value = get_current_value(
+                corrected_data, key_col, corr_key_val, survey_id_col
+            )
+            st.write(f"**Survey ID:** {survey_id_value}")
 
         # Step 2: Select action
         corr_action = st.selectbox(
@@ -546,6 +563,7 @@ def render_add_correction_form(
             form_state=form_state,
             reason=reason,
             tab_index=tab_index,
+            survey_id_value=survey_id_value,
         )
 
 
@@ -599,6 +617,7 @@ def _render_apply_button(
     form_state: CorrectionFormState,
     reason: str,
     tab_index: int,
+    survey_id_value: Any = None,
 ) -> None:
     """
     Render apply button and handle correction application.
@@ -619,6 +638,9 @@ def _render_apply_button(
         Reason for correction.
     tab_index : int
         The tab index for unique widget keys.
+    survey_id_value : Any
+        The Survey ID value for the selected KEY, if a Survey ID column is
+        configured, to record alongside the correction log entry.
     """
     apply_enabled = should_enable_apply_button(
         form_state.action, reason, form_state.new_value
@@ -644,6 +666,7 @@ def _render_apply_button(
             current_value=form_state.current_value,
             new_value=form_state.new_value,
             reason=reason,
+            survey_id_value=survey_id_value,
         )
 
 
@@ -658,6 +681,7 @@ def _handle_apply_correction(
     current_value: Any,
     new_value: Any,
     reason: str,
+    survey_id_value: Any = None,
 ) -> None:
     """
     Handle the application of a correction with validation.
@@ -684,6 +708,9 @@ def _handle_apply_correction(
         The new value (if applicable).
     reason : str
         The reason for correction.
+    survey_id_value : Any
+        The Survey ID value for this KEY, if a Survey ID column is
+        configured, to record alongside the correction log entry.
     """
     try:
         # Validate input
@@ -710,6 +737,7 @@ def _handle_apply_correction(
             current_value=current_value,
             new_value=new_value,
             reason=reason,
+            survey_id_value=survey_id_value,
         )
 
         st.success("Correction applied successfully!")
@@ -724,6 +752,7 @@ def render_correction_input_form(
     key_col: str,
     alias: str,
     tab_index: int,
+    survey_id_col: str | None = None,
 ) -> None:
     """
     Render input form for corrections with add and remove functionality.
@@ -738,6 +767,8 @@ def render_correction_input_form(
         The data alias/table name.
     tab_index : int
         The tab index for unique widget keys.
+    survey_id_col : str | None
+        The name of the configured Survey ID column, if any.
     """
     corrected_data = correction_processor.get_corrected_data(alias)
 
@@ -753,6 +784,7 @@ def render_correction_input_form(
             key_col=key_col,
             alias=alias,
             tab_index=tab_index,
+            survey_id_col=survey_id_col,
         )
 
     with fc2:
@@ -876,13 +908,60 @@ def _handle_remove_correction(
         )
 
         # Remove the correction
-        correction_processor.remove_correction_entry(alias, correction_index)
+        failures = correction_processor.remove_correction_entry(alias, correction_index)
 
         st.success(f"Correction '{selected_action}' removed successfully!")
+        warn_reapply_failures(
+            failures, "Some remaining corrections could not be reapplied"
+        )
         st.rerun()
 
     except Exception as e:
         st.error(f"Error removing correction: {e!s}")
+
+
+def _build_correction_log_display(correction_log: pl.DataFrame) -> pl.DataFrame:
+    """Prepare a correction log for display in the Correction Log table.
+
+    Backfills the status columns for logs saved before they existed, orders
+    columns so status/status_reason sit right after action, and relabels the
+    "ID" column as "Survey ID" for display.
+
+    Parameters
+    ----------
+    correction_log : pl.DataFrame
+        The raw correction log, as persisted.
+
+    Returns
+    -------
+    pl.DataFrame
+        The log with status columns present, in display column order, ready
+        for display.
+    """
+    if "status" not in correction_log.columns:
+        correction_log = correction_log.with_columns(
+            pl.lit("Successful").alias("status")
+        )
+    if "status_reason" not in correction_log.columns:
+        correction_log = correction_log.with_columns(
+            pl.lit(None, dtype=pl.String).alias("status_reason")
+        )
+
+    display_columns = [
+        "date",
+        "KEY",
+        "ID",
+        "action",
+        "status",
+        "status_reason",
+        "column",
+        "current_value",
+        "new_value",
+        "reason",
+    ]
+    # "ID" holds the Survey ID value recorded for the KEY, if one was
+    # configured - rename it for display so the column reads clearly.
+    return correction_log.select(display_columns).rename({"ID": "Survey ID"})
 
 
 @st.fragment
@@ -911,7 +990,12 @@ def render_correction_log(
             )
         else:
             section_header("Correction Log")
-            st.dataframe(data=correction_log, width="stretch")
+
+            log_display = _build_correction_log_display(correction_log).to_pandas()
+            st.dataframe(
+                log_display.style.map(highlight_status, subset=["status"]),
+                width="stretch",
+            )
 
 
 @st.fragment
@@ -983,6 +1067,7 @@ def render_correction_tab(
         key_col=config.survey_key,
         alias=config.survey_data_name,
         tab_index=tab_index,
+        survey_id_col=config.survey_id,
     )
 
     render_correction_log(

@@ -28,6 +28,7 @@ from datasure.utils.prep_utils import (
     PrepActionResult,
     PrepConfirmationMessages,
 )
+from datasure.utils.reapply_utils import ReapplyFailure
 
 # === EXCEPTIONS === #
 
@@ -51,6 +52,15 @@ class OperationError(PrepError):
 
 
 # === DATA MODELS === #
+
+
+@dataclass
+class PrepReapplyOutcome:
+    """Result of (re)applying one logged prep action during a bulk reapply."""
+
+    prep_args: PrepActionResult
+    status: str  # "Successful" or "Failed"
+    error: str | None = None
 
 
 @dataclass
@@ -161,29 +171,41 @@ class RemoveColumnsOperation(PrepOperation):
     def execute(
         self, data: pl.DataFrame, prep_args: PrepActionResult
     ) -> tuple[pl.DataFrame, PrepActionResult]:
-        """Remove columns specified in description."""
-        try:
-            # Extract column names from description
-            columns = prep_args.source_columns
-            self._validate_columns_exist(data, columns)
+        """Remove columns specified in description.
 
-            # drop columns
-            results = data.drop(columns)
+        Columns that no longer exist (e.g. dropped by a later re-import) are
+        skipped rather than failing the whole step, as long as at least one
+        requested column is still present - so a step that removed 4 columns
+        still removes the 2 that remain instead of removing none.
+        """
+        try:
+            columns = prep_args.source_columns or []
+            existing_columns = [c for c in columns if c in data.columns]
+            missing_columns = [c for c in columns if c not in data.columns]
+
+            if not existing_columns:
+                raise OperationError(f"Columns not found: {missing_columns}")  # noqa: TRY301
+
+            # Remove columns using Polars
+            results = data.drop(existing_columns)
 
             updated_prep_args = {
                 "action": PrepActions.remove_column.value,
                 "column_names": None,
-                "affected_count": len(columns),
-                "remaining_count": data.width,
+                "affected_count": len(existing_columns),
+                "remaining_count": results.width,
                 "value": None,
                 "method": None,
-                "source_columns": columns,
+                "source_columns": existing_columns,
                 "condition": prep_args.condition,
-                "failed_count": 0,
-                "additional_info": None,
+                "failed_count": len(missing_columns),
+                "additional_info": (
+                    f"Columns not found and skipped: {missing_columns}"
+                    if missing_columns
+                    else None
+                ),
             }
 
-            # Remove columns using Polars
             return results, PrepActionResult(**updated_prep_args)
 
         except (ValidationError, OperationError):
@@ -301,18 +323,18 @@ class RemoveRowsOperation(PrepOperation):
         # Ensure value is a list for is_in() to treat as literal values
         value_list = value if isinstance(value, list) else [value]
 
+        filter_expr = pl.any_horizontal(
+            [pl.col(col).is_in(value_list) for col in columns]
+        )
+
         if condition == PrepRowConditions.not_equal_to.value:
-            # Keep rows where value is NOT in the list (remove matching rows)
-            filter_expr = pl.any_horizontal(
-                [pl.col(col).is_in(value_list) for col in columns]
-            )
-            return data.filter(~filter_expr)
-        else:
-            # Keep rows where value IS in the list (remove non-matching rows)
-            filter_expr = pl.any_horizontal(
-                [pl.col(col).is_in(value_list) for col in columns]
-            )
+            # "Remove rows where value is not equal to X" - keep only the
+            # matching rows, i.e. drop everything the filter doesn't match.
             return data.filter(filter_expr)
+        else:
+            # "Remove rows where value is equal to X" - keep everything
+            # that doesn't match.
+            return data.filter(~filter_expr)
 
     def _filter_by_comparison(
         self, data: pl.DataFrame, condition: str, columns: list[str], value: Any
@@ -446,9 +468,19 @@ class TransformColumnsOperation(PrepOperation):
                 "example": "18aug2025 19:49:00",
             },
             {
+                "format": "%d%b%Y %H:%M",
+                "validator": r"^\d{1,2}[a-zA-Z]{3}\d{4} \d{1,2}:\d{2}$",
+                "example": "18aug2025 19:49",
+            },
+            {
                 "format": "%d-%b-%Y %H:%M:%S",
                 "validator": r"^\d{1,2}-[a-zA-Z]{3}-\d{4} \d{2}:\d{2}:\d{2}$",
                 "example": "18-aug-2025 19:49:00",
+            },
+            {
+                "format": "%d-%b-%Y %H:%M",
+                "validator": r"^\d{1,2}-[a-zA-Z]{3}-\d{4} \d{1,2}:\d{2}$",
+                "example": "18-aug-2025 19:49",
             },
             {
                 "format": "%Y-%m-%d %H:%M:%S",
@@ -456,14 +488,29 @@ class TransformColumnsOperation(PrepOperation):
                 "example": "2025-08-18 19:49:00",
             },
             {
+                "format": "%Y-%m-%d %H:%M",
+                "validator": r"^\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}$",
+                "example": "2025-08-18 19:49",
+            },
+            {
                 "format": "%m/%d/%Y %H:%M:%S",
                 "validator": r"^\d{1,2}/\d{1,2}/\d{4} \d{2}:\d{2}:\d{2}$",
                 "example": "08/18/2025 19:49:00",
             },
             {
+                "format": "%m/%d/%Y %H:%M",
+                "validator": r"^\d{1,2}/\d{1,2}/\d{4} \d{1,2}:\d{2}$",
+                "example": "3/15/2026 17:28",
+            },
+            {
                 "format": "%d/%m/%Y %H:%M:%S",
                 "validator": r"^\d{1,2}/\d{1,2}/\d{4} \d{2}:\d{2}:\d{2}$",
                 "example": "18/08/2025 19:49:00",
+            },
+            {
+                "format": "%d/%m/%Y %H:%M",
+                "validator": r"^\d{1,2}/\d{1,2}/\d{4} \d{1,2}:\d{2}$",
+                "example": "18/08/2025 19:49",
             },
             {
                 "format": "%Y-%m-%d",
@@ -779,7 +826,9 @@ class AddNewColumnOperation(PrepOperation):
             PrepFunctions.var.value: lambda cols: pl.concat_list(cols).list.var(),
             PrepFunctions.first.value: lambda cols: pl.concat_list(cols).list.first(),
             PrepFunctions.last.value: lambda cols: pl.concat_list(cols).list.last(),
-            PrepFunctions.count.value: lambda cols: pl.concat_list(cols).list.len(),
+            PrepFunctions.count.value: lambda cols: (
+                pl.concat_list(cols).list.drop_nulls().list.len()
+            ),
             PrepFunctions.nunique.value: lambda cols: (
                 pl.concat_list(cols).list.unique().list.len()
             ),
@@ -835,19 +884,46 @@ class PrepProcessor:
 
     def execute_all_actions(
         self, data: pl.DataFrame, actions: list[PrepAction]
-    ) -> pl.DataFrame:
-        """Execute a sequence of preparation actions."""
+    ) -> tuple[pl.DataFrame, list[PrepReapplyOutcome]]:
+        """Execute a sequence of preparation actions.
+
+        An action that fails is skipped - the data is left as it was before
+        that action - so a single step made incompatible by upstream changes
+        (e.g. a re-import that renames/drops a column an earlier step relied
+        on) does not abort the rest of the sequence.
+
+        Returns
+        -------
+            Tuple of the resulting data and one outcome per action, in order,
+            reflecting what actually happened this time (a step that used to
+            remove 4 columns but now only finds 2 is reported as removing 2,
+            not as a failure).
+        """
         result_data = data
+        outcomes: list[PrepReapplyOutcome] = []
 
         for action in actions:
             try:
-                result_data, _ = self.execute_single_action(result_data, action)
-            except (ValidationError, OperationError):
-                raise
+                result_data, updated_args = self.execute_single_action(
+                    result_data, action
+                )
+                outcomes.append(
+                    PrepReapplyOutcome(prep_args=updated_args, status="Successful")
+                )
+            except (ValidationError, OperationError) as e:
+                outcomes.append(
+                    PrepReapplyOutcome(
+                        prep_args=action.prep_args, status="Failed", error=str(e)
+                    )
+                )
             except Exception as e:
-                raise OperationError(f"Failed to execute action '{action}': {e}") from e
+                outcomes.append(
+                    PrepReapplyOutcome(
+                        prep_args=action.prep_args, status="Failed", error=str(e)
+                    )
+                )
 
-        return result_data
+        return result_data, outcomes
 
 
 # === LOG MANAGEMENT (PRIVATE) === #
@@ -869,7 +945,7 @@ def _parse_prep_log_to_actions(prep_log_df: pl.DataFrame) -> list[PrepAction]:
         if isinstance(args, str):
             try:
                 args = json.loads(args)
-            except (json.JSONDecodeError, ValueError):
+            except ValueError:
                 args = ast.literal_eval(args)
         prep_action = PrepActionResult(**args)
         actions.append(PrepAction.from_args(prep_action))
@@ -918,6 +994,7 @@ def _create_log_entry(
     description: str,
     prep_args: PrepActionResult,
     log_index: int,
+    status: str = "Successful",
 ) -> pl.DataFrame:
     """Create a new log entry DataFrame for a prep action.
 
@@ -926,6 +1003,8 @@ def _create_log_entry(
         description: Human-readable description
         prep_args: The preparation action result
         log_index: Current log size (for action_index)
+        status: "Successful" or "Failed" - the outcome of the most recent
+            (re)application of this step
 
     Returns
     -------
@@ -938,8 +1017,56 @@ def _create_log_entry(
             "description": [description],
             "prep_args": [prep_args],
             "action_index": [action_index_val],
+            "status": [status],
         }
     )
+
+
+def _ensure_status_column(df: pl.DataFrame) -> pl.DataFrame:
+    """Backfill a "status" column for logs persisted before it was added."""
+    if df.is_empty() or "status" in df.columns:
+        return df
+    return df.with_columns(pl.lit("Successful").alias("status"))
+
+
+def _build_log_from_outcomes(
+    existing_actions: list[PrepAction], outcomes: list[PrepReapplyOutcome]
+) -> pl.DataFrame:
+    """Rebuild the persisted prep log after a reapply.
+
+    Each step's original request (`prep_args`) is kept as-is, so a column
+    that reappears in a later re-import is still requested for removal.
+    Only the display description and status are refreshed to reflect what
+    actually happened this time.
+
+    Args:
+        existing_actions: The logged actions, as originally requested
+        outcomes: The result of (re)applying each action, in the same order
+
+    Returns
+    -------
+        A fresh prep log DataFrame reflecting the latest reapply
+    """
+    entries = []
+    for index, (action, outcome) in enumerate(
+        zip(existing_actions, outcomes, strict=True)
+    ):
+        if outcome.status == "Failed":
+            description = f"✗ Failed to reapply: {outcome.error}"
+        else:
+            description = _generate_action_description(outcome.prep_args)
+
+        entries.append(
+            _create_log_entry(
+                action.prep_args.action,
+                description,
+                action.prep_args,
+                index,
+                outcome.status,
+            )
+        )
+
+    return pl.concat([_convert_prep_args_to_string(e) for e in entries])
 
 
 def _append_to_prep_log(
@@ -957,7 +1084,7 @@ def _append_to_prep_log(
     """
     if existing_log.is_empty():
         return new_entry
-    existing_log_str = _convert_prep_args_to_string(existing_log)
+    existing_log_str = _ensure_status_column(_convert_prep_args_to_string(existing_log))
     new_entry_str = _convert_prep_args_to_string(new_entry)
     return pl.concat([existing_log_str, new_entry_str])
 
@@ -967,7 +1094,7 @@ def _reapply_all_actions(
     alias: str,
     prep_log_df: pl.DataFrame,
     processor: PrepProcessor,
-) -> None:
+) -> list[ReapplyFailure]:
     """Re-apply all actions from the log to the raw data.
 
     Args:
@@ -975,16 +1102,31 @@ def _reapply_all_actions(
         alias: Dataset alias
         prep_log_df: DataFrame containing the preparation log
         processor: PrepProcessor instance for executing actions
+
+    Returns
+    -------
+        List of actions that were skipped because they failed to reapply.
     """
     raw_data = duckdb_get_table(project_id, alias, db_name="raw")
 
     if prep_log_df.is_empty():
         duckdb_save_table(project_id, raw_data, alias, db_name="prep")
-        return
+        return []
 
     existing_actions = _parse_prep_log_to_actions(prep_log_df)
-    result_data = processor.execute_all_actions(raw_data, existing_actions)
+    result_data, outcomes = processor.execute_all_actions(raw_data, existing_actions)
     duckdb_save_table(project_id, result_data, alias, db_name="prep")
+
+    refreshed_log = _build_log_from_outcomes(existing_actions, outcomes)
+    duckdb_save_table(project_id, refreshed_log, f"prep_log_{alias}", db_name="logs")
+
+    return [
+        ReapplyFailure(
+            step=_generate_action_description(outcome.prep_args), reason=outcome.error
+        )
+        for outcome in outcomes
+        if outcome.status == "Failed"
+    ]
 
 
 def _apply_single_action(
@@ -1029,7 +1171,7 @@ def prep_apply_action(
     project_id: str,
     alias: str,
     prep_args: PrepActionResult | None = None,
-) -> None:
+) -> list[ReapplyFailure]:
     """Apply data preparation action to dataset.
 
     When prep_args is provided, applies the single new action to the current
@@ -1041,15 +1183,23 @@ def prep_apply_action(
         alias: Dataset alias
         prep_args: Optional action to apply. If None, re-applies all logged actions.
 
+    Returns
+    -------
+        List of actions skipped while re-applying the full log. Always empty
+        when applying a single new action (prep_args is not None).
+
     Raises
     ------
-        ValidationError: If action/description validation fails
-        OperationError: If data operation fails
+        ValidationError: If action/description validation fails (only when
+            applying a single new action)
+        OperationError: If data operation fails (only when applying a single
+            new action)
     """
     processor = PrepProcessor()
     prep_log_df = duckdb_get_table(project_id, f"prep_log_{alias}", db_name="logs")
 
     if prep_args is None:
-        _reapply_all_actions(project_id, alias, prep_log_df, processor)
-    else:
-        _apply_single_action(project_id, alias, prep_args, prep_log_df, processor)
+        return _reapply_all_actions(project_id, alias, prep_log_df, processor)
+
+    _apply_single_action(project_id, alias, prep_args, prep_log_df, processor)
+    return []
