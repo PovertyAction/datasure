@@ -211,13 +211,24 @@ def duplicates_report_settings(
                 save_check_settings(settings_file, TAB_NAME, {"enumerator": enumerator})
 
         with st.container(border=True):
-            st.subheader("Duplicates Conditions")
+            st.subheader("Missing Values")
+            st.caption(
+                "Controls how duplicates are matched, not which records are checked."
+            )
+            missing_as_duplicates = _render_missing_as_duplicates_toggle(settings_file)
+
+        with st.container(border=True):
+            st.subheader("Records to Include")
             st.info(
-                "Configure filters for duplicates checks. These settings help exclude irrelevant records from the duplicates analysis."
+                "By default, the duplicates check runs on every record. Use the "
+                "filter below to check duplicates only within a subset — for "
+                "example, only households with `consent == Yes` or "
+                "`interview_status == Complete`. Records that don't match the "
+                "condition are excluded from the duplicates analysis entirely."
             )
 
             conditions = _render_duplicates_condition_options(
-                project_id, data, settings_file
+                project_id, data, settings_file, missing_as_duplicates
             )
             _filter_data_on_conditions(project_id, data, conditions)
 
@@ -709,14 +720,47 @@ def _render_condition_value_input(
     return condition_value, {}
 
 
+def _render_missing_as_duplicates_toggle(settings_file: str) -> bool:
+    """Render the toggle controlling missing-value handling for duplicate matching.
+
+    Parameters
+    ----------
+    settings_file : str
+        Path to settings file for persisting configurations.
+
+    Returns
+    -------
+    bool
+        Whether missing values should be treated as duplicates.
+    """
+    saved_settings = load_check_settings(settings_file, TAB_NAME)
+
+    default_missing_as_duplicates = saved_settings.get("missing_as_duplicates", False)
+    missing_as_duplicates = st.toggle(
+        label="Consider missing values as duplicates",
+        value=default_missing_as_duplicates,
+        key="duplicates_missing_as_duplicates_key",
+        help=(
+            "If enabled, two records with a missing value in the same column "
+            "count as a duplicate pair. If disabled, missing values are never "
+            "matched as duplicates."
+        ),
+        on_change=trigger_save,
+        kwargs={"state_name": TAB_NAME + "_missing_as_duplicates"},
+    )
+    save_check_settings(
+        settings_file, TAB_NAME, {"missing_as_duplicates": missing_as_duplicates}
+    )
+    return missing_as_duplicates
+
+
 def _render_duplicates_condition_options(
-    project_id: str, data: pl.DataFrame, settings_file: str
+    project_id: str, data: pl.DataFrame, settings_file: str, missing_as_duplicates: bool
 ) -> dict:
     """Render duplicates condition options UI.
 
     Allows users to configure filtering conditions for duplicate detection,
     including:
-    - Whether to treat missing values as duplicates
     - Column-based filtering with various condition types
     - Support for numeric, string, and datetime conditions
 
@@ -728,6 +772,9 @@ def _render_duplicates_condition_options(
         Dataset to analyze.
     settings_file : str
         Path to settings file for persisting configurations.
+    missing_as_duplicates : bool
+        Whether missing values should be treated as duplicates, as configured
+        by `_render_missing_as_duplicates_toggle`.
 
     Returns
     -------
@@ -740,18 +787,7 @@ def _render_duplicates_condition_options(
     """
     saved_settings = load_check_settings(settings_file, TAB_NAME)
 
-    default_missing_as_duplicates = saved_settings.get("missing_as_duplicates", False)
-    missing_as_duplicates = st.toggle(
-        label="Consider missing values as duplicates",
-        value=default_missing_as_duplicates,
-        key="duplicates_missing_as_duplicates_key",
-        help="If enabled, missing values will be treated as duplicates during the check.",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_missing_as_duplicates"},
-    )
-    save_check_settings(
-        settings_file, TAB_NAME, {"missing_as_duplicates": missing_as_duplicates}
-    )
+    st.caption("Only records matching this condition will be checked for duplicates.")
 
     co1, co2, co3 = st.columns([0.3, 0.3, 0.4])
     all_columns = data.columns
@@ -760,7 +796,10 @@ def _render_duplicates_condition_options(
             label="Condition Column",
             options=all_columns,
             key="duplicates_condition_col_key",
-            help="Select the column to apply the condition on.",
+            help=(
+                "Column used to decide which records are included, e.g. a "
+                "consent or interview-status column."
+            ),
             on_change=trigger_save,
             kwargs={"state_name": TAB_NAME + "_condition_col"},
         )
@@ -788,7 +827,10 @@ def _render_duplicates_condition_options(
                 index=default_condition_type_index,
                 options=condition_type_options,
                 key="duplicates_condition_type_key",
-                help="Select the type of condition to apply.",
+                help=(
+                    "How to compare the column's values against your condition "
+                    "value (equals, contains, greater than, etc.)."
+                ),
                 on_change=trigger_save,
                 kwargs={"state_name": TAB_NAME + "_condition_type"},
             )
@@ -821,14 +863,18 @@ def _render_duplicates_condition_options(
             }
 
     if st.button(
-        "Apply Condition",
+        "Apply Filter",
         key="apply_duplicates_condition_button",
         type="primary",
         width="stretch",
+        help="Only records matching this condition will be used for the duplicates check below.",
         disabled=not condition_col or not conditions_dict.get("condition_value"),
     ):
         _filter_data_on_conditions(project_id, data, conditions_dict)
         st.rerun()
+
+    if not condition_col:
+        st.caption("No filter applied — all records will be checked for duplicates.")
 
     return conditions_dict if condition_col else {}
 
