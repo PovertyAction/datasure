@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Local file connector**: Added Parquet file format support for local file
+  imports (`src/datasure/connectors/local.py`) — #245
+- **Correction log**: Survey ID now shown on the Correct Data page and in the
+  Correction Log, alongside correction status and status reason
+  (`src/datasure/processing/corrections.py`,
+  `src/datasure/views/correction_view.py`) — #264
+- **Project creation**: Newly created projects are now automatically loaded
+  and selected after creation, instead of requiring a manual return to
+  project selection (`src/datasure/views/start_view.py`) — #272
+
+### Changed
+
+- **Outliers module**: Split the monolithic `src/datasure/checks/outliers.py`
+  into a subpackage (`compute.py`, `models.py`, `report_ui.py`,
+  `settings_ui.py`) for maintainability — #268, closes #197
+- **View UI consistency**: Introduced shared header/section/dialog helpers
+  (`src/datasure/utils/ui_utils.py`) and adopted them across `config_view.py`,
+  `correction_view.py`, `import_view.py`, `output_view_template.py`,
+  `prep_view.py`, `replication_view.py`, and `start_view.py` so page chrome
+  (headers, section titles, metric rows, confirm dialogs) stays consistent as
+  new views are added — #244
+- **Dependencies**: `streamlit` pinned to an exact `==1.61.0` (previously
+  `>=1.52.0`) for reproducible builds; `uv_build` upper bound raised to
+  `<0.13.0`
+- **Dev tooling**: Vendored Streamlit's official `developing-with-streamlit`
+  meta-skill into `.claude/skills/` so it is available to every contributor
+  without a user-level install; trimmed the project-local `streamlit` skill
+  down to DataSure-specific patterns (asset paths, cache directory
+  resolution) — #274
+- **CI**: Bumped `actions/checkout` to 7.0.1, `actions/setup-python` to
+  7.0.0, `astral-sh/setup-uv` to 8.3.2, and `SonarSource/sonarqube-scan-action`
+  to 8.2.0 — #255, #257, #243, #236, #235
+- **Duplicates check**: Clarified filter settings copy on the duplicates
+  check page (`src/datasure/checks/duplicates.py`) — #273
+
+### Fixed
+
+- **Prep "remove rows"**: Equal-to/not-equal-to filter conditions were
+  inverted (matching rows were removed instead of kept, and vice versa);
+  logic corrected (`src/datasure/processing/prep.py`) — #263
+- **Datetime parsing**: Fixed parsing of datetime formats with missing
+  seconds during data preparation (`src/datasure/processing/prep.py`,
+  `src/datasure/views/prep_view.py`)
+- **Bulk reapply error handling**: Prep reapply-all no longer crashes the
+  page on a failing step (e.g. a re-import that drops a column an earlier
+  step used); correction reapply-all no longer silently swallows failures.
+  Both now collect per-item failures, skip just the failing item, and
+  surface one shared warning at the UI boundary
+  (`src/datasure/processing/prep.py`, `src/datasure/processing/corrections.py`,
+  `src/datasure/utils/reapply_utils.py`) — closes #253
+- **Stale prep/corrected data**: Re-importing raw data now properly
+  invalidates stale prepared and corrected data instead of leaving outdated
+  results visible (`src/datasure/processing/corrections.py`,
+  `src/datasure/views/import_view.py`) — #254, closes #252
+
 ---
 
 ## [1.0.0] - 2026-07-10
