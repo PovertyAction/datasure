@@ -64,8 +64,6 @@ def _mock_context_widget() -> MagicMock:
     widget.__exit__ = MagicMock(return_value=False)
     return widget
 
-from datasure.views.correction_view import _build_correction_log_display
-
 
 class TestCorrectionInputFormLogic:
     """Test the correction_input_form function logic patterns."""
