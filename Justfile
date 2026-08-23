@@ -246,7 +246,7 @@ bump-and-tag +bumps:
 
 [windows]
 bump-and-tag +bumps:
-    @uv run python scripts/check_changelog.py {{ bumps }}; if ($LASTEXITCODE -ne 0) { exit 1 }; $status = & git status --porcelain; if ($status) { Write-Host "Error: Git repository has uncommitted changes. Please commit or stash them first."; exit 1 }; $OLD_VERSION = & uv version --short; Write-Host "Current version: $OLD_VERSION"; Write-Host "Bumping version ({{ bumps }})..."; & uv version {{ prepend("--bump=", bumps) }}; if ($LASTEXITCODE -ne 0) { exit 1 }; $NEW_VERSION = & uv version --short; Write-Host "New version: $NEW_VERSION"; Write-Host "Updating lock file with uv sync..."; & uv sync; & git add pyproject.toml uv.lock; & git commit -m "Bump version: $OLD_VERSION → $NEW_VERSION"; $TAG = "v$NEW_VERSION"; if (git rev-parse "$TAG" 2>$null) { Write-Host "Tag $TAG already exists. Skipping tag creation." } else { Write-Host "Creating git tag $TAG..."; git tag -a "$TAG" -m "Version $NEW_VERSION"; Write-Host "Created git tag: $TAG"; Write-Host "To push the tag, run: git push origin $TAG" }
+    @uv run python scripts/check_changelog.py {{ bumps }}; if ($LASTEXITCODE -ne 0) { exit 1 }; $status = & git status --porcelain; if ($status) { Write-Host "Error: Git repository has uncommitted changes. Please commit or stash them first."; exit 1 }; $OLD_VERSION = & uv version --short; Write-Host "Current version: $OLD_VERSION"; Write-Host "Bumping version ({{ bumps }})..."; & uv version {{ prepend("--bump=", bumps) }}; if ($LASTEXITCODE -ne 0) { exit 1 }; $NEW_VERSION = & uv version --short; Write-Host "New version: $NEW_VERSION"; Write-Host "Updating lock file with uv sync..."; & uv sync; & git add pyproject.toml uv.lock; & git commit -m "Bump version: $OLD_VERSION → $NEW_VERSION"; $TAG = "v$NEW_VERSION"; git rev-parse $TAG *>$null; if ($LASTEXITCODE -eq 0) { Write-Host "Tag $TAG already exists. Skipping tag creation." } else { Write-Host "Creating git tag $TAG..."; git tag -a "$TAG" -m "Version $NEW_VERSION"; Write-Host "Created git tag: $TAG"; Write-Host "To push the tag, run: git push origin $TAG" }
 
 # Create git tag from current version if it doesn't exist
 [unix]
@@ -267,7 +267,7 @@ tag-version:
 
 [windows]
 tag-version:
-    @$VERSION = & uv version --short; $TAG = "v$VERSION"; if (git rev-parse "$TAG" 2>$null) { Write-Host "Tag $TAG already exists. Skipping tag creation." } else { Write-Host "Creating git tag $TAG..."; git tag -a "$TAG" -m "Version $VERSION"; Write-Host "Created git tag: $TAG"; Write-Host "To push the tag, run: git push origin $TAG" }
+    @$VERSION = & uv version --short; $TAG = "v$VERSION"; git rev-parse $TAG *>$null; if ($LASTEXITCODE -eq 0) { Write-Host "Tag $TAG already exists. Skipping tag creation." } else { Write-Host "Creating git tag $TAG..."; git tag -a "$TAG" -m "Version $VERSION"; Write-Host "Created git tag: $TAG"; Write-Host "To push the tag, run: git push origin $TAG" }
 
 # Push the latest version tag to remote
 [unix]
@@ -288,7 +288,7 @@ push-tag:
 
 [windows]
 push-tag:
-    @$VERSION = & uv version --short; $TAG = "v$VERSION"; if (git rev-parse "$TAG" 2>$null) { Write-Host "Pushing tag $TAG to remote..."; git push origin "$TAG"; Write-Host "Tag $TAG pushed successfully!" } else { Write-Host "Tag $TAG does not exist locally. Create it first with 'just tag-version'."; exit 1 }
+    @$VERSION = & uv version --short; $TAG = "v$VERSION"; git rev-parse $TAG *>$null; if ($LASTEXITCODE -eq 0) { Write-Host "Pushing tag $TAG to remote..."; git push origin "$TAG"; Write-Host "Tag $TAG pushed successfully!" } else { Write-Host "Tag $TAG does not exist locally. Create it first with 'just tag-version'."; exit 1 }
 
 # Push both commits and tag to remote
 [unix]
@@ -313,7 +313,7 @@ push-all:
 
 [windows]
 push-all:
-    @$VERSION = & uv version --short; $TAG = "v$VERSION"; Write-Host "Pushing commits to remote..."; git push; if (git rev-parse "$TAG" 2>$null) { Write-Host "Pushing tag $TAG to remote..."; git push origin "$TAG"; Write-Host "All changes pushed successfully!" } else { Write-Host "Tag $TAG does not exist locally. Create it first with 'just tag-version'."; exit 1 }
+    @$VERSION = & uv version --short; $TAG = "v$VERSION"; Write-Host "Pushing commits to remote..."; git push; git rev-parse $TAG *>$null; if ($LASTEXITCODE -eq 0) { Write-Host "Pushing tag $TAG to remote..."; git push origin "$TAG"; Write-Host "All changes pushed successfully!" } else { Write-Host "Tag $TAG does not exist locally. Create it first with 'just tag-version'."; exit 1 }
 
 # Clean build artifacts
 [unix]
