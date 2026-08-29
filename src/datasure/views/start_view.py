@@ -9,6 +9,7 @@ import streamlit as st
 
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
+from datasure.utils.duckdb_utils import duckdb_get_aliases
 from datasure.utils.onboarding_utils import (
     DEMO_PROJECT_ID,
     create_demo_project,
@@ -37,29 +38,43 @@ def get_project_id(project_name: str) -> str:
     return hash_val[:8]  # Return the first 8 characters of the hash as the project ID
 
 
-def get_project_names() -> list[str]:
-    """Get a list of project names sorted by last used date (most recent first)."""
-    projects = load_projects()
-    sorted_projects = sorted(
-        (p for p in projects.values() if not p.get("is_demo", False)),
-        key=lambda p: p.get("last_used", ""),
-        reverse=True,
-    )
-    project_names = [p["name"] for p in sorted_projects]
-    return ["DataSure Demo"] + project_names + ["Create New Project"]
-
-
-def _get_last_used_project_name() -> str | None:
-    """Return the name of the most recently used non-demo project, or None."""
-    projects = load_projects()
-    candidates = [
-        p
-        for p in projects.values()
-        if not p.get("is_demo", False) and p.get("last_used")
+def _non_demo_projects(projects: dict) -> list[tuple[str, dict]]:
+    """Return (project_id, info) for every non-demo project."""
+    return [
+        (pid, info)
+        for pid, info in projects.items()
+        if not info.get("is_demo", False) and pid != DEMO_PROJECT_ID
     ]
-    if not candidates:
-        return None
-    return max(candidates, key=lambda p: p["last_used"])["name"]
+
+
+def _filter_and_sort_projects(
+    rows: list[tuple[str, dict]], search: str, sort_by: str
+) -> list[tuple[str, dict]]:
+    """Filter projects by name (case-insensitive substring) and sort them.
+
+    Parameters
+    ----------
+    rows : list[tuple[str, dict]]
+        (project_id, info) pairs, as returned by `_non_demo_projects`.
+    search : str
+        Substring to filter project names by. Empty string matches all.
+    sort_by : str
+        "Name" for alphabetical order, anything else for most-recently-used
+        first.
+    """
+    if search:
+        needle = search.strip().lower()
+        rows = [row for row in rows if needle in row[1].get("name", "").lower()]
+    if sort_by == "Name":
+        return sorted(rows, key=lambda row: row[1].get("name", "").lower())
+    return sorted(rows, key=lambda row: row[1].get("last_used", ""), reverse=True)
+
+
+def _project_stats(project_id: str) -> tuple[int, int]:
+    """Return (dataset count, HFC page count) for a project."""
+    dataset_count = len(duckdb_get_aliases(project_id, to_load=True))
+    page_count = ConfigurationService(project_id).get_all_configurations().height
+    return dataset_count, page_count
 
 
 def valid_project_name(project_name: str) -> bool:
@@ -176,30 +191,42 @@ def _launch_fresh_demo():
             st.error("Failed to load demo data. Please try again.")
 
 
-def _handle_demo_project():
-    """Handle demo project selection and initialization."""
-    show_demo_intro()
-
+def _render_demo_row() -> None:
+    """Render the pinned DataSure Demo row."""
     demo_exists = DEMO_PROJECT_ID in load_projects()
 
-    if demo_exists:
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Resume Demo", type="primary", width="stretch"):
-                _activate_project(DEMO_PROJECT_ID)
-        with col2:
-            if st.button("Restart Demo", type="secondary", width="stretch"):
-                confirm_dialog(
-                    "Restart demo",
-                    "Restarting will permanently delete all your demo progress, "
-                    "including any corrections and data preparation steps you have "
-                    "made. This cannot be undone.",
-                    confirm_label="Restart demo",
-                    on_confirm=_launch_fresh_demo,
-                )
-    else:
-        if st.button("Start Demo", type="primary", width="stretch"):
-            _launch_fresh_demo()
+    if not demo_exists:
+        show_demo_intro()
+
+    with st.container(border=True):
+        name_col, action_col = st.columns([0.7, 0.3])
+        with name_col:
+            st.markdown(":material/school: **DataSure Demo**")
+            st.caption("A pre-loaded sample project for exploring DataSure.")
+        with action_col:
+            if demo_exists:
+                resume_col, restart_col = st.columns(2)
+                with resume_col:
+                    if st.button(
+                        "Resume", type="primary", width="stretch", key="demo_resume"
+                    ):
+                        _activate_project(DEMO_PROJECT_ID)
+                with restart_col:
+                    if st.button("Restart", width="stretch", key="demo_restart"):
+                        confirm_dialog(
+                            "Restart demo",
+                            "Restarting will permanently delete all your demo "
+                            "progress, including any corrections and data "
+                            "preparation steps you have made. This cannot be "
+                            "undone.",
+                            confirm_label="Restart demo",
+                            on_confirm=_launch_fresh_demo,
+                        )
+            else:
+                if st.button(
+                    "Start Demo", type="primary", width="stretch", key="demo_start"
+                ):
+                    _launch_fresh_demo()
 
 
 def _create_and_load_project(project_name: str, project_id: str):
@@ -228,9 +255,14 @@ def _check_new_project_name(project_name: str) -> str | None:
     return project_id
 
 
-def _handle_create_new_project():
-    """Handle new project creation workflow."""
-    project_name = st.text_input("Enter Project Name", placeholder="My New Project")
+def _render_new_project_form() -> None:
+    """Render the new-project name + start-mode form.
+
+    Split out from `_new_project_dialog` so the form logic stays testable as
+    a plain function - `@st.dialog`-wrapped functions can't be exercised
+    directly under this test suite's mocked streamlit module.
+    """
+    project_name = st.text_input("Project name", placeholder="My New Project")
 
     start_mode = st.radio(
         "How do you want to start?",
@@ -273,27 +305,39 @@ def _handle_create_new_project():
             )
 
 
-def _handle_existing_project_selection(project: str):
-    """Handle selection of an existing project."""
-    project_id = get_project_id(project)
-    projects = load_projects()
-    project_info = projects.get(project_id, {})
-    if project_info:
-        created_at = project_info.get("created_at", "Unknown")
-        last_used = project_info.get("last_used", "Unknown")
-        st.caption(f"Created: {created_at} | Last used: {last_used}")
-    select_project = st.button("Load Project", type="primary", width="stretch")
+@st.dialog(title="New Project", width="large")
+def _new_project_dialog() -> None:
+    """Open the new-project creation dialog."""
+    _render_new_project_form()
 
-    if select_project:
-        st.write(f"Loading project '{project}'...")
-        save_project(project, project_id)
-        _activate_project(project_id)
 
-    # Only show configuration/delete options for non-demo projects
-    if project_id != DEMO_PROJECT_ID:
-        _show_export_config_option(project, project_id)
-        _show_update_from_config_option(project, project_id)
-        _show_delete_project_option(project, project_id, projects)
+def _render_project_row(project_id: str, info: dict, projects: dict) -> None:
+    """Render one row in the project list: name/meta, stats, Open, and a "more" menu."""
+    name = info.get("name", project_id)
+    last_used = info.get("last_used", "Unknown")
+    dataset_count, page_count = _project_stats(project_id)
+    dataset_word = "dataset" if dataset_count == 1 else "datasets"
+    page_word = "HFC page" if page_count == 1 else "HFC pages"
+
+    with st.container(border=True):
+        name_col, stats_col, open_col, menu_col = st.columns(
+            [0.45, 0.25, 0.15, 0.15], vertical_alignment="center"
+        )
+        with name_col:
+            st.markdown(f"**{name}**")
+            st.caption(f"Last used {last_used}")
+        with stats_col:
+            st.caption(f"{dataset_count} {dataset_word} · {page_count} {page_word}")
+        with open_col:
+            if st.button(
+                "Open", type="primary", width="stretch", key=f"open_{project_id}"
+            ):
+                save_project(name, project_id)
+                _activate_project(project_id)
+        with menu_col, st.popover(":material/more_vert: More", width="stretch"):
+            _show_export_config_option(name, project_id)
+            _show_update_from_config_option(name, project_id)
+            _show_delete_project_option(name, project_id, projects)
 
 
 def _show_export_config_option(project: str, project_id: str) -> None:
@@ -339,37 +383,56 @@ def _show_delete_project_option(project: str, project_id: str, projects: dict):
         )
 
 
+def _render_project_toolbar() -> tuple[str, str]:
+    """Render the search / sort / new-project toolbar.
+
+    Returns
+    -------
+        The current (search text, sort field) selections.
+    """
+    search_col, sort_col, new_col = st.columns([0.5, 0.25, 0.25])
+    with search_col:
+        search = st.text_input(
+            "Search projects",
+            placeholder="Search projects...",
+            label_visibility="collapsed",
+            key="project_search",
+        )
+    with sort_col:
+        sort_by = st.selectbox(
+            "Sort by",
+            options=["Last used", "Name"],
+            label_visibility="collapsed",
+            key="project_sort_by",
+        )
+    with new_col:
+        if st.button(":material/add: New Project", type="primary", width="stretch"):
+            _new_project_dialog()
+    return search, sort_by
+
+
 def _render_project_selection_ui():
     """Render the project selection interface."""
-    st.header("Select Your Project")
-    _, pc1, _ = st.columns([0.25, 0.5, 0.25])
-    project_list = get_project_names()
-    last_used_name = _get_last_used_project_name()
-    default_index = (
-        project_list.index(last_used_name)
-        if last_used_name and last_used_name in project_list
-        else None
-    )
+    st.header("Your Projects")
+    st.caption("Open a project to continue, or start a new one.")
 
-    with pc1, st.container(border=True):
-        st.markdown(
-            "Select a DataSure project to get started. If you don't have a project yet, you can create a new project "
-            "by selecting the **'Create New Project'** option. If you are new to DataSure, try the **'DataSure Demo'** "
-            "project for a guided experience."
-        )
-        project = st.selectbox(
-            label="Select Project",
-            options=project_list,
-            index=default_index,
-            key="project_select_key",
-        )
+    search, sort_by = _render_project_toolbar()
 
-        if project == "DataSure Demo":
-            _handle_demo_project()
-        elif project == "Create New Project":
-            _handle_create_new_project()
-        elif project:
-            _handle_existing_project_selection(project)
+    _render_demo_row()
+    st.divider()
+
+    projects = load_projects()
+    rows = _filter_and_sort_projects(_non_demo_projects(projects), search, sort_by)
+
+    if not rows:
+        if search:
+            st.info("No projects match your search.")
+        else:
+            st.info("No projects yet. Use **+ New Project** above to create one.")
+        return
+
+    for project_id, info in rows:
+        _render_project_row(project_id, info, projects)
 
 
 def _render_page_header():
