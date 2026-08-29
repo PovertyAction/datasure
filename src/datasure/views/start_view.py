@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import shutil
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
@@ -26,6 +27,8 @@ from datasure.utils.project_config import (
     render_project_config_wizard,
 )
 from datasure.utils.ui_utils import confirm_dialog
+
+logger = logging.getLogger(__name__)
 
 PROJECTS_FILE: str = "projects.json"
 
@@ -314,8 +317,16 @@ def _render_new_project_config_upload() -> ProjectConfigBundle | None:
     except (json.JSONDecodeError, ValidationError) as e:
         st.error(f"This doesn't look like a valid configuration file: {e}")
         return None
+    except Exception as e:
+        # UI boundary: an unexpected parse failure must not leave the
+        # "Create Project" button silently disabled with no explanation.
+        logger.exception("Failed to parse uploaded configuration file")
+        st.error(f"Couldn't read this configuration file: {e}")
+        return None
 
-    st.caption(f"Exported from **{bundle.exported_from_project}**")
+    st.success(
+        f"Configuration loaded, exported from **{bundle.exported_from_project}**"
+    )
     return bundle
 
 
@@ -350,11 +361,20 @@ def _render_new_project_form() -> None:
         )
         bundle = _render_new_project_config_upload()
 
+        ready = bool(project_name) and bundle is not None
+        if not ready:
+            missing = []
+            if not project_name:
+                missing.append("a project name")
+            if bundle is None:
+                missing.append("a valid configuration file")
+            st.caption(f"Enter {' and '.join(missing)} to continue.")
+
         if st.button(
             ":material/rocket_launch: Create Project & Continue",
             type="primary",
             width="stretch",
-            disabled=not project_name or bundle is None,
+            disabled=not ready,
         ):
             project_id = _check_new_project_name(project_name)
             if project_id:

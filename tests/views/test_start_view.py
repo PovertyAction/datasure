@@ -500,6 +500,29 @@ class TestRenderNewProjectForm:
         mock_error.assert_called_once()
         assert "new_project_created_id" not in _st.session_state
 
+    def test_from_configuration_file_unexpected_parse_error_shows_error(
+        self, monkeypatch
+    ):
+        """A non-JSON/non-ValidationError parse failure must still surface an
+        error - not leave the button silently disabled with no explanation.
+        """
+        _st.session_state.pop("new_project_created_id", None)
+        _st.session_state["new_project_mode"] = "config"
+        monkeypatch.setattr(_st, "text_input", MagicMock(return_value="My New Project"))
+        uploaded = self._mock_uploaded_config_file("{}")
+        monkeypatch.setattr(_st, "file_uploader", MagicMock(return_value=uploaded))
+        mock_error = MagicMock()
+        monkeypatch.setattr(_st, "error", mock_error)
+
+        with patch(
+            "datasure.views.start_view.parse_project_config",
+            side_effect=TypeError("boom"),
+        ):
+            start_view._render_new_project_form()
+
+        mock_error.assert_called_once()
+        assert "new_project_created_id" not in _st.session_state
+
     def test_resumes_resolution_after_project_already_created(self, monkeypatch):
         """Once created_id is set, the form skips straight to resolve/apply
         on every later rerun, instead of asking for name/mode again.
