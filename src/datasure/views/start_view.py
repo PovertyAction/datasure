@@ -169,7 +169,7 @@ def delete_project(project_id: str):
 
         if project_path.exists():
             shutil.rmtree(project_path)
-        st.success(f"Project '{project_id}' deleted successfully!")
+        st.success(f"Project '{project_id}' deleted successfully!", width="stretch")
     else:
         st.error(f"Project '{project_id}' does not exist.")
 

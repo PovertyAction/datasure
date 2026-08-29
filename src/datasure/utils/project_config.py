@@ -465,7 +465,11 @@ def _render_config_summary(bundle: ProjectConfigBundle) -> None:
         (correction_count > 0, _count_label(correction_count, "correction")),
     ]
     for available, label in checklist:
-        icon = ":material/check_circle:" if available else ":material/cancel:"
+        icon = (
+            ":green[:material/check_circle:]"
+            if available
+            else ":red[:material/cancel:]"
+        )
         st.markdown(f"{icon} {label}")
 
 
