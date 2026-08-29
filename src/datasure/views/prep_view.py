@@ -501,7 +501,7 @@ def _get_unique_values_from_columns(
     value_options = []
     for col in columns:
         value_options.extend(prep_data[col].unique().to_list())
-    return sorted(value_options)
+    return sorted(v for v in value_options if v is not None)
 
 
 def _render_range_value_inputs(
