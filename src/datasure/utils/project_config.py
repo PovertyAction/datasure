@@ -37,7 +37,6 @@ from datasure.utils.config_utils import ConfigurationService
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.reapply_utils import ReapplyFailure, warn_reapply_failures
 from datasure.utils.secure_credentials import list_stored_credentials
-from datasure.utils.ui_utils import metric_row
 
 # ============================================================================
 # EXPORT
@@ -438,18 +437,36 @@ def apply_project_config(
 # ============================================================================
 
 
+def _count_label(count: int, noun: str) -> str:
+    """Format a "N noun(s)" label, or "No nouns" when the count is zero."""
+    if count == 0:
+        return f"No {noun}s"
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
 def _render_config_summary(bundle: ProjectConfigBundle) -> None:
-    """Render the parsed bundle's contents as a metric row."""
+    """Render the parsed bundle's contents as an ordered checklist.
+
+    One line per layer, in the order it will be applied, with a check when
+    the bundle actually has that layer and an X when it doesn't.
+    """
+    import streamlit as st
+
     prep_count = sum(len(v) for v in bundle.prep_steps.values())
     correction_count = sum(len(v) for v in bundle.corrections.values())
-    metric_row(
-        [
-            ("Datasets", len(bundle.datasets)),
-            ("Prep steps", prep_count),
-            ("HFC pages", len(bundle.pages)),
-            ("Corrections", correction_count),
-        ]
-    )
+
+    st.markdown("**Project loaded.**")
+
+    checklist = [
+        (True, f"Project info — *{bundle.exported_from_project}*"),
+        (len(bundle.datasets) > 0, _count_label(len(bundle.datasets), "dataset")),
+        (prep_count > 0, _count_label(prep_count, "prep step")),
+        (len(bundle.pages) > 0, _count_label(len(bundle.pages), "HFC page")),
+        (correction_count > 0, _count_label(correction_count, "correction")),
+    ]
+    for available, label in checklist:
+        icon = ":material/check_circle:" if available else ":material/cancel:"
+        st.markdown(f"{icon} {label}")
 
 
 def _render_config_resolution(
