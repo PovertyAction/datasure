@@ -16,9 +16,9 @@ from datasure.utils.onboarding_utils import (
     set_onboarding_step,
     show_demo_intro,
 )
-from datasure.utils.project_template import (
-    export_project_template,
-    render_project_template_wizard,
+from datasure.utils.project_config import (
+    export_project_config,
+    render_project_config_wizard,
 )
 from datasure.utils.ui_utils import confirm_dialog
 
@@ -234,12 +234,12 @@ def _handle_create_new_project():
 
     start_mode = st.radio(
         "How do you want to start?",
-        options=["Start blank", "Start from a template"],
+        options=["Start blank", "Start from a configuration file"],
         horizontal=True,
         key="new_project_start_mode",
     )
 
-    if start_mode == "Start from a template":
+    if start_mode == "Start from a configuration file":
         st.caption(
             "We'll create the project, then walk through matching it to a "
             "configuration file exported from another DataSure project."
@@ -253,7 +253,7 @@ def _handle_create_new_project():
             project_id = _check_new_project_name(project_name)
             if project_id:
                 save_project(project_name, project_id)
-                render_project_template_wizard(
+                render_project_config_wizard(
                     project_id,
                     project_name,
                     on_complete=lambda: _activate_project(project_id),
@@ -289,19 +289,19 @@ def _handle_existing_project_selection(project: str):
         save_project(project, project_id)
         _activate_project(project_id)
 
-    # Only show template/delete options for non-demo projects
+    # Only show configuration/delete options for non-demo projects
     if project_id != DEMO_PROJECT_ID:
-        _show_export_template_option(project, project_id)
-        _show_update_from_template_option(project, project_id)
+        _show_export_config_option(project, project_id)
+        _show_update_from_config_option(project, project_id)
         _show_delete_project_option(project, project_id, projects)
 
 
-def _show_export_template_option(project: str, project_id: str) -> None:
-    """Show the option to export this project's configuration as a template file."""
-    bundle = export_project_template(project_id, project)
+def _show_export_config_option(project: str, project_id: str) -> None:
+    """Show the option to export this project's configuration to a file."""
+    bundle = export_project_config(project_id, project)
     export_date = datetime.now().strftime("%Y%m%d")
     file_name = (
-        f"{project.lower().replace(' ', '_')}_datasure_template_{export_date}.json"
+        f"{project.lower().replace(' ', '_')}_datasure_config_{export_date}.json"
     )
     st.download_button(
         ":material/download: Export configuration",
@@ -312,10 +312,10 @@ def _show_export_template_option(project: str, project_id: str) -> None:
     )
 
 
-def _show_update_from_template_option(project: str, project_id: str) -> None:
-    """Show the option to update an existing project from a template file."""
-    if st.button(":material/upload_file: Update from template", width="stretch"):
-        render_project_template_wizard(
+def _show_update_from_config_option(project: str, project_id: str) -> None:
+    """Show the option to update an existing project from a configuration file."""
+    if st.button(":material/upload_file: Update from configuration", width="stretch"):
+        render_project_config_wizard(
             project_id, project, on_complete=lambda: _activate_project(project_id)
         )
 

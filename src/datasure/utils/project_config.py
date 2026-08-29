@@ -1,4 +1,4 @@
-"""Export and import of full project configuration templates.
+"""Export and import of full project configurations.
 
 Bundles the four layers that make up a DataSure project's setup - import
 sources, prep steps, HFC (check) configurations, and corrections - into a
@@ -27,8 +27,8 @@ from datasure.connectors.scto import FormConfig, SurveyCTOUI, download_forms
 from datasure.models.schemas import (
     CheckConfiguration,
     ImportSourceEntry,
+    ProjectConfigBundle,
     ProjectPageBundle,
-    ProjectTemplateBundle,
 )
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.processing.prep import prep_apply_action
@@ -62,9 +62,7 @@ def _decode_prep_args_cell(value: str | dict) -> dict:
         return ast.literal_eval(value)
 
 
-def export_project_template(
-    project_id: str, project_name: str
-) -> ProjectTemplateBundle:
+def export_project_config(project_id: str, project_name: str) -> ProjectConfigBundle:
     """Build a portable configuration bundle for the given project.
 
     Parameters
@@ -76,7 +74,7 @@ def export_project_template(
 
     Returns
     -------
-    ProjectTemplateBundle
+    ProjectConfigBundle
         The assembled bundle, ready to be written to a file.
     """
     import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
@@ -135,7 +133,7 @@ def export_project_template(
             )
         )
 
-    return ProjectTemplateBundle(
+    return ProjectConfigBundle(
         exported_from_project=project_name,
         exported_at=datetime.now().isoformat(timespec="seconds"),
         datasets=datasets,
@@ -145,18 +143,18 @@ def export_project_template(
     )
 
 
-def parse_project_template(raw: bytes | str) -> ProjectTemplateBundle:
-    """Parse and validate an uploaded template file.
+def parse_project_config(raw: bytes | str) -> ProjectConfigBundle:
+    """Parse and validate an uploaded configuration file.
 
     Raises
     ------
     json.JSONDecodeError
         If the file isn't valid JSON.
     pydantic.ValidationError
-        If the file isn't a valid template bundle.
+        If the file isn't a valid configuration bundle.
     """
     data = json.loads(raw)
-    return ProjectTemplateBundle(**data)
+    return ProjectConfigBundle(**data)
 
 
 # ============================================================================
@@ -164,7 +162,7 @@ def parse_project_template(raw: bytes | str) -> ProjectTemplateBundle:
 # ============================================================================
 
 
-def missing_credentials(project_id: str, bundle: ProjectTemplateBundle) -> list[str]:
+def missing_credentials(project_id: str, bundle: ProjectConfigBundle) -> list[str]:
     """Distinct SurveyCTO servers referenced by the bundle with no stored credentials.
 
     Returns
@@ -180,7 +178,7 @@ def missing_credentials(project_id: str, bundle: ProjectTemplateBundle) -> list[
     return sorted(servers - stored_servers)
 
 
-def missing_local_files(bundle: ProjectTemplateBundle) -> list[ImportSourceEntry]:
+def missing_local_files(bundle: ProjectConfigBundle) -> list[ImportSourceEntry]:
     """Local-storage datasets that need a file path re-supplied on this machine."""
     return [d for d in bundle.datasets if d.source == "local storage"]
 
@@ -200,8 +198,8 @@ def _stored_username_for_server(project_id: str, server: str) -> str | None:
 
 
 @dataclass
-class TemplateApplyResult:
-    """Outcome of applying a project template bundle."""
+class ConfigApplyResult:
+    """Outcome of applying a project configuration bundle."""
 
     datasets_imported: list[str] = field(default_factory=list)
     datasets_skipped: list[ReapplyFailure] = field(default_factory=list)
@@ -349,12 +347,12 @@ def _import_dataset(
     return False, f"Unknown import source: {ds.source}"
 
 
-def apply_project_template(
+def apply_project_config(
     project_id: str,
-    bundle: ProjectTemplateBundle,
+    bundle: ProjectConfigBundle,
     local_file_paths: dict[str, str],
-) -> TemplateApplyResult:
-    """Apply a parsed template bundle to a new or existing project.
+) -> ConfigApplyResult:
+    """Apply a parsed configuration bundle to a new or existing project.
 
     Runs the same pipeline a person would run by hand: import each dataset,
     replay its prep steps, create each HFC page, then replay corrections. A
@@ -364,9 +362,9 @@ def apply_project_template(
     Parameters
     ----------
     project_id : str
-        The project to apply the template to. Must already exist.
-    bundle : ProjectTemplateBundle
-        The parsed template.
+        The project to apply the configuration to. Must already exist.
+    bundle : ProjectConfigBundle
+        The parsed configuration.
     local_file_paths : dict[str, str]
         Alias -> file path, for every "local storage" dataset in the bundle.
         SurveyCTO credentials are looked up from the project's stored
@@ -374,10 +372,10 @@ def apply_project_template(
 
     Returns
     -------
-    TemplateApplyResult
+    ConfigApplyResult
         What was imported, applied, created, or skipped (and why).
     """
-    result = TemplateApplyResult()
+    result = ConfigApplyResult()
     imported_aliases: set[str] = set()
 
     for ds in bundle.datasets:
@@ -440,7 +438,7 @@ def apply_project_template(
 # ============================================================================
 
 
-def _render_template_summary(bundle: ProjectTemplateBundle) -> None:
+def _render_config_summary(bundle: ProjectConfigBundle) -> None:
     """Render the parsed bundle's contents as a metric row."""
     prep_count = sum(len(v) for v in bundle.prep_steps.values())
     correction_count = sum(len(v) for v in bundle.corrections.values())
@@ -454,8 +452,8 @@ def _render_template_summary(bundle: ProjectTemplateBundle) -> None:
     )
 
 
-def _render_template_resolution(
-    project_id: str, bundle: ProjectTemplateBundle
+def _render_config_resolution(
+    project_id: str, bundle: ProjectConfigBundle
 ) -> dict[str, str]:
     """Render credential and file-path inputs for what the bundle can't carry.
 
@@ -477,7 +475,7 @@ def _render_template_resolution(
         hint = f" (expected {ds.filename})" if ds.filename else ""
         path = st.text_input(
             f'Local file for "{ds.alias}"{hint}',
-            key=f"tpl_local_path_{ds.alias}",
+            key=f"cfg_local_path_{ds.alias}",
             placeholder="Full path, e.g. C:/data/survey.dta",
         )
         if path:
@@ -486,8 +484,8 @@ def _render_template_resolution(
     return local_paths
 
 
-def _render_template_apply_result(result: TemplateApplyResult) -> None:
-    """Render a summary of what applying a template did."""
+def _render_config_apply_result(result: ConfigApplyResult) -> None:
+    """Render a summary of what applying a configuration did."""
     import streamlit as st
 
     st.success(
@@ -506,10 +504,10 @@ def _render_template_apply_result(result: TemplateApplyResult) -> None:
     )
 
 
-def render_project_template_wizard(
+def render_project_config_wizard(
     project_id: str, project_name: str, on_complete: Callable[[], None]
 ) -> None:
-    """Render the "set up project from a template" dialog.
+    """Render the "set up project from a configuration file" dialog.
 
     Walks through uploading a configuration file exported from another
     project, resolving anything it can't carry (SurveyCTO credentials, local
@@ -518,7 +516,7 @@ def render_project_template_wizard(
     Parameters
     ----------
     project_id : str
-        The (already-created) project to apply the template to.
+        The (already-created) project to apply the configuration to.
     project_name : str
         Display name, used in the dialog heading only.
     on_complete : callable
@@ -526,20 +524,20 @@ def render_project_template_wizard(
     """
     import streamlit as st
 
-    @st.dialog(title="Set Up Project From a Template", width="large")
+    @st.dialog(title="Set Up Project From a Configuration File", width="large")
     def _dialog() -> None:
         st.caption(f"Applying to **{project_name}**")
 
-        result_key = f"tpl_result_{project_id}"
+        result_key = f"cfg_result_{project_id}"
         if result_key in st.session_state:
-            _render_template_apply_result(st.session_state[result_key])
+            _render_config_apply_result(st.session_state[result_key])
             if st.button("Continue", type="primary", width="stretch"):
                 del st.session_state[result_key]
                 on_complete()
             return
 
         uploaded = st.file_uploader(
-            "Configuration file", type=["json"], key="tpl_upload"
+            "Configuration file", type=["json"], key="cfg_upload"
         )
         if not uploaded:
             st.info(
@@ -548,16 +546,16 @@ def render_project_template_wizard(
             return
 
         try:
-            bundle = parse_project_template(uploaded.getvalue())
+            bundle = parse_project_config(uploaded.getvalue())
         except (json.JSONDecodeError, ValidationError) as e:
             st.error(f"This doesn't look like a valid configuration file: {e}")
             return
 
         st.caption(f"Exported from **{bundle.exported_from_project}**")
-        _render_template_summary(bundle)
+        _render_config_summary(bundle)
         st.divider()
 
-        local_paths = _render_template_resolution(project_id, bundle)
+        local_paths = _render_config_resolution(project_id, bundle)
 
         servers_needed = missing_credentials(project_id, bundle)
         files_needed = [
@@ -581,7 +579,7 @@ def render_project_template_wizard(
             disabled=not ready,
         ):
             with st.spinner("Setting up your project..."):
-                result = apply_project_template(project_id, bundle, local_paths)
+                result = apply_project_config(project_id, bundle, local_paths)
             st.session_state[result_key] = result
             st.rerun()
 

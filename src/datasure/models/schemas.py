@@ -328,7 +328,7 @@ class BackcheckColumnSelectors(BaseModel):
 
 
 ## ============================================================================
-# PROJECT TEMPLATE MODELS
+# PROJECT CONFIGURATION MODELS
 # =============================================================================
 
 
@@ -360,7 +360,7 @@ class ProjectPageBundle(BaseModel):
     missing_settings: dict = Field(default_factory=dict)
 
 
-class ProjectTemplateBundle(BaseModel):
+class ProjectConfigBundle(BaseModel):
     """Portable snapshot of an entire DataSure project setup.
 
     Bundles the four layers that make up "how this project is configured":
@@ -368,7 +368,7 @@ class ProjectTemplateBundle(BaseModel):
     Never contains credentials, machine-specific file paths, or survey data.
     """
 
-    datasure_template_version: int = 1
+    datasure_config_version: int = 1
     exported_from_project: str
     exported_at: str
     datasets: list[ImportSourceEntry] = Field(default_factory=list)

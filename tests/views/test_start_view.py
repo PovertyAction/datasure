@@ -412,8 +412,8 @@ class TestHandleExistingProjectSelection:
         with (
             patch("datasure.views.start_view._activate_project") as mock_activate,
             patch("datasure.views.start_view._show_delete_project_option"),
-            patch("datasure.views.start_view._show_update_from_template_option"),
-            patch("datasure.views.start_view._show_export_template_option"),
+            patch("datasure.views.start_view._show_update_from_config_option"),
+            patch("datasure.views.start_view._show_export_config_option"),
         ):
             start_view._handle_existing_project_selection("My Project")
 
@@ -426,7 +426,7 @@ class TestHandleExistingProjectSelection:
 
         with (
             patch("datasure.views.start_view._activate_project") as mock_activate,
-            patch("datasure.views.start_view._show_export_template_option"),
+            patch("datasure.views.start_view._show_export_config_option"),
         ):
             start_view._handle_existing_project_selection("My Project")
 
@@ -456,7 +456,7 @@ class TestHandleExistingProjectSelection:
             patch(
                 "datasure.views.start_view._show_delete_project_option"
             ) as mock_show_delete,
-            patch("datasure.views.start_view._show_export_template_option"),
+            patch("datasure.views.start_view._show_export_config_option"),
         ):
             start_view._handle_existing_project_selection("My Project")
 
@@ -484,39 +484,39 @@ class TestShowDeleteProjectOption:
         mock_confirm.assert_not_called()
 
 
-class TestShowExportTemplateOption:
-    """Test _show_export_template_option."""
+class TestShowExportConfigOption:
+    """Test _show_export_config_option."""
 
     def test_renders_download_button_with_bundle(self, monkeypatch):
         mock_bundle = MagicMock()
-        mock_bundle.model_dump_json.return_value = '{"datasure_template_version": 1}'
+        mock_bundle.model_dump_json.return_value = '{"datasure_config_version": 1}'
         mock_download = MagicMock()
         monkeypatch.setattr(_st, "download_button", mock_download)
 
         with patch(
-            "datasure.views.start_view.export_project_template",
+            "datasure.views.start_view.export_project_config",
             return_value=mock_bundle,
         ) as mock_export:
-            start_view._show_export_template_option("My Project", "abcd1234")
+            start_view._show_export_config_option("My Project", "abcd1234")
 
         mock_export.assert_called_once_with("abcd1234", "My Project")
         mock_download.assert_called_once()
         assert (
-            mock_download.call_args.kwargs["data"] == '{"datasure_template_version": 1}'
+            mock_download.call_args.kwargs["data"] == '{"datasure_config_version": 1}'
         )
         assert mock_download.call_args.kwargs["file_name"].startswith("my_project_")
 
 
-class TestShowUpdateFromTemplateOption:
-    """Test _show_update_from_template_option."""
+class TestShowUpdateFromConfigOption:
+    """Test _show_update_from_config_option."""
 
-    def test_click_opens_template_wizard(self, monkeypatch):
+    def test_click_opens_config_wizard(self, monkeypatch):
         monkeypatch.setattr(_st, "button", MagicMock(return_value=True))
 
         with patch(
-            "datasure.views.start_view.render_project_template_wizard"
+            "datasure.views.start_view.render_project_config_wizard"
         ) as mock_wizard:
-            start_view._show_update_from_template_option("My Project", "abcd1234")
+            start_view._show_update_from_config_option("My Project", "abcd1234")
 
         mock_wizard.assert_called_once()
         assert mock_wizard.call_args.args[:2] == ("abcd1234", "My Project")
@@ -525,9 +525,9 @@ class TestShowUpdateFromTemplateOption:
         monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
 
         with patch(
-            "datasure.views.start_view.render_project_template_wizard"
+            "datasure.views.start_view.render_project_config_wizard"
         ) as mock_wizard:
-            start_view._show_update_from_template_option("My Project", "abcd1234")
+            start_view._show_update_from_config_option("My Project", "abcd1234")
 
         mock_wizard.assert_not_called()
 

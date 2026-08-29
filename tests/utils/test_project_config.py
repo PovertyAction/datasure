@@ -1,4 +1,4 @@
-"""Tests for project template export/import (issue #251)."""
+"""Tests for project configuration export/import (issue #251)."""
 
 import json
 from unittest.mock import Mock, patch
@@ -8,17 +8,17 @@ import pytest
 
 from datasure.models.schemas import (
     ImportSourceEntry,
+    ProjectConfigBundle,
     ProjectPageBundle,
-    ProjectTemplateBundle,
 )
 from datasure.utils.config_utils import ConfigurationService
-from datasure.utils.project_template import (
+from datasure.utils.project_config import (
     _stored_username_for_server,
-    apply_project_template,
-    export_project_template,
+    apply_project_config,
+    export_project_config,
     missing_credentials,
     missing_local_files,
-    parse_project_template,
+    parse_project_config,
 )
 from datasure.utils.reapply_utils import ReapplyFailure
 
@@ -34,11 +34,11 @@ def mock_database_functions(monkeypatch):
 
 
 class TestBundleRoundTrip:
-    """Test ProjectTemplateBundle serialization and parsing."""
+    """Test ProjectConfigBundle serialization and parsing."""
 
     def test_round_trip(self):
         """A bundle survives a dump-to-JSON, parse-back cycle unchanged."""
-        bundle = ProjectTemplateBundle(
+        bundle = ProjectConfigBundle(
             exported_from_project="ACME Endline 2026",
             exported_at="2026-08-28T10:15:00",
             datasets=[
@@ -50,18 +50,18 @@ class TestBundleRoundTrip:
         )
 
         raw = bundle.model_dump_json()
-        parsed = parse_project_template(raw)
+        parsed = parse_project_config(raw)
 
         assert parsed == bundle
 
     def test_parse_rejects_invalid_json(self):
         """Malformed JSON raises rather than silently producing an empty bundle."""
         with pytest.raises(json.JSONDecodeError):
-            parse_project_template("not json")
+            parse_project_config("not json")
 
     def test_parse_defaults_missing_optional_fields(self):
         """A minimal bundle (no datasets/prep/pages/corrections) still parses."""
-        bundle = parse_project_template(
+        bundle = parse_project_config(
             json.dumps(
                 {
                     "exported_from_project": "Minimal Project",
@@ -78,12 +78,12 @@ class TestBundleRoundTrip:
 # === EXPORT === #
 
 
-class TestExportProjectTemplate:
-    """Test export_project_template."""
+class TestExportProjectConfig:
+    """Test export_project_config."""
 
-    @patch("datasure.utils.project_template.get_cache_path")
-    @patch("datasure.utils.project_template.ConfigurationService")
-    @patch("datasure.utils.project_template.duckdb_get_table")
+    @patch("datasure.utils.project_config.get_cache_path")
+    @patch("datasure.utils.project_config.ConfigurationService")
+    @patch("datasure.utils.project_config.duckdb_get_table")
     def test_export_assembles_all_layers(
         self, mock_get_table, mock_config_service_cls, mock_get_cache_path, tmp_path
     ):
@@ -130,7 +130,7 @@ class TestExportProjectTemplate:
         mock_config_service_cls.return_value = mock_service
         mock_get_cache_path.return_value = tmp_path
 
-        bundle = export_project_template(PROJECT_ID, "ACME Endline 2026")
+        bundle = export_project_config(PROJECT_ID, "ACME Endline 2026")
 
         assert bundle.exported_from_project == "ACME Endline 2026"
         assert [d.alias for d in bundle.datasets] == ["household"]
@@ -139,9 +139,9 @@ class TestExportProjectTemplate:
         assert bundle.corrections["household"][0]["KEY"] == "1"
         assert bundle.pages[0].config["page_name"] == "Household HFC"
 
-    @patch("datasure.utils.project_template.get_cache_path")
-    @patch("datasure.utils.project_template.ConfigurationService")
-    @patch("datasure.utils.project_template.duckdb_get_table")
+    @patch("datasure.utils.project_config.get_cache_path")
+    @patch("datasure.utils.project_config.ConfigurationService")
+    @patch("datasure.utils.project_config.duckdb_get_table")
     def test_export_reads_settings_json_files(
         self, mock_get_table, mock_config_service_cls, mock_get_cache_path, tmp_path
     ):
@@ -159,7 +159,7 @@ class TestExportProjectTemplate:
             json.dumps({"missing": {"threshold": 5}})
         )
 
-        bundle = export_project_template(PROJECT_ID, "ACME Endline 2026")
+        bundle = export_project_config(PROJECT_ID, "ACME Endline 2026")
 
         assert bundle.pages[0].settings == {"missing": {"threshold": 5}}
         assert bundle.pages[0].missing_settings == {}
@@ -171,13 +171,13 @@ class TestExportProjectTemplate:
 class TestResolutionHelpers:
     """Test missing_credentials / missing_local_files / _stored_username_for_server."""
 
-    @patch("datasure.utils.project_template.list_stored_credentials")
+    @patch("datasure.utils.project_config.list_stored_credentials")
     def test_missing_credentials_excludes_stored_servers(self, mock_list_creds):
         """A server with a stored credential is not reported as missing."""
         mock_list_creds.return_value = {
             "credentials": {"scto_login - acme - a@x.com": {"server": "acme"}}
         }
-        bundle = ProjectTemplateBundle(
+        bundle = ProjectConfigBundle(
             exported_from_project="p",
             exported_at="t",
             datasets=[
@@ -190,7 +190,7 @@ class TestResolutionHelpers:
 
     def test_missing_local_files_returns_only_local_storage_entries(self):
         """SurveyCTO datasets are not included; local-storage ones are."""
-        bundle = ProjectTemplateBundle(
+        bundle = ProjectConfigBundle(
             exported_from_project="p",
             exported_at="t",
             datasets=[
@@ -203,7 +203,7 @@ class TestResolutionHelpers:
 
         assert [d.alias for d in result] == ["tracking"]
 
-    @patch("datasure.utils.project_template.list_stored_credentials")
+    @patch("datasure.utils.project_config.list_stored_credentials")
     def test_stored_username_for_server_found(self, mock_list_creds):
         """Returns the username stored for a matching server."""
         mock_list_creds.return_value = {
@@ -211,7 +211,7 @@ class TestResolutionHelpers:
         }
         assert _stored_username_for_server(PROJECT_ID, "acme") == "k@x.com"
 
-    @patch("datasure.utils.project_template.list_stored_credentials")
+    @patch("datasure.utils.project_config.list_stored_credentials")
     def test_stored_username_for_server_not_found(self, mock_list_creds):
         """Returns None when no credential is stored for that server."""
         mock_list_creds.return_value = {"credentials": {}}
@@ -221,20 +221,20 @@ class TestResolutionHelpers:
 # === APPLY === #
 
 
-class TestApplyProjectTemplate:
-    """Test apply_project_template."""
+class TestApplyProjectConfig:
+    """Test apply_project_config."""
 
     def _config_service_mock(self, page_exists=False):
         service = Mock()
         service.page_name_exists.return_value = page_exists
         return service
 
-    @patch("datasure.utils.project_template.CorrectionProcessor")
-    @patch("datasure.utils.project_template.ConfigurationService")
-    @patch("datasure.utils.project_template.prep_apply_action")
-    @patch("datasure.utils.project_template.load_local_data")
-    @patch("datasure.utils.project_template.duckdb_save_table")
-    @patch("datasure.utils.project_template.duckdb_get_table")
+    @patch("datasure.utils.project_config.CorrectionProcessor")
+    @patch("datasure.utils.project_config.ConfigurationService")
+    @patch("datasure.utils.project_config.prep_apply_action")
+    @patch("datasure.utils.project_config.load_local_data")
+    @patch("datasure.utils.project_config.duckdb_save_table")
+    @patch("datasure.utils.project_config.duckdb_get_table")
     def test_local_dataset_full_pipeline_succeeds(
         self,
         mock_get_table,
@@ -256,7 +256,7 @@ class TestApplyProjectTemplate:
         data_file = tmp_path / "household.csv"
         data_file.write_text("id,age\n1,30\n")
 
-        bundle = ProjectTemplateBundle(
+        bundle = ProjectConfigBundle(
             exported_from_project="p",
             exported_at="t",
             datasets=[ImportSourceEntry(alias="household", source="local storage")],
@@ -272,7 +272,7 @@ class TestApplyProjectTemplate:
             corrections={"household": [{"KEY": "1", "action": "modify value"}]},
         )
 
-        result = apply_project_template(
+        result = apply_project_config(
             PROJECT_ID, bundle, local_file_paths={"household": str(data_file)}
         )
 
@@ -285,8 +285,8 @@ class TestApplyProjectTemplate:
             "household"
         )
 
-    @patch("datasure.utils.project_template.ConfigurationService")
-    @patch("datasure.utils.project_template.duckdb_get_table")
+    @patch("datasure.utils.project_config.ConfigurationService")
+    @patch("datasure.utils.project_config.duckdb_get_table")
     def test_local_dataset_without_path_is_skipped(
         self, mock_get_table, mock_config_service_cls
     ):
@@ -294,22 +294,22 @@ class TestApplyProjectTemplate:
         mock_get_table.return_value = pl.DataFrame()
         mock_config_service_cls.return_value = self._config_service_mock()
 
-        bundle = ProjectTemplateBundle(
+        bundle = ProjectConfigBundle(
             exported_from_project="p",
             exported_at="t",
             datasets=[ImportSourceEntry(alias="tracking", source="local storage")],
         )
 
-        result = apply_project_template(PROJECT_ID, bundle, local_file_paths={})
+        result = apply_project_config(PROJECT_ID, bundle, local_file_paths={})
 
         assert result.datasets_imported == []
         assert result.datasets_skipped == [
             ReapplyFailure("tracking", "No file path was provided")
         ]
 
-    @patch("datasure.utils.project_template.list_stored_credentials")
-    @patch("datasure.utils.project_template.ConfigurationService")
-    @patch("datasure.utils.project_template.duckdb_get_table")
+    @patch("datasure.utils.project_config.list_stored_credentials")
+    @patch("datasure.utils.project_config.ConfigurationService")
+    @patch("datasure.utils.project_config.duckdb_get_table")
     def test_surveycto_dataset_without_credentials_is_skipped(
         self, mock_get_table, mock_config_service_cls, mock_list_creds
     ):
@@ -318,7 +318,7 @@ class TestApplyProjectTemplate:
         mock_config_service_cls.return_value = self._config_service_mock()
         mock_list_creds.return_value = {"credentials": {}}
 
-        bundle = ProjectTemplateBundle(
+        bundle = ProjectConfigBundle(
             exported_from_project="p",
             exported_at="t",
             datasets=[
@@ -328,16 +328,16 @@ class TestApplyProjectTemplate:
             ],
         )
 
-        result = apply_project_template(PROJECT_ID, bundle, local_file_paths={})
+        result = apply_project_config(PROJECT_ID, bundle, local_file_paths={})
 
         assert result.datasets_imported == []
         assert len(result.datasets_skipped) == 1
         assert result.datasets_skipped[0].step == "household"
 
-    @patch("datasure.utils.project_template.ConfigurationService")
-    @patch("datasure.utils.project_template.duckdb_get_table")
-    @patch("datasure.utils.project_template.duckdb_save_table")
-    @patch("datasure.utils.project_template.load_local_data")
+    @patch("datasure.utils.project_config.ConfigurationService")
+    @patch("datasure.utils.project_config.duckdb_get_table")
+    @patch("datasure.utils.project_config.duckdb_save_table")
+    @patch("datasure.utils.project_config.load_local_data")
     def test_page_referencing_unimported_dataset_is_skipped(
         self, mock_load_local, mock_save_table, mock_get_table, mock_config_service_cls
     ):
@@ -345,7 +345,7 @@ class TestApplyProjectTemplate:
         mock_get_table.return_value = pl.DataFrame()
         mock_config_service_cls.return_value = self._config_service_mock()
 
-        bundle = ProjectTemplateBundle(
+        bundle = ProjectConfigBundle(
             exported_from_project="p",
             exported_at="t",
             datasets=[ImportSourceEntry(alias="household", source="local storage")],
@@ -360,15 +360,15 @@ class TestApplyProjectTemplate:
         )
 
         # No path resolved for "household" -> import is skipped -> page must be too
-        result = apply_project_template(PROJECT_ID, bundle, local_file_paths={})
+        result = apply_project_config(PROJECT_ID, bundle, local_file_paths={})
 
         assert result.pages_created == []
         assert result.pages_skipped == [
             ReapplyFailure("Household HFC", "Dataset 'household' was not imported")
         ]
 
-    @patch("datasure.utils.project_template.ConfigurationService")
-    @patch("datasure.utils.project_template.duckdb_get_table")
+    @patch("datasure.utils.project_config.ConfigurationService")
+    @patch("datasure.utils.project_config.duckdb_get_table")
     def test_page_with_existing_name_is_skipped(
         self, mock_get_table, mock_config_service_cls
     ):
@@ -378,7 +378,7 @@ class TestApplyProjectTemplate:
             page_exists=True
         )
 
-        bundle = ProjectTemplateBundle(
+        bundle = ProjectConfigBundle(
             exported_from_project="p",
             exported_at="t",
             pages=[
@@ -391,7 +391,7 @@ class TestApplyProjectTemplate:
             ],
         )
 
-        result = apply_project_template(PROJECT_ID, bundle, local_file_paths={})
+        result = apply_project_config(PROJECT_ID, bundle, local_file_paths={})
 
         assert result.pages_created == []
         assert result.pages_skipped[0].reason == "A page with this name already exists"
