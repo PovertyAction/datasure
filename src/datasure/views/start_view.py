@@ -255,6 +255,43 @@ def _check_new_project_name(project_name: str) -> str | None:
     return project_id
 
 
+def _render_new_project_mode_switch() -> str:
+    """Render the "Start from scratch" / "From a configuration file" switch.
+
+    A plain `st.button` only reports True on the single rerun right after
+    it's clicked, so it can't act as a toggle by itself - the current mode
+    is held in `st.session_state["new_project_mode"]` instead, and each
+    button just sets it. "blank" is the default every time the dialog is
+    freshly opened (see the "+ New Project" button in
+    `_render_project_toolbar`).
+
+    Returns
+    -------
+        The current mode: "blank" or "config".
+    """
+    mode = st.session_state.get("new_project_mode", "blank")
+
+    blank_col, config_col = st.columns(2)
+    with blank_col:
+        if st.button(
+            "Start from scratch",
+            type="primary" if mode == "blank" else "secondary",
+            width="stretch",
+        ):
+            mode = "blank"
+            st.session_state.new_project_mode = mode
+    with config_col:
+        if st.button(
+            ":material/upload_file: From a configuration file",
+            type="primary" if mode == "config" else "secondary",
+            width="stretch",
+        ):
+            mode = "config"
+            st.session_state.new_project_mode = mode
+
+    return mode
+
+
 def _render_new_project_form() -> None:
     """Render the new-project name + start-mode form.
 
@@ -263,15 +300,9 @@ def _render_new_project_form() -> None:
     directly under this test suite's mocked streamlit module.
     """
     project_name = st.text_input("Project name", placeholder="My New Project")
+    mode = _render_new_project_mode_switch()
 
-    start_mode = st.radio(
-        "How do you want to start?",
-        options=["Start blank", "Start from a configuration file"],
-        horizontal=True,
-        key="new_project_start_mode",
-    )
-
-    if start_mode == "Start from a configuration file":
+    if mode == "config":
         st.caption(
             "We'll create the project, then walk through matching it to a "
             "configuration file exported from another DataSure project."
@@ -423,6 +454,7 @@ def _render_project_toolbar() -> tuple[str, str]:
         )
     with new_col:
         if st.button(":material/add: New Project", type="primary", width="stretch"):
+            st.session_state.new_project_mode = "blank"
             _new_project_dialog()
     return search, sort_by
 

@@ -341,13 +341,63 @@ class TestDeleteProjectAndReset:
 # === HANDLER FUNCTION TESTS (with mocked Streamlit widgets) === #
 
 
+class TestRenderNewProjectModeSwitch:
+    """Test _render_new_project_mode_switch."""
+
+    def test_defaults_to_blank(self):
+        _st.session_state.pop("new_project_mode", None)
+        assert start_view._render_new_project_mode_switch() == "blank"
+
+    def test_clicking_config_button_switches_and_persists(self, monkeypatch):
+        _st.session_state.pop("new_project_mode", None)
+        monkeypatch.setattr(
+            _st,
+            "button",
+            MagicMock(side_effect=lambda label=None, *a, **k: "configuration" in label),
+        )
+
+        mode = start_view._render_new_project_mode_switch()
+
+        assert mode == "config"
+        assert _st.session_state["new_project_mode"] == "config"
+
+    def test_clicking_blank_button_switches_back(self, monkeypatch):
+        _st.session_state["new_project_mode"] = "config"
+        monkeypatch.setattr(
+            _st,
+            "button",
+            MagicMock(
+                side_effect=lambda label=None, *a, **k: label == "Start from scratch"
+            ),
+        )
+
+        mode = start_view._render_new_project_mode_switch()
+
+        assert mode == "blank"
+        assert _st.session_state["new_project_mode"] == "blank"
+
+    def test_no_click_keeps_current_mode(self, monkeypatch):
+        _st.session_state["new_project_mode"] = "config"
+        monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
+
+        assert start_view._render_new_project_mode_switch() == "config"
+
+
 class TestRenderNewProjectForm:
     """Test _render_new_project_form."""
 
+    def _mock_button_for_label(self, monkeypatch, wanted_label):
+        """Only the button whose label matches `wanted_label` reports a click."""
+        monkeypatch.setattr(
+            _st,
+            "button",
+            MagicMock(side_effect=lambda label=None, *a, **k: label == wanted_label),
+        )
+
     def test_asks_for_confirmation_before_creating(self, monkeypatch):
+        _st.session_state["new_project_mode"] = "blank"
         monkeypatch.setattr(_st, "text_input", MagicMock(return_value="My New Project"))
-        monkeypatch.setattr(_st, "radio", MagicMock(return_value="Start blank"))
-        monkeypatch.setattr(_st, "button", MagicMock(return_value=True))
+        self._mock_button_for_label(monkeypatch, "Create Project")
 
         with patch("datasure.views.start_view.confirm_dialog") as mock_confirm:
             start_view._render_new_project_form()
@@ -358,9 +408,9 @@ class TestRenderNewProjectForm:
         assert "My New Project" in args[1]
 
     def test_confirming_creates_and_activates_the_project(self, tmp_path, monkeypatch):
+        _st.session_state["new_project_mode"] = "blank"
         monkeypatch.setattr(_st, "text_input", MagicMock(return_value="My New Project"))
-        monkeypatch.setattr(_st, "radio", MagicMock(return_value="Start blank"))
-        monkeypatch.setattr(_st, "button", MagicMock(return_value=True))
+        self._mock_button_for_label(monkeypatch, "Create Project")
 
         with patch("datasure.views.start_view.confirm_dialog") as mock_confirm:
             start_view._render_new_project_form()
@@ -376,9 +426,9 @@ class TestRenderNewProjectForm:
     def test_duplicate_name_shows_error_and_stops(self, tmp_path, monkeypatch):
         existing_id = start_view.get_project_id("Existing")
         start_view.save_project("Existing", existing_id)
+        _st.session_state["new_project_mode"] = "blank"
         monkeypatch.setattr(_st, "text_input", MagicMock(return_value="Existing"))
-        monkeypatch.setattr(_st, "radio", MagicMock(return_value="Start blank"))
-        monkeypatch.setattr(_st, "button", MagicMock(return_value=True))
+        self._mock_button_for_label(monkeypatch, "Create Project")
         mock_error = MagicMock()
         monkeypatch.setattr(_st, "error", mock_error)
         monkeypatch.setattr(_st, "stop", MagicMock(side_effect=StopIteration))
@@ -393,8 +443,8 @@ class TestRenderNewProjectForm:
         mock_confirm.assert_not_called()
 
     def test_no_button_click_does_nothing(self, monkeypatch):
+        _st.session_state["new_project_mode"] = "blank"
         monkeypatch.setattr(_st, "text_input", MagicMock(return_value=""))
-        monkeypatch.setattr(_st, "radio", MagicMock(return_value="Start blank"))
         monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
 
         with patch("datasure.views.start_view.confirm_dialog") as mock_confirm:
@@ -405,11 +455,9 @@ class TestRenderNewProjectForm:
     def test_from_configuration_file_creates_project_and_opens_wizard(
         self, tmp_path, monkeypatch
     ):
+        _st.session_state["new_project_mode"] = "config"
         monkeypatch.setattr(_st, "text_input", MagicMock(return_value="My New Project"))
-        monkeypatch.setattr(
-            _st, "radio", MagicMock(return_value="Start from a configuration file")
-        )
-        monkeypatch.setattr(_st, "button", MagicMock(return_value=True))
+        self._mock_button_for_label(monkeypatch, "Create Project & Continue")
 
         with patch(
             "datasure.views.start_view.render_project_config_wizard"
