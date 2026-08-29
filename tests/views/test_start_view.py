@@ -394,30 +394,14 @@ class TestRenderNewProjectForm:
             MagicMock(side_effect=lambda label=None, *a, **k: wanted_label in label),
         )
 
-    def test_asks_for_confirmation_before_creating(self, monkeypatch):
+    def test_blank_mode_creates_and_activates_the_project(self, tmp_path, monkeypatch):
+        """No confirmation dialog: this dialog can't open a second one."""
         _st.session_state["new_project_mode"] = "blank"
         monkeypatch.setattr(_st, "text_input", MagicMock(return_value="My New Project"))
         self._mock_button_for_label(monkeypatch, "Create Project")
-
-        with patch("datasure.views.start_view.confirm_dialog") as mock_confirm:
-            start_view._render_new_project_form()
-
-        mock_confirm.assert_called_once()
-        args, kwargs = mock_confirm.call_args
-        assert kwargs["confirm_label"] == "Create & Load New Project"
-        assert "My New Project" in args[1]
-
-    def test_confirming_creates_and_activates_the_project(self, tmp_path, monkeypatch):
-        _st.session_state["new_project_mode"] = "blank"
-        monkeypatch.setattr(_st, "text_input", MagicMock(return_value="My New Project"))
-        self._mock_button_for_label(monkeypatch, "Create Project")
-
-        with patch("datasure.views.start_view.confirm_dialog") as mock_confirm:
-            start_view._render_new_project_form()
-        on_confirm = mock_confirm.call_args.kwargs["on_confirm"]
 
         with patch("datasure.views.start_view._activate_project") as mock_activate:
-            on_confirm()
+            start_view._render_new_project_form()
 
         project_id = start_view.get_project_id("My New Project")
         assert project_id in start_view.load_projects()
@@ -434,23 +418,23 @@ class TestRenderNewProjectForm:
         monkeypatch.setattr(_st, "stop", MagicMock(side_effect=StopIteration))
 
         with (
-            patch("datasure.views.start_view.confirm_dialog") as mock_confirm,
+            patch("datasure.views.start_view._activate_project") as mock_activate,
             pytest.raises(StopIteration),
         ):
             start_view._render_new_project_form()
 
         mock_error.assert_called_once()
-        mock_confirm.assert_not_called()
+        mock_activate.assert_not_called()
 
     def test_no_button_click_does_nothing(self, monkeypatch):
         _st.session_state["new_project_mode"] = "blank"
         monkeypatch.setattr(_st, "text_input", MagicMock(return_value=""))
         monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
 
-        with patch("datasure.views.start_view.confirm_dialog") as mock_confirm:
+        with patch("datasure.views.start_view._activate_project") as mock_activate:
             start_view._render_new_project_form()
 
-        mock_confirm.assert_not_called()
+        mock_activate.assert_not_called()
 
     def _mock_uploaded_config_file(self, content: str) -> MagicMock:
         """Build a fake `st.file_uploader` return value with the given content."""
@@ -458,9 +442,14 @@ class TestRenderNewProjectForm:
         mock_file.getvalue.return_value = content
         return mock_file
 
-    def test_from_configuration_file_creates_project_and_opens_wizard(
+    def test_from_configuration_file_creates_project_and_stores_bundle(
         self, tmp_path, monkeypatch
     ):
+        """Clicking through doesn't open a second dialog (Streamlit forbids
+        nesting one), so it stores the bundle and reruns instead.
+        """
+        _st.session_state.pop("new_project_created_id", None)
+        _st.session_state.pop("new_project_bundle", None)
         _st.session_state["new_project_mode"] = "config"
         monkeypatch.setattr(_st, "text_input", MagicMock(return_value="My New Project"))
         self._mock_button_for_label(monkeypatch, "Create Project & Continue")
@@ -469,31 +458,27 @@ class TestRenderNewProjectForm:
         )
         monkeypatch.setattr(_st, "file_uploader", MagicMock(return_value=uploaded))
 
-        with patch(
-            "datasure.views.start_view.render_project_config_wizard"
-        ) as mock_wizard:
-            start_view._render_new_project_form()
+        start_view._render_new_project_form()
 
         project_id = start_view.get_project_id("My New Project")
         assert project_id in start_view.load_projects()
-        mock_wizard.assert_called_once()
-        assert mock_wizard.call_args.args[:2] == (project_id, "My New Project")
-        bundle = mock_wizard.call_args.kwargs["initial_bundle"]
-        assert bundle.exported_from_project == "Other Project"
+        assert _st.session_state["new_project_created_id"] == project_id
+        assert (
+            _st.session_state["new_project_bundle"].exported_from_project
+            == "Other Project"
+        )
 
     def test_from_configuration_file_button_disabled_without_upload(self, monkeypatch):
+        _st.session_state.pop("new_project_created_id", None)
         _st.session_state["new_project_mode"] = "config"
         monkeypatch.setattr(_st, "text_input", MagicMock(return_value="My New Project"))
         monkeypatch.setattr(_st, "file_uploader", MagicMock(return_value=None))
         mock_button = MagicMock(return_value=False)
         monkeypatch.setattr(_st, "button", mock_button)
 
-        with patch(
-            "datasure.views.start_view.render_project_config_wizard"
-        ) as mock_wizard:
-            start_view._render_new_project_form()
+        start_view._render_new_project_form()
 
-        mock_wizard.assert_not_called()
+        assert "new_project_created_id" not in _st.session_state
         submit_call = next(
             call
             for call in mock_button.call_args_list
@@ -502,6 +487,7 @@ class TestRenderNewProjectForm:
         assert submit_call.kwargs["disabled"] is True
 
     def test_from_configuration_file_invalid_upload_shows_error(self, monkeypatch):
+        _st.session_state.pop("new_project_created_id", None)
         _st.session_state["new_project_mode"] = "config"
         monkeypatch.setattr(_st, "text_input", MagicMock(return_value="My New Project"))
         uploaded = self._mock_uploaded_config_file("not json")
@@ -509,13 +495,26 @@ class TestRenderNewProjectForm:
         mock_error = MagicMock()
         monkeypatch.setattr(_st, "error", mock_error)
 
-        with patch(
-            "datasure.views.start_view.render_project_config_wizard"
-        ) as mock_wizard:
-            start_view._render_new_project_form()
+        start_view._render_new_project_form()
 
         mock_error.assert_called_once()
-        mock_wizard.assert_not_called()
+        assert "new_project_created_id" not in _st.session_state
+
+    def test_resumes_resolution_after_project_already_created(self, monkeypatch):
+        """Once created_id is set, the form skips straight to resolve/apply
+        on every later rerun, instead of asking for name/mode again.
+        """
+        _st.session_state["new_project_created_id"] = "abcd1234"
+        _st.session_state["new_project_bundle"] = "a-bundle-placeholder"
+
+        with patch(
+            "datasure.views.start_view.render_config_resolution_and_apply"
+        ) as mock_resolve:
+            start_view._render_new_project_form()
+
+        mock_resolve.assert_called_once()
+        assert mock_resolve.call_args.args[0] == "abcd1234"
+        assert mock_resolve.call_args.args[1] == "a-bundle-placeholder"
 
 
 class TestRenderProjectRow:

@@ -504,17 +504,82 @@ def _render_config_apply_result(result: ConfigApplyResult) -> None:
     )
 
 
-def render_project_config_wizard(
+def render_config_resolution_and_apply(
     project_id: str,
-    project_name: str,
+    bundle: ProjectConfigBundle | None,
     on_complete: Callable[[], None],
-    initial_bundle: ProjectConfigBundle | None = None,
 ) -> None:
-    """Render the "set up project from a configuration file" dialog.
+    """Render the resolve-then-apply steps for an already-parsed bundle.
 
-    Walks through uploading a configuration file exported from another
-    project, resolving anything it can't carry (SurveyCTO credentials, local
-    file paths), then applying it: import, prep, HFC configs, corrections.
+    Streamlit does not allow opening a dialog from within another dialog, so
+    this renders inline into whatever dialog is already open - the
+    standalone "Set Up Project From a Configuration File" dialog after its
+    own upload step, or the "New Project" dialog directly, since that one
+    already has its own uploader.
+
+    Parameters
+    ----------
+    project_id : str
+        The (already-created) project to apply the configuration to.
+    bundle : ProjectConfigBundle, optional
+        The parsed configuration to resolve and apply. Only read before an
+        apply has happened yet - once `apply_project_config` has run, the
+        stored result is shown instead and this is ignored.
+    on_complete : callable
+        Called after the user dismisses a completed apply, to navigate away.
+    """
+    import streamlit as st
+
+    result_key = f"cfg_result_{project_id}"
+    if result_key in st.session_state:
+        _render_config_apply_result(st.session_state[result_key])
+        if st.button("Continue", type="primary", width="stretch"):
+            del st.session_state[result_key]
+            on_complete()
+        return
+
+    st.caption(f"Exported from **{bundle.exported_from_project}**")
+    _render_config_summary(bundle)
+    st.divider()
+
+    local_paths = _render_config_resolution(project_id, bundle)
+
+    servers_needed = missing_credentials(project_id, bundle)
+    files_needed = [
+        ds.alias for ds in missing_local_files(bundle) if ds.alias not in local_paths
+    ]
+    ready = not servers_needed and not files_needed
+
+    if not ready:
+        st.caption(
+            f"Resolve the items above before continuing "
+            f"({len(servers_needed)} credential(s), "
+            f"{len(files_needed)} file(s) remaining)."
+        )
+
+    if st.button(
+        "Import, Prep & Configure",
+        type="primary",
+        width="stretch",
+        disabled=not ready,
+        key=f"apply_config_{project_id}",
+    ):
+        with st.spinner("Setting up your project..."):
+            result = apply_project_config(project_id, bundle, local_paths)
+        st.session_state[result_key] = result
+        st.rerun()
+
+
+def render_project_config_wizard(
+    project_id: str, project_name: str, on_complete: Callable[[], None]
+) -> None:
+    """Render the standalone "set up project from a configuration file" dialog.
+
+    Used by "Update from configuration" on an existing project, which has no
+    bundle yet: asks for the file itself, then hands off to
+    `render_config_resolution_and_apply`. The New Project dialog already has
+    its own uploader and calls that function directly instead, since a
+    dialog can't open another dialog from within itself.
 
     Parameters
     ----------
@@ -524,10 +589,6 @@ def render_project_config_wizard(
         Display name, used in the dialog heading only.
     on_complete : callable
         Called after the user dismisses a completed apply, to navigate away.
-    initial_bundle : ProjectConfigBundle, optional
-        A bundle already uploaded and parsed by the caller (e.g. the New
-        Project dialog's own file uploader). When given, this dialog skips
-        straight to resolution/apply instead of asking for the file again.
     """
     import streamlit as st
 
@@ -536,16 +597,7 @@ def render_project_config_wizard(
         st.caption(f"Applying to **{project_name}**")
 
         result_key = f"cfg_result_{project_id}"
-        if result_key in st.session_state:
-            _render_config_apply_result(st.session_state[result_key])
-            if st.button("Continue", type="primary", width="stretch"):
-                del st.session_state[result_key]
-                on_complete()
-            return
-
-        if initial_bundle is not None:
-            bundle = initial_bundle
-        else:
+        if result_key not in st.session_state:
             uploaded = st.file_uploader(
                 "Configuration file", type=["json"], key="cfg_upload"
             )
@@ -560,37 +612,9 @@ def render_project_config_wizard(
             except (json.JSONDecodeError, ValidationError) as e:
                 st.error(f"This doesn't look like a valid configuration file: {e}")
                 return
+        else:
+            bundle = None  # unused: the stored apply result takes over instead
 
-        st.caption(f"Exported from **{bundle.exported_from_project}**")
-        _render_config_summary(bundle)
-        st.divider()
-
-        local_paths = _render_config_resolution(project_id, bundle)
-
-        servers_needed = missing_credentials(project_id, bundle)
-        files_needed = [
-            ds.alias
-            for ds in missing_local_files(bundle)
-            if ds.alias not in local_paths
-        ]
-        ready = not servers_needed and not files_needed
-
-        if not ready:
-            st.caption(
-                f"Resolve the items above before continuing "
-                f"({len(servers_needed)} credential(s), "
-                f"{len(files_needed)} file(s) remaining)."
-            )
-
-        if st.button(
-            "Import, Prep & Configure",
-            type="primary",
-            width="stretch",
-            disabled=not ready,
-        ):
-            with st.spinner("Setting up your project..."):
-                result = apply_project_config(project_id, bundle, local_paths)
-            st.session_state[result_key] = result
-            st.rerun()
+        render_config_resolution_and_apply(project_id, bundle, on_complete)
 
     _dialog()

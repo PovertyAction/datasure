@@ -22,6 +22,7 @@ from datasure.utils.onboarding_utils import (
 from datasure.utils.project_config import (
     export_project_config,
     parse_project_config,
+    render_config_resolution_and_apply,
     render_project_config_wizard,
 )
 from datasure.utils.ui_utils import confirm_dialog
@@ -277,7 +278,7 @@ def _render_new_project_mode_switch() -> str:
     blank_col, config_col = st.columns(2)
     with blank_col:
         if st.button(
-            ":material/add: Start from scratch",
+            ":material/lightbulb: Start from scratch",
             type="primary" if mode == "blank" else "secondary",
             width="stretch",
         ):
@@ -324,7 +325,21 @@ def _render_new_project_form() -> None:
     Split out from `_new_project_dialog` so the form logic stays testable as
     a plain function - `@st.dialog`-wrapped functions can't be exercised
     directly under this test suite's mocked streamlit module.
+
+    Once a project has been created from a configuration file, this skips
+    straight to resolving/applying it on every later rerun (tracked via
+    `st.session_state["new_project_created_id"]`) instead of showing the
+    name/mode form again - a dialog can't open a second dialog for that
+    step, so it has to render inline in this same one.
     """
+    created_id = st.session_state.get("new_project_created_id")
+    if created_id:
+        bundle = st.session_state.get("new_project_bundle")
+        render_config_resolution_and_apply(
+            created_id, bundle, on_complete=lambda: _activate_project(created_id)
+        )
+        return
+
     project_name = st.text_input("Project name", placeholder="My New Project")
     mode = _render_new_project_mode_switch()
 
@@ -344,29 +359,20 @@ def _render_new_project_form() -> None:
             project_id = _check_new_project_name(project_name)
             if project_id:
                 save_project(project_name, project_id)
-                render_project_config_wizard(
-                    project_id,
-                    project_name,
-                    on_complete=lambda: _activate_project(project_id),
-                    initial_bundle=bundle,
-                )
+                st.session_state.new_project_created_id = project_id
+                st.session_state.new_project_bundle = bundle
+                st.rerun()
         return
 
     if st.button(
         ":material/rocket_launch: Create Project",
         type="primary",
         disabled=not project_name,
+        width="stretch",
     ):
         project_id = _check_new_project_name(project_name)
         if project_id:
-            confirm_dialog(
-                "Create new project",
-                f"Create **{project_name}** and load it now? You'll be taken "
-                "straight to the Import Data page.",
-                confirm_label="Create & Load New Project",
-                danger=False,
-                on_confirm=lambda: _create_and_load_project(project_name, project_id),
-            )
+            _create_and_load_project(project_name, project_id)
 
 
 @st.dialog(title="New Project", width="small")
@@ -488,6 +494,8 @@ def _render_project_toolbar() -> tuple[str, str]:
     with new_col:
         if st.button(":material/add: New Project", type="primary", width="stretch"):
             st.session_state.new_project_mode = "blank"
+            st.session_state.pop("new_project_created_id", None)
+            st.session_state.pop("new_project_bundle", None)
             _new_project_dialog()
     return search, sort_by
 
