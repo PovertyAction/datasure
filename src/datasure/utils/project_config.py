@@ -567,7 +567,10 @@ def render_config_resolution_and_apply(
         with st.spinner("Setting up your project..."):
             result = apply_project_config(project_id, bundle, local_paths)
         st.session_state[result_key] = result
-        st.rerun()
+        # scope="fragment": a dialog is implemented as a fragment, and a
+        # plain (app-scoped) rerun exits that fragment, closing the dialog
+        # instead of just refreshing its content to show the result.
+        st.rerun(scope="fragment")
 
 
 def render_project_config_wizard(

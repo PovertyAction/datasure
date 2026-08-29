@@ -361,7 +361,10 @@ def _render_new_project_form() -> None:
                 save_project(project_name, project_id)
                 st.session_state.new_project_created_id = project_id
                 st.session_state.new_project_bundle = bundle
-                st.rerun()
+                # scope="fragment": a dialog is implemented as a fragment,
+                # and a plain (app-scoped) rerun exits that fragment,
+                # closing the dialog instead of just refreshing its content.
+                st.rerun(scope="fragment")
         return
 
     if st.button(
