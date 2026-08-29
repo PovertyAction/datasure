@@ -334,7 +334,14 @@ def _render_project_row(project_id: str, info: dict, projects: dict) -> None:
             ):
                 save_project(name, project_id)
                 _activate_project(project_id)
-        with menu_col, st.popover(":material/more_vert: More", width="stretch"):
+        with (
+            menu_col,
+            st.popover(
+                ":material/more_vert: More",
+                width="stretch",
+                key=f"project_menu_{project_id}",
+            ),
+        ):
             _show_export_config_option(name, project_id)
             _show_update_from_config_option(name, project_id)
             _show_delete_project_option(name, project_id, projects)
@@ -353,12 +360,17 @@ def _show_export_config_option(project: str, project_id: str) -> None:
         file_name=file_name,
         mime="application/json",
         width="stretch",
+        key=f"export_config_{project_id}",
     )
 
 
 def _show_update_from_config_option(project: str, project_id: str) -> None:
     """Show the option to update an existing project from a configuration file."""
-    if st.button(":material/upload_file: Update from configuration", width="stretch"):
+    if st.button(
+        ":material/upload_file: Update from configuration",
+        width="stretch",
+        key=f"update_config_{project_id}",
+    ):
         render_project_config_wizard(
             project_id, project, on_complete=lambda: _activate_project(project_id)
         )
@@ -373,7 +385,11 @@ def _delete_project_and_reset(project_id: str):
 
 def _show_delete_project_option(project: str, project_id: str, projects: dict):
     """Show delete project option for non-demo projects."""
-    if st.button(":material/delete: Delete project", width="stretch"):
+    if st.button(
+        ":material/delete: Delete project",
+        width="stretch",
+        key=f"delete_project_{project_id}",
+    ):
         confirm_dialog(
             "Delete project",
             f"This permanently deletes **{project}** and all its data, corrections, "

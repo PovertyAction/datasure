@@ -429,6 +429,8 @@ class TestRenderProjectRow:
         project_id = start_view.get_project_id("My Project")
         start_view.save_project("My Project", project_id)
         monkeypatch.setattr(_st, "button", MagicMock(return_value=True))
+        mock_popover = MagicMock()
+        monkeypatch.setattr(_st, "popover", mock_popover)
 
         with (
             patch("datasure.views.start_view._project_stats", return_value=(0, 0)),
@@ -442,6 +444,9 @@ class TestRenderProjectRow:
             )
 
         mock_activate.assert_called_once_with(project_id)
+        # Regression: the popover needs a project-specific key, or rendering
+        # more than one project's row raises StreamlitDuplicateElementId.
+        assert mock_popover.call_args.kwargs["key"] == f"project_menu_{project_id}"
 
     def test_no_click_does_not_activate(self, monkeypatch):
         monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
@@ -487,13 +492,17 @@ class TestShowDeleteProjectOption:
     """Test _show_delete_project_option."""
 
     def test_click_opens_confirm_dialog(self, monkeypatch):
-        monkeypatch.setattr(_st, "button", MagicMock(return_value=True))
+        mock_button = MagicMock(return_value=True)
+        monkeypatch.setattr(_st, "button", mock_button)
 
         with patch("datasure.views.start_view.confirm_dialog") as mock_confirm:
             start_view._show_delete_project_option("My Project", "abcd1234", {})
 
         mock_confirm.assert_called_once()
         assert mock_confirm.call_args.kwargs["confirm_label"] == "Delete project"
+        # Regression: the button needs a project-specific key, or rendering
+        # more than one project's row raises StreamlitDuplicateElementId.
+        assert mock_button.call_args.kwargs["key"] == "delete_project_abcd1234"
 
     def test_no_click_does_nothing(self, monkeypatch):
         monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
@@ -525,13 +534,17 @@ class TestShowExportConfigOption:
             mock_download.call_args.kwargs["data"] == '{"datasure_config_version": 1}'
         )
         assert mock_download.call_args.kwargs["file_name"].startswith("my_project_")
+        # Regression: the button needs a project-specific key, or rendering
+        # more than one project's row raises StreamlitDuplicateElementId.
+        assert mock_download.call_args.kwargs["key"] == "export_config_abcd1234"
 
 
 class TestShowUpdateFromConfigOption:
     """Test _show_update_from_config_option."""
 
     def test_click_opens_config_wizard(self, monkeypatch):
-        monkeypatch.setattr(_st, "button", MagicMock(return_value=True))
+        mock_button = MagicMock(return_value=True)
+        monkeypatch.setattr(_st, "button", mock_button)
 
         with patch(
             "datasure.views.start_view.render_project_config_wizard"
@@ -540,6 +553,9 @@ class TestShowUpdateFromConfigOption:
 
         mock_wizard.assert_called_once()
         assert mock_wizard.call_args.args[:2] == ("abcd1234", "My Project")
+        # Regression: the button needs a project-specific key, or rendering
+        # more than one project's row raises StreamlitDuplicateElementId.
+        assert mock_button.call_args.kwargs["key"] == "update_config_abcd1234"
 
     def test_no_click_does_nothing(self, monkeypatch):
         monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
