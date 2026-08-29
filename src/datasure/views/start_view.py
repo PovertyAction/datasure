@@ -6,7 +6,9 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import streamlit as st
+from pydantic import ValidationError
 
+from datasure.models.schemas import ProjectConfigBundle
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
 from datasure.utils.duckdb_utils import duckdb_get_aliases
@@ -19,6 +21,7 @@ from datasure.utils.onboarding_utils import (
 )
 from datasure.utils.project_config import (
     export_project_config,
+    parse_project_config,
     render_project_config_wizard,
 )
 from datasure.utils.ui_utils import confirm_dialog
@@ -274,7 +277,7 @@ def _render_new_project_mode_switch() -> str:
     blank_col, config_col = st.columns(2)
     with blank_col:
         if st.button(
-            "Start from scratch",
+            ":material/add: Start from scratch",
             type="primary" if mode == "blank" else "secondary",
             width="stretch",
         ):
@@ -292,6 +295,29 @@ def _render_new_project_mode_switch() -> str:
     return mode
 
 
+def _render_new_project_config_upload() -> ProjectConfigBundle | None:
+    """Render the configuration file uploader and parse the result.
+
+    Returns
+    -------
+        The parsed bundle once a valid file is uploaded, else None.
+    """
+    uploaded = st.file_uploader(
+        "Configuration file", type=["json"], key="new_project_cfg_upload"
+    )
+    if uploaded is None:
+        return None
+
+    try:
+        bundle = parse_project_config(uploaded.getvalue())
+    except (json.JSONDecodeError, ValidationError) as e:
+        st.error(f"This doesn't look like a valid configuration file: {e}")
+        return None
+
+    st.caption(f"Exported from **{bundle.exported_from_project}**")
+    return bundle
+
+
 def _render_new_project_form() -> None:
     """Render the new-project name + start-mode form.
 
@@ -307,11 +333,13 @@ def _render_new_project_form() -> None:
             "We'll create the project, then walk through matching it to a "
             "configuration file exported from another DataSure project."
         )
+        bundle = _render_new_project_config_upload()
+
         if st.button(
-            "Create Project & Continue",
+            ":material/rocket_launch: Create Project & Continue",
             type="primary",
             width="stretch",
-            disabled=not project_name,
+            disabled=not project_name or bundle is None,
         ):
             project_id = _check_new_project_name(project_name)
             if project_id:
@@ -320,10 +348,15 @@ def _render_new_project_form() -> None:
                     project_id,
                     project_name,
                     on_complete=lambda: _activate_project(project_id),
+                    initial_bundle=bundle,
                 )
         return
 
-    if st.button("Create Project", type="primary", disabled=not project_name):
+    if st.button(
+        ":material/rocket_launch: Create Project",
+        type="primary",
+        disabled=not project_name,
+    ):
         project_id = _check_new_project_name(project_name)
         if project_id:
             confirm_dialog(
@@ -336,7 +369,7 @@ def _render_new_project_form() -> None:
             )
 
 
-@st.dialog(title="New Project", width="large")
+@st.dialog(title="New Project", width="small")
 def _new_project_dialog() -> None:
     """Open the new-project creation dialog."""
     _render_new_project_form()

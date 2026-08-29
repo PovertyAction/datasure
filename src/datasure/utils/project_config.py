@@ -505,7 +505,10 @@ def _render_config_apply_result(result: ConfigApplyResult) -> None:
 
 
 def render_project_config_wizard(
-    project_id: str, project_name: str, on_complete: Callable[[], None]
+    project_id: str,
+    project_name: str,
+    on_complete: Callable[[], None],
+    initial_bundle: ProjectConfigBundle | None = None,
 ) -> None:
     """Render the "set up project from a configuration file" dialog.
 
@@ -521,6 +524,10 @@ def render_project_config_wizard(
         Display name, used in the dialog heading only.
     on_complete : callable
         Called after the user dismisses a completed apply, to navigate away.
+    initial_bundle : ProjectConfigBundle, optional
+        A bundle already uploaded and parsed by the caller (e.g. the New
+        Project dialog's own file uploader). When given, this dialog skips
+        straight to resolution/apply instead of asking for the file again.
     """
     import streamlit as st
 
@@ -536,20 +543,23 @@ def render_project_config_wizard(
                 on_complete()
             return
 
-        uploaded = st.file_uploader(
-            "Configuration file", type=["json"], key="cfg_upload"
-        )
-        if not uploaded:
-            st.info(
-                "Upload a DataSure configuration file exported from another project."
+        if initial_bundle is not None:
+            bundle = initial_bundle
+        else:
+            uploaded = st.file_uploader(
+                "Configuration file", type=["json"], key="cfg_upload"
             )
-            return
+            if not uploaded:
+                st.info(
+                    "Upload a DataSure configuration file exported from another project."
+                )
+                return
 
-        try:
-            bundle = parse_project_config(uploaded.getvalue())
-        except (json.JSONDecodeError, ValidationError) as e:
-            st.error(f"This doesn't look like a valid configuration file: {e}")
-            return
+            try:
+                bundle = parse_project_config(uploaded.getvalue())
+            except (json.JSONDecodeError, ValidationError) as e:
+                st.error(f"This doesn't look like a valid configuration file: {e}")
+                return
 
         st.caption(f"Exported from **{bundle.exported_from_project}**")
         _render_config_summary(bundle)

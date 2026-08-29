@@ -367,7 +367,7 @@ class TestRenderNewProjectModeSwitch:
             _st,
             "button",
             MagicMock(
-                side_effect=lambda label=None, *a, **k: label == "Start from scratch"
+                side_effect=lambda label=None, *a, **k: "Start from scratch" in label
             ),
         )
 
@@ -387,11 +387,11 @@ class TestRenderNewProjectForm:
     """Test _render_new_project_form."""
 
     def _mock_button_for_label(self, monkeypatch, wanted_label):
-        """Only the button whose label matches `wanted_label` reports a click."""
+        """Only the button whose label contains `wanted_label` reports a click."""
         monkeypatch.setattr(
             _st,
             "button",
-            MagicMock(side_effect=lambda label=None, *a, **k: label == wanted_label),
+            MagicMock(side_effect=lambda label=None, *a, **k: wanted_label in label),
         )
 
     def test_asks_for_confirmation_before_creating(self, monkeypatch):
@@ -452,12 +452,22 @@ class TestRenderNewProjectForm:
 
         mock_confirm.assert_not_called()
 
+    def _mock_uploaded_config_file(self, content: str) -> MagicMock:
+        """Build a fake `st.file_uploader` return value with the given content."""
+        mock_file = MagicMock()
+        mock_file.getvalue.return_value = content
+        return mock_file
+
     def test_from_configuration_file_creates_project_and_opens_wizard(
         self, tmp_path, monkeypatch
     ):
         _st.session_state["new_project_mode"] = "config"
         monkeypatch.setattr(_st, "text_input", MagicMock(return_value="My New Project"))
         self._mock_button_for_label(monkeypatch, "Create Project & Continue")
+        uploaded = self._mock_uploaded_config_file(
+            json.dumps({"exported_from_project": "Other Project", "exported_at": "t"})
+        )
+        monkeypatch.setattr(_st, "file_uploader", MagicMock(return_value=uploaded))
 
         with patch(
             "datasure.views.start_view.render_project_config_wizard"
@@ -468,6 +478,44 @@ class TestRenderNewProjectForm:
         assert project_id in start_view.load_projects()
         mock_wizard.assert_called_once()
         assert mock_wizard.call_args.args[:2] == (project_id, "My New Project")
+        bundle = mock_wizard.call_args.kwargs["initial_bundle"]
+        assert bundle.exported_from_project == "Other Project"
+
+    def test_from_configuration_file_button_disabled_without_upload(self, monkeypatch):
+        _st.session_state["new_project_mode"] = "config"
+        monkeypatch.setattr(_st, "text_input", MagicMock(return_value="My New Project"))
+        monkeypatch.setattr(_st, "file_uploader", MagicMock(return_value=None))
+        mock_button = MagicMock(return_value=False)
+        monkeypatch.setattr(_st, "button", mock_button)
+
+        with patch(
+            "datasure.views.start_view.render_project_config_wizard"
+        ) as mock_wizard:
+            start_view._render_new_project_form()
+
+        mock_wizard.assert_not_called()
+        submit_call = next(
+            call
+            for call in mock_button.call_args_list
+            if "Create Project & Continue" in call.args[0]
+        )
+        assert submit_call.kwargs["disabled"] is True
+
+    def test_from_configuration_file_invalid_upload_shows_error(self, monkeypatch):
+        _st.session_state["new_project_mode"] = "config"
+        monkeypatch.setattr(_st, "text_input", MagicMock(return_value="My New Project"))
+        uploaded = self._mock_uploaded_config_file("not json")
+        monkeypatch.setattr(_st, "file_uploader", MagicMock(return_value=uploaded))
+        mock_error = MagicMock()
+        monkeypatch.setattr(_st, "error", mock_error)
+
+        with patch(
+            "datasure.views.start_view.render_project_config_wizard"
+        ) as mock_wizard:
+            start_view._render_new_project_form()
+
+        mock_error.assert_called_once()
+        mock_wizard.assert_not_called()
 
 
 class TestRenderProjectRow:
