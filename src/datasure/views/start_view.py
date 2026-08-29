@@ -16,6 +16,10 @@ from datasure.utils.onboarding_utils import (
     set_onboarding_step,
     show_demo_intro,
 )
+from datasure.utils.project_template import (
+    export_project_template,
+    render_project_template_wizard,
+)
 from datasure.utils.ui_utils import confirm_dialog
 
 PROJECTS_FILE: str = "projects.json"
@@ -204,27 +208,69 @@ def _create_and_load_project(project_name: str, project_id: str):
     _activate_project(project_id)
 
 
+def _check_new_project_name(project_name: str) -> str | None:
+    """Validate a new project name and its uniqueness.
+
+    Returns
+    -------
+        The project ID if the name is valid and unique, or None (after
+        showing an error) otherwise.
+    """
+    if not valid_project_name(project_name):
+        return None
+    project_id = get_project_id(project_name)
+    existing_projects = load_projects()
+    if existing_projects and project_id in existing_projects:
+        st.error(
+            f"Project '{project_name}' already exists. Please choose a different name."
+        )
+        st.stop()
+    return project_id
+
+
 def _handle_create_new_project():
     """Handle new project creation workflow."""
     project_name = st.text_input("Enter Project Name", placeholder="My New Project")
-    if st.button(
-        "Create Project", type="primary", disabled=not project_name
-    ) and valid_project_name(project_name):
-        project_id = get_project_id(project_name)
-        existing_projects = load_projects()
-        if existing_projects and project_id in existing_projects:
-            st.error(
-                f"Project '{project_name}' already exists. Please choose a different name."
-            )
-            st.stop()
-        confirm_dialog(
-            "Create new project",
-            f"Create **{project_name}** and load it now? You'll be taken "
-            "straight to the Import Data page.",
-            confirm_label="Create & Load New Project",
-            danger=False,
-            on_confirm=lambda: _create_and_load_project(project_name, project_id),
+
+    start_mode = st.radio(
+        "How do you want to start?",
+        options=["Start blank", "Start from a template"],
+        horizontal=True,
+        key="new_project_start_mode",
+    )
+
+    if start_mode == "Start from a template":
+        st.caption(
+            "We'll create the project, then walk through matching it to a "
+            "configuration file exported from another DataSure project."
         )
+        if st.button(
+            "Create Project & Continue",
+            type="primary",
+            width="stretch",
+            disabled=not project_name,
+        ):
+            project_id = _check_new_project_name(project_name)
+            if project_id:
+                save_project(project_name, project_id)
+                render_project_template_wizard(
+                    project_id,
+                    project_name,
+                    on_complete=lambda: _activate_project(project_id),
+                )
+        return
+
+    if st.button("Create Project", type="primary", disabled=not project_name):
+        project_id = _check_new_project_name(project_name)
+        if project_id:
+            confirm_dialog(
+                "Create new project",
+                f"Create **{project_name}** and load it now? You'll be taken "
+                "straight to the Import Data page.",
+                confirm_label="Create & Load New Project",
+                danger=False,
+                on_confirm=lambda: _create_and_load_project(project_name, project_id),
+            )
 
 
 def _handle_existing_project_selection(project: str):
@@ -243,9 +289,35 @@ def _handle_existing_project_selection(project: str):
         save_project(project, project_id)
         _activate_project(project_id)
 
-    # Only show delete option for non-demo projects
+    # Only show template/delete options for non-demo projects
     if project_id != DEMO_PROJECT_ID:
+        _show_export_template_option(project, project_id)
+        _show_update_from_template_option(project, project_id)
         _show_delete_project_option(project, project_id, projects)
+
+
+def _show_export_template_option(project: str, project_id: str) -> None:
+    """Show the option to export this project's configuration as a template file."""
+    bundle = export_project_template(project_id, project)
+    export_date = datetime.now().strftime("%Y%m%d")
+    file_name = (
+        f"{project.lower().replace(' ', '_')}_datasure_template_{export_date}.json"
+    )
+    st.download_button(
+        ":material/download: Export configuration",
+        data=bundle.model_dump_json(indent=2),
+        file_name=file_name,
+        mime="application/json",
+        width="stretch",
+    )
+
+
+def _show_update_from_template_option(project: str, project_id: str) -> None:
+    """Show the option to update an existing project from a template file."""
+    if st.button(":material/upload_file: Update from template", width="stretch"):
+        render_project_template_wizard(
+            project_id, project, on_complete=lambda: _activate_project(project_id)
+        )
 
 
 def _delete_project_and_reset(project_id: str):

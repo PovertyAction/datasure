@@ -412,6 +412,8 @@ class TestHandleExistingProjectSelection:
         with (
             patch("datasure.views.start_view._activate_project") as mock_activate,
             patch("datasure.views.start_view._show_delete_project_option"),
+            patch("datasure.views.start_view._show_update_from_template_option"),
+            patch("datasure.views.start_view._show_export_template_option"),
         ):
             start_view._handle_existing_project_selection("My Project")
 
@@ -422,7 +424,10 @@ class TestHandleExistingProjectSelection:
         start_view.save_project("My Project", project_id)
         monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
 
-        with patch("datasure.views.start_view._activate_project") as mock_activate:
+        with (
+            patch("datasure.views.start_view._activate_project") as mock_activate,
+            patch("datasure.views.start_view._show_export_template_option"),
+        ):
             start_view._handle_existing_project_selection("My Project")
 
         mock_activate.assert_not_called()
@@ -447,9 +452,12 @@ class TestHandleExistingProjectSelection:
         start_view.save_project("My Project", start_view.get_project_id("My Project"))
         monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
 
-        with patch(
-            "datasure.views.start_view._show_delete_project_option"
-        ) as mock_show_delete:
+        with (
+            patch(
+                "datasure.views.start_view._show_delete_project_option"
+            ) as mock_show_delete,
+            patch("datasure.views.start_view._show_export_template_option"),
+        ):
             start_view._handle_existing_project_selection("My Project")
 
         mock_show_delete.assert_called_once()
@@ -474,6 +482,54 @@ class TestShowDeleteProjectOption:
             start_view._show_delete_project_option("My Project", "abcd1234", {})
 
         mock_confirm.assert_not_called()
+
+
+class TestShowExportTemplateOption:
+    """Test _show_export_template_option."""
+
+    def test_renders_download_button_with_bundle(self, monkeypatch):
+        mock_bundle = MagicMock()
+        mock_bundle.model_dump_json.return_value = '{"datasure_template_version": 1}'
+        mock_download = MagicMock()
+        monkeypatch.setattr(_st, "download_button", mock_download)
+
+        with patch(
+            "datasure.views.start_view.export_project_template",
+            return_value=mock_bundle,
+        ) as mock_export:
+            start_view._show_export_template_option("My Project", "abcd1234")
+
+        mock_export.assert_called_once_with("abcd1234", "My Project")
+        mock_download.assert_called_once()
+        assert (
+            mock_download.call_args.kwargs["data"] == '{"datasure_template_version": 1}'
+        )
+        assert mock_download.call_args.kwargs["file_name"].startswith("my_project_")
+
+
+class TestShowUpdateFromTemplateOption:
+    """Test _show_update_from_template_option."""
+
+    def test_click_opens_template_wizard(self, monkeypatch):
+        monkeypatch.setattr(_st, "button", MagicMock(return_value=True))
+
+        with patch(
+            "datasure.views.start_view.render_project_template_wizard"
+        ) as mock_wizard:
+            start_view._show_update_from_template_option("My Project", "abcd1234")
+
+        mock_wizard.assert_called_once()
+        assert mock_wizard.call_args.args[:2] == ("abcd1234", "My Project")
+
+    def test_no_click_does_nothing(self, monkeypatch):
+        monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
+
+        with patch(
+            "datasure.views.start_view.render_project_template_wizard"
+        ) as mock_wizard:
+            start_view._show_update_from_template_option("My Project", "abcd1234")
+
+        mock_wizard.assert_not_called()
 
 
 class TestLaunchFreshDemo:
