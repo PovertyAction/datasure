@@ -18,6 +18,8 @@ class PrepActionResult:
     column_names: str | list[str] | None = None
     affected_count: int | None = None
     remaining_count: int | None = None
+    remaining_rows: int | None = None
+    remaining_columns: int | None = None
     value: str | list | None = None
     method: str | None = None
     source_columns: str | list[str] | None = None
@@ -215,6 +217,79 @@ class PrepConfirmationMessages:
             plural = f"{singular}s"
         return singular if count == 1 else plural
 
+    @classmethod
+    def _format_remaining(
+        cls, remaining_rows: int | None, remaining_columns: int | None
+    ) -> str:
+        """Build the standard 'dataset now has N rows and M columns' clause."""
+        parts = []
+        if remaining_rows is not None:
+            parts.append(f"{remaining_rows} {cls._pluralize(remaining_rows, 'row')}")
+        if remaining_columns is not None:
+            parts.append(
+                f"{remaining_columns} {cls._pluralize(remaining_columns, 'column')}"
+            )
+        if not parts:
+            return ""
+        return f"Dataset now has {' and '.join(parts)}."
+
+    @classmethod
+    def _with_remaining(cls, message: str, result: PrepActionResult) -> str:
+        """Append the standard remaining rows/columns clause to a message."""
+        remaining = cls._format_remaining(
+            result.remaining_rows, result.remaining_columns
+        )
+        return f"{message} {remaining}".rstrip() if remaining else message
+
+    @staticmethod
+    def _quote_scalar(value: object) -> str:
+        """Quote string values for display; leave other types as-is."""
+        return f'"{value}"' if isinstance(value, str) else str(value)
+
+    @classmethod
+    def _format_row_condition_detail(
+        cls,
+        source_columns: str | list[str] | None,
+        condition: str | None,
+        value: object,
+    ) -> str:
+        """Build a human-readable 'where <column> <condition> <value>' clause."""
+        column_display = cls._format_column_names(source_columns)
+        if not condition:
+            return "matching the specified criteria"
+
+        if condition in (
+            PrepRowConditions.missing.value,
+            PrepRowConditions.not_missing.value,
+        ):
+            value_text = ""
+        elif condition in (
+            PrepRowConditions.between.value,
+            PrepRowConditions.not_between.value,
+        ):
+            values = value if isinstance(value, list) else [value, value]
+            value_text = (
+                f" {cls._quote_scalar(values[0])} and {cls._quote_scalar(values[1])}"
+            )
+        elif isinstance(value, list):
+            value_text = " " + ", ".join(cls._quote_scalar(v) for v in value)
+        elif value is not None:
+            value_text = f" {cls._quote_scalar(value)}"
+        else:
+            value_text = ""
+
+        if column_display:
+            return f"where {column_display} {condition}{value_text}"
+        return f"where {condition}{value_text}"
+
+    @staticmethod
+    def _format_row_index_detail(value: object) -> str:
+        """Build a human-readable clause describing removed row indexes."""
+        if not value:
+            return "at the specified row index"
+        items = value if isinstance(value, list) else [value]
+        return f"at row index {', '.join(str(v) for v in items)}"
+
     # Main Actions
     @classmethod
     def transform_columns(cls, result: PrepActionResult) -> str:
@@ -223,10 +298,11 @@ class PrepConfirmationMessages:
         row_text = cls._pluralize(result.affected_count, "row")
         method = result.method or "unknown method"
         affected_count = result.affected_count or 0
-        return (
+        message = (
             f"✓ Column transformation applied. {column_display} updated using "
             f"{method}. {affected_count} {row_text} affected."
         )
+        return cls._with_remaining(message, result)
 
     @classmethod
     def add_new_column(cls, result: PrepActionResult) -> str:
@@ -236,12 +312,11 @@ class PrepConfirmationMessages:
             if result.source_columns
             else "specified parameters"
         )
-        column_text = cls._pluralize(result.remaining_count, "column")
-        return (
+        message = (
             f"✓ New column {cls._format_column_names(result.column_names)} added. "
-            f"Created using {result.method} from {source_display}. "
-            f"Your dataset now has {result.remaining_count} {column_text}."
+            f"Created using {result.method} from {source_display}."
         )
+        return cls._with_remaining(message, result)
 
     @classmethod
     def remove_columns(cls, result: PrepActionResult) -> str:
@@ -258,26 +333,27 @@ class PrepConfirmationMessages:
             else (len(removed_columns) if isinstance(removed_columns, list) else 1)
         )
         column_text = cls._pluralize(column_count, "column")
-        remaining_text = cls._pluralize(result.remaining_count, "column")
         column_display = cls._format_column_names(removed_columns)
         message = (
             f"✓ {column_count} {column_text} removed. {column_display} deleted from "
-            f"your dataset. {result.remaining_count} {remaining_text} remaining."
+            "your dataset."
         )
         if result.failed_count:
             message = f"{message} {result.additional_info}"
-        return message
+        return cls._with_remaining(message, result)
 
     @classmethod
     def remove_rows(cls, result: PrepActionResult) -> str:
         """Generate message for removing rows."""
         row_text = cls._pluralize(result.affected_count, "row")
-        remaining_text = cls._pluralize(result.remaining_count, "row")
-        method_text = result.method if result.method else "specified criteria"
-        return (
-            f"✓ {result.affected_count} {row_text} removed. Deleted rows {method_text}. "
-            f"{result.remaining_count} {remaining_text} remaining in your dataset."
-        )
+        if result.method == PrepMethods.row_index.value:
+            detail = cls._format_row_index_detail(result.value)
+        else:
+            detail = cls._format_row_condition_detail(
+                result.source_columns, result.condition, result.value
+            )
+        message = f"✓ {result.affected_count} {row_text} removed {detail}."
+        return cls._with_remaining(message, result)
 
     # Add Column Methods
     @classmethod
