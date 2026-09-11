@@ -51,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CI**: Bumped `actions/checkout` to 7.0.1, `actions/setup-python` to
   7.0.0, `astral-sh/setup-uv` to 8.3.2, and `SonarSource/sonarqube-scan-action`
   to 8.2.0 — #255, #257, #243, #236, #235
+- **CI**: Bumped `astral-sh/setup-uv` to 10.0.1 (from 8.3.2) — #280
 - **Duplicates check**: Clarified filter settings copy on the duplicates
   check page (`src/datasure/checks/duplicates.py`) — #273
 - **Project picker**: Replaced the Start page's single dropdown (which
@@ -59,6 +60,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project with an "Open" button and a "More" menu for the less-frequent
   export/update/delete actions, plus a dedicated "+ New Project" dialog
   (`src/datasure/views/start_view.py`)
+- **Prep confirmation messages**: Row/column-removal, transform, and
+  add-column confirmation messages now consistently end with "Dataset now
+  has N rows and M columns" via new `PrepActionResult.remaining_rows`/
+  `remaining_columns` fields, and remove-rows messages state the actual
+  column, condition, and value instead of just the method label
+  (`src/datasure/utils/prep_utils.py`, `src/datasure/processing/prep.py`)
+  — #283
 
 ### Fixed
 
@@ -79,6 +87,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   invalidates stale prepared and corrected data instead of leaving outdated
   results visible (`src/datasure/processing/corrections.py`,
   `src/datasure/views/import_view.py`) — #254, closes #252
+- **Release tooling**: Fixed the Windows `just` recipes for `tag-version`,
+  `push-tag`, `push-all`, and `bump-and-tag` reporting a tag already existed
+  for tags that were never created — PowerShell's `if()` was evaluating
+  `git rev-parse`'s leftover stdout instead of its exit code (`justfile`)
+  — #279
+- **CLI**: `uv run datasure` now opens the default browser automatically on
+  launch, matching `just datasure-dev` — a leftover `--server.headless true`
+  flag (from an old PyInstaller-packaged build) was silently overriding
+  `headless = false` already set in `src/datasure/.streamlit/config.toml`
+  (`src/datasure/cli.py`) — #284
 
 ---
 

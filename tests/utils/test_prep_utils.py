@@ -404,6 +404,8 @@ class TestPrepConfirmationMessages:
             source_columns=["column1"],
             affected_count=100,
             method="trim",
+            remaining_rows=500,
+            remaining_columns=12,
         )
 
         message = PrepConfirmationMessages.transform_columns(result)
@@ -412,6 +414,7 @@ class TestPrepConfirmationMessages:
         assert '"column1"' in message
         assert "trim" in message
         assert "100 rows affected" in message
+        assert "500 rows and 12 columns" in message
 
     def test_transform_columns_message_no_method(self):
         """Test transform_columns message with no method."""
@@ -432,7 +435,8 @@ class TestPrepConfirmationMessages:
         result = PrepActionResult(
             action="add new column",
             column_names="new_col",
-            remaining_count=10,
+            remaining_rows=200,
+            remaining_columns=10,
             method="constant",
             source_columns=["source_col"],
         )
@@ -442,14 +446,15 @@ class TestPrepConfirmationMessages:
         assert "✓ New column" in message
         assert '"new_col"' in message
         assert "constant" in message
-        assert "10 columns" in message
+        assert "200 rows and 10 columns" in message
 
     def test_add_new_column_message_no_source(self):
         """Test add_new_column message with no source columns."""
         result = PrepActionResult(
             action="add new column",
             column_names="new_col",
-            remaining_count=5,
+            remaining_rows=5,
+            remaining_columns=5,
             method="index",
             source_columns=None,
         )
@@ -463,25 +468,29 @@ class TestPrepConfirmationMessages:
         result = PrepActionResult(
             action="remove column(s)",
             source_columns=["col1", "col2"],
-            remaining_count=8,
+            remaining_rows=50,
+            remaining_columns=8,
         )
 
         message = PrepConfirmationMessages.remove_columns(result)
 
         assert "✓ 2 columns removed" in message
         assert '"col1", "col2"' in message
-        assert "8 columns remaining" in message
+        assert "50 rows and 8 columns" in message
 
     def test_remove_columns_message_single_column(self):
         """Test remove_columns message with single column."""
         result = PrepActionResult(
-            action="remove column(s)", source_columns="single_col", remaining_count=5
+            action="remove column(s)",
+            source_columns="single_col",
+            remaining_rows=50,
+            remaining_columns=5,
         )
 
         message = PrepConfirmationMessages.remove_columns(result)
 
         assert "✓ 1 column removed" in message
-        assert "5 columns remaining" in message
+        assert "50 rows and 5 columns" in message
 
     def test_remove_columns_message_partial_failure(self):
         """Test remove_columns message notes columns skipped as missing."""
@@ -489,7 +498,8 @@ class TestPrepConfirmationMessages:
             action="remove column(s)",
             source_columns=["col1", "col2"],
             affected_count=2,
-            remaining_count=8,
+            remaining_rows=50,
+            remaining_columns=8,
             failed_count=2,
             additional_info="Columns not found and skipped: ['col3', 'col4']",
         )
@@ -500,25 +510,67 @@ class TestPrepConfirmationMessages:
         assert '"col1", "col2"' in message
         assert "Columns not found and skipped: ['col3', 'col4']" in message
 
-    def test_remove_rows_message(self):
-        """Test remove_rows message generation."""
+    def test_remove_rows_message_by_condition(self):
+        """Test remove_rows message states the column, condition, and value."""
         result = PrepActionResult(
             action="remove row(s)",
             affected_count=25,
-            remaining_count=75,
+            remaining_rows=75,
+            remaining_columns=10,
             method="by condition",
+            source_columns=["age"],
+            condition="value is greater than",
+            value=65,
         )
 
         message = PrepConfirmationMessages.remove_rows(result)
 
         assert "✓ 25 rows removed" in message
-        assert "by condition" in message
-        assert "75 rows remaining" in message
+        assert '"age" value is greater than 65' in message
+        assert "75 rows and 10 columns" in message
 
-    def test_remove_rows_message_no_method(self):
-        """Test remove_rows message with no method."""
+    def test_remove_rows_message_by_condition_between(self):
+        """Test remove_rows message formats a between-condition value range."""
         result = PrepActionResult(
-            action="remove row(s)", affected_count=10, remaining_count=90, method=None
+            action="remove row(s)",
+            affected_count=5,
+            remaining_rows=95,
+            remaining_columns=10,
+            method="by condition",
+            source_columns=["age"],
+            condition="value is between",
+            value=[18, 65],
+        )
+
+        message = PrepConfirmationMessages.remove_rows(result)
+
+        assert '"age" value is between 18 and 65' in message
+
+    def test_remove_rows_message_by_index(self):
+        """Test remove_rows message for row-index removal states the indexes."""
+        result = PrepActionResult(
+            action="remove row(s)",
+            affected_count=3,
+            remaining_rows=97,
+            remaining_columns=10,
+            method="by row index",
+            value=["1", "5", "10"],
+        )
+
+        message = PrepConfirmationMessages.remove_rows(result)
+
+        assert "✓ 3 rows removed" in message
+        assert "at row index 1, 5, 10" in message
+        assert "97 rows and 10 columns" in message
+
+    def test_remove_rows_message_no_condition(self):
+        """Test remove_rows message with no condition falls back gracefully."""
+        result = PrepActionResult(
+            action="remove row(s)",
+            affected_count=10,
+            remaining_rows=90,
+            remaining_columns=10,
+            method=None,
         )
 
         message = PrepConfirmationMessages.remove_rows(result)

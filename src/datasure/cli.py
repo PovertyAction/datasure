@@ -88,8 +88,6 @@ def main():
         browser_address,
         "--browser.serverPort",
         str(args.port),
-        "--server.headless",
-        "true",
         "--browser.gatherUsageStats",
         "false",
         "--logger.level",
