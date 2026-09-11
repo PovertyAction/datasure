@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Project creation**: Newly created projects are now automatically loaded
   and selected after creation, instead of requiring a manual return to
   project selection (`src/datasure/views/start_view.py`) — #272
+- **Project configuration export/import**: A project's import sources, prep
+  steps, HFC configs, and corrections can now be bundled into one portable
+  JSON file and applied to a new or existing project, so a teammate (or a
+  similar project) can start from an existing setup instead of configuring
+  from scratch. Credentials, machine-specific file paths, and survey data
+  are never included; applying a bundle replays the same pipeline a person
+  would run by hand, skipping and reporting anything that can't apply
+  rather than aborting the whole bundle
+  (`src/datasure/models/schemas.py`, `src/datasure/utils/project_config.py`,
+  `src/datasure/views/start_view.py`) — closes #251
 
 ### Changed
 
@@ -44,6 +54,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CI**: Bumped `astral-sh/setup-uv` to 10.0.1 (from 8.3.2) — #280
 - **Duplicates check**: Clarified filter settings copy on the duplicates
   check page (`src/datasure/checks/duplicates.py`) — #273
+- **Project picker**: Replaced the Start page's single dropdown (which
+  mixed real projects, the demo, and "Create New Project" as if they were
+  the same kind of choice) with a searchable, sortable list — one row per
+  project with an "Open" button and a "More" menu for the less-frequent
+  export/update/delete actions, plus a dedicated "+ New Project" dialog
+  (`src/datasure/views/start_view.py`)
 - **Prep confirmation messages**: Row/column-removal, transform, and
   add-column confirmation messages now consistently end with "Dataset now
   has N rows and M columns" via new `PrepActionResult.remaining_rows`/

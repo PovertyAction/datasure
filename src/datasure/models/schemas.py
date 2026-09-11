@@ -327,6 +327,56 @@ class BackcheckColumnSelectors(BaseModel):
 # ============================================================================
 
 
+## ============================================================================
+# PROJECT CONFIGURATION MODELS
+# =============================================================================
+
+
+class ImportSourceEntry(BaseModel):
+    """One portable import_log row: what to import and from where.
+
+    Deliberately excludes anything that can't travel between machines:
+    no password, no private key file path, no local save-to path. A local
+    storage entry's ``filename``/``sheet_name`` are kept only as a hint for
+    the person resolving the import - the actual path must be re-supplied
+    on the machine doing the import.
+    """
+
+    alias: str = Field(..., min_length=1)
+    source: str = Field(..., description="'SurveyCTO' or 'local storage'")
+    server: str | None = None
+    form_id: str | None = None
+    username: str | None = None
+    filename: str | None = None
+    sheet_name: str | None = None
+    attachments: bool = False
+
+
+class ProjectPageBundle(BaseModel):
+    """One HFC report page: its check_config row plus its settings files."""
+
+    config: dict = Field(default_factory=dict)
+    settings: dict = Field(default_factory=dict)
+    missing_settings: dict = Field(default_factory=dict)
+
+
+class ProjectConfigBundle(BaseModel):
+    """Portable snapshot of an entire DataSure project setup.
+
+    Bundles the four layers that make up "how this project is configured":
+    import sources, prep steps, HFC (check) configurations, and corrections.
+    Never contains credentials, machine-specific file paths, or survey data.
+    """
+
+    datasure_config_version: int = 1
+    exported_from_project: str
+    exported_at: str
+    datasets: list[ImportSourceEntry] = Field(default_factory=list)
+    prep_steps: dict[str, list[dict]] = Field(default_factory=dict)
+    pages: list[ProjectPageBundle] = Field(default_factory=list)
+    corrections: dict[str, list[dict]] = Field(default_factory=dict)
+
+
 class ColumnByType(BaseModel):
     """Class to hold columns by type."""
 

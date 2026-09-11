@@ -5,6 +5,7 @@ import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -27,28 +28,43 @@ def _make_columns(spec, **_kwargs):
 
 _st.columns = MagicMock(side_effect=_make_columns)
 _st.container = MagicMock()
+_st.popover = MagicMock()
 _st.tabs = MagicMock(return_value=[MagicMock() for _ in range(5)])
 
-# st.selectbox defaults to returning None (conftest default), so none of the
-# "DataSure Demo" / "Create New Project" / existing-project branches run
-# during import - only get_project_names()/_get_last_used_project_name() are
-# exercised, both of which read the project registry via get_cache_path.
-# Patch it to a throwaway temp dir so import never touches the real cache.
+# The project list renders unconditionally at import time (toolbar, pinned
+# demo row, and an empty-state message since there are no projects yet), all
+# of which read the project registry via get_cache_path. Patch it to a
+# throwaway temp dir so import never touches the real cache. show_demo_intro
+# is patched too: with no demo project yet, it's called for real - and it
+# calls real streamlit's st.info, which (when sys.modules["streamlit"] has
+# been swapped for a mock elsewhere) can fail deep inside streamlit's own
+# lazy submodule import for emoji extraction.
 _fake_import_cache_dir = Path(tempfile.mkdtemp(prefix="datasure_start_view_import_"))
 
-with patch(
-    "datasure.utils.cache_utils.get_cache_path",
-    side_effect=lambda *parts: _fake_import_cache_dir.joinpath(*parts),
+with (
+    patch(
+        "datasure.utils.cache_utils.get_cache_path",
+        side_effect=lambda *parts: _fake_import_cache_dir.joinpath(*parts),
+    ),
+    patch("datasure.utils.onboarding_utils.show_demo_intro"),
 ):
     import datasure.views.start_view as start_view
 
 
 @pytest.fixture(autouse=True)
 def _isolated_cache(tmp_path, monkeypatch):
-    """Point start_view's get_cache_path at a fresh temp dir for each test."""
+    """Point start_view's get_cache_path at a fresh temp dir for each test.
+
+    Also re-asserts the layout-primitive mocks this module needs (other view
+    test files share the same underlying mock streamlit module and can leave
+    `.columns`/`.container`/`.popover` reconfigured differently).
+    """
     monkeypatch.setattr(
         start_view, "get_cache_path", lambda *parts: tmp_path.joinpath(*parts)
     )
+    monkeypatch.setattr(_st, "columns", MagicMock(side_effect=_make_columns))
+    monkeypatch.setattr(_st, "container", MagicMock())
+    monkeypatch.setattr(_st, "popover", MagicMock())
 
 
 # === PURE VALIDATION FUNCTION TESTS === #
@@ -215,83 +231,66 @@ class TestDeleteProject:
         mock_error.assert_called_once()
 
 
-class TestGetProjectNames:
-    """Test get_project_names."""
+class TestNonDemoProjects:
+    """Test _non_demo_projects."""
 
-    def test_no_projects_file(self):
-        assert start_view.get_project_names() == [
-            "DataSure Demo",
-            "Create New Project",
-        ]
+    def test_empty_registry(self):
+        assert start_view._non_demo_projects({}) == []
 
-    def test_sorts_by_last_used_most_recent_first(self, tmp_path):
-        (tmp_path / "projects.json").write_text(
-            json.dumps(
-                {
-                    "id1": {"name": "Older", "last_used": "2024-01-01 00:00:00"},
-                    "id2": {"name": "Newer", "last_used": "2024-06-01 00:00:00"},
-                }
-            )
-        )
-        assert start_view.get_project_names() == [
-            "DataSure Demo",
-            "Newer",
-            "Older",
-            "Create New Project",
-        ]
-
-    def test_excludes_demo_projects(self, tmp_path):
-        (tmp_path / "projects.json").write_text(
-            json.dumps(
-                {
-                    "demoid": {
-                        "name": "Demo Copy",
-                        "is_demo": True,
-                        "last_used": "2024-01-01 00:00:00",
-                    },
-                    "id1": {
-                        "name": "Real Project",
-                        "last_used": "2024-02-01 00:00:00",
-                    },
-                }
-            )
-        )
-        names = start_view.get_project_names()
-        assert "Demo Copy" not in names
-        assert "Real Project" in names
+    def test_excludes_demo_projects(self):
+        projects = {
+            "demoid": {"name": "Demo Copy", "is_demo": True},
+            start_view.DEMO_PROJECT_ID: {"name": "DataSure Demo"},
+            "id1": {"name": "Real Project"},
+        }
+        rows = start_view._non_demo_projects(projects)
+        assert rows == [("id1", {"name": "Real Project"})]
 
 
-class TestGetLastUsedProjectName:
-    """Test _get_last_used_project_name."""
+class TestFilterAndSortProjects:
+    """Test _filter_and_sort_projects."""
 
-    def test_no_projects_file(self):
-        assert start_view._get_last_used_project_name() is None
+    ROWS: ClassVar = [
+        ("id1", {"name": "Older", "last_used": "2024-01-01 00:00:00"}),
+        ("id2", {"name": "Newer", "last_used": "2024-06-01 00:00:00"}),
+    ]
 
-    def test_returns_most_recently_used(self, tmp_path):
-        (tmp_path / "projects.json").write_text(
-            json.dumps(
-                {
-                    "id1": {"name": "Older", "last_used": "2024-01-01 00:00:00"},
-                    "id2": {"name": "Newer", "last_used": "2024-06-01 00:00:00"},
-                }
-            )
-        )
-        assert start_view._get_last_used_project_name() == "Newer"
+    def test_sorts_by_last_used_most_recent_first(self):
+        result = start_view._filter_and_sort_projects(self.ROWS, "", "Last used")
+        assert [pid for pid, _ in result] == ["id2", "id1"]
 
-    def test_ignores_demo_and_never_used_projects(self, tmp_path):
-        (tmp_path / "projects.json").write_text(
-            json.dumps(
-                {
-                    "demoid": {
-                        "name": "Demo",
-                        "is_demo": True,
-                        "last_used": "2024-06-01 00:00:00",
-                    },
-                    "id1": {"name": "NoLastUsed"},
-                }
-            )
-        )
-        assert start_view._get_last_used_project_name() is None
+    def test_sorts_by_name(self):
+        result = start_view._filter_and_sort_projects(self.ROWS, "", "Name")
+        assert [pid for pid, _ in result] == ["id2", "id1"]
+
+    def test_filters_by_case_insensitive_substring(self):
+        result = start_view._filter_and_sort_projects(self.ROWS, "new", "Name")
+        assert [pid for pid, _ in result] == ["id2"]
+
+    def test_empty_search_matches_all(self):
+        result = start_view._filter_and_sort_projects(self.ROWS, "", "Name")
+        assert len(result) == 2
+
+    def test_no_match_returns_empty(self):
+        result = start_view._filter_and_sort_projects(self.ROWS, "zzz", "Name")
+        assert result == []
+
+
+class TestProjectStats:
+    """Test _project_stats."""
+
+    def test_returns_dataset_and_page_counts(self):
+        with (
+            patch(
+                "datasure.views.start_view.duckdb_get_aliases",
+                return_value=["household", "individual"],
+            ),
+            patch("datasure.views.start_view.ConfigurationService") as mock_cs,
+        ):
+            mock_cs.return_value.get_all_configurations.return_value.height = 3
+            result = start_view._project_stats("abcd1234")
+
+        assert result == (2, 3)
 
 
 # === PROJECT ACTIVATION / NAVIGATION TESTS === #
@@ -342,31 +341,67 @@ class TestDeleteProjectAndReset:
 # === HANDLER FUNCTION TESTS (with mocked Streamlit widgets) === #
 
 
-class TestHandleCreateNewProject:
-    """Test _handle_create_new_project."""
+class TestRenderNewProjectModeSwitch:
+    """Test _render_new_project_mode_switch."""
 
-    def test_asks_for_confirmation_before_creating(self, monkeypatch):
+    def test_defaults_to_blank(self):
+        _st.session_state.pop("new_project_mode", None)
+        assert start_view._render_new_project_mode_switch() == "blank"
+
+    def test_clicking_config_button_switches_and_persists(self, monkeypatch):
+        _st.session_state.pop("new_project_mode", None)
+        monkeypatch.setattr(
+            _st,
+            "button",
+            MagicMock(side_effect=lambda label=None, *a, **k: "configuration" in label),
+        )
+
+        mode = start_view._render_new_project_mode_switch()
+
+        assert mode == "config"
+        assert _st.session_state["new_project_mode"] == "config"
+
+    def test_clicking_blank_button_switches_back(self, monkeypatch):
+        _st.session_state["new_project_mode"] = "config"
+        monkeypatch.setattr(
+            _st,
+            "button",
+            MagicMock(
+                side_effect=lambda label=None, *a, **k: "Start from scratch" in label
+            ),
+        )
+
+        mode = start_view._render_new_project_mode_switch()
+
+        assert mode == "blank"
+        assert _st.session_state["new_project_mode"] == "blank"
+
+    def test_no_click_keeps_current_mode(self, monkeypatch):
+        _st.session_state["new_project_mode"] = "config"
+        monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
+
+        assert start_view._render_new_project_mode_switch() == "config"
+
+
+class TestRenderNewProjectForm:
+    """Test _render_new_project_form."""
+
+    def _mock_button_for_label(self, monkeypatch, wanted_label):
+        """Only the button whose label contains `wanted_label` reports a click."""
+        monkeypatch.setattr(
+            _st,
+            "button",
+            MagicMock(side_effect=lambda label=None, *a, **k: wanted_label in label),
+        )
+
+    def test_blank_mode_creates_and_activates_the_project(self, tmp_path, monkeypatch):
+        """No confirmation dialog: this dialog can't open a second one."""
+        _st.session_state["new_project_mode"] = "blank"
         monkeypatch.setattr(_st, "text_input", MagicMock(return_value="My New Project"))
-        monkeypatch.setattr(_st, "button", MagicMock(return_value=True))
-
-        with patch("datasure.views.start_view.confirm_dialog") as mock_confirm:
-            start_view._handle_create_new_project()
-
-        mock_confirm.assert_called_once()
-        args, kwargs = mock_confirm.call_args
-        assert kwargs["confirm_label"] == "Create & Load New Project"
-        assert "My New Project" in args[1]
-
-    def test_confirming_creates_and_activates_the_project(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(_st, "text_input", MagicMock(return_value="My New Project"))
-        monkeypatch.setattr(_st, "button", MagicMock(return_value=True))
-
-        with patch("datasure.views.start_view.confirm_dialog") as mock_confirm:
-            start_view._handle_create_new_project()
-        on_confirm = mock_confirm.call_args.kwargs["on_confirm"]
+        self._mock_button_for_label(monkeypatch, "Create Project")
 
         with patch("datasure.views.start_view._activate_project") as mock_activate:
-            on_confirm()
+            start_view._render_new_project_form()
 
         project_id = start_view.get_project_id("My New Project")
         assert project_id in start_view.load_projects()
@@ -375,97 +410,217 @@ class TestHandleCreateNewProject:
     def test_duplicate_name_shows_error_and_stops(self, tmp_path, monkeypatch):
         existing_id = start_view.get_project_id("Existing")
         start_view.save_project("Existing", existing_id)
+        _st.session_state["new_project_mode"] = "blank"
         monkeypatch.setattr(_st, "text_input", MagicMock(return_value="Existing"))
-        monkeypatch.setattr(_st, "button", MagicMock(return_value=True))
+        self._mock_button_for_label(monkeypatch, "Create Project")
         mock_error = MagicMock()
         monkeypatch.setattr(_st, "error", mock_error)
         monkeypatch.setattr(_st, "stop", MagicMock(side_effect=StopIteration))
 
         with (
-            patch("datasure.views.start_view.confirm_dialog") as mock_confirm,
+            patch("datasure.views.start_view._activate_project") as mock_activate,
             pytest.raises(StopIteration),
         ):
-            start_view._handle_create_new_project()
+            start_view._render_new_project_form()
 
         mock_error.assert_called_once()
-        mock_confirm.assert_not_called()
+        mock_activate.assert_not_called()
 
     def test_no_button_click_does_nothing(self, monkeypatch):
+        _st.session_state["new_project_mode"] = "blank"
         monkeypatch.setattr(_st, "text_input", MagicMock(return_value=""))
         monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
 
-        with patch("datasure.views.start_view.confirm_dialog") as mock_confirm:
-            start_view._handle_create_new_project()
-
-        mock_confirm.assert_not_called()
-
-
-class TestHandleExistingProjectSelection:
-    """Test _handle_existing_project_selection."""
-
-    def test_loading_activates_the_project(self, tmp_path, monkeypatch):
-        project_id = start_view.get_project_id("My Project")
-        start_view.save_project("My Project", project_id)
-        monkeypatch.setattr(_st, "button", MagicMock(return_value=True))
-        monkeypatch.setattr(_st, "write", MagicMock())
-
-        with (
-            patch("datasure.views.start_view._activate_project") as mock_activate,
-            patch("datasure.views.start_view._show_delete_project_option"),
-        ):
-            start_view._handle_existing_project_selection("My Project")
-
-        mock_activate.assert_called_once_with(project_id)
-
-    def test_no_click_does_not_activate(self, tmp_path, monkeypatch):
-        project_id = start_view.get_project_id("My Project")
-        start_view.save_project("My Project", project_id)
-        monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
-
         with patch("datasure.views.start_view._activate_project") as mock_activate:
-            start_view._handle_existing_project_selection("My Project")
+            start_view._render_new_project_form()
 
         mock_activate.assert_not_called()
 
-    def test_demo_project_skips_delete_option(self, monkeypatch):
+    def _mock_uploaded_config_file(self, content: str) -> MagicMock:
+        """Build a fake `st.file_uploader` return value with the given content."""
+        mock_file = MagicMock()
+        mock_file.getvalue.return_value = content
+        return mock_file
+
+    def test_from_configuration_file_creates_project_and_stores_bundle(
+        self, tmp_path, monkeypatch
+    ):
+        """Clicking through doesn't open a second dialog (Streamlit forbids
+        nesting one), so it stores the bundle and reruns instead.
+        """
+        _st.session_state.pop("new_project_created_id", None)
+        _st.session_state.pop("new_project_bundle", None)
+        _st.session_state["new_project_mode"] = "config"
+        monkeypatch.setattr(_st, "text_input", MagicMock(return_value="My New Project"))
+        self._mock_button_for_label(monkeypatch, "Create Project & Continue")
+        uploaded = self._mock_uploaded_config_file(
+            json.dumps({"exported_from_project": "Other Project", "exported_at": "t"})
+        )
+        monkeypatch.setattr(_st, "file_uploader", MagicMock(return_value=uploaded))
+
+        start_view._render_new_project_form()
+
+        project_id = start_view.get_project_id("My New Project")
+        assert project_id in start_view.load_projects()
+        assert _st.session_state["new_project_created_id"] == project_id
+        assert (
+            _st.session_state["new_project_bundle"].exported_from_project
+            == "Other Project"
+        )
+
+    def test_from_configuration_file_button_disabled_without_upload(self, monkeypatch):
+        _st.session_state.pop("new_project_created_id", None)
+        _st.session_state["new_project_mode"] = "config"
+        monkeypatch.setattr(_st, "text_input", MagicMock(return_value="My New Project"))
+        monkeypatch.setattr(_st, "file_uploader", MagicMock(return_value=None))
+        mock_button = MagicMock(return_value=False)
+        monkeypatch.setattr(_st, "button", mock_button)
+
+        start_view._render_new_project_form()
+
+        assert "new_project_created_id" not in _st.session_state
+        submit_call = next(
+            call
+            for call in mock_button.call_args_list
+            if "Create Project & Continue" in call.args[0]
+        )
+        assert submit_call.kwargs["disabled"] is True
+
+    def test_from_configuration_file_invalid_upload_shows_error(self, monkeypatch):
+        _st.session_state.pop("new_project_created_id", None)
+        _st.session_state["new_project_mode"] = "config"
+        monkeypatch.setattr(_st, "text_input", MagicMock(return_value="My New Project"))
+        uploaded = self._mock_uploaded_config_file("not json")
+        monkeypatch.setattr(_st, "file_uploader", MagicMock(return_value=uploaded))
+        mock_error = MagicMock()
+        monkeypatch.setattr(_st, "error", mock_error)
+
+        start_view._render_new_project_form()
+
+        mock_error.assert_called_once()
+        assert "new_project_created_id" not in _st.session_state
+
+    def test_from_configuration_file_unexpected_parse_error_shows_error(
+        self, monkeypatch
+    ):
+        """A non-JSON/non-ValidationError parse failure must still surface an
+        error - not leave the button silently disabled with no explanation.
+        """
+        _st.session_state.pop("new_project_created_id", None)
+        _st.session_state["new_project_mode"] = "config"
+        monkeypatch.setattr(_st, "text_input", MagicMock(return_value="My New Project"))
+        uploaded = self._mock_uploaded_config_file("{}")
+        monkeypatch.setattr(_st, "file_uploader", MagicMock(return_value=uploaded))
+        mock_error = MagicMock()
+        monkeypatch.setattr(_st, "error", mock_error)
+
+        with patch(
+            "datasure.views.start_view.parse_project_config",
+            side_effect=TypeError("boom"),
+        ):
+            start_view._render_new_project_form()
+
+        mock_error.assert_called_once()
+        assert "new_project_created_id" not in _st.session_state
+
+    def test_resumes_resolution_after_project_already_created(self, monkeypatch):
+        """Once created_id is set, the form skips straight to resolve/apply
+        on every later rerun, instead of asking for name/mode again.
+        """
+        _st.session_state["new_project_created_id"] = "abcd1234"
+        _st.session_state["new_project_bundle"] = "a-bundle-placeholder"
+
+        with patch(
+            "datasure.views.start_view.render_config_resolution_and_apply"
+        ) as mock_resolve:
+            start_view._render_new_project_form()
+
+        mock_resolve.assert_called_once()
+        assert mock_resolve.call_args.args[0] == "abcd1234"
+        assert mock_resolve.call_args.args[1] == "a-bundle-placeholder"
+
+
+class TestRenderProjectRow:
+    """Test _render_project_row."""
+
+    def test_open_activates_the_project(self, tmp_path, monkeypatch):
+        project_id = start_view.get_project_id("My Project")
+        start_view.save_project("My Project", project_id)
+        monkeypatch.setattr(_st, "button", MagicMock(return_value=True))
+        mock_popover = MagicMock()
+        monkeypatch.setattr(_st, "popover", mock_popover)
+
+        with (
+            patch("datasure.views.start_view._project_stats", return_value=(0, 0)),
+            patch("datasure.views.start_view._activate_project") as mock_activate,
+            patch("datasure.views.start_view._show_delete_project_option"),
+            patch("datasure.views.start_view._show_update_from_config_option"),
+            patch("datasure.views.start_view._show_export_config_option"),
+        ):
+            start_view._render_project_row(
+                project_id, {"name": "My Project", "last_used": "today"}, {}
+            )
+
+        mock_activate.assert_called_once_with(project_id)
+        # Regression: the popover needs a project-specific key, or rendering
+        # more than one project's row raises StreamlitDuplicateElementId.
+        assert mock_popover.call_args.kwargs["key"] == f"project_menu_{project_id}"
+
+    def test_no_click_does_not_activate(self, monkeypatch):
         monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
 
         with (
-            patch(
-                "datasure.views.start_view.get_project_id",
-                return_value=DEMO_PROJECT_ID,
-            ),
-            patch(
-                "datasure.views.start_view._show_delete_project_option"
-            ) as mock_show_delete,
+            patch("datasure.views.start_view._project_stats", return_value=(0, 0)),
+            patch("datasure.views.start_view._activate_project") as mock_activate,
+            patch("datasure.views.start_view._show_delete_project_option"),
+            patch("datasure.views.start_view._show_update_from_config_option"),
+            patch("datasure.views.start_view._show_export_config_option"),
         ):
-            start_view._handle_existing_project_selection("DataSure Demo")
+            start_view._render_project_row(
+                "abcd1234", {"name": "My Project", "last_used": "today"}, {}
+            )
 
-        mock_show_delete.assert_not_called()
+        mock_activate.assert_not_called()
 
-    def test_non_demo_project_shows_delete_option(self, tmp_path, monkeypatch):
-        start_view.save_project("My Project", start_view.get_project_id("My Project"))
+    def test_menu_renders_export_update_and_delete_options(self, monkeypatch):
         monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
 
-        with patch(
-            "datasure.views.start_view._show_delete_project_option"
-        ) as mock_show_delete:
-            start_view._handle_existing_project_selection("My Project")
+        with (
+            patch("datasure.views.start_view._project_stats", return_value=(2, 1)),
+            patch(
+                "datasure.views.start_view._show_delete_project_option"
+            ) as mock_delete,
+            patch(
+                "datasure.views.start_view._show_update_from_config_option"
+            ) as mock_update,
+            patch(
+                "datasure.views.start_view._show_export_config_option"
+            ) as mock_export,
+        ):
+            start_view._render_project_row(
+                "abcd1234", {"name": "My Project", "last_used": "today"}, {}
+            )
 
-        mock_show_delete.assert_called_once()
+        mock_export.assert_called_once_with("My Project", "abcd1234")
+        mock_update.assert_called_once_with("My Project", "abcd1234")
+        mock_delete.assert_called_once_with("My Project", "abcd1234", {})
 
 
 class TestShowDeleteProjectOption:
     """Test _show_delete_project_option."""
 
     def test_click_opens_confirm_dialog(self, monkeypatch):
-        monkeypatch.setattr(_st, "button", MagicMock(return_value=True))
+        mock_button = MagicMock(return_value=True)
+        monkeypatch.setattr(_st, "button", mock_button)
 
         with patch("datasure.views.start_view.confirm_dialog") as mock_confirm:
             start_view._show_delete_project_option("My Project", "abcd1234", {})
 
         mock_confirm.assert_called_once()
         assert mock_confirm.call_args.kwargs["confirm_label"] == "Delete project"
+        # Regression: the button needs a project-specific key, or rendering
+        # more than one project's row raises StreamlitDuplicateElementId.
+        assert mock_button.call_args.kwargs["key"] == "delete_project_abcd1234"
 
     def test_no_click_does_nothing(self, monkeypatch):
         monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
@@ -474,6 +629,61 @@ class TestShowDeleteProjectOption:
             start_view._show_delete_project_option("My Project", "abcd1234", {})
 
         mock_confirm.assert_not_called()
+
+
+class TestShowExportConfigOption:
+    """Test _show_export_config_option."""
+
+    def test_renders_download_button_with_bundle(self, monkeypatch):
+        mock_bundle = MagicMock()
+        mock_bundle.model_dump_json.return_value = '{"datasure_config_version": 1}'
+        mock_download = MagicMock()
+        monkeypatch.setattr(_st, "download_button", mock_download)
+
+        with patch(
+            "datasure.views.start_view.export_project_config",
+            return_value=mock_bundle,
+        ) as mock_export:
+            start_view._show_export_config_option("My Project", "abcd1234")
+
+        mock_export.assert_called_once_with("abcd1234", "My Project")
+        mock_download.assert_called_once()
+        assert (
+            mock_download.call_args.kwargs["data"] == '{"datasure_config_version": 1}'
+        )
+        assert mock_download.call_args.kwargs["file_name"].startswith("my_project_")
+        # Regression: the button needs a project-specific key, or rendering
+        # more than one project's row raises StreamlitDuplicateElementId.
+        assert mock_download.call_args.kwargs["key"] == "export_config_abcd1234"
+
+
+class TestShowUpdateFromConfigOption:
+    """Test _show_update_from_config_option."""
+
+    def test_click_opens_config_wizard(self, monkeypatch):
+        mock_button = MagicMock(return_value=True)
+        monkeypatch.setattr(_st, "button", mock_button)
+
+        with patch(
+            "datasure.views.start_view.render_project_config_wizard"
+        ) as mock_wizard:
+            start_view._show_update_from_config_option("My Project", "abcd1234")
+
+        mock_wizard.assert_called_once()
+        assert mock_wizard.call_args.args[:2] == ("abcd1234", "My Project")
+        # Regression: the button needs a project-specific key, or rendering
+        # more than one project's row raises StreamlitDuplicateElementId.
+        assert mock_button.call_args.kwargs["key"] == "update_config_abcd1234"
+
+    def test_no_click_does_nothing(self, monkeypatch):
+        monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
+
+        with patch(
+            "datasure.views.start_view.render_project_config_wizard"
+        ) as mock_wizard:
+            start_view._show_update_from_config_option("My Project", "abcd1234")
+
+        mock_wizard.assert_not_called()
 
 
 class TestLaunchFreshDemo:
@@ -519,33 +729,34 @@ class TestLaunchFreshDemo:
         mock_switch_page.assert_not_called()
 
 
-class TestHandleDemoProject:
-    """Test _handle_demo_project."""
+class TestRenderDemoRow:
+    """Test _render_demo_row."""
 
     def test_resume_demo_activates_it_when_it_exists(self, monkeypatch):
         monkeypatch.setattr(
             _st,
             "button",
-            MagicMock(side_effect=lambda label=None, *a, **k: label == "Resume Demo"),
+            MagicMock(side_effect=lambda *a, key=None, **k: key == "demo_resume"),
         )
 
         with (
-            patch("datasure.views.start_view.show_demo_intro"),
+            patch("datasure.views.start_view.show_demo_intro") as mock_intro,
             patch(
                 "datasure.views.start_view.load_projects",
                 return_value={DEMO_PROJECT_ID: {}},
             ),
             patch("datasure.views.start_view._activate_project") as mock_activate,
         ):
-            start_view._handle_demo_project()
+            start_view._render_demo_row()
 
         mock_activate.assert_called_once_with(DEMO_PROJECT_ID)
+        mock_intro.assert_not_called()
 
     def test_restart_demo_opens_confirm_dialog(self, monkeypatch):
         monkeypatch.setattr(
             _st,
             "button",
-            MagicMock(side_effect=lambda label=None, *a, **k: label == "Restart Demo"),
+            MagicMock(side_effect=lambda *a, key=None, **k: key == "demo_restart"),
         )
 
         with (
@@ -556,7 +767,7 @@ class TestHandleDemoProject:
             ),
             patch("datasure.views.start_view.confirm_dialog") as mock_confirm,
         ):
-            start_view._handle_demo_project()
+            start_view._render_demo_row()
 
         mock_confirm.assert_called_once()
 
@@ -564,10 +775,11 @@ class TestHandleDemoProject:
         monkeypatch.setattr(_st, "button", MagicMock(return_value=True))
 
         with (
-            patch("datasure.views.start_view.show_demo_intro"),
+            patch("datasure.views.start_view.show_demo_intro") as mock_intro,
             patch("datasure.views.start_view.load_projects", return_value={}),
             patch("datasure.views.start_view._launch_fresh_demo") as mock_launch,
         ):
-            start_view._handle_demo_project()
+            start_view._render_demo_row()
 
         mock_launch.assert_called_once()
+        mock_intro.assert_called_once()

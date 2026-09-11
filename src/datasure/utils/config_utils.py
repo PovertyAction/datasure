@@ -150,9 +150,19 @@ class ConfigurationService:
         with open(new_page_path, "w") as new_page_file:
             new_page_file.write(template_content)
 
-    def add_configuration(self, config: CheckConfiguration) -> bool:
+    def add_configuration(self, config: CheckConfiguration, rerun: bool = True) -> bool:
         """
         Add a new check configuration.
+
+        Parameters
+        ----------
+        config : CheckConfiguration
+            The configuration to add.
+        rerun : bool, default True
+            Whether to rerun the app afterward. Callers adding several
+            configurations in one pass (e.g. applying a project template)
+            should pass False, since `st.rerun()` aborts execution
+            immediately and would leave the remaining ones unapplied.
 
         Returns
         -------
@@ -179,7 +189,8 @@ class ConfigurationService:
         page_number = config_log.height
         self._add_page_file(page_number)
 
-        st.rerun()
+        if rerun:
+            st.rerun()
 
         return True
 
