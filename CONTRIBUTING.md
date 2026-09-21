@@ -132,6 +132,31 @@ specific exception the code can actually raise, and follow these rules:
    with a broad except - it raises a control-flow exception that the handler
    would swallow. Put it in the `else:` clause instead.
 
+### View UI Consistency
+
+Every Streamlit view must render its chrome through the shared helpers in
+`src/datasure/utils/ui_utils.py` so pages stay uniform as new ones are added:
+
+- `page_header(title, subtitle)` for the page heading. The `title` must match
+  the view's `st.Page(title=...)` nav label in `app.py` word-for-word
+  (`start_view`'s "Welcome to DataSure" hero is the one intentional
+  exception). Put the one-line "what this page does" prose in `subtitle`, not
+  a loose `st.markdown`.
+- `section_header(text, icon=None)` for section subheadings — no trailing
+  colons; use a `:material/...:` icon shortcode, never emoji.
+- `metric_row([(label, value[, help]), ...])` for metric rows so they align
+  across pages; do not hand-build `st.columns` + `st.metric`.
+- `confirm_dialog(title, body, on_confirm=...)` for every destructive action
+  (delete/remove/restart) — do not invent per-view confirm flows with
+  session-state flags, expanders, or inline warnings.
+- Use `st.divider()` for horizontal rules, never `st.write("---")`.
+- Icons are Material shortcodes (`:material/check_circle:`), not emoji
+  shortcodes (`:white_check_mark:`).
+
+`ui_utils` imports `streamlit` inside each helper rather than at module top so
+it honors the view-test harness's `sys.modules` swap regardless of import
+order — keep that pattern when adding helpers.
+
 ## Testing
 
 DataSure uses pytest for testing with comprehensive coverage requirements.
@@ -167,6 +192,35 @@ tests/
 ├── utils/                      # Tests for utility functions
 └── views/                      # Tests for Streamlit page scripts
 ```
+
+Coverage is enforced at `fail_under = 80` (`[tool.coverage.report]` in
+`pyproject.toml`). Registered markers are `slow`, `integration`, and `unit`
+(`-m "not slow"` skips the slow ones).
+
+### Shared Fixtures
+
+`tests/conftest.py` provides the shared fixtures — including
+`sample_dataframe`, `sample_gps_data`, `missing_data`, `date_format_data`,
+`backcheck_survey_data`/`backcheck_data`, `mock_streamlit_session`, `mock_st`,
+and `settings_file` — plus the autouse fixtures `mock_database_functions` (so
+tests need no real DB files) and `cleanup_test_cache`.
+
+### Testing Views
+
+`tests/views/` has its own conftest that installs a module-level Streamlit mock
+so view page scripts can be imported at all. Follow the pattern in
+`tests/views/test_prep_view.py`: configure the shared mock, patch utils at
+their source during import, then test the module functions directly.
+
+When a view calls a `utils`/connector function at module import that itself
+calls `st.*` (for example `SurveyCTOUI(...).render_login_form()`), the view
+test must patch that symbol at its source in `_module_patches()` before
+importing the view (see `tests/views/test_import_view.py`), or collection
+fails in bare mode.
+
+On Windows the suite must run cleanly under plain `uv run python -m pytest`.
+If pytest dies with INTERNALERROR, a test is patching `os.name` or `pathlib`
+without context-managed cleanup.
 
 ## Dependency Management
 
@@ -540,6 +594,10 @@ For emergency releases only:
 
 ### Pull Request Guidelines
 
+- **Template**: Always open pull requests using
+  [`.github/pull_request_template.md`](.github/pull_request_template.md). Fill
+  in every section and complete the checklist; do not delete sections (write
+  "N/A" where a section does not apply)
 - **Title**: Use clear, descriptive titles
 - **Description**: Explain what changes you made and why
 - **Tests**: Include tests for new functionality
@@ -555,41 +613,30 @@ For emergency releases only:
 
 ## Development Architecture
 
-### Project Structure
-
-```text
-src/datasure/                   # Main package (source layout)
-├── app.py                  # Main Streamlit application entry point
-├── cli.py                  # Command-line interface
-├── checks/                 # 9 modular data quality check modules
-├── connectors/             # Data source connectors
-├── processing/             # Data preparation utilities
-├── utils/                  # Shared utilities
-└── views/                  # Streamlit page components
-```
-
-### Key Patterns
-
-- **Session State Management**: Extensive use of Streamlit session state
-- **Configuration System**: JSON-based configuration files
-- **Asset Management**: Package-aware path resolution
-- **Error Handling**: Comprehensive exception handling
+The package layout, data flow, storage and cache locations, session-state
+conventions, generated output views, and credential handling are documented in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Read that before making
+structural changes.
 
 ### Adding New Features
 
 #### Adding a New Data Quality Check
 
-1. Create new module in `src/datasure/checks/`
-2. Implement standardized interface with report function
-3. Create corresponding test file in `tests/checks/`
+1. Create the module in `src/datasure/checks/`, following an existing one
+   (e.g. `missing.py`): a report function that takes prepared data plus
+   settings and renders Streamlit output
+2. Wire it into check configuration (`views/config_view.py` /
+   `utils/config_utils.py`) and the output view template if needed
+3. Add `tests/checks/test_<name>.py` using the conftest fixtures
 4. Update navigation in `src/datasure/app.py` if needed
 
 #### Adding a New Data Connector
 
-1. Create new module in `src/datasure/connectors/`
-2. Implement data loading and form functions
-3. Update import view to include new connector
-4. Add appropriate tests and documentation
+1. Create the module in `src/datasure/connectors/` — see `local.py` for the
+   pattern: Pydantic validation, a render form, and a load function that saves
+   via `duckdb_save_table`
+2. Add it to the import-type options in `views/import_view.py`
+3. Add tests in `tests/connectors/` and update documentation
 
 ## Getting Help
 
