@@ -18,6 +18,56 @@ This document tracks user-facing changes and improvements to help data managers,
 
 ---
 
+## Version 1.1.0 — Reusable Project Setups
+
+Released: September 2026
+
+This release makes a project's setup portable: the way you configured one survey can be saved to a file and handed to a colleague, or reused for the next round. It also redesigns the project picker, clarifies preparation messages, and fixes several issues in data preparation and corrections.
+
+### New Features
+
+#### Share a project setup with a colleague
+
+Export everything that defines how a project is set up — its import sources, preparation steps, quality check configuration, and corrections — into a single file, then apply it to a new or existing project. Instead of configuring a survey from scratch, a teammate can start from a setup that already works, and a follow-up round can reuse the previous round's configuration.
+
+The exported file never contains survey data, passwords, or file paths specific to your computer, so it is safe to share by email or store alongside project documentation. Applying it replays the same steps you would perform by hand; anything that cannot apply to the new project is skipped and reported, so one mismatched step does not stop the rest of the setup from being restored.
+
+#### Import Parquet files
+
+Local file import now accepts Parquet files, alongside CSV, Excel, JSON, and Stata.
+
+#### Survey ID shown with corrections
+
+The Correct Data page and the Correction Log now show the survey ID for each correction, next to its status and status reason, so you can tell at a glance which submission a correction belongs to.
+
+### Improvements
+
+#### Redesigned project picker
+
+The Start page previously offered a single dropdown that mixed real projects, the demo project, and "Create New Project" as if they were the same kind of choice. It is now a searchable, sortable list with one row per project: an **Open** button where you expect it, and a **More** menu holding the less frequent export, update, and delete actions. Creating a project has its own **+ New Project** dialog.
+
+#### New projects open immediately
+
+After you create a project, DataSure now loads and selects it for you instead of returning you to the project list to pick it manually.
+
+#### Clearer data preparation messages
+
+Confirmation messages after preparation steps now consistently tell you how many rows and columns the dataset has afterwards. Row-removal messages also state the actual column, condition, and value used, rather than only naming the method.
+
+#### Consistent page layout
+
+Page headings, section titles, metric rows, and confirmation dialogs now come from a shared set of building blocks, so every page in DataSure looks and behaves the same way. Filter settings wording on the duplicates check page has also been clarified.
+
+### Bug Fixes
+
+- **Fixed**: The "remove rows" preparation step with an *equal to* or *not equal to* condition did the opposite of what was asked — matching rows were removed instead of kept, and vice versa
+- **Fixed**: Re-importing raw data now clears stale prepared and corrected data, so reports no longer show results from the previous import
+- **Fixed**: Reapplying all preparation steps no longer crashes the page when one step fails (for example, when a re-import drops a column an earlier step used); the failing step is skipped and reported, and the rest still run. Reapplying all corrections now reports failures instead of passing over them silently
+- **Fixed**: Dates and times without seconds are now parsed correctly during data preparation
+- **Fixed**: Launching DataSure with `datasure` now opens your browser automatically, matching the behavior of the development command
+
+---
+
 ## Version 1.0.0 — Initial Release
 
 Released: July 2026
@@ -119,5 +169,5 @@ DataSure 1.0.0 is the first stable public release. Prior versions were internal 
 
 *This document is maintained alongside the project and updated with each release. For technical details, see [CHANGELOG.md](CHANGELOG.md).*
 
-**Last Updated**: July 2026
-**Document Version**: 1.0.0
+**Last Updated**: September 2026
+**Document Version**: 1.1.0
