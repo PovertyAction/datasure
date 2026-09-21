@@ -211,6 +211,18 @@ Cache directories are created automatically — no manual setup required.
 
 ## Support and Resources
 
+### Documentation Map
+
+| Document | What it covers |
+| --- | --- |
+| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | Step-by-step guide to using the application |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, code quality, testing, releases |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Package layout, data flow, storage, session state |
+| [docs/changelog_guide.md](docs/changelog_guide.md) | How to write CHANGELOG entries |
+| [docs/release_notes_guide.md](docs/release_notes_guide.md) | How to write release notes |
+| [ROADMAP.md](ROADMAP.md) | Planned features and priorities |
+| [SECURITY.md](SECURITY.md) | Reporting security issues |
+
 ### Getting Help
 
 - **Documentation**: [data.poverty-action.org/data-quality/datasure](https://data.poverty-action.org/data-quality/datasure/) - Full user guides, installation instructions, and workflow documentation

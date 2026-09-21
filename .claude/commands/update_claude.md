@@ -1,171 +1,77 @@
 ---
 allowed-tools: Bash(git diff:*), Bash(git log:*), Bash(git status:*), Bash(find:*), Bash(grep:*), Bash(wc:*), Bash(ls:*)
-description: Automatically update CLAUDE.md file based on recent code changes
+description: Route recent code changes into the documentation file that owns each topic
 ---
 
-# Update Claude.md File
+# Update project documentation after recent changes
 
-## Current Claude.md State
+## Current CLAUDE.md
 
 @CLAUDE.md
 
-## Git Analysis
+## Recent changes
 
-### Current Repository Status
+### Repository status
 
 !`git status --porcelain`
 
-### Recent Changes (Last 10 commits)
+### Recent commits
 
 !`git log --oneline -10`
 
-### Detailed Recent Changes
+### Files changed recently
 
-!`git log --since="1 week ago" --pretty=format:"%h - %an, %ar : %s" --stat`
+!`git diff --name-status HEAD~10`
 
-### Recent Diff Analysis
+### Source diff
 
-!`git diff HEAD~5 --name-only | head -20`
+!`git diff HEAD~5 -- "src/**/*.py" "tests/**/*.py" "Justfile" "pyproject.toml" | head -300`
 
-### Detailed Diff of Key Changes
+## Your task
 
-!`git diff HEAD~5 -- "*.js" "*.ts" "*.jsx" "*.tsx" "*.py" "*.md" "*.json" | head -200`
+**CLAUDE.md is a navigation file, not a knowledge base.** It is deliberately
+short: a table pointing at the document that owns each topic, plus a handful of
+rules for agents. Your job is to route the changes above into the *owning*
+document. In most runs, CLAUDE.md itself should not change at all.
 
-### New Files Added
+### Step 1: Decide which document owns each change
 
-!`git diff --name-status HEAD~10 | grep "^A" | head -15`
+| If the change affects... | Update this file |
+| --- | --- |
+| User-facing behavior, installation, cache locations | `README.md` |
+| Package layout, data flow, storage, session state, generated views, credentials | `docs/ARCHITECTURE.md` |
+| Dev setup, lint/format rules, error handling, view UI rules, testing, releases | `CONTRIBUTING.md` |
+| Available commands | `Justfile` (the recipe *is* the documentation) |
+| Lint/test/coverage configuration | `pyproject.toml`, `.pre-commit-config.yaml` |
+| End-user workflow steps | `docs/USER_GUIDE.md` |
+| Notable changes for a release | `CHANGELOG.md` / `RELEASENOTES.md` (follow `docs/changelog_guide.md` and `docs/release_notes_guide.md`) |
 
-### Deleted Files
+### Step 2: Check CLAUDE.md for drift, not for content
 
-!`git diff --name-status HEAD~10 | grep "^D" | head -10`
+Only change CLAUDE.md when one of these is true:
 
-### Modified Core Files
+- A pointer is broken — a linked file was renamed, moved, or deleted
+- A whole topic gained or lost an owning document, so the table needs a row
+  added or removed
+- A rule for agents is now wrong (for example, a `just` recipe named in the
+  rules was renamed)
 
-!`git diff --name-status HEAD~10 | grep "^M" | grep -E "(package\.json|README|config|main|index|app)" | head -10`
+### Step 3: Do not add these to CLAUDE.md
 
-## Project Structure Changes
+Adding any of the following is a regression — put it in the owning document
+instead and link to it:
 
-!`find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" | head -10`
+- Command listings or code fences showing `just`, `uv`, `pytest`, or `ruff`
+  invocations — `just --list` and the Justfile are the source of truth
+- Directory trees or file-by-file inventories of `src/` or `tests/`
+- Architecture prose, data flow descriptions, or design rationale
+- Setup, installation, or release instructions
+- Coverage thresholds, marker lists, fixture lists, or other config values
+  copied out of `pyproject.toml`
+- A "Recent Updates" / changelog section — that is what `CHANGELOG.md` is for
+- Version numbers, dependency versions, or module counts
 
-## Configuration Changes
+### Step 4: Report
 
-!`git diff HEAD~10 -- package.json tsconfig.json webpack.config.js next.config.js .env* docker* | head -100`
-
-## API/Route Changes
-
-!`git diff HEAD~10 -- "**/routes/**" "**/api/**" "**/controllers/**" | head -150`
-
-## Database/Model Changes
-
-!`git diff HEAD~10 -- "**/models/**" "**/schemas/**" "**/migrations/**" | head -100`
-
-## Your Task
-
-Based on the current CLAUDE.md content and all the git analysis above, create an updated CLAUDE.md file that:
-
-## 1. Preserves Important Existing Content
-
-- Keep the core project description and architecture
-- Maintain important setup instructions
-- Preserve key architectural decisions and patterns
-- Keep essential development workflow information
-
-## 2. Integrates Recent Changes
-
-Analyze the git diff and logs to identify:
-
-- **New Features**: What new functionality was added?
-- **API Changes**: New endpoints, modified routes, updated parameters
-- **Configuration Updates**: Changes to build tools, dependencies, environment variables
-- **File Structure Changes**: New directories, moved files, deleted components
-- **Database Changes**: New models, schema updates, migrations
-- **Bug Fixes**: Important fixes that affect how the system works
-- **Refactoring**: Significant code reorganization or architectural changes
-
-## 3. Updates Key Sections
-
-Intelligently update these CLAUDE.md sections:
-
-### Project Overview
-
-- Update description if scope changed
-- Note new technologies or frameworks added
-- Update version information
-
-### Architecture
-
-- Document new architectural patterns
-- Note significant structural changes
-- Update component relationships
-
-### Setup Instructions
-
-- Add new environment variables
-- Update installation steps if dependencies changed
-- Note new configuration requirements
-
-### API Documentation
-
-- Add new endpoints discovered in routes
-- Update existing endpoint documentation
-- Note authentication or parameter changes
-
-### Development Workflow
-
-- Update based on new scripts in package.json
-- Note new development tools or processes
-- Update testing procedures if changed
-
-### Recent Changes Section
-
-Add a "Recent Updates" section with:
-
-- Summary of major changes from git analysis
-- New features and their impact
-- Important bug fixes
-- Breaking changes developers should know about
-
-### File Structure
-
-- Update directory explanations for new folders
-- Note relocated or reorganized files
-- Document new important files
-
-## 4. Smart Content Management
-
-- **Don't duplicate**: Avoid repeating information already well-documented
-- **Prioritize relevance**: Focus on changes that affect how developers work with the code
-- **Keep it concise**: Summarize rather than listing every small change
-- **Maintain structure**: Follow existing CLAUDE.md organization
-- **Add timestamps**: Note when major updates were made
-
-## 5. Output Format
-
-Provide the complete updated CLAUDE.md content, organized as:
-
-```markdown
-# Project Name
-
-## Overview
-[Updated project description]
-
-## Architecture
-[Updated architecture information]
-
-## Setup & Installation
-[Updated setup instructions]
-
-## Development Workflow
-[Updated development processes]
-
-## API Documentation
-[Updated API information]
-
-## File Structure
-[Updated directory explanations]
-
-## Recent Updates (Updated: YYYY-MM-DD)
-[Summary of recent changes]
-
-## Important Notes
-[Key information for developers]
+List, per file, what you changed and why. If CLAUDE.md needed no change, say
+so explicitly — that is the expected outcome.
