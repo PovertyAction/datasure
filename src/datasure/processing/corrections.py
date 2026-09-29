@@ -1,9 +1,21 @@
+import json
+import math
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 import polars as pl
 import streamlit as st
 
+from datasure.processing.correction_log import (
+    ACCEPT_ACTION,
+    ACCEPT_CHECK_TYPES,
+    CORRECTION_LOG_SCHEMA,
+    CORRECTIONS_PAGE_SOURCE,
+    empty_correction_log,
+    ensure_log_columns,
+)
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.reapply_utils import ReapplyFailure
 
@@ -32,18 +44,175 @@ def _describe_correction_row(row: dict[str, Any]) -> str:
         return f"Remove {column} value for key {key_value}"
     if action == "remove row":
         return f"Remove entire row for key {key_value}"
+    if action == ACCEPT_ACTION:
+        target = column if column is not None else "coordinates"
+        return f"Accept {row['check_type']} flag on {target} for key {key_value}"
     return f"{action} for key {key_value}"
 
 
-def _ensure_status_columns(df: pl.DataFrame) -> pl.DataFrame:
-    """Backfill status/status_reason columns for logs persisted before they existed."""
-    if df.is_empty():
-        return df
-    if "status" not in df.columns:
-        df = df.with_columns(pl.lit("Successful").alias("status"))
-    if "status_reason" not in df.columns:
-        df = df.with_columns(pl.lit(None, dtype=pl.String).alias("status_reason"))
-    return df
+def _is_missing(value: Any) -> bool:
+    """Whether a value is missing: None, or NaN as pandas reports nulls."""
+    return value is None or (isinstance(value, float) and math.isnan(value))
+
+
+def _encode_scalar(value: Any) -> str | None:
+    return None if _is_missing(value) else str(value)
+
+
+def _encode_log_value(value: Any) -> str | None:
+    """Encode a value for the log's string-typed value columns.
+
+    Missing values (None or NaN) are stored as null. GPS acceptances cover a
+    latitude/longitude pair, passed as a mapping of column name to value and
+    stored as JSON. Any other value is stored as a string.
+    """
+    if isinstance(value, dict):
+        return json.dumps(
+            {col: _encode_scalar(v) for col, v in value.items()}, sort_keys=True
+        )
+    return _encode_scalar(value)
+
+
+def _values_match(actual: Any, recorded: str | None) -> bool:
+    """Whether a data value equals a value recorded in the log as a string.
+
+    Missing matches missing. Numbers compare numerically, so an integer cell
+    holding 25 matches "25.0", which is how pandas reports an integer column
+    that has nulls.
+    """
+    if _is_missing(actual) or recorded is None:
+        return _is_missing(actual) and recorded is None
+    if str(actual) == recorded:
+        return True
+    if isinstance(actual, int | float) and not isinstance(actual, bool):
+        try:
+            return float(actual) == float(recorded)
+        except ValueError:
+            return False
+    return False
+
+
+def _accepted_values(row: dict[str, Any]) -> dict[str, str | None]:
+    """Return the column -> value snapshot an accept row was recorded against."""
+    if row["column"] is not None:
+        return {row["column"]: row["current_value"]}
+    return json.loads(row["current_value"]) if row["current_value"] else {}
+
+
+def _acceptance_is_active(
+    data: pl.DataFrame, key_col: str, row: dict[str, Any]
+) -> bool:
+    """Whether the data still holds the values an acceptance recorded.
+
+    The log stores KEY as text, so the key column is compared as text. If
+    the KEY appears on several rows, every row must hold the accepted values.
+    """
+    if key_col not in data.columns:
+        return False
+    records = data.filter(pl.col(key_col).cast(pl.String) == str(row["KEY"]))
+    if records.is_empty():
+        return False
+    for column, accepted in _accepted_values(row).items():
+        if column not in records.columns:
+            return False
+        if not all(_values_match(v, accepted) for v in records[column].to_list()):
+            return False
+    return True
+
+
+def _validate_acceptance(
+    check_type: str | None, column: str | None, current_value: Any
+) -> None:
+    """Raise ValueError if an acceptance's check type, column and value don't fit."""
+    if check_type not in ACCEPT_CHECK_TYPES:
+        raise ValueError(
+            f"Unknown check type '{check_type}'; expected one of "
+            f"{', '.join(ACCEPT_CHECK_TYPES)}"
+        )
+    if check_type == "gps":
+        if column is not None or not isinstance(current_value, dict):
+            raise ValueError(
+                "GPS acceptances take no column and a mapping of the "
+                "latitude and longitude columns to their values"
+            )
+    elif not column:
+        raise ValueError(f"A column is required to accept a {check_type} value")
+
+
+def _build_log_row(
+    key_value: str,
+    current_id: Any | None,
+    action: str,
+    column: str | None,
+    current_value: Any | None,
+    new_value: Any | None,
+    reason: str,
+    source: str,
+    check_type: str | None,
+) -> dict[str, Any]:
+    """Build one correction-log row.
+
+    A freshly logged entry has just been applied successfully (the apply
+    step raises before logging otherwise).
+    """
+    return {
+        "date": datetime.now(),
+        "KEY": str(key_value),
+        "ID": str(current_id) if current_id is not None else None,
+        "action": str(action),
+        "column": str(column) if column is not None else None,
+        "current_value": _encode_log_value(current_value),
+        "new_value": _encode_log_value(new_value),
+        "reason": str(reason),
+        "status": "Successful",
+        "status_reason": None,
+        "source": str(source),
+        "check_type": check_type,
+    }
+
+
+@dataclass(frozen=True)
+class CorrectionEntry:
+    """One correction or acceptance, applied as part of `apply_corrections`.
+
+    Attributes
+    ----------
+    key_value : str
+        The KEY of the record
+    action : str
+        "modify value", "remove value", "remove row" or "accept"
+    reason : str
+        Why the entry is made. Required.
+    column : str | None
+        The column affected. None for "remove row" and GPS acceptances.
+    current_value : Any
+        The value before the change, or the value being accepted. For GPS
+        acceptances, a mapping of the latitude and longitude columns to their
+        values.
+    new_value : Any
+        The new value, for "modify value"
+    survey_id_value : Any
+        The Survey ID value for this KEY, recorded in the log's ID column
+    check_type : str | None
+        For "accept", the check whose flag is accepted
+    """
+
+    key_value: str
+    action: str
+    reason: str
+    column: str | None = None
+    current_value: Any = None
+    new_value: Any = None
+    survey_id_value: Any = None
+    check_type: str | None = None
+
+
+# The cached methods below hash `self` by its project so that two projects
+# sharing an alias never share cached data. The key is the class's qualified
+# name because the class isn't defined yet when the decorators run.
+_PROCESSOR_HASH_FUNCS = {
+    "datasure.processing.corrections.CorrectionProcessor": lambda p: p.project_id
+}
 
 
 class CorrectionProcessor:
@@ -59,8 +228,8 @@ class CorrectionProcessor:
         """
         self.project_id = project_id
 
-    @st.cache_data(ttl=60, show_spinner=False)
-    def get_corrected_data(_self, alias: str) -> pl.DataFrame:
+    @st.cache_data(ttl=60, show_spinner=False, hash_funcs=_PROCESSOR_HASH_FUNCS)
+    def get_corrected_data(self, alias: str) -> pl.DataFrame:
         """Get corrected data for a given alias.
 
         If no corrected data exists, initializes from prepped data.
@@ -76,7 +245,7 @@ class CorrectionProcessor:
             The corrected data
         """
         corrected_data = duckdb_get_table(
-            project_id=_self.project_id,
+            project_id=self.project_id,
             alias=alias,
             db_name="corrected",
         )
@@ -84,12 +253,12 @@ class CorrectionProcessor:
         if corrected_data.is_empty():
             # Initialize from prepped data
             prepped_data = duckdb_get_table(
-                project_id=_self.project_id,
+                project_id=self.project_id,
                 alias=alias,
                 db_name="prep",
             )
             if not prepped_data.is_empty():
-                _self.save_corrected_data(alias, prepped_data)
+                self.save_corrected_data(alias, prepped_data)
                 return prepped_data
 
         return corrected_data
@@ -114,8 +283,8 @@ class CorrectionProcessor:
         self.get_corrected_data.clear()
         self.get_data_summary.clear()
 
-    @st.cache_data(ttl=30, show_spinner=False)
-    def get_correction_log(_self, alias: str) -> pl.DataFrame:
+    @st.cache_data(ttl=30, show_spinner=False, hash_funcs=_PROCESSOR_HASH_FUNCS)
+    def get_correction_log(self, alias: str) -> pl.DataFrame:
         """Get correction log for a given alias.
 
         Parameters
@@ -128,10 +297,12 @@ class CorrectionProcessor:
         pl.DataFrame
             The correction log
         """
-        return duckdb_get_table(
-            project_id=_self.project_id,
-            alias=f"corr_log_{alias}",
-            db_name="logs",
+        return ensure_log_columns(
+            duckdb_get_table(
+                project_id=self.project_id,
+                alias=f"corr_log_{alias}",
+                db_name="logs",
+            )
         )
 
     def add_correction_entry(
@@ -144,6 +315,8 @@ class CorrectionProcessor:
         current_value: Any | None,
         new_value: Any | None,
         reason: str,
+        source: str = CORRECTIONS_PAGE_SOURCE,
+        check_type: str | None = None,
     ) -> None:
         """Add a new correction entry to the log.
 
@@ -166,51 +339,51 @@ class CorrectionProcessor:
             The new value
         reason : str
             The reason for correction
+        source : str
+            The page that produced the entry, e.g. "corrections_page" or a
+            check page such as "outliers"
+        check_type : str | None
+            For "accept" entries, the check whose flag was accepted
         """
-        current_log = self.get_correction_log(alias)
-
-        # Create new entry DataFrame with proper schema. A freshly added
-        # correction has just been applied successfully (apply_correction
-        # would have raised before reaching this point otherwise).
-        new_entry_data = {
-            "date": [datetime.now()],
-            "KEY": [str(key_value)],
-            "ID": [str(current_id) if current_id is not None else None],
-            "action": [str(action)],
-            "column": [str(column) if column is not None else None],
-            "current_value": [
-                str(current_value) if current_value is not None else None
+        self._append_log_rows(
+            alias,
+            [
+                _build_log_row(
+                    key_value=key_value,
+                    current_id=current_id,
+                    action=action,
+                    column=column,
+                    current_value=current_value,
+                    new_value=new_value,
+                    reason=reason,
+                    source=source,
+                    check_type=check_type,
+                )
             ],
-            "new_value": [str(new_value) if new_value is not None else None],
-            "reason": [str(reason)],
-            "status": ["Successful"],
-            "status_reason": [None],
-        }
-        new_entry_df = pl.DataFrame(new_entry_data).with_columns(
-            pl.col("status_reason").cast(pl.String)
         )
 
+    def _append_log_rows(self, alias: str, rows: list[dict[str, Any]]) -> None:
+        """Append rows to the correction log in a single save.
+
+        Parameters
+        ----------
+        alias : str
+            The data alias/table name
+        rows : list[dict[str, Any]]
+            Log rows built by `_build_log_row`
+        """
+        current_log = self.get_correction_log(alias)
+        new_rows = pl.DataFrame(rows, schema=CORRECTION_LOG_SCHEMA)
+
         if current_log.is_empty():
-            # If no existing log, use the new entry schema
-            updated_log = new_entry_df
+            updated_log = new_rows
         else:
-            # Ensure schema compatibility before concatenating
-            # Cast columns to match the new entry schema
-            aligned_current_log = _ensure_status_columns(current_log).with_columns(
-                [
-                    pl.col("date").cast(pl.Datetime("us")),
-                    pl.col("KEY").cast(pl.String),
-                    pl.col("ID").cast(pl.String),
-                    pl.col("action").cast(pl.String),
-                    pl.col("column").cast(pl.String),
-                    pl.col("current_value").cast(pl.String),
-                    pl.col("new_value").cast(pl.String),
-                    pl.col("reason").cast(pl.String),
-                    pl.col("status").cast(pl.String),
-                    pl.col("status_reason").cast(pl.String),
-                ]
+            # Align column order and types with the new rows before concatenating
+            aligned_current_log = current_log.select(
+                pl.col(name).cast(dtype)
+                for name, dtype in CORRECTION_LOG_SCHEMA.items()
             )
-            updated_log = pl.concat([aligned_current_log, new_entry_df])
+            updated_log = pl.concat([aligned_current_log, new_rows])
 
         duckdb_save_table(
             project_id=self.project_id,
@@ -218,9 +391,109 @@ class CorrectionProcessor:
             alias=f"corr_log_{alias}",
             db_name="logs",
         )
-        # Clear correction log cache so the new entry shows immediately
+        # Clear correction log cache so the new entries show immediately
         self.get_correction_log.clear()
         self.get_correction_summary.clear()
+
+    def accept_value(
+        self,
+        alias: str,
+        key_value: str,
+        check_type: str,
+        column: str | None,
+        current_value: Any,
+        reason: str,
+        survey_id_value: Any | None = None,
+        source: str | None = None,
+    ) -> None:
+        """Record that a flagged value was reviewed and is correct.
+
+        The entry never changes the data. It stays active only while the
+        data still holds `current_value` (see `get_active_acceptances`).
+
+        Parameters
+        ----------
+        alias : str
+            The data alias/table name
+        key_value : str
+            The KEY of the accepted record
+        check_type : str
+            The check whose flag is accepted, one of `ACCEPT_CHECK_TYPES`
+        column : str | None
+            The accepted column. None for GPS, which accepts a coordinate pair.
+        current_value : Any
+            The value being accepted. For GPS, a mapping of the latitude and
+            longitude column names to their values.
+        reason : str
+            Why the value is correct. Required.
+        survey_id_value : Any | None
+            The Survey ID value for this KEY, if a Survey ID column is
+            configured, recorded in the log's ID column
+        source : str | None
+            The page that produced the entry. Defaults to `check_type`.
+
+        Raises
+        ------
+        ValueError
+            If the check type is unknown, the reason is blank, or the column
+            and value do not fit the check type.
+        """
+        _validate_acceptance(check_type, column, current_value)
+        if not reason or not reason.strip():
+            raise ValueError("A reason is required to accept a value")
+
+        self.add_correction_entry(
+            alias=alias,
+            key_value=key_value,
+            current_id=survey_id_value,
+            action=ACCEPT_ACTION,
+            column=column,
+            current_value=current_value,
+            new_value=None,
+            reason=reason,
+            source=source or check_type,
+            check_type=check_type,
+        )
+
+    def get_active_acceptances(
+        self, alias: str, check_type: str, key_col: str
+    ) -> pl.DataFrame:
+        """Return the acceptances for a check that still apply to the data.
+
+        An acceptance is active only while the corrected data still holds the
+        value recorded when it was accepted. For GPS, both the latitude and
+        the longitude must still match.
+
+        Parameters
+        ----------
+        alias : str
+            The data alias/table name
+        check_type : str
+            The check to return acceptances for
+        key_col : str
+            The Survey KEY column name
+
+        Returns
+        -------
+        pl.DataFrame
+            The active "accept" rows from the correction log, in log order
+        """
+        log = self.get_correction_log(alias)
+        if log.width == 0:
+            return empty_correction_log()
+
+        acceptances = log.filter(
+            (pl.col("action") == ACCEPT_ACTION) & (pl.col("check_type") == check_type)
+        )
+        if acceptances.is_empty():
+            return acceptances
+
+        data = self.get_corrected_data(alias)
+        is_active = [
+            _acceptance_is_active(data, key_col, row)
+            for row in acceptances.iter_rows(named=True)
+        ]
+        return acceptances.filter(pl.Series(is_active, dtype=pl.Boolean))
 
     def apply_correction(
         self,
@@ -263,18 +536,14 @@ class CorrectionProcessor:
         pl.DataFrame
             The corrected data
         """
-        corrected_data = self.get_corrected_data(alias)
-
-        if action == "modify value" and column and new_value is not None:
-            corrected_data = self._apply_modify_value(
-                corrected_data, key_col, key_value, column, new_value
-            )
-        elif action == "remove value" and column:
-            corrected_data = self._apply_remove_value(
-                corrected_data, key_col, key_value, column
-            )
-        elif action == "remove row":
-            corrected_data = self._apply_remove_row(corrected_data, key_col, key_value)
+        corrected_data = self._apply_action(
+            self.get_corrected_data(alias),
+            key_col,
+            key_value,
+            action,
+            column,
+            new_value,
+        )
 
         self.save_corrected_data(alias, corrected_data)
 
@@ -292,6 +561,125 @@ class CorrectionProcessor:
             )
 
         return corrected_data
+
+    def apply_corrections(
+        self,
+        alias: str,
+        key_col: str,
+        entries: Sequence[CorrectionEntry],
+        source: str = CORRECTIONS_PAGE_SOURCE,
+    ) -> pl.DataFrame:
+        """Apply several corrections and acceptances as one all-or-nothing step.
+
+        Entries are validated and applied in order against the result of the
+        entries before them. If any entry is invalid, nothing is saved and
+        nothing is logged.
+
+        Parameters
+        ----------
+        alias : str
+            The data alias/table name
+        key_col : str
+            The key column name
+        entries : Sequence[CorrectionEntry]
+            The corrections and acceptances to apply, in order
+        source : str
+            The page that produced the entries, recorded on every log row
+
+        Returns
+        -------
+        pl.DataFrame
+            The corrected data
+
+        Raises
+        ------
+        ValueError
+            If any entry is invalid; the message names the entry's problem.
+            Storage errors are re-raised after the corrected data is restored.
+        """
+        original_data = self.get_corrected_data(alias)
+        corrected_data = original_data
+        for entry in entries:
+            corrected_data = self._apply_entry(corrected_data, key_col, entry)
+
+        log_rows = [
+            _build_log_row(
+                key_value=entry.key_value,
+                current_id=entry.survey_id_value,
+                action=entry.action,
+                column=entry.column,
+                current_value=entry.current_value,
+                new_value=entry.new_value,
+                reason=entry.reason,
+                source=source,
+                check_type=entry.check_type,
+            )
+            for entry in entries
+        ]
+
+        self.save_corrected_data(alias, corrected_data)
+        try:
+            self._append_log_rows(alias, log_rows)
+        except Exception:
+            # Keep data and log in step: undo the data change, then re-raise.
+            self.save_corrected_data(alias, original_data)
+            raise
+        return corrected_data
+
+    def _apply_entry(
+        self, data: pl.DataFrame, key_col: str, entry: CorrectionEntry
+    ) -> pl.DataFrame:
+        """Validate one `CorrectionEntry` against `data` and apply it.
+
+        Raises
+        ------
+        ValueError
+            If the entry is invalid for `data`.
+        """
+        if not entry.reason or not entry.reason.strip():
+            raise ValueError(
+                f"A reason is required for {entry.action} on {entry.key_value}"
+            )
+
+        if entry.action == ACCEPT_ACTION:
+            _validate_acceptance(entry.check_type, entry.column, entry.current_value)
+            is_valid, error_msg = self.validate_correction_input(
+                data, key_col, entry.key_value, "remove row"
+            )
+            if not is_valid:
+                raise ValueError(error_msg)
+            return data
+
+        if entry.action not in ("modify value", "remove value", "remove row"):
+            raise ValueError(f"Unknown correction action '{entry.action}'")
+
+        is_valid, error_msg = self.validate_correction_input(
+            data, key_col, entry.key_value, entry.action, entry.column, entry.new_value
+        )
+        if not is_valid:
+            raise ValueError(error_msg)
+
+        return self._apply_action(
+            data, key_col, entry.key_value, entry.action, entry.column, entry.new_value
+        )
+
+    def _apply_action(
+        self,
+        data: pl.DataFrame,
+        key_col: str,
+        key_value: str,
+        action: str,
+        column: str | None,
+        new_value: Any | None,
+    ) -> pl.DataFrame:
+        """Apply one correction action to `data`; unknown actions leave it as is."""
+        if action == "modify value" and column and new_value is not None:
+            return self._apply_modify_value(data, key_col, key_value, column, new_value)
+        if action == "remove value" and column:
+            return self._apply_remove_value(data, key_col, key_value, column)
+        if action == "remove row":
+            return self._apply_remove_row(data, key_col, key_value)
+        return data
 
     def _apply_modify_value(
         self,
@@ -407,8 +795,8 @@ class CorrectionProcessor:
         """
         return data.filter(pl.col(key_col) != key_value)
 
-    @st.cache_data(ttl=60, show_spinner=False)
-    def get_data_summary(_self, data: pl.DataFrame) -> dict[str, Any]:
+    @st.cache_data(ttl=60, show_spinner=False, hash_funcs=_PROCESSOR_HASH_FUNCS)
+    def get_data_summary(self, data: pl.DataFrame) -> dict[str, Any]:
         """Get summary statistics for the data.
 
         Parameters
@@ -522,18 +910,7 @@ class CorrectionProcessor:
         # Remove the correction entry at the specified index
         if correction_index == 0 and correction_log.height == 1:
             # If removing the only entry, create an empty DataFrame with proper schema
-            updated_log = pl.DataFrame(
-                {
-                    "date": pl.Series([], dtype=pl.Datetime("us")),
-                    "KEY": pl.Series([], dtype=pl.String),
-                    "ID": pl.Series([], dtype=pl.String),
-                    "action": pl.Series([], dtype=pl.String),
-                    "column": pl.Series([], dtype=pl.String),
-                    "current_value": pl.Series([], dtype=pl.String),
-                    "new_value": pl.Series([], dtype=pl.String),
-                    "reason": pl.Series([], dtype=pl.String),
-                }
-            )
+            updated_log = empty_correction_log()
         else:
             # Build list of parts to concatenate
             parts = []
@@ -542,22 +919,8 @@ class CorrectionProcessor:
             if correction_index < len(correction_log) - 1:
                 parts.append(correction_log[correction_index + 1 :])
 
-            if parts:
-                updated_log = pl.concat(parts)
-            else:
-                # Should not happen given the conditions above, but handle it
-                updated_log = pl.DataFrame(
-                    {
-                        "date": pl.Series([], dtype=pl.Datetime("us")),
-                        "KEY": pl.Series([], dtype=pl.String),
-                        "ID": pl.Series([], dtype=pl.String),
-                        "action": pl.Series([], dtype=pl.String),
-                        "column": pl.Series([], dtype=pl.String),
-                        "current_value": pl.Series([], dtype=pl.String),
-                        "new_value": pl.Series([], dtype=pl.String),
-                        "reason": pl.Series([], dtype=pl.String),
-                    }
-                )
+            # parts is never empty given the conditions above, but handle it
+            updated_log = pl.concat(parts) if parts else empty_correction_log()
 
         # Save the updated log
         duckdb_save_table(
@@ -654,7 +1017,8 @@ class CorrectionProcessor:
     ) -> tuple[pl.DataFrame, str | None]:
         """Apply one correction-log row to data.
 
-        Returns `data` unchanged if the row's key can't be located, or if
+        Returns `data` unchanged for "accept" rows, if the row's key can't be
+        located, or if
         applying the correction fails (the underlying data may have changed
         since the correction was logged).
 
@@ -672,12 +1036,16 @@ class CorrectionProcessor:
             message describing why the correction was skipped, or None on
             success.
         """
+        action = row["action"]
+        if action == ACCEPT_ACTION:
+            # Acceptances record a decision; they never change the data.
+            return data, None
+
         key_value = row["KEY"]
         key_col = self._find_key_column(data, key_value)
         if not key_col:
             return data, f"Key '{key_value}' not found in current data"
 
-        action = row["action"]
         column = row["column"]
         recorded_value = row["current_value"]
         new_value = row["new_value"]
@@ -778,8 +1146,8 @@ class CorrectionProcessor:
                 continue
         return None
 
-    @st.cache_data(ttl=30, show_spinner=False)
-    def get_correction_summary(_self, alias: str) -> list[dict[str, Any]]:
+    @st.cache_data(ttl=30, show_spinner=False, hash_funcs=_PROCESSOR_HASH_FUNCS)
+    def get_correction_summary(self, alias: str) -> list[dict[str, Any]]:
         """Get a summary of all correction entries for display.
 
         Parameters
@@ -792,7 +1160,7 @@ class CorrectionProcessor:
         list[dict[str, Any]]
             List of correction summaries with index, description, and details
         """
-        correction_log = _self.get_correction_log(alias)
+        correction_log = self.get_correction_log(alias)
 
         if correction_log.is_empty():
             return []
@@ -813,6 +1181,7 @@ class CorrectionProcessor:
                     "index": index,
                     "action_index": f"{index} - {action} - {description}",
                     "action": action,
+                    "check_type": row["check_type"],
                     "description": description,
                     "key_value": key_value,
                     "column": column,
