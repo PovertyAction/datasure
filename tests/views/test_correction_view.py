@@ -462,10 +462,32 @@ class TestBuildCorrectionLogDisplay:
             "action",
             "status",
             "status_reason",
+            "check_type",
             "column",
             "current_value",
             "new_value",
             "reason",
+            "source",
+        ]
+
+    def test_legacy_log_shows_corrections_page_source(self):
+        result = _build_correction_log_display(self._base_log())
+
+        assert result["source"].to_list() == ["corrections_page"]
+        assert result["check_type"].to_list() == [None]
+
+    def test_accept_rows_show_their_check_type_and_source(self):
+        log = self._base_log(
+            action=["accept"],
+            new_value=[None],
+            check_type=["outliers"],
+            source=["outliers"],
+        )
+
+        result = _build_correction_log_display(log)
+
+        assert result.select("action", "check_type", "source").rows() == [
+            ("accept", "outliers", "outliers")
         ]
 
 
@@ -718,6 +740,11 @@ class TestShouldEnableApplyButton:
         assert should_enable_apply_button("modify value", "reason", None) is False
         assert should_enable_apply_button("modify value", "reason", "") is False
         assert should_enable_apply_button("modify value", "reason", "new") is True
+
+    def test_modify_value_accepts_zero(self):
+        """Zero, as text or a number, is a real value, not a missing one."""
+        assert should_enable_apply_button("modify value", "reason", "0") is True
+        assert should_enable_apply_button("modify value", "reason", 0) is True
 
     def test_remove_value_enabled_with_reason(self):
         assert should_enable_apply_button("remove value", "reason") is True
@@ -1082,6 +1109,26 @@ class TestDisplayCorrectionDetails:
 
         assert not any("Column" in t for t in written)
         assert not any("New Value" in t for t in written)
+        assert not any("Check type" in t for t in written)
+
+    def test_shows_check_type_for_accept_rows(self):
+        summaries = [
+            {
+                "action_index": "0 - accept - x",
+                "action": "accept",
+                "check_type": "outliers",
+                "key_value": "k1",
+                "column": "age",
+                "new_value": None,
+                "reason": "verified",
+            }
+        ]
+
+        with _patched_st(write=MagicMock()):
+            _display_correction_details(summaries, "0 - accept - x")
+            written = [str(c.args[0]) for c in _st.write.call_args_list]
+
+        assert any("Check type" in t and "outliers" in t for t in written)
 
 
 class TestHandleRemoveCorrection:

@@ -1,0 +1,57 @@
+"""Schema and vocabulary of the correction log (`corr_log_{alias}`).
+
+Kept free of Streamlit so the replication package can read logs with the
+same schema and backfill rules as `CorrectionProcessor`.
+"""
+
+import polars as pl
+
+CORRECTIONS_PAGE_SOURCE = "corrections_page"
+
+# An "accept" entry records that a flagged value was reviewed and is correct.
+# It never changes the data; check pages use it to stop flagging the value.
+ACCEPT_ACTION = "accept"
+ACCEPT_CHECK_TYPES = ("outliers", "constraints", "backchecks", "duplicates", "gps")
+
+# Full schema of a persisted correction log (`corr_log_{alias}`), in column order.
+CORRECTION_LOG_SCHEMA: dict[str, pl.DataType] = {
+    "date": pl.Datetime("us"),
+    "KEY": pl.String,
+    "ID": pl.String,
+    "action": pl.String,
+    "column": pl.String,
+    "current_value": pl.String,
+    "new_value": pl.String,
+    "reason": pl.String,
+    "status": pl.String,
+    "status_reason": pl.String,
+    "source": pl.String,
+    "check_type": pl.String,
+}
+
+# Values given to columns that were added to the log after some logs were
+# already persisted. Every legacy entry came from the Corrections page and
+# was applied successfully when it was logged.
+_LOG_BACKFILL_DEFAULTS: dict[str, str | None] = {
+    "status": "Successful",
+    "status_reason": None,
+    "source": CORRECTIONS_PAGE_SOURCE,
+    "check_type": None,
+}
+
+
+def ensure_log_columns(df: pl.DataFrame) -> pl.DataFrame:
+    """Backfill columns missing from logs persisted before those columns existed."""
+    if df.width == 0:
+        return df
+    for column, default in _LOG_BACKFILL_DEFAULTS.items():
+        if column not in df.columns:
+            df = df.with_columns(
+                pl.lit(default, dtype=CORRECTION_LOG_SCHEMA[column]).alias(column)
+            )
+    return df
+
+
+def empty_correction_log() -> pl.DataFrame:
+    """Return a correction log with no entries and the full schema."""
+    return pl.DataFrame(schema=CORRECTION_LOG_SCHEMA)

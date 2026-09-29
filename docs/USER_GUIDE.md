@@ -460,6 +460,18 @@ All corrections are tracked with:
 - Action type
 - Reason for correction
 - Timestamp
+- Status of the last reapply, with the reason if it failed
+- Source: the page that made the entry (`corrections_page` for this page)
+
+The log can also contain **accept** entries. An accept entry records that a
+flagged value was reviewed and is correct. It never changes the data, and the
+Check type column shows which check it applies to. It stays in effect only
+while the value is unchanged. Accept entries are kept in `correction_log.csv`
+in the replication package but are not part of the corrections script. You can
+remove an accept entry with "Remove correction step" like any other entry.
+
+To blank a cell, use "remove value": "modify value" needs a non-empty new
+value (`0` is valid).
 
 #### Verifying Corrections
 
