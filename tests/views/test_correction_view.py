@@ -8,30 +8,32 @@ from unittest.mock import MagicMock, patch
 import polars as pl
 import pytest
 
-from datasure.views.correction_view import (
+from datasure.utils.correction_form import (
     CorrectionFormState,
-    _build_correction_log_display,
-    _display_correction_details,
-    _handle_apply_correction,
-    _handle_remove_correction,
     _render_action_ui,
     _render_column_selector,
     _render_modify_value_action,
     _render_remove_row_action,
     _render_remove_value_action,
+    parse_date_value,
+    should_enable_apply_button,
+    validate_numeric_input,
+)
+from datasure.views.correction_view import (
+    _build_correction_log_display,
+    _display_correction_details,
+    _handle_apply_correction,
+    _handle_remove_correction,
     get_current_value,
     get_key_options,
     load_hfc_config,
     load_tab_config,
     main,
-    parse_date_value,
     render_add_correction_form,
     render_correction_input_form,
     render_page_header,
     render_page_navigation,
     render_value_input_widget,
-    should_enable_apply_button,
-    validate_numeric_input,
     validate_prerequisites,
 )
 
