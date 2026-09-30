@@ -614,7 +614,8 @@ For emergency releases only:
 
 ## Issue Types and Labels
 
-Every issue gets one **Issue Type**, which records the kind of work:
+Every issue except a usage question gets one **Issue Type**, which records the
+kind of work:
 
 | Issue Type | Use for |
 | --- | --- |
@@ -622,22 +623,26 @@ Every issue gets one **Issue Type**, which records the kind of work:
 | Feature | A new capability or an improvement to an existing one |
 | Task | Refactoring, cleanup, tests, docs, or other maintenance |
 
+Questions from the Question form keep the `question` label and no Issue Type.
+If a question turns out to be a bug or a feature request, set the Issue Type
+and remove `question`.
+
 Labels record where the work is and any cross-cutting concern. Add as many as
 apply.
 
 | Label | Use for |
 | --- | --- |
 | `area/checks` | Check pages and `src/datasure/checks/` (name the page in the issue title) |
-| `area/corrections` | Corrections and the correction log (`processing/corrections*.py`) |
-| `area/connectors` | SurveyCTO and local data import (`connectors/`) |
-| `area/replication` | Replication package builder (`replication/`) |
+| `area/corrections` | Corrections and the correction log (`src/datasure/processing/correction*.py`) |
+| `area/connectors` | SurveyCTO and local data import (`src/datasure/connectors/`) |
+| `area/replication` | Replication package builder (`src/datasure/replication/`) |
 | `area/ui` | Layout, views, and shared UI helpers |
 | `area/docs` | Documentation |
 | `area/testing` | Test coverage and test infrastructure |
 | `area/ci-cd` | Build, release, and CI/CD pipeline |
 | `security` | Security hardening, in any area |
 | `performance` | Delays, lags, and slow pages, in any area |
-| `needs-triage` | Applied by the issue forms; remove once the issue has a type and area |
+| `needs-triage` | Applied by the issue forms; remove once the issue has its Issue Type (if any) and area labels |
 | `question` | A usage question rather than a change request |
 | `good first issue` | Small, well-scoped work suitable for newcomers |
 | `help wanted` | Work the maintainers would welcome outside help with |

@@ -6,7 +6,8 @@
 # https://containers.dev/guide/dependabot
 
 # Labels are set explicitly so Dependabot does not recreate its default
-# per-ecosystem labels (python, github_actions); see CONTRIBUTING.md#labels.
+# per-ecosystem labels (python, github_actions); see
+# CONTRIBUTING.md#issue-types-and-labels.
 # All ecosystems use a 7-day cooldown so a compromised upstream release is
 # likely caught before Dependabot proposes it here (zizmor: dependabot-cooldown).
 version: 2
