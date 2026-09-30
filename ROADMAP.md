@@ -106,7 +106,7 @@ Features under exploration for future releases. These are not yet committed to t
 
 ## How to Influence the Roadmap
 
-- **Request a feature**: [Open an issue](https://github.com/PovertyAction/datasure/issues/new) on GitHub with the `enhancement` label
+- **Request a feature**: [Open a feature request](https://github.com/PovertyAction/datasure/issues/new?template=feature_request.yml) on GitHub
 - **Vote on priorities**: Upvote existing issues to signal demand
 - **Contribute**: See [CONTRIBUTING.md](CONTRIBUTING.md) to contribute code or documentation
 - **Contact the team**: Reach out at <researchsupport@poverty-action.org>
