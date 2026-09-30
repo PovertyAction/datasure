@@ -3,6 +3,8 @@
 import polars as pl
 import pytest
 
+from datasure.processing.correction_log import CORRECTION_ACTIONS, Action
+
 
 class TestConfigViewLogic:
     """Test configuration view logic patterns."""
@@ -91,12 +93,11 @@ class TestCorrectionViewLogic:
 
     def test_correction_actions_constants(self):
         """Test correction actions constants."""
-        CORRECTION_ACTIONS = ("modify value", "remove value", "remove row")
-
         assert len(CORRECTION_ACTIONS) == 3
         assert "modify value" in CORRECTION_ACTIONS
         assert "remove value" in CORRECTION_ACTIONS
         assert "remove row" in CORRECTION_ACTIONS
+        assert Action.ACCEPT not in CORRECTION_ACTIONS
 
     def test_correction_form_logic(self):
         """Test correction form logic patterns."""

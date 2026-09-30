@@ -9,13 +9,11 @@ import polars as pl
 import streamlit as st
 
 from datasure.processing.correction_log import (
-    ACCEPT_ACTION,
     ACCEPT_CHECK_TYPES,
+    CORRECTION_ACTIONS,
     CORRECTION_LOG_SCHEMA,
     CORRECTIONS_PAGE_SOURCE,
-    MODIFY_VALUE_ACTION,
-    REMOVE_ROW_ACTION,
-    REMOVE_VALUE_ACTION,
+    Action,
     empty_correction_log,
     ensure_log_columns,
 )
@@ -41,13 +39,13 @@ def _describe_correction_row(row: dict[str, Any]) -> str:
     column = row["column"]
     new_value = row["new_value"]
 
-    if action == MODIFY_VALUE_ACTION:
+    if action == Action.MODIFY_VALUE:
         return f"Modify {column} for key {key_value} to '{new_value}'"
-    if action == REMOVE_VALUE_ACTION:
+    if action == Action.REMOVE_VALUE:
         return f"Remove {column} value for key {key_value}"
-    if action == REMOVE_ROW_ACTION:
+    if action == Action.REMOVE_ROW:
         return f"Remove entire row for key {key_value}"
-    if action == ACCEPT_ACTION:
+    if action == Action.ACCEPT:
         target = column if column is not None else "coordinates"
         return f"Accept {row['check_type']} flag on {target} for key {key_value}"
     return f"{action} for key {key_value}"
@@ -182,7 +180,7 @@ def _validate_acceptance(
 def _build_log_row(
     key_value: str,
     current_id: Any | None,
-    action: str,
+    action: Action,
     column: str | None,
     current_value: Any | None,
     new_value: Any | None,
@@ -219,8 +217,8 @@ class CorrectionEntry:
     ----------
     key_value : str
         The KEY of the record
-    action : str
-        "modify value", "remove value", "remove row" or "accept"
+    action : Action
+        The action to record; see `Action`
     reason : str
         Why the entry is made. Required.
     column : str | None
@@ -238,7 +236,7 @@ class CorrectionEntry:
     """
 
     key_value: str
-    action: str
+    action: Action
     reason: str
     column: str | None = None
     current_value: Any = None
@@ -350,7 +348,7 @@ class CorrectionProcessor:
         alias: str,
         key_value: str,
         current_id: str | None,
-        action: str,
+        action: Action,
         column: str | None,
         current_value: Any | None,
         new_value: Any | None,
@@ -369,7 +367,7 @@ class CorrectionProcessor:
         current_id : str | None
             The Survey ID value for this KEY, if a Survey ID column is
             configured for the dataset
-        action : str
+        action : Action
             The correction action
         column : str | None
             The column being modified
@@ -494,7 +492,7 @@ class CorrectionProcessor:
             alias=alias,
             key_value=key_value,
             current_id=survey_id_value,
-            action=ACCEPT_ACTION,
+            action=Action.ACCEPT,
             column=column,
             current_value=current_value,
             new_value=None,
@@ -531,7 +529,7 @@ class CorrectionProcessor:
             return empty_correction_log()
 
         acceptances = log.filter(
-            (pl.col("action") == ACCEPT_ACTION) & (pl.col("check_type") == check_type)
+            (pl.col("action") == Action.ACCEPT) & (pl.col("check_type") == check_type)
         )
         if acceptances.is_empty():
             return acceptances
@@ -548,7 +546,7 @@ class CorrectionProcessor:
         alias: str,
         key_col: str,
         key_value: str,
-        action: str,
+        action: Action,
         column: str | None = None,
         current_value: Any | None = None,
         new_value: Any | None = None,
@@ -565,8 +563,8 @@ class CorrectionProcessor:
             The key column name
         key_value : str
             The key value to correct
-        action : str
-            The correction action ('modify value', 'remove value', 'remove row')
+        action : Action
+            The correction action; any of `CORRECTION_ACTIONS`
         column : str | None
             The column to modify
         current_value : Any | None
@@ -689,18 +687,14 @@ class CorrectionProcessor:
                 f"A reason is required for {entry.action} on {entry.key_value}"
             )
 
-        if entry.action == ACCEPT_ACTION:
+        if entry.action == Action.ACCEPT:
             _validate_acceptance(entry.check_type, entry.column, entry.current_value)
             _check_acceptance_against_data(
                 data, key_col, entry.key_value, entry.column, entry.current_value
             )
             return data
 
-        if entry.action not in (
-            MODIFY_VALUE_ACTION,
-            REMOVE_VALUE_ACTION,
-            REMOVE_ROW_ACTION,
-        ):
+        if entry.action not in CORRECTION_ACTIONS:
             raise ValueError(f"Unknown correction action '{entry.action}'")
 
         is_valid, error_msg = self.validate_correction_input(
@@ -718,16 +712,16 @@ class CorrectionProcessor:
         data: pl.DataFrame,
         key_col: str,
         key_value: str,
-        action: str,
+        action: Action,
         column: str | None,
         new_value: Any | None,
     ) -> pl.DataFrame:
         """Apply one correction action to `data`; unknown actions leave it as is."""
-        if action == MODIFY_VALUE_ACTION and column and new_value is not None:
+        if action == Action.MODIFY_VALUE and column and new_value is not None:
             return self._apply_modify_value(data, key_col, key_value, column, new_value)
-        if action == REMOVE_VALUE_ACTION and column:
+        if action == Action.REMOVE_VALUE and column:
             return self._apply_remove_value(data, key_col, key_value, column)
-        if action == REMOVE_ROW_ACTION:
+        if action == Action.REMOVE_ROW:
             return self._apply_remove_row(data, key_col, key_value)
         return data
 
@@ -887,7 +881,7 @@ class CorrectionProcessor:
         data: pl.DataFrame,
         key_col: str,
         key_value: str,
-        action: str,
+        action: Action,
         column: str | None = None,
         new_value: Any | None = None,
     ) -> tuple[bool, str]:
@@ -901,7 +895,7 @@ class CorrectionProcessor:
             The key column name
         key_value : str
             The key value
-        action : str
+        action : Action
             The correction action
         column : str | None
             The column to modify
@@ -919,13 +913,13 @@ class CorrectionProcessor:
         if key_value not in data[key_col].to_list():
             return False, f"Key value '{key_value}' not found in data"
 
-        if action in [MODIFY_VALUE_ACTION, REMOVE_VALUE_ACTION]:
+        if action in (Action.MODIFY_VALUE, Action.REMOVE_VALUE):
             if not column:
                 return False, "Column must be specified for modify/remove value actions"
             if column not in data.columns:
                 return False, f"Column '{column}' not found in data"
 
-        if action == MODIFY_VALUE_ACTION and new_value is None:
+        if action == Action.MODIFY_VALUE and new_value is None:
             return False, "New value must be provided for modify value action"
 
         return True, ""
@@ -1087,7 +1081,7 @@ class CorrectionProcessor:
             success.
         """
         action = row["action"]
-        if action == ACCEPT_ACTION:
+        if action == Action.ACCEPT:
             # Acceptances record a decision; they never change the data.
             return data, None
 
@@ -1100,7 +1094,7 @@ class CorrectionProcessor:
         recorded_value = row["current_value"]
         new_value = row["new_value"]
 
-        if action in (MODIFY_VALUE_ACTION, REMOVE_VALUE_ACTION) and column:
+        if action in (Action.MODIFY_VALUE, Action.REMOVE_VALUE) and column:
             if column not in data.columns:
                 return data, f"Column '{column}' no longer available in the data"
 
@@ -1111,16 +1105,16 @@ class CorrectionProcessor:
                 return data, mismatch
 
         try:
-            if action == MODIFY_VALUE_ACTION and column and new_value is not None:
+            if action == Action.MODIFY_VALUE and column and new_value is not None:
                 return (
                     self._apply_modify_value(
                         data, key_col, key_value, column, new_value
                     ),
                     None,
                 )
-            if action == REMOVE_VALUE_ACTION and column:
+            if action == Action.REMOVE_VALUE and column:
                 return self._apply_remove_value(data, key_col, key_value, column), None
-            if action == REMOVE_ROW_ACTION:
+            if action == Action.REMOVE_ROW:
                 return self._apply_remove_row(data, key_col, key_value), None
         except Exception as e:
             # Skip corrections that fail (data may have changed)

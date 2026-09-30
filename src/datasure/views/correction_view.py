@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from datasure.processing.correction_log import (
     CORRECTIONS_PAGE_SOURCE,
+    Action,
     ensure_log_columns,
 )
 from datasure.processing.corrections import CorrectionProcessor
@@ -283,7 +284,7 @@ def _handle_apply_correction(
     alias: str,
     key_col: str,
     key_value: str,
-    action: str,
+    action: Action,
     column: str | None,
     current_value: Any,
     new_value: Any,
@@ -305,7 +306,7 @@ def _handle_apply_correction(
         The name of the Survey KEY column.
     key_value : str
         The key value to correct.
-    action : str
+    action : Action
         The correction action type.
     column : str | None
         The column to modify (if applicable).
