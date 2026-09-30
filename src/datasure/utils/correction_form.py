@@ -24,11 +24,8 @@ import polars as pl
 from pydantic import BaseModel, Field
 
 from datasure.processing.correction_log import (
-    ACCEPT_ACTION,
     CORRECTION_ACTIONS,
-    MODIFY_VALUE_ACTION,
-    REMOVE_ROW_ACTION,
-    REMOVE_VALUE_ACTION,
+    Action,
 )
 from datasure.processing.corrections import CorrectionEntry, CorrectionProcessor
 
@@ -39,7 +36,7 @@ class CorrectionFormState(BaseModel):
     """State management for correction form inputs."""
 
     key_value: str = Field(..., description="The selected key value for correction")
-    action: str = Field(..., description="The correction action type")
+    action: Action = Field(..., description="The correction action type")
     column: str | None = Field(None, description="The column to modify (if applicable)")
     current_value: Any | None = Field(
         None, description="The current value (if applicable)"
@@ -152,13 +149,15 @@ def validate_numeric_input(value: str, dtype: pl.DataType) -> tuple[bool, str | 
     return True, None
 
 
-def should_enable_apply_button(action: str, reason: str, new_value: Any = None) -> bool:
+def should_enable_apply_button(
+    action: Action, reason: str, new_value: Any = None
+) -> bool:
     """
     Determine if the apply button should be enabled.
 
     Parameters
     ----------
-    action : str
+    action : Action
         The correction action type.
     reason : str
         The reason for correction.
@@ -175,9 +174,9 @@ def should_enable_apply_button(action: str, reason: str, new_value: Any = None) 
     if not reason:
         return False
 
-    if action == MODIFY_VALUE_ACTION:
+    if action == Action.MODIFY_VALUE:
         return new_value is not None and new_value != ""
-    return action in [REMOVE_VALUE_ACTION, REMOVE_ROW_ACTION, ACCEPT_ACTION]
+    return action in [Action.REMOVE_VALUE, Action.REMOVE_ROW, Action.ACCEPT]
 
 
 def render_value_input_widget(
@@ -283,7 +282,7 @@ def _render_modify_value_action(
 
     if not column:
         return CorrectionFormState(
-            key_value=key_value, action=MODIFY_VALUE_ACTION, column=None
+            key_value=key_value, action=Action.MODIFY_VALUE, column=None
         )
 
     col_dtype = data.schema[column]
@@ -296,7 +295,7 @@ def _render_modify_value_action(
 
     return CorrectionFormState(
         key_value=key_value,
-        action=MODIFY_VALUE_ACTION,
+        action=Action.MODIFY_VALUE,
         column=column,
         current_value=current_value,
         new_value=new_value,
@@ -319,7 +318,7 @@ def _render_remove_value_action(
 
     return CorrectionFormState(
         key_value=key_value,
-        action=REMOVE_VALUE_ACTION,
+        action=Action.REMOVE_VALUE,
         column=column,
         current_value=current_value,
     )
@@ -331,7 +330,7 @@ def _render_remove_row_action(key_value: str) -> CorrectionFormState:
 
     st.warning("This will remove the row with the selected key value from the dataset.")
 
-    return CorrectionFormState(key_value=key_value, action=REMOVE_ROW_ACTION)
+    return CorrectionFormState(key_value=key_value, action=Action.REMOVE_ROW)
 
 
 def _render_accept_action(
@@ -359,7 +358,7 @@ def _render_accept_action(
 
     return CorrectionFormState(
         key_value=key_value,
-        action=ACCEPT_ACTION,
+        action=Action.ACCEPT,
         column=column,
         current_value=current_value,
         check_type=check_type,
@@ -367,7 +366,7 @@ def _render_accept_action(
 
 
 def _render_action_ui(
-    action: str,
+    action: Action,
     data: pl.DataFrame,
     key_col: str,
     key_value: str,
@@ -377,22 +376,22 @@ def _render_action_ui(
     check_type: str | None = None,
 ) -> CorrectionFormState:
     """Render the inputs for `action` and return the collected state."""
-    if action == MODIFY_VALUE_ACTION:
+    if action == Action.MODIFY_VALUE:
         return _render_modify_value_action(
             data, key_col, key_value, key_namespace, column, current_value
         )
 
-    if action == REMOVE_VALUE_ACTION:
+    if action == Action.REMOVE_VALUE:
         return _render_remove_value_action(
             data, key_col, key_value, key_namespace, column, current_value
         )
 
-    if action == ACCEPT_ACTION:
+    if action == Action.ACCEPT:
         return _render_accept_action(
             data, key_col, key_value, key_namespace, column, current_value, check_type
         )
 
-    if action == REMOVE_ROW_ACTION:
+    if action == Action.REMOVE_ROW:
         return _render_remove_row_action(key_value)
 
     # Never fall back to a destructive action for an unrecognized value.
@@ -405,7 +404,7 @@ def render_correction_inputs(
     key_value: str,
     *,
     key_namespace: str | int,
-    actions: Sequence[str] = CORRECTION_ACTIONS,
+    actions: Sequence[Action] = CORRECTION_ACTIONS,
     column: str | None = None,
     current_value: Any = None,
     check_type: str | None = None,
@@ -424,7 +423,7 @@ def render_correction_inputs(
         The KEY the entry applies to.
     key_namespace : str | int
         Suffix for unique widget keys, so several forms can render at once.
-    actions : Sequence[str]
+    actions : Sequence[Action]
         The actions to offer. May include "accept".
     column : str | None
         A prefilled column. If None, the user picks one when the action
@@ -533,7 +532,7 @@ def render_correction_form(
     *,
     key_namespace: str | int,
     source: str,
-    actions: Sequence[str] = CORRECTION_ACTIONS,
+    actions: Sequence[Action] = CORRECTION_ACTIONS,
     column: str | None = None,
     current_value: Any = None,
     check_type: str | None = None,

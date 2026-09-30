@@ -4,19 +4,35 @@ Kept free of Streamlit so the replication package can read logs with the
 same schema and backfill rules as `CorrectionProcessor`.
 """
 
+from enum import StrEnum
+
 import polars as pl
 
 CORRECTIONS_PAGE_SOURCE = "corrections_page"
 
-# Actions that change the data when a correction is applied or replayed.
-MODIFY_VALUE_ACTION = "modify value"
-REMOVE_VALUE_ACTION = "remove value"
-REMOVE_ROW_ACTION = "remove row"
-CORRECTION_ACTIONS = (MODIFY_VALUE_ACTION, REMOVE_VALUE_ACTION, REMOVE_ROW_ACTION)
 
-# An "accept" entry records that a flagged value was reviewed and is correct.
-# It never changes the data; check pages use it to stop flagging the value.
-ACCEPT_ACTION = "accept"
+class Action(StrEnum):
+    """An action recorded in the correction log's `action` column.
+
+    Values are stored in persisted logs and matched on replay and by the
+    replication script, so changing one requires migrating existing logs.
+    """
+
+    MODIFY_VALUE = "modify value"
+    REMOVE_VALUE = "remove value"
+    REMOVE_ROW = "remove row"
+    # Records that a flagged value was reviewed and is correct. It never
+    # changes the data; check pages use it to stop flagging the value.
+    ACCEPT = "accept"
+
+
+# Actions that change the data when a correction is applied or replayed.
+CORRECTION_ACTIONS: tuple[Action, ...] = (
+    Action.MODIFY_VALUE,
+    Action.REMOVE_VALUE,
+    Action.REMOVE_ROW,
+)
+
 ACCEPT_CHECK_TYPES = ("outliers", "constraints", "backchecks", "duplicates", "gps")
 
 # Full schema of a persisted correction log (`corr_log_{alias}`), in column order.

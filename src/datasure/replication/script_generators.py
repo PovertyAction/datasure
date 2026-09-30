@@ -6,12 +6,7 @@ from datetime import date
 
 import polars as pl
 
-from datasure.processing.correction_log import (
-    ACCEPT_ACTION,
-    MODIFY_VALUE_ACTION,
-    REMOVE_ROW_ACTION,
-    REMOVE_VALUE_ACTION,
-)
+from datasure.processing.correction_log import Action
 
 SCRIPT_EXT = "do"
 _C = "*"  # Stata comment character
@@ -76,17 +71,17 @@ def _emit_stata(
     escaped_key = _escape(key_val)
     escaped_val = _escape(new_val) if new_val is not None else None
 
-    if action == MODIFY_VALUE_ACTION and col and new_val is not None:
+    if action == Action.MODIFY_VALUE and col and new_val is not None:
         if _is_numeric(new_val):
             stmt = f'replace {col} = {new_val} if {key_col} == "{escaped_key}"'
         else:
             stmt = f'replace {col} = "{escaped_val}" if {key_col} == "{escaped_key}"'
-    elif action == REMOVE_VALUE_ACTION and col:
+    elif action == Action.REMOVE_VALUE and col:
         if _is_numeric(new_val):
             stmt = f'replace {col} = . if {key_col} == "{escaped_key}"'
         else:
             stmt = f'replace {col} = "" if {key_col} == "{escaped_key}"'
-    elif action == REMOVE_ROW_ACTION:
+    elif action == Action.REMOVE_ROW:
         stmt = f'drop if {key_col} == "{escaped_key}"'
     else:
         return []
@@ -334,7 +329,7 @@ def generate_corrections_script(
     # "accept" rows record that a flagged value was reviewed and is correct;
     # they never change the data, so they have no Stata equivalent.
     if "action" in correction_log.columns:
-        correction_log = correction_log.filter(pl.col("action") != ACCEPT_ACTION)
+        correction_log = correction_log.filter(pl.col("action") != Action.ACCEPT)
 
     if correction_log.is_empty():
         return (
