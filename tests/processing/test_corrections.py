@@ -1318,6 +1318,27 @@ class TestAcceptAction:
                 reason="ok",
             )
 
+    @pytest.mark.parametrize(
+        "current_value",
+        [{}, {"gps_lat": 5.6037}],
+        ids=["empty", "latitude_only"],
+    )
+    def test_gps_acceptance_requires_both_coordinates(self, store, current_value):
+        _seed_prep(store, self._gps_data())
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="GPS"):
+            processor.accept_value(
+                alias="survey",
+                key_value="key1",
+                check_type="gps",
+                column=None,
+                current_value=current_value,
+                reason="ok",
+            )
+
+        assert processor.get_correction_log("survey").is_empty()
+
     def test_replay_skips_accept_rows(self, store, sample_data):
         _seed_prep(store, sample_data)
         processor = CorrectionProcessor("p1")

@@ -960,6 +960,17 @@ class TestRenderActionUi:
             state = _render_action_ui("remove row", data, "KEY", "k1", 0)
         assert state.action == "remove row"
 
+    @pytest.mark.parametrize("action", ["modify ID", "", None])
+    def test_rejects_unknown_action_instead_of_removing_row(self, action):
+        data = pl.DataFrame({"KEY": ["k1"], "name": ["Alice"]})
+        warning = MagicMock()
+        with (
+            _patched_st(warning=warning),
+            pytest.raises(ValueError, match="Unsupported correction action"),
+        ):
+            _render_action_ui(action, data, "KEY", "k1", 0)
+        warning.assert_not_called()
+
 
 class TestHandleApplyCorrection:
     """Test _handle_apply_correction: validation failure, success, exception."""
