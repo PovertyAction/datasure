@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   package, which now exports legacy logs with these columns) — #296
 - **Accept action**: `CorrectionProcessor.accept_value` records that a flagged
   value (outliers, constraints, backchecks, duplicates, GPS) was reviewed and
-  is correct, with a required reason. `get_active_acceptances` returns the
+  is correct, with a required reason. An acceptance is rejected if the data
+  no longer holds the value being accepted. `get_active_acceptances` returns the
   acceptances whose recorded value still matches the data (for GPS, both
   latitude and longitude). Replay and the generated `4_corrections.do` skip
   `accept` rows; `correction_log.csv` keeps them, and the README's correction

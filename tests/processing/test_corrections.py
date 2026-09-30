@@ -1174,6 +1174,7 @@ class TestAcceptAction:
     def _accept_age(self, processor, key="key1", value=25, reason="verified"):
         processor.accept_value(
             alias="survey",
+            key_col="survey_key",
             key_value=key,
             check_type="outliers",
             column="age",
@@ -1211,6 +1212,7 @@ class TestAcceptAction:
         with pytest.raises(ValueError, match="check type"):
             processor.accept_value(
                 alias="survey",
+                key_col="survey_key",
                 key_value="key1",
                 check_type="missing",
                 column="age",
@@ -1267,6 +1269,7 @@ class TestAcceptAction:
     def _accept_gps(self, processor):
         processor.accept_value(
             alias="survey",
+            key_col="survey_key",
             key_value="key1",
             check_type="gps",
             column=None,
@@ -1311,6 +1314,7 @@ class TestAcceptAction:
         with pytest.raises(ValueError, match="GPS"):
             processor.accept_value(
                 alias="survey",
+                key_col="survey_key",
                 key_value="key1",
                 check_type="gps",
                 column="gps_lat",
@@ -1330,6 +1334,7 @@ class TestAcceptAction:
         with pytest.raises(ValueError, match="GPS"):
             processor.accept_value(
                 alias="survey",
+                key_col="survey_key",
                 key_value="key1",
                 check_type="gps",
                 column=None,
@@ -1337,6 +1342,95 @@ class TestAcceptAction:
                 reason="ok",
             )
 
+        assert processor.get_correction_log("survey").is_empty()
+
+    def test_accept_rejects_a_value_that_changed_since_it_was_flagged(
+        self, store, sample_data
+    ):
+        # key1's age is 25; the check page still shows the stale value 99
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="has changed since it was flagged"):
+            self._accept_age(processor, value=99)
+
+        assert processor.get_correction_log("survey").is_empty()
+
+    def test_gps_accept_rejects_a_changed_coordinate(self, store):
+        _seed_prep(store, self._gps_data())
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match=r"'gps_lon'.*has changed"):
+            processor.accept_value(
+                alias="survey",
+                key_col="survey_key",
+                key_value="key1",
+                check_type="gps",
+                column=None,
+                current_value={"gps_lat": 5.6037, "gps_lon": -0.2},
+                reason="ok",
+            )
+
+        assert processor.get_correction_log("survey").is_empty()
+
+    @pytest.mark.parametrize(
+        ("key", "column", "message"),
+        [
+            ("missing", "age", "Key value 'missing' not found"),
+            ("key1", "height", "Column 'height' not found"),
+        ],
+    )
+    def test_accept_rejects_unknown_key_or_column(
+        self, store, sample_data, key, column, message
+    ):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match=message):
+            processor.accept_value(
+                alias="survey",
+                key_col="survey_key",
+                key_value=key,
+                check_type="outliers",
+                column=column,
+                current_value=25,
+                reason="ok",
+            )
+
+        assert processor.get_correction_log("survey").is_empty()
+
+    def test_apply_corrections_rejects_a_stale_acceptance_atomically(
+        self, store, sample_data
+    ):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="has changed since it was flagged"):
+            processor.apply_corrections(
+                alias="survey",
+                key_col="survey_key",
+                entries=[
+                    CorrectionEntry(
+                        key_value="key2",
+                        action="modify value",
+                        column="age",
+                        current_value=30,
+                        new_value=31,
+                        reason="typo",
+                    ),
+                    CorrectionEntry(
+                        key_value="key1",
+                        action="accept",
+                        check_type="outliers",
+                        column="age",
+                        current_value=99,
+                        reason="verified",
+                    ),
+                ],
+                source="outliers",
+            )
+
+        assert processor.get_corrected_data("survey").equals(sample_data)
         assert processor.get_correction_log("survey").is_empty()
 
     def test_replay_skips_accept_rows(self, store, sample_data):
@@ -1557,6 +1651,7 @@ class TestCorrectionSummaryDescribesAcceptances:
         processor = CorrectionProcessor("p1")
         processor.accept_value(
             alias="survey",
+            key_col="survey_key",
             key_value="key1",
             check_type="outliers",
             column="age",
@@ -1575,6 +1670,7 @@ class TestCorrectionSummaryDescribesAcceptances:
         processor = CorrectionProcessor("p1")
         processor.accept_value(
             alias="survey",
+            key_col="KEY",
             key_value="k1",
             check_type="gps",
             column=None,
@@ -1590,9 +1686,10 @@ class TestCorrectionSummaryDescribesAcceptances:
 class TestAcceptanceMatching:
     """Acceptances compare values, not their pandas/polars string forms."""
 
-    def _accept(self, processor, key, column, value, key_col_data=None):
+    def _accept(self, processor, key, column, value, key_col="KEY"):
         processor.accept_value(
             alias="survey",
+            key_col=key_col,
             key_value=key,
             check_type="constraints",
             column=column,
@@ -1628,16 +1725,16 @@ class TestAcceptanceMatching:
     def test_a_different_number_does_not_match(self, store):
         _seed_prep(store, pl.DataFrame({"KEY": ["k1"], "age": [25]}))
         processor = CorrectionProcessor("p1")
-        self._accept(processor, "k1", "age", 25.5)
 
-        assert processor.get_active_acceptances(
-            "survey", "constraints", "KEY"
-        ).is_empty()
+        with pytest.raises(ValueError, match="has changed since it was flagged"):
+            self._accept(processor, "k1", "age", 25.5)
+
+        assert processor.get_correction_log("survey").is_empty()
 
     def test_non_string_key_column_is_supported(self, store):
         _seed_prep(store, pl.DataFrame({"hhid": [101, 102], "age": [25, 30]}))
         processor = CorrectionProcessor("p1")
-        self._accept(processor, "102", "age", 30)
+        self._accept(processor, "102", "age", 30, key_col="hhid")
 
         active = processor.get_active_acceptances("survey", "constraints", "hhid")
 
@@ -1646,11 +1743,11 @@ class TestAcceptanceMatching:
     def test_duplicate_keys_must_all_hold_the_accepted_value(self, store):
         _seed_prep(store, pl.DataFrame({"KEY": ["k1", "k1"], "age": [25, 40]}))
         processor = CorrectionProcessor("p1")
-        self._accept(processor, "k1", "age", 25)
 
-        assert processor.get_active_acceptances(
-            "survey", "constraints", "KEY"
-        ).is_empty()
+        with pytest.raises(ValueError, match="has changed since it was flagged"):
+            self._accept(processor, "k1", "age", 25)
+
+        assert processor.get_correction_log("survey").is_empty()
 
 
 class TestApplyCorrectionsStorageFailure:

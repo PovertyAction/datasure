@@ -102,25 +102,58 @@ def _accepted_values(row: dict[str, Any]) -> dict[str, str | None]:
     return json.loads(row["current_value"]) if row["current_value"] else {}
 
 
+def _acceptance_mismatch(
+    data: pl.DataFrame, key_col: str, key_value: Any, accepted: dict[str, str | None]
+) -> str | None:
+    """Explain why the data doesn't hold the accepted values, or None if it does.
+
+    `accepted` maps each column to its value as encoded in the log. The log
+    stores KEY as text, so the key column is compared as text. If the KEY
+    appears on several rows, every row must hold the accepted values.
+    """
+    if key_col not in data.columns:
+        return f"Key column '{key_col}' not found in data"
+    records = data.filter(pl.col(key_col).cast(pl.String) == str(key_value))
+    if records.is_empty():
+        return f"Key value '{key_value}' not found in data"
+    for column, value in accepted.items():
+        if column not in records.columns:
+            return f"Column '{column}' not found in data"
+        if not all(_values_match(v, value) for v in records[column].to_list()):
+            return (
+                f"The value of '{column}' for key '{key_value}' has changed since "
+                "it was flagged. Refresh the page and review it again."
+            )
+    return None
+
+
 def _acceptance_is_active(
     data: pl.DataFrame, key_col: str, row: dict[str, Any]
 ) -> bool:
-    """Whether the data still holds the values an acceptance recorded.
+    """Whether the data still holds the values an acceptance recorded."""
+    return (
+        _acceptance_mismatch(data, key_col, row["KEY"], _accepted_values(row)) is None
+    )
 
-    The log stores KEY as text, so the key column is compared as text. If
-    the KEY appears on several rows, every row must hold the accepted values.
+
+def _check_acceptance_against_data(
+    data: pl.DataFrame,
+    key_col: str,
+    key_value: Any,
+    column: str | None,
+    current_value: Any,
+) -> None:
+    """Raise ValueError unless the data holds the value being accepted.
+
+    The value is encoded exactly as the log will store it, so an acceptance
+    that passes this check is active as soon as it is logged.
     """
-    if key_col not in data.columns:
-        return False
-    records = data.filter(pl.col(key_col).cast(pl.String) == str(row["KEY"]))
-    if records.is_empty():
-        return False
-    for column, accepted in _accepted_values(row).items():
-        if column not in records.columns:
-            return False
-        if not all(_values_match(v, accepted) for v in records[column].to_list()):
-            return False
-    return True
+    accepted = _accepted_values(
+        {"column": column, "current_value": _encode_log_value(current_value)}
+    )
+    mismatch = _acceptance_mismatch(data, key_col, key_value, accepted)
+    if mismatch:
+        raise ValueError(mismatch)
 
 
 def _validate_acceptance(
@@ -405,6 +438,7 @@ class CorrectionProcessor:
     def accept_value(
         self,
         alias: str,
+        key_col: str,
         key_value: str,
         check_type: str,
         column: str | None,
@@ -422,6 +456,8 @@ class CorrectionProcessor:
         ----------
         alias : str
             The data alias/table name
+        key_col : str
+            The key column name
         key_value : str
             The KEY of the accepted record
         check_type : str
@@ -442,12 +478,17 @@ class CorrectionProcessor:
         Raises
         ------
         ValueError
-            If the check type is unknown, the reason is blank, or the column
-            and value do not fit the check type.
+            If the check type is unknown, the reason is blank, the column and
+            value do not fit the check type, or the corrected data does not
+            hold `current_value` for the KEY (for example, because the value
+            changed after it was flagged).
         """
         _validate_acceptance(check_type, column, current_value)
         if not reason or not reason.strip():
             raise ValueError("A reason is required to accept a value")
+        _check_acceptance_against_data(
+            self.get_corrected_data(alias), key_col, key_value, column, current_value
+        )
 
         self.add_correction_entry(
             alias=alias,
@@ -650,11 +691,9 @@ class CorrectionProcessor:
 
         if entry.action == ACCEPT_ACTION:
             _validate_acceptance(entry.check_type, entry.column, entry.current_value)
-            is_valid, error_msg = self.validate_correction_input(
-                data, key_col, entry.key_value, REMOVE_ROW_ACTION
+            _check_acceptance_against_data(
+                data, key_col, entry.key_value, entry.column, entry.current_value
             )
-            if not is_valid:
-                raise ValueError(error_msg)
             return data
 
         if entry.action not in (
