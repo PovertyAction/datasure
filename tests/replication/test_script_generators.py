@@ -363,3 +363,35 @@ class TestGenerateImportScript:
 
     def test_header_present(self, script):
         assert "Import Script" in script
+
+
+class TestCorrectionsScriptSkipsAcceptances:
+    """Accept rows record a review decision and never become Stata commands."""
+
+    def _log(self, actions: list[str]) -> pl.DataFrame:
+        n = len(actions)
+        return pl.DataFrame(
+            {
+                "action": actions,
+                "KEY": [f"k{i}" for i in range(n)],
+                "column": ["age"] * n,
+                "new_value": ["30" if a == "modify value" else None for a in actions],
+                "reason": ["checked"] * n,
+                "check_type": ["outliers" if a == "accept" else None for a in actions],
+            }
+        )
+
+    def test_accept_rows_emit_no_commands(self):
+        script = generate_corrections_script(
+            self._log(["accept", "modify value"]), "KEY", "P", "S", "0.1"
+        )
+
+        assert 'replace age = 30 if KEY == "k1"' in script
+        assert "k0" not in script
+
+    def test_log_with_only_acceptances_has_no_corrections(self):
+        script = generate_corrections_script(
+            self._log(["accept", "accept"]), "KEY", "P", "S", "0.1"
+        )
+
+        assert "No corrections recorded" in script
