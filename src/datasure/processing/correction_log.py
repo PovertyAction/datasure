@@ -8,6 +8,12 @@ import polars as pl
 
 CORRECTIONS_PAGE_SOURCE = "corrections_page"
 
+# Actions that change the data when a correction is applied or replayed.
+MODIFY_VALUE_ACTION = "modify value"
+REMOVE_VALUE_ACTION = "remove value"
+REMOVE_ROW_ACTION = "remove row"
+CORRECTION_ACTIONS = (MODIFY_VALUE_ACTION, REMOVE_VALUE_ACTION, REMOVE_ROW_ACTION)
+
 # An "accept" entry records that a flagged value was reviewed and is correct.
 # It never changes the data; check pages use it to stop flagging the value.
 ACCEPT_ACTION = "accept"

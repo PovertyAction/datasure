@@ -23,12 +23,16 @@ from typing import Any
 import polars as pl
 from pydantic import BaseModel, Field
 
-from datasure.processing.correction_log import ACCEPT_ACTION
+from datasure.processing.correction_log import (
+    ACCEPT_ACTION,
+    CORRECTION_ACTIONS,
+    MODIFY_VALUE_ACTION,
+    REMOVE_ROW_ACTION,
+    REMOVE_VALUE_ACTION,
+)
 from datasure.processing.corrections import CorrectionEntry, CorrectionProcessor
 
 logger = logging.getLogger(__name__)
-
-CORRECTION_ACTIONS = ("modify value", "remove value", "remove row")
 
 
 class CorrectionFormState(BaseModel):
@@ -171,9 +175,9 @@ def should_enable_apply_button(action: str, reason: str, new_value: Any = None) 
     if not reason:
         return False
 
-    if action == "modify value":
+    if action == MODIFY_VALUE_ACTION:
         return new_value is not None and new_value != ""
-    return action in ["remove value", "remove row", ACCEPT_ACTION]
+    return action in [REMOVE_VALUE_ACTION, REMOVE_ROW_ACTION, ACCEPT_ACTION]
 
 
 def render_value_input_widget(
@@ -279,7 +283,7 @@ def _render_modify_value_action(
 
     if not column:
         return CorrectionFormState(
-            key_value=key_value, action="modify value", column=None
+            key_value=key_value, action=MODIFY_VALUE_ACTION, column=None
         )
 
     col_dtype = data.schema[column]
@@ -292,7 +296,7 @@ def _render_modify_value_action(
 
     return CorrectionFormState(
         key_value=key_value,
-        action="modify value",
+        action=MODIFY_VALUE_ACTION,
         column=column,
         current_value=current_value,
         new_value=new_value,
@@ -315,7 +319,7 @@ def _render_remove_value_action(
 
     return CorrectionFormState(
         key_value=key_value,
-        action="remove value",
+        action=REMOVE_VALUE_ACTION,
         column=column,
         current_value=current_value,
     )
@@ -327,7 +331,7 @@ def _render_remove_row_action(key_value: str) -> CorrectionFormState:
 
     st.warning("This will remove the row with the selected key value from the dataset.")
 
-    return CorrectionFormState(key_value=key_value, action="remove row")
+    return CorrectionFormState(key_value=key_value, action=REMOVE_ROW_ACTION)
 
 
 def _render_accept_action(
@@ -373,12 +377,12 @@ def _render_action_ui(
     check_type: str | None = None,
 ) -> CorrectionFormState:
     """Render the inputs for `action` and return the collected state."""
-    if action == "modify value":
+    if action == MODIFY_VALUE_ACTION:
         return _render_modify_value_action(
             data, key_col, key_value, key_namespace, column, current_value
         )
 
-    if action == "remove value":
+    if action == REMOVE_VALUE_ACTION:
         return _render_remove_value_action(
             data, key_col, key_value, key_namespace, column, current_value
         )

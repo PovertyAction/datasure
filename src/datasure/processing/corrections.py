@@ -13,6 +13,9 @@ from datasure.processing.correction_log import (
     ACCEPT_CHECK_TYPES,
     CORRECTION_LOG_SCHEMA,
     CORRECTIONS_PAGE_SOURCE,
+    MODIFY_VALUE_ACTION,
+    REMOVE_ROW_ACTION,
+    REMOVE_VALUE_ACTION,
     empty_correction_log,
     ensure_log_columns,
 )
@@ -38,11 +41,11 @@ def _describe_correction_row(row: dict[str, Any]) -> str:
     column = row["column"]
     new_value = row["new_value"]
 
-    if action == "modify value":
+    if action == MODIFY_VALUE_ACTION:
         return f"Modify {column} for key {key_value} to '{new_value}'"
-    if action == "remove value":
+    if action == REMOVE_VALUE_ACTION:
         return f"Remove {column} value for key {key_value}"
-    if action == "remove row":
+    if action == REMOVE_ROW_ACTION:
         return f"Remove entire row for key {key_value}"
     if action == ACCEPT_ACTION:
         target = column if column is not None else "coordinates"
@@ -644,13 +647,17 @@ class CorrectionProcessor:
         if entry.action == ACCEPT_ACTION:
             _validate_acceptance(entry.check_type, entry.column, entry.current_value)
             is_valid, error_msg = self.validate_correction_input(
-                data, key_col, entry.key_value, "remove row"
+                data, key_col, entry.key_value, REMOVE_ROW_ACTION
             )
             if not is_valid:
                 raise ValueError(error_msg)
             return data
 
-        if entry.action not in ("modify value", "remove value", "remove row"):
+        if entry.action not in (
+            MODIFY_VALUE_ACTION,
+            REMOVE_VALUE_ACTION,
+            REMOVE_ROW_ACTION,
+        ):
             raise ValueError(f"Unknown correction action '{entry.action}'")
 
         is_valid, error_msg = self.validate_correction_input(
@@ -673,11 +680,11 @@ class CorrectionProcessor:
         new_value: Any | None,
     ) -> pl.DataFrame:
         """Apply one correction action to `data`; unknown actions leave it as is."""
-        if action == "modify value" and column and new_value is not None:
+        if action == MODIFY_VALUE_ACTION and column and new_value is not None:
             return self._apply_modify_value(data, key_col, key_value, column, new_value)
-        if action == "remove value" and column:
+        if action == REMOVE_VALUE_ACTION and column:
             return self._apply_remove_value(data, key_col, key_value, column)
-        if action == "remove row":
+        if action == REMOVE_ROW_ACTION:
             return self._apply_remove_row(data, key_col, key_value)
         return data
 
@@ -869,13 +876,13 @@ class CorrectionProcessor:
         if key_value not in data[key_col].to_list():
             return False, f"Key value '{key_value}' not found in data"
 
-        if action in ["modify value", "remove value"]:
+        if action in [MODIFY_VALUE_ACTION, REMOVE_VALUE_ACTION]:
             if not column:
                 return False, "Column must be specified for modify/remove value actions"
             if column not in data.columns:
                 return False, f"Column '{column}' not found in data"
 
-        if action == "modify value" and new_value is None:
+        if action == MODIFY_VALUE_ACTION and new_value is None:
             return False, "New value must be provided for modify value action"
 
         return True, ""
@@ -1050,7 +1057,7 @@ class CorrectionProcessor:
         recorded_value = row["current_value"]
         new_value = row["new_value"]
 
-        if action in ("modify value", "remove value") and column:
+        if action in (MODIFY_VALUE_ACTION, REMOVE_VALUE_ACTION) and column:
             if column not in data.columns:
                 return data, f"Column '{column}' no longer available in the data"
 
@@ -1061,16 +1068,16 @@ class CorrectionProcessor:
                 return data, mismatch
 
         try:
-            if action == "modify value" and column and new_value is not None:
+            if action == MODIFY_VALUE_ACTION and column and new_value is not None:
                 return (
                     self._apply_modify_value(
                         data, key_col, key_value, column, new_value
                     ),
                     None,
                 )
-            if action == "remove value" and column:
+            if action == REMOVE_VALUE_ACTION and column:
                 return self._apply_remove_value(data, key_col, key_value, column), None
-            if action == "remove row":
+            if action == REMOVE_ROW_ACTION:
                 return self._apply_remove_row(data, key_col, key_value), None
         except Exception as e:
             # Skip corrections that fail (data may have changed)
