@@ -12,6 +12,7 @@ Thank you for your interest in contributing to DataSure! This guide will help yo
 - [Version Management](#version-management)
 - [Release Process](#release-process)
 - [Submitting Changes](#submitting-changes)
+- [Issue Types and Labels](#issue-types-and-labels)
 
 ## Development Setup
 
@@ -611,6 +612,48 @@ For emergency releases only:
 - Keep pull requests focused and reasonably sized
 - Ensure CI/CD checks pass before requesting review
 
+## Issue Types and Labels
+
+Every issue except a usage question gets one **Issue Type**, which records the
+kind of work:
+
+| Issue Type | Use for |
+| --- | --- |
+| Bug | Something that is broken or behaves unexpectedly |
+| Feature | A new capability or an improvement to an existing one |
+| Task | Refactoring, cleanup, tests, docs, or other maintenance |
+
+Questions from the Question form keep the `question` label and no Issue Type.
+If a question turns out to be a bug or a feature request, set the Issue Type
+and remove `question`.
+
+Labels record where the work is and any cross-cutting concern. Add as many as
+apply.
+
+| Label | Use for |
+| --- | --- |
+| `area/checks` | Check pages and `src/datasure/checks/` (name the page in the issue title) |
+| `area/corrections` | Corrections and the correction log (`src/datasure/processing/correction*.py`) |
+| `area/connectors` | SurveyCTO and local data import (`src/datasure/connectors/`) |
+| `area/replication` | Replication package builder (`src/datasure/replication/`) |
+| `area/ui` | Layout, views, and shared UI helpers |
+| `area/docs` | Documentation |
+| `area/testing` | Test coverage and test infrastructure |
+| `area/ci-cd` | Build, release, and CI/CD pipeline |
+| `security` | Security hardening, in any area |
+| `performance` | Delays, lags, and slow pages, in any area |
+| `needs-triage` | Applied by the issue forms; remove once the issue has its Issue Type (if any) and area labels |
+| `question` | A usage question rather than a change request |
+| `good first issue` | Small, well-scoped work suitable for newcomers |
+| `help wanted` | Work the maintainers would welcome outside help with |
+| `dependencies` | Dependency updates (applied by Dependabot) |
+
+Releases are tracked with milestones (for example `v1.0.0`), not labels.
+Duplicate or out-of-scope issues are closed with GitHub's "Close as duplicate"
+or "Close as not planned" options rather than a label. Dependabot's labels are
+set explicitly in [`.github/dependabot.yml`](.github/dependabot.yml); update
+that file if you rename `dependencies` or `area/ci-cd`.
+
 ## Development Architecture
 
 The package layout, data flow, storage and cache locations, session-state
@@ -641,8 +684,8 @@ structural changes.
 ## Getting Help
 
 - **Documentation**: Check the [docs/](docs/) directory for development guides (changelog, release notes, etc.)
-- **Issues**: Report bugs or request features on GitHub Issues
-- **Discussions**: Use GitHub Discussions for questions and ideas
+- **Issues**: Report bugs, request features, or ask questions using the
+  [issue forms](https://github.com/PovertyAction/datasure/issues/new/choose)
 - **Code Quality**: Monitor [SonarQube Dashboard](https://sonarcloud.io/project/overview?id=PovertyAction_datasure)
 
 ## Code of Conduct

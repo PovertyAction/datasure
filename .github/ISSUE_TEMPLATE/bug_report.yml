@@ -1,0 +1,61 @@
+name: Bug report
+description: Something in DataSure is broken or behaves unexpectedly
+type: Bug
+labels: ["needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before opening a new issue, [search existing issues](https://github.com/PovertyAction/datasure/issues?q=is%3Aissue%20sort%3Aupdated-desc).
+        If you find the same problem, upvote it with a 👍 instead of commenting "+1".
+        If you are unsure whether it is the same, open a new issue and link the possible duplicate.
+
+        Do not paste survey data, respondent names, or other personal information into this issue.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the steps that trigger the problem.
+      placeholder: |
+        1. Open the ... page
+        2. Select ...
+        3. See error
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: DataSure version
+      description: Run `datasure --version`. If you are not on the latest version, check the problem still happens there.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: e.g. Windows 11, macOS 15, Ubuntu 24.04
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Terminal output
+      description: Start DataSure with `datasure --logging debug` and paste the relevant output. Remove any credentials or personal data first.
+      render: text
+  - type: textarea
+    id: regression
+    attributes:
+      label: Did this work in an earlier version?
+      description: If so, list every version you tested and which ones worked.
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or videos
+      description: Drag images or videos here if they help show the problem.
