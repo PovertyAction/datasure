@@ -133,7 +133,11 @@ def _validate_acceptance(
             f"{', '.join(ACCEPT_CHECK_TYPES)}"
         )
     if check_type == "gps":
-        if column is not None or not isinstance(current_value, dict):
+        if (
+            column is not None
+            or not isinstance(current_value, dict)
+            or len(current_value) != 2
+        ):
             raise ValueError(
                 "GPS acceptances take no column and a mapping of the "
                 "latitude and longitude columns to their values"

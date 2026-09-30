@@ -392,8 +392,11 @@ def _render_action_ui(
             data, key_col, key_value, key_namespace, column, current_value, check_type
         )
 
-    # action == "remove row"
-    return _render_remove_row_action(key_value)
+    if action == REMOVE_ROW_ACTION:
+        return _render_remove_row_action(key_value)
+
+    # Never fall back to a destructive action for an unrecognized value.
+    raise ValueError(f"Unsupported correction action: {action!r}")
 
 
 def render_correction_inputs(
