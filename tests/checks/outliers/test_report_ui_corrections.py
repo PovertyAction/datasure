@@ -204,6 +204,34 @@ class TestConstraintTableSelection:
 
         assert _shown_table(st_mock)["KEY"].to_list() == ["K1", "K2"]
 
+    def test_selection_resets_when_the_shown_rows_change(
+        self, data, violations, settings
+    ):
+        """A row position must never carry over to a different set of rows."""
+        review = _review({"constraints": _acceptances(("K1", "age", "verified"))})
+        hidden, shown = _st_mock(show_reviewed=False), _st_mock(show_reviewed=True)
+
+        self._render(data, violations, settings, hidden, review)
+        self._render(data, violations, settings, shown, review)
+
+        assert (
+            hidden.dataframe.call_args.kwargs["key"]
+            != shown.dataframe.call_args.kwargs["key"]
+        )
+
+    def test_selection_is_kept_while_the_rows_are_unchanged(
+        self, data, violations, settings
+    ):
+        first, second = _st_mock(), _st_mock()
+
+        self._render(data, violations, settings, first, _review())
+        self._render(data, violations, settings, second, _review())
+
+        assert (
+            first.dataframe.call_args.kwargs["key"]
+            == second.dataframe.call_args.kwargs["key"]
+        )
+
     def test_without_review_the_table_is_read_only(self, data, violations, settings):
         st_mock = _st_mock()
 
@@ -325,17 +353,21 @@ class TestFlagCorrectionForm:
         st_mock.rerun.assert_called_once()
 
     def test_a_save_queues_a_toast_for_after_the_rerun(self, data, settings):
-        st_mock, _, _ = self._render(
-            data,
-            settings,
-            _selection(),
-            _review(),
-            _form_state(),
-            apply=True,
-            confirm=False,
-        )
+        with patch(f"{MODULE}.queue_notice") as queue_notice:
+            self._render(
+                data,
+                settings,
+                _selection(),
+                _review(),
+                _form_state(),
+                apply=True,
+                confirm=False,
+            )
 
-        assert any("toast" in key for key in st_mock.session_state)
+        scope, level, message = queue_notice.call_args.args
+        assert scope == "outliers_corrections"
+        assert level == "toast"
+        assert "Correction Log" in message
 
     def test_hard_violation_accept_is_disabled_until_confirmed(self, data, settings):
         st_mock, _, apply_entries = self._render(
@@ -410,7 +442,22 @@ class TestFlagCorrectionForm:
 
 
 class TestMetricsExcludeAcceptedFlags:
-    def test_metrics_do_not_count_accepted_flags(self, data, violations):
+    @pytest.fixture
+    def outliers(self) -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                "KEY": ["K1", "K2", "K3"],
+                "column name": ["age"] * 3,
+                "column value": [150.0, 70.0, 30.0],
+                "outlier reason": [
+                    "Value is above upper bound 120.00",
+                    "Value is above upper bound 60.00",
+                    "no outlier",
+                ],
+            }
+        )
+
+    def _run_report(self, data, violations, outliers, acceptances_by_check):
         config = {"survey_key": "KEY", "survey_id": "hhid"}
         columns = ColumnByType(
             all_columns=data.columns,
@@ -420,12 +467,9 @@ class TestMetricsExcludeAcceptedFlags:
             string_columns=[],
             integer_columns=["age"],
         )
-        review_processor = _review(
-            {"constraints": _acceptances(("K1", "age", "verified"))}
-        ).processor
-        st_mock = _st_mock()
+        processor = _review(acceptances_by_check).processor
         with (
-            patch(f"{MODULE}.st", st_mock),
+            patch(f"{MODULE}.st", _st_mock()),
             patch(
                 f"{MODULE}.outliers_report_settings",
                 return_value=OutlierSettings(**config),
@@ -438,10 +482,12 @@ class TestMetricsExcludeAcceptedFlags:
             patch(f"{MODULE}._update_unlocked_cols", side_effect=lambda df, _: df),
             patch(f"{MODULE}.duckdb_save_table"),
             patch(f"{MODULE}.compute_constraint_violations", return_value=violations),
-            patch(f"{MODULE}.compute_outlier_output", return_value=pl.DataFrame()),
-            patch(f"{MODULE}.CorrectionProcessor", return_value=review_processor),
-            patch(f"{MODULE}._render_constraint_metrics") as metrics,
+            patch(f"{MODULE}.compute_outlier_output", return_value=outliers),
+            patch(f"{MODULE}.CorrectionProcessor", return_value=processor),
+            patch(f"{MODULE}._render_constraint_metrics") as constraint_metrics,
             patch(f"{MODULE}._render_constraint_violations_table") as table,
+            patch(f"{MODULE}._render_outlier_metrics") as outlier_metrics,
+            patch(f"{MODULE}._render_outlier_column_inspection") as inspection,
         ):
             outliers_report(
                 "proj1",
@@ -452,9 +498,38 @@ class TestMetricsExcludeAcceptedFlags:
                 columns,
                 alias="survey",
             )
+        return constraint_metrics, table, outlier_metrics, inspection
+
+    def test_constraint_metrics_do_not_count_accepted_violations(
+        self, data, violations, outliers
+    ):
+        metrics, table, _, _ = self._run_report(
+            data,
+            violations,
+            outliers,
+            {"constraints": _acceptances(("K1", "age", "verified"))},
+        )
 
         counted = metrics.call_args.args[0]
         assert counted.filter(pl.col("violation reason") != "no violation")[
             "KEY"
         ].to_list() == ["K2"]
         assert table.call_args.kwargs["review"].alias == "survey"
+
+    def test_outlier_metrics_do_not_count_accepted_outliers(
+        self, data, violations, outliers
+    ):
+        _, _, metrics, inspection = self._run_report(
+            data,
+            violations,
+            outliers,
+            {"outliers": _acceptances(("K2", "age", "verified"))},
+        )
+
+        counted = metrics.call_args.args[0]
+        assert counted.filter(pl.col("outlier reason") != "no outlier")[
+            "KEY"
+        ].to_list() == ["K1"]
+        # Rows are kept, so the column still counts as checked.
+        assert counted.height == outliers.height
+        assert inspection.call_args.kwargs["review"].alias == "survey"

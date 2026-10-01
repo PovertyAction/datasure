@@ -222,8 +222,17 @@ class TestQueuedNotices:
         st_with_state.success.assert_not_called()
 
     def test_showing_with_nothing_queued_is_a_no_op(self, st_with_state):
-        show_queued_notices("prep_survey")
+        shown = show_queued_notices("prep_survey")
 
+        assert shown is False
         st_with_state.success.assert_not_called()
         st_with_state.warning.assert_not_called()
         st_with_state.error.assert_not_called()
+
+    def test_toast_notices_render_as_toasts(self, st_with_state):
+        queue_notice("outliers", "toast", "Saved")
+
+        shown = show_queued_notices("outliers")
+
+        assert shown is True
+        st_with_state.toast.assert_called_once_with("Saved")

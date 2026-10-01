@@ -45,7 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the acceptance is removed. Accepting a hard violation needs a confirmation.
   Flag review logic lives in the new Streamlit-free
   `src/datasure/checks/outliers/review.py`; `outliers_report` takes the
-  dataset `alias`. Removed the unused `_render_outlier_table` — #298
+  dataset `alias`. Removed the unused `_render_outlier_table`.
+  `queue_notice` gains a `toast` level, and `show_queued_notices` returns
+  whether it showed anything — #298
 - **Correction log severity**: New `severity` column, `hard` on acceptances of
   hard constraint violations (null otherwise and for legacy logs).
   `CorrectionEntry.severity` sets it and is rejected on non-accept actions.
@@ -71,6 +73,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CorrectionProcessor.apply_correction`, so it gets the same stale-value
   check and all-or-nothing save as the check pages. `_handle_apply_correction`
   is removed — #296
+- **Constraint violations**: A value past a hard bound was reported as a soft
+  violation whenever a soft bound on the same side was set (for example,
+  above the hard maximum read "above soft maximum"), so hard violations were
+  undercounted. Hard bounds are now tested first
+  (`compute_constraint_violations`) — #298
 
 ## [1.1.0] - 2026-09-21
 

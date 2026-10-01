@@ -62,6 +62,7 @@ from datasure.utils.settings_utils import (
     save_check_settings,
     trigger_save,
 )
+from datasure.utils.ui_utils import queue_notice, show_queued_notices
 
 # =============================================================================
 # Streamlit UI - Metrics Display
@@ -162,8 +163,8 @@ def _render_outlier_metrics(
 # Streamlit UI - Correcting and Accepting Flags
 # =============================================================================
 
-# Session-state key for the confirmation shown after the post-save rerun.
-_SAVED_TOAST_KEY = "outliers_correction_toast"
+# `queue_notice` scope of the confirmation shown after the post-save rerun.
+_NOTICE_SCOPE = "outliers_corrections"
 
 
 @dataclass(frozen=True)
@@ -174,7 +175,7 @@ class ReviewContext:
     alias: str
 
 
-def _mark_reviewed(
+def _with_review_status(
     flags: pl.DataFrame,
     settings: OutlierSettings,
     check: FlagCheck,
@@ -219,11 +220,15 @@ def _render_flags_table(
         st.dataframe(table, **dataframe_kwargs)
         return
 
-    # The nonce changes after each save, which drops the old selection.
+    # Selection is a row position, so the key changes whenever the shown
+    # rows do (and after each save, via the nonce); a position never carries
+    # over to a different flag.
     nonce = st.session_state.get(_table_nonce_key(check.check_type), 0)
+    rows = table.select(pl.col(settings.survey_key).cast(pl.String), "column name")
+    fingerprint = hash(tuple(rows.hash_rows().to_list()))
     event = st.dataframe(
         table,
-        key=f"{check.check_type}_flags_table_{nonce}",
+        key=f"{check.check_type}_flags_table_{nonce}_{fingerprint}",
         on_select="rerun",
         selection_mode="single-row",
         **dataframe_kwargs,
@@ -321,19 +326,19 @@ def _render_flag_correction_form(
 
     nonce_key = _table_nonce_key(selection.check_type)
     st.session_state[nonce_key] = st.session_state.get(nonce_key, 0) + 1
-    st.session_state[_SAVED_TOAST_KEY] = (
+    queue_notice(
+        _NOTICE_SCOPE,
+        "toast",
         f"Saved {state.action} on {selection.column} for KEY {key_value}. "
-        "It is listed in the Correction Log on the Correct Data page."
+        "It is listed in the Correction Log on the Correct Data page.",
     )
     st.rerun()
 
 
 def _show_saved_toast() -> None:
     """Show the confirmation queued by a save before the page reran."""
-    message = st.session_state.pop(_SAVED_TOAST_KEY, None)
-    if not message:
+    if not show_queued_notices(_NOTICE_SCOPE):
         return
-    st.toast(message, icon=":material/check_circle:")
     # A markdown link in the toast would open a new browser session and lose
     # the selected project; a page link navigates within this session.
     corrections_page = st.session_state.get("st_corr_page")
@@ -430,7 +435,7 @@ def _render_constraint_violations_table(
 
     show_reviewed = _render_show_reviewed_toggle(CONSTRAINTS, review)
     violation_data = visible_flags(
-        _mark_reviewed(violation_data, settings, CONSTRAINTS, review),
+        _with_review_status(violation_data, settings, CONSTRAINTS, review),
         show_reviewed=show_reviewed,
     )
 
@@ -612,7 +617,7 @@ def _render_outlier_column_inspection(
 
     show_reviewed = _render_show_reviewed_toggle(OUTLIERS, review)
     outliers_data = visible_flags(
-        _mark_reviewed(outliers_data, settings, OUTLIERS, review),
+        _with_review_status(outliers_data, settings, OUTLIERS, review),
         show_reviewed=show_reviewed,
     )
 
@@ -1497,7 +1502,7 @@ def outliers_report(
         st.info("No constraint violations detected.")
 
     else:
-        constraint_violations = _mark_reviewed(
+        constraint_violations = _with_review_status(
             constraint_violations, outliers_settings, CONSTRAINTS, review
         )
         # show constraint metrics, leaving out accepted violations
@@ -1544,7 +1549,9 @@ def outliers_report(
         st.info("No outliers detected.")
 
     else:
-        outlier_data = _mark_reviewed(outlier_data, outliers_settings, OUTLIERS, review)
+        outlier_data = _with_review_status(
+            outlier_data, outliers_settings, OUTLIERS, review
+        )
         # show outlier metrics, leaving out accepted outliers
         _render_outlier_metrics(
             clear_reviewed_flags(outlier_data, OUTLIERS), outliers_settings
