@@ -12,6 +12,7 @@ from datasure.checks.outliers.review import (
     FlagSelection,
     allowed_actions,
     clear_reviewed_flags,
+    flagged_only,
     mark_reviewed,
     needs_hard_confirmation,
     select_flag,
@@ -189,6 +190,30 @@ class TestClearReviewedFlags:
 
     def test_data_without_review_columns_is_unchanged(self, outlier_flags):
         assert clear_reviewed_flags(outlier_flags, OUTLIERS).equals(outlier_flags)
+
+
+class TestFlaggedOnly:
+    def test_keeps_only_flagged_rows(self, outlier_flags):
+        result = flagged_only(outlier_flags, OUTLIERS)
+
+        assert result["survey_key"].to_list() == ["K1", "K3", "K1"]
+        assert "no outlier" not in result["outlier reason"].to_list()
+
+    def test_uses_the_check_sentinel(self):
+        flags = pl.DataFrame(
+            {
+                "survey_key": ["K1", "K2"],
+                "column name": ["age", "age"],
+                "violation reason": ["Value is above hard maximum 100", "no violation"],
+            }
+        )
+
+        assert flagged_only(flags, CONSTRAINTS)["survey_key"].to_list() == ["K1"]
+
+    def test_data_without_the_reason_column_is_unchanged(self):
+        flags = pl.DataFrame({"survey_key": ["K1"]})
+
+        assert flagged_only(flags, OUTLIERS).equals(flags)
 
 
 class TestVisibleFlags:
