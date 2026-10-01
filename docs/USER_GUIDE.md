@@ -844,7 +844,7 @@ enter a reason and click "Apply":
   the flag is updated or disappears.
 - **accept** records that the flagged value is correct. The flag is hidden
   and no longer counted in the metrics. Turn on "Show reviewed" to see
-  accepted flags with a Reviewed badge and the reason.
+  accepted flags highlighted in green, with a Reviewed badge and the reason.
 
 Outlier and constraint acceptances are separate: accepting an outlier does not
 accept a constraint violation on the same value. Accepting a **hard**

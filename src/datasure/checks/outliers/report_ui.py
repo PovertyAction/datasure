@@ -40,6 +40,7 @@ from datasure.checks.outliers.review import (
     allowed_actions,
     clear_reviewed_flags,
     flagged_only,
+    highlight_reviewed_row,
     mark_reviewed,
     needs_hard_confirmation,
     select_flag,
@@ -243,8 +244,12 @@ def _render_flags_table(
         return
 
     click_key = f"{check.check_type}_flag_review_click"
+    shown = table.select(pl.lit(REVIEW_BUTTON_LABEL).alias(REVIEW_BUTTON_COL), pl.all())
+    if REVIEW_STATUS_COL in shown.columns:
+        # "Show reviewed" is on: colour the reviewed flags green.
+        shown = shown.to_pandas().style.apply(highlight_reviewed_row, axis=1)
     st.dataframe(
-        table.select(pl.lit(REVIEW_BUTTON_LABEL).alias(REVIEW_BUTTON_COL), pl.all()),
+        shown,
         column_config={
             REVIEW_BUTTON_COL: st.column_config.ButtonColumn(
                 "",

@@ -135,6 +135,20 @@ def clear_reviewed_flags(flags: pl.DataFrame, check: FlagCheck) -> pl.DataFrame:
     )
 
 
+_REVIEWED_ROW_STYLE = "background-color: rgba(25, 135, 84, 0.15)"
+
+
+def highlight_reviewed_row(row: Any) -> list[str]:
+    """Style every cell of a reviewed flag green in a results table.
+
+    Used with a pandas ``Styler`` (``df.style.apply(highlight_reviewed_row,
+    axis=1)``) when "Show reviewed" is on.
+    """
+    status = row.get(REVIEW_STATUS_COL)
+    style = _REVIEWED_ROW_STYLE if status == REVIEWED_BADGE else ""
+    return [style] * len(row)
+
+
 def flagged_only(flags: pl.DataFrame, check: FlagCheck) -> pl.DataFrame:
     """Return the rows of `flags` that `check` flagged."""
     if check.reason_col not in flags.columns:
