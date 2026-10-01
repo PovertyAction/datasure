@@ -87,12 +87,16 @@ def _review(acceptances_by_check: dict[str, pl.DataFrame] | None = None):
     return ReviewContext(processor=processor, alias="survey")
 
 
-def _st_mock(clicked: tuple[str, int] | None = None, show_reviewed=False):
+def _st_mock(
+    clicked: tuple[str, int] | None = None, show_reviewed=False, flagged_only=True
+):
     """A Streamlit mock; `clicked` is (check type, row) of a Review click."""
     st_mock = MagicMock()
     st_mock.columns.side_effect = _columns_side_effect
     st_mock.multiselect.return_value = []
-    st_mock.toggle.return_value = show_reviewed
+    st_mock.toggle.side_effect = lambda label, *, key, **kwargs: (
+        flagged_only if key.endswith("_flagged_only") else show_reviewed
+    )
     st_mock.session_state = {}
     if clicked is not None:
         check_type, row = clicked
@@ -237,6 +241,46 @@ class TestConstraintTableReviewButton:
 
         assert _shown_table(st_mock)["KEY"].to_list() == ["K1", "K2"]
 
+    def test_flagged_only_toggle_is_on_by_default(self, data, violations, settings):
+        st_mock = _st_mock()
+
+        self._render(data, violations, settings, st_mock, _review())
+
+        toggle_kwargs = {
+            c.kwargs["key"]: c.kwargs for c in st_mock.toggle.call_args_list
+        }
+        assert toggle_kwargs["constraints_flagged_only"]["value"] is True
+
+    def test_turning_flagged_only_off_shows_every_checked_value(
+        self, data, violations, settings
+    ):
+        st_mock = _st_mock(flagged_only=False)
+
+        self._render(data, violations, settings, st_mock, _review())
+
+        table = _shown_table(st_mock)
+        assert table.select("KEY", "violation type").rows() == [
+            ("K1", "Hard Max"),
+            ("K2", "Soft Max"),
+            ("K3", None),
+        ]
+
+    def test_unflagged_rows_offer_a_review_button_too(self, data, violations, settings):
+        st_mock = _st_mock(clicked=("constraints", 2), flagged_only=False)
+
+        dialog = self._render(data, violations, settings, st_mock, _review())
+
+        selection = dialog.call_args.args[2]
+        assert selection.key_value == "K3"
+        assert selection.flagged is False
+
+    def test_flagged_only_toggle_works_without_review(self, data, violations, settings):
+        st_mock = _st_mock(flagged_only=False)
+
+        self._render(data, violations, settings, st_mock, None)
+
+        assert _shown_table(st_mock)["KEY"].to_list() == ["K1", "K2", "K3"]
+
     def test_without_review_the_table_has_no_button(self, data, violations, settings):
         st_mock = _st_mock()
 
@@ -289,6 +333,22 @@ class TestOutlierTableReviewButton:
         assert selection.column == "age"
         assert selection.check_type == "outliers"
         assert selection.hard is False
+
+    def test_flagged_only_shows_only_outliers(self, data, outliers, settings):
+        st_mock = _st_mock()
+
+        self._render(data, outliers, settings, st_mock, _review())
+
+        assert _shown_table(st_mock)["KEY"].to_list() == ["K1"]
+
+    def test_turning_flagged_only_off_shows_every_checked_value(
+        self, data, outliers, settings
+    ):
+        st_mock = _st_mock(flagged_only=False)
+
+        self._render(data, outliers, settings, st_mock, _review())
+
+        assert _shown_table(st_mock)["KEY"].to_list() == ["K1", "K2", "K3"]
 
     def test_accepted_outliers_are_hidden(self, data, outliers, settings):
         st_mock = _st_mock()

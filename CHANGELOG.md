@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `outliers`/`constraints`). Accepted flags are hidden and left out of the
   metrics unless "Show reviewed" is on, and come back if the value changes or
   the acceptance is removed. Accepting a hard violation needs a confirmation.
+  A "Show only flagged values" toggle (on by default) sits above both tables;
+  the outlier inspection table previously always listed unflagged values too.
   Flag review logic lives in the new Streamlit-free
   `src/datasure/checks/outliers/review.py`; `outliers_report` takes the
   dataset `alias`. Removed the unused `_render_outlier_table`.
