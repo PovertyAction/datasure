@@ -138,6 +138,26 @@ def _acceptance_is_active(
     )
 
 
+def _stored_correction_value(data: pl.DataFrame, row: dict[str, Any]) -> str | None:
+    """Return the value a logged value correction left in the data, as logged.
+
+    "remove value" leaves the cell missing. "modify value" stores its new
+    value cast to the column's type, as `_apply_modify_value` does, so a
+    Float32 column holds 70.0999984741211 for a logged "70.1". If the cast
+    fails, the logged text is returned unchanged.
+    """
+    if row["action"] != Action.MODIFY_VALUE:
+        return None
+    new_value, column = row["new_value"], row["column"]
+    if new_value is None or column not in data.columns:
+        return new_value
+    try:
+        typed = pl.select(pl.lit(new_value).cast(data.schema[column])).item()
+    except pl.exceptions.PolarsError:
+        return new_value
+    return _encode_scalar(typed)
+
+
 def _check_acceptance_against_data(
     data: pl.DataFrame,
     key_col: str,
@@ -583,16 +603,19 @@ class CorrectionProcessor:
             return corrections
 
         data = self.get_corrected_data(alias)
+        if key_col in data.columns:
+            # Check only the rows of logged KEYs, not the whole dataset per
+            # correction. Every row of a duplicated KEY is kept, so all of
+            # them must still hold the value.
+            logged_keys = corrections["KEY"].unique()
+            data = data.filter(pl.col(key_col).cast(pl.String).is_in(logged_keys))
+
         is_active = [
             _acceptance_mismatch(
                 data,
                 key_col,
                 row["KEY"],
-                {
-                    row["column"]: row["new_value"]
-                    if row["action"] == Action.MODIFY_VALUE
-                    else None
-                },
+                {row["column"]: _stored_correction_value(data, row)},
             )
             is None
             for row in corrections.iter_rows(named=True)

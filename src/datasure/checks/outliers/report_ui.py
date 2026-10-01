@@ -1,7 +1,8 @@
 """Report-rendering UI for the outliers report."""
 
+import json
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import polars as pl
@@ -180,10 +181,25 @@ REVIEW_BUTTON_LABEL = ":material/edit_note: Review"
 
 @dataclass(frozen=True)
 class ReviewContext:
-    """What the results tables need to correct or accept flagged values."""
+    """What the results tables need to correct or accept flagged values.
+
+    One context is built per report run, so lookups shared by both tables
+    are cached on it.
+    """
 
     processor: CorrectionProcessor
     alias: str
+    _corrections: dict[str, pl.DataFrame] = field(
+        default_factory=dict, compare=False, repr=False
+    )
+
+    def active_corrections(self, key_col: str) -> pl.DataFrame:
+        """Return the active value corrections, looked up once per run."""
+        if key_col not in self._corrections:
+            self._corrections[key_col] = self.processor.get_active_corrections(
+                self.alias, key_col
+            )
+        return self._corrections[key_col]
 
 
 def _with_review_status(
@@ -198,9 +214,7 @@ def _with_review_status(
     acceptances = review.processor.get_active_acceptances(
         review.alias, check.check_type, settings.survey_key
     )
-    corrections = review.processor.get_active_corrections(
-        review.alias, settings.survey_key
-    )
+    corrections = review.active_corrections(settings.survey_key)
     return mark_reviewed(flags, acceptances, settings.survey_key, check, corrections)
 
 
@@ -330,7 +344,9 @@ def _render_flag_correction_form(
         if settings.survey_id
         else None
     )
-    namespace = f"{selection.check_type}_{key_value}_{selection.column}"
+    # JSON keeps the parts distinct: KEY "a_1"/column "b" and KEY "a"/column
+    # "1_b" would collide if joined with underscores.
+    namespace = json.dumps([selection.check_type, str(key_value), selection.column])
 
     st.markdown(f"**{selection.column}** for KEY **{key_value}**")
     if selection.reviewed:
@@ -377,7 +393,9 @@ def _render_flag_correction_form(
     ):
         return
 
-    entry = state.to_entry()
+    # The form holds KEY as text for display; validation and the data
+    # compare the KEY's native value (e.g. 7, not "7").
+    entry = replace(state.to_entry(), key_value=key_value)
     if hard_accept:
         entry = replace(entry, severity=HARD_SEVERITY)
     if not apply_correction_entries(

@@ -643,6 +643,42 @@ class TestFlagCorrectionForm:
 
         st_mock.checkbox.assert_not_called()
 
+    def test_numeric_keys_are_saved_with_their_native_type(self, settings):
+        """The form shows KEY 7 as text, but validation compares native values."""
+        numeric = pl.DataFrame({"KEY": [7, 8], "hhid": ["H7", "H8"], "age": [150, 30]})
+
+        _, inputs, apply_entries = self._render(
+            numeric,
+            settings,
+            _selection(key_value=7),
+            _review(),
+            _form_state(key_value="7", action=Action.MODIFY_VALUE, new_value="90"),
+            apply=True,
+            confirm=False,
+        )
+
+        assert inputs.call_args.args[2] == "7"
+        assert inputs.call_args.kwargs["current_value"] == 150
+        (entry,) = apply_entries.call_args.args[3]
+        assert entry.key_value == 7
+
+    def test_widget_keys_are_unique_per_cell(self, data, settings):
+        """KEY "survey_1"/column "age" and KEY "survey"/column "1_age" differ."""
+        namespaces = []
+        for key, column in (("survey_1", "age"), ("survey", "1_age")):
+            _, inputs, _ = self._render(
+                data,
+                settings,
+                _selection(key_value=key, column=column),
+                _review(),
+                _form_state(key_value=key, column=column),
+                apply=False,
+                confirm=False,
+            )
+            namespaces.append(inputs.call_args.kwargs["key_namespace"])
+
+        assert namespaces[0] != namespaces[1]
+
     def test_failed_save_does_not_rerun(self, data, settings):
         st_mock = _st_mock()
         st_mock.button.return_value = True
@@ -713,6 +749,7 @@ class TestMetricsExcludeAcceptedFlags:
                 columns,
                 alias="survey",
             )
+        self.processor = processor
         return constraint_metrics, table, outlier_metrics, inspection
 
     def test_constraint_metrics_do_not_count_accepted_violations(
@@ -748,3 +785,10 @@ class TestMetricsExcludeAcceptedFlags:
         # Rows are kept, so the column still counts as checked.
         assert counted.height == outliers.height
         assert inspection.call_args.kwargs["review"].alias == "survey"
+
+    def test_corrections_are_looked_up_once_per_report_run(
+        self, data, violations, outliers
+    ):
+        self._run_report(data, violations, outliers, {})
+
+        assert self.processor.get_active_corrections.call_count == 1
