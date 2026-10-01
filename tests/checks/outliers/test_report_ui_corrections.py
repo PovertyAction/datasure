@@ -148,6 +148,11 @@ class TestConstraintTableReviewButton:
             patch(f"{MODULE}.load_check_settings", return_value={}),
             patch(f"{MODULE}.save_check_settings"),
             patch(f"{MODULE}._flag_correction_dialog") as dialog,
+            # styled_dataframe imports streamlit itself; forward to the mock.
+            patch(
+                f"{MODULE}.styled_dataframe",
+                side_effect=lambda styler, **kw: st_mock.dataframe(styler, **kw),
+            ),
         ):
             _render_constraint_violations_table(
                 data, violations, settings, "settings.json", review=review
@@ -348,6 +353,11 @@ class TestOutlierTableReviewButton:
             patch(f"{MODULE}._create_descriptive_stats", return_value=pl.DataFrame()),
             patch(f"{MODULE}._create_box_plot"),
             patch(f"{MODULE}._flag_correction_dialog") as dialog,
+            # styled_dataframe imports streamlit itself; forward to the mock.
+            patch(
+                f"{MODULE}.styled_dataframe",
+                side_effect=lambda styler, **kw: st_mock.dataframe(styler, **kw),
+            ),
         ):
             st_mock.selectbox.return_value = "age"
             _render_outlier_column_inspection(
