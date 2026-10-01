@@ -852,6 +852,9 @@ no longer flagged, so turn off "Show only flagged values" to see it. A
 corrected value that is still flagged stays in the table and in the metrics
 until it is fixed or accepted. The badge clears if the value changes again.
 
+Turn on **Show only reviewed** to list only accepted and corrected values. While
+it is on, the other two toggles are disabled.
+
 Outlier and constraint acceptances are separate: accepting an outlier does not
 accept a constraint violation on the same value. Accepting a **hard**
 constraint violation needs an extra confirmation. An accepted flag comes back
