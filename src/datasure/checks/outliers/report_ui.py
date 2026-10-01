@@ -37,14 +37,14 @@ from datasure.checks.outliers.review import (
     REVIEW_STATUS_COL,
     FlagCheck,
     FlagSelection,
+    TableFilters,
     allowed_actions,
     clear_reviewed_flags,
-    flagged_only,
+    filter_table,
     highlight_reviewed_row,
     mark_reviewed,
     needs_hard_confirmation,
     select_flag,
-    visible_flags,
 )
 from datasure.checks.outliers.settings_ui import outliers_report_settings
 from datasure.processing.correction_log import HARD_SEVERITY
@@ -206,33 +206,50 @@ def _with_review_status(
 
 def _render_table_toggles(
     check: FlagCheck, review: ReviewContext | None
-) -> tuple[bool, bool]:
-    """Render the toggles above a results table.
+) -> TableFilters:
+    """Render the toggles above a results table and return their values.
 
-    Returns
-    -------
-    tuple[bool, bool]
-        Whether to show only flagged values, and whether to show reviewed
-        flags. "Show reviewed" is only offered with `review`.
+    "Show reviewed" and "Show only reviewed" are only offered with
+    `review`. While "Show only reviewed" is on, the other two toggles are
+    disabled, since it overrides them.
     """
-    tc1, tc2, _ = st.columns([0.25, 0.25, 0.5])
+    reviewed_only_key = f"{check.check_type}_reviewed_only"
+    # Read before rendering so the toggles to its left can be disabled.
+    reviewed_only_on = review is not None and bool(
+        st.session_state.get(reviewed_only_key, False)
+    )
+
+    tc1, tc2, tc3, _ = st.columns([0.22, 0.22, 0.22, 0.34])
     with tc1:
-        show_flagged_only = st.toggle(
+        flagged_only_on = st.toggle(
             "Show only flagged values",
             key=f"{check.check_type}_flagged_only",
             value=True,
+            disabled=reviewed_only_on,
             help="Turn off to show every checked value, flagged or not.",
         )
-    show_reviewed = False
-    if review is not None:
-        with tc2:
-            show_reviewed = st.toggle(
-                "Show reviewed",
-                key=f"{check.check_type}_show_reviewed",
-                help="Show flags accepted as valid, with the reason they were "
-                "accepted.",
-            )
-    return show_flagged_only, show_reviewed
+    if review is None:
+        return TableFilters(flagged_only=flagged_only_on)
+
+    with tc2:
+        show_reviewed = st.toggle(
+            "Show reviewed",
+            key=f"{check.check_type}_show_reviewed",
+            disabled=reviewed_only_on,
+            help="Also show flags accepted as valid and corrected values, "
+            "highlighted green, with the reason.",
+        )
+    with tc3:
+        reviewed_only = st.toggle(
+            "Show only reviewed",
+            key=reviewed_only_key,
+            help="Show only flags accepted as valid and corrected values.",
+        )
+    return TableFilters(
+        flagged_only=flagged_only_on,
+        show_reviewed=show_reviewed,
+        reviewed_only=reviewed_only,
+    )
 
 
 def _render_flags_table(
@@ -480,13 +497,11 @@ def _render_constraint_violations_table(
         st.info("No constraint violations detected.")
         return
 
-    show_flagged_only, show_reviewed = _render_table_toggles(CONSTRAINTS, review)
-    violation_data = visible_flags(
+    violation_data = filter_table(
         _with_review_status(violation_data, settings, CONSTRAINTS, review),
-        show_reviewed=show_reviewed,
+        _render_table_toggles(CONSTRAINTS, review),
+        CONSTRAINTS,
     )
-    if show_flagged_only:
-        violation_data = flagged_only(violation_data, CONSTRAINTS)
 
     all_columns = data.columns
 
@@ -664,13 +679,11 @@ def _render_outlier_column_inspection(
         if inspect_display_cols:
             include_cols.extend(inspect_display_cols)
 
-    show_flagged_only, show_reviewed = _render_table_toggles(OUTLIERS, review)
-    outliers_data = visible_flags(
+    outliers_data = filter_table(
         _with_review_status(outliers_data, settings, OUTLIERS, review),
-        show_reviewed=show_reviewed,
+        _render_table_toggles(OUTLIERS, review),
+        OUTLIERS,
     )
-    if show_flagged_only:
-        outliers_data = flagged_only(outliers_data, OUTLIERS)
 
     # select columns to display from data
     display_df = data.select(include_cols)

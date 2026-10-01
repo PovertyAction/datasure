@@ -199,6 +199,42 @@ def visible_flags(flags: pl.DataFrame, *, show_reviewed: bool) -> pl.DataFrame:
     return flags.filter(~_is_reviewed()).drop(REVIEW_STATUS_COL, REVIEW_REASON_COL)
 
 
+@dataclass(frozen=True)
+class TableFilters:
+    """The toggles above a results table.
+
+    Attributes
+    ----------
+    flagged_only : bool
+        Show only flagged values.
+    show_reviewed : bool
+        Also show accepted flags, with the review columns.
+    reviewed_only : bool
+        Show only accepted and corrected rows, whatever the other toggles.
+    """
+
+    flagged_only: bool = True
+    show_reviewed: bool = False
+    reviewed_only: bool = False
+
+
+def filter_table(
+    flags: pl.DataFrame, filters: TableFilters, check: FlagCheck
+) -> pl.DataFrame:
+    """Return the rows and columns of marked `flags` that `filters` show."""
+    if filters.reviewed_only:
+        # A value corrected into range is unflagged, so flagged-only and
+        # show-reviewed are ignored here.
+        if REVIEW_STATUS_COL not in flags.columns:
+            return flags.clear()
+        return flags.filter(pl.col(REVIEW_STATUS_COL).is_not_null())
+
+    flags = visible_flags(flags, show_reviewed=filters.show_reviewed)
+    if filters.flagged_only:
+        flags = flagged_only(flags, check)
+    return flags
+
+
 def select_flag(
     table: pl.DataFrame,
     rows: list[int],
