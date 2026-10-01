@@ -16,7 +16,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-NoticeLevel = Literal["success", "warning", "error"]
+NoticeLevel = Literal["success", "warning", "error", "toast"]
 
 _QUEUED_NOTICES_KEY = "st_queued_notices"
 
@@ -174,8 +174,9 @@ def queue_notice(scope: str, level: NoticeLevel, message: str) -> None:
     ----------
     scope : str
         Where the message belongs, e.g. ``"prep_survey"`` for one Prep tab.
-    level : {"success", "warning", "error"}
-        The Streamlit callout used to render the message.
+    level : {"success", "warning", "error", "toast"}
+        The Streamlit callout used to render the message, or "toast" for a
+        transient ``st.toast``.
     message : str
         The message text (Markdown).
     """
@@ -185,10 +186,15 @@ def queue_notice(scope: str, level: NoticeLevel, message: str) -> None:
     queued.setdefault(scope, []).append(Notice(level, message))
 
 
-def show_queued_notices(scope: str) -> None:
-    """Render and clear the messages queued for a scope, in queue order."""
+def show_queued_notices(scope: str) -> bool:
+    """Render and clear the messages queued for a scope, in queue order.
+
+    Returns True if any message was shown.
+    """
     import streamlit as st
 
     queued = st.session_state.get(_QUEUED_NOTICES_KEY, {})
-    for notice in queued.pop(scope, []):
+    notices = queued.pop(scope, [])
+    for notice in notices:
         getattr(st, notice.level)(notice.message)
+    return bool(notices)
