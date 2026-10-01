@@ -14,7 +14,10 @@ swap regardless of the order in which the module was first imported.
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from pandas.io.formats.style import Styler
 
 NoticeLevel = Literal["success", "warning", "error", "toast"]
 
@@ -198,3 +201,21 @@ def show_queued_notices(scope: str) -> bool:
     for notice in notices:
         getattr(st, notice.level)(notice.message)
     return bool(notices)
+
+
+def styled_dataframe(styler: "Styler", **dataframe_kwargs: Any) -> Any:
+    """Render a pandas ``Styler`` with ``st.dataframe``, whatever its size.
+
+    Streamlit refuses to render a Styler with more cells than the global
+    ``styler.render.max_elements`` pandas option, which other pages lower to
+    fit their own tables. The limit is raised to fit this table only for the
+    duration of the call, then restored.
+
+    Returns what ``st.dataframe`` returns.
+    """
+    import pandas as pd
+    import streamlit as st
+
+    limit = max(pd.get_option("styler.render.max_elements"), styler.data.size)
+    with pd.option_context("styler.render.max_elements", limit):
+        return st.dataframe(styler, **dataframe_kwargs)

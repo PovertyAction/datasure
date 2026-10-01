@@ -3,6 +3,7 @@
 import sys
 from unittest.mock import MagicMock
 
+import pandas as pd
 import pytest
 
 from datasure.utils.ui_utils import (
@@ -12,6 +13,7 @@ from datasure.utils.ui_utils import (
     queue_notice,
     section_header,
     show_queued_notices,
+    styled_dataframe,
 )
 
 
@@ -236,3 +238,46 @@ class TestQueuedNotices:
 
         assert shown is True
         st_with_state.toast.assert_called_once_with("Saved")
+
+
+class TestStyledDataframe:
+    """Styled tables render whatever their size, without leaking the limit."""
+
+    @pytest.fixture
+    def small_limit(self):
+        """Simulate another page having lowered the global Styler limit."""
+        with pd.option_context("styler.render.max_elements", 10):
+            yield
+
+    def test_raises_the_styler_limit_to_fit_the_table(self, mock_st, small_limit):
+        styler = pd.DataFrame({"a": range(50), "b": range(50)}).style
+        seen_limits = []
+        mock_st.dataframe.side_effect = lambda *a, **k: seen_limits.append(
+            pd.get_option("styler.render.max_elements")
+        )
+
+        styled_dataframe(styler, width="stretch")
+
+        assert seen_limits == [100]
+        mock_st.dataframe.assert_called_once_with(styler, width="stretch")
+
+    def test_restores_the_previous_limit(self, mock_st, small_limit):
+        styled_dataframe(pd.DataFrame({"a": range(50)}).style)
+
+        assert pd.get_option("styler.render.max_elements") == 10
+
+    def test_never_lowers_a_higher_limit(self, mock_st):
+        seen_limits = []
+        mock_st.dataframe.side_effect = lambda *a, **k: seen_limits.append(
+            pd.get_option("styler.render.max_elements")
+        )
+
+        with pd.option_context("styler.render.max_elements", 1_000):
+            styled_dataframe(pd.DataFrame({"a": [1, 2]}).style)
+
+        assert seen_limits == [1_000]
+
+    def test_returns_what_st_dataframe_returns(self, mock_st):
+        result = styled_dataframe(pd.DataFrame({"a": [1]}).style)
+
+        assert result is mock_st.dataframe.return_value
