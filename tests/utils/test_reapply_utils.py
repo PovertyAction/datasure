@@ -26,6 +26,13 @@ class TestHighlightStatus:
     def test_unknown_status_is_not_highlighted(self):
         assert highlight_status("") == ""
 
+    def test_missing_status_is_not_highlighted(self):
+        """A null status reaches a nullable-typed Styler as pd.NA."""
+        import pandas as pd
+
+        assert highlight_status(pd.NA) == ""
+        assert highlight_status(None) == ""
+
 
 class TestWarnReapplyFailures:
     """Test the shared bulk-reapply warning banner helper."""
