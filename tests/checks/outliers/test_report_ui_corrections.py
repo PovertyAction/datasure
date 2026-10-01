@@ -61,20 +61,22 @@ def violations() -> pl.DataFrame:
     )
 
 
-def _acceptances(*rows: tuple[str, str, str]) -> pl.DataFrame:
-    """Active acceptances with (KEY, column, reason) rows."""
+def _acceptances(*rows: tuple[str, ...]) -> pl.DataFrame:
+    """Active acceptances with (KEY, column, reason[, severity]) rows."""
     return pl.DataFrame(
         {
             "KEY": [r[0] for r in rows],
             "action": ["accept"] * len(rows),
             "column": [r[1] for r in rows],
             "reason": [r[2] for r in rows],
+            "severity": [r[3] if len(r) > 3 else None for r in rows],
         },
         schema={
             "KEY": pl.String,
             "action": pl.String,
             "column": pl.String,
             "reason": pl.String,
+            "severity": pl.String,
         },
     )
 
@@ -196,6 +198,29 @@ class TestConstraintTableReviewButton:
         assert button_kwargs["key"] == "constraints_flag_review_click"
         assert button_kwargs["pinned"] is True
 
+    def test_button_column_does_not_clash_with_a_survey_column(
+        self, violations, settings
+    ):
+        """A survey field named like the button column can be shown too."""
+        data = pl.DataFrame(
+            {
+                "KEY": ["K1", "K2", "K3"],
+                "hhid": ["H1", "H2", "H3"],
+                "_review": [1, 2, 3],
+            }
+        )
+        st_mock = _st_mock(clicked=("constraints", 0))
+        st_mock.multiselect.return_value = ["_review"]
+
+        dialog = self._render(data, violations, settings, st_mock, _review())
+
+        shown = st_mock.dataframe.call_args.args[0]
+        (button_col,) = st_mock.dataframe.call_args.kwargs["column_config"]
+        assert button_col != REVIEW_BUTTON_COL
+        assert shown.columns[0] == button_col
+        assert shown["_review"].to_list() == [1, 2]
+        assert dialog.call_args.args[2].key_value == "K1"
+
     def test_rows_are_not_selectable(self, data, violations, settings):
         st_mock = _st_mock()
 
@@ -239,7 +264,9 @@ class TestConstraintTableReviewButton:
 
     def test_accepted_violations_are_hidden(self, data, violations, settings):
         st_mock = _st_mock()
-        review = _review({"constraints": _acceptances(("K1", "age", "verified"))})
+        review = _review(
+            {"constraints": _acceptances(("K1", "age", "verified", "hard"))}
+        )
 
         self._render(data, violations, settings, st_mock, review)
 
@@ -249,7 +276,9 @@ class TestConstraintTableReviewButton:
         self, data, violations, settings
     ):
         st_mock = _st_mock(show_reviewed=True)
-        review = _review({"constraints": _acceptances(("K1", "age", "verified"))})
+        review = _review(
+            {"constraints": _acceptances(("K1", "age", "verified", "hard"))}
+        )
 
         self._render(data, violations, settings, st_mock, review)
 
@@ -263,7 +292,9 @@ class TestConstraintTableReviewButton:
         self, data, violations, settings
     ):
         st_mock = _st_mock(show_reviewed=True)
-        review = _review({"constraints": _acceptances(("K1", "age", "verified"))})
+        review = _review(
+            {"constraints": _acceptances(("K1", "age", "verified", "hard"))}
+        )
 
         self._render(data, violations, settings, st_mock, review)
 
@@ -302,7 +333,7 @@ class TestConstraintTableReviewButton:
     ):
         st_mock = _st_mock(reviewed_only=True)
         review = _review(
-            {"constraints": _acceptances(("K1", "age", "verified"))},
+            {"constraints": _acceptances(("K1", "age", "verified", "hard"))},
             corrections=_acceptances(("K3", "age", "typo fixed")),
         )
 
@@ -346,11 +377,24 @@ class TestConstraintTableReviewButton:
         self, data, violations, settings
     ):
         st_mock = _st_mock()
-        review = _review({"constraints": _acceptances(("K1", "age", "verified"))})
+        review = _review(
+            {"constraints": _acceptances(("K1", "age", "verified", "hard"))}
+        )
 
         self._render(data, violations, settings, st_mock, review)
 
         assert not isinstance(st_mock.dataframe.call_args.args[0], Styler)
+
+    def test_soft_acceptance_does_not_hide_a_hard_violation(
+        self, data, violations, settings
+    ):
+        """K1 was accepted as a soft violation; bounds now make it hard."""
+        st_mock = _st_mock()
+        review = _review({"constraints": _acceptances(("K1", "age", "verified"))})
+
+        self._render(data, violations, settings, st_mock, review)
+
+        assert _shown_table(st_mock)["KEY"].to_list() == ["K1", "K2"]
 
     def test_outlier_acceptance_does_not_hide_a_constraint_violation(
         self, data, violations, settings
@@ -759,7 +803,7 @@ class TestMetricsExcludeAcceptedFlags:
             data,
             violations,
             outliers,
-            {"constraints": _acceptances(("K1", "age", "verified"))},
+            {"constraints": _acceptances(("K1", "age", "verified", "hard"))},
         )
 
         counted = metrics.call_args.args[0]

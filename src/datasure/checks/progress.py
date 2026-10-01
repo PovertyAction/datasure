@@ -10,7 +10,6 @@ This module provides comprehensive progress tracking functionality with:
 
 from typing import Any, Literal
 
-import pandas as pd
 import plotly.graph_objects as go
 import polars as pl
 import seaborn as sns
@@ -26,11 +25,12 @@ from datasure.utils.settings_utils import (
     save_check_settings,
     trigger_save,
 )
+from datasure.utils.ui_utils import ensure_styler_limit
 
 TAB_NAME = "progress"
 
-# Configure pandas styler for large dataframes (performance optimization)
-pd.set_option("styler.render.max_elements", 1_000_000)
+# Allow styling large dataframes (the limit is shared and only raised)
+ensure_styler_limit(1_000_000)
 
 
 # =============================================================================
@@ -1318,8 +1318,8 @@ def _display_chart_and_table(
     with ai2:
         # Convert to pandas for styling (Streamlit doesn't support Polars styling yet)
         attempts_pd = attempted_interviews.to_pandas()
-        # Dynamically set pd styler max elements based on DataFrame size
-        pd.set_option("styler.render.max_elements", attempts_pd.size + 1)
+        # Make sure the Styler limit fits this DataFrame
+        ensure_styler_limit(attempts_pd.size + 1)
 
         cmap = sns.light_palette("pink", as_cmap=True)
         vmin = attempts_pd["num_interviews"].min()

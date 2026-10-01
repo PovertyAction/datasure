@@ -12,6 +12,7 @@ import time; resolving the module per call ensures these helpers honor that
 swap regardless of the order in which the module was first imported.
 """
 
+import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
@@ -204,22 +205,36 @@ def show_queued_notices(scope: str) -> bool:
     return bool(notices)
 
 
+# Serializes updates to pandas' process-wide Styler limit across sessions.
+_STYLER_LIMIT_LOCK = threading.Lock()
+
+
+def ensure_styler_limit(cells: int) -> None:
+    """Raise pandas' ``styler.render.max_elements`` to at least `cells`.
+
+    Streamlit refuses to render a Styler with more cells than this
+    process-wide option, and every session shares it. The limit is only
+    ever raised, never lowered or restored, so one session can't cut it
+    below what another's render needs. Use this instead of
+    ``pd.set_option("styler.render.max_elements", ...)``.
+    """
+    import pandas as pd
+
+    with _STYLER_LIMIT_LOCK:
+        if pd.get_option("styler.render.max_elements") < cells:
+            pd.set_option("styler.render.max_elements", cells)
+
+
 def styled_dataframe(styler: "Styler", **dataframe_kwargs: Any) -> Any:
     """Render a pandas ``Styler`` with ``st.dataframe``, whatever its size.
 
-    Streamlit refuses to render a Styler with more cells than the global
-    ``styler.render.max_elements`` pandas option, which other pages lower to
-    fit their own tables. The limit is raised to fit this table only for the
-    duration of the call, then restored.
-
-    Returns what ``st.dataframe`` returns.
+    Raises the Styler cell limit to fit the table first (see
+    `ensure_styler_limit`). Returns what ``st.dataframe`` returns.
     """
-    import pandas as pd
     import streamlit as st
 
-    limit = max(pd.get_option("styler.render.max_elements"), styler.data.size)
-    with pd.option_context("styler.render.max_elements", limit):
-        return st.dataframe(styler, **dataframe_kwargs)
+    ensure_styler_limit(styler.data.size)
+    return st.dataframe(styler, **dataframe_kwargs)
 
 
 def row_styler(df: "pl.DataFrame", row_style: Callable[[Any], list[str]]) -> "Styler":
