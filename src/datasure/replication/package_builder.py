@@ -11,8 +11,8 @@ from collections.abc import Callable
 import polars as pl
 
 from datasure.processing.correction_log import (
-    ACCEPT_ACTION,
     CORRECTION_LOG_SCHEMA,
+    Action,
     ensure_log_columns,
 )
 from datasure.replication.codebook import generate_codebook
@@ -92,7 +92,7 @@ def _applied_corrections(correction_log: pl.DataFrame) -> pl.DataFrame:
     """Return the log rows that change data, dropping "accept" review records."""
     if "action" not in correction_log.columns:
         return correction_log
-    return correction_log.filter(pl.col("action") != ACCEPT_ACTION)
+    return correction_log.filter(pl.col("action") != Action.ACCEPT)
 
 
 def _action_summary(correction_log: pl.DataFrame) -> dict[str, int]:
