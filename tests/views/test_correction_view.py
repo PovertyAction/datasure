@@ -5,6 +5,7 @@ import sys
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import polars as pl
 import pytest
 
@@ -26,6 +27,7 @@ from datasure.views.correction_view import (
     _handle_remove_correction,
     get_current_value,
     get_key_options,
+    highlight_hard_acceptance,
     load_hfc_config,
     load_tab_config,
     main,
@@ -465,6 +467,7 @@ class TestBuildCorrectionLogDisplay:
             "status",
             "status_reason",
             "check_type",
+            "severity",
             "column",
             "current_value",
             "new_value",
@@ -491,6 +494,40 @@ class TestBuildCorrectionLogDisplay:
         assert result.select("action", "check_type", "source").rows() == [
             ("accept", "outliers", "outliers")
         ]
+
+    def test_hard_violation_acceptances_show_their_severity(self):
+        log = self._base_log(
+            action=["accept"],
+            new_value=[None],
+            check_type=["constraints"],
+            source=["constraints"],
+            severity=["hard"],
+        )
+
+        result = _build_correction_log_display(log)
+
+        assert result["severity"].to_list() == ["hard"]
+
+
+class TestHighlightHardAcceptance:
+    """Hard-violation acceptances stand out in the Correction Log."""
+
+    def test_highlights_every_cell_of_a_hard_acceptance(self):
+        row = pd.Series({"action": "accept", "severity": "hard", "KEY": "k1"})
+
+        styles = highlight_hard_acceptance(row)
+
+        assert len(styles) == len(row)
+        assert all(style and "background" in style for style in styles)
+
+    @pytest.mark.parametrize(
+        ("action", "severity"),
+        [("accept", None), ("modify value", None), ("accept", "soft")],
+    )
+    def test_leaves_other_rows_plain(self, action, severity):
+        row = pd.Series({"action": action, "severity": severity, "KEY": "k1"})
+
+        assert highlight_hard_acceptance(row) == ["", "", ""]
 
 
 class TestLoadTabConfig:
