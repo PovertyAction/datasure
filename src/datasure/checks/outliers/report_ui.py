@@ -166,6 +166,10 @@ def _render_outlier_metrics(
 # `queue_notice` scope of the confirmation shown after the post-save rerun.
 _NOTICE_SCOPE = "outliers_corrections"
 
+# First column of a results table: a button that opens the correction dialog.
+REVIEW_BUTTON_COL = "_review"
+REVIEW_BUTTON_LABEL = ":material/edit_note: Review"
+
 
 @dataclass(frozen=True)
 class ReviewContext:
@@ -203,10 +207,6 @@ def _render_show_reviewed_toggle(
     )
 
 
-def _table_nonce_key(check_type: str) -> str:
-    return f"{check_type}_flags_table_nonce"
-
-
 def _render_flags_table(
     table: pl.DataFrame,
     data: pl.DataFrame,
@@ -215,31 +215,46 @@ def _render_flags_table(
     review: ReviewContext | None,
     **dataframe_kwargs: Any,
 ) -> None:
-    """Render a results table; with `review`, a selected row opens the form."""
+    """Render a results table; with `review`, each row has a Review button.
+
+    Clicking Review opens the correction form for that row in a dialog.
+    """
     if review is None:
         st.dataframe(table, **dataframe_kwargs)
         return
 
-    # Selection is a row position, so the key changes whenever the shown
-    # rows do (and after each save, via the nonce); a position never carries
-    # over to a different flag.
-    nonce = st.session_state.get(_table_nonce_key(check.check_type), 0)
-    rows = table.select(pl.col(settings.survey_key).cast(pl.String), "column name")
-    fingerprint = hash(tuple(rows.hash_rows().to_list()))
-    event = st.dataframe(
-        table,
-        key=f"{check.check_type}_flags_table_{nonce}_{fingerprint}",
-        on_select="rerun",
-        selection_mode="single-row",
+    click_key = f"{check.check_type}_flag_review_click"
+    st.dataframe(
+        table.select(pl.lit(REVIEW_BUTTON_LABEL).alias(REVIEW_BUTTON_COL), pl.all()),
+        column_config={
+            REVIEW_BUTTON_COL: st.column_config.ButtonColumn(
+                "",
+                type="tertiary",
+                pinned=True,
+                key=click_key,
+                help="Correct the value or accept it as valid.",
+            )
+        },
         **dataframe_kwargs,
     )
-    selection = select_flag(
-        table, list(event.selection.rows), settings.survey_key, check
-    )
-    if selection is None:
-        st.caption("Select a row to correct the value or accept it as valid.")
-        return
 
+    # The click is only present during the rerun it triggers, so the dialog
+    # opens once per click; widgets inside the dialog rerun just the dialog.
+    click = st.session_state.get(click_key)
+    rows = [click["row"]] if click else []
+    selection = select_flag(table, rows, settings.survey_key, check)
+    if selection is not None:
+        _flag_correction_dialog(data, settings, selection, review)
+
+
+@st.dialog("Correct or accept flagged value", width="medium")
+def _flag_correction_dialog(
+    data: pl.DataFrame,
+    settings: OutlierSettings,
+    selection: FlagSelection,
+    review: ReviewContext,
+) -> None:
+    """Show the correction form for a flag in a dialog."""
     _render_flag_correction_form(data, settings, selection, review)
 
 
@@ -266,66 +281,64 @@ def _render_flag_correction_form(
     )
     namespace = f"{selection.check_type}_{key_value}_{selection.column}"
 
-    with st.container(border=True):
-        st.markdown(f"**{selection.column}** for KEY **{key_value}**")
-        if selection.reviewed:
-            st.info(
-                "This flag was accepted as valid. Remove the acceptance on the "
-                "Correct Data page to flag it again."
-            )
-
-        state = render_correction_inputs(
-            data,
-            key_col,
-            str(key_value),
-            key_namespace=namespace,
-            actions=allowed_actions(selection),
-            column=selection.column,
-            current_value=current_value,
-            check_type=selection.check_type,
-            survey_id_value=survey_id_value,
+    st.markdown(f"**{selection.column}** for KEY **{key_value}**")
+    if selection.reviewed:
+        st.info(
+            "This flag was accepted as valid. Remove the acceptance on the "
+            "Correct Data page to flag it again."
         )
 
-        hard_accept = needs_hard_confirmation(selection, state.action)
-        confirmed = True
-        if hard_accept:
-            st.warning(
-                "This value breaks a hard constraint, a bound meant to be "
-                "absolute. The acceptance is highlighted in the Correction Log."
-            )
-            confirmed = st.checkbox(
-                "I confirm this value is correct despite the hard constraint",
-                key=f"correction_hard_confirm_{namespace}",
-            )
+    state = render_correction_inputs(
+        data,
+        key_col,
+        str(key_value),
+        key_namespace=namespace,
+        actions=allowed_actions(selection),
+        column=selection.column,
+        current_value=current_value,
+        check_type=selection.check_type,
+        survey_id_value=survey_id_value,
+    )
 
-        apply_enabled = (
-            should_enable_apply_button(state.action, state.reason, state.new_value)
-            and not state.validation_error
-            and confirmed
+    hard_accept = needs_hard_confirmation(selection, state.action)
+    confirmed = True
+    if hard_accept:
+        st.warning(
+            "This value breaks a hard constraint, a bound meant to be "
+            "absolute. The acceptance is highlighted in the Correction Log."
         )
-        if not st.button(
-            label="Apply",
-            key=f"correction_apply_{namespace}",
-            width="stretch",
-            disabled=not apply_enabled,
-            type="primary",
-        ):
-            return
+        confirmed = st.checkbox(
+            "I confirm this value is correct despite the hard constraint",
+            key=f"correction_hard_confirm_{namespace}",
+        )
 
-        entry = state.to_entry()
-        if hard_accept:
-            entry = replace(entry, severity=HARD_SEVERITY)
-        if not apply_correction_entries(
-            review.processor,
-            review.alias,
-            key_col,
-            [entry],
-            source=selection.check_type,
-        ):
-            return
+    apply_enabled = (
+        should_enable_apply_button(state.action, state.reason, state.new_value)
+        and not state.validation_error
+        and confirmed
+    )
+    if not st.button(
+        label="Apply",
+        key=f"correction_apply_{namespace}",
+        width="stretch",
+        disabled=not apply_enabled,
+        type="primary",
+    ):
+        return
 
-    nonce_key = _table_nonce_key(selection.check_type)
-    st.session_state[nonce_key] = st.session_state.get(nonce_key, 0) + 1
+    entry = state.to_entry()
+    if hard_accept:
+        entry = replace(entry, severity=HARD_SEVERITY)
+    if not apply_correction_entries(
+        review.processor,
+        review.alias,
+        key_col,
+        [entry],
+        source=selection.check_type,
+    ):
+        return
+
+    # A full rerun closes the dialog and refreshes the tables and metrics.
     queue_notice(
         _NOTICE_SCOPE,
         "toast",
