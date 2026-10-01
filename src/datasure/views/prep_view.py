@@ -1106,6 +1106,10 @@ if show_prep_page_info:
 
         # display tab features
         with tab:
+            # Before the empty check: a step that removes every row still
+            # queued messages for this run.
+            show_queued_notices(_notice_scope(label))
+
             if prep_data.is_empty():
                 st.warning(
                     "No data available to prepare. Please upload a dataset in the Import Data step."
@@ -1121,7 +1125,6 @@ if show_prep_page_info:
             all_cols = prep_data.columns
 
             section_header("Apply Changes")
-            show_queued_notices(_notice_scope(label))
 
             # Demo guidance for apply changes section
             if is_demo_project():
