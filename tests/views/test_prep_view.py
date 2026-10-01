@@ -16,6 +16,7 @@ from datasure.models.enums import (
     PrepRowConditions,
 )
 from datasure.utils.reapply_utils import ReapplyFailure
+from datasure.utils.ui_utils import show_queued_notices
 
 # --- Module import setup ---
 # prep_view.py has module-level Streamlit guards and UI code.
@@ -67,7 +68,6 @@ with (
         _render_range_value_inputs,
         _render_string_function_inputs,
         _render_substring_inputs,
-        _show_queued_reapply_warnings,
         _validate_column_types_for_range,
         prep_add_step,
         prep_remove_step,
@@ -1584,7 +1584,6 @@ class TestPrepAddStep:
 
         prep_add_step(sample_polars_df, step_index=0)
         mock_prep_apply.assert_called_once()
-        _st.success.assert_called_once()
         _st.rerun.assert_called_once()
 
     @patch("datasure.views.prep_view.prep_apply_action")
@@ -1663,37 +1662,43 @@ def _confirm_remove_first_step(pv, mock_get_table):
     _st.rerun = MagicMock()
 
 
-@pytest.fixture()
-def clear_queued_warnings():
-    _st.session_state.pop("st_prep_reapply_warnings", None)
-    yield
-    _st.session_state.pop("st_prep_reapply_warnings", None)
+def _processor(mock_processor_cls, failures=()):
+    """Return the mocked CorrectionProcessor, set to report `failures`."""
+    processor = mock_processor_cls.return_value
+    processor.refresh_existing_corrected_data.return_value = list(failures)
+    return processor
 
 
-@pytest.mark.usefixtures("clear_queued_warnings")
-class TestPrepChangeReplaysCorrections:
+def _show_next_run_notices(pv):
+    """Render what the Prep tab shows for test_label on the next run."""
+    _st.success = MagicMock()
+    _st.warning = MagicMock()
+    _st.error = MagicMock()
+    show_queued_notices(pv._notice_scope("test_label"))
+
+
+class TestPrepChangeRefreshesCorrectedData:
     """Changing prep steps rebuilds the corrected table from the new prep."""
 
     @patch("datasure.views.prep_view.CorrectionProcessor")
     @patch("datasure.views.prep_view.prep_apply_action")
-    def test_adding_a_step_replays_corrections(
+    def test_adding_a_step_refreshes_corrected_data(
         self, mock_prep_apply, mock_processor_cls, sample_polars_df
     ):
         import datasure.views.prep_view as pv
 
         _click_add_remove_column(pv)
-        mock_processor_cls.return_value.refresh_existing_corrected_data.return_value = []
+        processor = _processor(mock_processor_cls)
 
         prep_add_step(sample_polars_df, step_index=0)
 
         mock_processor_cls.assert_called_once_with("test_project")
-        processor = mock_processor_cls.return_value
         processor.refresh_existing_corrected_data.assert_called_once_with("test_label")
         _st.rerun.assert_called_once()
 
     @patch("datasure.views.prep_view.CorrectionProcessor")
     @patch("datasure.views.prep_view.prep_apply_action")
-    def test_rejected_step_does_not_replay_corrections(
+    def test_rejected_step_does_not_refresh_corrected_data(
         self, mock_prep_apply, mock_processor_cls, sample_polars_df
     ):
         import datasure.views.prep_view as pv
@@ -1708,20 +1713,21 @@ class TestPrepChangeReplaysCorrections:
 
     @patch("datasure.views.prep_view.CorrectionProcessor")
     @patch("datasure.views.prep_view.prep_apply_action")
-    def test_correction_failures_after_adding_are_shown_after_rerun(
+    def test_success_and_failures_after_adding_are_shown_after_rerun(
         self, mock_prep_apply, mock_processor_cls, sample_polars_df
     ):
         import datasure.views.prep_view as pv
 
         _click_add_remove_column(pv)
-        mock_processor_cls.return_value.refresh_existing_corrected_data.return_value = [
-            ReapplyFailure("modify value name for key1", "column 'name' not found")
-        ]
+        _processor(
+            mock_processor_cls,
+            [ReapplyFailure("modify value name for key1", "column 'name' not found")],
+        )
 
         prep_add_step(sample_polars_df, step_index=0)
-        _st.warning = MagicMock()
-        _show_queued_reapply_warnings("test_label")
+        _show_next_run_notices(pv)
 
+        _st.success.assert_called_once_with("Preparation step added successfully!")
         _st.warning.assert_called_once()
         message = _st.warning.call_args[0][0]
         assert "corrections could not be reapplied" in message
@@ -1729,68 +1735,64 @@ class TestPrepChangeReplaysCorrections:
 
     @patch("datasure.views.prep_view.CorrectionProcessor")
     @patch("datasure.views.prep_view.prep_apply_action")
+    def test_refresh_error_is_shown_after_rerun(
+        self, mock_prep_apply, mock_processor_cls, sample_polars_df
+    ):
+        import datasure.views.prep_view as pv
+
+        _click_add_remove_column(pv)
+        processor = _processor(mock_processor_cls)
+        processor.refresh_existing_corrected_data.side_effect = OSError("disk full")
+
+        prep_add_step(sample_polars_df, step_index=0)
+        _show_next_run_notices(pv)
+
+        _st.rerun.assert_called_once()
+        _st.error.assert_called_once()
+        assert "disk full" in _st.error.call_args[0][0]
+
+    @patch("datasure.views.prep_view.CorrectionProcessor")
+    @patch("datasure.views.prep_view.prep_apply_action")
     @patch("datasure.views.prep_view.duckdb_save_table")
     @patch("datasure.views.prep_view.duckdb_get_table")
-    def test_removing_a_step_replays_corrections(
+    def test_removing_a_step_refreshes_corrected_data(
         self, mock_get_table, mock_save, mock_prep_apply, mock_processor_cls
     ):
         import datasure.views.prep_view as pv
 
         _confirm_remove_first_step(pv, mock_get_table)
         mock_prep_apply.return_value = []
-        mock_processor_cls.return_value.refresh_existing_corrected_data.return_value = []
+        processor = _processor(mock_processor_cls)
 
         prep_remove_step()
 
-        processor = mock_processor_cls.return_value
         processor.refresh_existing_corrected_data.assert_called_once_with("test_label")
 
     @patch("datasure.views.prep_view.CorrectionProcessor")
     @patch("datasure.views.prep_view.prep_apply_action")
     @patch("datasure.views.prep_view.duckdb_save_table")
     @patch("datasure.views.prep_view.duckdb_get_table")
-    def test_failures_after_removing_are_shown_after_rerun(
+    def test_success_and_failures_after_removing_are_shown_after_rerun(
         self, mock_get_table, mock_save, mock_prep_apply, mock_processor_cls
     ):
         import datasure.views.prep_view as pv
 
         _confirm_remove_first_step(pv, mock_get_table)
         mock_prep_apply.return_value = [ReapplyFailure("add col2", "prep broke")]
-        mock_processor_cls.return_value.refresh_existing_corrected_data.return_value = [
-            ReapplyFailure("remove row key1", "key not found")
-        ]
+        _processor(
+            mock_processor_cls, [ReapplyFailure("remove row key1", "key not found")]
+        )
 
         prep_remove_step()
-        _st.warning = MagicMock()
-        _show_queued_reapply_warnings("test_label")
+        _show_next_run_notices(pv)
 
+        _st.success.assert_called_once_with(
+            "Action 'Removed col1' removed successfully!"
+        )
         messages = [c.args[0] for c in _st.warning.call_args_list]
         assert len(messages) == 2
         assert "prep broke" in messages[0]
         assert "key not found" in messages[1]
-
-    def test_queued_warnings_are_shown_once(self):
-        import datasure.views.prep_view as pv
-
-        pv._queue_reapply_warning(
-            "test_label", [ReapplyFailure("step", "reason")], "Context"
-        )
-        _st.warning = MagicMock()
-        _show_queued_reapply_warnings("test_label")
-        _show_queued_reapply_warnings("test_label")
-
-        _st.warning.assert_called_once()
-
-    def test_queued_warnings_are_scoped_to_their_alias(self):
-        import datasure.views.prep_view as pv
-
-        pv._queue_reapply_warning(
-            "test_label", [ReapplyFailure("step", "reason")], "Context"
-        )
-        _st.warning = MagicMock()
-        _show_queued_reapply_warnings("other_label")
-
-        _st.warning.assert_not_called()
 
 
 class TestModuleLevelPageLayout:
@@ -2189,5 +2191,4 @@ class TestPrepRemoveStep:
         prep_remove_step()
         mock_save_table.assert_called_once()
         mock_prep_apply.assert_called_once()
-        _st.success.assert_called_once()
         _st.rerun.assert_called_once()

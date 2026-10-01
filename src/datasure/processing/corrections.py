@@ -1023,7 +1023,7 @@ class CorrectionProcessor:
         """
         if not duckdb_table_exists(self.project_id, alias=alias, db_name="corrected"):
             return []
-        return self.refresh_corrected_data(alias)
+        return self._reapply_all_corrections(alias)
 
     def _reapply_all_corrections(self, alias: str) -> list[ReapplyFailure]:
         """Reapply all corrections from the log to fresh data.

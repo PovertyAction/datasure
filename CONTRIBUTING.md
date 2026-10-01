@@ -149,6 +149,10 @@ Every Streamlit view must render its chrome through the shared helpers in
 - `confirm_dialog(title, body, on_confirm=...)` for every destructive action
   (delete/remove/restart) — do not invent per-view confirm flows with
   session-state flags, expanders, or inline warnings.
+- `queue_notice(scope, level, message)` for any success/warning/error message
+  raised just before an `st.rerun()` (including a `confirm_dialog` callback,
+  which reruns), with `show_queued_notices(scope)` where it should appear on
+  the next run. Rendering it directly gets cleared by the rerun.
 - Use `st.divider()` for horizontal rules, never `st.write("---")`.
 - Icons are Material shortcodes (`:material/check_circle:`), not emoji
   shortcodes (`:white_check_mark:`).

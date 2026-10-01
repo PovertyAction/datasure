@@ -251,6 +251,32 @@ def _seed_correction_log(project_id: str, alias: str, rows: list[dict]) -> None:
     duckdb_save_table(project_id, log_df, alias=f"corr_log_{alias}", db_name="logs")
 
 
+def _apply_corrections(
+    project_id: str,
+    bundle: ProjectConfigBundle,
+    imported_aliases: set[str],
+    prepped_aliases: list[str],
+) -> list[ReapplyFailure]:
+    """Rebuild corrected data for every alias whose inputs the bundle changed.
+
+    Bundled corrections are seeded and replayed. An alias whose prep was just
+    rebuilt but has no bundled corrections still has its existing corrected
+    table, if any, replayed against the new prep output.
+    """
+    processor = CorrectionProcessor(project_id)
+    failures: list[ReapplyFailure] = []
+    for alias, rows in bundle.corrections.items():
+        if alias not in imported_aliases:
+            continue
+        _seed_correction_log(project_id, alias, rows)
+        failures.extend(processor.refresh_corrected_data(alias))
+
+    for alias in prepped_aliases:
+        if alias not in bundle.corrections:
+            failures.extend(processor.refresh_existing_corrected_data(alias))
+    return failures
+
+
 def _write_page_settings(
     project_id: str, page_name: str, settings: dict, missing_settings: dict
 ) -> None:
@@ -387,11 +413,13 @@ def apply_project_config(
                 ReapplyFailure(ds.alias, reason or "Unknown error")
             )
 
+    prepped_aliases: list[str] = []
     for alias, steps in bundle.prep_steps.items():
         if alias not in imported_aliases:
             continue
         _seed_prep_log(project_id, alias, steps)
         result.prep_failures.extend(prep_apply_action(project_id, alias))
+        prepped_aliases.append(alias)
 
     config_service = ConfigurationService(project_id)
     for page in bundle.pages:
@@ -420,13 +448,9 @@ def apply_project_config(
         )
         result.pages_created.append(page_name)
 
-    for alias, rows in bundle.corrections.items():
-        if alias not in imported_aliases:
-            continue
-        _seed_correction_log(project_id, alias, rows)
-        result.correction_failures.extend(
-            CorrectionProcessor(project_id).refresh_corrected_data(alias)
-        )
+    result.correction_failures.extend(
+        _apply_corrections(project_id, bundle, imported_aliases, prepped_aliases)
+    )
 
     config_service.sync_output_view_files()
     return result
