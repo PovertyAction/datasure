@@ -39,6 +39,7 @@ from datasure.utils.ui_utils import (
     confirm_dialog,
     metric_row,
     page_header,
+    row_styler,
     section_header,
     styled_dataframe,
 )
@@ -581,8 +582,13 @@ def highlight_hard_acceptance(row: Any) -> list[str]:
     axis=1)``). Accepting a value that breaks a hard constraint overrides a
     bound meant to be absolute, so those rows stand out for review.
     """
-    is_hard_accept = row.get("action") == Action.ACCEPT and (
-        row.get("severity") == HARD_SEVERITY
+    action, severity = row.get("action"), row.get("severity")
+    # Missing values may be pd.NA, which can't be used in a boolean test.
+    is_hard_accept = (
+        isinstance(action, str)
+        and isinstance(severity, str)
+        and action == Action.ACCEPT
+        and severity == HARD_SEVERITY
     )
     style = "background-color: rgba(220, 53, 69, 0.15)" if is_hard_accept else ""
     return [style] * len(row)
@@ -615,9 +621,9 @@ def render_correction_log(
         else:
             section_header("Correction Log")
 
-            log_display = _build_correction_log_display(correction_log).to_pandas()
+            log_display = _build_correction_log_display(correction_log)
             styled_dataframe(
-                log_display.style.apply(highlight_hard_acceptance, axis=1).map(
+                row_styler(log_display, highlight_hard_acceptance).map(
                     highlight_status, subset=["status"]
                 ),
                 width="stretch",

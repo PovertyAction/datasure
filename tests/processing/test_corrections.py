@@ -1914,3 +1914,84 @@ class TestAcceptanceSeverity:
         (summary,) = processor.get_correction_summary("survey")
 
         assert summary["severity"] == "hard"
+
+
+class TestActiveCorrections:
+    """Value corrections whose result the data still holds."""
+
+    def _correct(self, processor, *entries):
+        processor.apply_corrections(
+            alias="survey",
+            key_col="survey_key",
+            entries=list(entries),
+            source="outliers",
+        )
+
+    def _modify(self, key, column, new_value, current_value, reason="typo"):
+        return CorrectionEntry(
+            key_value=key,
+            action="modify value",
+            column=column,
+            current_value=current_value,
+            new_value=new_value,
+            reason=reason,
+        )
+
+    def test_returns_modify_and_remove_value_corrections(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._correct(
+            processor,
+            self._modify("key1", "age", 26, 25),
+            CorrectionEntry(
+                key_value="key2",
+                action="remove value",
+                column="age",
+                current_value=30,
+                reason="impossible",
+            ),
+        )
+
+        active = processor.get_active_corrections("survey", "survey_key")
+
+        assert active.select("KEY", "action", "column", "reason").rows() == [
+            ("key1", "modify value", "age", "typo"),
+            ("key2", "remove value", "age", "impossible"),
+        ]
+
+    def test_a_correction_overwritten_later_is_inactive(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._correct(processor, self._modify("key1", "age", 26, 25, reason="first"))
+        self._correct(processor, self._modify("key1", "age", 27, 26, reason="second"))
+
+        active = processor.get_active_corrections("survey", "survey_key")
+
+        assert active["reason"].to_list() == ["second"]
+
+    def test_excludes_acceptances_and_removed_rows(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._correct(
+            processor,
+            CorrectionEntry(
+                key_value="key1",
+                action="accept",
+                check_type="outliers",
+                column="age",
+                current_value=25,
+                reason="ok",
+            ),
+            CorrectionEntry(key_value="key3", action="remove row", reason="dup"),
+        )
+
+        assert processor.get_active_corrections("survey", "survey_key").is_empty()
+
+    def test_empty_log_returns_no_corrections(self, store, sample_data):
+        _seed_prep(store, sample_data)
+
+        active = CorrectionProcessor("p1").get_active_corrections(
+            "survey", "survey_key"
+        )
+
+        assert active.is_empty()

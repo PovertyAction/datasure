@@ -522,7 +522,13 @@ class TestHighlightHardAcceptance:
 
     @pytest.mark.parametrize(
         ("action", "severity"),
-        [("accept", None), ("modify value", None), ("accept", "soft")],
+        [
+            ("accept", None),
+            ("modify value", None),
+            ("accept", "soft"),
+            ("accept", pd.NA),
+            (pd.NA, pd.NA),
+        ],
     )
     def test_leaves_other_rows_plain(self, action, severity):
         row = pd.Series({"action": action, "severity": severity, "KEY": "k1"})

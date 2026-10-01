@@ -1,4 +1,4 @@
-"""Review of outlier and constraint flags against accepted values.
+"""Review of outlier and constraint flags against the correction log.
 
 A flag is reviewed when the correction log holds an active acceptance for
 its KEY and column under the same check type (see
@@ -6,6 +6,11 @@ its KEY and column under the same check type (see
 the tables unless the user asks to see them, and are left out of the flag
 counts. Outlier and constraint acceptances are independent: accepting an
 outlier does not review a constraint violation on the same cell.
+
+A cell whose current value comes from a correction (see
+`CorrectionProcessor.get_active_corrections`) is marked corrected. Corrected
+values are shown with the reviewed ones, but a corrected value that is still
+flagged stays visible and counted: it still needs attention.
 
 Kept free of Streamlit so the logic can be tested without a running app.
 """
@@ -20,6 +25,7 @@ from datasure.processing.correction_log import Action
 REVIEW_STATUS_COL = "review status"
 REVIEW_REASON_COL = "review reason"
 REVIEWED_BADGE = "Reviewed"
+CORRECTED_BADGE = "Corrected"
 
 
 @dataclass(frozen=True)
@@ -56,11 +62,24 @@ def _is_flagged(check: FlagCheck) -> pl.Expr:
     )
 
 
+def _latest_reason_by_cell(log_rows: pl.DataFrame, prefix: str) -> pl.DataFrame:
+    """Return the latest log reason per KEY and column, keyed for a join.
+
+    The log stores KEY as text, so keys are compared as text.
+    """
+    return log_rows.select(
+        pl.col("KEY").cast(pl.String).alias("_review_key"),
+        pl.col("column").cast(pl.String).alias("_review_column"),
+        pl.col("reason").cast(pl.String).alias(f"_{prefix}_reason"),
+    ).unique(subset=["_review_key", "_review_column"], keep="last")
+
+
 def mark_reviewed(
     flags: pl.DataFrame,
     acceptances: pl.DataFrame,
     survey_key: str,
     check: FlagCheck,
+    corrections: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """Add review status and reason columns to computed flags.
 
@@ -76,48 +95,56 @@ def mark_reviewed(
         The Survey KEY column in `flags`.
     check : FlagCheck
         The check that produced `flags`.
+    corrections : pl.DataFrame | None
+        The active value corrections, as returned by
+        `CorrectionProcessor.get_active_corrections`.
 
     Returns
     -------
     pl.DataFrame
-        `flags` in the same order, plus `REVIEW_STATUS_COL` (the reviewed
-        badge, or null) and `REVIEW_REASON_COL` (the acceptance reason, or
-        null). Only flagged rows can be reviewed.
+        `flags` in the same order, plus `REVIEW_STATUS_COL` and
+        `REVIEW_REASON_COL`: `REVIEWED_BADGE` and the acceptance reason for
+        an accepted flag (only flagged rows can be accepted),
+        `CORRECTED_BADGE` and the correction reason for a corrected cell,
+        otherwise null. An acceptance takes precedence over a correction.
     """
     if flags.is_empty():
         return flags
 
-    # The log stores KEY as text; the latest acceptance's reason wins.
-    accepted = acceptances.select(
-        pl.col("KEY").cast(pl.String).alias("_review_key"),
-        pl.col("column").cast(pl.String).alias("_review_column"),
-        pl.lit(REVIEWED_BADGE).alias(REVIEW_STATUS_COL),
-        pl.col("reason").cast(pl.String).alias(REVIEW_REASON_COL),
-    ).unique(subset=["_review_key", "_review_column"], keep="last")
+    if corrections is None:
+        corrections = acceptances.clear()
 
-    marked = (
-        flags.with_columns(
-            pl.col(survey_key).cast(pl.String).alias("_review_key"),
-            pl.col("column name").cast(pl.String).alias("_review_column"),
-        )
-        .join(
-            accepted,
+    keyed = flags.with_columns(
+        pl.col(survey_key).cast(pl.String).alias("_review_key"),
+        pl.col("column name").cast(pl.String).alias("_review_column"),
+    )
+    for prefix, log_rows in (("accept", acceptances), ("correct", corrections)):
+        keyed = keyed.join(
+            _latest_reason_by_cell(log_rows, prefix),
             on=["_review_key", "_review_column"],
             how="left",
             maintain_order="left",
         )
-        .drop("_review_key", "_review_column")
-    )
 
-    flagged = _is_flagged(check)
-    return marked.with_columns(
-        pl.when(flagged).then(pl.col(REVIEW_STATUS_COL)).alias(REVIEW_STATUS_COL),
-        pl.when(flagged).then(pl.col(REVIEW_REASON_COL)).alias(REVIEW_REASON_COL),
-    )
+    accepted = _is_flagged(check) & pl.col("_accept_reason").is_not_null()
+    corrected = pl.col("_correct_reason").is_not_null()
+    return keyed.with_columns(
+        pl.when(accepted)
+        .then(pl.lit(REVIEWED_BADGE))
+        .when(corrected)
+        .then(pl.lit(CORRECTED_BADGE))
+        .alias(REVIEW_STATUS_COL),
+        pl.when(accepted)
+        .then(pl.col("_accept_reason"))
+        .when(corrected)
+        .then(pl.col("_correct_reason"))
+        .alias(REVIEW_REASON_COL),
+    ).drop("_review_key", "_review_column", "_accept_reason", "_correct_reason")
 
 
 def _is_reviewed() -> pl.Expr:
-    return pl.col(REVIEW_STATUS_COL).is_not_null()
+    """Whether a row is an accepted flag (not merely a corrected value)."""
+    return pl.col(REVIEW_STATUS_COL).fill_null("") == REVIEWED_BADGE
 
 
 def clear_reviewed_flags(flags: pl.DataFrame, check: FlagCheck) -> pl.DataFrame:
@@ -139,14 +166,18 @@ _REVIEWED_ROW_STYLE = "background-color: rgba(25, 135, 84, 0.15)"
 
 
 def highlight_reviewed_row(row: Any) -> list[str]:
-    """Style every cell of a reviewed flag green in a results table.
+    """Style every cell of an accepted or corrected row green in a table.
 
     Used with a pandas ``Styler`` (``df.style.apply(highlight_reviewed_row,
     axis=1)``) when "Show reviewed" is on.
     """
     status = row.get(REVIEW_STATUS_COL)
-    style = _REVIEWED_ROW_STYLE if status == REVIEWED_BADGE else ""
-    return [style] * len(row)
+    # Missing values may be pd.NA, which can't be used in a boolean test.
+    is_reviewed = isinstance(status, str) and status in (
+        REVIEWED_BADGE,
+        CORRECTED_BADGE,
+    )
+    return [_REVIEWED_ROW_STYLE if is_reviewed else ""] * len(row)
 
 
 def flagged_only(flags: pl.DataFrame, check: FlagCheck) -> pl.DataFrame:
@@ -205,7 +236,7 @@ def select_flag(
         column=row["column name"],
         check_type=check.check_type,
         flagged=flagged,
-        reviewed=row.get(REVIEW_STATUS_COL) is not None,
+        reviewed=row.get(REVIEW_STATUS_COL) == REVIEWED_BADGE,
         hard=row.get("violation type") in _HARD_VIOLATION_TYPES,
     )
 

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
+    import polars as pl
     from pandas.io.formats.style import Styler
 
 NoticeLevel = Literal["success", "warning", "error", "toast"]
@@ -219,3 +220,19 @@ def styled_dataframe(styler: "Styler", **dataframe_kwargs: Any) -> Any:
     limit = max(pd.get_option("styler.render.max_elements"), styler.data.size)
     with pd.option_context("styler.render.max_elements", limit):
         return st.dataframe(styler, **dataframe_kwargs)
+
+
+def row_styler(df: "pl.DataFrame", row_style: Callable[[Any], list[str]]) -> "Styler":
+    """Return a pandas ``Styler`` for `df` that styles each row with `row_style`.
+
+    ``st.dataframe`` shows a Styler's formatted text, and pandas' defaults
+    would change the values: integers with missing values become floats,
+    floats are padded or rounded to six decimals, and missing values read
+    "nan". Here nullable types are kept and each value is shown as its plain
+    text ("None" if missing), so styling changes only the colours.
+
+    `row_style` receives each row as a pandas Series; missing values are
+    ``pd.NA``, which must not be used in a boolean test.
+    """
+    pandas_df = df.to_pandas(use_pyarrow_extension_array=True)
+    return pandas_df.style.apply(row_style, axis=1).format(str, na_rep="None")

@@ -20,12 +20,15 @@ class ReapplyFailure:
     reason: str
 
 
-def highlight_status(value: str) -> str:
+def highlight_status(value: object) -> str:
     """Style a log status cell: green text for Successful, red for Failed.
 
     Used with a pandas ``Styler`` (``df.style.map(highlight_status,
     subset=["status"])``) on the prep and correction Change Log tables.
     """
+    if not isinstance(value, str):
+        # Missing (None or pd.NA, which can't be used in a boolean test).
+        return ""
     if value == "Failed":
         return "color: #dc3545; font-weight: 600"
     if value == "Successful":

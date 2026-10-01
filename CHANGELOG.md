@@ -44,6 +44,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the acceptance is removed. Accepting a hard violation needs a confirmation.
   A "Show only flagged values" toggle (on by default) sits above both tables;
   the outlier inspection table previously always listed unflagged values too.
+  With "Show reviewed" on, values whose current value comes from a modify or
+  remove correction are also highlighted green, with a "Corrected" badge and
+  the correction reason (new `CorrectionProcessor.get_active_corrections`);
+  unlike accepted flags, corrected values that are still flagged stay visible
+  and counted. The outlier inspection table now hides its index. Styled tables
+  are built with new `ui_utils.row_styler`, which keeps values displayed as in
+  the unstyled table (pandas' default Styler formatting showed `150` as
+  `150.000000` and missing values as `nan`).
   Flag review logic lives in the new Streamlit-free
   `src/datasure/checks/outliers/review.py`; `outliers_report` takes the
   dataset `alias`. Removed the unused `_render_outlier_table`.

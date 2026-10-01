@@ -66,6 +66,7 @@ from datasure.utils.settings_utils import (
 )
 from datasure.utils.ui_utils import (
     queue_notice,
+    row_styler,
     show_queued_notices,
     styled_dataframe,
 )
@@ -191,13 +192,16 @@ def _with_review_status(
     check: FlagCheck,
     review: ReviewContext | None,
 ) -> pl.DataFrame:
-    """Mark the flags accepted under `check`; a no-op if already marked."""
+    """Mark accepted flags and corrected values; a no-op if already marked."""
     if review is None or flags.is_empty() or REVIEW_STATUS_COL in flags.columns:
         return flags
     acceptances = review.processor.get_active_acceptances(
         review.alias, check.check_type, settings.survey_key
     )
-    return mark_reviewed(flags, acceptances, settings.survey_key, check)
+    corrections = review.processor.get_active_corrections(
+        review.alias, settings.survey_key
+    )
+    return mark_reviewed(flags, acceptances, settings.survey_key, check, corrections)
 
 
 def _render_table_toggles(
@@ -261,7 +265,7 @@ def _render_flags_table(
     if REVIEW_STATUS_COL in shown.columns:
         # "Show reviewed" is on: colour the reviewed flags green.
         styled_dataframe(
-            shown.to_pandas().style.apply(highlight_reviewed_row, axis=1),
+            row_styler(shown, highlight_reviewed_row),
             column_config=column_config,
             **dataframe_kwargs,
         )
@@ -684,7 +688,7 @@ def _render_outlier_column_inspection(
         OUTLIERS,
         review,
         width="stretch",
-        hide_index=False,
+        hide_index=True,
     )
 
 

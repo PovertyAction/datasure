@@ -846,6 +846,12 @@ enter a reason and click "Apply":
   and no longer counted in the metrics. Turn on "Show reviewed" to see
   accepted flags highlighted in green, with a Reviewed badge and the reason.
 
+"Show reviewed" also highlights corrected values in green, with a Corrected
+badge and the correction's reason. A corrected value that is now in range is
+no longer flagged, so turn off "Show only flagged values" to see it. A
+corrected value that is still flagged stays in the table and in the metrics
+until it is fixed or accepted. The badge clears if the value changes again.
+
 Outlier and constraint acceptances are separate: accepting an outlier does not
 accept a constraint violation on the same value. Accepting a **hard**
 constraint violation needs an extra confirmation. An accepted flag comes back
