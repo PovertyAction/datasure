@@ -33,9 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `apply_correction_entries`) renders the action, new-value and reason inputs
   for a prefilled KEY/column/current value, with namespaced widget keys. The
   Correct Data page now uses it — #296
-- **Outliers and constraints corrections**: Selecting a row in the constraint
-  violations or outlier inspection table opens the shared correction form,
-  prefilled with the row's KEY, column and current value, to modify the
+- **Outliers and constraints corrections**: Each row of the constraint
+  violations and outlier inspection tables has a Review button (a pinned
+  `st.column_config.ButtonColumn`) that opens the shared correction form in a
+  dialog, prefilled with the row's KEY, column and current value, to modify the
   value, remove it or accept it as valid (source and check type
   `outliers`/`constraints`). Accepted flags are hidden and left out of the
   metrics unless "Show reviewed" is on, and come back if the value changes or

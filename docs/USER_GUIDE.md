@@ -831,9 +831,10 @@ Visual analysis:
 
 ##### Correcting or Accepting Flagged Values
 
-Click a row in the constraint violations table or the outlier inspection table
-to open a correction form below it. The KEY, column and current value are
-filled in. Choose an action, enter a reason and click "Apply":
+Each row of the constraint violations table and the outlier inspection table
+starts with a **Review** button. Click it to open a correction form in a
+dialog, with the KEY, column and current value filled in. Choose an action,
+enter a reason and click "Apply":
 
 - **modify value** or **remove value** corrects the data. The page reloads, and
   the flag is updated or disappears.
