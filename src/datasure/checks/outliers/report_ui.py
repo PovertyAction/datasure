@@ -64,7 +64,11 @@ from datasure.utils.settings_utils import (
     save_check_settings,
     trigger_save,
 )
-from datasure.utils.ui_utils import queue_notice, show_queued_notices
+from datasure.utils.ui_utils import (
+    queue_notice,
+    show_queued_notices,
+    styled_dataframe,
+)
 
 # =============================================================================
 # Streamlit UI - Metrics Display
@@ -245,22 +249,24 @@ def _render_flags_table(
 
     click_key = f"{check.check_type}_flag_review_click"
     shown = table.select(pl.lit(REVIEW_BUTTON_LABEL).alias(REVIEW_BUTTON_COL), pl.all())
+    column_config = {
+        REVIEW_BUTTON_COL: st.column_config.ButtonColumn(
+            "",
+            type="tertiary",
+            pinned=True,
+            key=click_key,
+            help="Correct the value or accept it as valid.",
+        )
+    }
     if REVIEW_STATUS_COL in shown.columns:
         # "Show reviewed" is on: colour the reviewed flags green.
-        shown = shown.to_pandas().style.apply(highlight_reviewed_row, axis=1)
-    st.dataframe(
-        shown,
-        column_config={
-            REVIEW_BUTTON_COL: st.column_config.ButtonColumn(
-                "",
-                type="tertiary",
-                pinned=True,
-                key=click_key,
-                help="Correct the value or accept it as valid.",
-            )
-        },
-        **dataframe_kwargs,
-    )
+        styled_dataframe(
+            shown.to_pandas().style.apply(highlight_reviewed_row, axis=1),
+            column_config=column_config,
+            **dataframe_kwargs,
+        )
+    else:
+        st.dataframe(shown, column_config=column_config, **dataframe_kwargs)
 
     # The click is only present during the rerun it triggers, so the dialog
     # opens once per click; widgets inside the dialog rerun just the dialog.

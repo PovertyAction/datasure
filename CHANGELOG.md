@@ -48,7 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `src/datasure/checks/outliers/review.py`; `outliers_report` takes the
   dataset `alias`. Removed the unused `_render_outlier_table`.
   `queue_notice` gains a `toast` level, and `show_queued_notices` returns
-  whether it showed anything — #298
+  whether it showed anything. New `ui_utils.styled_dataframe` renders a
+  pandas Styler with the `styler.render.max_elements` limit raised to fit it
+  for that call only, since other tabs lower the global limit to fit their own
+  tables; the results tables and the Correction Log use it — #298
 - **Correction log severity**: New `severity` column, `hard` on acceptances of
   hard constraint violations (null otherwise and for legacy logs).
   `CorrectionEntry.severity` sets it and is rejected on non-accept actions.

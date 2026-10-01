@@ -40,6 +40,7 @@ from datasure.utils.ui_utils import (
     metric_row,
     page_header,
     section_header,
+    styled_dataframe,
 )
 
 
@@ -615,7 +616,7 @@ def render_correction_log(
             section_header("Correction Log")
 
             log_display = _build_correction_log_display(correction_log).to_pandas()
-            st.dataframe(
+            styled_dataframe(
                 log_display.style.apply(highlight_hard_acceptance, axis=1).map(
                     highlight_status, subset=["status"]
                 ),
