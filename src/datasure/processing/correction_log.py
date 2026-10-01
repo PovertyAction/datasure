@@ -35,6 +35,9 @@ CORRECTION_ACTIONS: tuple[Action, ...] = (
 
 ACCEPT_CHECK_TYPES = ("outliers", "constraints", "backchecks", "duplicates", "gps")
 
+# `severity` of an acceptance that overrides a hard constraint bound.
+HARD_SEVERITY = "hard"
+
 # Full schema of a persisted correction log (`corr_log_{alias}`), in column order.
 CORRECTION_LOG_SCHEMA: dict[str, pl.DataType] = {
     "date": pl.Datetime("us"),
@@ -49,6 +52,9 @@ CORRECTION_LOG_SCHEMA: dict[str, pl.DataType] = {
     "status_reason": pl.String,
     "source": pl.String,
     "check_type": pl.String,
+    # For "accept", how serious the accepted flag is: "hard" for a hard
+    # constraint violation, null otherwise.
+    "severity": pl.String,
 }
 
 # Values given to columns that were added to the log after some logs were
@@ -59,6 +65,7 @@ _LOG_BACKFILL_DEFAULTS: dict[str, str | None] = {
     "status_reason": None,
     "source": CORRECTIONS_PAGE_SOURCE,
     "check_type": None,
+    "severity": None,
 }
 
 

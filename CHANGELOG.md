@@ -33,6 +33,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `apply_correction_entries`) renders the action, new-value and reason inputs
   for a prefilled KEY/column/current value, with namespaced widget keys. The
   Correct Data page now uses it — #296
+- **Outliers and constraints corrections**: Selecting a row in the constraint
+  violations or outlier inspection table opens the shared correction form,
+  prefilled with the row's KEY, column and current value, to modify the
+  value, remove it or accept it as valid (source and check type
+  `outliers`/`constraints`). Accepted flags are hidden and left out of the
+  metrics unless "Show reviewed" is on, and come back if the value changes or
+  the acceptance is removed. Accepting a hard violation needs a confirmation.
+  Flag review logic lives in the new Streamlit-free
+  `src/datasure/checks/outliers/review.py`; `outliers_report` takes the
+  dataset `alias`. Removed the unused `_render_outlier_table` — #298
+- **Correction log severity**: New `severity` column, `hard` on acceptances of
+  hard constraint violations (null otherwise and for legacy logs).
+  `CorrectionEntry.severity` sets it and is rejected on non-accept actions.
+  Hard acceptances are highlighted in the Correction Log — #298
 
 ### Fixed
 

@@ -1169,6 +1169,7 @@ class TestCorrectionLogSource:
             "status_reason",
             "source",
             "check_type",
+            "severity",
         ]
 
 
@@ -1829,3 +1830,87 @@ class TestRefreshExistingCorrectedData:
 
         assert len(failures) == 1
         assert processor.get_correction_log("survey")["status"].to_list() == ["Failed"]
+
+
+class TestAcceptanceSeverity:
+    """Hard constraint acceptances record their severity in the log."""
+
+    def _hard_accept(self, **overrides):
+        values = {
+            "key_value": "key1",
+            "action": "accept",
+            "check_type": "constraints",
+            "column": "age",
+            "current_value": 25,
+            "reason": "verified with respondent",
+            "severity": "hard",
+        }
+        return CorrectionEntry(**(values | overrides))
+
+    def test_apply_corrections_logs_the_severity(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        processor.apply_corrections(
+            alias="survey",
+            key_col="survey_key",
+            entries=[self._hard_accept()],
+            source="constraints",
+        )
+
+        log = processor.get_correction_log("survey")
+        assert log.select("action", "source", "severity").rows() == [
+            ("accept", "constraints", "hard")
+        ]
+
+    def test_entries_without_severity_log_null(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        processor.apply_corrections(
+            alias="survey",
+            key_col="survey_key",
+            entries=[self._hard_accept(severity=None)],
+            source="constraints",
+        )
+
+        assert processor.get_correction_log("survey")["severity"].to_list() == [None]
+
+    def test_severity_is_only_recorded_on_acceptances(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="severity"):
+            processor.apply_corrections(
+                alias="survey",
+                key_col="survey_key",
+                entries=[
+                    self._hard_accept(
+                        action="modify value", new_value=26, check_type=None
+                    )
+                ],
+                source="constraints",
+            )
+
+        assert processor.get_correction_log("survey").is_empty()
+
+    def test_legacy_logs_load_with_null_severity(self, store, sample_corrections_log):
+        store[("p1", "logs", "corr_log_survey")] = sample_corrections_log
+
+        log = CorrectionProcessor("p1").get_correction_log("survey")
+
+        assert log["severity"].to_list() == [None] * 3
+
+    def test_summary_carries_the_severity(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        processor.apply_corrections(
+            alias="survey",
+            key_col="survey_key",
+            entries=[self._hard_accept()],
+            source="constraints",
+        )
+
+        (summary,) = processor.get_correction_summary("survey")
+
+        assert summary["severity"] == "hard"
