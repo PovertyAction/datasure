@@ -15,6 +15,7 @@ from datasure.models.enums import (
     PrepMethods,
     PrepRowConditions,
 )
+from datasure.utils.reapply_utils import ReapplyFailure
 
 # --- Module import setup ---
 # prep_view.py has module-level Streamlit guards and UI code.
@@ -66,6 +67,7 @@ with (
         _render_range_value_inputs,
         _render_string_function_inputs,
         _render_substring_inputs,
+        _show_queued_reapply_warnings,
         _validate_column_types_for_range,
         prep_add_step,
         prep_remove_step,
@@ -1557,8 +1559,11 @@ class TestPrepAddStep:
 
         prep_add_step(sample_polars_df, step_index=0)
 
+    @patch("datasure.views.prep_view.CorrectionProcessor")
     @patch("datasure.views.prep_view.prep_apply_action")
-    def test_add_button_clicked(self, mock_prep_apply, sample_polars_df):
+    def test_add_button_clicked(
+        self, mock_prep_apply, mock_processor_cls, sample_polars_df
+    ):
         """When Add button is clicked with valid data."""
         import datasure.views.prep_view as pv
 
@@ -1614,6 +1619,178 @@ class TestPrepAddStep:
         assert "Failed to parse datetime" in _st.error.call_args[0][0]
         _st.success.assert_not_called()
         _st.rerun.assert_not_called()
+
+
+def _open_popover():
+    mock_popover = MagicMock()
+    mock_popover.__enter__ = MagicMock(return_value=None)
+    mock_popover.__exit__ = MagicMock(return_value=False)
+    _st.popover = MagicMock(return_value=mock_popover)
+
+
+def _click_add_remove_column(pv):
+    """Drive prep_add_step through a valid "remove column" submission."""
+    pv.project_id = "test_project"
+    pv.label = "test_label"
+    _open_popover()
+    _st.selectbox = MagicMock(return_value=PrepActions.remove_column.value)
+    _st.multiselect = MagicMock(return_value=["name"])
+    _st.info = MagicMock()
+    _st.button = MagicMock(return_value=True)
+    _st.success = MagicMock()
+    _st.error = MagicMock()
+    _st.rerun = MagicMock()
+
+
+def _confirm_remove_first_step(pv, mock_get_table):
+    """Drive prep_remove_step through confirming removal of step 0."""
+    import pandas as pd
+
+    pv.project_id = "test_project"
+    pv.label = "test_label"
+    pv.i = 0
+    _open_popover()
+    mock_get_table.return_value = MagicMock()
+    mock_get_table.return_value.to_pandas.return_value = pd.DataFrame(
+        {"action": ["remove column(s)"], "description": ["Removed col1"]}
+    )
+    _st.warning = MagicMock()
+    _st.selectbox = MagicMock(return_value="0 - remove column(s) - Removed col1")
+    _st.button = MagicMock(side_effect=lambda label=None, *a, **k: label != "Cancel")
+    _st.dialog = MagicMock(side_effect=lambda *a, **k: lambda fn: fn)
+    _st.columns = MagicMock(return_value=[MagicMock(), MagicMock()])
+    _st.success = MagicMock()
+    _st.rerun = MagicMock()
+
+
+@pytest.fixture()
+def clear_queued_warnings():
+    _st.session_state.pop("st_prep_reapply_warnings", None)
+    yield
+    _st.session_state.pop("st_prep_reapply_warnings", None)
+
+
+@pytest.mark.usefixtures("clear_queued_warnings")
+class TestPrepChangeReplaysCorrections:
+    """Changing prep steps rebuilds the corrected table from the new prep."""
+
+    @patch("datasure.views.prep_view.CorrectionProcessor")
+    @patch("datasure.views.prep_view.prep_apply_action")
+    def test_adding_a_step_replays_corrections(
+        self, mock_prep_apply, mock_processor_cls, sample_polars_df
+    ):
+        import datasure.views.prep_view as pv
+
+        _click_add_remove_column(pv)
+        mock_processor_cls.return_value.refresh_existing_corrected_data.return_value = []
+
+        prep_add_step(sample_polars_df, step_index=0)
+
+        mock_processor_cls.assert_called_once_with("test_project")
+        processor = mock_processor_cls.return_value
+        processor.refresh_existing_corrected_data.assert_called_once_with("test_label")
+        _st.rerun.assert_called_once()
+
+    @patch("datasure.views.prep_view.CorrectionProcessor")
+    @patch("datasure.views.prep_view.prep_apply_action")
+    def test_rejected_step_does_not_replay_corrections(
+        self, mock_prep_apply, mock_processor_cls, sample_polars_df
+    ):
+        import datasure.views.prep_view as pv
+        from datasure.processing.prep import ValidationError
+
+        _click_add_remove_column(pv)
+        mock_prep_apply.side_effect = ValidationError("bad step")
+
+        prep_add_step(sample_polars_df, step_index=0)
+
+        mock_processor_cls.assert_not_called()
+
+    @patch("datasure.views.prep_view.CorrectionProcessor")
+    @patch("datasure.views.prep_view.prep_apply_action")
+    def test_correction_failures_after_adding_are_shown_after_rerun(
+        self, mock_prep_apply, mock_processor_cls, sample_polars_df
+    ):
+        import datasure.views.prep_view as pv
+
+        _click_add_remove_column(pv)
+        mock_processor_cls.return_value.refresh_existing_corrected_data.return_value = [
+            ReapplyFailure("modify value name for key1", "column 'name' not found")
+        ]
+
+        prep_add_step(sample_polars_df, step_index=0)
+        _st.warning = MagicMock()
+        _show_queued_reapply_warnings("test_label")
+
+        _st.warning.assert_called_once()
+        message = _st.warning.call_args[0][0]
+        assert "corrections could not be reapplied" in message
+        assert "column 'name' not found" in message
+
+    @patch("datasure.views.prep_view.CorrectionProcessor")
+    @patch("datasure.views.prep_view.prep_apply_action")
+    @patch("datasure.views.prep_view.duckdb_save_table")
+    @patch("datasure.views.prep_view.duckdb_get_table")
+    def test_removing_a_step_replays_corrections(
+        self, mock_get_table, mock_save, mock_prep_apply, mock_processor_cls
+    ):
+        import datasure.views.prep_view as pv
+
+        _confirm_remove_first_step(pv, mock_get_table)
+        mock_prep_apply.return_value = []
+        mock_processor_cls.return_value.refresh_existing_corrected_data.return_value = []
+
+        prep_remove_step()
+
+        processor = mock_processor_cls.return_value
+        processor.refresh_existing_corrected_data.assert_called_once_with("test_label")
+
+    @patch("datasure.views.prep_view.CorrectionProcessor")
+    @patch("datasure.views.prep_view.prep_apply_action")
+    @patch("datasure.views.prep_view.duckdb_save_table")
+    @patch("datasure.views.prep_view.duckdb_get_table")
+    def test_failures_after_removing_are_shown_after_rerun(
+        self, mock_get_table, mock_save, mock_prep_apply, mock_processor_cls
+    ):
+        import datasure.views.prep_view as pv
+
+        _confirm_remove_first_step(pv, mock_get_table)
+        mock_prep_apply.return_value = [ReapplyFailure("add col2", "prep broke")]
+        mock_processor_cls.return_value.refresh_existing_corrected_data.return_value = [
+            ReapplyFailure("remove row key1", "key not found")
+        ]
+
+        prep_remove_step()
+        _st.warning = MagicMock()
+        _show_queued_reapply_warnings("test_label")
+
+        messages = [c.args[0] for c in _st.warning.call_args_list]
+        assert len(messages) == 2
+        assert "prep broke" in messages[0]
+        assert "key not found" in messages[1]
+
+    def test_queued_warnings_are_shown_once(self):
+        import datasure.views.prep_view as pv
+
+        pv._queue_reapply_warning(
+            "test_label", [ReapplyFailure("step", "reason")], "Context"
+        )
+        _st.warning = MagicMock()
+        _show_queued_reapply_warnings("test_label")
+        _show_queued_reapply_warnings("test_label")
+
+        _st.warning.assert_called_once()
+
+    def test_queued_warnings_are_scoped_to_their_alias(self):
+        import datasure.views.prep_view as pv
+
+        pv._queue_reapply_warning(
+            "test_label", [ReapplyFailure("step", "reason")], "Context"
+        )
+        _st.warning = MagicMock()
+        _show_queued_reapply_warnings("other_label")
+
+        _st.warning.assert_not_called()
 
 
 class TestModuleLevelPageLayout:
@@ -1964,10 +2141,13 @@ class TestPrepRemoveStep:
         # With entries present, the action selector is rendered.
         _st.selectbox.assert_called()
 
+    @patch("datasure.views.prep_view.CorrectionProcessor")
     @patch("datasure.views.prep_view.prep_apply_action")
     @patch("datasure.views.prep_view.duckdb_save_table")
     @patch("datasure.views.prep_view.duckdb_get_table")
-    def test_remove_confirm(self, mock_get_table, mock_save_table, mock_prep_apply):
+    def test_remove_confirm(
+        self, mock_get_table, mock_save_table, mock_prep_apply, mock_processor_cls
+    ):
         """When remove button clicked with valid selection."""
         import pandas as pd
 

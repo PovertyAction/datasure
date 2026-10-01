@@ -1068,9 +1068,13 @@ def store():
     def fake_save(project_id, table_data, alias, db_name="raw"):
         tables[(project_id, db_name, alias)] = table_data
 
+    def fake_exists(project_id, alias, db_name):
+        return (project_id, db_name, alias) in tables
+
     with (
         patch("datasure.processing.corrections.duckdb_get_table", fake_get),
         patch("datasure.processing.corrections.duckdb_save_table", fake_save),
+        patch("datasure.processing.corrections.duckdb_table_exists", fake_exists),
     ):
         _clear_processor_caches()
         yield tables
@@ -1775,3 +1779,53 @@ class TestApplyCorrectionsStorageFailure:
 
         assert processor.get_corrected_data("survey").equals(sample_data)
         assert processor.get_correction_log("survey").is_empty()
+
+
+class TestRefreshExistingCorrectedData:
+    """Replays corrections after an upstream change, only once corrections exist."""
+
+    def _fix_name(self, processor):
+        processor.apply_correction(
+            alias="survey",
+            key_col="survey_key",
+            key_value="key1",
+            action="modify value",
+            column="name",
+            current_value="John",
+            new_value="Johnny",
+            reason="typo",
+        )
+
+    def test_does_nothing_without_a_corrected_table(self, store, sample_data):
+        _seed_prep(store, sample_data)
+
+        failures = CorrectionProcessor("p1").refresh_existing_corrected_data("survey")
+
+        assert failures == []
+        assert ("p1", "corrected", "survey") not in store
+
+    def test_rebuilds_corrected_table_from_new_prep(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._fix_name(processor)
+
+        # A prep step drops a column after the correction was made.
+        _seed_prep(store, sample_data.drop("age"))
+        failures = processor.refresh_existing_corrected_data("survey")
+
+        assert failures == []
+        corrected = processor.get_corrected_data("survey")
+        assert "age" not in corrected.columns
+        assert corrected["name"].to_list() == ["Johnny", "Jane", "Bob"]
+
+    def test_reports_corrections_that_no_longer_apply(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._fix_name(processor)
+
+        # A prep step drops the corrected column.
+        _seed_prep(store, sample_data.drop("name"))
+        failures = processor.refresh_existing_corrected_data("survey")
+
+        assert len(failures) == 1
+        assert processor.get_correction_log("survey")["status"].to_list() == ["Failed"]
