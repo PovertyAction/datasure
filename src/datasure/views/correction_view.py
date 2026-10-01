@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from datasure.processing.correction_log import (
     CORRECTIONS_PAGE_SOURCE,
+    HARD_SEVERITY,
     Action,
     ensure_log_columns,
 )
@@ -536,8 +537,8 @@ def _build_correction_log_display(correction_log: pl.DataFrame) -> pl.DataFrame:
     Backfills columns missing from logs saved before they existed, orders
     columns so status/status_reason sit right after action, and relabels the
     "ID" column as "Survey ID" for display. "accept" rows carry the check
-    whose flag was accepted in check_type; source names the page that made
-    each entry.
+    whose flag was accepted in check_type and, for a hard constraint
+    violation, severity "hard"; source names the page that made each entry.
 
     Parameters
     ----------
@@ -560,6 +561,7 @@ def _build_correction_log_display(correction_log: pl.DataFrame) -> pl.DataFrame:
         "status",
         "status_reason",
         "check_type",
+        "severity",
         "column",
         "current_value",
         "new_value",
@@ -569,6 +571,20 @@ def _build_correction_log_display(correction_log: pl.DataFrame) -> pl.DataFrame:
     # "ID" holds the Survey ID value recorded for the KEY, if one was
     # configured - rename it for display so the column reads clearly.
     return correction_log.select(display_columns).rename({"ID": "Survey ID"})
+
+
+def highlight_hard_acceptance(row: Any) -> list[str]:
+    """Style every cell of a hard-violation acceptance in the Correction Log.
+
+    Used with a pandas ``Styler`` (``df.style.apply(highlight_hard_acceptance,
+    axis=1)``). Accepting a value that breaks a hard constraint overrides a
+    bound meant to be absolute, so those rows stand out for review.
+    """
+    is_hard_accept = row.get("action") == Action.ACCEPT and (
+        row.get("severity") == HARD_SEVERITY
+    )
+    style = "background-color: rgba(220, 53, 69, 0.15)" if is_hard_accept else ""
+    return [style] * len(row)
 
 
 @st.fragment
@@ -600,7 +616,9 @@ def render_correction_log(
 
             log_display = _build_correction_log_display(correction_log).to_pandas()
             st.dataframe(
-                log_display.style.map(highlight_status, subset=["status"]),
+                log_display.style.apply(highlight_hard_acceptance, axis=1).map(
+                    highlight_status, subset=["status"]
+                ),
                 width="stretch",
             )
 

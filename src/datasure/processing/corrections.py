@@ -191,6 +191,7 @@ def _build_log_row(
     reason: str,
     source: str,
     check_type: str | None,
+    severity: str | None = None,
 ) -> dict[str, Any]:
     """Build one correction-log row.
 
@@ -210,6 +211,7 @@ def _build_log_row(
         "status_reason": None,
         "source": str(source),
         "check_type": check_type,
+        "severity": severity,
     }
 
 
@@ -237,6 +239,9 @@ class CorrectionEntry:
         The Survey ID value for this KEY, recorded in the log's ID column
     check_type : str | None
         For "accept", the check whose flag is accepted
+    severity : str | None
+        For "accept", how serious the accepted flag is: "hard" for a hard
+        constraint violation, otherwise None
     """
 
     key_value: str
@@ -247,6 +252,7 @@ class CorrectionEntry:
     new_value: Any = None
     survey_id_value: Any = None
     check_type: str | None = None
+    severity: str | None = None
 
 
 # The cached methods below hash `self` by its project so that two projects
@@ -663,6 +669,7 @@ class CorrectionProcessor:
                 reason=entry.reason,
                 source=source,
                 check_type=entry.check_type,
+                severity=entry.severity,
             )
             for entry in entries
         ]
@@ -697,6 +704,12 @@ class CorrectionProcessor:
                 data, key_col, entry.key_value, entry.column, entry.current_value
             )
             return data
+
+        if entry.severity is not None:
+            raise ValueError(
+                f"Only acceptances record a severity, not {entry.action} "
+                f"on {entry.key_value}"
+            )
 
         if entry.action not in CORRECTION_ACTIONS:
             raise ValueError(f"Unknown correction action '{entry.action}'")
@@ -1252,6 +1265,7 @@ class CorrectionProcessor:
                     "action_index": f"{index} - {action} - {description}",
                     "action": action,
                     "check_type": row["check_type"],
+                    "severity": row["severity"],
                     "description": description,
                     "key_value": key_value,
                     "column": column,

@@ -469,6 +469,8 @@ Check type column shows which check it applies to. It stays in effect only
 while the value is unchanged. Accept entries are kept in `correction_log.csv`
 in the replication package but are not part of the corrections script. You can
 remove an accept entry with "Remove correction step" like any other entry.
+Accepting a hard constraint violation sets Severity to `hard`, and those rows
+are highlighted in red.
 
 To blank a cell, use "remove value": "modify value" needs a non-empty new
 value (`0` is valid).
@@ -826,6 +828,25 @@ Visual analysis:
 - **Statistics display**: All relevant metrics
 - **Box Plot**: Distribution with outliers highlighted
 - **Table**: All records with outlier indicators
+
+##### Correcting or Accepting Flagged Values
+
+Click a row in the constraint violations table or the outlier inspection table
+to open a correction form below it. The KEY, column and current value are
+filled in. Choose an action, enter a reason and click "Apply":
+
+- **modify value** or **remove value** corrects the data. The page reloads, and
+  the flag is updated or disappears.
+- **accept** records that the flagged value is correct. The flag is hidden
+  and no longer counted in the metrics. Turn on "Show reviewed" to see
+  accepted flags with a Reviewed badge and the reason.
+
+Outlier and constraint acceptances are separate: accepting an outlier does not
+accept a constraint violation on the same value. Accepting a **hard**
+constraint violation needs an extra confirmation. An accepted flag comes back
+if the value changes, or if you remove the acceptance on the Correct Data page.
+Every entry appears in the Correction Log with source `outliers` or
+`constraints`.
 
 ---
 
