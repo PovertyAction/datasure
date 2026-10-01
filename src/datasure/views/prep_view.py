@@ -1,3 +1,5 @@
+import logging
+
 import pandas as pd
 import polars as pl
 import streamlit as st
@@ -15,6 +17,7 @@ from datasure.models.enums import (
     PrepOperations,
     PrepRowConditions,
 )
+from datasure.processing.corrections import CorrectionProcessor
 from datasure.processing.prep import (
     OperationError,
     ValidationError,
@@ -42,13 +45,21 @@ from datasure.utils.prep_utils import (
     PrepActionResult,
     PrepDescriptions,
 )
-from datasure.utils.reapply_utils import highlight_status, warn_reapply_failures
+from datasure.utils.reapply_utils import (
+    ReapplyFailure,
+    format_reapply_failures,
+    highlight_status,
+)
 from datasure.utils.ui_utils import (
     confirm_dialog,
     metric_row,
     page_header,
+    queue_notice,
     section_header,
+    show_queued_notices,
 )
+
+logger = logging.getLogger(__name__)
 
 # === PAGE GUARDS === #
 
@@ -881,6 +892,46 @@ class PrepStepHandler:
 # === STEP MANAGEMENT === #
 
 
+# --- Next-Run Notices ---#
+# Both step handlers end in a rerun, which would clear any message rendered
+# straight away, so their messages are queued and shown on the next run.
+def _notice_scope(alias: str) -> str:
+    """Return the queued-notice scope for an alias's Prep tab."""
+    return f"prep_{alias}"
+
+
+def _queue_reapply_failures(
+    alias: str, failures: list[ReapplyFailure], context: str
+) -> None:
+    """Queue a warning listing reapply failures, if there are any."""
+    if failures:
+        queue_notice(
+            _notice_scope(alias), "warning", format_reapply_failures(failures, context)
+        )
+
+
+def _refresh_corrected_data(alias: str) -> None:
+    """Rebuild the alias's corrected table after its prep data changed."""
+    # UI boundary: the prep change is already saved, so a failed rebuild is
+    # reported rather than allowed to crash the page.
+    try:
+        failures = CorrectionProcessor(project_id).refresh_existing_corrected_data(
+            alias
+        )
+    except Exception as e:
+        logger.exception("Failed to rebuild corrected data for %s", alias)
+        queue_notice(
+            _notice_scope(alias),
+            "error",
+            f"The preparation change was saved, but corrected data could not be "
+            f"rebuilt: {e!s}",
+        )
+        return
+    _queue_reapply_failures(
+        alias, failures, "Some corrections could not be reapplied to the new prep data"
+    )
+
+
 # --- Add Preparation Step ---#
 def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
     """Add a data preparation step."""
@@ -930,7 +981,12 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
             except (ValidationError, OperationError) as e:
                 st.error(f"Error adding preparation step: {e!s}")
             else:
-                st.success("Preparation step added successfully!")
+                queue_notice(
+                    _notice_scope(label),
+                    "success",
+                    "Preparation step added successfully!",
+                )
+                _refresh_corrected_data(label)
                 st.rerun()
 
 
@@ -976,10 +1032,15 @@ def prep_remove_step():
                     db_name="logs",
                 )
                 failures = prep_apply_action(project_id, alias)
-                st.success(f"Action '{action_desc}' removed successfully!")
-                warn_reapply_failures(
-                    failures, "Some preparation steps could not be reapplied"
+                queue_notice(
+                    _notice_scope(alias),
+                    "success",
+                    f"Action '{action_desc}' removed successfully!",
                 )
+                _queue_reapply_failures(
+                    alias, failures, "Some preparation steps could not be reapplied"
+                )
+                _refresh_corrected_data(alias)
 
             if st.button(
                 label="Remove",
@@ -1045,6 +1106,10 @@ if show_prep_page_info:
 
         # display tab features
         with tab:
+            # Before the empty check: a step that removes every row still
+            # queued messages for this run.
+            show_queued_notices(_notice_scope(label))
+
             if prep_data.is_empty():
                 st.warning(
                     "No data available to prepare. Please upload a dataset in the Import Data step."

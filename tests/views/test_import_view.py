@@ -9,6 +9,7 @@ import polars as pl
 import pytest
 
 from datasure.connectors.scto import FormConfig
+from datasure.utils.reapply_utils import ReapplyFailure
 
 # --- Module import setup ---
 # import_view.py is a Streamlit page script: it has module-level UI code and
@@ -64,6 +65,8 @@ def _module_patches(overrides: dict | None = None):
         _p("datasure.utils.duckdb_utils.duckdb_get_table", return_value=pl.DataFrame()),
         _p("datasure.utils.duckdb_utils.duckdb_get_imported_datasets", return_value=[]),
         _p("datasure.utils.duckdb_utils.duckdb_table_exists", return_value=False),
+        # The corrections module is not reloaded, so it keeps its own binding.
+        _p("datasure.processing.corrections.duckdb_table_exists", return_value=False),
         _p(
             "datasure.utils.secure_credentials.list_stored_credentials",
             return_value={"credentials": {}},
@@ -379,24 +382,20 @@ class TestProcessSingleImport:
 class TestRefreshDownstreamData:
     """Test that a raw refresh rebuilds prep/corrected data when present."""
 
-    def test_rebuilds_prep_and_corrected_when_both_exist(self):
+    def test_rebuilds_prep_and_replays_corrections_when_prep_exists(self):
         with (
-            patch.object(
-                import_view, "duckdb_table_exists", return_value=True
-            ) as mock_exists,
+            patch.object(import_view, "duckdb_table_exists", return_value=True),
             patch.object(import_view, "prep_apply_action") as mock_prep_apply,
             patch.object(import_view, "CorrectionProcessor") as mock_processor_cls,
         ):
             import_view._refresh_downstream_data("test_project", "survey")
 
-        assert mock_exists.call_count == 2
         mock_prep_apply.assert_called_once_with("test_project", "survey")
         mock_processor_cls.assert_called_once_with("test_project")
-        mock_processor_cls.return_value.refresh_corrected_data.assert_called_once_with(
-            "survey"
-        )
+        processor = mock_processor_cls.return_value
+        processor.refresh_existing_corrected_data.assert_called_once_with("survey")
 
-    def test_skips_when_neither_prep_nor_corrected_exist(self):
+    def test_skips_prep_rebuild_when_prep_does_not_exist(self):
         with (
             patch.object(import_view, "duckdb_table_exists", return_value=False),
             patch.object(import_view, "prep_apply_action") as mock_prep_apply,
@@ -405,7 +404,24 @@ class TestRefreshDownstreamData:
             import_view._refresh_downstream_data("test_project", "survey")
 
         mock_prep_apply.assert_not_called()
-        mock_processor_cls.assert_not_called()
+        processor = mock_processor_cls.return_value
+        processor.refresh_existing_corrected_data.assert_called_once_with("survey")
+
+    def test_returns_prep_and_correction_failures(self):
+        prep_failure = ReapplyFailure("drop age", "column missing")
+        correction_failure = ReapplyFailure("modify name", "column missing")
+        with (
+            patch.object(import_view, "duckdb_table_exists", return_value=True),
+            patch.object(import_view, "prep_apply_action", return_value=[prep_failure]),
+            patch.object(import_view, "CorrectionProcessor") as mock_processor_cls,
+        ):
+            processor = mock_processor_cls.return_value
+            processor.refresh_existing_corrected_data.return_value = [
+                correction_failure
+            ]
+            failures = import_view._refresh_downstream_data("test_project", "survey")
+
+        assert failures == [prep_failure, correction_failure]
 
 
 class TestLoadDatasetBySource:
