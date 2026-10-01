@@ -17,7 +17,11 @@ from datasure.processing.correction_log import (
     empty_correction_log,
     ensure_log_columns,
 )
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.duckdb_utils import (
+    duckdb_get_table,
+    duckdb_save_table,
+    duckdb_table_exists,
+)
 from datasure.utils.reapply_utils import ReapplyFailure
 
 
@@ -998,6 +1002,28 @@ class CorrectionProcessor:
             Corrections that failed to reapply against the refreshed data.
         """
         return self._reapply_all_corrections(alias)
+
+    def refresh_existing_corrected_data(self, alias: str) -> list[ReapplyFailure]:
+        """Rebuild corrected data from prep, if a corrected table already exists.
+
+        Used after prep data changes (a re-import or a prep step being added
+        or removed). Aliases that have never been corrected are left alone,
+        so a corrected table is not created as a side effect.
+
+        Parameters
+        ----------
+        alias : str
+            The data alias/table name
+
+        Returns
+        -------
+        list[ReapplyFailure]
+            Corrections that failed to reapply against the new prep data.
+            Empty when there is no corrected table.
+        """
+        if not duckdb_table_exists(self.project_id, alias=alias, db_name="corrected"):
+            return []
+        return self.refresh_corrected_data(alias)
 
     def _reapply_all_corrections(self, alias: str) -> list[ReapplyFailure]:
         """Reapply all corrections from the log to fresh data.

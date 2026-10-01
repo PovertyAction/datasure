@@ -15,6 +15,7 @@ from datasure.models.enums import (
     PrepOperations,
     PrepRowConditions,
 )
+from datasure.processing.corrections import CorrectionProcessor
 from datasure.processing.prep import (
     OperationError,
     ValidationError,
@@ -42,7 +43,11 @@ from datasure.utils.prep_utils import (
     PrepActionResult,
     PrepDescriptions,
 )
-from datasure.utils.reapply_utils import highlight_status, warn_reapply_failures
+from datasure.utils.reapply_utils import (
+    ReapplyFailure,
+    highlight_status,
+    warn_reapply_failures,
+)
 from datasure.utils.ui_utils import (
     confirm_dialog,
     metric_row,
@@ -881,6 +886,37 @@ class PrepStepHandler:
 # === STEP MANAGEMENT === #
 
 
+# --- Reapply Warnings ---#
+# Both step handlers end in a rerun, which would clear a warning rendered
+# straight away, so reapply failures are queued and shown on the next run.
+_REAPPLY_WARNINGS_KEY = "st_prep_reapply_warnings"
+
+
+def _queue_reapply_warning(
+    alias: str, failures: list[ReapplyFailure], context: str
+) -> None:
+    """Queue a reapply warning for an alias, to show on the next run."""
+    if not failures:
+        return
+    queued = st.session_state.setdefault(_REAPPLY_WARNINGS_KEY, {})
+    queued.setdefault(alias, []).append((failures, context))
+
+
+def _show_queued_reapply_warnings(alias: str) -> None:
+    """Show and clear the reapply warnings queued for an alias."""
+    queued = st.session_state.get(_REAPPLY_WARNINGS_KEY, {})
+    for failures, context in queued.pop(alias, []):
+        warn_reapply_failures(failures, context)
+
+
+def _replay_corrections(alias: str) -> None:
+    """Rebuild the alias's corrected table after its prep data changed."""
+    failures = CorrectionProcessor(project_id).refresh_existing_corrected_data(alias)
+    _queue_reapply_warning(
+        alias, failures, "Some corrections could not be reapplied to the new prep data"
+    )
+
+
 # --- Add Preparation Step ---#
 def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
     """Add a data preparation step."""
@@ -930,6 +966,7 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
             except (ValidationError, OperationError) as e:
                 st.error(f"Error adding preparation step: {e!s}")
             else:
+                _replay_corrections(label)
                 st.success("Preparation step added successfully!")
                 st.rerun()
 
@@ -976,10 +1013,11 @@ def prep_remove_step():
                     db_name="logs",
                 )
                 failures = prep_apply_action(project_id, alias)
-                st.success(f"Action '{action_desc}' removed successfully!")
-                warn_reapply_failures(
-                    failures, "Some preparation steps could not be reapplied"
+                _queue_reapply_warning(
+                    alias, failures, "Some preparation steps could not be reapplied"
                 )
+                _replay_corrections(alias)
+                st.success(f"Action '{action_desc}' removed successfully!")
 
             if st.button(
                 label="Remove",
@@ -1060,6 +1098,7 @@ if show_prep_page_info:
             all_cols = prep_data.columns
 
             section_header("Apply Changes")
+            _show_queued_reapply_warnings(label)
 
             # Demo guidance for apply changes section
             if is_demo_project():
