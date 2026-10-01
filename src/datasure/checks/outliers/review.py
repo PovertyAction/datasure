@@ -176,12 +176,14 @@ def select_flag(
         return None
 
     row = table.row(rows[0], named=True)
-    reason = row.get(check.reason_col)
+    flagged = check.reason_col in table.columns and bool(
+        table.slice(rows[0], 1).select(_is_flagged(check)).item()
+    )
     return FlagSelection(
         key_value=row[survey_key],
         column=row["column name"],
         check_type=check.check_type,
-        flagged=reason is not None and reason != check.no_flag,
+        flagged=flagged,
         reviewed=row.get(REVIEW_STATUS_COL) is not None,
         hard=row.get("violation type") in _HARD_VIOLATION_TYPES,
     )

@@ -329,6 +329,30 @@ class TestComputeConstraintViolations:
         )
         assert result.is_empty()
 
+    def test_hard_bounds_take_precedence_over_soft_bounds(self, outlier_settings):
+        """A value past a hard bound is a hard violation, not a soft one."""
+        data = pl.DataFrame(
+            {"survey_key": ["K1", "K2", "K3", "K4"], "age": [150, 70, -5, 10]}
+        )
+        config = pl.DataFrame(
+            {
+                "column_name": [["age"]],
+                "hard_min": [0.0],
+                "soft_min": [15.0],
+                "soft_max": [65.0],
+                "hard_max": [100.0],
+            }
+        )
+
+        result = compute_constraint_violations(data, outlier_settings, config)
+
+        assert result["violation reason"].to_list() == [
+            "Value is above hard maximum 100.0",
+            "Value is above soft maximum 65.0",
+            "Value is below hard minimum 0.0",
+            "Value is below soft minimum 15.0",
+        ]
+
 
 class TestComputeColumnOutlierSummary:
     """Test compute_column_outlier_summary function."""
