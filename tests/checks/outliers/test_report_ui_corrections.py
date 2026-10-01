@@ -7,6 +7,7 @@ import pytest
 
 from datasure.checks.outliers.models import OutlierSettings
 from datasure.checks.outliers.report_ui import (
+    REVIEW_BUTTON_COL,
     ReviewContext,
     _render_constraint_violations_table,
     _render_flag_correction_form,
@@ -86,18 +87,25 @@ def _review(acceptances_by_check: dict[str, pl.DataFrame] | None = None):
     return ReviewContext(processor=processor, alias="survey")
 
 
-def _st_mock(selected_rows: list[int] | None = None, show_reviewed=False):
+def _st_mock(clicked: tuple[str, int] | None = None, show_reviewed=False):
+    """A Streamlit mock; `clicked` is (check type, row) of a Review click."""
     st_mock = MagicMock()
     st_mock.columns.side_effect = _columns_side_effect
     st_mock.multiselect.return_value = []
     st_mock.toggle.return_value = show_reviewed
     st_mock.session_state = {}
-    st_mock.dataframe.return_value.selection.rows = selected_rows or []
+    if clicked is not None:
+        check_type, row = clicked
+        st_mock.session_state[f"{check_type}_flag_review_click"] = {
+            "row": row,
+            "label": "Review",
+        }
     return st_mock
 
 
 def _shown_table(st_mock) -> pl.DataFrame:
-    return st_mock.dataframe.call_args.args[0]
+    """The flags shown, without the Review button column."""
+    return st_mock.dataframe.call_args.args[0].drop(REVIEW_BUTTON_COL, strict=False)
 
 
 def _selection(**overrides) -> FlagSelection:
@@ -125,38 +133,54 @@ def _form_state(action=Action.ACCEPT, reason="verified", **overrides):
     return CorrectionFormState(**(values | overrides))
 
 
-class TestConstraintTableSelection:
+class TestConstraintTableReviewButton:
     def _render(self, data, violations, settings, st_mock, review):
         with (
             patch(f"{MODULE}.st", st_mock),
             patch(f"{MODULE}.load_check_settings", return_value={}),
             patch(f"{MODULE}.save_check_settings"),
-            patch(f"{MODULE}._render_flag_correction_form") as form,
+            patch(f"{MODULE}._flag_correction_dialog") as dialog,
         ):
             _render_constraint_violations_table(
                 data, violations, settings, "settings.json", review=review
             )
-        return form
+        return dialog
 
-    def test_table_allows_single_row_selection(self, data, violations, settings):
+    def test_first_column_is_a_review_button_on_every_flag(
+        self, data, violations, settings
+    ):
         st_mock = _st_mock()
 
         self._render(data, violations, settings, st_mock, _review())
 
-        kwargs = st_mock.dataframe.call_args.kwargs
-        assert kwargs["on_select"] == "rerun"
-        assert kwargs["selection_mode"] == "single-row"
+        shown = st_mock.dataframe.call_args.args[0]
+        assert shown.columns[0] == REVIEW_BUTTON_COL
+        assert all("Review" in label for label in shown[REVIEW_BUTTON_COL])
+        button_config = st_mock.dataframe.call_args.kwargs["column_config"][
+            REVIEW_BUTTON_COL
+        ]
+        assert button_config is st_mock.column_config.ButtonColumn.return_value
+        button_kwargs = st_mock.column_config.ButtonColumn.call_args.kwargs
+        assert button_kwargs["key"] == "constraints_flag_review_click"
+        assert button_kwargs["pinned"] is True
 
-    def test_selecting_a_row_opens_the_form_prefilled_from_it(
+    def test_rows_are_not_selectable(self, data, violations, settings):
+        st_mock = _st_mock()
+
+        self._render(data, violations, settings, st_mock, _review())
+
+        assert "on_select" not in st_mock.dataframe.call_args.kwargs
+
+    def test_clicking_review_opens_the_dialog_prefilled_from_the_row(
         self, data, violations, settings
     ):
-        st_mock = _st_mock(selected_rows=[0])
+        st_mock = _st_mock(clicked=("constraints", 0))
         review = _review()
 
-        form = self._render(data, violations, settings, st_mock, review)
+        dialog = self._render(data, violations, settings, st_mock, review)
 
-        form.assert_called_once()
-        _, _, selection, passed_review = form.call_args.args
+        dialog.assert_called_once()
+        _, _, selection, passed_review = dialog.call_args.args
         assert selection == FlagSelection(
             key_value="K1",
             column="age",
@@ -167,10 +191,19 @@ class TestConstraintTableSelection:
         )
         assert passed_review is review
 
-    def test_no_selection_opens_no_form(self, data, violations, settings):
-        form = self._render(data, violations, settings, _st_mock(), _review())
+    def test_no_click_opens_no_dialog(self, data, violations, settings):
+        dialog = self._render(data, violations, settings, _st_mock(), _review())
 
-        form.assert_not_called()
+        dialog.assert_not_called()
+
+    def test_a_click_on_the_other_table_opens_no_dialog(
+        self, data, violations, settings
+    ):
+        st_mock = _st_mock(clicked=("outliers", 0))
+
+        dialog = self._render(data, violations, settings, st_mock, _review())
+
+        dialog.assert_not_called()
 
     def test_accepted_violations_are_hidden(self, data, violations, settings):
         st_mock = _st_mock()
@@ -204,43 +237,16 @@ class TestConstraintTableSelection:
 
         assert _shown_table(st_mock)["KEY"].to_list() == ["K1", "K2"]
 
-    def test_selection_resets_when_the_shown_rows_change(
-        self, data, violations, settings
-    ):
-        """A row position must never carry over to a different set of rows."""
-        review = _review({"constraints": _acceptances(("K1", "age", "verified"))})
-        hidden, shown = _st_mock(show_reviewed=False), _st_mock(show_reviewed=True)
-
-        self._render(data, violations, settings, hidden, review)
-        self._render(data, violations, settings, shown, review)
-
-        assert (
-            hidden.dataframe.call_args.kwargs["key"]
-            != shown.dataframe.call_args.kwargs["key"]
-        )
-
-    def test_selection_is_kept_while_the_rows_are_unchanged(
-        self, data, violations, settings
-    ):
-        first, second = _st_mock(), _st_mock()
-
-        self._render(data, violations, settings, first, _review())
-        self._render(data, violations, settings, second, _review())
-
-        assert (
-            first.dataframe.call_args.kwargs["key"]
-            == second.dataframe.call_args.kwargs["key"]
-        )
-
-    def test_without_review_the_table_is_read_only(self, data, violations, settings):
+    def test_without_review_the_table_has_no_button(self, data, violations, settings):
         st_mock = _st_mock()
 
         self._render(data, violations, settings, st_mock, None)
 
-        assert "on_select" not in st_mock.dataframe.call_args.kwargs
+        assert REVIEW_BUTTON_COL not in st_mock.dataframe.call_args.args[0].columns
+        assert "column_config" not in st_mock.dataframe.call_args.kwargs
 
 
-class TestOutlierTableSelection:
+class TestOutlierTableReviewButton:
     @pytest.fixture
     def outliers(self) -> pl.DataFrame:
         return pl.DataFrame(
@@ -263,22 +269,22 @@ class TestOutlierTableSelection:
             patch(f"{MODULE}.save_check_settings"),
             patch(f"{MODULE}._create_descriptive_stats", return_value=pl.DataFrame()),
             patch(f"{MODULE}._create_box_plot"),
-            patch(f"{MODULE}._render_flag_correction_form") as form,
+            patch(f"{MODULE}._flag_correction_dialog") as dialog,
         ):
             st_mock.selectbox.return_value = "age"
             _render_outlier_column_inspection(
                 data, outliers, settings, "settings.json", review=review
             )
-        return form
+        return dialog
 
-    def test_selecting_a_row_opens_the_form_for_outliers(
+    def test_clicking_review_opens_the_dialog_for_outliers(
         self, data, outliers, settings
     ):
-        st_mock = _st_mock(selected_rows=[0])
+        st_mock = _st_mock(clicked=("outliers", 0))
 
-        form = self._render(data, outliers, settings, st_mock, _review())
+        dialog = self._render(data, outliers, settings, st_mock, _review())
 
-        selection = form.call_args.args[2]
+        selection = dialog.call_args.args[2]
         assert selection.key_value == "K1"
         assert selection.column == "age"
         assert selection.check_type == "outliers"
