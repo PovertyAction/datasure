@@ -831,6 +831,10 @@ Visual analysis:
 
 ##### Correcting or Accepting Flagged Values
 
+Above each of the constraint violations and outlier inspection tables,
+**Show only flagged values** (on by default) limits the table to flagged
+values. Turn it off to see every checked value.
+
 Each row of the constraint violations table and the outlier inspection table
 starts with a **Review** button. Click it to open a correction form in a
 dialog, with the KEY, column and current value filled in. Choose an action,

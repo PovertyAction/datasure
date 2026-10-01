@@ -135,6 +135,13 @@ def clear_reviewed_flags(flags: pl.DataFrame, check: FlagCheck) -> pl.DataFrame:
     )
 
 
+def flagged_only(flags: pl.DataFrame, check: FlagCheck) -> pl.DataFrame:
+    """Return the rows of `flags` that `check` flagged."""
+    if check.reason_col not in flags.columns:
+        return flags
+    return flags.filter(_is_flagged(check))
+
+
 def visible_flags(flags: pl.DataFrame, *, show_reviewed: bool) -> pl.DataFrame:
     """Return the rows and columns of `flags` to show in a results table.
 

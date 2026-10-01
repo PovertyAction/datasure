@@ -39,6 +39,7 @@ from datasure.checks.outliers.review import (
     FlagSelection,
     allowed_actions,
     clear_reviewed_flags,
+    flagged_only,
     mark_reviewed,
     needs_hard_confirmation,
     select_flag,
@@ -194,17 +195,35 @@ def _with_review_status(
     return mark_reviewed(flags, acceptances, settings.survey_key, check)
 
 
-def _render_show_reviewed_toggle(
+def _render_table_toggles(
     check: FlagCheck, review: ReviewContext | None
-) -> bool:
-    """Render the "Show reviewed" toggle for a results table."""
-    if review is None:
-        return False
-    return st.toggle(
-        "Show reviewed",
-        key=f"{check.check_type}_show_reviewed",
-        help="Show flags accepted as valid, with the reason they were accepted.",
-    )
+) -> tuple[bool, bool]:
+    """Render the toggles above a results table.
+
+    Returns
+    -------
+    tuple[bool, bool]
+        Whether to show only flagged values, and whether to show reviewed
+        flags. "Show reviewed" is only offered with `review`.
+    """
+    tc1, tc2, _ = st.columns([0.25, 0.25, 0.5])
+    with tc1:
+        show_flagged_only = st.toggle(
+            "Show only flagged values",
+            key=f"{check.check_type}_flagged_only",
+            value=True,
+            help="Turn off to show every checked value, flagged or not.",
+        )
+    show_reviewed = False
+    if review is not None:
+        with tc2:
+            show_reviewed = st.toggle(
+                "Show reviewed",
+                key=f"{check.check_type}_show_reviewed",
+                help="Show flags accepted as valid, with the reason they were "
+                "accepted.",
+            )
+    return show_flagged_only, show_reviewed
 
 
 def _render_flags_table(
@@ -446,11 +465,13 @@ def _render_constraint_violations_table(
         st.info("No constraint violations detected.")
         return
 
-    show_reviewed = _render_show_reviewed_toggle(CONSTRAINTS, review)
+    show_flagged_only, show_reviewed = _render_table_toggles(CONSTRAINTS, review)
     violation_data = visible_flags(
         _with_review_status(violation_data, settings, CONSTRAINTS, review),
         show_reviewed=show_reviewed,
     )
+    if show_flagged_only:
+        violation_data = flagged_only(violation_data, CONSTRAINTS)
 
     all_columns = data.columns
 
@@ -484,18 +505,18 @@ def _render_constraint_violations_table(
         join_key=settings.survey_key,
     )
 
-    display_df = display_df.join(
+    violations_df = display_df.join(
         violation_df,
         on=settings.survey_key,
         how="inner",
     )
 
-    # show only rows with violations
-    violations_df = display_df.filter(pl.col("violation reason") != "no violation")
-
     # add violation type column ie. "Soft Min", "Soft Max", "Hard Min", "Hard Max"
+    # (null for values within bounds, shown when flagged-only is off)
     violation_type_expr = (
-        pl.when(pl.col("violation reason").str.contains("below hard minimum"))
+        pl.when(pl.col("violation reason") == CONSTRAINTS.no_flag)
+        .then(pl.lit(None, dtype=pl.String))
+        .when(pl.col("violation reason").str.contains("below hard minimum"))
         .then(pl.lit("Hard Min"))
         .when(pl.col("violation reason").str.contains("below soft minimum"))
         .then(pl.lit("Soft Min"))
@@ -628,11 +649,13 @@ def _render_outlier_column_inspection(
         if inspect_display_cols:
             include_cols.extend(inspect_display_cols)
 
-    show_reviewed = _render_show_reviewed_toggle(OUTLIERS, review)
+    show_flagged_only, show_reviewed = _render_table_toggles(OUTLIERS, review)
     outliers_data = visible_flags(
         _with_review_status(outliers_data, settings, OUTLIERS, review),
         show_reviewed=show_reviewed,
     )
+    if show_flagged_only:
+        outliers_data = flagged_only(outliers_data, OUTLIERS)
 
     # select columns to display from data
     display_df = data.select(include_cols)
