@@ -4,6 +4,7 @@ import sys
 from unittest.mock import MagicMock
 
 import pandas as pd
+import polars as pl
 import pytest
 
 from datasure.utils.ui_utils import (
@@ -11,6 +12,7 @@ from datasure.utils.ui_utils import (
     metric_row,
     page_header,
     queue_notice,
+    row_styler,
     section_header,
     show_queued_notices,
     styled_dataframe,
@@ -281,3 +283,41 @@ class TestStyledDataframe:
         result = styled_dataframe(pd.DataFrame({"a": [1]}).style)
 
         assert result is mock_st.dataframe.return_value
+
+
+class TestRowStyler:
+    """Styling a table must not change how its values are displayed."""
+
+    @staticmethod
+    def _display_values(styler) -> list[list[str]]:
+        body = styler._translate(False, False)["body"]
+        return [[cell["display_value"] for cell in row[1:]] for row in body]
+
+    def test_values_display_as_in_the_unstyled_table(self):
+        df = pl.DataFrame(
+            {
+                "KEY": ["K1", "K2"],
+                "age": [150, None],
+                "income": [1234.5678912, 70.5],
+                "note": ["x", None],
+            }
+        )
+
+        styler = row_styler(df, lambda row: [""] * len(row))
+
+        assert self._display_values(styler) == [
+            ["K1", "150", "1234.5678912", "x"],
+            ["K2", "None", "70.5", "None"],
+        ]
+
+    def test_applies_the_row_style(self):
+        df = pl.DataFrame({"KEY": ["K1", "K2"], "flag": ["yes", None]})
+
+        def green_if_flagged(row):
+            flagged = isinstance(row["flag"], str)
+            return ["background-color: green" if flagged else ""] * len(row)
+
+        cell_styles = row_styler(df, green_if_flagged)._compute().ctx
+
+        styled_rows = {row for (row, _), props in cell_styles.items() if props}
+        assert styled_rows == {0}

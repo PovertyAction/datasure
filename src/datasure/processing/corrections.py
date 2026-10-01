@@ -551,6 +551,54 @@ class CorrectionProcessor:
         ]
         return acceptances.filter(pl.Series(is_active, dtype=pl.Boolean))
 
+    def get_active_corrections(self, alias: str, key_col: str) -> pl.DataFrame:
+        """Return the value corrections whose result the data still holds.
+
+        A "modify value" is active while the cell holds its new value, and a
+        "remove value" while the cell is missing. A correction overwritten by
+        a later one, or whose row was removed, is inactive.
+
+        Parameters
+        ----------
+        alias : str
+            The data alias/table name
+        key_col : str
+            The Survey KEY column name
+
+        Returns
+        -------
+        pl.DataFrame
+            The active "modify value" and "remove value" rows from the
+            correction log, in log order
+        """
+        log = self.get_correction_log(alias)
+        if log.width == 0:
+            return empty_correction_log()
+
+        corrections = log.filter(
+            pl.col("action").is_in([Action.MODIFY_VALUE, Action.REMOVE_VALUE])
+            & pl.col("column").is_not_null()
+        )
+        if corrections.is_empty():
+            return corrections
+
+        data = self.get_corrected_data(alias)
+        is_active = [
+            _acceptance_mismatch(
+                data,
+                key_col,
+                row["KEY"],
+                {
+                    row["column"]: row["new_value"]
+                    if row["action"] == Action.MODIFY_VALUE
+                    else None
+                },
+            )
+            is None
+            for row in corrections.iter_rows(named=True)
+        ]
+        return corrections.filter(pl.Series(is_active, dtype=pl.Boolean))
+
     def apply_correction(
         self,
         alias: str,

@@ -6,6 +6,7 @@ import pytest
 
 from datasure.checks.outliers.review import (
     CONSTRAINTS,
+    CORRECTED_BADGE,
     OUTLIERS,
     REVIEW_REASON_COL,
     REVIEW_STATUS_COL,
@@ -204,7 +205,7 @@ class TestHighlightReviewedRow:
         assert all("background-color" in style for style in styles)
         assert all("25, 135, 84" in style for style in styles)
 
-    @pytest.mark.parametrize("status", [None, float("nan")])
+    @pytest.mark.parametrize("status", [None, float("nan"), pd.NA])
     def test_other_rows_are_plain(self, status):
         row = pd.Series({"KEY": "K2", REVIEW_STATUS_COL: status})
 
@@ -377,3 +378,79 @@ class TestAllowedActions:
         assert needs_hard_confirmation(hard, Action.ACCEPT) is True
         assert needs_hard_confirmation(hard, Action.MODIFY_VALUE) is False
         assert needs_hard_confirmation(soft, Action.ACCEPT) is False
+
+
+def _corrections(rows: list[dict]) -> pl.DataFrame:
+    """Active value corrections shaped like `get_active_corrections` output."""
+    if not rows:
+        return empty_correction_log()
+    return pl.DataFrame(
+        {
+            "KEY": [r["KEY"] for r in rows],
+            "action": [r.get("action", "modify value") for r in rows],
+            "column": [r["column"] for r in rows],
+            "reason": [r.get("reason", "typo") for r in rows],
+        }
+    )
+
+
+class TestCorrectedValues:
+    """Cells whose current value comes from a correction are marked Corrected."""
+
+    def test_corrected_rows_get_the_corrected_badge_and_reason(self, outlier_flags):
+        # K2/age is no longer flagged after its correction.
+        corrections = _corrections([{"KEY": "K2", "column": "age", "reason": "typo"}])
+
+        result = mark_reviewed(
+            outlier_flags, _acceptances([]), "survey_key", OUTLIERS, corrections
+        )
+
+        assert result.row(1, named=True)[REVIEW_STATUS_COL] == CORRECTED_BADGE
+        assert result.row(1, named=True)[REVIEW_REASON_COL] == "typo"
+
+    def test_an_acceptance_takes_precedence_over_a_correction(self, outlier_flags):
+        result = mark_reviewed(
+            outlier_flags,
+            _acceptances([{"KEY": "K1", "column": "age", "reason": "verified"}]),
+            "survey_key",
+            OUTLIERS,
+            _corrections([{"KEY": "K1", "column": "age", "reason": "typo"}]),
+        )
+
+        assert result.row(0, named=True)[REVIEW_STATUS_COL] == REVIEWED_BADGE
+        assert result.row(0, named=True)[REVIEW_REASON_COL] == "verified"
+
+    def test_corrected_flags_stay_visible_and_counted(self, outlier_flags):
+        # K3/age was corrected but is still flagged.
+        marked = mark_reviewed(
+            outlier_flags,
+            _acceptances([]),
+            "survey_key",
+            OUTLIERS,
+            _corrections([{"KEY": "K3", "column": "age"}]),
+        )
+
+        visible = visible_flags(marked, show_reviewed=False)
+        counted = clear_reviewed_flags(marked, OUTLIERS)
+
+        assert "K3" in visible["survey_key"].to_list()
+        assert counted["outlier reason"][2] == "Value is above upper bound 80.00"
+
+    def test_corrected_rows_are_highlighted(self):
+        row = pd.Series({"KEY": "K1", REVIEW_STATUS_COL: CORRECTED_BADGE})
+
+        assert all(highlight_reviewed_row(row))
+
+    def test_a_corrected_flag_can_still_be_accepted(self, outlier_flags):
+        marked = mark_reviewed(
+            outlier_flags,
+            _acceptances([]),
+            "survey_key",
+            OUTLIERS,
+            _corrections([{"KEY": "K3", "column": "age"}]),
+        )
+
+        selection = select_flag(marked, [2], "survey_key", OUTLIERS)
+
+        assert selection.reviewed is False
+        assert Action.ACCEPT in allowed_actions(selection)

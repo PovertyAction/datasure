@@ -79,11 +79,18 @@ def _acceptances(*rows: tuple[str, str, str]) -> pl.DataFrame:
     )
 
 
-def _review(acceptances_by_check: dict[str, pl.DataFrame] | None = None):
+def _review(
+    acceptances_by_check: dict[str, pl.DataFrame] | None = None,
+    corrections: pl.DataFrame | None = None,
+):
+    """A review context; `corrections` are active value corrections."""
     acceptances_by_check = acceptances_by_check or {}
     processor = MagicMock()
     processor.get_active_acceptances.side_effect = lambda alias, check_type, key_col: (
         acceptances_by_check.get(check_type, _acceptances())
+    )
+    processor.get_active_corrections.return_value = (
+        _acceptances() if corrections is None else corrections
     )
     return ReviewContext(processor=processor, alias="survey")
 
@@ -260,6 +267,24 @@ class TestConstraintTableReviewButton:
             for prop, _ in props
         )
 
+    def test_corrected_value_shows_highlighted_with_show_reviewed(
+        self, data, violations, settings
+    ):
+        """K3 was corrected into range: no longer flagged, but reviewed."""
+        st_mock = _st_mock(show_reviewed=True, flagged_only=False)
+        review = _review(corrections=_acceptances(("K3", "age", "typo fixed")))
+
+        self._render(data, violations, settings, st_mock, review)
+
+        table = _shown_table(st_mock)
+        assert table.filter(pl.col("KEY") == "K3").select(
+            "review status", "review reason"
+        ).rows() == [("Corrected", "typo fixed")]
+        cell_styles = st_mock.dataframe.call_args.args[0]._compute().ctx
+        styled_rows = {row for (row, _), props in cell_styles.items() if props}
+        assert styled_rows == {2}
+        review.processor.get_active_corrections.assert_called_with("survey", "KEY")
+
     def test_without_show_reviewed_the_table_is_not_styled(
         self, data, violations, settings
     ):
@@ -377,6 +402,29 @@ class TestOutlierTableReviewButton:
         assert selection.column == "age"
         assert selection.check_type == "outliers"
         assert selection.hard is False
+
+    def test_index_is_hidden_like_the_constraint_table(self, data, outliers, settings):
+        st_mock = _st_mock()
+
+        self._render(data, outliers, settings, st_mock, _review())
+
+        assert st_mock.dataframe.call_args.kwargs["hide_index"] is True
+
+    def test_show_reviewed_keeps_values_as_displayed(self, data, outliers, settings):
+        """Styling for "Show reviewed" must not turn 150 into 150.000000."""
+        st_mock = _st_mock(show_reviewed=True, flagged_only=False)
+        review = _review({"outliers": _acceptances(("K1", "age", "verified"))})
+
+        self._render(data, outliers, settings, st_mock, review)
+
+        styler = st_mock.dataframe.call_args.args[0]
+        body = styler._translate(False, False)["body"]
+        value_col = list(styler.data.columns).index("column value")
+        assert [row[value_col + 1]["display_value"] for row in body] == [
+            "150.0",
+            "70.0",
+            "30.0",
+        ]
 
     def test_flagged_only_shows_only_outliers(self, data, outliers, settings):
         st_mock = _st_mock()
