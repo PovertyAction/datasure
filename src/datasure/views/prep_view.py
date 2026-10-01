@@ -1,3 +1,5 @@
+import logging
+
 import pandas as pd
 import polars as pl
 import streamlit as st
@@ -45,15 +47,19 @@ from datasure.utils.prep_utils import (
 )
 from datasure.utils.reapply_utils import (
     ReapplyFailure,
+    format_reapply_failures,
     highlight_status,
-    warn_reapply_failures,
 )
 from datasure.utils.ui_utils import (
     confirm_dialog,
     metric_row,
     page_header,
+    queue_notice,
     section_header,
+    show_queued_notices,
 )
+
+logger = logging.getLogger(__name__)
 
 # === PAGE GUARDS === #
 
@@ -886,33 +892,42 @@ class PrepStepHandler:
 # === STEP MANAGEMENT === #
 
 
-# --- Reapply Warnings ---#
-# Both step handlers end in a rerun, which would clear a warning rendered
-# straight away, so reapply failures are queued and shown on the next run.
-_REAPPLY_WARNINGS_KEY = "st_prep_reapply_warnings"
+# --- Next-Run Notices ---#
+# Both step handlers end in a rerun, which would clear any message rendered
+# straight away, so their messages are queued and shown on the next run.
+def _notice_scope(alias: str) -> str:
+    """Return the queued-notice scope for an alias's Prep tab."""
+    return f"prep_{alias}"
 
 
-def _queue_reapply_warning(
+def _queue_reapply_failures(
     alias: str, failures: list[ReapplyFailure], context: str
 ) -> None:
-    """Queue a reapply warning for an alias, to show on the next run."""
-    if not failures:
-        return
-    queued = st.session_state.setdefault(_REAPPLY_WARNINGS_KEY, {})
-    queued.setdefault(alias, []).append((failures, context))
+    """Queue a warning listing reapply failures, if there are any."""
+    if failures:
+        queue_notice(
+            _notice_scope(alias), "warning", format_reapply_failures(failures, context)
+        )
 
 
-def _show_queued_reapply_warnings(alias: str) -> None:
-    """Show and clear the reapply warnings queued for an alias."""
-    queued = st.session_state.get(_REAPPLY_WARNINGS_KEY, {})
-    for failures, context in queued.pop(alias, []):
-        warn_reapply_failures(failures, context)
-
-
-def _replay_corrections(alias: str) -> None:
+def _refresh_corrected_data(alias: str) -> None:
     """Rebuild the alias's corrected table after its prep data changed."""
-    failures = CorrectionProcessor(project_id).refresh_existing_corrected_data(alias)
-    _queue_reapply_warning(
+    # UI boundary: the prep change is already saved, so a failed rebuild is
+    # reported rather than allowed to crash the page.
+    try:
+        failures = CorrectionProcessor(project_id).refresh_existing_corrected_data(
+            alias
+        )
+    except Exception as e:
+        logger.exception("Failed to rebuild corrected data for %s", alias)
+        queue_notice(
+            _notice_scope(alias),
+            "error",
+            f"The preparation change was saved, but corrected data could not be "
+            f"rebuilt: {e!s}",
+        )
+        return
+    _queue_reapply_failures(
         alias, failures, "Some corrections could not be reapplied to the new prep data"
     )
 
@@ -966,8 +981,12 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
             except (ValidationError, OperationError) as e:
                 st.error(f"Error adding preparation step: {e!s}")
             else:
-                _replay_corrections(label)
-                st.success("Preparation step added successfully!")
+                queue_notice(
+                    _notice_scope(label),
+                    "success",
+                    "Preparation step added successfully!",
+                )
+                _refresh_corrected_data(label)
                 st.rerun()
 
 
@@ -1013,11 +1032,15 @@ def prep_remove_step():
                     db_name="logs",
                 )
                 failures = prep_apply_action(project_id, alias)
-                _queue_reapply_warning(
+                queue_notice(
+                    _notice_scope(alias),
+                    "success",
+                    f"Action '{action_desc}' removed successfully!",
+                )
+                _queue_reapply_failures(
                     alias, failures, "Some preparation steps could not be reapplied"
                 )
-                _replay_corrections(alias)
-                st.success(f"Action '{action_desc}' removed successfully!")
+                _refresh_corrected_data(alias)
 
             if st.button(
                 label="Remove",
@@ -1098,7 +1121,7 @@ if show_prep_page_info:
             all_cols = prep_data.columns
 
             section_header("Apply Changes")
-            _show_queued_reapply_warnings(label)
+            show_queued_notices(_notice_scope(label))
 
             # Demo guidance for apply changes section
             if is_demo_project():

@@ -9,7 +9,9 @@ from datasure.utils.ui_utils import (
     confirm_dialog,
     metric_row,
     page_header,
+    queue_notice,
     section_header,
+    show_queued_notices,
 )
 
 
@@ -183,3 +185,45 @@ class TestConfirmDialog:
         labels = [c.args[0] for c in mock_st.button.call_args_list]
         assert "Yes, delete" in labels
         assert "Keep it" in labels
+
+
+class TestQueuedNotices:
+    """Notices queued before a rerun are shown once on the next run."""
+
+    @pytest.fixture
+    def st_with_state(self, mock_st):
+        mock_st.session_state = {}
+        return mock_st
+
+    def test_shows_notices_in_queue_order_at_their_level(self, st_with_state):
+        queue_notice("prep_survey", "success", "Step added")
+        queue_notice("prep_survey", "warning", "Some skipped")
+        queue_notice("prep_survey", "error", "Rebuild failed")
+
+        show_queued_notices("prep_survey")
+
+        st_with_state.success.assert_called_once_with("Step added")
+        st_with_state.warning.assert_called_once_with("Some skipped")
+        st_with_state.error.assert_called_once_with("Rebuild failed")
+
+    def test_notices_are_shown_only_once(self, st_with_state):
+        queue_notice("prep_survey", "success", "Step added")
+
+        show_queued_notices("prep_survey")
+        show_queued_notices("prep_survey")
+
+        st_with_state.success.assert_called_once()
+
+    def test_notices_are_scoped(self, st_with_state):
+        queue_notice("prep_survey", "success", "Step added")
+
+        show_queued_notices("prep_other")
+
+        st_with_state.success.assert_not_called()
+
+    def test_showing_with_nothing_queued_is_a_no_op(self, st_with_state):
+        show_queued_notices("prep_survey")
+
+        st_with_state.success.assert_not_called()
+        st_with_state.warning.assert_not_called()
+        st_with_state.error.assert_not_called()
