@@ -40,12 +40,21 @@ def _acceptances(rows: list[dict]) -> pl.DataFrame:
                 "current_value": r.get("current_value"),
                 "reason": r.get("reason", "checked"),
                 "check_type": r.get("check_type", "outliers"),
+                "severity": r.get("severity"),
             }
             for r in rows
         ]
     ).select(
         pl.col(c).cast(pl.String)
-        for c in ["KEY", "action", "column", "current_value", "reason", "check_type"]
+        for c in [
+            "KEY",
+            "action",
+            "column",
+            "current_value",
+            "reason",
+            "check_type",
+            "severity",
+        ]
     )
 
 
@@ -131,7 +140,14 @@ class TestMarkReviewed:
             }
         )
         acceptances = _acceptances(
-            [{"KEY": "1", "column": "age", "check_type": "constraints"}]
+            [
+                {
+                    "KEY": "1",
+                    "column": "age",
+                    "check_type": "constraints",
+                    "severity": "hard",
+                }
+            ]
         )
 
         result = mark_reviewed(flags, acceptances, "survey_key", CONSTRAINTS)
@@ -512,3 +528,62 @@ class TestFilterTable:
 
         assert result.is_empty()
         assert result.columns == outlier_flags.columns
+
+
+class TestHardViolationsNeedHardAcceptances:
+    """A soft acceptance must not silence a value that is now a hard violation."""
+
+    @pytest.fixture
+    def violations(self) -> pl.DataFrame:
+        # Bounds were tightened: age 70 is now above the hard maximum.
+        return pl.DataFrame(
+            {
+                "survey_key": ["K1", "K2"],
+                "column name": ["age", "age"],
+                "violation reason": [
+                    "Value is above hard maximum 60.0",
+                    "Value is above soft maximum 50.0",
+                ],
+            }
+        )
+
+    def _mark(self, violations, severity):
+        acceptances = _acceptances(
+            [
+                {"KEY": key, "column": "age", "check_type": "constraints", **severity}
+                for key in ("K1", "K2")
+            ]
+        )
+        return mark_reviewed(violations, acceptances, "survey_key", CONSTRAINTS)
+
+    def test_soft_acceptance_leaves_a_hard_violation_pending(self, violations):
+        marked = self._mark(violations, {})
+
+        assert marked[REVIEW_STATUS_COL].to_list() == [None, REVIEWED_BADGE]
+
+    def test_hard_acceptance_covers_a_hard_violation(self, violations):
+        marked = self._mark(violations, {"severity": "hard"})
+
+        assert marked[REVIEW_STATUS_COL].to_list() == [REVIEWED_BADGE, REVIEWED_BADGE]
+
+    def test_pending_hard_violation_is_counted_and_offers_confirmed_accept(
+        self, violations
+    ):
+        marked = self._mark(violations, {})
+        table = marked.with_columns(
+            pl.Series("violation type", ["Hard Max", "Soft Max"])
+        )
+
+        counted = clear_reviewed_flags(marked, CONSTRAINTS)
+        selection = select_flag(table, [0], "survey_key", CONSTRAINTS)
+
+        assert counted["violation reason"][0] == "Value is above hard maximum 60.0"
+        assert Action.ACCEPT in allowed_actions(selection)
+        assert needs_hard_confirmation(selection, Action.ACCEPT)
+
+    def test_acceptances_without_a_severity_column_still_work(self, outlier_flags):
+        acceptances = _acceptances([{"KEY": "K1", "column": "age"}]).drop("severity")
+
+        marked = mark_reviewed(outlier_flags, acceptances, "survey_key", OUTLIERS)
+
+        assert marked[REVIEW_STATUS_COL][0] == REVIEWED_BADGE

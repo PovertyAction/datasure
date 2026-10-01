@@ -283,9 +283,13 @@ def _render_flags_table(
         return
 
     click_key = f"{check.check_type}_flag_review_click"
-    shown = table.select(pl.lit(REVIEW_BUTTON_LABEL).alias(REVIEW_BUTTON_COL), pl.all())
+    # Survey fields can be added to the table, so avoid their names.
+    button_col = REVIEW_BUTTON_COL
+    while button_col in table.columns:
+        button_col = f"_{button_col}"
+    shown = table.select(pl.lit(REVIEW_BUTTON_LABEL).alias(button_col), pl.all())
     column_config = {
-        REVIEW_BUTTON_COL: st.column_config.ButtonColumn(
+        button_col: st.column_config.ButtonColumn(
             "",
             type="tertiary",
             pinned=True,

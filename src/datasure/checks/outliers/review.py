@@ -20,7 +20,7 @@ from typing import Any
 
 import polars as pl
 
-from datasure.processing.correction_log import Action
+from datasure.processing.correction_log import HARD_SEVERITY, Action
 
 REVIEW_STATUS_COL = "review status"
 REVIEW_REASON_COL = "review reason"
@@ -62,16 +62,35 @@ def _is_flagged(check: FlagCheck) -> pl.Expr:
     )
 
 
-def _latest_reason_by_cell(log_rows: pl.DataFrame, prefix: str) -> pl.DataFrame:
-    """Return the latest log reason per KEY and column, keyed for a join.
+def _latest_entry_by_cell(log_rows: pl.DataFrame, prefix: str) -> pl.DataFrame:
+    """Return the latest log reason and severity per KEY and column, for a join.
 
-    The log stores KEY as text, so keys are compared as text.
+    The log stores KEY as text, so keys are compared as text. Logs without
+    a severity column have a null severity.
     """
+    severity = (
+        pl.col("severity").cast(pl.String)
+        if "severity" in log_rows.columns
+        else pl.lit(None, dtype=pl.String)
+    )
     return log_rows.select(
         pl.col("KEY").cast(pl.String).alias("_review_key"),
         pl.col("column").cast(pl.String).alias("_review_column"),
         pl.col("reason").cast(pl.String).alias(f"_{prefix}_reason"),
+        severity.alias(f"_{prefix}_severity"),
     ).unique(subset=["_review_key", "_review_column"], keep="last")
+
+
+def _is_hard_violation(check: FlagCheck) -> pl.Expr:
+    """Whether a row's flag is a hard constraint violation.
+
+    Matches the reasons written by `compute_constraint_violations`.
+    """
+    return (
+        pl.col(check.reason_col)
+        .fill_null("")
+        .str.contains("below hard minimum|above hard maximum")
+    )
 
 
 def mark_reviewed(
@@ -120,13 +139,23 @@ def mark_reviewed(
     )
     for prefix, log_rows in (("accept", acceptances), ("correct", corrections)):
         keyed = keyed.join(
-            _latest_reason_by_cell(log_rows, prefix),
+            _latest_entry_by_cell(log_rows, prefix),
             on=["_review_key", "_review_column"],
             how="left",
             maintain_order="left",
         )
 
-    accepted = _is_flagged(check) & pl.col("_accept_reason").is_not_null()
+    # An acceptance covers a hard violation only if it was confirmed as one:
+    # a value accepted as a soft violation can become hard when bounds are
+    # tightened, and must then be confirmed again.
+    accepted = (
+        _is_flagged(check)
+        & pl.col("_accept_reason").is_not_null()
+        & (
+            ~_is_hard_violation(check)
+            | (pl.col("_accept_severity").fill_null("") == HARD_SEVERITY)
+        )
+    )
     corrected = pl.col("_correct_reason").is_not_null()
     return keyed.with_columns(
         pl.when(accepted)
@@ -139,7 +168,14 @@ def mark_reviewed(
         .when(corrected)
         .then(pl.col("_correct_reason"))
         .alias(REVIEW_REASON_COL),
-    ).drop("_review_key", "_review_column", "_accept_reason", "_correct_reason")
+    ).drop(
+        "_review_key",
+        "_review_column",
+        "_accept_reason",
+        "_accept_severity",
+        "_correct_reason",
+        "_correct_severity",
+    )
 
 
 def _is_reviewed() -> pl.Expr:

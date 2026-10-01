@@ -30,6 +30,7 @@ from datasure.utils.settings_utils import (
     save_check_settings,
     trigger_save,
 )
+from datasure.utils.ui_utils import ensure_styler_limit
 
 TAB_NAME: str = "summary"
 
@@ -1312,7 +1313,7 @@ def _render_progress_by_column(
     # Display heatmap
     cmap = sns.light_palette("pink", as_cmap=True)
     styler_limit = progress_data.shape[0] * progress_data.shape[1]
-    pd.set_option("styler.render.max_elements", styler_limit)
+    ensure_styler_limit(styler_limit)
     st.dataframe(
         progress_data.style.format(subset=format_cols, precision=0).background_gradient(
             subset=format_cols, cmap=cmap, axis=1, vmin=vmin_val, vmax=vmax_val
