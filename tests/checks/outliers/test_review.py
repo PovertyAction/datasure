@@ -12,8 +12,10 @@ from datasure.checks.outliers.review import (
     REVIEW_STATUS_COL,
     REVIEWED_BADGE,
     FlagSelection,
+    TableFilters,
     allowed_actions,
     clear_reviewed_flags,
+    filter_table,
     flagged_only,
     highlight_reviewed_row,
     mark_reviewed,
@@ -454,3 +456,59 @@ class TestCorrectedValues:
 
         assert selection.reviewed is False
         assert Action.ACCEPT in allowed_actions(selection)
+
+
+class TestFilterTable:
+    """The table toggles applied together."""
+
+    @pytest.fixture
+    def marked(self, outlier_flags):
+        # K1/age accepted; K2/age corrected into range (unflagged).
+        return mark_reviewed(
+            outlier_flags,
+            _acceptances([{"KEY": "K1", "column": "age", "reason": "ok"}]),
+            "survey_key",
+            OUTLIERS,
+            _corrections([{"KEY": "K2", "column": "age", "reason": "typo"}]),
+        )
+
+    @staticmethod
+    def _cells(table):
+        return list(zip(table["survey_key"], table["column name"], strict=True))
+
+    def test_defaults_show_unreviewed_flags_only(self, marked):
+        result = filter_table(marked, TableFilters(), OUTLIERS)
+
+        assert self._cells(result) == [("K3", "age"), ("K1", "income")]
+        assert REVIEW_STATUS_COL not in result.columns
+
+    def test_show_reviewed_adds_accepted_flags(self, marked):
+        result = filter_table(marked, TableFilters(show_reviewed=True), OUTLIERS)
+
+        assert self._cells(result) == [("K1", "age"), ("K3", "age"), ("K1", "income")]
+
+    def test_all_values_with_reviewed(self, marked):
+        filters = TableFilters(flagged_only=False, show_reviewed=True)
+
+        assert filter_table(marked, filters, OUTLIERS).height == marked.height
+
+    def test_reviewed_only_shows_accepted_and_corrected_rows(self, marked):
+        result = filter_table(marked, TableFilters(reviewed_only=True), OUTLIERS)
+
+        assert self._cells(result) == [("K1", "age"), ("K2", "age")]
+        assert result[REVIEW_STATUS_COL].to_list() == [REVIEWED_BADGE, CORRECTED_BADGE]
+
+    def test_reviewed_only_overrides_the_other_toggles(self, marked):
+        filters = TableFilters(
+            flagged_only=True, show_reviewed=False, reviewed_only=True
+        )
+
+        result = filter_table(marked, filters, OUTLIERS)
+
+        assert ("K2", "age") in self._cells(result)
+
+    def test_reviewed_only_without_review_columns_shows_nothing(self, outlier_flags):
+        result = filter_table(outlier_flags, TableFilters(reviewed_only=True), OUTLIERS)
+
+        assert result.is_empty()
+        assert result.columns == outlier_flags.columns

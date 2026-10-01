@@ -96,16 +96,28 @@ def _review(
 
 
 def _st_mock(
-    clicked: tuple[str, int] | None = None, show_reviewed=False, flagged_only=True
+    clicked: tuple[str, int] | None = None,
+    show_reviewed=False,
+    flagged_only=True,
+    reviewed_only=False,
 ):
     """A Streamlit mock; `clicked` is (check type, row) of a Review click."""
     st_mock = MagicMock()
     st_mock.columns.side_effect = _columns_side_effect
     st_mock.multiselect.return_value = []
-    st_mock.toggle.side_effect = lambda label, *, key, **kwargs: (
-        flagged_only if key.endswith("_flagged_only") else show_reviewed
+    toggle_values = {
+        "_flagged_only": flagged_only,
+        "_show_reviewed": show_reviewed,
+        "_reviewed_only": reviewed_only,
+    }
+    st_mock.toggle.side_effect = lambda label, *, key, **kwargs: next(
+        value for suffix, value in toggle_values.items() if key.endswith(suffix)
     )
     st_mock.session_state = {}
+    # Widget state is in session_state before the widget renders.
+    for suffix, value in toggle_values.items():
+        for check_type in ("constraints", "outliers"):
+            st_mock.session_state[f"{check_type}{suffix}"] = value
     if clicked is not None:
         check_type, row = clicked
         st_mock.session_state[f"{check_type}_flag_review_click"] = {
@@ -284,6 +296,51 @@ class TestConstraintTableReviewButton:
         styled_rows = {row for (row, _), props in cell_styles.items() if props}
         assert styled_rows == {2}
         review.processor.get_active_corrections.assert_called_with("survey", "KEY")
+
+    def test_show_only_reviewed_lists_accepted_and_corrected_rows(
+        self, data, violations, settings
+    ):
+        st_mock = _st_mock(reviewed_only=True)
+        review = _review(
+            {"constraints": _acceptances(("K1", "age", "verified"))},
+            corrections=_acceptances(("K3", "age", "typo fixed")),
+        )
+
+        self._render(data, violations, settings, st_mock, review)
+
+        table = _shown_table(st_mock)
+        assert table.select("KEY", "review status").rows() == [
+            ("K1", "Reviewed"),
+            ("K3", "Corrected"),
+        ]
+        assert isinstance(st_mock.dataframe.call_args.args[0], Styler)
+
+    def test_show_only_reviewed_disables_the_other_toggles(
+        self, data, violations, settings
+    ):
+        st_mock = _st_mock(reviewed_only=True)
+
+        self._render(data, violations, settings, st_mock, _review())
+
+        disabled = {
+            c.kwargs["key"]: c.kwargs.get("disabled", False)
+            for c in st_mock.toggle.call_args_list
+        }
+        assert disabled == {
+            "constraints_flagged_only": True,
+            "constraints_show_reviewed": True,
+            "constraints_reviewed_only": False,
+        }
+
+    def test_without_review_there_is_no_show_only_reviewed_toggle(
+        self, data, violations, settings
+    ):
+        st_mock = _st_mock()
+
+        self._render(data, violations, settings, st_mock, None)
+
+        keys = [c.kwargs["key"] for c in st_mock.toggle.call_args_list]
+        assert keys == ["constraints_flagged_only"]
 
     def test_without_show_reviewed_the_table_is_not_styled(
         self, data, violations, settings
