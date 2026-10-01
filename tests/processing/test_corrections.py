@@ -1995,3 +1995,71 @@ class TestActiveCorrections:
         )
 
         assert active.is_empty()
+
+
+class TestActiveCorrectionsMatchStoredValues:
+    """A correction is active if the cell holds the value it stored."""
+
+    @staticmethod
+    def _modify(key, new_value, current_value):
+        return CorrectionEntry(
+            key_value=key,
+            action="modify value",
+            column="age",
+            current_value=current_value,
+            new_value=new_value,
+            reason="typo",
+        )
+
+    def test_float32_modification_is_active(self, store):
+        """70.1 is stored as 70.0999984741211 in a Float32 column."""
+        _seed_prep(
+            store,
+            pl.DataFrame(
+                {"KEY": ["a", "b"], "age": [150.0, 30.0]},
+                schema={"KEY": pl.String, "age": pl.Float32},
+            ),
+        )
+        processor = CorrectionProcessor("p1")
+        processor.apply_corrections(
+            "survey", "KEY", [self._modify("a", "70.1", 150.0)], source="outliers"
+        )
+
+        active = processor.get_active_corrections("survey", "KEY")
+
+        assert active["KEY"].to_list() == ["a"]
+
+    def test_numeric_key_correction_applies_and_is_active(self, store):
+        _seed_prep(store, pl.DataFrame({"KEY": [7, 8], "age": [150, 30]}))
+        processor = CorrectionProcessor("p1")
+
+        processor.apply_corrections(
+            "survey", "KEY", [self._modify(7, "90", 150)], source="outliers"
+        )
+
+        assert processor.get_corrected_data("survey")["age"].to_list() == [90, 30]
+        active = processor.get_active_corrections("survey", "KEY")
+        assert active["KEY"].to_list() == ["7"]
+
+    def test_duplicate_keys_must_all_hold_the_value(self, store):
+        _seed_prep(
+            store,
+            pl.DataFrame({"KEY": ["a", "a", "b"], "age": [150, 150, 30]}),
+        )
+        processor = CorrectionProcessor("p1")
+        processor.apply_corrections(
+            "survey", "KEY", [self._modify("a", "90", 150)], source="outliers"
+        )
+        # Another step changes one of the duplicate rows afterwards.
+        data = processor.get_corrected_data("survey")
+        processor.save_corrected_data(
+            "survey",
+            data.with_columns(
+                pl.when(pl.int_range(pl.len()) == 1)
+                .then(pl.lit(91))
+                .otherwise(pl.col("age"))
+                .alias("age")
+            ),
+        )
+
+        assert processor.get_active_corrections("survey", "KEY").is_empty()
