@@ -50,5 +50,18 @@ def warn_reapply_failures(failures: list[ReapplyFailure], context: str) -> None:
 
     import streamlit as st
 
+    st.warning(format_reapply_failures(failures, context))
+
+
+def format_reapply_failures(failures: list[ReapplyFailure], context: str) -> str:
+    """Summarize skipped steps as Markdown: a lead-in, then one bullet each.
+
+    Parameters
+    ----------
+    failures : list[ReapplyFailure]
+        Steps/corrections skipped during the reapply, in order.
+    context : str
+        Short lead-in describing what was being reapplied.
+    """
     lines = "\n".join(f"- {f.step}: {f.reason}" for f in failures)
-    st.warning(f"{context} ({len(failures)} skipped):\n{lines}")
+    return f"{context} ({len(failures)} skipped):\n{lines}"

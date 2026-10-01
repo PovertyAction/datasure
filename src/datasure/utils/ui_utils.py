@@ -1,9 +1,10 @@
 """Shared UI helpers for consistent page structure across DataSure views.
 
 These helpers centralize the repeated Streamlit patterns (page headers,
-section headers, destructive-action confirmations, and metric rows) so every
-view renders them identically. The module is intentionally UI-only: it holds
-no data-access logic and is safe to import from any view.
+section headers, destructive-action confirmations, metric rows, and messages
+that must survive a rerun) so every view renders them identically. The module
+is intentionally UI-only: it holds no data-access logic and is safe to import
+from any view.
 
 Streamlit is imported inside each helper rather than at module level. Views
 are page scripts whose tests swap ``sys.modules["streamlit"]`` for a mock at
@@ -12,6 +13,20 @@ swap regardless of the order in which the module was first imported.
 """
 
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from typing import Literal
+
+NoticeLevel = Literal["success", "warning", "error"]
+
+_QUEUED_NOTICES_KEY = "st_queued_notices"
+
+
+@dataclass(frozen=True)
+class Notice:
+    """A message queued for the next run of a page."""
+
+    level: NoticeLevel
+    message: str
 
 
 def page_header(title: str, subtitle: str | None = None, *, divider: bool = True):
@@ -146,3 +161,34 @@ def confirm_dialog(
                 st.rerun()
 
     _dialog()
+
+
+def queue_notice(scope: str, level: NoticeLevel, message: str) -> None:
+    """Queue a message to show on the next run, after an ``st.rerun()``.
+
+    A message rendered just before a rerun is cleared before the user sees
+    it. Queue it instead, and call ``show_queued_notices`` with the same
+    scope where it should appear.
+
+    Parameters
+    ----------
+    scope : str
+        Where the message belongs, e.g. ``"prep_survey"`` for one Prep tab.
+    level : {"success", "warning", "error"}
+        The Streamlit callout used to render the message.
+    message : str
+        The message text (Markdown).
+    """
+    import streamlit as st
+
+    queued = st.session_state.setdefault(_QUEUED_NOTICES_KEY, {})
+    queued.setdefault(scope, []).append(Notice(level, message))
+
+
+def show_queued_notices(scope: str) -> None:
+    """Render and clear the messages queued for a scope, in queue order."""
+    import streamlit as st
+
+    queued = st.session_state.get(_QUEUED_NOTICES_KEY, {})
+    for notice in queued.pop(scope, []):
+        getattr(st, notice.level)(notice.message)

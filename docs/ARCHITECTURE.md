@@ -68,9 +68,10 @@ The `archived/` directory holds legacy code and is gitignored.
 5. **Reports** (generated output views): charts and tables per check
 6. **Corrections / replication**: apply corrections; export a replication
    package that reproduces the pipeline outside DataSure. Once an alias has a
-   corrected table, any change to its prep data (a re-import, or a prep step
-   added or removed) rebuilds it by replaying the correction log against the
-   new prep output (`CorrectionProcessor.refresh_existing_corrected_data`)
+   corrected table, any change to its prep data (a re-import, a prep step
+   added or removed, or a project bundle re-seeding its prep steps) rebuilds it
+   by replaying the correction log against the new prep output
+   (`CorrectionProcessor.refresh_existing_corrected_data`)
 
 ## Generated output views
 
