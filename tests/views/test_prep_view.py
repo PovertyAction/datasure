@@ -16,7 +16,7 @@ from datasure.models.enums import (
     PrepRowConditions,
 )
 from datasure.utils.reapply_utils import ReapplyFailure
-from datasure.utils.ui_utils import show_queued_notices
+from datasure.utils.ui_utils import queue_notice, show_queued_notices
 
 # --- Module import setup ---
 # prep_view.py has module-level Streamlit guards and UI code.
@@ -45,33 +45,34 @@ with (
     patch("datasure.utils.onboarding_utils.is_demo_project", return_value=False),
     patch("datasure.utils.onboarding_utils.demo_expander"),
 ):
-    from datasure.views.prep_view import (
-        PrepStepHandler,
-        PrepViewConfig,
-        RemoveRowsInputs,
-        TransformInputs,
-        _build_remove_rows_result,
-        _build_remove_rows_value,
-        _build_transform_result,
-        _build_transform_value,
-        _get_column_options_for_condition,
-        _get_unique_values_from_columns,
-        _has_none_values,
-        _is_add_column_incomplete,
-        _is_prep_form_incomplete,
-        _is_remove_row_incomplete,
-        _is_transform_column_incomplete,
-        _render_datetime_function_inputs,
-        _render_equality_value_inputs,
-        _render_numeric_function_inputs,
-        _render_pattern_value_inputs,
-        _render_range_value_inputs,
-        _render_string_function_inputs,
-        _render_substring_inputs,
-        _validate_column_types_for_range,
-        prep_add_step,
-        prep_remove_step,
-    )
+    import datasure.views.prep_view as pv
+
+# The view's names, bound once so tests can use them unqualified
+PrepStepHandler = pv.PrepStepHandler
+PrepViewConfig = pv.PrepViewConfig
+RemoveRowsInputs = pv.RemoveRowsInputs
+TransformInputs = pv.TransformInputs
+_build_remove_rows_result = pv._build_remove_rows_result
+_build_remove_rows_value = pv._build_remove_rows_value
+_build_transform_result = pv._build_transform_result
+_build_transform_value = pv._build_transform_value
+_get_column_options_for_condition = pv._get_column_options_for_condition
+_get_unique_values_from_columns = pv._get_unique_values_from_columns
+_has_none_values = pv._has_none_values
+_is_add_column_incomplete = pv._is_add_column_incomplete
+_is_prep_form_incomplete = pv._is_prep_form_incomplete
+_is_remove_row_incomplete = pv._is_remove_row_incomplete
+_is_transform_column_incomplete = pv._is_transform_column_incomplete
+_render_datetime_function_inputs = pv._render_datetime_function_inputs
+_render_equality_value_inputs = pv._render_equality_value_inputs
+_render_numeric_function_inputs = pv._render_numeric_function_inputs
+_render_pattern_value_inputs = pv._render_pattern_value_inputs
+_render_range_value_inputs = pv._render_range_value_inputs
+_render_string_function_inputs = pv._render_string_function_inputs
+_render_substring_inputs = pv._render_substring_inputs
+_validate_column_types_for_range = pv._validate_column_types_for_range
+prep_add_step = pv.prep_add_step
+prep_remove_step = pv.prep_remove_step
 
 # Restore original stop behavior
 _st.session_state["st_project_id"] = None
@@ -1565,8 +1566,6 @@ class TestPrepAddStep:
         self, mock_prep_apply, mock_processor_cls, sample_polars_df
     ):
         """When Add button is clicked with valid data."""
-        import datasure.views.prep_view as pv
-
         # Set module-level variables needed by prep_add_step
         pv.project_id = "test_project"
         pv.label = "test_label"
@@ -1591,7 +1590,6 @@ class TestPrepAddStep:
         self, mock_prep_apply, sample_polars_df
     ):
         """A failing transform shows st.error instead of crashing the app."""
-        import datasure.views.prep_view as pv
         from datasure.processing.prep import ValidationError
 
         pv.project_id = "test_project"
@@ -1685,7 +1683,6 @@ class TestPrepChangeRefreshesCorrectedData:
     def test_adding_a_step_refreshes_corrected_data(
         self, mock_prep_apply, mock_processor_cls, sample_polars_df
     ):
-        import datasure.views.prep_view as pv
 
         _click_add_remove_column(pv)
         processor = _processor(mock_processor_cls)
@@ -1701,7 +1698,6 @@ class TestPrepChangeRefreshesCorrectedData:
     def test_rejected_step_does_not_refresh_corrected_data(
         self, mock_prep_apply, mock_processor_cls, sample_polars_df
     ):
-        import datasure.views.prep_view as pv
         from datasure.processing.prep import ValidationError
 
         _click_add_remove_column(pv)
@@ -1716,7 +1712,6 @@ class TestPrepChangeRefreshesCorrectedData:
     def test_success_and_failures_after_adding_are_shown_after_rerun(
         self, mock_prep_apply, mock_processor_cls, sample_polars_df
     ):
-        import datasure.views.prep_view as pv
 
         _click_add_remove_column(pv)
         _processor(
@@ -1738,7 +1733,6 @@ class TestPrepChangeRefreshesCorrectedData:
     def test_refresh_error_is_shown_after_rerun(
         self, mock_prep_apply, mock_processor_cls, sample_polars_df
     ):
-        import datasure.views.prep_view as pv
 
         _click_add_remove_column(pv)
         processor = _processor(mock_processor_cls)
@@ -1758,7 +1752,6 @@ class TestPrepChangeRefreshesCorrectedData:
     def test_removing_a_step_refreshes_corrected_data(
         self, mock_get_table, mock_save, mock_prep_apply, mock_processor_cls
     ):
-        import datasure.views.prep_view as pv
 
         _confirm_remove_first_step(pv, mock_get_table)
         mock_prep_apply.return_value = []
@@ -1775,7 +1768,6 @@ class TestPrepChangeRefreshesCorrectedData:
     def test_success_and_failures_after_removing_are_shown_after_rerun(
         self, mock_get_table, mock_save, mock_prep_apply, mock_processor_cls
     ):
-        import datasure.views.prep_view as pv
 
         _confirm_remove_first_step(pv, mock_get_table)
         mock_prep_apply.return_value = [ReapplyFailure("add col2", "prep broke")]
@@ -1801,8 +1793,6 @@ class TestModuleLevelPageLayout:
     def test_page_layout_with_aliases(self):
         """Reload prep_view with aliases to cover the tab rendering code."""
         import importlib
-
-        import datasure.views.prep_view as pv_mod
 
         # Set up session state
         _st.session_state["st_project_id"] = "test_project"
@@ -1878,17 +1868,66 @@ class TestModuleLevelPageLayout:
             patch("datasure.utils.onboarding_utils.demo_expander"),
             patch("datasure.processing.prep.prep_apply_action"),
         ):
-            importlib.reload(pv_mod)
+            importlib.reload(pv)
 
         # Restore session state
+        _st.session_state["st_project_id"] = None
+        _st.stop = _orig_stop
+
+    def test_queued_notices_show_when_prep_leaves_zero_rows(self):
+        """A step that removes every row still shows its messages next run."""
+        import importlib
+
+        _st.session_state["st_project_id"] = "test_project"
+        _st.session_state["st_import_data_page"] = "import_page"
+        _st.session_state["st_config_checks_page"] = "config_page"
+        _st.stop = MagicMock()
+
+        queue_notice(pv._notice_scope("test_data"), "success", "Rows removed")
+        zero_rows = pl.DataFrame(
+            {
+                "name": pl.Series([], dtype=pl.String),
+                "age": pl.Series([], dtype=pl.Int64),
+            }
+        )
+        prep_log_df = pl.DataFrame(
+            {"action": ["remove row(s)"], "description": ["Removed all rows"]}
+        )
+
+        mock_tab = MagicMock()
+        mock_tab.__enter__ = MagicMock(return_value=mock_tab)
+        mock_tab.__exit__ = MagicMock(return_value=False)
+        _st.tabs = MagicMock(return_value=[mock_tab])
+        _st.success = MagicMock()
+
+        with (
+            patch(
+                "datasure.utils.duckdb_utils.duckdb_get_aliases",
+                return_value=["test_data"],
+            ),
+            patch(
+                "datasure.utils.duckdb_utils.duckdb_get_table",
+                side_effect=[prep_log_df, zero_rows],
+            ),
+            patch("datasure.utils.duckdb_utils.duckdb_save_table"),
+            patch("datasure.utils.navigations_utils.page_navigation"),
+            patch("datasure.utils.navigations_utils.add_demo_navigation"),
+            patch("datasure.utils.navigations_utils.demo_sidebar_help"),
+            patch(
+                "datasure.utils.onboarding_utils.is_demo_project",
+                return_value=False,
+            ),
+        ):
+            importlib.reload(pv)
+
+        _st.success.assert_called_once_with("Rows removed")
+
         _st.session_state["st_project_id"] = None
         _st.stop = _orig_stop
 
     def test_page_layout_with_failed_status_in_log(self):
         """Change Log renders a status column and styles a Failed row."""
         import importlib
-
-        import datasure.views.prep_view as pv_mod
 
         _st.session_state["st_project_id"] = "test_project"
         _st.session_state["st_import_data_page"] = "import_page"
@@ -1960,7 +1999,7 @@ class TestModuleLevelPageLayout:
             patch("datasure.utils.onboarding_utils.demo_expander"),
             patch("datasure.processing.prep.prep_apply_action"),
         ):
-            importlib.reload(pv_mod)
+            importlib.reload(pv)
 
         # The Change Log table (first st.dataframe call) is a styled pandas
         # DataFrame with the status column positioned right after action
@@ -1973,8 +2012,6 @@ class TestModuleLevelPageLayout:
     def test_page_layout_with_empty_prep_data(self):
         """Test when prep_data and prep_log are both empty (falls back to raw)."""
         import importlib
-
-        import datasure.views.prep_view as pv_mod
 
         _st.session_state["st_project_id"] = "test_project"
         _st.session_state["st_import_data_page"] = "import_page"
@@ -2044,7 +2081,7 @@ class TestModuleLevelPageLayout:
             patch("datasure.utils.onboarding_utils.demo_expander"),
             patch("datasure.processing.prep.prep_apply_action"),
         ):
-            importlib.reload(pv_mod)
+            importlib.reload(pv)
             # Verify that raw data was saved as prep data
             mock_save.assert_called()
 
@@ -2054,8 +2091,6 @@ class TestModuleLevelPageLayout:
     def test_page_layout_no_project_id(self):
         """Test page guard when no project_id is set."""
         import importlib
-
-        import datasure.views.prep_view as pv_mod
 
         _st.session_state["st_project_id"] = None
         _st.stop = MagicMock()
@@ -2077,7 +2112,7 @@ class TestModuleLevelPageLayout:
             ),
             patch("datasure.utils.onboarding_utils.demo_expander"),
         ):
-            importlib.reload(pv_mod)
+            importlib.reload(pv)
 
         _st.session_state["st_project_id"] = None
         _st.stop = _orig_stop
@@ -2089,8 +2124,6 @@ class TestPrepRemoveStep:
     @patch("datasure.views.prep_view.duckdb_get_table")
     def test_empty_prep_log(self, mock_get_table):
         """When prep log is empty."""
-        import datasure.views.prep_view as pv
-
         pv.project_id = "test_project"
         pv.label = "test_label"
         pv.i = 0
@@ -2117,8 +2150,6 @@ class TestPrepRemoveStep:
     def test_with_prep_log_no_selection(self, mock_get_table):
         """When prep log has entries but no action selected."""
         import pandas as pd
-
-        import datasure.views.prep_view as pv
 
         pv.project_id = "test_project"
         pv.label = "test_label"
@@ -2152,8 +2183,6 @@ class TestPrepRemoveStep:
     ):
         """When remove button clicked with valid selection."""
         import pandas as pd
-
-        import datasure.views.prep_view as pv
 
         pv.project_id = "test_project"
         pv.label = "test_label"
