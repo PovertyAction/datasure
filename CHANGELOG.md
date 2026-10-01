@@ -39,7 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dialog, prefilled with the row's KEY, column and current value, to modify the
   value, remove it or accept it as valid (source and check type
   `outliers`/`constraints`). Accepted flags are hidden and left out of the
-  metrics unless "Show reviewed" is on, and come back if the value changes or
+  metrics unless "Show reviewed" is on (then they are highlighted green), and
+  come back if the value changes or
   the acceptance is removed. Accepting a hard violation needs a confirmation.
   A "Show only flagged values" toggle (on by default) sits above both tables;
   the outlier inspection table previously always listed unflagged values too.
