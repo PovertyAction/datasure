@@ -1,5 +1,6 @@
 """Tests for datasure.checks.outliers.review."""
 
+import pandas as pd
 import polars as pl
 import pytest
 
@@ -13,6 +14,7 @@ from datasure.checks.outliers.review import (
     allowed_actions,
     clear_reviewed_flags,
     flagged_only,
+    highlight_reviewed_row,
     mark_reviewed,
     needs_hard_confirmation,
     select_flag,
@@ -190,6 +192,23 @@ class TestClearReviewedFlags:
 
     def test_data_without_review_columns_is_unchanged(self, outlier_flags):
         assert clear_reviewed_flags(outlier_flags, OUTLIERS).equals(outlier_flags)
+
+
+class TestHighlightReviewedRow:
+    def test_reviewed_rows_are_green_in_every_cell(self):
+        row = pd.Series({"KEY": "K1", REVIEW_STATUS_COL: REVIEWED_BADGE})
+
+        styles = highlight_reviewed_row(row)
+
+        assert len(styles) == len(row)
+        assert all("background-color" in style for style in styles)
+        assert all("25, 135, 84" in style for style in styles)
+
+    @pytest.mark.parametrize("status", [None, float("nan")])
+    def test_other_rows_are_plain(self, status):
+        row = pd.Series({"KEY": "K2", REVIEW_STATUS_COL: status})
+
+        assert highlight_reviewed_row(row) == ["", ""]
 
 
 class TestFlaggedOnly:

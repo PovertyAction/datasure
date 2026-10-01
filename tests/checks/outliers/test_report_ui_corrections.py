@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
+from pandas.io.formats.style import Styler
 
 from datasure.checks.outliers.models import OutlierSettings
 from datasure.checks.outliers.report_ui import (
@@ -109,7 +110,10 @@ def _st_mock(
 
 def _shown_table(st_mock) -> pl.DataFrame:
     """The flags shown, without the Review button column."""
-    return st_mock.dataframe.call_args.args[0].drop(REVIEW_BUTTON_COL, strict=False)
+    shown = st_mock.dataframe.call_args.args[0]
+    if isinstance(shown, Styler):
+        shown = pl.from_pandas(shown.data)
+    return shown.drop(REVIEW_BUTTON_COL, strict=False)
 
 
 def _selection(**overrides) -> FlagSelection:
@@ -230,6 +234,36 @@ class TestConstraintTableReviewButton:
             ("K1", "Reviewed", "verified"),
             ("K2", None, None),
         ]
+
+    def test_show_reviewed_colours_reviewed_rows_green(
+        self, data, violations, settings
+    ):
+        st_mock = _st_mock(show_reviewed=True)
+        review = _review({"constraints": _acceptances(("K1", "age", "verified"))})
+
+        self._render(data, violations, settings, st_mock, review)
+
+        shown = st_mock.dataframe.call_args.args[0]
+        assert isinstance(shown, Styler)
+        # Styler.ctx maps (row, column) to the CSS properties applied to it.
+        cell_styles = shown._compute().ctx
+        styled_rows = {row for (row, _), props in cell_styles.items() if props}
+        assert styled_rows == {0}
+        assert all(
+            prop == "background-color"
+            for props in cell_styles.values()
+            for prop, _ in props
+        )
+
+    def test_without_show_reviewed_the_table_is_not_styled(
+        self, data, violations, settings
+    ):
+        st_mock = _st_mock()
+        review = _review({"constraints": _acceptances(("K1", "age", "verified"))})
+
+        self._render(data, violations, settings, st_mock, review)
+
+        assert not isinstance(st_mock.dataframe.call_args.args[0], Styler)
 
     def test_outlier_acceptance_does_not_hide_a_constraint_violation(
         self, data, violations, settings
