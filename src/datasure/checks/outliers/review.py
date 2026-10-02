@@ -15,6 +15,7 @@ flagged stays visible and counted: it still needs attention.
 Kept free of Streamlit so the logic can be tested without a running app.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -39,6 +40,11 @@ class FlagCheck:
 
 OUTLIERS = FlagCheck("outliers", "outlier reason", "no outlier")
 CONSTRAINTS = FlagCheck("constraints", "violation reason", "no violation")
+
+# Flag columns of the computed results that the review logic reads.
+COLUMN_NAME_COL = "column name"
+# Added to the constraint table by `_render_constraint_violations_table`.
+VIOLATION_TYPE_COL = "violation type"
 
 # Violation types (see `_render_constraint_violations_table`) of hard bounds.
 _HARD_VIOLATION_TYPES = ("Hard Min", "Hard Max")
@@ -135,7 +141,7 @@ def mark_reviewed(
 
     keyed = flags.with_columns(
         pl.col(survey_key).cast(pl.String).alias("_review_key"),
-        pl.col("column name").cast(pl.String).alias("_review_column"),
+        pl.col(COLUMN_NAME_COL).cast(pl.String).alias("_review_column"),
     )
     for prefix, log_rows in (("accept", acceptances), ("correct", corrections)):
         keyed = keyed.join(
@@ -271,6 +277,48 @@ def filter_table(
     return flags
 
 
+SURVEY_COL_SUFFIX = " (survey)"
+
+
+def join_survey_columns(
+    survey: pl.DataFrame,
+    flags: pl.DataFrame,
+    survey_key: str,
+    check: FlagCheck,
+    *,
+    reserved: Sequence[str] = (),
+) -> pl.DataFrame:
+    """Join survey display columns onto `flags` for a results table.
+
+    The flag columns stay authoritative: a survey column named like one of
+    them, or like a `reserved` column added afterwards, is renamed with
+    `SURVEY_COL_SUFFIX`. Otherwise a survey field called "column name"
+    would become the correction target.
+
+    The result is sorted by KEY, column name and flag reason, so a row
+    position reported by a Review click resolves to the same flag on the
+    rerun it triggers whatever order the join returns.
+    """
+    taken = set(flags.columns) | set(reserved) | set(survey.columns)
+    renames = {}
+    for col in survey.columns:
+        if col == survey_key or (col not in flags.columns and col not in reserved):
+            continue
+        new_name = f"{col}{SURVEY_COL_SUFFIX}"
+        while new_name in taken:
+            new_name = f"{new_name}{SURVEY_COL_SUFFIX}"
+        renames[col] = new_name
+        taken.add(new_name)
+
+    joined = survey.rename(renames).join(flags, on=survey_key, how="inner")
+    sort_cols = [
+        col
+        for col in (survey_key, COLUMN_NAME_COL, check.reason_col)
+        if col in joined.columns
+    ]
+    return joined.sort(sort_cols, nulls_last=True, maintain_order=True)
+
+
 def select_flag(
     table: pl.DataFrame,
     rows: list[int],
@@ -305,11 +353,11 @@ def select_flag(
     )
     return FlagSelection(
         key_value=row[survey_key],
-        column=row["column name"],
+        column=row[COLUMN_NAME_COL],
         check_type=check.check_type,
         flagged=flagged,
         reviewed=row.get(REVIEW_STATUS_COL) == REVIEWED_BADGE,
-        hard=row.get("violation type") in _HARD_VIOLATION_TYPES,
+        hard=row.get(VIOLATION_TYPE_COL) in _HARD_VIOLATION_TYPES,
     )
 
 
