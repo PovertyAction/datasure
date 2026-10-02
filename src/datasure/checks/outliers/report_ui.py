@@ -36,6 +36,7 @@ from datasure.checks.outliers.review import (
     CONSTRAINTS,
     OUTLIERS,
     REVIEW_STATUS_COL,
+    VIOLATION_TYPE_COL,
     FlagCheck,
     FlagSelection,
     TableFilters,
@@ -43,6 +44,7 @@ from datasure.checks.outliers.review import (
     clear_reviewed_flags,
     filter_table,
     highlight_reviewed_row,
+    join_survey_columns,
     mark_reviewed,
     needs_hard_confirmation,
     select_flag,
@@ -56,7 +58,7 @@ from datasure.utils.correction_form import (
     render_correction_inputs,
     should_enable_apply_button,
 )
-from datasure.utils.dataframe_utils import ColumnByType, sanitize_df_for_join
+from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import is_demo_project
@@ -550,17 +552,12 @@ def _render_constraint_violations_table(
 
     # select columns to display from data
     display_df = data.select(include_cols)
-    # sanitize violation_data to avoid column name conflicts
-    violation_df = sanitize_df_for_join(
-        main_df=display_df,
-        join_df=violation_data,
-        join_key=settings.survey_key,
-    )
-
-    violations_df = display_df.join(
-        violation_df,
-        on=settings.survey_key,
-        how="inner",
+    violations_df = join_survey_columns(
+        display_df,
+        violation_data,
+        settings.survey_key,
+        CONSTRAINTS,
+        reserved=[VIOLATION_TYPE_COL],
     )
 
     # add violation type column ie. "Soft Min", "Soft Max", "Hard Min", "Hard Max"
@@ -580,7 +577,7 @@ def _render_constraint_violations_table(
     )
 
     violations_df = violations_df.with_columns(
-        violation_type_expr.alias("violation type")
+        violation_type_expr.alias(VIOLATION_TYPE_COL)
     )
 
     _render_flags_table(violations_df, data, settings, CONSTRAINTS, review)
@@ -709,11 +706,8 @@ def _render_outlier_column_inspection(
 
     # select columns to display from data
     display_df = data.select(include_cols)
-    outliers_df = sanitize_df_for_join(display_df, outliers_data, settings.survey_key)
-    display_df = display_df.join(
-        outliers_df,
-        on=settings.survey_key,
-        how="inner",
+    display_df = join_survey_columns(
+        display_df, outliers_data, settings.survey_key, OUTLIERS
     )
 
     _render_flags_table(
