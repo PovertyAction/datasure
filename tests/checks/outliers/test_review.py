@@ -11,6 +11,8 @@ from datasure.checks.outliers.review import (
     REVIEW_REASON_COL,
     REVIEW_STATUS_COL,
     REVIEWED_BADGE,
+    SURVEY_COL_SUFFIX,
+    VIOLATION_TYPE_COL,
     FlagSelection,
     TableFilters,
     allowed_actions,
@@ -18,6 +20,7 @@ from datasure.checks.outliers.review import (
     filter_table,
     flagged_only,
     highlight_reviewed_row,
+    join_survey_columns,
     mark_reviewed,
     needs_hard_confirmation,
     select_flag,
@@ -298,6 +301,79 @@ def constraint_table() -> pl.DataFrame:
             "violation type": ["Hard Max", "Soft Max"],
         }
     )
+
+
+class TestJoinSurveyColumns:
+    def test_flag_column_name_wins_over_a_survey_field_of_that_name(
+        self, outlier_flags
+    ):
+        survey = pl.DataFrame(
+            {"survey_key": ["K1", "K2", "K3"], "column name": ["income"] * 3}
+        )
+
+        table = join_survey_columns(survey, outlier_flags, "survey_key", OUTLIERS)
+        selection = select_flag(table, [0], "survey_key", OUTLIERS)
+
+        assert selection.column == "age"
+        assert table[f"column name{SURVEY_COL_SUFFIX}"].to_list() == ["income"] * 4
+
+    def test_reserved_names_are_renamed_on_the_survey_side(self, outlier_flags):
+        survey = pl.DataFrame(
+            {
+                "survey_key": ["K1", "K2", "K3"],
+                VIOLATION_TYPE_COL: ["a", "b", "c"],
+                f"{VIOLATION_TYPE_COL}{SURVEY_COL_SUFFIX}": ["x", "y", "z"],
+            }
+        )
+
+        table = join_survey_columns(
+            survey,
+            outlier_flags,
+            "survey_key",
+            OUTLIERS,
+            reserved=[VIOLATION_TYPE_COL],
+        )
+
+        assert VIOLATION_TYPE_COL not in table.columns
+        assert f"{VIOLATION_TYPE_COL}{SURVEY_COL_SUFFIX * 2}" in table.columns
+        assert f"{VIOLATION_TYPE_COL}{SURVEY_COL_SUFFIX}" in table.columns
+
+    def test_row_order_does_not_depend_on_input_order(self, outlier_flags):
+        survey = pl.DataFrame(
+            {"survey_key": ["K1", "K2", "K3"], "enumerator": ["E1", "E2", "E3"]}
+        )
+
+        table = join_survey_columns(survey, outlier_flags, "survey_key", OUTLIERS)
+        reordered = join_survey_columns(
+            survey.reverse(), outlier_flags.reverse(), "survey_key", OUTLIERS
+        )
+
+        assert table.equals(reordered)
+        # A click on row 1 of the first render resolves to the same flag after
+        # a rerun whose join returned rows in another order.
+        assert select_flag(table, [1], "survey_key", OUTLIERS) == select_flag(
+            reordered, [1], "survey_key", OUTLIERS
+        )
+
+    def test_duplicate_key_and_column_are_ordered_by_reason(self):
+        flags = pl.DataFrame(
+            {
+                "survey_key": ["K1", "K1"],
+                "column name": ["age", "age"],
+                "violation reason": [
+                    "Value is above soft maximum 65",
+                    "Value is above hard maximum 100",
+                ],
+            }
+        )
+        survey = pl.DataFrame({"survey_key": ["K1"]})
+
+        table = join_survey_columns(survey, flags, "survey_key", CONSTRAINTS)
+
+        assert table["violation reason"].to_list() == [
+            "Value is above hard maximum 100",
+            "Value is above soft maximum 65",
+        ]
 
 
 class TestSelectFlag:
