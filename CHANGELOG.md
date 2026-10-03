@@ -95,7 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `BackcheckSettings` silently dropped, so duplicates were always dropped and
   the target was always 10. They are now passed as `drop_duplicates_option`
   and `backcheck_target_percent`, and the target is saved under
-  `backcheck_target_percent` so it reloads in later sessions — #299
+  `backcheck_target_percent` so it reloads in later sessions. Targets saved
+  under the old `backcheck_goal` key were never applied and are ignored — #299
 - **Correction log schema**: Removing the last correction entry now leaves an
   empty log with the full schema, including status columns — #296
 - **Constraint violations**: A value past a hard bound was reported as a soft

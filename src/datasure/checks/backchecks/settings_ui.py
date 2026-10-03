@@ -260,14 +260,14 @@ def _render_tracking_options(
     Returns
     -------
     int
-        Backcheck goal.
+        Backcheck target percent.
     """
     with st.container(border=True):
         st.subheader("Tracking Options")
         to1, _, _ = st.columns(3)
 
         with to1:
-            backcheck_goal = st.number_input(
+            backcheck_target_percent = st.number_input(
                 "Target number of backchecks",
                 min_value=0,
                 help="Total number of backchecks expected",
@@ -277,10 +277,12 @@ def _render_tracking_options(
                 kwargs={"state_name": TAB_NAME + "_backcheck_goal"},
             )
             save_check_settings(
-                settings_file, TAB_NAME, {"backcheck_target_percent": backcheck_goal}
+                settings_file,
+                TAB_NAME,
+                {"backcheck_target_percent": backcheck_target_percent},
             )
 
-    return backcheck_goal
+    return backcheck_target_percent
 
 
 def _render_duplicate_handling(
@@ -500,7 +502,9 @@ def backchecks_report_settings(
             backcheck_categorical_columns,
         )
 
-        backcheck_goal = _render_tracking_options(settings_file, default_settings)
+        backcheck_target_percent = _render_tracking_options(
+            settings_file, default_settings
+        )
 
         (
             drop_duplicates_option,
@@ -516,7 +520,7 @@ def backchecks_report_settings(
         backcheck_date=backcheck_date,
         enumerator=enumerator,
         backchecker=backchecker,
-        backcheck_target_percent=backcheck_goal,
+        backcheck_target_percent=backcheck_target_percent,
         drop_duplicates_option=drop_duplicates_option,
         no_differences_list=no_diff_values,
         exclude_values_list=exclude_values,
