@@ -25,6 +25,8 @@ from datasure.processing.correction_log import HARD_SEVERITY, Action
 
 REVIEW_STATUS_COL = "review status"
 REVIEW_REASON_COL = "review reason"
+# The columns `mark_reviewed` adds to the results.
+REVIEW_COLUMNS = (REVIEW_STATUS_COL, REVIEW_REASON_COL)
 REVIEWED_BADGE = "Reviewed"
 CORRECTED_BADGE = "Corrected"
 
@@ -80,11 +82,11 @@ def _latest_entry_by_cell(log_rows: pl.DataFrame, prefix: str) -> pl.DataFrame:
         else pl.lit(None, dtype=pl.String)
     )
     return log_rows.select(
-        pl.col("KEY").cast(pl.String).alias("_review_key"),
-        pl.col("column").cast(pl.String).alias("_review_column"),
+        pl.col("KEY").cast(pl.String).alias("_key"),
+        pl.col("column").cast(pl.String).alias("_column"),
         pl.col("reason").cast(pl.String).alias(f"_{prefix}_reason"),
         severity.alias(f"_{prefix}_severity"),
-    ).unique(subset=["_review_key", "_review_column"], keep="last")
+    ).unique(subset=["_key", "_column"], keep="last")
 
 
 def _is_hard_violation(check: FlagCheck) -> pl.Expr:
@@ -132,21 +134,33 @@ def mark_reviewed(
         an accepted flag (only flagged rows can be accepted),
         `CORRECTED_BADGE` and the correction reason for a corrected cell,
         otherwise null. An acceptance takes precedence over a correction.
+
+    Raises
+    ------
+    ValueError
+        If `survey_key` is one of `REVIEW_COLUMNS`, which would overwrite it.
     """
     if flags.is_empty():
         return flags
+    if survey_key in REVIEW_COLUMNS:
+        raise ValueError(
+            f"The Survey KEY column '{survey_key}' has the name of a review column"
+        )
 
     if corrections is None:
         corrections = acceptances.clear()
 
-    keyed = flags.with_columns(
-        pl.col(survey_key).cast(pl.String).alias("_review_key"),
-        pl.col(COLUMN_NAME_COL).cast(pl.String).alias("_review_column"),
+    # Match in a frame of our own columns, so the helper columns can't clash
+    # with a survey KEY or field of the same name.
+    cells = flags.select(
+        pl.col(survey_key).cast(pl.String).alias("_key"),
+        pl.col(COLUMN_NAME_COL).cast(pl.String).alias("_column"),
+        pl.col(check.reason_col),
     )
     for prefix, log_rows in (("accept", acceptances), ("correct", corrections)):
-        keyed = keyed.join(
+        cells = cells.join(
             _latest_entry_by_cell(log_rows, prefix),
-            on=["_review_key", "_review_column"],
+            on=["_key", "_column"],
             how="left",
             maintain_order="left",
         )
@@ -163,7 +177,8 @@ def mark_reviewed(
         )
     )
     corrected = pl.col("_correct_reason").is_not_null()
-    return keyed.with_columns(
+    # Each cell matches at most one log row, so `cells` lines up with `flags`.
+    review = cells.select(
         pl.when(accepted)
         .then(pl.lit(REVIEWED_BADGE))
         .when(corrected)
@@ -174,14 +189,8 @@ def mark_reviewed(
         .when(corrected)
         .then(pl.col("_correct_reason"))
         .alias(REVIEW_REASON_COL),
-    ).drop(
-        "_review_key",
-        "_review_column",
-        "_accept_reason",
-        "_accept_severity",
-        "_correct_reason",
-        "_correct_severity",
     )
+    return flags.with_columns(review.get_columns())
 
 
 def _is_reviewed() -> pl.Expr:
@@ -291,18 +300,21 @@ def join_survey_columns(
     """Join survey display columns onto `flags` for a results table.
 
     The flag columns stay authoritative: a survey column named like one of
-    them, or like a `reserved` column added afterwards, is renamed with
+    them, like a review column (`REVIEW_COLUMNS`, even when hidden), or like
+    a `reserved` column added afterwards, is renamed with
     `SURVEY_COL_SUFFIX`. Otherwise a survey field called "column name"
-    would become the correction target.
+    would become the correction target, and one called "review status"
+    would be read as the flag's review state.
 
     The result is sorted by KEY, column name and flag reason, so a row
     position reported by a Review click resolves to the same flag on the
     rerun it triggers whatever order the join returns.
     """
-    taken = set(flags.columns) | set(reserved) | set(survey.columns)
+    generated = set(flags.columns) | set(REVIEW_COLUMNS) | set(reserved)
+    taken = generated | set(survey.columns)
     renames = {}
     for col in survey.columns:
-        if col == survey_key or (col not in flags.columns and col not in reserved):
+        if col == survey_key or col not in generated:
             continue
         new_name = f"{col}{SURVEY_COL_SUFFIX}"
         while new_name in taken:
@@ -359,6 +371,22 @@ def select_flag(
         reviewed=row.get(REVIEW_STATUS_COL) == REVIEWED_BADGE,
         hard=row.get(VIOLATION_TYPE_COL) in _HARD_VIOLATION_TYPES,
     )
+
+
+def key_has_conflicting_values(
+    data: pl.DataFrame, survey_key: str, key_value: Any, column: str
+) -> bool:
+    """Whether rows sharing `key_value` hold different values of `column`.
+
+    Corrections and acceptances target a KEY, not a row: a modification
+    changes every row with the KEY, and an acceptance holds only while every
+    row has the accepted value. A flag on such a KEY can't be reviewed
+    without changing or misreading another record.
+    """
+    if survey_key not in data.columns or column not in data.columns:
+        return False
+    values = data.filter(pl.col(survey_key) == key_value).get_column(column)
+    return values.n_unique() > 1
 
 
 def allowed_actions(selection: FlagSelection) -> list[Action]:

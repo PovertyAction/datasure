@@ -221,6 +221,30 @@ class TestConstraintTableReviewButton:
         assert shown["_review"].to_list() == [1, 2]
         assert dialog.call_args.args[2].key_value == "K1"
 
+    def test_a_survey_review_status_field_is_not_read_as_review_state(
+        self, violations, settings
+    ):
+        """A survey field named "review status" is shown, renamed, and ignored."""
+        data = pl.DataFrame(
+            {
+                "KEY": ["K1", "K2", "K3"],
+                "hhid": ["H1", "H2", "H3"],
+                "review status": ["Reviewed"] * 3,
+            }
+        )
+        st_mock = _st_mock(clicked=("constraints", 1))
+        st_mock.multiselect.return_value = ["review status"]
+
+        dialog = self._render(data, violations, settings, st_mock, _review())
+
+        shown = st_mock.dataframe.call_args.args[0]
+        assert not isinstance(shown, Styler)
+        assert "review status" not in shown.columns
+        assert shown["review status (survey)"].to_list() == ["Reviewed"] * 2
+        selection = dialog.call_args.args[2]
+        assert selection.key_value == "K2"
+        assert not selection.reviewed
+
     def test_rows_are_not_selectable(self, data, violations, settings):
         st_mock = _st_mock()
 
@@ -723,6 +747,44 @@ class TestFlagCorrectionForm:
 
         assert namespaces[0] != namespaces[1]
 
+    def test_duplicate_key_with_different_values_cannot_be_reviewed(self, settings):
+        """Reviewing age 150 must not prefill or overwrite the other K1's 30."""
+        duplicated = pl.DataFrame(
+            {"KEY": ["K1", "K1"], "hhid": ["H1", "H1"], "age": [30, 150]}
+        )
+
+        st_mock, inputs, apply_entries = self._render(
+            duplicated,
+            settings,
+            _selection(key_value="K1", hard=True),
+            _review(),
+            _form_state(key_value="K1", action=Action.MODIFY_VALUE, new_value="90"),
+            apply=True,
+            confirm=True,
+        )
+
+        assert "more than one row" in st_mock.warning.call_args.args[0]
+        inputs.assert_not_called()
+        apply_entries.assert_not_called()
+        st_mock.button.assert_not_called()
+
+    def test_duplicate_key_with_the_same_value_can_be_reviewed(self, settings):
+        duplicated = pl.DataFrame(
+            {"KEY": ["K1", "K1"], "hhid": ["H1", "H1"], "age": [150, 150]}
+        )
+
+        _, inputs, _ = self._render(
+            duplicated,
+            settings,
+            _selection(key_value="K1"),
+            _review(),
+            _form_state(key_value="K1"),
+            apply=False,
+            confirm=False,
+        )
+
+        assert inputs.call_args.kwargs["current_value"] == 150
+
     def test_failed_save_does_not_rerun(self, data, settings):
         st_mock = _st_mock()
         st_mock.button.return_value = True
@@ -752,8 +814,10 @@ class TestMetricsExcludeAcceptedFlags:
             }
         )
 
-    def _run_report(self, data, violations, outliers, acceptances_by_check):
-        config = {"survey_key": "KEY", "survey_id": "hhid"}
+    def _run_report(
+        self, data, violations, outliers, acceptances_by_check, survey_key="KEY"
+    ):
+        config = {"survey_key": survey_key, "survey_id": "hhid"}
         columns = ColumnByType(
             all_columns=data.columns,
             categorical_columns=[],
@@ -763,8 +827,9 @@ class TestMetricsExcludeAcceptedFlags:
             integer_columns=["age"],
         )
         processor = _review(acceptances_by_check).processor
+        self.st_mock = _st_mock()
         with (
-            patch(f"{MODULE}.st", _st_mock()),
+            patch(f"{MODULE}.st", self.st_mock),
             patch(
                 f"{MODULE}.outliers_report_settings",
                 return_value=OutlierSettings(**config),
@@ -836,3 +901,23 @@ class TestMetricsExcludeAcceptedFlags:
         self._run_report(data, violations, outliers, {})
 
         assert self.processor.get_active_corrections.call_count == 1
+
+    def test_a_key_named_like_a_review_column_turns_review_off(
+        self, data, violations, outliers
+    ):
+        """The report still renders, without overwriting the KEY column."""
+        key = "review status"
+
+        _, table, _, inspection = self._run_report(
+            data.rename({"KEY": key}),
+            violations.rename({"KEY": key}),
+            outliers.rename({"KEY": key}),
+            {"constraints": _acceptances(("K1", "age", "verified", "hard"))},
+            survey_key=key,
+        )
+
+        assert key in self.st_mock.warning.call_args.args[0]
+        assert table.call_args.kwargs["review"] is None
+        assert inspection.call_args.kwargs["review"] is None
+        assert table.call_args.args[1][key].to_list() == ["K1", "K2", "K3"]
+        self.processor.get_active_acceptances.assert_not_called()
