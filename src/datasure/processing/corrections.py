@@ -13,6 +13,7 @@ from datasure.processing.correction_log import (
     CORRECTION_ACTIONS,
     CORRECTION_LOG_SCHEMA,
     CORRECTIONS_PAGE_SOURCE,
+    HARD_SEVERITY,
     Action,
     empty_correction_log,
     ensure_log_columns,
@@ -179,13 +180,27 @@ def _check_acceptance_against_data(
 
 
 def _validate_acceptance(
-    check_type: str | None, column: str | None, current_value: Any
+    check_type: str | None,
+    column: str | None,
+    current_value: Any,
+    severity: str | None = None,
 ) -> None:
-    """Raise ValueError if an acceptance's check type, column and value don't fit."""
+    """Raise ValueError if an acceptance's check type, column, value and
+    severity don't fit.
+    """
     if check_type not in ACCEPT_CHECK_TYPES:
         raise ValueError(
             f"Unknown check type '{check_type}'; expected one of "
             f"{', '.join(ACCEPT_CHECK_TYPES)}"
+        )
+    # The Correction Log highlights hard acceptances as hard-constraint
+    # overrides, so only a constraint acceptance may be hard.
+    if severity is not None and (
+        severity != HARD_SEVERITY or check_type != "constraints"
+    ):
+        raise ValueError(
+            f"Severity '{severity}' is not valid for a {check_type} acceptance; "
+            f"only constraint acceptances can have severity '{HARD_SEVERITY}'"
         )
     if check_type == "gps":
         if (
@@ -576,7 +591,8 @@ class CorrectionProcessor:
 
         A "modify value" is active while the cell holds its new value, and a
         "remove value" while the cell is missing. A correction overwritten by
-        a later one, or whose row was removed, is inactive.
+        a later one, whose row was removed, or that failed to reapply to the
+        current prep data, is inactive.
 
         Parameters
         ----------
@@ -595,9 +611,12 @@ class CorrectionProcessor:
         if log.width == 0:
             return empty_correction_log()
 
+        # A correction that failed to reapply was not applied, even if the
+        # prep data happens to hold its new value.
         corrections = log.filter(
             pl.col("action").is_in([Action.MODIFY_VALUE, Action.REMOVE_VALUE])
             & pl.col("column").is_not_null()
+            & (pl.col("status") == "Successful")
         )
         if corrections.is_empty():
             return corrections
@@ -770,7 +789,9 @@ class CorrectionProcessor:
             )
 
         if entry.action == Action.ACCEPT:
-            _validate_acceptance(entry.check_type, entry.column, entry.current_value)
+            _validate_acceptance(
+                entry.check_type, entry.column, entry.current_value, entry.severity
+            )
             _check_acceptance_against_data(
                 data, key_col, entry.key_value, entry.column, entry.current_value
             )

@@ -862,6 +862,12 @@ if the value changes, or if you remove the acceptance on the Correct Data page.
 Every entry appears in the Correction Log with source `outliers` or
 `constraints`.
 
+Corrections and acceptances apply to every row with the same KEY. If a KEY is
+on more than one row with different values in the flagged column, Review shows
+a warning instead of the form, because a correction would change all those
+rows. Give each record a unique KEY in the source data first. The Duplicates
+check lists duplicated KEYs.
+
 ---
 
 ### 6. Enumerator Stats Report

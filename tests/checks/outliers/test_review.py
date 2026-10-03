@@ -8,6 +8,7 @@ from datasure.checks.outliers.review import (
     CONSTRAINTS,
     CORRECTED_BADGE,
     OUTLIERS,
+    REVIEW_COLUMNS,
     REVIEW_REASON_COL,
     REVIEW_STATUS_COL,
     REVIEWED_BADGE,
@@ -21,6 +22,7 @@ from datasure.checks.outliers.review import (
     flagged_only,
     highlight_reviewed_row,
     join_survey_columns,
+    key_has_conflicting_values,
     mark_reviewed,
     needs_hard_confirmation,
     select_flag,
@@ -182,6 +184,26 @@ class TestMarkReviewed:
 
         assert result.is_empty()
 
+    @pytest.mark.parametrize("key_name", ["_key", "_review_key", "_accept_reason"])
+    def test_a_key_named_like_a_helper_column_is_kept(self, outlier_flags, key_name):
+        flags = outlier_flags.rename({"survey_key": key_name})
+        acceptances = _acceptances([{"KEY": "K1", "column": "age"}])
+
+        result = mark_reviewed(flags, acceptances, key_name, OUTLIERS)
+
+        assert result.columns == [*flags.columns, REVIEW_STATUS_COL, REVIEW_REASON_COL]
+        assert result[key_name].to_list() == flags[key_name].to_list()
+        assert result[REVIEW_STATUS_COL][0] == REVIEWED_BADGE
+
+    @pytest.mark.parametrize("key_name", REVIEW_COLUMNS)
+    def test_a_key_named_like_a_review_column_is_rejected(
+        self, outlier_flags, key_name
+    ):
+        flags = outlier_flags.rename({"survey_key": key_name})
+
+        with pytest.raises(ValueError, match="review column"):
+            mark_reviewed(flags, _acceptances([]), key_name, OUTLIERS)
+
 
 class TestClearReviewedFlags:
     def test_reviewed_flags_no_longer_count_as_flags(self, outlier_flags):
@@ -338,6 +360,53 @@ class TestJoinSurveyColumns:
         assert f"{VIOLATION_TYPE_COL}{SURVEY_COL_SUFFIX * 2}" in table.columns
         assert f"{VIOLATION_TYPE_COL}{SURVEY_COL_SUFFIX}" in table.columns
 
+    def test_survey_review_fields_are_renamed_while_review_columns_are_hidden(
+        self, outlier_flags
+    ):
+        """With "Show reviewed" off, survey text is not read as review state."""
+        survey = pl.DataFrame(
+            {
+                "survey_key": ["K1", "K2", "K3"],
+                REVIEW_STATUS_COL: [REVIEWED_BADGE] * 3,
+                REVIEW_REASON_COL: ["survey text"] * 3,
+            }
+        )
+
+        table = join_survey_columns(survey, outlier_flags, "survey_key", OUTLIERS)
+        selection = select_flag(table, [0], "survey_key", OUTLIERS)
+
+        assert REVIEW_STATUS_COL not in table.columns
+        assert REVIEW_REASON_COL not in table.columns
+        assert table[f"{REVIEW_STATUS_COL}{SURVEY_COL_SUFFIX}"][0] == REVIEWED_BADGE
+        assert not selection.reviewed
+
+    def test_generated_review_columns_win_over_survey_fields(self, outlier_flags):
+        """With "Show reviewed" on, badges and reasons come from the log."""
+        marked = mark_reviewed(
+            outlier_flags,
+            _acceptances([{"KEY": "K1", "column": "age", "reason": "verified"}]),
+            "survey_key",
+            OUTLIERS,
+        )
+        survey = pl.DataFrame(
+            {
+                "survey_key": ["K1", "K2", "K3"],
+                REVIEW_STATUS_COL: ["survey status"] * 3,
+                REVIEW_REASON_COL: ["survey reason"] * 3,
+            }
+        )
+
+        table = join_survey_columns(survey, marked, "survey_key", OUTLIERS)
+        k1_age = table.filter(
+            (pl.col("survey_key") == "K1") & (pl.col("column name") == "age")
+        )
+
+        assert k1_age[REVIEW_STATUS_COL].to_list() == [REVIEWED_BADGE]
+        assert k1_age[REVIEW_REASON_COL].to_list() == ["verified"]
+        assert k1_age[f"{REVIEW_REASON_COL}{SURVEY_COL_SUFFIX}"].to_list() == [
+            "survey reason"
+        ]
+
     def test_row_order_does_not_depend_on_input_order(self, outlier_flags):
         survey = pl.DataFrame(
             {"survey_key": ["K1", "K2", "K3"], "enumerator": ["E1", "E2", "E3"]}
@@ -435,6 +504,37 @@ class TestSelectFlag:
     @pytest.mark.parametrize("rows", [[], [5], [-1]])
     def test_no_or_stale_selection_returns_none(self, constraint_table, rows):
         assert select_flag(constraint_table, rows, "survey_key", CONSTRAINTS) is None
+
+
+class TestKeyHasConflictingValues:
+    @pytest.mark.parametrize(
+        ("ages", "expected"),
+        [
+            ([30, 150, 40], True),
+            ([150, 150, 40], False),
+            ([None, 150, 40], True),
+        ],
+        ids=["different-values", "same-value", "missing-and-value"],
+    )
+    def test_duplicate_keys(self, ages, expected):
+        data = pl.DataFrame({"KEY": ["K1", "K1", "K2"], "age": ages})
+
+        assert key_has_conflicting_values(data, "KEY", "K1", "age") is expected
+
+    def test_unique_key(self):
+        data = pl.DataFrame({"KEY": ["K1", "K2"], "age": [30, 150]})
+
+        assert not key_has_conflicting_values(data, "KEY", "K1", "age")
+
+    def test_numeric_key_matches_its_native_value(self):
+        data = pl.DataFrame({"KEY": [7, 7], "age": [30, 150]})
+
+        assert key_has_conflicting_values(data, "KEY", 7, "age")
+
+    def test_missing_column_is_not_a_conflict(self):
+        data = pl.DataFrame({"KEY": ["K1", "K1"], "age": [30, 150]})
+
+        assert not key_has_conflicting_values(data, "KEY", "K1", "income")
 
 
 class TestAllowedActions:
