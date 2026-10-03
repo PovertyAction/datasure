@@ -35,6 +35,7 @@ from datasure.checks.outliers.models import (
 from datasure.checks.outliers.review import (
     CONSTRAINTS,
     OUTLIERS,
+    REVIEW_COLUMNS,
     REVIEW_STATUS_COL,
     VIOLATION_TYPE_COL,
     FlagCheck,
@@ -45,6 +46,7 @@ from datasure.checks.outliers.review import (
     filter_table,
     highlight_reviewed_row,
     join_survey_columns,
+    key_has_conflicting_values,
     mark_reviewed,
     needs_hard_confirmation,
     select_flag,
@@ -341,9 +343,24 @@ def _render_flag_correction_form(
     the data. Accepting a hard constraint violation needs an extra
     confirmation and is logged with severity "hard". A successful save
     reruns the page so the tables and metrics reflect it.
+
+    A KEY shared by rows with different values of the column can't be
+    reviewed, since a correction would change every one of those rows.
     """
     key_col = settings.survey_key
     key_value = selection.key_value
+
+    st.markdown(f"**{selection.column}** for KEY **{key_value}**")
+    if key_has_conflicting_values(data, key_col, key_value, selection.column):
+        st.warning(
+            f"KEY {key_value} is on more than one row, with different values "
+            f"of {selection.column}. Corrections and acceptances apply to "
+            "every row with the KEY, so this value can't be reviewed here. "
+            "Give each record a unique KEY in the source data first; the "
+            "Duplicates check lists duplicated KEYs."
+        )
+        return
+
     current_value = get_current_value(data, key_col, key_value, selection.column)
     survey_id_value = (
         get_current_value(data, key_col, key_value, settings.survey_id)
@@ -354,7 +371,6 @@ def _render_flag_correction_form(
     # "1_b" would collide if joined with underscores.
     namespace = json.dumps([selection.check_type, str(key_value), selection.column])
 
-    st.markdown(f"**{selection.column}** for KEY **{key_value}**")
     if selection.reviewed:
         st.info(
             "This flag was accepted as valid. Remove the acceptance on the "
@@ -1508,6 +1524,14 @@ def outliers_report(
     outliers_settings = outliers_report_settings(
         setting_file, config_settings, categorical_columns, datetime_columns
     )
+    if review is not None and outliers_settings.survey_key in REVIEW_COLUMNS:
+        st.warning(
+            f"Flags can't be corrected or accepted on this page because the "
+            f"Survey KEY column is named '{outliers_settings.survey_key}', "
+            "which this report uses for review results. Rename the column to "
+            "review flags here."
+        )
+        review = None
 
     # Outlier columns configuration
     st.subheader("Outlier/Constraint Columns Configuration")

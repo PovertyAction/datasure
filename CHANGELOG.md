@@ -68,10 +68,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after raising the limit to fit it; the results tables and the Correction
   Log use it. A soft-violation acceptance no longer hides a value that has
   since become a hard violation (e.g. after bounds are tightened): it needs a
-  new hard acceptance — #298
+  new hard acceptance. A correction that failed to reapply to new prep data
+  is never shown as Corrected, even if the data holds its new value. Review
+  on a KEY whose rows hold different values of the column shows a warning
+  instead of the form, since a correction changes every row with the KEY
+  (`review.key_has_conflicting_values`). Survey fields added through "Show
+  more columns" that share a name with a results or review column get a
+  " (survey)" suffix, even while the review columns are hidden. A Survey KEY
+  named "review status" or "review reason" turns review off with a warning
+  instead of being overwritten — #298
 - **Correction log severity**: New `severity` column, `hard` on acceptances of
   hard constraint violations (null otherwise and for legacy logs).
-  `CorrectionEntry.severity` sets it and is rejected on non-accept actions.
+  `CorrectionEntry.severity` sets it and is rejected on non-accept actions,
+  on acceptances of other checks, and with any value other than `hard`.
   Hard acceptances are highlighted in the Correction Log — #298
 
 ### Fixed
