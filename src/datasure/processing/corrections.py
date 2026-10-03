@@ -13,6 +13,7 @@ from datasure.processing.correction_log import (
     CORRECTION_ACTIONS,
     CORRECTION_LOG_SCHEMA,
     CORRECTIONS_PAGE_SOURCE,
+    HARD_SEVERITY,
     Action,
     empty_correction_log,
     ensure_log_columns,
@@ -138,6 +139,26 @@ def _acceptance_is_active(
     )
 
 
+def _stored_correction_value(data: pl.DataFrame, row: dict[str, Any]) -> str | None:
+    """Return the value a logged value correction left in the data, as logged.
+
+    "remove value" leaves the cell missing. "modify value" stores its new
+    value cast to the column's type, as `_apply_modify_value` does, so a
+    Float32 column holds 70.0999984741211 for a logged "70.1". If the cast
+    fails, the logged text is returned unchanged.
+    """
+    if row["action"] != Action.MODIFY_VALUE:
+        return None
+    new_value, column = row["new_value"], row["column"]
+    if new_value is None or column not in data.columns:
+        return new_value
+    try:
+        typed = pl.select(pl.lit(new_value).cast(data.schema[column])).item()
+    except pl.exceptions.PolarsError:
+        return new_value
+    return _encode_scalar(typed)
+
+
 def _check_acceptance_against_data(
     data: pl.DataFrame,
     key_col: str,
@@ -159,13 +180,27 @@ def _check_acceptance_against_data(
 
 
 def _validate_acceptance(
-    check_type: str | None, column: str | None, current_value: Any
+    check_type: str | None,
+    column: str | None,
+    current_value: Any,
+    severity: str | None = None,
 ) -> None:
-    """Raise ValueError if an acceptance's check type, column and value don't fit."""
+    """Raise ValueError if an acceptance's check type, column, value and
+    severity don't fit.
+    """
     if check_type not in ACCEPT_CHECK_TYPES:
         raise ValueError(
             f"Unknown check type '{check_type}'; expected one of "
             f"{', '.join(ACCEPT_CHECK_TYPES)}"
+        )
+    # The Correction Log highlights hard acceptances as hard-constraint
+    # overrides, so only a constraint acceptance may be hard.
+    if severity is not None and (
+        severity != HARD_SEVERITY or check_type != "constraints"
+    ):
+        raise ValueError(
+            f"Severity '{severity}' is not valid for a {check_type} acceptance; "
+            f"only constraint acceptances can have severity '{HARD_SEVERITY}'"
         )
     if check_type == "gps":
         if (
@@ -191,6 +226,7 @@ def _build_log_row(
     reason: str,
     source: str,
     check_type: str | None,
+    severity: str | None = None,
 ) -> dict[str, Any]:
     """Build one correction-log row.
 
@@ -210,6 +246,7 @@ def _build_log_row(
         "status_reason": None,
         "source": str(source),
         "check_type": check_type,
+        "severity": severity,
     }
 
 
@@ -237,6 +274,9 @@ class CorrectionEntry:
         The Survey ID value for this KEY, recorded in the log's ID column
     check_type : str | None
         For "accept", the check whose flag is accepted
+    severity : str | None
+        For "accept", how serious the accepted flag is: "hard" for a hard
+        constraint violation, otherwise None
     """
 
     key_value: str
@@ -247,6 +287,7 @@ class CorrectionEntry:
     new_value: Any = None
     survey_id_value: Any = None
     check_type: str | None = None
+    severity: str | None = None
 
 
 # The cached methods below hash `self` by its project so that two projects
@@ -545,6 +586,61 @@ class CorrectionProcessor:
         ]
         return acceptances.filter(pl.Series(is_active, dtype=pl.Boolean))
 
+    def get_active_corrections(self, alias: str, key_col: str) -> pl.DataFrame:
+        """Return the value corrections whose result the data still holds.
+
+        A "modify value" is active while the cell holds its new value, and a
+        "remove value" while the cell is missing. A correction overwritten by
+        a later one, whose row was removed, or that failed to reapply to the
+        current prep data, is inactive.
+
+        Parameters
+        ----------
+        alias : str
+            The data alias/table name
+        key_col : str
+            The Survey KEY column name
+
+        Returns
+        -------
+        pl.DataFrame
+            The active "modify value" and "remove value" rows from the
+            correction log, in log order
+        """
+        log = self.get_correction_log(alias)
+        if log.width == 0:
+            return empty_correction_log()
+
+        # A correction that failed to reapply was not applied, even if the
+        # prep data happens to hold its new value.
+        corrections = log.filter(
+            pl.col("action").is_in([Action.MODIFY_VALUE, Action.REMOVE_VALUE])
+            & pl.col("column").is_not_null()
+            & (pl.col("status") == "Successful")
+        )
+        if corrections.is_empty():
+            return corrections
+
+        data = self.get_corrected_data(alias)
+        if key_col in data.columns:
+            # Check only the rows of logged KEYs, not the whole dataset per
+            # correction. Every row of a duplicated KEY is kept, so all of
+            # them must still hold the value.
+            logged_keys = corrections["KEY"].unique()
+            data = data.filter(pl.col(key_col).cast(pl.String).is_in(logged_keys))
+
+        is_active = [
+            _acceptance_mismatch(
+                data,
+                key_col,
+                row["KEY"],
+                {row["column"]: _stored_correction_value(data, row)},
+            )
+            is None
+            for row in corrections.iter_rows(named=True)
+        ]
+        return corrections.filter(pl.Series(is_active, dtype=pl.Boolean))
+
     def apply_correction(
         self,
         alias: str,
@@ -663,6 +759,7 @@ class CorrectionProcessor:
                 reason=entry.reason,
                 source=source,
                 check_type=entry.check_type,
+                severity=entry.severity,
             )
             for entry in entries
         ]
@@ -692,11 +789,19 @@ class CorrectionProcessor:
             )
 
         if entry.action == Action.ACCEPT:
-            _validate_acceptance(entry.check_type, entry.column, entry.current_value)
+            _validate_acceptance(
+                entry.check_type, entry.column, entry.current_value, entry.severity
+            )
             _check_acceptance_against_data(
                 data, key_col, entry.key_value, entry.column, entry.current_value
             )
             return data
+
+        if entry.severity is not None:
+            raise ValueError(
+                f"Only acceptances record a severity, not {entry.action} "
+                f"on {entry.key_value}"
+            )
 
         if entry.action not in CORRECTION_ACTIONS:
             raise ValueError(f"Unknown correction action '{entry.action}'")
@@ -1252,6 +1357,7 @@ class CorrectionProcessor:
                     "action_index": f"{index} - {action} - {description}",
                     "action": action,
                     "check_type": row["check_type"],
+                    "severity": row["severity"],
                     "description": description,
                     "key_value": key_value,
                     "column": column,

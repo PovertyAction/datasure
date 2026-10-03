@@ -1,6 +1,9 @@
 """Report-rendering UI for the outliers report."""
 
+import json
 from collections.abc import Callable
+from dataclasses import dataclass, field, replace
+from typing import Any
 
 import polars as pl
 import streamlit as st
@@ -29,8 +32,35 @@ from datasure.checks.outliers.models import (
     OutlierThresholds,
     SearchType,
 )
+from datasure.checks.outliers.review import (
+    CONSTRAINTS,
+    OUTLIERS,
+    REVIEW_COLUMNS,
+    REVIEW_STATUS_COL,
+    VIOLATION_TYPE_COL,
+    FlagCheck,
+    FlagSelection,
+    TableFilters,
+    allowed_actions,
+    clear_reviewed_flags,
+    filter_table,
+    highlight_reviewed_row,
+    join_survey_columns,
+    key_has_conflicting_values,
+    mark_reviewed,
+    needs_hard_confirmation,
+    select_flag,
+)
 from datasure.checks.outliers.settings_ui import outliers_report_settings
-from datasure.utils.dataframe_utils import ColumnByType, sanitize_df_for_join
+from datasure.processing.correction_log import HARD_SEVERITY
+from datasure.processing.corrections import CorrectionProcessor
+from datasure.utils.correction_form import (
+    apply_correction_entries,
+    get_current_value,
+    render_correction_inputs,
+    should_enable_apply_button,
+)
+from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import is_demo_project
@@ -38,6 +68,12 @@ from datasure.utils.settings_utils import (
     load_check_settings,
     save_check_settings,
     trigger_save,
+)
+from datasure.utils.ui_utils import (
+    queue_notice,
+    row_styler,
+    show_queued_notices,
+    styled_dataframe,
 )
 
 # =============================================================================
@@ -136,6 +172,289 @@ def _render_outlier_metrics(
 
 
 # =============================================================================
+# Streamlit UI - Correcting and Accepting Flags
+# =============================================================================
+
+# `queue_notice` scope of the confirmation shown after the post-save rerun.
+_NOTICE_SCOPE = "outliers_corrections"
+
+# First column of a results table: a button that opens the correction dialog.
+REVIEW_BUTTON_COL = "_review"
+REVIEW_BUTTON_LABEL = ":material/edit_note: Review"
+
+
+@dataclass(frozen=True)
+class ReviewContext:
+    """What the results tables need to correct or accept flagged values.
+
+    One context is built per report run, so lookups shared by both tables
+    are cached on it.
+    """
+
+    processor: CorrectionProcessor
+    alias: str
+    _corrections: dict[str, pl.DataFrame] = field(
+        default_factory=dict, compare=False, repr=False
+    )
+
+    def active_corrections(self, key_col: str) -> pl.DataFrame:
+        """Return the active value corrections, looked up once per run."""
+        if key_col not in self._corrections:
+            self._corrections[key_col] = self.processor.get_active_corrections(
+                self.alias, key_col
+            )
+        return self._corrections[key_col]
+
+
+def _with_review_status(
+    flags: pl.DataFrame,
+    settings: OutlierSettings,
+    check: FlagCheck,
+    review: ReviewContext | None,
+) -> pl.DataFrame:
+    """Mark accepted flags and corrected values; a no-op if already marked."""
+    if review is None or flags.is_empty() or REVIEW_STATUS_COL in flags.columns:
+        return flags
+    acceptances = review.processor.get_active_acceptances(
+        review.alias, check.check_type, settings.survey_key
+    )
+    corrections = review.active_corrections(settings.survey_key)
+    return mark_reviewed(flags, acceptances, settings.survey_key, check, corrections)
+
+
+def _render_table_toggles(
+    check: FlagCheck, review: ReviewContext | None
+) -> TableFilters:
+    """Render the toggles above a results table and return their values.
+
+    "Show reviewed" and "Show only reviewed" are only offered with
+    `review`. While "Show only reviewed" is on, the other two toggles are
+    disabled, since it overrides them.
+    """
+    reviewed_only_key = f"{check.check_type}_reviewed_only"
+    # Read before rendering so the toggles to its left can be disabled.
+    reviewed_only_on = review is not None and bool(
+        st.session_state.get(reviewed_only_key, False)
+    )
+
+    tc1, tc2, tc3, _ = st.columns([0.22, 0.22, 0.22, 0.34])
+    with tc1:
+        flagged_only_on = st.toggle(
+            "Show only flagged values",
+            key=f"{check.check_type}_flagged_only",
+            value=True,
+            disabled=reviewed_only_on,
+            help="Turn off to show every checked value, flagged or not.",
+        )
+    if review is None:
+        return TableFilters(flagged_only=flagged_only_on)
+
+    with tc2:
+        show_reviewed = st.toggle(
+            "Show reviewed",
+            key=f"{check.check_type}_show_reviewed",
+            disabled=reviewed_only_on,
+            help="Also show flags accepted as valid and corrected values, "
+            "highlighted green, with the reason.",
+        )
+    with tc3:
+        reviewed_only = st.toggle(
+            "Show only reviewed",
+            key=reviewed_only_key,
+            help="Show only flags accepted as valid and corrected values.",
+        )
+    return TableFilters(
+        flagged_only=flagged_only_on,
+        show_reviewed=show_reviewed,
+        reviewed_only=reviewed_only,
+    )
+
+
+def _render_flags_table(
+    table: pl.DataFrame,
+    data: pl.DataFrame,
+    settings: OutlierSettings,
+    check: FlagCheck,
+    review: ReviewContext | None,
+    **dataframe_kwargs: Any,
+) -> None:
+    """Render a results table; with `review`, each row has a Review button.
+
+    Clicking Review opens the correction form for that row in a dialog.
+    """
+    if review is None:
+        st.dataframe(table, **dataframe_kwargs)
+        return
+
+    click_key = f"{check.check_type}_flag_review_click"
+    # Survey fields can be added to the table, so avoid their names.
+    button_col = REVIEW_BUTTON_COL
+    while button_col in table.columns:
+        button_col = f"_{button_col}"
+    shown = table.select(pl.lit(REVIEW_BUTTON_LABEL).alias(button_col), pl.all())
+    column_config = {
+        button_col: st.column_config.ButtonColumn(
+            "",
+            type="tertiary",
+            pinned=True,
+            key=click_key,
+            help="Correct the value or accept it as valid.",
+        )
+    }
+    if REVIEW_STATUS_COL in shown.columns:
+        # "Show reviewed" is on: colour the reviewed flags green.
+        styled_dataframe(
+            row_styler(shown, highlight_reviewed_row),
+            column_config=column_config,
+            **dataframe_kwargs,
+        )
+    else:
+        st.dataframe(shown, column_config=column_config, **dataframe_kwargs)
+
+    # The click is only present during the rerun it triggers, so the dialog
+    # opens once per click; widgets inside the dialog rerun just the dialog.
+    click = st.session_state.get(click_key)
+    rows = [click["row"]] if click else []
+    selection = select_flag(table, rows, settings.survey_key, check)
+    if selection is not None:
+        _flag_correction_dialog(data, settings, selection, review)
+
+
+@st.dialog("Correct or accept flagged value", width="medium")
+def _flag_correction_dialog(
+    data: pl.DataFrame,
+    settings: OutlierSettings,
+    selection: FlagSelection,
+    review: ReviewContext,
+) -> None:
+    """Show the correction form for a flag in a dialog."""
+    _render_flag_correction_form(data, settings, selection, review)
+
+
+def _render_flag_correction_form(
+    data: pl.DataFrame,
+    settings: OutlierSettings,
+    selection: FlagSelection,
+    review: ReviewContext,
+) -> None:
+    """Render the shared correction form for the selected flag.
+
+    The form is prefilled with the flag's KEY and column and the value in
+    the data. Accepting a hard constraint violation needs an extra
+    confirmation and is logged with severity "hard". A successful save
+    reruns the page so the tables and metrics reflect it.
+
+    A KEY shared by rows with different values of the column can't be
+    reviewed, since a correction would change every one of those rows.
+    """
+    key_col = settings.survey_key
+    key_value = selection.key_value
+
+    st.markdown(f"**{selection.column}** for KEY **{key_value}**")
+    if key_has_conflicting_values(data, key_col, key_value, selection.column):
+        st.warning(
+            f"KEY {key_value} is on more than one row, with different values "
+            f"of {selection.column}. Corrections and acceptances apply to "
+            "every row with the KEY, so this value can't be reviewed here. "
+            "Give each record a unique KEY in the source data first; the "
+            "Duplicates check lists duplicated KEYs."
+        )
+        return
+
+    current_value = get_current_value(data, key_col, key_value, selection.column)
+    survey_id_value = (
+        get_current_value(data, key_col, key_value, settings.survey_id)
+        if settings.survey_id
+        else None
+    )
+    # JSON keeps the parts distinct: KEY "a_1"/column "b" and KEY "a"/column
+    # "1_b" would collide if joined with underscores.
+    namespace = json.dumps([selection.check_type, str(key_value), selection.column])
+
+    if selection.reviewed:
+        st.info(
+            "This flag was accepted as valid. Remove the acceptance on the "
+            "Correct Data page to flag it again."
+        )
+
+    state = render_correction_inputs(
+        data,
+        key_col,
+        str(key_value),
+        key_namespace=namespace,
+        actions=allowed_actions(selection),
+        column=selection.column,
+        current_value=current_value,
+        check_type=selection.check_type,
+        survey_id_value=survey_id_value,
+    )
+
+    hard_accept = needs_hard_confirmation(selection, state.action)
+    confirmed = True
+    if hard_accept:
+        st.warning(
+            "This value breaks a hard constraint, a bound meant to be "
+            "absolute. The acceptance is highlighted in the Correction Log."
+        )
+        confirmed = st.checkbox(
+            "I confirm this value is correct despite the hard constraint",
+            key=f"correction_hard_confirm_{namespace}",
+        )
+
+    apply_enabled = (
+        should_enable_apply_button(state.action, state.reason, state.new_value)
+        and not state.validation_error
+        and confirmed
+    )
+    if not st.button(
+        label="Apply",
+        key=f"correction_apply_{namespace}",
+        width="stretch",
+        disabled=not apply_enabled,
+        type="primary",
+    ):
+        return
+
+    # The form holds KEY as text for display; validation and the data
+    # compare the KEY's native value (e.g. 7, not "7").
+    entry = replace(state.to_entry(), key_value=key_value)
+    if hard_accept:
+        entry = replace(entry, severity=HARD_SEVERITY)
+    if not apply_correction_entries(
+        review.processor,
+        review.alias,
+        key_col,
+        [entry],
+        source=selection.check_type,
+    ):
+        return
+
+    # A full rerun closes the dialog and refreshes the tables and metrics.
+    queue_notice(
+        _NOTICE_SCOPE,
+        "toast",
+        f"Saved {state.action} on {selection.column} for KEY {key_value}. "
+        "It is listed in the Correction Log on the Correct Data page.",
+    )
+    st.rerun()
+
+
+def _show_saved_toast() -> None:
+    """Show the confirmation queued by a save before the page reran."""
+    if not show_queued_notices(_NOTICE_SCOPE):
+        return
+    # A markdown link in the toast would open a new browser session and lose
+    # the selected project; a page link navigates within this session.
+    corrections_page = st.session_state.get("st_corr_page")
+    if corrections_page is not None:
+        st.page_link(
+            corrections_page,
+            label="Open the Correction Log",
+            icon=":material/cleaning_services:",
+        )
+
+
+# =============================================================================
 # Streamlit UI - Table Display
 # =============================================================================
 
@@ -149,9 +468,9 @@ def _render_display_columns_expander(
 ) -> list[str]:
     """Render the "Show more columns" expander and return the selected columns.
 
-    Shared by ``_render_constraint_violations_table`` and ``_render_outlier_table``,
-    which both let users add extra context columns to a results table, persisting
-    the selection to the settings file under ``settings_key``.
+    Used by ``_render_constraint_violations_table`` to let users add extra
+    context columns to the results table, persisting the selection to the
+    settings file under ``settings_key``.
 
     Parameters
     ----------
@@ -196,6 +515,7 @@ def _render_constraint_violations_table(
     violation_data: pl.DataFrame,
     settings: OutlierSettings,
     setting_file: str,
+    review: ReviewContext | None = None,
 ) -> None:
     """Render constraint violations table using Streamlit.
 
@@ -209,10 +529,19 @@ def _render_constraint_violations_table(
         Outlier settings configuration.
     setting_file : str
         Path to settings file.
+    review : ReviewContext | None
+        If given, accepted violations are hidden (unless "Show reviewed" is
+        on) and selecting a row opens the correction form.
     """
     if violation_data.is_empty():
         st.info("No constraint violations detected.")
         return
+
+    violation_data = filter_table(
+        _with_review_status(violation_data, settings, CONSTRAINTS, review),
+        _render_table_toggles(CONSTRAINTS, review),
+        CONSTRAINTS,
+    )
 
     all_columns = data.columns
 
@@ -239,25 +568,20 @@ def _render_constraint_violations_table(
 
     # select columns to display from data
     display_df = data.select(include_cols)
-    # sanitize violation_data to avoid column name conflicts
-    violation_df = sanitize_df_for_join(
-        main_df=display_df,
-        join_df=violation_data,
-        join_key=settings.survey_key,
+    violations_df = join_survey_columns(
+        display_df,
+        violation_data,
+        settings.survey_key,
+        CONSTRAINTS,
+        reserved=[VIOLATION_TYPE_COL],
     )
-
-    display_df = display_df.join(
-        violation_df,
-        on=settings.survey_key,
-        how="inner",
-    )
-
-    # show only rows with violations
-    violations_df = display_df.filter(pl.col("violation reason") != "no violation")
 
     # add violation type column ie. "Soft Min", "Soft Max", "Hard Min", "Hard Max"
+    # (null for values within bounds, shown when flagged-only is off)
     violation_type_expr = (
-        pl.when(pl.col("violation reason").str.contains("below hard minimum"))
+        pl.when(pl.col("violation reason") == CONSTRAINTS.no_flag)
+        .then(pl.lit(None, dtype=pl.String))
+        .when(pl.col("violation reason").str.contains("below hard minimum"))
         .then(pl.lit("Hard Min"))
         .when(pl.col("violation reason").str.contains("below soft minimum"))
         .then(pl.lit("Soft Min"))
@@ -269,71 +593,10 @@ def _render_constraint_violations_table(
     )
 
     violations_df = violations_df.with_columns(
-        violation_type_expr.alias("violation type")
+        violation_type_expr.alias(VIOLATION_TYPE_COL)
     )
 
-    st.dataframe(violations_df)
-
-
-def _render_outlier_table(
-    data: pl.DataFrame,
-    outliers_data: pl.DataFrame,
-    settings: OutlierSettings,
-    setting_file: str,
-) -> None:
-    """Render outlier data table using Streamlit.
-
-    Parameters
-    ----------
-    data : pl.DataFrame
-        Original survey data.
-    outliers_data : pl.DataFrame
-        DataFrame containing outlier data.
-    settings : OutlierSettings
-        Outlier settings configuration.
-    setting_file : str
-        Path to settings file.
-    """
-    if outliers_data.is_empty():
-        st.info("No outliers detected in the selected columns.")
-        return
-
-    all_columns = data.columns
-
-    include_cols = _build_include_cols(
-        survey_key=settings.survey_key,
-        survey_id=settings.survey_id,
-        survey_date=settings.survey_date,
-        enumerator=settings.enumerator,
-        team=settings.team,
-    )
-
-    display_options = [col for col in all_columns if col not in include_cols]
-
-    outlier_display_cols = _render_display_columns_expander(
-        setting_file,
-        "outlier_display_cols",
-        "outlier_display_cols",
-        display_options,
-        "Select additional columns to include in the outlier report.",
-    )
-
-    if outlier_display_cols:
-        include_cols.extend(outlier_display_cols)
-
-    # select columns to display from data
-    display_df = data.select(include_cols)
-    outliers_df = sanitize_df_for_join(display_df, outliers_data, settings.survey_key)
-    display_df = display_df.join(
-        outliers_df,
-        on=settings.survey_key,
-        how="inner",
-    )
-
-    # show only rows with outliers
-    outlier_show_df = display_df.filter(pl.col("outlier reason") != "no outlier")
-
-    st.dataframe(outlier_show_df)
+    _render_flags_table(violations_df, data, settings, CONSTRAINTS, review)
 
 
 def _render_outlier_column_inspection(
@@ -341,6 +604,7 @@ def _render_outlier_column_inspection(
     outliers_data: pl.DataFrame,
     settings: OutlierSettings,
     setting_file: str,
+    review: ReviewContext | None = None,
 ) -> None:
     """Inspect outlier columns in the DataFrame.
 
@@ -354,6 +618,9 @@ def _render_outlier_column_inspection(
         Outlier settings configuration.
     setting_file : str
         Path to settings file.
+    review : ReviewContext | None
+        If given, accepted outliers are hidden (unless "Show reviewed" is
+        on) and selecting a row opens the correction form.
     """
     if outliers_data.is_empty():
         st.info(
@@ -447,19 +714,26 @@ def _render_outlier_column_inspection(
         if inspect_display_cols:
             include_cols.extend(inspect_display_cols)
 
-    # select columns to display from data
-    display_df = data.select(include_cols)
-    outliers_df = sanitize_df_for_join(display_df, outliers_data, settings.survey_key)
-    display_df = display_df.join(
-        outliers_df,
-        on=settings.survey_key,
-        how="inner",
+    outliers_data = filter_table(
+        _with_review_status(outliers_data, settings, OUTLIERS, review),
+        _render_table_toggles(OUTLIERS, review),
+        OUTLIERS,
     )
 
-    st.dataframe(
+    # select columns to display from data
+    display_df = data.select(include_cols)
+    display_df = join_survey_columns(
+        display_df, outliers_data, settings.survey_key, OUTLIERS
+    )
+
+    _render_flags_table(
         display_df,
+        data,
+        settings,
+        OUTLIERS,
+        review,
         width="stretch",
-        hide_index=False,
+        hide_index=True,
     )
 
 
@@ -1200,6 +1474,7 @@ def outliers_report(
     setting_file: str,
     config: dict,
     survey_columns: ColumnByType,
+    alias: str | None = None,
 ) -> None:
     """Create a comprehensive outliers report.
 
@@ -1215,13 +1490,22 @@ def outliers_report(
         Path to settings file.
     config : dict
         Configuration dictionary.
+    survey_columns : ColumnByType
+        Columns of `data` by type.
+    alias : str | None
+        The survey dataset alias. If given, flagged values can be corrected
+        or accepted from the results tables, and accepted flags are hidden
+        and left out of the metrics.
     """
+    review = ReviewContext(CorrectionProcessor(project_id), alias) if alias else None
+
     # get column info
     categorical_columns = survey_columns.categorical_columns
     datetime_columns = survey_columns.datetime_columns
     numeric_columns = survey_columns.numeric_columns
 
     st.title("Outliers and Constraints Report")
+    _show_saved_toast()
 
     if is_demo_project():
         demo_callout(
@@ -1240,6 +1524,14 @@ def outliers_report(
     outliers_settings = outliers_report_settings(
         setting_file, config_settings, categorical_columns, datetime_columns
     )
+    if review is not None and outliers_settings.survey_key in REVIEW_COLUMNS:
+        st.warning(
+            f"Flags can't be corrected or accepted on this page because the "
+            f"Survey KEY column is named '{outliers_settings.survey_key}', "
+            "which this report uses for review results. Rename the column to "
+            "review flags here."
+        )
+        review = None
 
     # Outlier columns configuration
     st.subheader("Outlier/Constraint Columns Configuration")
@@ -1314,8 +1606,13 @@ def outliers_report(
         st.info("No constraint violations detected.")
 
     else:
-        # show constraint metrics
-        _render_constraint_metrics(constraint_violations)
+        constraint_violations = _with_review_status(
+            constraint_violations, outliers_settings, CONSTRAINTS, review
+        )
+        # show constraint metrics, leaving out accepted violations
+        _render_constraint_metrics(
+            clear_reviewed_flags(constraint_violations, CONSTRAINTS)
+        )
 
         # show constraint violations table
         st.subheader("Constraint Violations Details")
@@ -1324,6 +1621,7 @@ def outliers_report(
             constraint_violations,
             outliers_settings,
             setting_file,
+            review=review,
         )
 
     # show outliers metrics
@@ -1355,8 +1653,13 @@ def outliers_report(
         st.info("No outliers detected.")
 
     else:
-        # show outlier metrics
-        _render_outlier_metrics(outlier_data, outliers_settings)
+        outlier_data = _with_review_status(
+            outlier_data, outliers_settings, OUTLIERS, review
+        )
+        # show outlier metrics, leaving out accepted outliers
+        _render_outlier_metrics(
+            clear_reviewed_flags(outlier_data, OUTLIERS), outliers_settings
+        )
 
         # show outlier column inspection
         st.subheader("Inspect Columns")
@@ -1366,6 +1669,7 @@ def outliers_report(
             outlier_data,
             outliers_settings,
             setting_file,
+            review=review,
         )
 
     demo_callout(
