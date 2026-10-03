@@ -277,7 +277,7 @@ def _render_tracking_options(
                 kwargs={"state_name": TAB_NAME + "_backcheck_goal"},
             )
             save_check_settings(
-                settings_file, TAB_NAME, {"backcheck_goal": backcheck_goal}
+                settings_file, TAB_NAME, {"backcheck_target_percent": backcheck_goal}
             )
 
     return backcheck_goal
@@ -516,8 +516,8 @@ def backchecks_report_settings(
         backcheck_date=backcheck_date,
         enumerator=enumerator,
         backchecker=backchecker,
-        backcheck_goal=backcheck_goal,
-        drop_duplicates=drop_duplicates_option,
+        backcheck_target_percent=backcheck_goal,
+        drop_duplicates_option=drop_duplicates_option,
         no_differences_list=no_diff_values,
         exclude_values_list=exclude_values,
         case_option=string_comp_options.case_option,
