@@ -20,6 +20,7 @@ from datasure.checks.backchecks.settings_ui import (
     _render_value_list_display,
     backchecks_report_settings,
 )
+from datasure.utils.settings_utils import load_check_settings
 from tests.checks.backchecks.conftest import make_mock_st
 
 # ============================================
@@ -281,14 +282,24 @@ def test_report_settings_keeps_selected_target_percent(
     assert report_settings_with_choices.backcheck_target_percent == 35
 
 
-def test_render_tracking_options_saves_under_model_field_name(patched_bc):
-    """The target is saved under the key the settings model loads it from."""
-    patched_bc.number_input.return_value = 35
-    with patch(
-        "datasure.checks.backchecks.settings_ui.save_check_settings"
-    ) as mock_save:
-        _render_tracking_options("settings.json", BackcheckSettings(survey_key=None))
+def test_render_tracking_options_persists_changed_target(tmp_path):
+    """A changed target passes the real save guard and reloads from disk."""
+    settings_file = str(tmp_path / "settings.json")
+    session_state: dict = {}
+    mock_st = make_mock_st()
+    mock_st.session_state = session_state
 
-    mock_save.assert_called_once_with(
-        "settings.json", "backchecks", {"backcheck_target_percent": 35}
-    )
+    def change_target(*_args, on_change, kwargs, **_widget_kwargs):
+        on_change(**kwargs)
+        return 35
+
+    mock_st.number_input.side_effect = change_target
+    with (
+        patch("datasure.checks.backchecks.settings_ui.st", mock_st),
+        patch("datasure.utils.settings_utils.st", mock_st),
+    ):
+        _render_tracking_options(settings_file, BackcheckSettings(survey_key=None))
+
+    assert load_check_settings(settings_file, "backchecks") == {
+        "backcheck_target_percent": 35
+    }
