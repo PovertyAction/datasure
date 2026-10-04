@@ -2095,6 +2095,93 @@ def test_add_date_columns():
     assert "backcheck_date_col" in result.columns
 
 
+def test_add_date_columns_distinct_survey_and_backcheck_keys():
+    """Backcheck dates join on the backcheck KEY when it differs from the survey KEY."""
+    analysis = pl.DataFrame(
+        {
+            "key": ["s-1", "s-2"],
+            "key__BCCL": ["b-1", "b-2"],
+            "column_name": ["age", "age"],
+        }
+    )
+    survey_data = pl.DataFrame(
+        {
+            "key": ["s-1", "s-2"],
+            "survey_date": [date(2024, 1, 1), date(2024, 1, 2)],
+        }
+    )
+    backcheck_data = pl.DataFrame(
+        {
+            "key": ["b-1", "b-2"],
+            "backcheck_date": [date(2024, 1, 5), date(2024, 1, 9)],
+        }
+    )
+
+    result = _add_date_columns(
+        analysis, survey_data, backcheck_data, "key", "survey_date", "backcheck_date"
+    )
+
+    assert result["backcheck_date_col"].to_list() == [
+        date(2024, 1, 5),
+        date(2024, 1, 9),
+    ]
+    assert _calculate_average_days(result, "survey_date", "backcheck_date") == 5.5
+
+
+@pytest.mark.parametrize("staff_type", ["enumerator", "backchecker"])
+def test_stats_avg_days_with_distinct_survey_and_backcheck_keys(staff_type):
+    """Avg Days uses each backcheck's own date when the two datasets' KEYs differ."""
+    survey_data = pl.DataFrame(
+        {
+            "key": ["s-1", "s-2"],
+            "sid": ["A", "B"],
+            "enum": ["E1", "E1"],
+            "sdate": [date(2024, 1, 1), date(2024, 1, 1)],
+            "age": [25, 30],
+        }
+    )
+    backcheck_data = pl.DataFrame(
+        {
+            "key": ["b-1", "b-2"],
+            "sid": ["A", "B"],
+            "bcer": ["B1", "B1"],
+            "bdate": [date(2024, 1, 3), date(2024, 1, 5)],
+            "age": [25, 31],
+        }
+    )
+    settings = BackcheckSettings(
+        survey_key="key",
+        survey_id="sid",
+        survey_date="sdate",
+        backcheck_date="bdate",
+        enumerator="enum",
+        backchecker="bcer",
+    )
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["age"],
+            "column_name": [["age"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [False],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [False],
+        }
+    )
+    analysis = compute_backcheck_analysis(
+        survey_data, backcheck_data, settings, col_settings
+    )
+
+    result = compute_enumerator_backchecker_stats(
+        survey_data, backcheck_data, analysis, settings, staff_type
+    )
+
+    assert result["Avg Days"].to_list() == [3.0]
+
+
 def test_calculate_average_days():
     """Test _calculate_average_days."""
     staff_data = pl.DataFrame(
