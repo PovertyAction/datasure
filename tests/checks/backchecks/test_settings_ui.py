@@ -289,8 +289,8 @@ def test_render_tracking_options_persists_changed_target(tmp_path):
     mock_st = make_mock_st()
     mock_st.session_state = session_state
 
-    def change_target(*_args, on_change, kwargs, **_widget_kwargs):
-        on_change(**kwargs)
+    def change_target(*_args, on_change, args, **_widget_kwargs):
+        on_change(*args)
         return 35
 
     mock_st.number_input.side_effect = change_target

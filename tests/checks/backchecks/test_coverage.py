@@ -46,6 +46,16 @@ def test_saved_panel_target_wins_over_page_config(tmp_path):
     assert result.backcheck_target_percent == 25
 
 
+def test_saved_target_outside_percent_range_is_ignored(tmp_path):
+    """A saved value from the old count-based input does not break loading."""
+    settings_file = _settings_file(tmp_path, {"backcheck_target_percent": 250})
+    page_config = BackcheckSettings(survey_key="key", backcheck_target_percent=15)
+
+    result = load_default_backchecks_settings(settings_file, page_config)
+
+    assert result.backcheck_target_percent == 15
+
+
 def test_page_config_without_targets_builds_settings():
     """A page config with no targets builds settings with targets unset."""
     settings = settings_from_page_config(
