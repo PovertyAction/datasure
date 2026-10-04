@@ -274,7 +274,7 @@ def _render_tracking_options(
                 key="backcheck_goal_backchecks",
                 value=default_settings.backcheck_target_percent,
                 on_change=trigger_save,
-                kwargs={"state_name": TAB_NAME + "_backcheck_goal"},
+                kwargs={"state_name": TAB_NAME + "_backcheck_target_percent"},
             )
             save_check_settings(
                 settings_file,
