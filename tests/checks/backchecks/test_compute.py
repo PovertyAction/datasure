@@ -652,9 +652,7 @@ def test_compute_enumerator_backchecker_stats_backchecker(
         col_settings,
     )
 
-    # Check that analysis has the backcheck key column
     assert not analysis.is_empty()
-    backcheck_key = f"{sample_backcheck_settings.survey_key}__BCCL"
 
     result = compute_enumerator_backchecker_stats(
         sample_survey_data_pl,
@@ -664,14 +662,8 @@ def test_compute_enumerator_backchecker_stats_backchecker(
         "backchecker",
     )
 
-    # The result might be empty if the backcheck key is not properly set up
-    # Check if backcheck key exists in analysis before asserting non-empty result
-    if backcheck_key in analysis.columns:
-        assert not result.is_empty()
-        assert "backchecker" in result.columns
-    else:
-        # If backcheck key is not in analysis, the result will be empty
-        assert result.is_empty()
+    assert not result.is_empty()
+    assert "backchecker" in result.columns
 
 
 def test_compute_enumerator_backchecker_stats_empty_analysis(
@@ -2012,13 +2004,12 @@ def test_get_staff_configuration_enumerator(
         sample_survey_data_pl,
         sample_backcheck_data_pl,
         sample_backcheck_settings,
-        "survey_id",
     )
 
     assert result is not None
-    staff_col, _, join_key = result
+    staff_col, data_source = result
     assert staff_col == "enumerator"
-    assert join_key == "survey_id"
+    assert data_source is sample_survey_data_pl
 
 
 def test_get_staff_configuration_backchecker(
@@ -2030,13 +2021,12 @@ def test_get_staff_configuration_backchecker(
         sample_survey_data_pl,
         sample_backcheck_data_pl,
         sample_backcheck_settings,
-        "survey_id",
     )
 
     assert result is not None
-    staff_col, _, join_key = result
+    staff_col, data_source = result
     assert staff_col == "backchecker"
-    assert join_key == "survey_id__BCCL"
+    assert data_source is sample_backcheck_data_pl
 
 
 def test_join_staff_information():
@@ -2205,6 +2195,82 @@ def test_stats_avg_days_with_distinct_survey_and_backcheck_keys(staff_type):
     )
 
     assert result["Avg Days"].to_list() == [3.0]
+
+
+def _age_column_settings() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["age"],
+            "column_name": [["age"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [False],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [False],
+        }
+    )
+
+
+def test_backchecker_stats_when_survey_key_is_merge_id():
+    """Backchecker stats are computed when survey_key is also the merge ID."""
+    survey_data = pl.DataFrame(
+        {
+            "sid": ["A", "B"],
+            "enum": ["E1", "E1"],
+            "sdate": [date(2024, 1, 1), date(2024, 1, 1)],
+            "age": [25, 30],
+        }
+    )
+    backcheck_data = pl.DataFrame(
+        {
+            "sid": ["A", "B"],
+            "bcer": ["B1", "B1"],
+            "bdate": [date(2024, 1, 3), date(2024, 1, 5)],
+            "age": [25, 31],
+        }
+    )
+    settings = BackcheckSettings(
+        survey_key="sid",
+        survey_id="sid",
+        survey_date="sdate",
+        backcheck_date="bdate",
+        enumerator="enum",
+        backchecker="bcer",
+    )
+    analysis = compute_backcheck_analysis(
+        survey_data, backcheck_data, settings, _age_column_settings()
+    )
+
+    result = compute_enumerator_backchecker_stats(
+        survey_data, backcheck_data, analysis, settings, "backchecker"
+    )
+
+    assert result["bcer"].to_list() == ["B1"]
+    assert result["Mismatches (Total)"].to_list() == [1]
+    assert result["Avg Days"].to_list() == [3.0]
+
+
+def test_backchecker_stats_empty_when_backcheck_data_has_no_survey_key():
+    """Backchecker stats are empty when the backcheck data lacks survey_key."""
+    survey_data = pl.DataFrame(
+        {"key": ["s-1", "s-2"], "sid": ["A", "B"], "age": [25, 30]}
+    )
+    backcheck_data = pl.DataFrame(
+        {"sid": ["A", "B"], "bcer": ["B1", "B1"], "age": [25, 31]}
+    )
+    settings = BackcheckSettings(survey_key="key", survey_id="sid", backchecker="bcer")
+    analysis = compute_backcheck_analysis(
+        survey_data, backcheck_data, settings, _age_column_settings()
+    )
+
+    result = compute_enumerator_backchecker_stats(
+        survey_data, backcheck_data, analysis, settings, "backchecker"
+    )
+
+    assert result.is_empty()
 
 
 def test_calculate_average_days():
@@ -2629,7 +2695,6 @@ def test_get_staff_configuration_missing_staff_col(
         sample_survey_data_pl,
         sample_backcheck_data_pl,
         settings,
-        "survey_id",
     )
 
     assert result is None

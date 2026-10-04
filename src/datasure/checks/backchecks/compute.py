@@ -629,8 +629,7 @@ def _get_staff_configuration(
     survey_data: pl.DataFrame,
     backcheck_data: pl.DataFrame,
     backcheck_settings: BackcheckSettings,
-    survey_key: str,
-) -> tuple[str, pl.DataFrame, str] | None:
+) -> tuple[str, pl.DataFrame] | None:
     """Get staff column configuration based on staff type.
 
     Parameters
@@ -643,27 +642,23 @@ def _get_staff_configuration(
         Backcheck dataset.
     backcheck_settings : BackcheckSettings
         Backcheck settings.
-    survey_key : str
-        Survey key column name.
 
     Returns
     -------
-    tuple[str, pl.DataFrame, str] | None
-        Tuple of (staff_col, data_source, join_key) if valid, None otherwise.
+    tuple[str, pl.DataFrame] | None
+        Tuple of (staff_col, data_source) if valid, None otherwise.
     """
     if staff_type == "enumerator":
         staff_col = backcheck_settings.enumerator
         data_source = survey_data
-        join_key = survey_key
     else:  # backchecker
         staff_col = backcheck_settings.backchecker
         data_source = backcheck_data
-        join_key = merged_backcheck_name(survey_key)
 
     if not staff_col or staff_col not in data_source.columns:
         return None
 
-    return staff_col, data_source, join_key
+    return staff_col, data_source
 
 
 def _join_backcheck_columns(
@@ -1010,21 +1005,20 @@ def compute_enumerator_backchecker_stats(
 
     # Get staff configuration
     staff_config = _get_staff_configuration(
-        staff_type, survey_data, backcheck_data, backcheck_settings, survey_key
+        staff_type, survey_data, backcheck_data, backcheck_settings
     )
     if staff_config is None:
         return pl.DataFrame()
 
-    staff_col, data_source, join_key = staff_config
-
-    # Check if join key exists in analysis
-    if join_key not in backcheck_analysis.columns:
-        return pl.DataFrame()
+    staff_col, data_source = staff_config
 
     # Join analysis with staff information
     analysis_with_staff = _join_staff_information(
         backcheck_analysis, data_source, staff_col, survey_key, staff_type
     )
+    # The backchecker join is skipped when the backcheck data has no survey_key
+    if staff_col not in analysis_with_staff.columns:
+        return pl.DataFrame()
 
     # Add date columns
     analysis_with_staff = _add_date_columns(
