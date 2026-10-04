@@ -27,6 +27,7 @@ from datasure.checks.backchecks.compute import (
     _get_column_data_type,
     _get_staff_configuration,
     _get_test_value,
+    _join_backcheck_columns,
     _join_staff_information,
     _perform_statistical_tests,
     _prepare_data_for_merge,
@@ -2054,11 +2055,21 @@ def test_join_staff_information():
     )
 
     result = _join_staff_information(
-        analysis, survey_data, "staff", "survey_id", "survey_id", "enumerator"
+        analysis, survey_data, "staff", "survey_id", "enumerator"
     )
 
     assert "staff" in result.columns
     assert len(result) == 2
+
+
+def test_join_backcheck_columns_survey_key_is_merge_id():
+    """With no backcheck KEY column in the analysis, join on the shared survey_key."""
+    analysis = pl.DataFrame({"sid": ["A", "B"], "column_name": ["age", "age"]})
+    backcheck_data = pl.DataFrame({"sid": ["A", "B"], "bcer": ["B1", "B2"]})
+
+    result = _join_backcheck_columns(analysis, backcheck_data, "sid", {"bcer": "bcer"})
+
+    assert result["bcer"].to_list() == ["B1", "B2"]
 
 
 def test_add_date_columns():
@@ -2756,15 +2767,15 @@ def test_process_backcheck_column_backcheck_col_missing():
 
 
 def test_join_staff_information_backchecker_path():
-    """_join_staff_information renames survey_key to join_key for backcheckers."""
-    analysis = pl.DataFrame({"key": [1, 2], "bc_key": [10, 20]})
-    data_source = pl.DataFrame({"key": [1, 2], "staff": ["a", "b"]})
+    """_join_staff_information joins backcheckers on the backcheck KEY."""
+    analysis = pl.DataFrame({"key": [1, 2], "key__BCCL": [10, 20]})
+    data_source = pl.DataFrame({"key": [20, 10], "staff": ["b", "a"]})
 
     result = _join_staff_information(
-        analysis, data_source, "staff", "key", "bc_key", "backchecker"
+        analysis, data_source, "staff", "key", "backchecker"
     )
 
-    assert "staff" in result.columns
+    assert result["staff"].to_list() == ["a", "b"]
 
 
 def test_add_date_columns_no_dates():
