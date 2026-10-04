@@ -1,10 +1,10 @@
 """Settings UI for the backchecks report."""
 
-import pandas as pd
 import polars as pl
 import streamlit as st
 
 from datasure.checks.backchecks.compute import load_default_backchecks_settings
+from datasure.checks.backchecks.coverage import DEFAULT_TARGET_PERCENT
 from datasure.checks.backchecks.models import (
     TAB_NAME,
     BackcheckSettings,
@@ -247,8 +247,12 @@ def _render_staff_identifiers(
 
 def _render_tracking_options(
     settings_file: str, default_settings: BackcheckSettings
-) -> int:
+) -> float | None:
     """Render tracking options section.
+
+    The target input is pre-filled with the saved panel value, else the page
+    config target. A value the user changes is saved and wins over the page
+    config; clearing it saves None, which falls back to the page config.
 
     Parameters
     ----------
@@ -259,20 +263,25 @@ def _render_tracking_options(
 
     Returns
     -------
-    int
-        Backcheck target percent.
+    float | None
+        Backcheck target percent, or None if not set anywhere.
     """
     with st.container(border=True):
         st.subheader("Tracking Options")
         to1, _, _ = st.columns(3)
 
         with to1:
+            default_target = default_settings.backcheck_target_percent
             backcheck_target_percent = st.number_input(
-                "Target number of backchecks",
-                min_value=0,
-                help="Total number of backchecks expected",
+                "Backcheck target (%)",
+                min_value=0.0,
+                max_value=100.0,
+                step=1.0,
+                format="%.1f",
+                help="Percentage of survey submissions to backcheck. Leave blank "
+                "to use the target from the page configuration.",
                 key="backcheck_goal_backchecks",
-                value=default_settings.backcheck_target_percent,
+                value=float(default_target) if default_target is not None else None,
                 on_change=trigger_save,
                 kwargs={"state_name": TAB_NAME + "_backcheck_target_percent"},
             )
@@ -282,7 +291,87 @@ def _render_tracking_options(
                 {"backcheck_target_percent": backcheck_target_percent},
             )
 
+        if backcheck_target_percent is None:
+            st.warning(
+                "No backcheck target is set here or in the page configuration, "
+                f"so the default of {DEFAULT_TARGET_PERCENT:g}% is used."
+            )
+
     return backcheck_target_percent
+
+
+def _render_eligibility_filter(
+    settings_file: str,
+    default_settings: BackcheckSettings,
+    survey_data: pl.DataFrame,
+) -> tuple[str | None, list[str]]:
+    """Render the eligibility filter for the backcheck coverage base.
+
+    Parameters
+    ----------
+    settings_file : str
+        Path to settings file.
+    default_settings : BackcheckSettings
+        Default settings.
+    survey_data : pl.DataFrame
+        Survey dataset, used for the column and value options.
+
+    Returns
+    -------
+    tuple[str | None, list[str]]
+        Eligibility column and the values that mark a survey eligible.
+    """
+    with st.container(border=True):
+        st.markdown("##### Eligibility Filter (Optional)")
+        st.write(
+            "Only count surveys whose selected column has one of the selected "
+            "values towards backcheck coverage, for example `consent` in `1`. "
+            "With no values selected, every survey counts."
+        )
+        ef1, ef2, _ = st.columns(3)
+
+        with ef1:
+            eligibility_column = _render_selectbox_with_save(
+                "Eligibility column",
+                list(survey_data.columns),
+                "eligibility_column_backchecks",
+                settings_file,
+                "eligibility_column",
+                default_settings.eligibility_column,
+                "Select the survey column that marks a survey eligible",
+            )
+
+        value_options = []
+        if eligibility_column and eligibility_column in survey_data.columns:
+            # Cast as coverage.backchecked_surveys does, so the values match.
+            value_options = (
+                survey_data[eligibility_column]
+                .cast(pl.Utf8)
+                .drop_nulls()
+                .unique()
+                .sort()
+                .to_list()
+            )
+        saved_values = default_settings.eligibility_values or []
+
+        with ef2:
+            eligibility_values = st.multiselect(
+                "Eligible values",
+                options=value_options,
+                default=[v for v in saved_values if v in value_options],
+                key="eligibility_values_backchecks",
+                help="Select the values that mark a survey eligible",
+                disabled=not eligibility_column,
+                on_change=trigger_save,
+                kwargs={"state_name": TAB_NAME + "_eligibility_values"},
+            )
+            save_check_settings(
+                settings_file,
+                TAB_NAME,
+                {"eligibility_values": eligibility_values},
+            )
+
+    return eligibility_column, eligibility_values
 
 
 def _render_duplicate_handling(
@@ -431,8 +520,8 @@ def _render_additional_options(
 def backchecks_report_settings(
     project_id: str,
     settings_file: str,
-    survey_data: pd.DataFrame,
-    backcheck_data: pd.DataFrame,
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
     config: BackcheckSettings,
     survey_categorical_columns: list[str],
     survey_datetime_columns: list[str],
@@ -446,7 +535,8 @@ def backchecks_report_settings(
     - Survey identifiers (key and ID columns)
     - Survey date column selection
     - Enumerator and backchecker columns
-    - Tracking options (backcheck goal and duplicate handling)
+    - Tracking options (backcheck target % and eligibility filter)
+    - Additional options (duplicate handling and value comparison)
 
     Settings are automatically saved to the settings file when changed
     and loaded from previous sessions if available.
@@ -457,9 +547,9 @@ def backchecks_report_settings(
         Unique project identifier for database operations.
     settings_file : str
         Path to settings file for saving/loading configurations.
-    survey_data : pd.DataFrame
+    survey_data : pl.DataFrame
         Survey dataset.
-    backcheck_data : pd.DataFrame
+    backcheck_data : pl.DataFrame
         Backcheck dataset.
     config : BackcheckSettings
         Default configuration used as fallback values.
@@ -506,6 +596,10 @@ def backchecks_report_settings(
             settings_file, default_settings
         )
 
+        eligibility_column, eligibility_values = _render_eligibility_filter(
+            settings_file, default_settings, survey_data
+        )
+
         (
             drop_duplicates_option,
             no_diff_values,
@@ -521,6 +615,9 @@ def backchecks_report_settings(
         enumerator=enumerator,
         backchecker=backchecker,
         backcheck_target_percent=backcheck_target_percent,
+        survey_target=default_settings.survey_target,
+        eligibility_column=eligibility_column,
+        eligibility_values=eligibility_values,
         drop_duplicates_option=drop_duplicates_option,
         no_differences_list=no_diff_values,
         exclude_values_list=exclude_values,

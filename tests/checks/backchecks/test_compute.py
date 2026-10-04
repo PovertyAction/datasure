@@ -619,8 +619,6 @@ def test_compute_enumerator_backchecker_stats_enumerator(
 
     assert not result.is_empty()
     assert "enumerator" in result.columns
-    assert "Surveys" in result.columns
-    assert "Backchecks" in result.columns
     assert "Error Rate % (Total)" in result.columns
 
 

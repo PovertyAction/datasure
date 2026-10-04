@@ -76,8 +76,20 @@ class BackcheckSettings(BaseModel):
     )
     enumerator: str | None = Field(None, description="Column containing enumerator")
     backchecker: str | None = Field(None, description="Column containing back checker")
-    backcheck_target_percent: int = Field(
-        10, description="Target percentage of backchecks"
+    backcheck_target_percent: float | None = Field(
+        None,
+        ge=0,
+        le=100,
+        description="Target percentage of surveys to backcheck; None if not set",
+    )
+    survey_target: int | None = Field(
+        None, ge=0, description="Target number of survey responses"
+    )
+    eligibility_column: str | None = Field(
+        None, description="Survey column that marks a survey eligible"
+    )
+    eligibility_values: list[str] | None = Field(
+        None, description="Values of eligibility_column that mark a survey eligible"
     )
     drop_duplicates_option: str = Field(
         "drop", description="How to handle duplicate entries"

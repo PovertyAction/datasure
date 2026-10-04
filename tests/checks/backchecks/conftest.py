@@ -24,7 +24,7 @@ def make_mock_st():
         col.text_input.return_value = ""
         return col
 
-    def mock_columns(n_or_spec):
+    def mock_columns(n_or_spec, **_kwargs):
         if isinstance(n_or_spec, int):
             n = n_or_spec
         elif isinstance(n_or_spec, list | tuple):

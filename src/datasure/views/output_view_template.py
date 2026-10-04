@@ -419,6 +419,7 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
                 "backchecker": config.backchecker,
                 "backchecker_team": config.backchecker_team,
                 "backcheck_target_percent": config.backcheck_target_percent,
+                "survey_target": config.survey_target,
             }
             backchecks_report(
                 project_id,
