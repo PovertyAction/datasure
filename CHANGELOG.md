@@ -89,9 +89,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   expected backchecks, `ceil(survey_target × target% / 100)`, when
   `survey_target` is set. `compute_staff_coverage` returns per-enumerator
   coverage, including enumerators with no backchecks, or backchecks done per
-  backchecker. Neither needs comparison columns. The Backchecks Summary shows
-  coverage against the target and a new Targets row, and the settings panel
-  gains an eligibility filter (`eligibility_column`, `eligibility_values`).
+  backchecker. Neither needs comparison columns. The Backchecks Summary has a
+  new Targets section showing coverage against the target % and backchecks
+  done against expected, each with its deviation as a delta. The settings
+  panel gains an eligibility filter (`eligibility_column`,
+  `eligibility_values`).
   `settings_from_page_config` builds `BackcheckSettings` from the page config,
   where a target of 0 means not set — #318
 

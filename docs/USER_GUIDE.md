@@ -1005,14 +1005,17 @@ Configure validation:
 
 ##### Backchecks Summary
 
+A row of counts (survey observations, back check observations, enumerators and
+back checkers), then a **Targets** section with two metrics side by side:
+
 - **Backcheck Coverage**: Share of eligible unique survey IDs (after duplicate
   handling) with at least one matching back check, and how many points it is
   above or below the target. It is calculated before any back check columns
   are configured.
-- **Targets**: When the page configuration sets the target number of survey
-  responses, back checks done against the back checks expected
-  (survey target × target %, rounded up), with a progress bar. Values over
-  100% are shown as is.
+- **Backchecks vs Expected**: When the page configuration sets the target
+  number of survey responses, back checks done against the back checks
+  expected (survey target × target %, rounded up), and how many back checks
+  above or below that it is. Values over 100% are shown as is.
 
 **Add Back Check Columns**:
 Click "Add a back check column" (+ button):
