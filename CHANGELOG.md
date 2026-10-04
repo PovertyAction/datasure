@@ -100,7 +100,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Backcheck dates**: `_add_date_columns` joined backcheck dates on the survey
   KEY, so when survey and backcheck KEYs differed the dates and the "Avg Days"
   statistics were empty. Backcheck dates now join on the backcheck KEY
-  (`{survey_key}__BCCL`) — #300
+  (`{survey_key}__BCCL`). Backchecker statistics were also always empty when
+  the survey KEY was the merge ID; they are now computed — #300
 - **Correction log schema**: Removing the last correction entry now leaves an
   empty log with the full schema, including status columns — #296
 - **Constraint violations**: A value past a hard bound was reported as a soft
