@@ -82,6 +82,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CorrectionEntry.severity` sets it and is rejected on non-accept actions,
   on acceptances of other checks, and with any value other than `hard`.
   Hard acceptances are highlighted in the Correction Log — #298
+- **Backcheck targets**: The Backchecks Summary tracks progress against the
+  backcheck target. "Backcheck Coverage" is now the share of eligible unique
+  survey IDs (after duplicate handling) with a matching backcheck, shown
+  against the target, and is calculated before any comparison columns are
+  configured. A new Targets row shows backchecks done against
+  `ceil(survey_target × target% / 100)` when the page configuration sets
+  `survey_target`. The target % resolves from the settings panel, then the
+  page configuration, then 10% (`BackcheckSettings.backcheck_target_percent`
+  is now `float | None`; a page-config target of 0 counts as not set). A new
+  optional eligibility filter (column plus values) restricts the base. In the
+  Enumerator Backchecker Error Statistics table, the enumerator view's
+  "Surveys" and "Backchecks" are now eligible unique submissions and how many
+  were backchecked, with new "Coverage %" and "vs target" columns; the
+  backchecker view shows backchecks done. The table renders before comparison
+  columns are configured. Calculations live in the new
+  `checks/backchecks/coverage.py` — #318
 
 ### Fixed
 
