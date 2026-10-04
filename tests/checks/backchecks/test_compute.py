@@ -2128,6 +2128,20 @@ def test_add_date_columns_distinct_survey_and_backcheck_keys():
     assert _calculate_average_days(result, "survey_date", "backcheck_date") == 5.5
 
 
+def test_add_date_columns_backcheck_data_without_key():
+    """Backcheck dates are skipped, not a crash, when backcheck data has no KEY."""
+    analysis = pl.DataFrame({"key": ["s-1"], "column_name": ["age"]})
+    survey_data = pl.DataFrame({"key": ["s-1"], "survey_date": [date(2024, 1, 1)]})
+    backcheck_data = pl.DataFrame({"sid": ["A"], "backcheck_date": [date(2024, 1, 5)]})
+
+    result = _add_date_columns(
+        analysis, survey_data, backcheck_data, "key", "survey_date", "backcheck_date"
+    )
+
+    assert "survey_date_col" in result.columns
+    assert "backcheck_date_col" not in result.columns
+
+
 @pytest.mark.parametrize("staff_type", ["enumerator", "backchecker"])
 def test_stats_avg_days_with_distinct_survey_and_backcheck_keys(staff_type):
     """Avg Days uses each backcheck's own date when the two datasets' KEYs differ."""
