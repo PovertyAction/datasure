@@ -6,6 +6,16 @@ from pydantic import BaseModel, Field
 
 TAB_NAME: str = "backchecks"
 
+# Suffix the survey/backcheck merge adds to backcheck columns whose names
+# clash with survey columns, e.g. the backcheck KEY becomes "KEY__BCCL".
+BACKCHECK_SUFFIX: str = "__BCCL"
+
+
+def merged_backcheck_name(col: str) -> str:
+    """Return the merged-data name of backcheck column `col`."""
+    return f"{col}{BACKCHECK_SUFFIX}"
+
+
 # Weekday constants for productivity analysis
 WEEKDAY_NAMES = [
     "Monday",
