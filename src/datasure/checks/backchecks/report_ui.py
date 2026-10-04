@@ -607,31 +607,34 @@ def _render_backcheck_summary(
         n_backcheckers = 0
 
     # Display metrics in columns
-    uc1, uc2, uc3, _ = st.columns(4)
-    lc1, lc2, _, _ = st.columns(4)
+    c1, c2, c3, c4 = st.columns(4)
 
-    with uc1, st.container(border=True):
+    with c1, st.container(border=True):
         st.metric("Survey Observations", f"{len(survey_data):,}")
 
-    with uc2, st.container(border=True):
+    with c2, st.container(border=True):
         st.metric("Backcheck Observations", f"{len(backcheck_data):,}")
 
-    with uc3, st.container(border=True):
-        _render_coverage_metric(coverage)
-
-    with lc1, st.container(border=True):
+    with c3, st.container(border=True):
         st.metric(
             "Total Enumerators", f"{n_enumerators:,}" if n_enumerators > 0 else "N/A"
         )
 
-    with lc2, st.container(border=True):
+    with c4, st.container(border=True):
         st.metric(
             "Total Back Checkers",
             f"{n_backcheckers:,}" if n_backcheckers > 0 else "N/A",
         )
 
+    st.markdown("##### Targets")
+    tc1, tc2 = st.columns(2)
+
+    with tc1, st.container(border=True):
+        _render_coverage_metric(coverage)
+
     if coverage is not None:
-        _render_expected_backchecks(coverage)
+        with tc2:
+            _render_expected_backchecks(coverage)
 
 
 def _render_coverage_metric(coverage: BackcheckCoverage | None) -> None:
@@ -656,8 +659,7 @@ def _render_coverage_metric(coverage: BackcheckCoverage | None) -> None:
 
 
 def _render_expected_backchecks(coverage: BackcheckCoverage) -> None:
-    """Render the Targets row: backchecks done against backchecks expected."""
-    st.markdown("##### Targets")
+    """Render backchecks done against expected, with the deviation as a delta."""
     if coverage.expected_backchecks is None:
         st.info(
             "Set the target number of responses for the survey in the page "
@@ -666,18 +668,16 @@ def _render_expected_backchecks(coverage: BackcheckCoverage) -> None:
         )
         return
 
-    progress = coverage.expected_progress_percent or 0.0
-    tc1, tc2 = st.columns([1, 3], vertical_alignment="center")
-    with tc1, st.container(border=True):
+    deviation = coverage.backchecked - coverage.expected_backchecks
+    with st.container(border=True):
         st.metric(
             "Backchecks vs Expected",
             f"{coverage.backchecked:,} / {coverage.expected_backchecks:,} "
-            f"({progress:.0f}%)",
+            f"({coverage.expected_progress_percent:.0f}%)",
+            delta=f"{deviation:+,} backchecks vs target",
             help=f"Expected backchecks: {coverage.target_percent:g}% of the "
             "survey target, rounded up.",
         )
-    with tc2:
-        st.progress(min(progress / 100, 1.0))
 
 
 def _render_backchecker_productivity(
@@ -1732,13 +1732,13 @@ def backchecks_report(
     demo_callout(
         """
         ##### Backchecks Summary
-        Five metrics appear here: Survey Observations, Backcheck Observations,
-        Backcheck Coverage, Total Enumerators, and Total Back Checkers.
-        Backcheck Coverage is the share of eligible unique surveys that have been
-        backchecked, with how far it is above or below the backcheck target.
-        When the survey's target number of responses is set in the page
-        configuration, a **Targets** row shows backchecks done against the
-        total number of backchecks expected.
+        Four metrics appear here: Survey Observations, Backcheck Observations,
+        Total Enumerators, and Total Back Checkers. Below them, the **Targets**
+        section shows Backcheck Coverage, the share of eligible unique surveys
+        that have been backchecked, with how far it is above or below the
+        backcheck target. When the survey's target number of responses is set
+        in the page configuration, it also shows backchecks done against the
+        total number of backchecks expected, with how many above or below.
 
         Below the metrics, a **Backchecker Productivity** table shows submission
         counts per backchecker over time. Use the **Daily / Weekly / Monthly** pills

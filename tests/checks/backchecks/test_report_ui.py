@@ -463,11 +463,18 @@ def test_render_backcheck_summary(patched_bc):
         survey_id="key",
         enumerator="enum",
         backchecker="bcer",
-        survey_target=10,
+        survey_target=30,
     )
     _render_backcheck_summary(survey_data, backcheck_data, settings)
-    patched_bc.metric.assert_called()
-    patched_bc.progress.assert_called_once_with(1.0)
+    # 10% of 30 expects 3 backchecks; 1 is done, 2 short of the target.
+    expected_card = next(
+        c
+        for c in patched_bc.metric.call_args_list
+        if c.args[0] == "Backchecks vs Expected"
+    )
+    assert expected_card.args[1] == "1 / 3 (33%)"
+    assert expected_card.kwargs["delta"] == "-2 backchecks vs target"
+    patched_bc.progress.assert_not_called()
 
 
 def test_render_time_period_selector_backchecks(patched_bc):
