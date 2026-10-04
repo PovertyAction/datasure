@@ -743,12 +743,19 @@ def _add_date_columns(
         ).unique(subset=[survey_key])
         result = result.join(survey_dates, on=survey_key, how="left")
 
-    # Add backcheck date
+    # Add backcheck date, joining on the backcheck KEY. The analysis only lacks
+    # it when survey_key is the merge ID, which then matches both datasets.
     if backcheck_date and backcheck_date in backcheck_data.columns:
+        backcheck_key = f"{survey_key}__BCCL"
+        if backcheck_key not in result.columns:
+            backcheck_key = survey_key
         bc_dates = backcheck_data.select(
-            [survey_key, pl.col(backcheck_date).alias("backcheck_date_col")]
-        ).unique(subset=[survey_key])
-        result = result.join(bc_dates, on=survey_key, how="left")
+            [
+                pl.col(survey_key).alias(backcheck_key),
+                pl.col(backcheck_date).alias("backcheck_date_col"),
+            ]
+        ).unique(subset=[backcheck_key])
+        result = result.join(bc_dates, on=backcheck_key, how="left")
 
     return result
 
