@@ -617,7 +617,7 @@ def _render_backcheck_summary(
         st.metric("Backcheck Observations", f"{len(backcheck_data):,}")
 
     with uc3, st.container(border=True):
-        _render_coverage_metric(coverage, backcheck_settings)
+        _render_coverage_metric(coverage)
 
     with lc1, st.container(border=True):
         st.metric(
@@ -634,11 +634,8 @@ def _render_backcheck_summary(
         _render_expected_backchecks(coverage)
 
 
-def _render_coverage_metric(
-    coverage: BackcheckCoverage | None, backcheck_settings: BackcheckSettings
-) -> None:
+def _render_coverage_metric(coverage: BackcheckCoverage | None) -> None:
     """Render the on-track coverage card with its delta against the target."""
-    target_percent = effective_target_percent(backcheck_settings)
     if coverage is None or coverage.on_track_percent is None:
         st.metric(
             "Backcheck Coverage",
@@ -648,6 +645,7 @@ def _render_coverage_metric(
         )
         return
 
+    target_percent = coverage.target_percent
     st.metric(
         "Backcheck Coverage",
         f"{coverage.on_track_percent:.1f}%",

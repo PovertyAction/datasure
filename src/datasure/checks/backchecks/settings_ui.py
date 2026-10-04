@@ -245,14 +245,38 @@ def _render_staff_identifiers(
     return enumerator, backchecker
 
 
+TARGET_INPUT_KEY: str = "backcheck_goal_backchecks"
+TARGET_STATE_NAME: str = TAB_NAME + "_backcheck_target_percent"
+
+
+def _on_target_change(settings_file: str, page_config_target: float | None) -> None:
+    """Flag a changed target for saving; on clear, fall back to the page config.
+
+    Clearing saves None (so the page config target applies in later sessions)
+    and shows the page config target in the input straight away. The save
+    clears the flag, so the input's restored value is not saved as a panel
+    value.
+    """
+    trigger_save(state_name=TARGET_STATE_NAME)
+    if (
+        TARGET_INPUT_KEY in st.session_state
+        and st.session_state[TARGET_INPUT_KEY] is None
+    ):
+        save_check_settings(settings_file, TAB_NAME, {"backcheck_target_percent": None})
+        if page_config_target is not None:
+            st.session_state[TARGET_INPUT_KEY] = float(page_config_target)
+
+
 def _render_tracking_options(
-    settings_file: str, default_settings: BackcheckSettings
+    settings_file: str,
+    default_settings: BackcheckSettings,
+    page_config_target: float | None = None,
 ) -> float | None:
     """Render tracking options section.
 
     The target input is pre-filled with the saved panel value, else the page
     config target. A value the user changes is saved and wins over the page
-    config; clearing it saves None, which falls back to the page config.
+    config; clearing it saves None and falls back to the page config.
 
     Parameters
     ----------
@@ -260,6 +284,8 @@ def _render_tracking_options(
         Path to settings file.
     default_settings : BackcheckSettings
         Default settings.
+    page_config_target : float | None
+        Backcheck target % from the page configuration, if set.
 
     Returns
     -------
@@ -280,10 +306,10 @@ def _render_tracking_options(
                 format="%.1f",
                 help="Percentage of survey submissions to backcheck. Leave blank "
                 "to use the target from the page configuration.",
-                key="backcheck_goal_backchecks",
+                key=TARGET_INPUT_KEY,
                 value=float(default_target) if default_target is not None else None,
-                on_change=trigger_save,
-                kwargs={"state_name": TAB_NAME + "_backcheck_target_percent"},
+                on_change=_on_target_change,
+                args=(settings_file, page_config_target),
             )
             save_check_settings(
                 settings_file,
@@ -593,7 +619,7 @@ def backchecks_report_settings(
         )
 
         backcheck_target_percent = _render_tracking_options(
-            settings_file, default_settings
+            settings_file, default_settings, config.backcheck_target_percent
         )
 
         eligibility_column, eligibility_values = _render_eligibility_filter(
