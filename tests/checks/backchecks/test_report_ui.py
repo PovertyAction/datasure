@@ -477,6 +477,26 @@ def test_render_backcheck_summary(patched_bc):
     patched_bc.progress.assert_not_called()
 
 
+def test_render_backcheck_summary_zero_target(patched_bc):
+    """A 0% target expects no backchecks and renders without a percentage."""
+    survey_data = pl.DataFrame({"key": [1, 2]})
+    backcheck_data = pl.DataFrame({"key": [1]})
+    settings = BackcheckSettings(
+        survey_key="key",
+        survey_id="key",
+        backcheck_target_percent=0,
+        survey_target=30,
+    )
+    _render_backcheck_summary(survey_data, backcheck_data, settings)
+    expected_card = next(
+        c
+        for c in patched_bc.metric.call_args_list
+        if c.args[0] == "Backchecks vs Expected"
+    )
+    assert expected_card.args[1] == "1 / 0"
+    assert expected_card.kwargs["delta"] == "+1 backchecks vs target"
+
+
 def test_render_time_period_selector_backchecks(patched_bc):
     """_render_time_period_selector_backchecks returns selected time period."""
     patched_bc.pills.return_value = "Week"

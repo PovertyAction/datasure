@@ -669,11 +669,14 @@ def _render_expected_backchecks(coverage: BackcheckCoverage) -> None:
         return
 
     deviation = coverage.backchecked - coverage.expected_backchecks
+    value = f"{coverage.backchecked:,} / {coverage.expected_backchecks:,}"
+    # A 0% target expects no backchecks, so there is no percentage to show.
+    if coverage.expected_progress_percent is not None:
+        value += f" ({coverage.expected_progress_percent:.0f}%)"
     with st.container(border=True):
         st.metric(
             "Backchecks vs Expected",
-            f"{coverage.backchecked:,} / {coverage.expected_backchecks:,} "
-            f"({coverage.expected_progress_percent:.0f}%)",
+            value,
             delta=f"{deviation:+,} backchecks vs target",
             help=f"Expected backchecks: {coverage.target_percent:g}% of the "
             "survey target, rounded up.",
