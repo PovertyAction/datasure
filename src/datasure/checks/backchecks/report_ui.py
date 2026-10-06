@@ -1554,6 +1554,15 @@ def _prepare_display_data(
     return display_data
 
 
+def _error_source_column(*, pinned: bool = False) -> Any:
+    """Return the column config of the Error Source column."""
+    return st.column_config.TextColumn(
+        "Error Source",
+        help="Who caused the mismatch, as attributed by a reviewer.",
+        pinned=pinned,
+    )
+
+
 def _build_column_config(
     survey_key: str,
     survey_id: str | None,
@@ -1583,10 +1592,7 @@ def _build_column_config(
         "survey_value": st.column_config.TextColumn("Survey Value"),
         "backcheck_value": st.column_config.TextColumn("Backcheck Value"),
         "match_status": st.column_config.TextColumn("Match Status"),
-        ERROR_SOURCE_COL: st.column_config.TextColumn(
-            "Error Source",
-            help="Who caused the mismatch, as attributed by a reviewer.",
-        ),
+        ERROR_SOURCE_COL: _error_source_column(),
         "category": st.column_config.NumberColumn("Category", format="%d"),
     }
 
@@ -1732,6 +1738,8 @@ _NOTICE_SCOPE = "backchecks_attribution"
 # First column of the comparison table: a button that opens the dialog.
 REVIEW_BUTTON_COL = "_review"
 REVIEW_BUTTON_LABEL = ":material/edit_note: Review"
+# Pixels that fit the label; left unset, the button column is sized too wide.
+REVIEW_BUTTON_WIDTH = 100
 _REVIEW_CLICK_KEY = "backchecks_attribution_review_click"
 _COMPARISON_TABLE_KEY = "backchecks_comparison_table"
 
@@ -1767,9 +1775,11 @@ def _render_comparison_table(
     button_col = REVIEW_BUTTON_COL
     while button_col in display_data.columns:
         button_col = f"_{button_col}"
+    # Review and Error Source come first and stay pinned while scrolling.
     shown = display_data.select(
         pl.when(is_mismatch()).then(pl.lit(REVIEW_BUTTON_LABEL)).alias(button_col),
-        pl.all(),
+        pl.col(ERROR_SOURCE_COL),
+        pl.all().exclude(ERROR_SOURCE_COL),
     )
     column_config = {
         **column_config,
@@ -1777,9 +1787,11 @@ def _render_comparison_table(
             "",
             type="tertiary",
             pinned=True,
+            width=REVIEW_BUTTON_WIDTH,
             key=_REVIEW_CLICK_KEY,
             help="Attribute this mismatch, or every selected one, to an error source.",
         ),
+        ERROR_SOURCE_COL: _error_source_column(pinned=True),
     }
     event = st.dataframe(
         shown,
