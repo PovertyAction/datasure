@@ -96,8 +96,10 @@ Per project (UUID-keyed):
 
 - `cache/{project_id}/data/` — the DuckDB databases `raw.duckdb`,
   `prep.duckdb`, `corrected.duckdb`
-- `cache/{project_id}/settings/` — `logs.duckdb` (import/prep logs), JSON
-  settings, and credential metadata
+- `cache/{project_id}/settings/` — `logs.duckdb` (import/prep logs, and the
+  append-only backcheck attribution logs `bc_attribution_{page_name_id}`
+  written by `checks/backchecks/attribution.py`), JSON settings, and
+  credential metadata
 - `cache/projects.json` — the project registry
 - `cache/user_settings.json` — per-user preferences, currently the
   "Reviewer name" recorded as `user` in correction logs

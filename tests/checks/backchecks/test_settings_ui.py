@@ -156,12 +156,24 @@ def test_render_staff_identifiers(patched_bc):
 
 
 def test_render_tracking_options(patched_bc):
-    """_render_tracking_options returns a numeric backcheck_goal."""
-    patched_bc.number_input.return_value = 50
+    """_render_tracking_options returns the backcheck and error rate targets."""
+    patched_bc.number_input.side_effect = [50, 5]
     result = _render_tracking_options(
         "settings.json", BackcheckSettings(survey_key=None)
     )
-    assert result == 50
+    assert result == (50, 5)
+
+
+def test_render_tracking_options_saves_error_rate_target(patched_bc):
+    """A cleared error rate target is saved as None, so nothing is highlighted."""
+    patched_bc.number_input.side_effect = [10, None]
+    with patch("datasure.checks.backchecks.settings_ui.save_check_settings") as save:
+        _, error_target = _render_tracking_options(
+            "settings.json", BackcheckSettings(survey_key=None)
+        )
+    assert error_target is None
+    saved = [call.args[2] for call in save.call_args_list]
+    assert {"error_rate_target_percent": None} in saved
 
 
 def test_render_duplicate_handling(patched_bc):
@@ -249,7 +261,7 @@ def report_settings_with_choices(patched_bc):
         patch(f"{module}._render_survey_identifiers", return_value=("key", "sid")),
         patch(f"{module}._render_date_columns", return_value=(None, None)),
         patch(f"{module}._render_staff_identifiers", return_value=(None, None)),
-        patch(f"{module}._render_tracking_options", return_value=35),
+        patch(f"{module}._render_tracking_options", return_value=(35, 4.5)),
         patch(
             f"{module}._render_additional_options",
             return_value=("last", [], [], StrCompareOptions()),
@@ -282,6 +294,13 @@ def test_report_settings_keeps_selected_target_percent(
     assert report_settings_with_choices.backcheck_target_percent == 35
 
 
+def test_report_settings_keeps_selected_error_rate_target(
+    report_settings_with_choices,
+):
+    """The error rate target reaches the returned settings."""
+    assert report_settings_with_choices.error_rate_target_percent == 4.5
+
+
 def test_render_tracking_options_persists_changed_target(tmp_path):
     """A changed target passes the real save guard and reloads from disk."""
     settings_file = str(tmp_path / "settings.json")
@@ -289,8 +308,10 @@ def test_render_tracking_options_persists_changed_target(tmp_path):
     mock_st = make_mock_st()
     mock_st.session_state = session_state
 
-    def change_target(*_args, on_change, args, **_widget_kwargs):
-        on_change(*args)
+    def change_target(*_args, key, on_change, **widget_kwargs):
+        if key != "backcheck_goal_backchecks":
+            return None
+        on_change(*widget_kwargs["args"])
         return 35
 
     mock_st.number_input.side_effect = change_target
@@ -300,6 +321,7 @@ def test_render_tracking_options_persists_changed_target(tmp_path):
     ):
         _render_tracking_options(settings_file, BackcheckSettings(survey_key=None))
 
-    assert load_check_settings(settings_file, "backchecks") == {
-        "backcheck_target_percent": 35
-    }
+    assert (
+        load_check_settings(settings_file, "backchecks")["backcheck_target_percent"]
+        == 35
+    )

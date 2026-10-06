@@ -271,7 +271,7 @@ def _render_tracking_options(
     settings_file: str,
     default_settings: BackcheckSettings,
     page_config_target: float | None = None,
-) -> float | None:
+) -> tuple[float | None, float | None]:
     """Render tracking options section.
 
     The target input is pre-filled with the saved panel value, else the page
@@ -287,14 +287,18 @@ def _render_tracking_options(
     page_config_target : float | None
         Backcheck target % from the page configuration, if set.
 
+    The error rate target is optional: error rates above it are highlighted
+    in the enumerator and backchecker tables.
+
     Returns
     -------
-    float | None
-        Backcheck target percent, or None if not set anywhere.
+    tuple[float | None, float | None]
+        Backcheck target percent, or None if not set anywhere, and the error
+        rate target percent, or None if not set.
     """
     with st.container(border=True):
         st.subheader("Tracking Options")
-        to1, _, _ = st.columns(3)
+        to1, to2, _ = st.columns(3)
 
         with to1:
             default_target = default_settings.backcheck_target_percent
@@ -317,13 +321,37 @@ def _render_tracking_options(
                 {"backcheck_target_percent": backcheck_target_percent},
             )
 
+        with to2:
+            default_error_target = default_settings.error_rate_target_percent
+            error_rate_target_percent = st.number_input(
+                "Error rate target (%)",
+                min_value=0.0,
+                max_value=100.0,
+                step=1.0,
+                format="%.1f",
+                help="Highest acceptable error rate. Error rates and adjusted "
+                "error rates above it are highlighted in the enumerator and "
+                "backchecker statistics. Leave blank to highlight nothing.",
+                key="backcheck_error_rate_target",
+                value=float(default_error_target)
+                if default_error_target is not None
+                else None,
+                on_change=trigger_save,
+                kwargs={"state_name": TAB_NAME + "_error_rate_target_percent"},
+            )
+            save_check_settings(
+                settings_file,
+                TAB_NAME,
+                {"error_rate_target_percent": error_rate_target_percent},
+            )
+
         if backcheck_target_percent is None:
             st.warning(
                 "No backcheck target is set here or in the page configuration, "
                 f"so the default of {DEFAULT_TARGET_PERCENT:g}% is used."
             )
 
-    return backcheck_target_percent
+    return backcheck_target_percent, error_rate_target_percent
 
 
 def _render_eligibility_filter(
@@ -561,7 +589,7 @@ def backchecks_report_settings(
     - Survey identifiers (key and ID columns)
     - Survey date column selection
     - Enumerator and backchecker columns
-    - Tracking options (backcheck target % and eligibility filter)
+    - Tracking options (backcheck and error rate targets, eligibility filter)
     - Additional options (duplicate handling and value comparison)
 
     Settings are automatically saved to the settings file when changed
@@ -618,7 +646,7 @@ def backchecks_report_settings(
             backcheck_categorical_columns,
         )
 
-        backcheck_target_percent = _render_tracking_options(
+        backcheck_target_percent, error_rate_target_percent = _render_tracking_options(
             settings_file, default_settings, config.backcheck_target_percent
         )
 
@@ -642,6 +670,7 @@ def backchecks_report_settings(
         backchecker=backchecker,
         backcheck_target_percent=backcheck_target_percent,
         survey_target=default_settings.survey_target,
+        error_rate_target_percent=error_rate_target_percent,
         eligibility_column=eligibility_column,
         eligibility_values=eligibility_values,
         drop_duplicates_option=drop_duplicates_option,
