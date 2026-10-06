@@ -52,6 +52,7 @@ def _table() -> pl.DataFrame:
             "survey_value": [30, 41, 25],
             "backcheck_value": [31, 40, 25],
             "match_status": ["mismatch", "mismatch", "match"],
+            "category": [1, 1, 1],
             ERROR_SOURCE_COL: ["Unattributed", "Unattributed", None],
         }
     )
@@ -310,3 +311,46 @@ def test_attribution_save_reruns_the_whole_app(mock_st, review):
         _render_attribution_form(_mismatches(), "KEY", review)
 
     mock_st.rerun.assert_called_once_with(scope="app")
+
+
+def _error_rate_cards(mock_st, analysis):
+    survey = pl.DataFrame({"key": [1, 2]})
+    backcheck = pl.DataFrame({"key": [1]})
+    settings = BackcheckSettings(survey_key="key", survey_id="key")
+    with patch(f"{MODULE}.metric_row"):
+        _render_backcheck_summary(survey, backcheck, settings, analysis)
+    return {
+        c.args[0]: c
+        for c in mock_st.metric.call_args_list
+        if c.args[0].startswith("Error Rate")
+    }
+
+
+def test_summary_error_rate_cards_show_adjusted_rate_as_delta(mock_st):
+    # Two mismatches out of three compared, one attributed to the respondent.
+    analysis = _table().with_columns(
+        pl.lit(1).alias("category"),
+        pl.Series(ERROR_SOURCE_COL, ["Respondent", "Unattributed", None]),
+    )
+    cards = _error_rate_cards(mock_st, analysis)
+
+    assert list(cards) == [
+        "Error Rate (Total)",
+        "Error Rate (Cat 1)",
+        "Error Rate (Cat 2)",
+        "Error Rate (Cat 3)",
+    ]
+    total = cards["Error Rate (Total)"]
+    assert total.args[1] == "66.67%"
+    assert total.kwargs["delta"] == "33.33% adjusted"
+    assert total.kwargs["delta_color"] == "off"
+    assert total.kwargs["delta_arrow"] == "off"
+    assert "33.33%" in total.kwargs["help"]  # backchecker adjusted rate
+    cat2 = cards["Error Rate (Cat 2)"]
+    assert cat2.args[1] == "N/A"
+    assert cat2.kwargs["delta"] is None
+
+
+def test_summary_error_rate_cards_need_configured_columns(mock_st):
+    assert _error_rate_cards(mock_st, pl.DataFrame()) == {}
+    assert any("Error rates" in c.args[0] for c in mock_st.info.call_args_list)
