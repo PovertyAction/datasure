@@ -636,8 +636,7 @@ While this skill focuses on the CLI, DuckDB integrates seamlessly with programmi
 
 ```python
 import duckdb
-
-con = duckdb.connect("my_db.duckdb")
+con = duckdb.connect('my_db.duckdb')
 result = con.execute("SELECT * FROM users").df()  # Returns pandas DataFrame
 ```
 
