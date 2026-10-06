@@ -111,6 +111,17 @@ def test_load_default_backchecks_settings_invalid_error_rate_target(
     assert result.error_rate_target_percent == 5
 
 
+def test_load_default_backchecks_settings_cleared_error_rate_target(tmp_path):
+    """A cleared error rate target stays cleared, so nothing is highlighted."""
+    file_path = tmp_path / "settings.json"
+    file_path.write_text(
+        json.dumps({"backchecks": {"error_rate_target_percent": None}})
+    )
+    config = BackcheckSettings(survey_key="KEY", error_rate_target_percent=5)
+    result = load_default_backchecks_settings(str(file_path), config)
+    assert result.error_rate_target_percent is None
+
+
 def test_load_default_backchecks_settings_saved_error_rate_target(tmp_path):
     file_path = tmp_path / "settings.json"
     file_path.write_text(json.dumps({"backchecks": {"error_rate_target_percent": 2.5}}))
