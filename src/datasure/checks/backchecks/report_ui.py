@@ -1611,6 +1611,25 @@ def _build_column_config(
     return column_config
 
 
+@st.fragment
+def _render_comparison_results_section(
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
+    backcheck_analysis: pl.DataFrame,
+    backcheck_settings: BackcheckSettings,
+    review: "AttributionContext | None",
+) -> None:
+    """Render Comparison Results Details as a fragment.
+
+    Filtering, selecting rows and opening the Review dialog rerun only this
+    section, not the whole report. Saving an attribution reruns the whole app
+    so the rates elsewhere on the page are refreshed.
+    """
+    _render_backcheck_comparison_results(
+        survey_data, backcheck_data, backcheck_analysis, backcheck_settings, review
+    )
+
+
 def _render_backcheck_comparison_results(
     survey_data: pl.DataFrame,
     backcheck_data: pl.DataFrame,
@@ -1918,13 +1937,14 @@ def _render_attribution_form(
         st.error("Could not save the attribution. Check the cache folder.")
         return
 
-    # A full rerun closes the dialog and refreshes the tables and rates.
+    # A full rerun closes the dialog and refreshes the tables and rates. The
+    # dialog opens from a fragment, so ask for the whole app explicitly.
     queue_notice(
         _NOTICE_SCOPE,
         "toast",
         f"Attributed {_plural_mismatches(rows.height)} to {source}.",
     )
-    st.rerun()
+    st.rerun(scope="app")
 
 
 def _render_attribution_log(log: pl.DataFrame) -> None:
@@ -2168,7 +2188,7 @@ def backchecks_report(
         type="success",
     )
 
-    _render_backcheck_comparison_results(
+    _render_comparison_results_section(
         survey_data, backcheck_data, _backcheck_analysis, backcheck_settings, review
     )
     _render_attribution_log(review.log)

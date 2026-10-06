@@ -275,3 +275,38 @@ def test_attribution_form_when_survey_key_is_merge_id(mock_st, review):
 
     shown = mock_st.dataframe.call_args.args[0]
     assert shown.columns.count("KEY") == 1
+
+
+def test_comparison_results_section_is_a_fragment():
+    """Selecting rows or clicking Review reruns only the comparison section."""
+    import importlib
+    import sys
+
+    import datasure.checks.backchecks.report_ui as report_ui
+
+    fragments = []
+    st = make_mock_st()
+    st.fragment = lambda func: fragments.append(func.__name__) or func
+    original_st = sys.modules["streamlit"]
+    sys.modules["streamlit"] = st
+    try:
+        importlib.reload(report_ui)
+    finally:
+        sys.modules["streamlit"] = original_st
+        importlib.reload(report_ui)
+
+    assert "_render_comparison_results_section" in fragments
+
+
+def test_attribution_save_reruns_the_whole_app(mock_st, review):
+    """A saved attribution refreshes the rates outside the fragment too."""
+    mock_st.radio.return_value = ErrorSource.ENUMERATOR
+    mock_st.button.return_value = True
+    with (
+        patch(f"{MODULE}.save_attributions"),
+        patch(f"{MODULE}.get_reviewer_name", return_value="ana"),
+        patch(f"{MODULE}.queue_notice"),
+    ):
+        _render_attribution_form(_mismatches(), "KEY", review)
+
+    mock_st.rerun.assert_called_once_with(scope="app")
