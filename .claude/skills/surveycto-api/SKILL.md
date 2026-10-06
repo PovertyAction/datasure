@@ -37,7 +37,7 @@ All four required vars are loaded by `load_credentials()` in `src/utils/config_u
 from src.utils.config_utils import load_credentials, load_private_key_path
 
 server, username, password, form_id = load_credentials()
-private_key_path = load_private_key_path()  # returns str | None
+private_key_path = load_private_key_path()   # returns str | None
 ```
 
 `load_private_key_path()` returns `None` if the env var is unset, empty, or points to a missing file — never raises.
@@ -94,10 +94,7 @@ Uses `pysurveycto.SurveyCTOObject.get_form_data()` as a plain GET request.
 
 ```python
 records = fetch_submissions(
-    server,
-    username,
-    password,
-    form_id,
+    server, username, password, form_id,
     private_key_path="/path/to/private_key.pem",
 )
 ```
@@ -125,7 +122,7 @@ from src.connectors.scto import RateLimitError, fetch_submissions
 try:
     records = fetch_submissions(server, username, password, form_id)
 except RateLimitError as exc:
-    print(f"Rate limited — {exc}")  # exc message is the wait instruction from SCTO
+    print(f"Rate limited — {exc}")   # exc message is the wait instruction from SCTO
 ```
 
 The 417 response body contains `{"error": {"message": "..."}}` with the wait time. All other `HTTPError` statuses are re-raised unchanged.
@@ -143,8 +140,8 @@ client = pysurveycto.SurveyCTOObject(server_name, username, password)
 data = client.get_form_data(
     form_id,
     format="json",
-    oldest_completion_date=datetime(2025, 1, 1),  # lower bound
-    key=open("key.pem", "rb"),  # only for encrypted forms
+    oldest_completion_date=datetime(2025, 1, 1),   # lower bound
+    key=open("key.pem", "rb"),                      # only for encrypted forms
 )
 ```
 

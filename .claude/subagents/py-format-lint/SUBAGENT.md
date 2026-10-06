@@ -133,7 +133,6 @@ def my_function():
     """Does something"""
     pass
 
-
 # After
 def my_function():
     """Does something."""
@@ -152,7 +151,6 @@ def validate():
     """Validates the data."""
     pass
 
-
 # After
 def validate():
     """Validate the data."""
@@ -169,7 +167,6 @@ def validate():
 # Before
 def main():
     pass
-
 
 # After
 def main():
