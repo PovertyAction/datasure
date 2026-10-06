@@ -77,6 +77,25 @@ def test_comparison_table_review_buttons_only_on_mismatches(mock_st, review):
     assert mock_st.dataframe.call_args.kwargs["selection_mode"] == "multi-row"
 
 
+def test_comparison_table_pins_review_then_error_source(mock_st, review):
+    _render_comparison_table(_table(), {}, "KEY", review)
+
+    shown = mock_st.dataframe.call_args.args[0]
+    button_col = shown.columns[0]
+    assert shown.columns[1] == ERROR_SOURCE_COL
+    config = mock_st.dataframe.call_args.kwargs["column_config"]
+    assert mock_st.column_config.ButtonColumn.call_args.kwargs["pinned"] is True
+    assert isinstance(mock_st.column_config.ButtonColumn.call_args.kwargs["width"], int)
+    assert config[button_col] is mock_st.column_config.ButtonColumn.return_value
+    error_source_config = next(
+        c
+        for c in mock_st.column_config.TextColumn.call_args_list
+        if c.args and c.args[0] == "Error Source"
+    )
+    assert error_source_config.kwargs["pinned"] is True
+    assert config[ERROR_SOURCE_COL] is mock_st.column_config.TextColumn.return_value
+
+
 def test_comparison_table_without_click_opens_no_dialog(mock_st, review):
     with patch(f"{MODULE}._attribution_dialog") as dialog:
         _render_comparison_table(_table(), {}, "KEY", review)
