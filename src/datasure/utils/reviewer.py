@@ -17,6 +17,7 @@ from datasure.utils.cache_utils import get_cache_path
 logger = logging.getLogger(__name__)
 
 _REVIEWER_NAME_KEY = "reviewer_name"
+_REVIEWER_NAME_WIDGET_KEY = "reviewer_name_input"
 
 
 def _user_settings_path() -> Path:
@@ -38,7 +39,8 @@ def _load_user_settings() -> dict:
 def _os_login() -> str:
     try:
         return getpass.getuser()
-    except Exception:  # getpass raises OSError, or KeyError on some platforms
+    except (OSError, KeyError):  # KeyError when the uid has no passwd entry
+        logger.warning("Could not look up the OS login", exc_info=True)
         return ""
 
 
@@ -67,7 +69,11 @@ def set_reviewer_name(name: str) -> None:
 
 
 def _save_reviewer_name_input() -> None:
-    set_reviewer_name(st.session_state.get("reviewer_name_input", ""))
+    try:
+        set_reviewer_name(st.session_state.get(_REVIEWER_NAME_WIDGET_KEY, ""))
+    except OSError:
+        logger.exception("Could not save the reviewer name")
+        st.error("Could not save the reviewer name. Check the cache folder.")
 
 
 def render_reviewer_setting() -> None:
@@ -79,7 +85,7 @@ def render_reviewer_setting() -> None:
         st.text_input(
             "Reviewer name",
             value=get_reviewer_override(),
-            key="reviewer_name_input",
+            key=_REVIEWER_NAME_WIDGET_KEY,
             placeholder=_os_login(),
             help=(
                 "Recorded as the user on every correction and acceptance you "

@@ -96,6 +96,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `eligibility_values`).
   `settings_from_page_config` builds `BackcheckSettings` from the page config,
   where a target of 0 means not set — #318
+- **Correction log user**: New `user` column records who made each entry,
+  from any source. `get_reviewer_name()` in the new
+  `src/datasure/utils/reviewer.py` returns the "Reviewer name" set in the
+  sidebar, saved in `cache/user_settings.json`, else the OS login
+  (`getpass.getuser()`). Existing logs load with a null `user`. The
+  Correction Log table and `correction_log.csv` include it — #321
 
 ### Changed
 
