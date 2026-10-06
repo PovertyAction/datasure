@@ -348,7 +348,8 @@ def test_summary_error_rate_cards_show_adjusted_rate_as_delta(mock_st):
     assert "33.33%" in total.kwargs["help"]  # backchecker adjusted rate
     cat2 = cards["Error Rate (Cat 2)"]
     assert cat2.args[1] == "N/A"
-    assert cat2.kwargs["delta"] is None
+    # Every card has a delta line, so the cards are the same height.
+    assert cat2.kwargs["delta"] == "No values compared"
 
 
 def test_summary_error_rate_cards_need_configured_columns(mock_st):

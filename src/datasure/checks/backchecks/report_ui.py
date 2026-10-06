@@ -692,13 +692,17 @@ def _render_overall_error_rates(backcheck_analysis: pl.DataFrame) -> None:
         )
         return
 
-    for col, rate in zip(st.columns(len(rates)), rates, strict=True):
+    # Bordered columns stretch to the tallest card, and every card has a
+    # delta line, so the cards in the row are the same height.
+    for col, rate in zip(st.columns(len(rates), border=True), rates, strict=True):
         compared = rate.error_rate is not None
-        with col, st.container(border=True):
+        with col:
             st.metric(
                 f"Error Rate ({rate.label})",
                 f"{rate.error_rate:.2f}%" if compared else "N/A",
-                delta=f"{rate.enumerator_adjusted:.2f}% adjusted" if compared else None,
+                delta=f"{rate.enumerator_adjusted:.2f}% adjusted"
+                if compared
+                else "No values compared",
                 delta_color="off",
                 delta_arrow="off",
                 help=f"{rate.mismatches:,} mismatches out of {rate.compared:,} "
