@@ -74,7 +74,8 @@ def test_comparison_table_review_buttons_only_on_mismatches(mock_st, review):
     shown = mock_st.dataframe.call_args.args[0]
     labels = shown.to_series(0).to_list()
     assert labels[2] is None
-    assert labels[0] == labels[1] is not None
+    assert labels[0] is not None
+    assert labels[1] == labels[0]
     assert mock_st.dataframe.call_args.kwargs["selection_mode"] == "multi-row"
 
 
@@ -283,8 +284,7 @@ def test_comparison_results_section_is_a_fragment():
     import importlib
     import sys
 
-    import datasure.checks.backchecks.report_ui as report_ui
-
+    report_ui = sys.modules[MODULE]
     fragments = []
     st = make_mock_st()
     st.fragment = lambda func: fragments.append(func.__name__) or func

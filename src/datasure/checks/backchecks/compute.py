@@ -35,8 +35,9 @@ def load_default_backchecks_settings(
 
     Loads previously saved backcheck report settings from the settings file
     and merges them with the provided default configuration. Saved settings
-    take precedence over defaults, except a cleared or invalid backcheck or
-    error rate target, which falls back to the configured one.
+    take precedence over defaults, except a cleared or invalid backcheck
+    target and an invalid error rate target, which fall back to the
+    configured one. A cleared error rate target stays cleared.
 
     Parameters
     ----------
@@ -51,10 +52,17 @@ def load_default_backchecks_settings(
         Merged settings combining saved and default configurations.
     """
     saved_settings = load_check_settings(settings_file, TAB_NAME)
-    # A cleared target falls back to the configured one, as does a value saved
-    # by the old count-based input that is not a valid percentage.
-    for target in ("backcheck_target_percent", "error_rate_target_percent"):
+    # A cleared backcheck target falls back to the configured one, as does a
+    # value saved by the old count-based input that is not a valid percentage.
+    # The error rate target is optional: clearing it means "highlight
+    # nothing", so a saved None is kept and only invalid values fall back.
+    for target, keep_cleared in (
+        ("backcheck_target_percent", False),
+        ("error_rate_target_percent", True),
+    ):
         saved_target = saved_settings.get(target)
+        if saved_target is None and keep_cleared:
+            continue
         if not isinstance(saved_target, int | float) or not 0 <= saved_target <= 100:
             saved_settings.pop(target, None)
 
