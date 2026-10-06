@@ -29,6 +29,7 @@ from datasure.checks.backchecks.compute import (
     compute_backchecker_productivity,
     compute_column_stats,
     compute_enumerator_backchecker_stats,
+    compute_overall_error_rates,
     expand_col_names,
 )
 from datasure.checks.backchecks.coverage import (
@@ -670,6 +671,44 @@ def _render_backcheck_summary(
     if coverage is not None:
         with tc2:
             _render_expected_backchecks(coverage)
+
+    _render_overall_error_rates(
+        backcheck_analysis if backcheck_analysis is not None else pl.DataFrame()
+    )
+
+
+def _render_overall_error_rates(backcheck_analysis: pl.DataFrame) -> None:
+    """Render one card per error rate, total then by category.
+
+    Each card shows the regular error rate, with the enumerator adjusted
+    rate as a grey delta; the backchecker adjusted rate is in the help.
+    """
+    st.markdown("##### Error Rates")
+    rates = compute_overall_error_rates(backcheck_analysis)
+    if not rates:
+        st.info(
+            "Error rates appear here once backcheck columns are configured in "
+            "the Backchecks Columns Configuration section above."
+        )
+        return
+
+    for col, rate in zip(st.columns(len(rates)), rates, strict=True):
+        compared = rate.error_rate is not None
+        with col, st.container(border=True):
+            st.metric(
+                f"Error Rate ({rate.label})",
+                f"{rate.error_rate:.2f}%" if compared else "N/A",
+                delta=f"{rate.enumerator_adjusted:.2f}% adjusted" if compared else None,
+                delta_color="off",
+                delta_arrow="off",
+                help=f"{rate.mismatches:,} mismatches out of {rate.compared:,} "
+                "values compared. The delta is the adjusted error rate for "
+                "enumerators, which leaves out mismatches attributed to the "
+                "backchecker or respondent. Adjusted error rate for "
+                f"backcheckers: {rate.backchecker_adjusted:.2f}%."
+                if compared
+                else "No values compared in this category.",
+            )
 
 
 def _render_coverage_metric(coverage: BackcheckCoverage | None) -> None:
@@ -2116,6 +2155,9 @@ def backchecks_report(
         backcheck target. When the survey's target number of responses is set
         in the page configuration, it also shows backchecks done against the
         total number of backchecks expected, with how many above or below.
+        Under **Error Rates**, one card each shows the total error rate and the
+        error rate for each category, with the adjusted error rate for
+        enumerators as the delta.
 
         Below the metrics, a **Backchecker Productivity** table shows submission
         counts per backchecker over time. Use the **Daily / Weekly / Monthly** pills

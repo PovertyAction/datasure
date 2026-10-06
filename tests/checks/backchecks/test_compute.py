@@ -3213,3 +3213,45 @@ def test_compute_column_stats_without_attribution_counts_unattributed(
     )
     stats = compute_column_stats(sample_survey_data_pl, analysis)
     assert stats["Unattributed Mismatches"].to_list() == stats["Mismatches"].to_list()
+
+
+def test_compute_overall_error_rates_total_and_categories():
+    from datasure.checks.backchecks.compute import compute_overall_error_rates
+
+    # Cat 1: 5 compared, 4 mismatches (Enumerator, Backchecker, Respondent,
+    # Unattributed). Cat 2: 1 compared, a Backchecker mismatch. Cat 3: none.
+    rates = compute_overall_error_rates(_attributed_staff_data())
+
+    assert [r.label for r in rates] == ["Total", "Cat 1", "Cat 2", "Cat 3"]
+    total, cat1, cat2, cat3 = rates
+    assert (total.compared, total.mismatches) == (6, 5)
+    assert total.error_rate == round(5 / 6 * 100, 2)
+    # Enumerators: (5 - 2 Backchecker - 1 Respondent) / 6
+    assert total.enumerator_adjusted == round(2 / 6 * 100, 2)
+    # Backcheckers: (5 - 1 Enumerator - 1 Respondent) / 6
+    assert total.backchecker_adjusted == 50.0
+    assert (cat1.error_rate, cat1.enumerator_adjusted) == (80.0, 40.0)
+    assert (cat2.error_rate, cat2.enumerator_adjusted) == (100.0, 0.0)
+    assert cat2.backchecker_adjusted == 100.0
+    assert (cat3.compared, cat3.error_rate) == (0, None)
+
+
+def test_compute_overall_error_rates_ignores_missing_and_excluded():
+    from datasure.checks.backchecks.compute import compute_overall_error_rates
+
+    analysis = pl.DataFrame(
+        {
+            "category": [1, 1, 1, 1],
+            "match_status": ["mismatch", "match", "missing", "excluded"],
+        }
+    )
+    total = compute_overall_error_rates(analysis)[0]
+    assert (total.compared, total.error_rate) == (2, 50.0)
+    # Without attribution, the adjusted rates equal the regular one.
+    assert total.enumerator_adjusted == total.backchecker_adjusted == 50.0
+
+
+def test_compute_overall_error_rates_empty_analysis():
+    from datasure.checks.backchecks.compute import compute_overall_error_rates
+
+    assert compute_overall_error_rates(pl.DataFrame()) == []

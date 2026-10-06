@@ -2,6 +2,7 @@
 
 import re
 from contextlib import suppress
+from dataclasses import dataclass
 from typing import Any
 
 import polars as pl
@@ -1350,6 +1351,72 @@ def compute_column_stats(
         return pl.DataFrame()
 
     return pl.DataFrame(stats_list)
+
+
+@dataclass(frozen=True)
+class OverallErrorRate:
+    """Error rates over every compared value in a category, or in total.
+
+    `error_rate` is None when no values were compared; the adjusted rates
+    are then 0.
+    """
+
+    label: str
+    compared: int
+    mismatches: int
+    error_rate: float | None
+    enumerator_adjusted: float
+    backchecker_adjusted: float
+
+
+def _overall_error_rate(label: str, rows: pl.DataFrame) -> OverallErrorRate:
+    _, compared, mismatches, error_rate = _calculate_column_statistics(rows)
+    return OverallErrorRate(
+        label=label,
+        compared=compared,
+        mismatches=mismatches,
+        error_rate=round(error_rate, 2) if compared > 0 else None,
+        enumerator_adjusted=adjusted_error_rate(
+            mismatches, compared, rows, "enumerator"
+        ),
+        backchecker_adjusted=adjusted_error_rate(
+            mismatches, compared, rows, "backchecker"
+        ),
+    )
+
+
+def compute_overall_error_rates(
+    backcheck_analysis: pl.DataFrame,
+) -> list[OverallErrorRate]:
+    """Compute the error rates over all comparisons, in total and by category.
+
+    Parameters
+    ----------
+    backcheck_analysis : pl.DataFrame
+        Results from compute_backcheck_analysis, optionally marked with
+        their error sources.
+
+    Returns
+    -------
+    list[OverallErrorRate]
+        The total over categories 1-3, then each category; empty if there
+        are no results.
+    """
+    if backcheck_analysis.is_empty():
+        return []
+
+    categories = [1, 2, 3]
+    in_categories = backcheck_analysis.filter(pl.col("category").is_in(categories))
+    return [
+        _overall_error_rate("Total", in_categories),
+        *(
+            _overall_error_rate(
+                f"Cat {category}",
+                backcheck_analysis.filter(pl.col("category") == category),
+            )
+            for category in categories
+        ),
+    ]
 
 
 # ==============================================================================

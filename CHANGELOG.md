@@ -126,6 +126,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `BackcheckSettings.error_rate_target_percent` ("Error rate target (%)" in
   Tracking Options): each regular and adjusted rate column above it is
   highlighted in both the enumerator and backchecker views — #301
+- **Overall backcheck error rates**: `compute_overall_error_rates` returns an
+  `OverallErrorRate` (compared, mismatches, error rate, enumerator and
+  backchecker adjusted rates) for the total over categories 1–3 and for each
+  category. The Backchecks Summary gains an Error Rates section below Targets
+  with one card each, the enumerator adjusted rate as a grey, arrowless delta
+  and the backchecker adjusted rate in the help — #301
 
 ### Changed
 

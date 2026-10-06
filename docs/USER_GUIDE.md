@@ -1026,6 +1026,13 @@ error source (see [Attributing Mismatches](#attributing-mismatches)). Then a
   expected (survey target × target %, rounded up), and how many back checks
   above or below that it is. Values over 100% are shown as is.
 
+Below the targets, an **Error Rates** section has one card for the total error
+rate and one for each category. Each card shows mismatches ÷ values compared
+over every back check. Its grey delta is the enumerator adjusted error rate,
+and the card's help gives the back checker adjusted error rate (see
+[Attributing Mismatches](#attributing-mismatches)). A category with no values
+compared shows N/A. The cards appear once back check columns are configured.
+
 **Add Back Check Columns**:
 Click "Add a back check column" (+ button):
 
