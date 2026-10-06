@@ -99,6 +99,9 @@ Per project (UUID-keyed):
 - `cache/{project_id}/settings/` — `logs.duckdb` (import/prep logs), JSON
   settings, and credential metadata
 - `cache/projects.json` — the project registry
+- `cache/user_settings.json` — per-user preferences, currently the
+  "Reviewer name" recorded as `user` in correction logs
+  (`utils/reviewer.py`). Display names only, never credentials.
 
 The `cache/` directory is gitignored.
 

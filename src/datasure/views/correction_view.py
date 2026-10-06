@@ -540,7 +540,9 @@ def _build_correction_log_display(correction_log: pl.DataFrame) -> pl.DataFrame:
     columns so status/status_reason sit right after action, and relabels the
     "ID" column as "Survey ID" for display. "accept" rows carry the check
     whose flag was accepted in check_type and, for a hard constraint
-    violation, severity "hard"; source names the page that made each entry.
+    violation, severity "hard"; source names the page that made each entry
+    and user names who made it (empty for entries logged before it was
+    recorded).
 
     Parameters
     ----------
@@ -557,6 +559,7 @@ def _build_correction_log_display(correction_log: pl.DataFrame) -> pl.DataFrame:
 
     display_columns = [
         "date",
+        "user",
         "KEY",
         "ID",
         "action",

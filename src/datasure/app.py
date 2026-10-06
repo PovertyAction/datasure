@@ -6,6 +6,7 @@ from pathlib import Path
 import streamlit as st
 
 from datasure.utils.config_utils import ConfigurationService
+from datasure.utils.reviewer import render_reviewer_setting
 
 
 @st.cache_data
@@ -182,6 +183,7 @@ except PackageNotFoundError:
 
 with st.sidebar:
     st.divider()
+    render_reviewer_setting()
     _horizontal_logo = _assets_dir / "datasure-horizontal.svg"
     if _horizontal_logo.exists():
         st.image(str(_horizontal_logo), width="stretch")

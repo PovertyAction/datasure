@@ -282,6 +282,7 @@ class TestPackageKeepsAcceptancesInAuditLog:
                 "reason": ["verified", "typo"],
                 "source": ["outliers", "corrections_page"],
                 "check_type": ["outliers", None],
+                "user": ["ama", "kofi"],
             }
         )
 
@@ -309,9 +310,9 @@ class TestPackageKeepsAcceptancesInAuditLog:
             corrections_do = zf.read("replication_p_s/2_scripts/4_corrections.do")
 
         audit = pl.read_csv(BytesIO(log_csv))
-        assert audit.select("KEY", "action", "check_type").rows() == [
-            ("k1", "accept", "outliers"),
-            ("k2", "modify value", None),
+        assert audit.select("KEY", "action", "check_type", "user").rows() == [
+            ("k1", "accept", "outliers", "ama"),
+            ("k2", "modify value", None, "kofi"),
         ]
         assert b'"k1"' not in corrections_do
         assert b'"k2"' in corrections_do
@@ -342,7 +343,7 @@ class TestPackageKeepsAcceptancesInAuditLog:
             )
         assert header == (
             "date,KEY,ID,action,column,current_value,new_value,reason,"
-            "status,status_reason,source,check_type,severity"
+            "status,status_reason,source,check_type,severity,user"
         )
 
 
@@ -410,3 +411,4 @@ class TestPackageCountsAndLegacyLogs:
         assert audit["source"].to_list() == ["corrections_page"]
         assert audit["status"].to_list() == ["Successful"]
         assert "check_type" in audit.columns
+        assert audit["user"].to_list() == [None]

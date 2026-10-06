@@ -461,6 +461,7 @@ class TestBuildCorrectionLogDisplay:
 
         assert result.columns == [
             "date",
+            "user",
             "KEY",
             "Survey ID",
             "action",
@@ -507,6 +508,16 @@ class TestBuildCorrectionLogDisplay:
         result = _build_correction_log_display(log)
 
         assert result["severity"].to_list() == ["hard"]
+
+    def test_shows_who_made_each_entry(self):
+        result = _build_correction_log_display(self._base_log(user=["ama"]))
+
+        assert result["user"].to_list() == ["ama"]
+
+    def test_legacy_log_shows_an_empty_user(self):
+        result = _build_correction_log_display(self._base_log())
+
+        assert result["user"].to_list() == [None]
 
 
 class TestHighlightHardAcceptance:

@@ -1170,7 +1170,108 @@ class TestCorrectionLogSource:
             "source",
             "check_type",
             "severity",
+            "user",
         ]
+
+
+class TestCorrectionLogUser:
+    """Every log entry records who made it."""
+
+    @pytest.fixture(autouse=True)
+    def reviewer(self, monkeypatch):
+        monkeypatch.setattr(
+            "datasure.processing.corrections.get_reviewer_name", lambda: "ama"
+        )
+
+    def test_apply_correction_records_the_reviewer(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        processor.apply_correction(
+            alias="survey",
+            key_col="survey_key",
+            key_value="key1",
+            action="modify value",
+            column="name",
+            current_value="John",
+            new_value="Johnny",
+            reason="typo",
+        )
+
+        assert processor.get_correction_log("survey")["user"].to_list() == ["ama"]
+
+    def test_accept_value_records_the_reviewer(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        processor.accept_value(
+            alias="survey",
+            key_col="survey_key",
+            key_value="key1",
+            check_type="outliers",
+            column="age",
+            current_value=25,
+            reason="verified",
+        )
+
+        assert processor.get_correction_log("survey")["user"].to_list() == ["ama"]
+
+    def test_apply_corrections_records_the_reviewer_on_every_entry(
+        self, store, sample_data
+    ):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        processor.apply_corrections(
+            alias="survey",
+            key_col="survey_key",
+            entries=[
+                CorrectionEntry(
+                    key_value="key1",
+                    action="modify value",
+                    column="name",
+                    current_value="John",
+                    new_value="Jon",
+                    reason="typo",
+                ),
+                CorrectionEntry(
+                    key_value="key2", action="remove row", reason="duplicate"
+                ),
+            ],
+            source="duplicates",
+        )
+
+        log = processor.get_correction_log("survey")
+        assert log["user"].to_list() == ["ama", "ama"]
+
+    def test_legacy_log_loads_with_an_empty_user_and_no_data_loss(
+        self, store, sample_data, sample_corrections_log
+    ):
+        _seed_prep(store, sample_data)
+        legacy_log = sample_corrections_log.with_columns(
+            pl.lit("corrections_page").alias("source")
+        )
+        store[("p1", "logs", "corr_log_survey")] = legacy_log
+        processor = CorrectionProcessor("p1")
+
+        log = processor.get_correction_log("survey")
+        assert log["user"].to_list() == [None] * 3
+        assert log.select(legacy_log.columns).equals(legacy_log)
+
+        processor.add_correction_entry(
+            alias="survey",
+            key_value="key1",
+            current_id=None,
+            action="remove row",
+            column=None,
+            current_value=None,
+            new_value=None,
+            reason="duplicate",
+        )
+
+        log = processor.get_correction_log("survey")
+        assert log["user"].to_list() == [None, None, None, "ama"]
+        assert log.head(3).select(legacy_log.columns).equals(legacy_log)
 
 
 class TestAcceptAction:

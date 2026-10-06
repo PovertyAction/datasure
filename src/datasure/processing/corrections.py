@@ -24,6 +24,7 @@ from datasure.utils.duckdb_utils import (
     duckdb_table_exists,
 )
 from datasure.utils.reapply_utils import ReapplyFailure
+from datasure.utils.reviewer import get_reviewer_name
 
 
 def _describe_correction_row(row: dict[str, Any]) -> str:
@@ -231,7 +232,8 @@ def _build_log_row(
     """Build one correction-log row.
 
     A freshly logged entry has just been applied successfully (the apply
-    step raises before logging otherwise).
+    step raises before logging otherwise). The entry records the current
+    reviewer as its user.
     """
     return {
         "date": datetime.now(),
@@ -247,6 +249,7 @@ def _build_log_row(
         "source": str(source),
         "check_type": check_type,
         "severity": severity,
+        "user": get_reviewer_name(),
     }
 
 

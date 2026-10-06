@@ -462,6 +462,9 @@ All corrections are tracked with:
 - Timestamp
 - Status of the last reapply, with the reason if it failed
 - Source: the page that made the entry (`corrections_page` for this page)
+- User: who made the entry. This is your computer login unless you set a
+  **Reviewer name** in the sidebar, which DataSure remembers across sessions.
+  Entries logged before DataSure recorded the user show an empty User.
 
 The log can also contain **accept** entries. An accept entry records that a
 flagged value was reviewed and is correct. It never changes the data, and the
