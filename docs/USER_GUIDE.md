@@ -1031,7 +1031,8 @@ rate and one for each category. Each card shows mismatches ÷ values compared
 over every back check. Its grey delta is the enumerator adjusted error rate,
 and the card's help gives the back checker adjusted error rate (see
 [Attributing Mismatches](#attributing-mismatches)). A category with no values
-compared shows N/A. The cards appear once back check columns are configured.
+compared shows N/A, with "No values compared" in place of the delta. The cards
+appear once back check columns are configured.
 
 **Add Back Check Columns**:
 Click "Add a back check column" (+ button):
