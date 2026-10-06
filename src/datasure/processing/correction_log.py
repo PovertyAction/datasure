@@ -55,17 +55,20 @@ CORRECTION_LOG_SCHEMA: dict[str, pl.DataType] = {
     # For "accept", how serious the accepted flag is: "hard" for a hard
     # constraint violation, null otherwise.
     "severity": pl.String,
+    # Who made the entry: the reviewer name set in the app, else the OS login.
+    "user": pl.String,
 }
 
 # Values given to columns that were added to the log after some logs were
 # already persisted. Every legacy entry came from the Corrections page and
-# was applied successfully when it was logged.
+# was applied successfully when it was logged. Who made it was not recorded.
 _LOG_BACKFILL_DEFAULTS: dict[str, str | None] = {
     "status": "Successful",
     "status_reason": None,
     "source": CORRECTIONS_PAGE_SOURCE,
     "check_type": None,
     "severity": None,
+    "user": None,
 }
 
 
