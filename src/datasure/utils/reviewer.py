@@ -39,7 +39,10 @@ def _load_user_settings() -> dict:
 def _os_login() -> str:
     try:
         return getpass.getuser()
-    except (OSError, KeyError):  # KeyError when the uid has no passwd entry
+    # With no login environment variable set, getpass falls back to the
+    # password database: KeyError when the uid has no entry, ImportError on
+    # Windows before Python 3.13 (no pwd module), OSError from 3.13.
+    except (OSError, KeyError, ImportError):
         logger.warning("Could not look up the OS login", exc_info=True)
         return ""
 

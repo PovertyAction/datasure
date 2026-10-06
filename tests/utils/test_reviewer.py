@@ -58,6 +58,15 @@ class TestGetReviewerName:
         monkeypatch.setattr(reviewer.getpass, "getuser", fail)
         assert get_reviewer_name() == ""
 
+    def test_missing_pwd_module_gives_an_empty_name(self, monkeypatch):
+        # Python 3.11/3.12 on Windows with no login environment variables
+        # falls back to importing the Unix-only pwd module.
+        def fail():
+            raise ModuleNotFoundError("No module named 'pwd'")
+
+        monkeypatch.setattr(reviewer.getpass, "getuser", fail)
+        assert get_reviewer_name() == ""
+
 
 def _reviewer_setting_app():
     from datasure.utils.reviewer import render_reviewer_setting
