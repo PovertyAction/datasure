@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `src/datasure/processing/correction_log.py`, shared with the replication
   package, which now exports legacy logs with these columns) — #296
 - **Accept action**: `CorrectionProcessor.accept_value` records that a flagged
-  value (outliers, constraints, backchecks, duplicates, GPS) was reviewed and
+  value (outliers, constraints, duplicates, GPS) was reviewed and
   is correct, with a required reason. An acceptance is rejected if the data
   no longer holds the value being accepted. `get_active_acceptances` returns the
   acceptances whose recorded value still matches the data (for GPS, both
@@ -102,8 +102,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sidebar, saved in `cache/user_settings.json`, else the OS login
   (`getpass.getuser()`). Existing logs load with a null `user`. The
   Correction Log table and `correction_log.csv` include it — #321
+- **Backcheck mismatch attribution**: New Streamlit-free
+  `checks/backchecks/attribution.py`. Reviewers attribute mismatches in
+  Comparison Results Details to an `ErrorSource` (Enumerator, Backchecker,
+  Respondent, Unattributed) from a pinned Review button that opens a dialog;
+  selecting several mismatch rows and clicking Review on one of them
+  attributes them together. Only `match_status == "mismatch"` rows can be
+  attributed, and Backchecker and Respondent need a note. Entries are appended
+  to `bc_attribution_{page_name_id}` in the `logs` db with the survey and
+  backcheck KEYs, column, both values (as text), source, note, user
+  (`get_reviewer_name`) and date. `mark_error_sources` adds an `error_source`
+  column: the latest entry per KEY pair and column applies only while both
+  values still equal the stored ones, otherwise the mismatch is Unattributed.
+  An Attribution log expander lists the history. Attribution never changes
+  the data, the mismatch counts or the regular error rate — #301
+- **Adjusted error rate**: `compute_enumerator_backchecker_stats` adds
+  "Adjusted Error Rate % (Cat n)" and "(Total)": for enumerators
+  (mismatches − Backchecker − Respondent) ÷ values compared, for backcheckers
+  (mismatches − Enumerator − Respondent) ÷ values compared. Unattributed
+  mismatches always count. `compute_column_stats` adds "Enumerator / Backchecker
+  / Respondent / Unattributed Mismatches" counts. The Backchecks Summary shows
+  "Mismatches Attributed" (% of mismatches with a source). New optional
+  `BackcheckSettings.error_rate_target_percent` ("Error rate target (%)" in
+  Tracking Options): each regular and adjusted rate column above it is
+  highlighted in both the enumerator and backchecker views — #301
 
 ### Changed
+
+- **Breaking**: `backchecks` is no longer in `ACCEPT_CHECK_TYPES`, so a
+  backcheck mismatch can't be accepted; it can only be attributed — #301
 
 - **Breaking**: `BackcheckSettings.backcheck_target_percent` is now
   `float | None` (0–100), defaulting to None instead of 10;

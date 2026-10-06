@@ -219,8 +219,9 @@ Include minimal, runnable examples:
 ```python
 # Good: Shows actual usage
 from datasure.checks import OutlierDetection
-detector = OutlierDetection(method='iqr', threshold=1.5)
-outliers = detector.find_outliers(df['survey_duration'])
+
+detector = OutlierDetection(method="iqr", threshold=1.5)
+outliers = detector.find_outliers(df["survey_duration"])
 
 # Avoid: Too abstract
 # Use the new outlier detection API

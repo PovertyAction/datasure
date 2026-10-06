@@ -1001,6 +1001,10 @@ Configure validation:
   Pre-filled from the page configuration. A value you enter here is saved and
   overrides the page configuration; clear it to fall back. If neither is set,
   10% is used and a warning is shown.
+- **Error rate target (%)**: Optional. The highest acceptable error rate. In
+  the enumerator and back checker statistics, every error rate and adjusted
+  error rate above it is highlighted, each column on its own. Leave blank to
+  highlight nothing.
 - **Eligibility Filter**: Optional survey column and values that mark a survey
   eligible for back checks (e.g., `consent` in `1`). Only eligible surveys
   count towards coverage.
@@ -1009,7 +1013,9 @@ Configure validation:
 ##### Backchecks Summary
 
 A row of counts (survey observations, back check observations, enumerators and
-back checkers), then a **Targets** section with two metrics side by side:
+back checkers) and **Mismatches Attributed**, the share of mismatches given an
+error source (see [Attributing Mismatches](#attributing-mismatches)). Then a
+**Targets** section with two metrics side by side:
 
 - **Backcheck Coverage**: Share of eligible unique survey IDs (after duplicate
   handling) with at least one matching back check, and how many points it is
@@ -1056,6 +1062,8 @@ Detailed column-level validation:
 - \# surveys, backchecks, compared
 - \# different values
 - Error rate (%)
+- \# mismatches attributed to the enumerator, the back checker and the
+  respondent, and \# still unattributed (there is no adjusted rate per column)
 
 ##### Enumerator Statistics
 
@@ -1068,7 +1076,7 @@ Performance by original enumerator:
   enumerators with no back checks show 0%)
 - \# values compared
 - \# different values
-- Error rate (%)
+- Error rate (%) and adjusted error rate (%), by category and in total
 
 ##### Back Checker Statistics
 
@@ -1078,7 +1086,7 @@ Performance by validator:
 - Backchecks: unique surveys back checked
 - \# values compared
 - \# discrepancies
-- Error rate (%)
+- Error rate (%) and adjusted error rate (%), by category and in total
 
 ##### Comparison Details
 
@@ -1090,7 +1098,57 @@ Record-level validation results:
 - Survey value
 - Back check value
 - Comparison result
+- Error source, for mismatches
 - Column name
+
+##### Attributing Mismatches
+
+Back check results measure how well data was collected, so the Back Checks
+page never changes survey or back check data. There is no way to accept a
+mismatch as valid or to replace a survey value with the back check value.
+Expected differences, such as "Don't know" against "Refused", belong in the
+exclude and no-differences lists in the settings. The comparison uses the
+corrected survey data, so corrections made on the Correct Data page are
+reflected.
+
+What you can record is who caused each mismatch:
+
+- **Enumerator**: the survey value is wrong.
+- **Backchecker**: the back check value is wrong. A note is required.
+- **Respondent**: the respondent gave different answers. A note is required.
+- **Unattributed**: no source yet. Every mismatch starts here, and choosing it
+  clears an earlier attribution.
+
+Click **Review** on a mismatch in the Comparison Details table to open the
+attribution dialog. It shows the survey and back check values, which you
+can't edit. To attribute several mismatches at once, select their rows, then
+click **Review** on one of the selected rows. Only mismatches can be
+attributed.
+
+Each attribution records your reviewer name and the date. The latest
+attribution for a mismatch applies only while the survey and back check values
+are the ones you attributed. If either value changes, the mismatch is
+Unattributed again; if the values now match, there is no mismatch to
+attribute. The **Attribution log** expander below the table lists every
+attribution, newest first, including the ones later replaced.
+
+Attribution never changes the mismatch counts or the regular error rate. It
+only affects the **adjusted error rate**, which has the same denominator as
+the error rate (values compared):
+
+- Enumerator adjusted error rate = (mismatches − Backchecker − Respondent) ÷
+  values compared
+- Back checker adjusted error rate = (mismatches − Enumerator − Respondent) ÷
+  values compared
+
+Unattributed mismatches always count against both. For example, an enumerator
+with 10 values compared and 4 mismatches, 1 attributed to the respondent and 1
+to the back checker, has an error rate of 40% and an adjusted error rate of
+20%.
+
+Duplicate and unmatched back check IDs are not handled here. Until they can be
+resolved from the Duplicates page, the **Handle Duplicates** setting decides
+which duplicates are compared.
 
 ---
 
