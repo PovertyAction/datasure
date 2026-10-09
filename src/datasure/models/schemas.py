@@ -136,8 +136,12 @@ class DuplicatesSettings(BaseModel):
         Column name for survey date.
     enumerator : str | None
         Column name for enumerator ID.
+    team : str | None
+        Column name for the enumerator's team.
     conditions : dict
-        Dictionary of filtering conditions for duplicate detection.
+        Records to Include conditions for the survey data.
+    backcheck_conditions : dict
+        Records to Include conditions for the backcheck data.
     """
 
     filtered_data: pl.DataFrame | None = None
@@ -145,8 +149,13 @@ class DuplicatesSettings(BaseModel):
     survey_id: str | None = Field(..., min_length=1, description="Survey ID column")
     survey_date: str | None = Field(None, description="Survey date column")
     enumerator: str | None = Field(None, description="Enumerator ID column")
+    team: str | None = Field(None, description="Enumerator team column")
     conditions: dict = Field(
         default_factory=dict, description="Conditions for duplicates checks"
+    )
+    backcheck_conditions: dict = Field(
+        default_factory=dict,
+        description="Conditions for backcheck ID duplicates checks",
     )
 
     model_config = {

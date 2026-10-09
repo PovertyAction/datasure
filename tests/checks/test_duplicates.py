@@ -24,7 +24,6 @@ from datasure.checks.duplicates import (
     _create_search_type_info,
     _delete_duplicates_column,
     _ensure_duplicates_column_formats,
-    _filter_data_on_conditions,
     _has_date_values,
     _has_valid_filter_conditions,
     _is_date_not_datetime,
@@ -32,8 +31,6 @@ from datasure.checks.duplicates import (
     _render_condition_value_input,
     _render_duplicates_column_actions,
     _render_duplicates_settings_table,
-    _render_id_duplicates_metrics,
-    _render_id_duplicates_table,
     _render_numeric_condition_input,
     _render_other_duplicates_metrics,
     _render_other_duplicates_table,
@@ -43,12 +40,14 @@ from datasure.checks.duplicates import (
     _update_duplicates_column_config,
     _update_unlocked_duplicates_cols,
     _validate_duplicates_condition_date_value,
+    apply_records_to_include,
     compute_column_duplicates,
     compute_duplicates_statistics,
     compute_id_duplicates,
     duplicates_report,
     duplicates_report_settings,
     expand_col_names,
+    has_active_filter,
     load_default_duplicates_settings,
 )
 from datasure.models.enums import NumCondition, SearchType, StrCondition
@@ -725,35 +724,19 @@ def test_build_filter_expression_invalid_condition():
 
 
 # ============================================
-# FILTER_DATA_ON_CONDITIONS TESTS
+# APPLY_RECORDS_TO_INCLUDE TESTS
 # ============================================
 
 
-def test_filter_data_on_conditions_empty(sample_data_pl, tmp_path, monkeypatch):
-    """Test _filter_data_on_conditions with empty conditions."""
-    # Mock duckdb_save_table
-    saved_data = []
+def test_apply_records_to_include_empty(sample_data_pl, tmp_path, monkeypatch):
+    """Test apply_records_to_include with empty conditions."""
+    filtered = apply_records_to_include(sample_data_pl, {})
 
-    def mock_save(project_id, data, alias, db_name):
-        saved_data.append(data)
-
-    monkeypatch.setattr("datasure.checks.duplicates.duckdb_save_table", mock_save)
-
-    _filter_data_on_conditions("project1", sample_data_pl, {})
-
-    assert len(saved_data) == 1
-    assert saved_data[0].height == sample_data_pl.height
+    assert filtered.height == sample_data_pl.height
 
 
-def test_filter_data_on_conditions_numeric(sample_data_pl, monkeypatch):
-    """Test _filter_data_on_conditions with numeric condition."""
-    saved_data = []
-
-    def mock_save(project_id, data, alias, db_name):
-        saved_data.append(data)
-
-    monkeypatch.setattr("datasure.checks.duplicates.duckdb_save_table", mock_save)
-
+def test_apply_records_to_include_numeric(sample_data_pl, monkeypatch):
+    """Test apply_records_to_include with numeric condition."""
     conditions = {
         "condition_col": "age",
         "condition_type": NumCondition.GREATER_THAN.value,
@@ -761,22 +744,13 @@ def test_filter_data_on_conditions_numeric(sample_data_pl, monkeypatch):
         "missing_as_duplicates": False,
     }
 
-    _filter_data_on_conditions("project1", sample_data_pl, conditions)
+    filtered = apply_records_to_include(sample_data_pl, conditions)
 
-    assert len(saved_data) == 1
-    filtered = saved_data[0]
     assert all(age > 28 for age in filtered["age"].to_list())
 
 
-def test_filter_data_on_conditions_string(sample_data_pl, monkeypatch):
-    """Test _filter_data_on_conditions with string condition."""
-    saved_data = []
-
-    def mock_save(project_id, data, alias, db_name):
-        saved_data.append(data)
-
-    monkeypatch.setattr("datasure.checks.duplicates.duckdb_save_table", mock_save)
-
+def test_apply_records_to_include_string(sample_data_pl, monkeypatch):
+    """Test apply_records_to_include with string condition."""
     conditions = {
         "condition_col": "gender",
         "condition_type": StrCondition.EQUALS.value,
@@ -784,22 +758,13 @@ def test_filter_data_on_conditions_string(sample_data_pl, monkeypatch):
         "missing_as_duplicates": False,
     }
 
-    _filter_data_on_conditions("project1", sample_data_pl, conditions)
+    filtered = apply_records_to_include(sample_data_pl, conditions)
 
-    assert len(saved_data) == 1
-    filtered = saved_data[0]
     assert all(g == "M" for g in filtered["gender"].to_list())
 
 
-def test_filter_data_on_conditions_date(sample_data_pl, monkeypatch):
-    """Test _filter_data_on_conditions with date condition."""
-    saved_data = []
-
-    def mock_save(project_id, data, alias, db_name):
-        saved_data.append(data)
-
-    monkeypatch.setattr("datasure.checks.duplicates.duckdb_save_table", mock_save)
-
+def test_apply_records_to_include_date(sample_data_pl, monkeypatch):
+    """Test apply_records_to_include with date condition."""
     conditions = {
         "condition_col": "survey_date",
         "condition_type": NumCondition.GREATER_THAN.value,
@@ -807,11 +772,87 @@ def test_filter_data_on_conditions_date(sample_data_pl, monkeypatch):
         "missing_as_duplicates": False,
     }
 
-    _filter_data_on_conditions("project1", sample_data_pl, conditions)
+    filtered = apply_records_to_include(sample_data_pl, conditions)
 
-    assert len(saved_data) == 1
-    filtered = saved_data[0]
     assert all(d > datetime.date(2024, 1, 3) for d in filtered["survey_date"].to_list())
+
+
+def test_apply_records_to_include_without_a_value_keeps_every_record(sample_data_pl):
+    """A condition with no value yet is not applied."""
+    for value in (None, "", []):
+        conditions = {
+            "condition_col": "gender",
+            "condition_type": StrCondition.INCLUDES.value,
+            "condition_value": value,
+        }
+
+        filtered = apply_records_to_include(sample_data_pl, conditions)
+
+        assert filtered.height == sample_data_pl.height
+
+
+def test_apply_records_to_include_matching_nothing_keeps_nothing(sample_data_pl):
+    """A filter that matches no records checks no records, not every record."""
+    conditions = {
+        "condition_col": "gender",
+        "condition_type": StrCondition.EQUALS.value,
+        "condition_value": "nobody",
+    }
+
+    filtered = apply_records_to_include(sample_data_pl, conditions)
+
+    assert filtered.is_empty()
+    assert filtered.columns == sample_data_pl.columns
+
+
+def test_apply_records_to_include_does_not_change_conditions(sample_data_pl):
+    """The caller's conditions are not coerced in place."""
+    conditions = {
+        "condition_col": "age",
+        "condition_type": NumCondition.EQUALS.value,
+        "condition_value": "30",
+    }
+
+    apply_records_to_include(sample_data_pl, conditions)
+
+    assert conditions["condition_value"] == "30"
+
+
+def test_has_active_filter():
+    """A filter is active once it has a column, a type and a value."""
+    base = {"condition_col": "age", "condition_type": NumCondition.EQUALS.value}
+
+    assert has_active_filter({**base, "condition_value": 0})
+    assert has_active_filter({**base, "condition_value": ["M"]})
+    assert not has_active_filter({**base, "condition_value": None})
+    assert not has_active_filter({**base, "condition_value": []})
+    assert not has_active_filter({"condition_value": 3})
+    assert not has_active_filter({})
+    assert not has_active_filter(None)
+
+
+def test_compute_id_duplicates_without_date_column():
+    """No date column configured: no stray null column is added."""
+    data = pl.DataFrame({"survey_id": ["S1", "S1"], "survey_key": ["K1", "K2"]})
+
+    result = compute_id_duplicates(data, "survey_id", None, "survey_key")
+
+    assert result.columns == [
+        "survey_id",
+        "survey_key",
+        "id_dup_count",
+        "id_dup_percent",
+    ]
+
+
+def test_compute_id_duplicates_with_date_column_not_in_data():
+    """A configured date column missing from the data is skipped."""
+    data = pl.DataFrame({"survey_id": ["S1", "S1"], "survey_key": ["K1", "K2"]})
+
+    result = compute_id_duplicates(data, "survey_id", "gone", "survey_key")
+
+    assert "gone" not in result.columns
+    assert result.height == 2
 
 
 # ============================================
@@ -842,7 +883,6 @@ def test_update_duplicates_column_config(monkeypatch):
         False,
     )
 
-    assert len(saved_data) == 1
     config = saved_data[0]
     assert config["search_type"][0] == "exact"
     # Extract the list value from the Polars Series
@@ -1155,13 +1195,6 @@ def test_full_duplicates_workflow(sample_data_pl, monkeypatch):
 
 def test_duplicates_workflow_with_filtering(sample_data_pl, monkeypatch):
     """Test duplicates workflow with data filtering."""
-    saved_data = []
-
-    def mock_save(project_id, data, alias, db_name):
-        saved_data.append(data)
-
-    monkeypatch.setattr("datasure.checks.duplicates.duckdb_save_table", mock_save)
-
     # Apply filter
     conditions = {
         "condition_col": "age",
@@ -1170,9 +1203,9 @@ def test_duplicates_workflow_with_filtering(sample_data_pl, monkeypatch):
         "missing_as_duplicates": False,
     }
 
-    _filter_data_on_conditions("project1", sample_data_pl, conditions)
+    filtered = apply_records_to_include(sample_data_pl, conditions)
 
-    filtered_data = saved_data[0]
+    filtered_data = filtered
 
     # Compute duplicates on filtered data
     settings = DuplicatesSettings(
@@ -1501,22 +1534,15 @@ class TestCreateSearchTypeInfo:
 
 
 # ============================================
-# FILTER_DATA_ON_CONDITIONS WITH COERCION TESTS
+# APPLY_RECORDS_TO_INCLUDE WITH COERCION TESTS
 # ============================================
 
 
 class TestFilterDataCoercion:
-    """Test _filter_data_on_conditions with string values needing coercion."""
+    """Test apply_records_to_include with string values needing coercion."""
 
     def test_coerces_string_numeric_value(self, sample_data_pl, monkeypatch):
         """String condition values should be coerced to match column dtype."""
-        saved_data = []
-
-        def mock_save(project_id, data, alias, db_name):
-            saved_data.append(data)
-
-        monkeypatch.setattr("datasure.checks.duplicates.duckdb_save_table", mock_save)
-
         conditions = {
             "condition_col": "age",
             "condition_type": NumCondition.EQUALS.value,
@@ -1524,31 +1550,16 @@ class TestFilterDataCoercion:
             "missing_as_duplicates": False,
         }
 
-        _filter_data_on_conditions("project1", sample_data_pl, conditions)
-        filtered = saved_data[0]
+        filtered = apply_records_to_include(sample_data_pl, conditions)
         assert all(age == 30 for age in filtered["age"].to_list())
 
     def test_no_conditions_returns_full_data(self, sample_data_pl, monkeypatch):
-        """None conditions should save full dataset."""
-        saved_data = []
-
-        def mock_save(project_id, data, alias, db_name):
-            saved_data.append(data)
-
-        monkeypatch.setattr("datasure.checks.duplicates.duckdb_save_table", mock_save)
-
-        _filter_data_on_conditions("project1", sample_data_pl, None)
-        assert saved_data[0].height == sample_data_pl.height
+        """None conditions should keep every record."""
+        filtered = apply_records_to_include(sample_data_pl, None)
+        assert filtered.height == sample_data_pl.height
 
     def test_invalid_conditions_raises(self, sample_data_pl, monkeypatch):
         """Invalid conditions should raise ValueError."""
-        saved_data = []
-
-        def mock_save(project_id, data, alias, db_name):
-            saved_data.append(data)
-
-        monkeypatch.setattr("datasure.checks.duplicates.duckdb_save_table", mock_save)
-
         conditions = {
             "condition_col": "age",
             "condition_type": NumCondition.IN_RANGE.value,
@@ -1557,24 +1568,19 @@ class TestFilterDataCoercion:
         }
 
         with pytest.raises(ValueError, match="Invalid conditions"):
-            _filter_data_on_conditions("project1", sample_data_pl, conditions)
+            apply_records_to_include(sample_data_pl, conditions)
 
-    def test_missing_condition_col_saves_full_data(self, sample_data_pl, monkeypatch):
-        """Conditions without condition_col should save full dataset."""
-        saved_data = []
-
-        def mock_save(project_id, data, alias, db_name):
-            saved_data.append(data)
-
-        monkeypatch.setattr("datasure.checks.duplicates.duckdb_save_table", mock_save)
-
+    def test_missing_condition_col_keeps_every_record(
+        self, sample_data_pl, monkeypatch
+    ):
+        """Conditions without condition_col should keep every record."""
         conditions = {
             "condition_type": NumCondition.EQUALS.value,
             "condition_value": 25,
         }
 
-        _filter_data_on_conditions("project1", sample_data_pl, conditions)
-        assert saved_data[0].height == sample_data_pl.height
+        filtered = apply_records_to_include(sample_data_pl, conditions)
+        assert filtered.height == sample_data_pl.height
 
 
 # ============================================
@@ -1658,7 +1664,6 @@ class TestUpdateDuplicatesColumnConfigEdgeCases:
             "project1", "page1", "startswith", "inc", ["income", "income_total"], True
         )
 
-        assert len(saved_data) == 1
         result = saved_data[0]
         assert result.height == 2
         assert result["search_type"].to_list() == ["exact", "startswith"]
@@ -1718,194 +1723,6 @@ class TestRenderDuplicatesSettingsTable:
         _render_duplicates_settings_table(data)
         mock_st.expander.assert_called_once()
         mock_st.dataframe.assert_called_once()
-
-
-# ============================================
-# RENDER ID DUPLICATES METRICS TESTS
-# ============================================
-
-
-class TestRenderIdDuplicatesMetrics:
-    """Tests for _render_id_duplicates_metrics."""
-
-    @patch("datasure.checks.duplicates.st")
-    def test_no_survey_id(self, mock_st):
-        """When survey_id is None, should show info message."""
-        settings = DuplicatesSettings(survey_id="sid")
-        settings_dict = settings.__dict__.copy()
-        settings_dict["survey_id"] = None
-        # Create a mock settings with survey_id = None
-        mock_settings = MagicMock()
-        mock_settings.survey_id = None
-
-        _render_id_duplicates_metrics(pl.DataFrame(), mock_settings)
-        mock_st.info.assert_called_once()
-
-    @patch("datasure.checks.duplicates.st")
-    def test_empty_duplicates(self, mock_st):
-        """When no duplicates found, should show info message."""
-        settings = MagicMock()
-        settings.survey_id = "survey_id"
-
-        empty_data = pl.DataFrame(schema={"survey_id": pl.Utf8})
-        _render_id_duplicates_metrics(empty_data, settings)
-        mock_st.info.assert_called_once()
-
-    @patch("datasure.checks.duplicates.st")
-    def test_with_duplicates(self, mock_st):
-        """When duplicates exist, should show metrics."""
-        mock_ctx = MagicMock()
-        mock_ctx.__enter__ = MagicMock(return_value=mock_ctx)
-        mock_ctx.__exit__ = MagicMock(return_value=False)
-        mock_st.columns.return_value = [mock_ctx, mock_ctx, mock_ctx, mock_ctx]
-        mock_st.container.return_value = mock_ctx
-
-        settings = MagicMock()
-        settings.survey_id = "survey_id"
-
-        dup_data = pl.DataFrame(
-            {
-                "survey_id": ["S001", "S001", "S002", None],
-                "id_dup_count": [2, 2, 1, 1],
-            }
-        )
-
-        _render_id_duplicates_metrics(dup_data, settings)
-        assert mock_st.metric.call_count == 3
-
-
-# ============================================
-# RENDER ID DUPLICATES TABLE TESTS
-# ============================================
-
-
-class TestRenderIdDuplicatesTable:
-    """Tests for _render_id_duplicates_table."""
-
-    @patch("datasure.checks.duplicates.st")
-    def test_no_survey_id(self, mock_st):
-        """When survey_id is None, should show info and return."""
-        settings = MagicMock()
-        settings.survey_id = None
-
-        _render_id_duplicates_table(
-            pl.DataFrame(), pl.DataFrame(), settings, "settings.json"
-        )
-        mock_st.info.assert_called_once()
-
-    @patch("datasure.checks.duplicates.st")
-    @patch("datasure.checks.duplicates.load_check_settings")
-    @patch("datasure.checks.duplicates.save_check_settings")
-    def test_with_data_no_extra_cols(
-        self, mock_save_settings, mock_load_settings, mock_st
-    ):
-        """When data exists but no extra columns selected."""
-        mock_ctx = MagicMock()
-        mock_ctx.__enter__ = MagicMock(return_value=mock_ctx)
-        mock_ctx.__exit__ = MagicMock(return_value=False)
-        mock_st.expander.return_value = mock_ctx
-        mock_st.multiselect.return_value = []
-        mock_load_settings.return_value = {}
-
-        settings = MagicMock()
-        settings.survey_id = "survey_id"
-        settings.survey_key = "survey_key"
-
-        data = pl.DataFrame(
-            {
-                "survey_id": ["S001", "S002"],
-                "survey_key": ["K001", "K002"],
-                "age": [25, 30],
-            }
-        )
-
-        id_dups = pl.DataFrame(
-            {
-                "survey_id": ["S001"],
-                "survey_key": ["K001"],
-                "id_dup_count": [2],
-                "id_dup_percent": [50.0],
-            }
-        )
-
-        _render_id_duplicates_table(data, id_dups, settings, "settings.json")
-        mock_st.dataframe.assert_called_once()
-
-    @patch("datasure.checks.duplicates.st")
-    @patch("datasure.checks.duplicates.load_check_settings")
-    @patch("datasure.checks.duplicates.save_check_settings")
-    def test_with_extra_cols_and_join_keys(
-        self, mock_save_settings, mock_load_settings, mock_st
-    ):
-        """When extra columns selected and join keys exist."""
-        mock_ctx = MagicMock()
-        mock_ctx.__enter__ = MagicMock(return_value=mock_ctx)
-        mock_ctx.__exit__ = MagicMock(return_value=False)
-        mock_st.expander.return_value = mock_ctx
-        mock_st.multiselect.return_value = ["age"]
-        mock_load_settings.return_value = {}
-
-        settings = MagicMock()
-        settings.survey_id = "survey_id"
-        settings.survey_key = "survey_key"
-
-        data = pl.DataFrame(
-            {
-                "survey_id": ["S001", "S002"],
-                "survey_key": ["K001", "K002"],
-                "age": [25, 30],
-            }
-        )
-
-        id_dups = pl.DataFrame(
-            {
-                "survey_id": ["S001"],
-                "survey_key": ["K001"],
-                "id_dup_count": [2],
-                "id_dup_percent": [50.0],
-            }
-        )
-
-        _render_id_duplicates_table(data, id_dups, settings, "settings.json")
-        mock_st.dataframe.assert_called_once()
-
-    @patch("datasure.checks.duplicates.st")
-    @patch("datasure.checks.duplicates.load_check_settings")
-    @patch("datasure.checks.duplicates.save_check_settings")
-    def test_with_extra_cols_no_join_keys(
-        self, mock_save_settings, mock_load_settings, mock_st
-    ):
-        """When extra columns selected but no matching join keys."""
-        mock_ctx = MagicMock()
-        mock_ctx.__enter__ = MagicMock(return_value=mock_ctx)
-        mock_ctx.__exit__ = MagicMock(return_value=False)
-        mock_st.expander.return_value = mock_ctx
-        mock_st.multiselect.return_value = ["age"]
-        mock_load_settings.return_value = {}
-
-        settings = MagicMock()
-        settings.survey_id = "id_col"
-        settings.survey_key = "key_col"
-
-        data = pl.DataFrame(
-            {
-                "id_col": ["S001"],
-                "key_col": ["K001"],
-                "age": [25],
-            }
-        )
-
-        # id_dups doesn't have the join key columns
-        id_dups = pl.DataFrame(
-            {
-                "other_col": ["X"],
-                "id_dup_count": [2],
-                "id_dup_percent": [50.0],
-            }
-        )
-
-        _render_id_duplicates_table(data, id_dups, settings, "settings.json")
-        mock_st.warning.assert_called_once()
 
 
 # ============================================
@@ -2314,19 +2131,12 @@ def test_build_filter_expression_string_only_condition():
 
 
 # ============================================
-# FILTER DATA ON CONDITIONS - ERROR PATH
+# APPLY RECORDS TO INCLUDE - ERROR PATH
 # ============================================
 
 
-def test_filter_data_on_conditions_filter_error(monkeypatch):
-    """Test _filter_data_on_conditions when filter application raises an error."""
-    saved_data = []
-
-    def mock_save(project_id, data, alias, db_name):
-        saved_data.append(data)
-
-    monkeypatch.setattr("datasure.checks.duplicates.duckdb_save_table", mock_save)
-
+def test_apply_records_to_include_filter_error(monkeypatch):
+    """Test apply_records_to_include when filter application raises an error."""
     # Use a condition type that will pass validation but fail on filter
     # by providing a string value for a numeric column with IN_RANGE
     data = pl.DataFrame({"age": [20, 25, 30]})
@@ -2338,7 +2148,7 @@ def test_filter_data_on_conditions_filter_error(monkeypatch):
     }
 
     with pytest.raises(ValueError, match="Error applying filter"):
-        _filter_data_on_conditions("project1", data, conditions)
+        apply_records_to_include(data, conditions)
 
 
 # ============================================
@@ -2737,13 +2547,12 @@ class TestRenderSearchTypeSelection:
 class TestDuplicatesReportSettings:
     """Tests for duplicates_report_settings."""
 
-    @patch("datasure.checks.duplicates._filter_data_on_conditions")
     @patch("datasure.checks.duplicates._render_duplicates_condition_options")
     @patch("datasure.checks.duplicates.save_check_settings")
     @patch("datasure.checks.duplicates.load_default_duplicates_settings")
     @patch("datasure.checks.duplicates.st")
     def test_basic_settings(
-        self, mock_st, mock_load_default, mock_save, mock_render_cond, mock_filter
+        self, mock_st, mock_load_default, mock_save, mock_render_cond
     ):
         """Test basic duplicates report settings UI."""
         mock_st_obj, _mock_ctx = _make_mock_st()
@@ -2770,13 +2579,12 @@ class TestDuplicatesReportSettings:
         )
         assert isinstance(result, DuplicatesSettings)
 
-    @patch("datasure.checks.duplicates._filter_data_on_conditions")
     @patch("datasure.checks.duplicates._render_duplicates_condition_options")
     @patch("datasure.checks.duplicates.save_check_settings")
     @patch("datasure.checks.duplicates.load_default_duplicates_settings")
     @patch("datasure.checks.duplicates.st")
     def test_settings_with_defaults_in_columns(
-        self, mock_st, mock_load_default, mock_save, mock_render_cond, mock_filter
+        self, mock_st, mock_load_default, mock_save, mock_render_cond
     ):
         """Test settings when default values are found in column lists."""
         mock_st_obj, _mock_ctx = _make_mock_st()
@@ -2816,8 +2624,8 @@ class TestDuplicatesReport:
     @patch("datasure.checks.duplicates._render_other_duplicates_metrics")
     @patch("datasure.checks.duplicates._update_unlocked_duplicates_cols")
     @patch("datasure.checks.duplicates._render_duplicates_column_actions")
-    @patch("datasure.checks.duplicates._render_id_duplicates_table")
-    @patch("datasure.checks.duplicates._render_id_duplicates_metrics")
+    @patch("datasure.checks.duplicates.render_id_duplicates")
+    @patch("datasure.checks.duplicates.render_dataset_switcher")
     @patch("datasure.checks.duplicates.compute_id_duplicates")
     @patch("datasure.checks.duplicates.duckdb_save_table")
     @patch("datasure.checks.duplicates.duckdb_get_table")
@@ -2830,8 +2638,8 @@ class TestDuplicatesReport:
         mock_get,
         mock_save,
         mock_compute_id,
-        mock_render_id_metrics,
-        mock_render_id_table,
+        mock_switcher,
+        mock_render_id,
         mock_render_col_actions,
         mock_update_unlocked,
         mock_render_other_metrics,
@@ -2850,10 +2658,8 @@ class TestDuplicatesReport:
         )
         mock_report_settings.return_value = settings
 
-        # First call: filtered_duplicates_data (empty)
-        # Second call: duplicates_column_actions loads config
-        # Third call: duplicates_column_config (empty)
-        mock_get.side_effect = [pl.DataFrame(), pl.DataFrame()]
+        # Only call: duplicates_column_config (empty)
+        mock_get.side_effect = [pl.DataFrame()]
         mock_compute_id.return_value = pl.DataFrame()
 
         data = pl.DataFrame(
@@ -2888,8 +2694,8 @@ class TestDuplicatesReport:
     @patch("datasure.checks.duplicates._render_other_duplicates_metrics")
     @patch("datasure.checks.duplicates._update_unlocked_duplicates_cols")
     @patch("datasure.checks.duplicates._render_duplicates_column_actions")
-    @patch("datasure.checks.duplicates._render_id_duplicates_table")
-    @patch("datasure.checks.duplicates._render_id_duplicates_metrics")
+    @patch("datasure.checks.duplicates.render_id_duplicates")
+    @patch("datasure.checks.duplicates.render_dataset_switcher")
     @patch("datasure.checks.duplicates.compute_id_duplicates")
     @patch("datasure.checks.duplicates.duckdb_save_table")
     @patch("datasure.checks.duplicates.duckdb_get_table")
@@ -2902,8 +2708,8 @@ class TestDuplicatesReport:
         mock_get,
         mock_save,
         mock_compute_id,
-        mock_render_id_metrics,
-        mock_render_id_table,
+        mock_switcher,
+        mock_render_id,
         mock_render_col_actions,
         mock_update_unlocked,
         mock_render_other_metrics,
@@ -2932,17 +2738,7 @@ class TestDuplicatesReport:
         )
         mock_update_unlocked.return_value = config_df
 
-        # filtered_duplicates_data (non-empty), duplicates_column_config
-        filtered = pl.DataFrame(
-            {
-                "survey_id": ["S001"],
-                "survey_key": ["K001"],
-                "survey_date": [datetime.date(2024, 1, 1)],
-                "age": [25],
-                "income": [50000],
-            }
-        )
-        mock_get.side_effect = [filtered, config_df]
+        mock_get.side_effect = [config_df]
         mock_compute_id.return_value = pl.DataFrame()
 
         data = pl.DataFrame(
@@ -2978,8 +2774,8 @@ class TestDuplicatesReport:
     @patch("datasure.checks.duplicates._render_other_duplicates_metrics")
     @patch("datasure.checks.duplicates._update_unlocked_duplicates_cols")
     @patch("datasure.checks.duplicates._render_duplicates_column_actions")
-    @patch("datasure.checks.duplicates._render_id_duplicates_table")
-    @patch("datasure.checks.duplicates._render_id_duplicates_metrics")
+    @patch("datasure.checks.duplicates.render_id_duplicates")
+    @patch("datasure.checks.duplicates.render_dataset_switcher")
     @patch("datasure.checks.duplicates.compute_id_duplicates")
     @patch("datasure.checks.duplicates.duckdb_save_table")
     @patch("datasure.checks.duplicates.duckdb_get_table")
@@ -2992,8 +2788,8 @@ class TestDuplicatesReport:
         mock_get,
         mock_save,
         mock_compute_id,
-        mock_render_id_metrics,
-        mock_render_id_table,
+        mock_switcher,
+        mock_render_id,
         mock_render_col_actions,
         mock_update_unlocked,
         mock_render_other_metrics,
@@ -3048,8 +2844,8 @@ class TestDuplicatesReport:
     @patch("datasure.checks.duplicates._render_other_duplicates_metrics")
     @patch("datasure.checks.duplicates._update_unlocked_duplicates_cols")
     @patch("datasure.checks.duplicates._render_duplicates_column_actions")
-    @patch("datasure.checks.duplicates._render_id_duplicates_table")
-    @patch("datasure.checks.duplicates._render_id_duplicates_metrics")
+    @patch("datasure.checks.duplicates.render_id_duplicates")
+    @patch("datasure.checks.duplicates.render_dataset_switcher")
     @patch("datasure.checks.duplicates.compute_id_duplicates")
     @patch("datasure.checks.duplicates.duckdb_save_table")
     @patch("datasure.checks.duplicates.duckdb_get_table")
@@ -3062,8 +2858,8 @@ class TestDuplicatesReport:
         mock_get,
         mock_save,
         mock_compute_id,
-        mock_render_id_metrics,
-        mock_render_id_table,
+        mock_switcher,
+        mock_render_id,
         mock_render_col_actions,
         mock_update_unlocked,
         mock_render_other_metrics,
@@ -3109,3 +2905,316 @@ class TestDuplicatesReport:
         call_args = mock_render_col_actions.call_args
         all_columns = call_args[0][2]
         assert "survey_key" not in all_columns
+
+
+# ============================================
+# ID DUPLICATES VIEWS AND RECORDS TO INCLUDE
+# ============================================
+
+
+def _run_report(
+    data,
+    settings,
+    config,
+    backcheck_data=None,
+    dataset="Survey data",
+    saved_backcheck_settings=None,
+):
+    """Run duplicates_report with the UI mocked; return the mocks used."""
+    from contextlib import ExitStack
+
+    from datasure.utils.dataframe_utils import ColumnByType
+
+    mock_st_obj, _ = _make_mock_st()
+    with ExitStack() as stack:
+        mocks = {
+            name: stack.enter_context(patch(f"datasure.checks.duplicates.{name}"))
+            for name in (
+                "st",
+                "duplicates_report_settings",
+                "render_dataset_switcher",
+                "render_id_duplicates",
+                "load_check_settings",
+                "duckdb_get_table",
+                "_render_duplicates_column_actions",
+                "_render_other_duplicates_metrics",
+            )
+        }
+        for attr in ("columns", "container", "expander"):
+            setattr(mocks["st"], attr, getattr(mock_st_obj, attr))
+        mocks["duplicates_report_settings"].return_value = settings
+        mocks["render_dataset_switcher"].return_value = dataset
+        mocks["load_check_settings"].return_value = saved_backcheck_settings or {}
+        mocks["duckdb_get_table"].return_value = pl.DataFrame()
+
+        duplicates_report(
+            "project1",
+            "page1",
+            data,
+            "settings.json",
+            config,
+            ColumnByType(categorical_columns=[], datetime_columns=[]),
+            backcheck_data,
+        )
+    return mocks
+
+
+@pytest.fixture
+def report_data():
+    return pl.DataFrame(
+        {
+            "hhid": ["A", "A", "B"],
+            "KEY": ["k1", "k2", "k3"],
+            "consent": ["yes", "no", "yes"],
+        }
+    )
+
+
+@pytest.fixture
+def report_backcheck():
+    return pl.DataFrame(
+        {
+            "hhid": ["A", "Z", "Z"],
+            "KEY": ["b1", "b2", "b3"],
+            "visit": ["first", "first", "second"],
+            "bc": ["x", "y", "y"],
+        }
+    )
+
+
+class TestDuplicatesReportIdViews:
+    """duplicates_report picks the dataset, filter and columns for the cards."""
+
+    def test_switcher_hidden_without_backcheck_data_name(self, report_data):
+        settings = DuplicatesSettings(survey_id="hhid", survey_key="KEY")
+
+        mocks = _run_report(report_data, settings, {"survey_id": "hhid"})
+
+        mocks["render_dataset_switcher"].assert_called_once_with(False)
+        view = mocks["render_id_duplicates"].call_args.args[0]
+        assert view.name == "survey"
+        assert view.survey_data is None
+        assert view.display_cols_setting == "id_table_display_cols"
+
+    def test_survey_view_applies_the_survey_filter(self, report_data):
+        settings = DuplicatesSettings(
+            survey_id="hhid",
+            survey_key="KEY",
+            team="team",
+            conditions={
+                "condition_col": "consent",
+                "condition_type": StrCondition.EQUALS.value,
+                "condition_value": "yes",
+            },
+        )
+
+        mocks = _run_report(report_data, settings, {"survey_id": "hhid"})
+
+        view = mocks["render_id_duplicates"].call_args.args[0]
+        assert view.data["KEY"].to_list() == ["k1", "k3"]
+        assert view.team_col == "team"
+        mocks["st"].warning.assert_not_called()
+
+    def test_filter_matching_nothing_warns_and_checks_no_records(self, report_data):
+        settings = DuplicatesSettings(
+            survey_id="hhid",
+            survey_key="KEY",
+            conditions={
+                "condition_col": "consent",
+                "condition_type": StrCondition.EQUALS.value,
+                "condition_value": "maybe",
+            },
+        )
+
+        mocks = _run_report(report_data, settings, {"survey_id": "hhid"})
+
+        mocks["st"].warning.assert_called_once()
+        assert "matches no records" in mocks["st"].warning.call_args.args[0]
+        view = mocks["render_id_duplicates"].call_args.args[0]
+        assert view.data.is_empty()
+
+    def test_invalid_filter_shows_an_error_and_checks_no_records(self, report_data):
+        settings = DuplicatesSettings(
+            survey_id="hhid",
+            survey_key="KEY",
+            conditions={
+                "condition_col": "consent",
+                "condition_type": NumCondition.IN_RANGE.value,
+                "condition_value": "yes",
+            },
+        )
+
+        mocks = _run_report(report_data, settings, {"survey_id": "hhid"})
+
+        mocks["st"].error.assert_called_once()
+        assert mocks["render_id_duplicates"].call_args.args[0].data.is_empty()
+
+    def test_backcheck_view_uses_backcheck_settings_and_filter(
+        self, report_data, report_backcheck
+    ):
+        settings = DuplicatesSettings(
+            survey_id="hhid",
+            survey_key="KEY",
+            conditions={
+                "condition_col": "consent",
+                "condition_type": StrCondition.EQUALS.value,
+                "condition_value": "yes",
+            },
+            backcheck_conditions={
+                "condition_col": "visit",
+                "condition_type": StrCondition.EQUALS.value,
+                "condition_value": "second",
+            },
+        )
+        config = {
+            "survey_id": "hhid",
+            "backcheck_data_name": "bc_data",
+            "backcheck_date": "bc_date",
+            "backchecker": "bc_config",
+            "backchecker_team": "bc_team",
+        }
+
+        mocks = _run_report(
+            report_data,
+            settings,
+            config,
+            backcheck_data=report_backcheck,
+            dataset="Backcheck data",
+            saved_backcheck_settings={"backchecker": "bc"},
+        )
+
+        mocks["render_dataset_switcher"].assert_called_once_with(True)
+        view = mocks["render_id_duplicates"].call_args.args[0]
+        assert view.name == "backcheck"
+        assert view.data["KEY"].to_list() == ["b3"]
+        assert view.id_col == "hhid"
+        assert view.key_col == "KEY"
+        assert view.date_col == "bc_date"
+        assert view.staff_col == "bc"
+        assert view.team_col == "bc_team"
+        assert view.display_cols_setting == "backcheck_id_table_display_cols"
+        # Unmatched IDs are matched against every survey record.
+        assert view.survey_data.height == report_data.height
+        # Other duplicates is only in the survey view.
+        mocks["_render_duplicates_column_actions"].assert_not_called()
+
+    def test_backcheck_view_without_backcheck_data(self, report_data):
+        settings = DuplicatesSettings(survey_id="hhid", survey_key="KEY")
+
+        mocks = _run_report(
+            report_data,
+            settings,
+            {"survey_id": "hhid", "backcheck_data_name": "bc_data"},
+            dataset="Backcheck data",
+        )
+
+        mocks["render_id_duplicates"].assert_not_called()
+        mocks["st"].info.assert_called_once()
+
+
+def _filters_app(settings_file):
+    import polars as pl
+    import streamlit as st
+
+    from datasure.checks.duplicates import _render_duplicates_condition_options
+
+    data = pl.DataFrame({"consent": ["yes", "no"], "visit": ["first", "second"]})
+    st.session_state["survey"] = _render_duplicates_condition_options(
+        data, settings_file, False
+    )
+    st.session_state["backcheck"] = _render_duplicates_condition_options(
+        data, settings_file, False, prefix="backcheck_"
+    )
+
+
+def _write_settings(path, settings):
+    path.write_text(json.dumps({TAB_NAME: settings}), encoding="utf-8")
+    return str(path)
+
+
+def _run_filters(settings_file):
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_function(_filters_app, args=(settings_file,)).run()
+    assert not at.exception, at.exception
+    return at
+
+
+class TestRecordsToIncludeFilters:
+    """Each page, and the survey and backcheck data, keep their own filter."""
+
+    def test_survey_and_backcheck_filters_are_independent(self, tmp_path):
+        settings_file = _write_settings(
+            tmp_path / "page_a.json",
+            {
+                "condition_col": "consent",
+                "condition_type": StrCondition.INCLUDES.value,
+                "condition_value": ["yes"],
+                "backcheck_condition_col": "visit",
+                "backcheck_condition_type": StrCondition.INCLUDES.value,
+                "backcheck_condition_value": ["second"],
+            },
+        )
+
+        at = _run_filters(settings_file)
+
+        survey = at.session_state["survey"]
+        backcheck = at.session_state["backcheck"]
+        assert (survey["condition_col"], survey["condition_value"]) == (
+            "consent",
+            ["yes"],
+        )
+        assert (backcheck["condition_col"], backcheck["condition_value"]) == (
+            "visit",
+            ["second"],
+        )
+
+    def test_two_pages_keep_separate_filters(self, tmp_path):
+        page_a = _write_settings(
+            tmp_path / "page_a.json",
+            {
+                "condition_col": "consent",
+                "condition_type": StrCondition.INCLUDES.value,
+                "condition_value": ["yes"],
+            },
+        )
+        page_b = _write_settings(
+            tmp_path / "page_b.json",
+            {
+                "condition_col": "visit",
+                "condition_type": StrCondition.INCLUDES.value,
+                "condition_value": ["first"],
+            },
+        )
+
+        survey_a = _run_filters(page_a).session_state["survey"]
+        survey_b = _run_filters(page_b).session_state["survey"]
+
+        assert survey_a["condition_col"] == "consent"
+        assert survey_b["condition_col"] == "visit"
+
+    def test_no_saved_filter_checks_every_record(self, tmp_path):
+        at = _run_filters(str(tmp_path / "new_page.json"))
+
+        assert at.session_state["survey"] == {}
+        assert at.session_state["backcheck"] == {}
+
+    def test_changing_backcheck_filter_saves_under_its_own_keys(self, tmp_path):
+        settings_file = _write_settings(
+            tmp_path / "page_a.json",
+            {
+                "condition_col": "consent",
+                "condition_type": StrCondition.INCLUDES.value,
+                "condition_value": ["yes"],
+            },
+        )
+        at = _run_filters(settings_file)
+
+        at.selectbox(key="duplicates_backcheck_condition_col_key").set_value(
+            "visit"
+        ).run()
+
+        with open(settings_file, encoding="utf-8") as f:
+            saved = json.load(f)[TAB_NAME]
+        assert saved["condition_col"] == "consent"
+        assert saved["backcheck_condition_col"] == "visit"

@@ -344,6 +344,10 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             "enumerator": config.enumerator,
             "team": config.team,
             "survey_date": config.survey_date,
+            "backcheck_data_name": config.backcheck_data_name,
+            "backcheck_date": config.backcheck_date,
+            "backchecker": config.backchecker,
+            "backchecker_team": config.backchecker_team,
         }
         duplicates_report(
             project_id,
@@ -352,6 +356,7 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             config.setting_file,
             duplicates_config,
             survey_columns,
+            data.backcheck_data,
         )
 
     with outliers:

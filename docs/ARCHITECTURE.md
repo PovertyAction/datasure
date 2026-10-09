@@ -24,6 +24,8 @@ src/datasure/
 │   ├── summary.py          #   Overall data quality summary
 │   ├── missing.py          #   Missing data analysis
 │   ├── duplicates.py       #   Duplicate detection
+│   ├── id_duplicates.py    #   ID duplicate/unmatched cards logic (no Streamlit)
+│   ├── id_duplicates_ui.py #   ID duplicate cards UI
 │   ├── gpschecks.py        #   GPS validation and outlier mapping
 │   ├── outliers.py         #   Statistical outlier detection
 │   ├── enumerator.py       #   Enumerator performance
