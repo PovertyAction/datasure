@@ -628,7 +628,8 @@ Monitor survey completion:
 
 ### 3. Duplicates Report
 
-**Purpose**: Identify duplicate records in survey data
+**Purpose**: Find survey and back check records that share an ID, and back
+checks whose ID is not in the survey data
 
 #### Sections
 
@@ -640,32 +641,45 @@ Configure detection:
 - **Survey Key**: Unique key column
 - **Date**: Submission date
 - **Enumerator ID**: Data collector identifier
-- **Columns**: Additional columns to check for duplicates
+- **Records to Include**: Check only the records that match a condition, for
+  example `consent == Yes`. Use it to leave out a failed first visit when the
+  enumerator interviewed the respondent again under the same ID. Pages with
+  back check data have a separate **Backcheck Records to Include** filter.
+  Each page keeps its own filters. A filter that matches no records shows a
+  warning and checks no records.
 
-##### Duplicate Statistics
+##### ID Duplicates
 
-Overview metrics:
+Pages with back check data show a **Survey data** / **Backcheck data**
+switcher. The back check view uses the Survey ID and Survey Key set on the
+Backcheck Analysis tab.
 
-- Total duplicates found
-- Resolved duplicates
-- Columns checked
-- Columns with no duplicates
-- Columns with duplicates
-- Survey ID duplicates count
+Metrics above the cards:
 
-##### Duplicate Records Table
+- **Duplicate IDs**: IDs shared by two or more records
+- **Records involved**: Records that share an ID
+- **Missing IDs**: Records with no ID
+- **Unmatched IDs** (back check view): Back checks whose ID is not in the
+  survey data
+- **Resolved**: Duplicate IDs resolved on this page
 
-Detailed duplicate list:
+Each duplicate ID has a card showing its record count and date range. The card
+compares the records side by side, one column per record, and highlights the
+fields that differ. By default it shows the KEY, date, enumerator (back checker
+in the back check view) and team, plus the columns chosen in **Show more
+columns in report**. Turn on **Compare all fields** to see every column, and
+**Only differing fields** to hide fields that are the same in every record.
 
-- Survey ID
-- Duplicate column values
-- Count of duplicates
-- Resolution status
-- **Filter**: Select additional columns to display
+In the back check view, each unmatched back check has its own card with its
+KEY, ID, date and back checker.
 
-##### Duplicate Entries for Other Columns
+Search by ID or KEY, sort by group size or latest date, and move between pages
+of 10 cards. **Download duplicates (CSV)** exports every record on the cards
+that match the search, across all pages, with the displayed columns.
 
-Check duplicates in non-ID columns:
+##### Other Duplicates
+
+Shown in the survey view only. Check duplicates in non-ID columns:
 
 - Phone numbers
 - Addresses
@@ -1154,9 +1168,9 @@ with 10 values compared and 4 mismatches, 1 attributed to the respondent and 1
 to the back checker, has an error rate of 40% and an adjusted error rate of
 20%.
 
-Duplicate and unmatched back check IDs are not handled here. Until they can be
-resolved from the Duplicates page, the **Handle Duplicates** setting decides
-which duplicates are compared.
+Duplicate and unmatched back check IDs are listed in the **Backcheck data**
+view of the Duplicates tab, but are not resolved there yet. Until they are, the
+**Handle Duplicates** setting decides which duplicates are compared.
 
 ---
 
