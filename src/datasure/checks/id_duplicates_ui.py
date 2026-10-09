@@ -298,7 +298,8 @@ def render_id_duplicates(view: IdView, settings_file: str) -> None:
         return
 
     extra = _render_display_cols(view, settings_file)
-    # Only a date-typed column can give date ranges and sort by latest date.
+    # Only a date-typed column can give date ranges and sort by latest date;
+    # a text date is still compared as a field.
     has_date = bool(
         view.date_col
         and view.date_col in view.data.columns
@@ -307,7 +308,7 @@ def render_id_duplicates(view: IdView, settings_file: str) -> None:
     fields = default_fields(
         view.data.columns,
         key=view.key_col,
-        date=view.date_col if has_date else None,
+        date=view.date_col,
         staff=view.staff_col,
         team=view.team_col,
         extra=extra,
