@@ -12,6 +12,13 @@ from datasure.checks.backchecks.compute import (
     compute_enumerator_backchecker_stats,
     expand_col_names,
 )
+from datasure.checks.backchecks.coverage import (
+    BackcheckCoverage,
+    compute_backcheck_coverage,
+    compute_staff_coverage,
+    effective_target_percent,
+    settings_from_page_config,
+)
 from datasure.checks.backchecks.models import (
     TAB_NAME,
     WEEKDAY_NAMES,
@@ -33,6 +40,7 @@ from datasure.utils.settings_utils import (
     save_check_settings,
     trigger_save,
 )
+from datasure.utils.ui_utils import styled_dataframe
 
 # ==============================================================================
 # COLUMN CONFIGURATION FUNCTIONS
@@ -567,10 +575,9 @@ def _render_backcheck_test_options(backcheck_category: int) -> BackcheckTestOpti
 def _render_backcheck_summary(
     survey_data: pl.DataFrame,
     backcheck_data: pl.DataFrame,
-    backcheck_analysis: pl.DataFrame,
     backcheck_settings: BackcheckSettings,
 ) -> None:
-    """Render summary metrics for backcheck analysis.
+    """Render summary metrics and progress against the backcheck target.
 
     Parameters
     ----------
@@ -578,25 +585,12 @@ def _render_backcheck_summary(
         Survey dataset.
     backcheck_data : pl.DataFrame
         Backcheck dataset.
-    backcheck_analysis : pl.DataFrame
-        Results from compute_backcheck_analysis.
     backcheck_settings : BackcheckSettings
-        Backcheck settings including enumerator and backchecker columns.
+        Backcheck settings including the staff columns and targets.
     """
-    # Calculate basic metrics
-    n_survey_obs = len(survey_data)
-    n_backcheck_obs = len(backcheck_data)
-
-    # Calculate percentage of surveys with backcheck responses
-    # Get unique survey keys that have backchecks
-    survey_key = backcheck_settings.survey_key
-    if survey_key and not backcheck_analysis.is_empty():
-        unique_backchecked_surveys = backcheck_analysis[survey_key].n_unique()
-        backcheck_coverage_pct = (
-            (unique_backchecked_surveys / n_survey_obs * 100) if n_survey_obs > 0 else 0
-        )
-    else:
-        backcheck_coverage_pct = 0
+    coverage = compute_backcheck_coverage(
+        survey_data, backcheck_data, backcheck_settings
+    )
 
     # Count unique enumerators and back checkers
     enumerator_col = backcheck_settings.enumerator
@@ -613,30 +607,79 @@ def _render_backcheck_summary(
         n_backcheckers = 0
 
     # Display metrics in columns
-    uc1, uc2, uc3, _ = st.columns(4)
-    lc1, lc2, _, _ = st.columns(4)
+    c1, c2, c3, c4 = st.columns(4)
 
-    with uc1, st.container(border=True):
-        st.metric("Survey Observations", f"{n_survey_obs:,}")
+    with c1, st.container(border=True):
+        st.metric("Survey Observations", f"{len(survey_data):,}")
 
-    with uc2, st.container(border=True):
-        st.metric("Backcheck Observations", f"{n_backcheck_obs:,}")
+    with c2, st.container(border=True):
+        st.metric("Backcheck Observations", f"{len(backcheck_data):,}")
 
-    with uc3, st.container(border=True):
-        st.metric(
-            "Backcheck Coverage",
-            f"{backcheck_coverage_pct:.1f}%",
-        )
-
-    with lc1, st.container(border=True):
+    with c3, st.container(border=True):
         st.metric(
             "Total Enumerators", f"{n_enumerators:,}" if n_enumerators > 0 else "N/A"
         )
 
-    with lc2, st.container(border=True):
+    with c4, st.container(border=True):
         st.metric(
             "Total Back Checkers",
             f"{n_backcheckers:,}" if n_backcheckers > 0 else "N/A",
+        )
+
+    st.markdown("##### Targets")
+    tc1, tc2 = st.columns(2)
+
+    with tc1, st.container(border=True):
+        _render_coverage_metric(coverage)
+
+    if coverage is not None:
+        with tc2:
+            _render_expected_backchecks(coverage)
+
+
+def _render_coverage_metric(coverage: BackcheckCoverage | None) -> None:
+    """Render the on-track coverage card with its delta against the target."""
+    if coverage is None or coverage.on_track_percent is None:
+        st.metric(
+            "Backcheck Coverage",
+            "N/A",
+            help="Needs the survey ID column in both the survey and backcheck "
+            "data, and at least one eligible survey.",
+        )
+        return
+
+    target_percent = coverage.target_percent
+    st.metric(
+        "Backcheck Coverage",
+        f"{coverage.on_track_percent:.1f}%",
+        delta=f"{coverage.points_vs_target:+.1f} pts vs {target_percent:g}%",
+        help=f"{coverage.backchecked:,} of {coverage.eligible:,} eligible unique "
+        f"surveys have been backchecked. Target: {target_percent:g}%.",
+    )
+
+
+def _render_expected_backchecks(coverage: BackcheckCoverage) -> None:
+    """Render backchecks done against expected, with the deviation as a delta."""
+    if coverage.expected_backchecks is None:
+        st.info(
+            "Set the target number of responses for the survey in the page "
+            "configuration to track progress towards the expected total "
+            "number of backchecks."
+        )
+        return
+
+    deviation = coverage.backchecked - coverage.expected_backchecks
+    value = f"{coverage.backchecked:,} / {coverage.expected_backchecks:,}"
+    # A 0% target expects no backchecks, so there is no percentage to show.
+    if coverage.expected_progress_percent is not None:
+        value += f" ({coverage.expected_progress_percent:.0f}%)"
+    with st.container(border=True):
+        st.metric(
+            "Backchecks vs Expected",
+            value,
+            delta=f"{deviation:+,} backchecks vs target",
+            help=f"Expected backchecks: {coverage.target_percent:g}% of the "
+            "survey target, rounded up.",
         )
 
 
@@ -827,10 +870,11 @@ def _render_enum_bcer_stats(
     backcheck_settings: BackcheckSettings,
     settings_file: str,
 ) -> None:
-    """Render enumerator and backchecker error rate statistics.
+    """Render enumerator and backchecker coverage and error rate statistics.
 
-    Displays statistics tables showing error rates by category for either
-    enumerators or backcheckers, with a pills selector to switch between views.
+    Displays per-staff backcheck coverage, plus error rates by category once
+    backcheck columns are configured, with a pills selector to switch
+    between enumerators and backcheckers.
 
     Parameters
     ----------
@@ -845,12 +889,6 @@ def _render_enum_bcer_stats(
     settings_file : str
         Path to settings file for saving/loading configurations.
     """
-    if backcheck_analysis.is_empty():
-        st.info(
-            "No backcheck analysis results available. Configure backcheck columns in the settings section above."
-        )
-        return
-
     # Check if required columns are configured
     enumerator_col = backcheck_settings.enumerator
     backchecker_col = backcheck_settings.backchecker
@@ -869,6 +907,17 @@ def _render_enum_bcer_stats(
         backcheck_settings,
         settings_file,
     )
+
+
+def _highlight_below_target(target_percent: float):
+    """Return a Styler cell function that flags coverage below the target."""
+
+    def style(value: object) -> str:
+        if isinstance(value, int | float) and value < target_percent:
+            return "background-color: #f8d7da; color: #842029"
+        return ""
+
+    return style
 
 
 @st.fragment
@@ -920,8 +969,8 @@ def _render_enum_bcer_stats_table(
 
     # Compute and display statistics
     staff_type = "enumerator" if view_selection == "Enumerator" else "backchecker"
-    stats_df = compute_enumerator_backchecker_stats(
-        survey_data, backcheck_data, backcheck_analysis, backcheck_settings, staff_type
+    stats_df = compute_staff_coverage(
+        survey_data, backcheck_data, backcheck_settings, staff_type
     )
 
     if stats_df.is_empty():
@@ -931,11 +980,35 @@ def _render_enum_bcer_stats_table(
     # Get staff column name for display
     staff_col = enumerator_col if staff_type == "enumerator" else backchecker_col
 
+    if backcheck_analysis.is_empty():
+        st.info(
+            "Error rates appear here once backcheck columns are configured in "
+            "the Backchecks Columns Configuration section above."
+        )
+    else:
+        error_stats = compute_enumerator_backchecker_stats(
+            survey_data,
+            backcheck_data,
+            backcheck_analysis,
+            backcheck_settings,
+            staff_type,
+        )
+        if not error_stats.is_empty():
+            stats_df = stats_df.join(error_stats, on=staff_col, how="left")
+
     # Configure columns for wide format
     column_config = {
         staff_col: st.column_config.TextColumn(view_selection, pinned=True),
-        "Surveys": st.column_config.NumberColumn("Surveys", format="%d"),
-        "Backchecks": st.column_config.NumberColumn("Backchecks", format="%d"),
+        "Surveys": st.column_config.NumberColumn(
+            "Surveys", format="%d", help="Eligible unique submissions"
+        ),
+        "Backchecks": st.column_config.NumberColumn(
+            "Backchecks", format="%d", help="Unique submissions backchecked"
+        ),
+        "Coverage %": st.column_config.NumberColumn("Coverage %"),
+        "vs target": st.column_config.NumberColumn(
+            "vs target", help="Coverage minus the target, in percentage points"
+        ),
         "Avg Days": st.column_config.NumberColumn("Avg Days", format="%.1f"),
     }
 
@@ -978,8 +1051,24 @@ def _render_enum_bcer_stats_table(
         "Error % (Total)", format="%.2f"
     )
 
-    st.dataframe(
-        stats_df, hide_index=True, width="stretch", column_config=column_config
+    if staff_type == "backchecker":
+        st.dataframe(
+            stats_df, hide_index=True, width="stretch", column_config=column_config
+        )
+        return
+
+    # st.dataframe shows a Styler's formatted text, so format every cell here:
+    # plain text by default, blank error rates for unbackchecked enumerators.
+    target_percent = effective_target_percent(backcheck_settings)
+    formatters = {col: str for col in stats_df.columns}
+    formatters.update({"Coverage %": "{:.1f}%", "vs target": "{:+.1f}"})
+    styler = (
+        stats_df.to_pandas(use_pyarrow_extension_array=True)
+        .style.map(_highlight_below_target(target_percent), subset=["Coverage %"])
+        .format(formatters, na_rep="")
+    )
+    styled_dataframe(
+        styler, hide_index=True, width="stretch", column_config=column_config
     )
 
 
@@ -1574,10 +1663,6 @@ def backchecks_report(
         """
     )
 
-    # Convert Polars DataFrames to Pandas for compatibility
-    survey_data_pd = survey_data.to_pandas()
-    backcheck_data_pd = backcheck_data.to_pandas()
-
     # Get column information for settings UI
     survey_categorical_columns = survey_columns.categorical_columns
     survey_datetime_columns = survey_columns.datetime_columns
@@ -1586,12 +1671,12 @@ def backchecks_report(
     backcheck_datetime_columns = backcheck_columns.datetime_columns
 
     # Configure settings
-    config_settings = BackcheckSettings(**config)
+    config_settings = settings_from_page_config(config)
     backcheck_settings = backchecks_report_settings(
         project_id,
         setting_file,
-        survey_data_pd,
-        backcheck_data_pd,
+        survey_data,
+        backcheck_data,
         config_settings,
         survey_categorical_columns,
         survey_datetime_columns,
@@ -1650,8 +1735,13 @@ def backchecks_report(
     demo_callout(
         """
         ##### Backchecks Summary
-        Five metrics appear here: Survey Observations, Backcheck Observations,
-        Backcheck Coverage %, Total Enumerators, and Total Back Checkers.
+        Four metrics appear here: Survey Observations, Backcheck Observations,
+        Total Enumerators, and Total Back Checkers. Below them, the **Targets**
+        section shows Backcheck Coverage, the share of eligible unique surveys
+        that have been backchecked, with how far it is above or below the
+        backcheck target. When the survey's target number of responses is set
+        in the page configuration, it also shows backchecks done against the
+        total number of backchecks expected, with how many above or below.
 
         Below the metrics, a **Backchecker Productivity** table shows submission
         counts per backchecker over time. Use the **Daily / Weekly / Monthly** pills
@@ -1659,9 +1749,7 @@ def backchecks_report(
         """
     )
 
-    _render_backcheck_summary(
-        survey_data, backcheck_data, _backcheck_analysis, backcheck_settings
-    )
+    _render_backcheck_summary(survey_data, backcheck_data, backcheck_settings)
 
     _render_backchecker_productivity(
         backcheck_data,
@@ -1676,9 +1764,11 @@ def backchecks_report(
         """
         ##### Enumerator Backchecker Error Statistics
         Use the **Enumerator / Backchecker** pills to switch between two views.
-        Each view shows a table with submission counts, values compared, number of
-        mismatches, and error rate — broken down by category — for either the
-        original enumerator or the backchecker.
+        The enumerator view shows each enumerator's eligible surveys, how many
+        were backchecked, and their coverage against the target, with coverage
+        below target highlighted. The backchecker view shows backchecks done.
+        Once backcheck columns are configured, both views also show values
+        compared, number of mismatches, and error rate, broken down by category.
         """
     )
 

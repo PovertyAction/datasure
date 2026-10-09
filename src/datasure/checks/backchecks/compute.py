@@ -29,9 +29,8 @@ def load_default_backchecks_settings(
 
     Loads previously saved backcheck report settings from the settings file
     and merges them with the provided default configuration. Saved settings
-    take precedence over defaults.
-
-    Cached for 60 seconds to reduce file I/O operations.
+    take precedence over defaults, except a cleared or invalid backcheck
+    target, which falls back to the configured one.
 
     Parameters
     ----------
@@ -46,6 +45,11 @@ def load_default_backchecks_settings(
         Merged settings combining saved and default configurations.
     """
     saved_settings = load_check_settings(settings_file, TAB_NAME)
+    # A cleared target falls back to the configured one, as does a value saved
+    # by the old count-based input that is not a valid percentage.
+    saved_target = saved_settings.get("backcheck_target_percent")
+    if not isinstance(saved_target, int | float) or not 0 <= saved_target <= 100:
+        saved_settings.pop("backcheck_target_percent", None)
 
     default_settings: dict = dict(config)
     default_settings.update(saved_settings)
@@ -919,8 +923,6 @@ def _calculate_staff_statistics(
     # Initialize stats dict
     staff_stats = {
         staff_col: staff_name,
-        "Surveys": staff_data[survey_key].n_unique(),
-        "Backchecks": staff_data[survey_key].n_unique(),
         "Avg Days": _calculate_average_days(staff_data, survey_date, backcheck_date),
     }
 

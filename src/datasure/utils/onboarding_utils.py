@@ -855,7 +855,10 @@ class OutputOnboardingInfo:
         - **Enumerator**: Column identifying the original data collector (e.g., enum_name).
         - **Backchecker**: Column in the backcheck dataset identifying who conducted
           the back check (e.g., backchecker_name).
-        - **Target number of backchecks**: Expected total number of back checks.
+        - **Backcheck target (%)**: Percentage of surveys to backcheck. Defaults to
+          the page configuration target, or 10% if neither is set.
+        - **Eligibility Filter**: Optional column and values that mark a survey
+          eligible for backchecks (e.g., consent = 1).
         - **Additional Options**: Duplicate handling (Drop All / Keep First / Keep Last),
           No Differences Values, Exclude Values, and String Comparison Options
           (case sensitivity, trim spaces, remove symbols).

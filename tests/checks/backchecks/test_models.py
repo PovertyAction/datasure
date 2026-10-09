@@ -68,7 +68,7 @@ def test_backcheck_settings_model_valid():
 def test_backcheck_settings_model_defaults():
     """Test BackcheckSettings model with default values."""
     settings = BackcheckSettings(survey_key="survey_id")
-    assert settings.backcheck_target_percent == 10
+    assert settings.backcheck_target_percent is None
     assert settings.drop_duplicates_option == "drop"
     assert settings.no_differences_list is None
     assert settings.exclude_values_list is None

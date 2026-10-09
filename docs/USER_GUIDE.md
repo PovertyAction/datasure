@@ -994,8 +994,28 @@ Configure validation:
 - **Enumerator**: Original data collector
 - **Back Checker**: QC validator
 - **Date**: Back check date
-- **Target %**: Target back check rate (e.g., 10%)
+- **Backcheck target (%)**: Share of surveys to back check (e.g., 10%).
+  Pre-filled from the page configuration. A value you enter here is saved and
+  overrides the page configuration; clear it to fall back. If neither is set,
+  10% is used and a warning is shown.
+- **Eligibility Filter**: Optional survey column and values that mark a survey
+  eligible for back checks (e.g., `consent` in `1`). Only eligible surveys
+  count towards coverage.
 - **Handle Duplicates**: Include or exclude duplicates
+
+##### Backchecks Summary
+
+A row of counts (survey observations, back check observations, enumerators and
+back checkers), then a **Targets** section with two metrics side by side:
+
+- **Backcheck Coverage**: Share of eligible unique survey IDs (after duplicate
+  handling) with at least one matching back check, and how many points it is
+  above or below the target. It is calculated before any back check columns
+  are configured.
+- **Backchecks vs Expected**: When the page configuration sets the target
+  number of survey responses, back checks done against the back checks
+  expected (survey target × target %, rounded up), and how many back checks
+  above or below that it is. Values over 100% are shown as is.
 
 **Add Back Check Columns**:
 Click "Add a back check column" (+ button):
@@ -1039,7 +1059,10 @@ Detailed column-level validation:
 Performance by original enumerator:
 
 - Enumerator ID
-- \# surveys back checked
+- Surveys: eligible unique submissions
+- Backchecks: how many of those were back checked
+- Coverage % and points vs target (coverage below target is highlighted;
+  enumerators with no back checks show 0%)
 - \# values compared
 - \# different values
 - Error rate (%)
@@ -1049,7 +1072,7 @@ Performance by original enumerator:
 Performance by validator:
 
 - Back Checker ID
-- \# surveys validated
+- Backchecks: unique surveys back checked
 - \# values compared
 - \# discrepancies
 - Error rate (%)

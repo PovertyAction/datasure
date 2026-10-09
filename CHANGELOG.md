@@ -82,6 +82,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CorrectionEntry.severity` sets it and is rejected on non-accept actions,
   on acceptances of other checks, and with any value other than `hard`.
   Hard acceptances are highlighted in the Correction Log — #298
+- **Backcheck targets**: New `checks/backchecks/coverage.py`.
+  `compute_backcheck_coverage` returns `BackcheckCoverage`: eligible unique
+  survey IDs (after duplicate handling and the optional eligibility filter),
+  how many have a matching backcheck, the on-track %, points vs the target, and
+  expected backchecks, `ceil(survey_target × target% / 100)`, when
+  `survey_target` is set. `compute_staff_coverage` returns per-enumerator
+  coverage, including enumerators with no backchecks, or backchecks done per
+  backchecker. Neither needs comparison columns. The Backchecks Summary has a
+  new Targets section showing coverage against the target % and backchecks
+  done against expected, each with its deviation as a delta. The settings
+  panel gains an eligibility filter (`eligibility_column`,
+  `eligibility_values`).
+  `settings_from_page_config` builds `BackcheckSettings` from the page config,
+  where a target of 0 means not set — #318
+
+### Changed
+
+- **Breaking**: `BackcheckSettings.backcheck_target_percent` is now
+  `float | None` (0–100), defaulting to None instead of 10;
+  `effective_target_percent` applies the 10% default. The target resolves from
+  the settings panel, then the page config, then 10%. A cleared panel value, or
+  a saved value outside 0–100, falls back to the page config.
+  `BackcheckSettings` gains `survey_target` — #318
+- **Breaking**: `compute_enumerator_backchecker_stats` no longer returns the
+  "Surveys" and "Backchecks" columns (both were the count of compared survey
+  KEYs). The Enumerator Backchecker Error Statistics table now takes them from
+  `compute_staff_coverage` and renders before comparison columns are
+  configured — #318
 
 ### Fixed
 
