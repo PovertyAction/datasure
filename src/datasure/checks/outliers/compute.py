@@ -920,15 +920,17 @@ def compute_constraint_violations(
         for col in outlier_cols:
             col_df = data.select([survey_key, col])
 
+            # Hard bounds are tested before soft ones: a value past a hard
+            # bound is also past the soft bound inside it.
             violation_expr = (
                 pl.when((hard_min is not None) & (pl.col(col) < hard_min))
                 .then(pl.lit(f"Value is below hard minimum {hard_min}"))
+                .when((hard_max is not None) & (pl.col(col) > hard_max))
+                .then(pl.lit(f"Value is above hard maximum {hard_max}"))
                 .when((soft_min is not None) & (pl.col(col) < soft_min))
                 .then(pl.lit(f"Value is below soft minimum {soft_min}"))
                 .when((soft_max is not None) & (pl.col(col) > soft_max))
                 .then(pl.lit(f"Value is above soft maximum {soft_max}"))
-                .when((hard_max is not None) & (pl.col(col) > hard_max))
-                .then(pl.lit(f"Value is above hard maximum {hard_max}"))
             )
 
             col_df = safe_to_numeric(col_df, col)

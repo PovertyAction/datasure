@@ -1,17 +1,23 @@
 """Tests for the shared UI helpers module."""
 
 import sys
+import threading
 from unittest.mock import MagicMock
 
+import pandas as pd
+import polars as pl
 import pytest
 
 from datasure.utils.ui_utils import (
     confirm_dialog,
+    ensure_styler_limit,
     metric_row,
     page_header,
     queue_notice,
+    row_styler,
     section_header,
     show_queued_notices,
+    styled_dataframe,
 )
 
 
@@ -222,8 +228,127 @@ class TestQueuedNotices:
         st_with_state.success.assert_not_called()
 
     def test_showing_with_nothing_queued_is_a_no_op(self, st_with_state):
-        show_queued_notices("prep_survey")
+        shown = show_queued_notices("prep_survey")
 
+        assert shown is False
         st_with_state.success.assert_not_called()
         st_with_state.warning.assert_not_called()
         st_with_state.error.assert_not_called()
+
+    def test_toast_notices_render_as_toasts(self, st_with_state):
+        queue_notice("outliers", "toast", "Saved")
+
+        shown = show_queued_notices("outliers")
+
+        assert shown is True
+        st_with_state.toast.assert_called_once_with("Saved")
+
+
+@pytest.fixture
+def small_limit():
+    """Start from a low global Styler limit and restore it afterwards."""
+    with pd.option_context("styler.render.max_elements", 10):
+        yield
+
+
+class TestEnsureStylerLimit:
+    """The global Styler limit only ever goes up."""
+
+    def test_raises_a_lower_limit(self, small_limit):
+        ensure_styler_limit(100)
+
+        assert pd.get_option("styler.render.max_elements") == 100
+
+    def test_never_lowers_the_limit(self, small_limit):
+        ensure_styler_limit(100)
+        ensure_styler_limit(20)
+
+        assert pd.get_option("styler.render.max_elements") == 100
+
+    def test_concurrent_raises_keep_the_largest(self, small_limit):
+        sizes = list(range(11, 211))
+        threads = [
+            threading.Thread(target=ensure_styler_limit, args=(size,)) for size in sizes
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert pd.get_option("styler.render.max_elements") == max(sizes)
+
+
+class TestStyledDataframe:
+    """Styled tables render whatever their size."""
+
+    def test_the_limit_fits_the_table_while_it_renders(self, mock_st, small_limit):
+        styler = pd.DataFrame({"a": range(50), "b": range(50)}).style
+        seen_limits = []
+        mock_st.dataframe.side_effect = lambda *a, **k: seen_limits.append(
+            pd.get_option("styler.render.max_elements")
+        )
+
+        styled_dataframe(styler, width="stretch")
+
+        assert seen_limits == [100]
+        mock_st.dataframe.assert_called_once_with(styler, width="stretch")
+
+    def test_the_limit_is_not_lowered_afterwards(self, mock_st, small_limit):
+        """Restoring a lower limit could break a render in another session."""
+        styled_dataframe(pd.DataFrame({"a": range(50)}).style)
+
+        assert pd.get_option("styler.render.max_elements") == 50
+
+    def test_never_lowers_a_higher_limit(self, mock_st):
+        seen_limits = []
+        mock_st.dataframe.side_effect = lambda *a, **k: seen_limits.append(
+            pd.get_option("styler.render.max_elements")
+        )
+
+        with pd.option_context("styler.render.max_elements", 1_000):
+            styled_dataframe(pd.DataFrame({"a": [1, 2]}).style)
+
+        assert seen_limits == [1_000]
+
+    def test_returns_what_st_dataframe_returns(self, mock_st):
+        result = styled_dataframe(pd.DataFrame({"a": [1]}).style)
+
+        assert result is mock_st.dataframe.return_value
+
+
+class TestRowStyler:
+    """Styling a table must not change how its values are displayed."""
+
+    @staticmethod
+    def _display_values(styler) -> list[list[str]]:
+        body = styler._translate(False, False)["body"]
+        return [[cell["display_value"] for cell in row[1:]] for row in body]
+
+    def test_values_display_as_in_the_unstyled_table(self):
+        df = pl.DataFrame(
+            {
+                "KEY": ["K1", "K2"],
+                "age": [150, None],
+                "income": [1234.5678912, 70.5],
+                "note": ["x", None],
+            }
+        )
+
+        styler = row_styler(df, lambda row: [""] * len(row))
+
+        assert self._display_values(styler) == [
+            ["K1", "150", "1234.5678912", "x"],
+            ["K2", "None", "70.5", "None"],
+        ]
+
+    def test_applies_the_row_style(self):
+        df = pl.DataFrame({"KEY": ["K1", "K2"], "flag": ["yes", None]})
+
+        def green_if_flagged(row):
+            flagged = isinstance(row["flag"], str)
+            return ["background-color: green" if flagged else ""] * len(row)
+
+        cell_styles = row_styler(df, green_if_flagged)._compute().ctx
+
+        styled_rows = {row for (row, _), props in cell_styles.items() if props}
+        assert styled_rows == {0}

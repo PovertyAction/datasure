@@ -30,7 +30,6 @@ from datasure.checks.outliers.report_ui import (
     _render_outlier_metrics,
     _render_outlier_options,
     _render_outlier_settings_table,
-    _render_outlier_table,
     _render_search_type_selection,
     _update_outlier_column_config,
     _validate_constraint_settings,
@@ -465,51 +464,6 @@ class TestRenderConstraintViolationsTable:
             _render_constraint_violations_table(
                 base_survey_data,
                 violation_data,
-                outlier_settings,
-                "settings.json",
-            )
-        st_mock.dataframe.assert_called_once()
-
-
-# ============================================================================
-# TESTS: _render_outlier_table
-# ============================================================================
-
-
-class TestRenderOutlierTable:
-    """Test _render_outlier_table function."""
-
-    def test_empty_data_shows_info(self, base_survey_data, outlier_settings):
-        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
-            _render_outlier_table(
-                base_survey_data,
-                pl.DataFrame(),
-                outlier_settings,
-                "settings.json",
-            )
-        st_mock.info.assert_called_once()
-
-    def test_non_empty_data_shows_dataframe(self, base_survey_data, outlier_settings):
-        outliers_data = pl.DataFrame(
-            {
-                "survey_key": ["K001"],
-                "column name": ["col1"],
-                "outlier reason": ["Value is above upper bound 50.00"],
-            }
-        )
-        with (
-            patch("datasure.checks.outliers.report_ui.st") as st_mock,
-            patch(
-                "datasure.checks.outliers.report_ui.load_check_settings",
-                return_value={},
-            ),
-            patch("datasure.checks.outliers.report_ui.save_check_settings"),
-        ):
-            st_mock.columns.side_effect = _columns_side_effect
-            st_mock.multiselect.return_value = []
-            _render_outlier_table(
-                base_survey_data,
-                outliers_data,
                 outlier_settings,
                 "settings.json",
             )

@@ -12,11 +12,16 @@ import time; resolving the module per call ensures these helpers honor that
 swap regardless of the order in which the module was first imported.
 """
 
+import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-NoticeLevel = Literal["success", "warning", "error"]
+if TYPE_CHECKING:
+    import polars as pl
+    from pandas.io.formats.style import Styler
+
+NoticeLevel = Literal["success", "warning", "error", "toast"]
 
 _QUEUED_NOTICES_KEY = "st_queued_notices"
 
@@ -174,8 +179,9 @@ def queue_notice(scope: str, level: NoticeLevel, message: str) -> None:
     ----------
     scope : str
         Where the message belongs, e.g. ``"prep_survey"`` for one Prep tab.
-    level : {"success", "warning", "error"}
-        The Streamlit callout used to render the message.
+    level : {"success", "warning", "error", "toast"}
+        The Streamlit callout used to render the message, or "toast" for a
+        transient ``st.toast``.
     message : str
         The message text (Markdown).
     """
@@ -185,10 +191,63 @@ def queue_notice(scope: str, level: NoticeLevel, message: str) -> None:
     queued.setdefault(scope, []).append(Notice(level, message))
 
 
-def show_queued_notices(scope: str) -> None:
-    """Render and clear the messages queued for a scope, in queue order."""
+def show_queued_notices(scope: str) -> bool:
+    """Render and clear the messages queued for a scope, in queue order.
+
+    Returns True if any message was shown.
+    """
     import streamlit as st
 
     queued = st.session_state.get(_QUEUED_NOTICES_KEY, {})
-    for notice in queued.pop(scope, []):
+    notices = queued.pop(scope, [])
+    for notice in notices:
         getattr(st, notice.level)(notice.message)
+    return bool(notices)
+
+
+# Serializes updates to pandas' process-wide Styler limit across sessions.
+_STYLER_LIMIT_LOCK = threading.Lock()
+
+
+def ensure_styler_limit(cells: int) -> None:
+    """Raise pandas' ``styler.render.max_elements`` to at least `cells`.
+
+    Streamlit refuses to render a Styler with more cells than this
+    process-wide option, and every session shares it. The limit is only
+    ever raised, never lowered or restored, so one session can't cut it
+    below what another's render needs. Use this instead of
+    ``pd.set_option("styler.render.max_elements", ...)``.
+    """
+    import pandas as pd
+
+    with _STYLER_LIMIT_LOCK:
+        if pd.get_option("styler.render.max_elements") < cells:
+            pd.set_option("styler.render.max_elements", cells)
+
+
+def styled_dataframe(styler: "Styler", **dataframe_kwargs: Any) -> Any:
+    """Render a pandas ``Styler`` with ``st.dataframe``, whatever its size.
+
+    Raises the Styler cell limit to fit the table first (see
+    `ensure_styler_limit`). Returns what ``st.dataframe`` returns.
+    """
+    import streamlit as st
+
+    ensure_styler_limit(styler.data.size)
+    return st.dataframe(styler, **dataframe_kwargs)
+
+
+def row_styler(df: "pl.DataFrame", row_style: Callable[[Any], list[str]]) -> "Styler":
+    """Return a pandas ``Styler`` for `df` that styles each row with `row_style`.
+
+    ``st.dataframe`` shows a Styler's formatted text, and pandas' defaults
+    would change the values: integers with missing values become floats,
+    floats are padded or rounded to six decimals, and missing values read
+    "nan". Here nullable types are kept and each value is shown as its plain
+    text ("None" if missing), so styling changes only the colours.
+
+    `row_style` receives each row as a pandas Series; missing values are
+    ``pd.NA``, which must not be used in a boolean test.
+    """
+    pandas_df = df.to_pandas(use_pyarrow_extension_array=True)
+    return pandas_df.style.apply(row_style, axis=1).format(str, na_rep="None")

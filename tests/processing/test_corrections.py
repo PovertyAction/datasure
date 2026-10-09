@@ -1169,6 +1169,7 @@ class TestCorrectionLogSource:
             "status_reason",
             "source",
             "check_type",
+            "severity",
         ]
 
 
@@ -1829,3 +1830,283 @@ class TestRefreshExistingCorrectedData:
 
         assert len(failures) == 1
         assert processor.get_correction_log("survey")["status"].to_list() == ["Failed"]
+
+
+class TestAcceptanceSeverity:
+    """Hard constraint acceptances record their severity in the log."""
+
+    def _hard_accept(self, **overrides):
+        values = {
+            "key_value": "key1",
+            "action": "accept",
+            "check_type": "constraints",
+            "column": "age",
+            "current_value": 25,
+            "reason": "verified with respondent",
+            "severity": "hard",
+        }
+        return CorrectionEntry(**(values | overrides))
+
+    def test_apply_corrections_logs_the_severity(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        processor.apply_corrections(
+            alias="survey",
+            key_col="survey_key",
+            entries=[self._hard_accept()],
+            source="constraints",
+        )
+
+        log = processor.get_correction_log("survey")
+        assert log.select("action", "source", "severity").rows() == [
+            ("accept", "constraints", "hard")
+        ]
+
+    def test_entries_without_severity_log_null(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        processor.apply_corrections(
+            alias="survey",
+            key_col="survey_key",
+            entries=[self._hard_accept(severity=None)],
+            source="constraints",
+        )
+
+        assert processor.get_correction_log("survey")["severity"].to_list() == [None]
+
+    def test_severity_is_only_recorded_on_acceptances(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="severity"):
+            processor.apply_corrections(
+                alias="survey",
+                key_col="survey_key",
+                entries=[
+                    self._hard_accept(
+                        action="modify value", new_value=26, check_type=None
+                    )
+                ],
+                source="constraints",
+            )
+
+        assert processor.get_correction_log("survey").is_empty()
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [{"check_type": "outliers"}, {"severity": "soft"}],
+        ids=["hard-outlier-acceptance", "unknown-severity"],
+    )
+    def test_invalid_acceptance_severity_is_rejected(
+        self, store, sample_data, overrides
+    ):
+        """Only constraint acceptances can be hard; nothing else is logged."""
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="Severity"):
+            processor.apply_corrections(
+                alias="survey",
+                key_col="survey_key",
+                entries=[self._hard_accept(**overrides)],
+                source="outliers",
+            )
+
+        assert processor.get_correction_log("survey").is_empty()
+
+    def test_legacy_logs_load_with_null_severity(self, store, sample_corrections_log):
+        store[("p1", "logs", "corr_log_survey")] = sample_corrections_log
+
+        log = CorrectionProcessor("p1").get_correction_log("survey")
+
+        assert log["severity"].to_list() == [None] * 3
+
+    def test_summary_carries_the_severity(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        processor.apply_corrections(
+            alias="survey",
+            key_col="survey_key",
+            entries=[self._hard_accept()],
+            source="constraints",
+        )
+
+        (summary,) = processor.get_correction_summary("survey")
+
+        assert summary["severity"] == "hard"
+
+
+class TestActiveCorrections:
+    """Value corrections whose result the data still holds."""
+
+    def _correct(self, processor, *entries):
+        processor.apply_corrections(
+            alias="survey",
+            key_col="survey_key",
+            entries=list(entries),
+            source="outliers",
+        )
+
+    def _modify(self, key, column, new_value, current_value, reason="typo"):
+        return CorrectionEntry(
+            key_value=key,
+            action="modify value",
+            column=column,
+            current_value=current_value,
+            new_value=new_value,
+            reason=reason,
+        )
+
+    def test_returns_modify_and_remove_value_corrections(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._correct(
+            processor,
+            self._modify("key1", "age", 26, 25),
+            CorrectionEntry(
+                key_value="key2",
+                action="remove value",
+                column="age",
+                current_value=30,
+                reason="impossible",
+            ),
+        )
+
+        active = processor.get_active_corrections("survey", "survey_key")
+
+        assert active.select("KEY", "action", "column", "reason").rows() == [
+            ("key1", "modify value", "age", "typo"),
+            ("key2", "remove value", "age", "impossible"),
+        ]
+
+    def test_a_correction_overwritten_later_is_inactive(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._correct(processor, self._modify("key1", "age", 26, 25, reason="first"))
+        self._correct(processor, self._modify("key1", "age", 27, 26, reason="second"))
+
+        active = processor.get_active_corrections("survey", "survey_key")
+
+        assert active["reason"].to_list() == ["second"]
+
+    def test_excludes_acceptances_and_removed_rows(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._correct(
+            processor,
+            CorrectionEntry(
+                key_value="key1",
+                action="accept",
+                check_type="outliers",
+                column="age",
+                current_value=25,
+                reason="ok",
+            ),
+            CorrectionEntry(key_value="key3", action="remove row", reason="dup"),
+        )
+
+        assert processor.get_active_corrections("survey", "survey_key").is_empty()
+
+    def test_a_correction_that_failed_to_reapply_is_inactive(self, store, sample_data):
+        """Prep data that holds the new value doesn't make a failed correction
+        look applied.
+        """
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._correct(processor, self._modify("key1", "age", 26, 25))
+        # Prep now supplies 26 itself, so replay finds 26 where the
+        # correction expects 25 and rejects it.
+        _seed_prep(
+            store,
+            sample_data.with_columns(
+                pl.when(pl.col("survey_key") == "key1")
+                .then(26)
+                .otherwise(pl.col("age"))
+                .alias("age")
+            ),
+        )
+
+        failures = processor.refresh_existing_corrected_data("survey")
+
+        assert len(failures) == 1
+        assert processor.get_corrected_data("survey")["age"][0] == 26
+        assert processor.get_active_corrections("survey", "survey_key").is_empty()
+
+    def test_empty_log_returns_no_corrections(self, store, sample_data):
+        _seed_prep(store, sample_data)
+
+        active = CorrectionProcessor("p1").get_active_corrections(
+            "survey", "survey_key"
+        )
+
+        assert active.is_empty()
+
+
+class TestActiveCorrectionsMatchStoredValues:
+    """A correction is active if the cell holds the value it stored."""
+
+    @staticmethod
+    def _modify(key, new_value, current_value):
+        return CorrectionEntry(
+            key_value=key,
+            action="modify value",
+            column="age",
+            current_value=current_value,
+            new_value=new_value,
+            reason="typo",
+        )
+
+    def test_float32_modification_is_active(self, store):
+        """70.1 is stored as 70.0999984741211 in a Float32 column."""
+        _seed_prep(
+            store,
+            pl.DataFrame(
+                {"KEY": ["a", "b"], "age": [150.0, 30.0]},
+                schema={"KEY": pl.String, "age": pl.Float32},
+            ),
+        )
+        processor = CorrectionProcessor("p1")
+        processor.apply_corrections(
+            "survey", "KEY", [self._modify("a", "70.1", 150.0)], source="outliers"
+        )
+
+        active = processor.get_active_corrections("survey", "KEY")
+
+        assert active["KEY"].to_list() == ["a"]
+
+    def test_numeric_key_correction_applies_and_is_active(self, store):
+        _seed_prep(store, pl.DataFrame({"KEY": [7, 8], "age": [150, 30]}))
+        processor = CorrectionProcessor("p1")
+
+        processor.apply_corrections(
+            "survey", "KEY", [self._modify(7, "90", 150)], source="outliers"
+        )
+
+        assert processor.get_corrected_data("survey")["age"].to_list() == [90, 30]
+        active = processor.get_active_corrections("survey", "KEY")
+        assert active["KEY"].to_list() == ["7"]
+
+    def test_duplicate_keys_must_all_hold_the_value(self, store):
+        _seed_prep(
+            store,
+            pl.DataFrame({"KEY": ["a", "a", "b"], "age": [150, 150, 30]}),
+        )
+        processor = CorrectionProcessor("p1")
+        processor.apply_corrections(
+            "survey", "KEY", [self._modify("a", "90", 150)], source="outliers"
+        )
+        # Another step changes one of the duplicate rows afterwards.
+        data = processor.get_corrected_data("survey")
+        processor.save_corrected_data(
+            "survey",
+            data.with_columns(
+                pl.when(pl.int_range(pl.len()) == 1)
+                .then(pl.lit(91))
+                .otherwise(pl.col("age"))
+                .alias("age")
+            ),
+        )
+
+        assert processor.get_active_corrections("survey", "KEY").is_empty()

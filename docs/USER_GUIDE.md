@@ -469,6 +469,8 @@ Check type column shows which check it applies to. It stays in effect only
 while the value is unchanged. Accept entries are kept in `correction_log.csv`
 in the replication package but are not part of the corrections script. You can
 remove an accept entry with "Remove correction step" like any other entry.
+Accepting a hard constraint violation sets Severity to `hard`, and those rows
+are highlighted in red.
 
 To blank a cell, use "remove value": "modify value" needs a non-empty new
 value (`0` is valid).
@@ -826,6 +828,45 @@ Visual analysis:
 - **Statistics display**: All relevant metrics
 - **Box Plot**: Distribution with outliers highlighted
 - **Table**: All records with outlier indicators
+
+##### Correcting or Accepting Flagged Values
+
+Above each of the constraint violations and outlier inspection tables,
+**Show only flagged values** (on by default) limits the table to flagged
+values. Turn it off to see every checked value.
+
+Each row of the constraint violations table and the outlier inspection table
+starts with a **Review** button. Click it to open a correction form in a
+dialog, with the KEY, column and current value filled in. Choose an action,
+enter a reason and click "Apply":
+
+- **modify value** or **remove value** corrects the data. The page reloads, and
+  the flag is updated or disappears.
+- **accept** records that the flagged value is correct. The flag is hidden
+  and no longer counted in the metrics. Turn on "Show reviewed" to see
+  accepted flags highlighted in green, with a Reviewed badge and the reason.
+
+"Show reviewed" also highlights corrected values in green, with a Corrected
+badge and the correction's reason. A corrected value that is now in range is
+no longer flagged, so turn off "Show only flagged values" to see it. A
+corrected value that is still flagged stays in the table and in the metrics
+until it is fixed or accepted. The badge clears if the value changes again.
+
+Turn on **Show only reviewed** to list only accepted and corrected values. While
+it is on, the other two toggles are disabled.
+
+Outlier and constraint acceptances are separate: accepting an outlier does not
+accept a constraint violation on the same value. Accepting a **hard**
+constraint violation needs an extra confirmation. An accepted flag comes back
+if the value changes, or if you remove the acceptance on the Correct Data page.
+Every entry appears in the Correction Log with source `outliers` or
+`constraints`.
+
+Corrections and acceptances apply to every row with the same KEY. If a KEY is
+on more than one row with different values in the flagged column, Review shows
+a warning instead of the form, because a correction would change all those
+rows. Give each record a unique KEY in the source data first. The Duplicates
+check lists duplicated KEYs.
 
 ---
 

@@ -33,6 +33,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `apply_correction_entries`) renders the action, new-value and reason inputs
   for a prefilled KEY/column/current value, with namespaced widget keys. The
   Correct Data page now uses it — #296
+- **Outliers and constraints corrections**: Each row of the constraint
+  violations and outlier inspection tables has a Review button (a pinned
+  `st.column_config.ButtonColumn`) that opens the shared correction form in a
+  dialog, prefilled with the row's KEY, column and current value, to modify the
+  value, remove it or accept it as valid (source and check type
+  `outliers`/`constraints`). Accepted flags are hidden and left out of the
+  metrics unless "Show reviewed" is on (then they are highlighted green), and
+  come back if the value changes or
+  the acceptance is removed. Accepting a hard violation needs a confirmation.
+  A "Show only flagged values" toggle (on by default) sits above both tables;
+  the outlier inspection table previously always listed unflagged values too.
+  With "Show reviewed" on, values whose current value comes from a modify or
+  remove correction are also highlighted green, with a "Corrected" badge and
+  the correction reason (new `CorrectionProcessor.get_active_corrections`);
+  unlike accepted flags, corrected values that are still flagged stay visible
+  and counted. A "Show only reviewed" toggle lists only accepted and
+  corrected rows and disables the other two toggles while on (toggle values
+  are a `review.TableFilters`, applied by `review.filter_table`). The outlier
+  inspection table now hides its index. Styled tables
+  are built with new `ui_utils.row_styler`, which keeps values displayed as in
+  the unstyled table (pandas' default Styler formatting showed `150` as
+  `150.000000` and missing values as `nan`).
+  Flag review logic lives in the new Streamlit-free
+  `src/datasure/checks/outliers/review.py`; `outliers_report` takes the
+  dataset `alias`. Removed the unused `_render_outlier_table`.
+  `queue_notice` gains a `toast` level, and `show_queued_notices` returns
+  whether it showed anything. New `ui_utils.ensure_styler_limit` raises
+  pandas' process-wide `styler.render.max_elements` under a lock and never
+  lowers it, so concurrent sessions can't cut it below what another render
+  needs; it replaces the `pd.set_option` calls in the summary, missing and
+  progress checks, which lowered the limit to fit their own tables and could
+  crash other styled tables. New `ui_utils.styled_dataframe` renders a Styler
+  after raising the limit to fit it; the results tables and the Correction
+  Log use it. A soft-violation acceptance no longer hides a value that has
+  since become a hard violation (e.g. after bounds are tightened): it needs a
+  new hard acceptance. A correction that failed to reapply to new prep data
+  is never shown as Corrected, even if the data holds its new value. Review
+  on a KEY whose rows hold different values of the column shows a warning
+  instead of the form, since a correction changes every row with the KEY
+  (`review.key_has_conflicting_values`). Survey fields added through "Show
+  more columns" that share a name with a results or review column get a
+  " (survey)" suffix, even while the review columns are hidden. A Survey KEY
+  named "review status" or "review reason" turns review off with a warning
+  instead of being overwritten — #298
+- **Correction log severity**: New `severity` column, `hard` on acceptances of
+  hard constraint violations (null otherwise and for legacy logs).
+  `CorrectionEntry.severity` sets it and is rejected on non-accept actions,
+  on acceptances of other checks, and with any value other than `hard`.
+  Hard acceptances are highlighted in the Correction Log — #298
 
 ### Fixed
 
@@ -43,6 +92,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   string still does; use "remove value" to blank a cell — #296
 - **Correction log schema**: Removing the last correction entry now leaves an
   empty log with the full schema, including status columns — #296
+- **Constraint violations**: A value past a hard bound was reported as a soft
+  violation whenever a soft bound on the same side was set (for example,
+  above the hard maximum read "above soft maximum"), so hard violations were
+  undercounted. Hard bounds are now tested first
+  (`compute_constraint_violations`) — #298
 
 ## [1.1.0] - 2026-09-21
 

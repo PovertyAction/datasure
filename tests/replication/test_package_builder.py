@@ -342,7 +342,7 @@ class TestPackageKeepsAcceptancesInAuditLog:
             )
         assert header == (
             "date,KEY,ID,action,column,current_value,new_value,reason,"
-            "status,status_reason,source,check_type"
+            "status,status_reason,source,check_type,severity"
         )
 
 
