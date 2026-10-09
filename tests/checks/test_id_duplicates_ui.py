@@ -149,8 +149,8 @@ def test_text_date_column_is_not_offered_for_sorting(survey, settings_file):
     at = _run(data, settings_file)
 
     assert at.selectbox(key="iddup_survey_sort").options == ["Group size"]
-    # Shown as an ordinary field instead.
-    assert "date" not in list(at.dataframe[0].value["Field"])
+    # Still compared as a field.
+    assert "date" in list(at.dataframe[0].value["Field"])
 
 
 def test_no_duplicates_shows_a_message(settings_file):
