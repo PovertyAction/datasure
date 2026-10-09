@@ -22,6 +22,7 @@ from datasure.checks.backchecks.models import (
     OkRangeType,
     OkRangeValues,
     SearchType,
+    merged_backcheck_name,
 )
 from datasure.checks.backchecks.settings_ui import backchecks_report_settings
 from datasure.utils.dataframe_utils import ColumnByType
@@ -1447,7 +1448,7 @@ def _render_backcheck_comparison_results(
     # Extract settings
     survey_key = backcheck_settings.survey_key
     survey_id = backcheck_settings.survey_id
-    backcheck_key = f"{survey_key}__BCCL"
+    backcheck_key = merged_backcheck_name(survey_key)
 
     # Get available columns from backcheck_analysis
     available_columns = sorted(

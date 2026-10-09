@@ -8,10 +8,12 @@ import polars as pl
 from scipy import stats
 
 from datasure.checks.backchecks.models import (
+    BACKCHECK_SUFFIX,
     TAB_NAME,
     WEEKDAY_OFFSET_TO_NUMERIC,
     BackcheckSettings,
     SearchType,
+    merged_backcheck_name,
 )
 from datasure.utils.settings_utils import load_check_settings
 
@@ -317,7 +319,7 @@ def _process_backcheck_column(
     if col not in merged_data.columns:
         return None
 
-    backcheck_col = f"{col}__BCCL"
+    backcheck_col = merged_backcheck_name(col)
     if backcheck_col not in merged_data.columns:
         return None
 
@@ -453,7 +455,7 @@ def compute_backcheck_analysis(
         backcheck_for_merge,
         on=survey_id,
         how="inner",
-        suffix="__BCCL",
+        suffix=BACKCHECK_SUFFIX,
     )
 
     if merged_data.is_empty():
@@ -627,8 +629,7 @@ def _get_staff_configuration(
     survey_data: pl.DataFrame,
     backcheck_data: pl.DataFrame,
     backcheck_settings: BackcheckSettings,
-    survey_key: str,
-) -> tuple[str, pl.DataFrame, str] | None:
+) -> tuple[str, pl.DataFrame] | None:
     """Get staff column configuration based on staff type.
 
     Parameters
@@ -641,27 +642,66 @@ def _get_staff_configuration(
         Backcheck dataset.
     backcheck_settings : BackcheckSettings
         Backcheck settings.
-    survey_key : str
-        Survey key column name.
 
     Returns
     -------
-    tuple[str, pl.DataFrame, str] | None
-        Tuple of (staff_col, data_source, join_key) if valid, None otherwise.
+    tuple[str, pl.DataFrame] | None
+        Tuple of (staff_col, data_source) if valid, None otherwise.
     """
     if staff_type == "enumerator":
         staff_col = backcheck_settings.enumerator
         data_source = survey_data
-        join_key = survey_key
     else:  # backchecker
         staff_col = backcheck_settings.backchecker
         data_source = backcheck_data
-        join_key = f"{survey_key}__BCCL"
 
     if not staff_col or staff_col not in data_source.columns:
         return None
 
-    return staff_col, data_source, join_key
+    return staff_col, data_source
+
+
+def _join_backcheck_columns(
+    analysis: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
+    survey_key: str,
+    columns: dict[str, str],
+) -> pl.DataFrame:
+    """Left-join backcheck columns onto the analysis by backcheck KEY.
+
+    The analysis holds the backcheck KEY as `{survey_key}__BCCL`. The merge only
+    adds that column when both datasets have `survey_key`; if `survey_key` is
+    also the merge ID it is shared, and the join uses `survey_key` as is.
+
+    Parameters
+    ----------
+    analysis : pl.DataFrame
+        Backcheck analysis results.
+    backcheck_data : pl.DataFrame
+        Backcheck dataset.
+    survey_key : str
+        Survey key column name.
+    columns : dict[str, str]
+        Backcheck columns to add, mapped to their names in the result.
+
+    Returns
+    -------
+    pl.DataFrame
+        Analysis with the columns added, or unchanged if the backcheck data
+        lacks `survey_key` or any of the columns.
+    """
+    if any(col not in backcheck_data.columns for col in [survey_key, *columns]):
+        return analysis
+
+    backcheck_key = merged_backcheck_name(survey_key)
+    if backcheck_key not in analysis.columns:
+        backcheck_key = survey_key
+
+    backcheck_info = backcheck_data.select(
+        pl.col(survey_key).alias(backcheck_key),
+        *(pl.col(col).alias(alias) for col, alias in columns.items()),
+    ).unique(subset=[backcheck_key])
+    return analysis.join(backcheck_info, on=backcheck_key, how="left")
 
 
 def _join_staff_information(
@@ -669,7 +709,6 @@ def _join_staff_information(
     data_source: pl.DataFrame,
     staff_col: str,
     survey_key: str,
-    join_key: str,
     staff_type: str,
 ) -> pl.DataFrame:
     """Join backcheck analysis with staff information.
@@ -684,8 +723,6 @@ def _join_staff_information(
         Staff column name.
     survey_key : str
         Survey key column name.
-    join_key : str
-        Key to join on.
     staff_type : str
         Either "enumerator" or "backchecker".
 
@@ -694,14 +731,13 @@ def _join_staff_information(
     pl.DataFrame
         Analysis joined with staff information.
     """
+    if staff_type == "backchecker":
+        return _join_backcheck_columns(
+            backcheck_analysis, data_source, survey_key, {staff_col: staff_col}
+        )
+
     staff_info = data_source.select([survey_key, staff_col]).unique(subset=[survey_key])
-
-    if staff_type == "enumerator":
-        return backcheck_analysis.join(staff_info, on=survey_key, how="left")
-
-    # For backcheckers, rename survey_key to match backcheck key
-    staff_info = staff_info.rename({survey_key: join_key})
-    return backcheck_analysis.join(staff_info, on=join_key, how="left")
+    return backcheck_analysis.join(staff_info, on=survey_key, how="left")
 
 
 def _add_date_columns(
@@ -744,11 +780,10 @@ def _add_date_columns(
         result = result.join(survey_dates, on=survey_key, how="left")
 
     # Add backcheck date
-    if backcheck_date and backcheck_date in backcheck_data.columns:
-        bc_dates = backcheck_data.select(
-            [survey_key, pl.col(backcheck_date).alias("backcheck_date_col")]
-        ).unique(subset=[survey_key])
-        result = result.join(bc_dates, on=survey_key, how="left")
+    if backcheck_date:
+        result = _join_backcheck_columns(
+            result, backcheck_data, survey_key, {backcheck_date: "backcheck_date_col"}
+        )
 
     return result
 
@@ -970,21 +1005,20 @@ def compute_enumerator_backchecker_stats(
 
     # Get staff configuration
     staff_config = _get_staff_configuration(
-        staff_type, survey_data, backcheck_data, backcheck_settings, survey_key
+        staff_type, survey_data, backcheck_data, backcheck_settings
     )
     if staff_config is None:
         return pl.DataFrame()
 
-    staff_col, data_source, join_key = staff_config
-
-    # Check if join key exists in analysis
-    if join_key not in backcheck_analysis.columns:
-        return pl.DataFrame()
+    staff_col, data_source = staff_config
 
     # Join analysis with staff information
     analysis_with_staff = _join_staff_information(
-        backcheck_analysis, data_source, staff_col, survey_key, join_key, staff_type
+        backcheck_analysis, data_source, staff_col, survey_key, staff_type
     )
+    # The backchecker join is skipped when the backcheck data has no survey_key
+    if staff_col not in analysis_with_staff.columns:
+        return pl.DataFrame()
 
     # Add date columns
     analysis_with_staff = _add_date_columns(
@@ -1325,7 +1359,7 @@ def _build_select_columns(
     ]
 
     # Include backcheck key if it exists in the data
-    backcheck_key = f"{survey_key}__BCCL"
+    backcheck_key = merged_backcheck_name(survey_key)
     if backcheck_key in data.columns:
         select_cols.insert(1, pl.col(backcheck_key))
 
@@ -1436,8 +1470,8 @@ def _are_columns_numeric(
     bool
         True if both columns are numeric.
     """
-    # Remove __BCCL suffix from backcheck column for schema lookup
-    backcheck_col_original = backcheck_col.replace("__BCCL", "")
+    # Remove the backcheck suffix from the column for schema lookup
+    backcheck_col_original = backcheck_col.removesuffix(BACKCHECK_SUFFIX)
     return (
         data.schema[survey_col].is_numeric()
         and data.schema[backcheck_col_original].is_numeric()
