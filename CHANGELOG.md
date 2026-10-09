@@ -132,8 +132,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   category. The Backchecks Summary gains an Error Rates section below Targets
   with one card each, the enumerator adjusted rate as a grey, arrowless delta
   and the backchecker adjusted rate in the help — #301
+- **ID duplicate cards**: The ID Duplicates section shows one card per
+  duplicate ID instead of a flat table. Each card compares the records side by
+  side (fields as rows, records as columns), highlights fields that differ, and
+  has "Compare all fields" and "Only differing fields" toggles. Metrics,
+  search by ID or KEY, sort by group size or latest date, 10 cards per page and
+  a "Download duplicates (CSV)" export sit above the cards. Pages with backcheck
+  data get a Survey data / Backcheck data switcher; the backcheck view also
+  lists unmatched backcheck IDs and has its own Records to Include filter,
+  saved under `backcheck_`-prefixed keys. Logic is in the new Streamlit-free
+  `checks/id_duplicates.py`, rendering in `checks/id_duplicates_ui.py`;
+  `DuplicatesSettings` gains `team` and `backcheck_conditions` — #306
 
 ### Changed
+
+- **Breaking**: `_filter_data_on_conditions`, which saved the filtered rows to
+  the project-wide DuckDB table `filtered_duplicates_data`, is replaced by
+  `apply_records_to_include(data, conditions)`, which returns them. The Records
+  to Include filter applies as soon as it has a value (the Apply Filter button
+  is gone), and its condition column is restored from the page settings.
+  `duplicates_report` and `duplicates_report_settings` take an optional
+  `backcheck_data` — #306
 
 - **Breaking**: `backchecks` is no longer in `ACCEPT_CHECK_TYPES`, so a
   backcheck mismatch can't be accepted; it can only be attributed — #301
@@ -152,6 +171,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Duplicates filter**: Pages in one project shared the Records to Include
+  filter through `filtered_duplicates_data`, so one page's filter overwrote
+  another's. Each page now applies its own saved conditions — #306
+- **Duplicates filter**: A filter that matched no records silently checked
+  every record. It now shows a warning and checks no records — #306
+- **Duplicates filter**: A saved single-value filter (string or numeric), or a
+  numeric includes/excludes filter, came back empty in a new session and was
+  then saved as empty, dropping the filter. Saved values are now restored, and
+  saved values no longer in the data are dropped instead of failing — #306
+- **ID duplicates**: `compute_id_duplicates` added a stray null column when no
+  date column was configured, and failed when the configured date (or KEY)
+  column was missing from the data. Both are now skipped — #306
 - **Corrections cache**: `CorrectionProcessor`'s cached reads were keyed only on
   `alias`, so two projects sharing an alias shared cached corrected data and
   logs. The processor is now hashed by `project_id` — #296
