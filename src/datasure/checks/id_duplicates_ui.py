@@ -73,22 +73,69 @@ class IdView:
     survey_data: pl.DataFrame | None = None
 
 
-def render_dataset_switcher(has_backcheck: bool) -> str:
+_SWITCHER_KEY = "duplicates_dataset"
+
+# A segmented control cannot disable one option, so grey out the Backcheck
+# data button and ignore clicks on it.
+_DISABLED_BACKCHECK_CSS = f"""<style>
+.st-key-{_SWITCHER_KEY} button:last-of-type {{
+    opacity: 0.5;
+    pointer-events: none;
+    cursor: not-allowed;
+}}
+</style>"""
+
+
+def count_duplicate_ids(view: IdView) -> int:
+    """Return the number of unresolved duplicate IDs in `view`.
+
+    Returns 0 when the ID column is not configured or not in the data.
+    """
+    if not view.id_col or view.id_col not in view.data.columns:
+        return 0
+    return find_duplicate_groups(
+        view.data, view.id_col, view.key_col, view.date_col
+    ).height
+
+
+def _keep_survey_data() -> None:
+    st.session_state[_SWITCHER_KEY] = SURVEY_DATA
+
+
+def render_dataset_switcher(survey_count: int, backcheck_count: int | None) -> str:
     """Render the Survey data / Backcheck data switcher and return the choice.
 
-    The switcher is shown only when the page has backcheck data; otherwise
-    the survey data is always chosen.
+    Each option shows its number of unresolved duplicate IDs, for example
+    "Survey data (3)". When `backcheck_count` is None the page has no
+    backchecks: the option shows "Backcheck data (N/A)", cannot be chosen,
+    and the survey data is always returned.
     """
+    has_backcheck = backcheck_count is not None
+    labels = {
+        SURVEY_DATA: f"{SURVEY_DATA} ({survey_count})",
+        BACKCHECK_DATA: (
+            f"{BACKCHECK_DATA} ({backcheck_count if has_backcheck else 'N/A'})"
+        ),
+    }
     if not has_backcheck:
-        return SURVEY_DATA
-    return st.segmented_control(
+        st.html(_DISABLED_BACKCHECK_CSS)
+        if st.session_state.get(_SWITCHER_KEY) == BACKCHECK_DATA:
+            _keep_survey_data()
+
+    chosen = st.segmented_control(
         "Dataset",
         options=[SURVEY_DATA, BACKCHECK_DATA],
+        format_func=labels.get,
         default=SURVEY_DATA,
         required=True,
-        key="duplicates_dataset",
-        help="Find ID problems in the survey data or in the backcheck data.",
+        key=_SWITCHER_KEY,
+        on_change=None if has_backcheck else _keep_survey_data,
+        help=(
+            "Find ID problems in the survey data or in the backcheck data. "
+            "The number is the count of unresolved duplicate IDs."
+        ),
     )
+    return chosen if has_backcheck else SURVEY_DATA
 
 
 def _render_display_cols(view: IdView, settings_file: str) -> list[str]:
