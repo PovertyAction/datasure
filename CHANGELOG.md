@@ -176,6 +176,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   another's. Each page now applies its own saved conditions — #306
 - **Duplicates filter**: A filter that matched no records silently checked
   every record. It now shows a warning and checks no records — #306
+- **Duplicates filter**: A saved single-value filter (string or numeric), or a
+  numeric includes/excludes filter, came back empty in a new session and was
+  then saved as empty, dropping the filter. Saved values are now restored, and
+  saved values no longer in the data are dropped instead of failing — #306
 - **ID duplicates**: `compute_id_duplicates` added a stray null column when no
   date column was configured, and failed when the configured date (or KEY)
   column was missing from the data. Both are now skipped — #306

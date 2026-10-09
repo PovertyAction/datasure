@@ -3259,3 +3259,71 @@ class TestRecordsToIncludeFilters:
             saved = json.load(f)[TAB_NAME]
         assert saved["condition_col"] == "consent"
         assert saved["backcheck_condition_col"] == "visit"
+
+
+def _restore_app(settings_file):
+    import polars as pl
+    import streamlit as st
+
+    from datasure.checks.duplicates import _render_duplicates_condition_options
+
+    data = pl.DataFrame({"consent": ["yes", "no", "yes"], "visit": [0, 1, 2]})
+    st.session_state["survey"] = _render_duplicates_condition_options(
+        data, settings_file, False
+    )
+
+
+class TestRecordsToIncludeRestore:
+    """A saved filter is shown and applied again in a new session."""
+
+    @pytest.mark.parametrize(
+        ("col", "condition_type", "saved"),
+        [
+            ("consent", StrCondition.EQUALS.value, "yes"),
+            ("consent", StrCondition.INCLUDES.value, ["yes"]),
+            ("visit", NumCondition.EQUALS.value, 0),
+            ("visit", NumCondition.GREATER_THAN.value, 1),
+            ("visit", NumCondition.INCLUDES.value, [0, 2]),
+            ("visit", NumCondition.EXCLUDES.value, [1]),
+            ("visit", NumCondition.IN_RANGE.value, [1, 2]),
+        ],
+    )
+    def test_saved_value_is_restored_and_kept(
+        self, tmp_path, col, condition_type, saved
+    ):
+        from streamlit.testing.v1 import AppTest
+
+        settings_file = _write_settings(
+            tmp_path / "page.json",
+            {
+                "condition_col": col,
+                "condition_type": condition_type,
+                "condition_value": saved,
+            },
+        )
+
+        at = AppTest.from_function(_restore_app, args=(settings_file,)).run()
+
+        assert not at.exception, at.exception
+        restored = at.session_state["survey"]["condition_value"]
+        # The range slider returns a tuple.
+        assert (list(restored) if isinstance(saved, list) else restored) == saved
+        with open(settings_file, encoding="utf-8") as f:
+            assert json.load(f)[TAB_NAME]["condition_value"] == saved
+
+    def test_saved_values_no_longer_in_the_data_are_dropped(self, tmp_path):
+        from streamlit.testing.v1 import AppTest
+
+        settings_file = _write_settings(
+            tmp_path / "page.json",
+            {
+                "condition_col": "consent",
+                "condition_type": StrCondition.INCLUDES.value,
+                "condition_value": ["yes", "refused"],
+            },
+        )
+
+        at = AppTest.from_function(_restore_app, args=(settings_file,)).run()
+
+        assert not at.exception, at.exception
+        assert at.session_state["survey"]["condition_value"] == ["yes"]

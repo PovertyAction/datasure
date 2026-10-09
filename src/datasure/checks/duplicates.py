@@ -601,6 +601,29 @@ def _render_datetime_condition_input(
     return condition_value, condition_value_dict
 
 
+def _saved_values(saved, options: list) -> list:
+    """Return the saved filter values that are still in `options`.
+
+    A single saved value, from another condition type, counts as a list of one.
+    """
+    if saved is None:
+        return []
+    saved = saved if isinstance(saved, list) else [saved]
+    return [v for v in saved if v in options]
+
+
+def _saved_value(saved, value_type: type | tuple[type, ...]):
+    """Return a single saved filter value of `value_type`, or None.
+
+    A saved list, from another condition type, gives its first value.
+    """
+    if isinstance(saved, list):
+        saved = saved[0] if saved else None
+    if isinstance(saved, bool) or not isinstance(saved, value_type):
+        return None
+    return saved
+
+
 def _render_numeric_condition_input(
     condition_type: str,
     default_condition_value,
@@ -625,18 +648,23 @@ def _render_numeric_condition_input(
     The selected condition value.
     """
     state_name = f"{TAB_NAME}_{prefix}condition_value"
-    if not default_condition_value:
-        default_condition_value = (
-            min(condition_values),
-            max(condition_values),
-        )
 
     if condition_type == NumCondition.IN_RANGE.value:
+        low, high = min(condition_values), max(condition_values)
+        value_range = (low, high)
+        saved = default_condition_value
+        if (
+            isinstance(saved, list | tuple)
+            and len(saved) == 2
+            and all(_saved_value(v, int | float) is not None for v in saved)
+            and low <= saved[0] <= saved[1] <= high
+        ):
+            value_range = (saved[0], saved[1])
         return st.slider(
             label="Condition Value Range",
-            min_value=min(condition_values),
-            max_value=max(condition_values),
-            value=default_condition_value,
+            min_value=low,
+            max_value=high,
+            value=value_range,
             key=f"duplicates_{prefix}condition_numeric_range_value_key",
             help="Select the numeric range to filter the condition column.",
             on_change=trigger_save,
@@ -644,25 +672,19 @@ def _render_numeric_condition_input(
         )
 
     if condition_type in [NumCondition.INCLUDES.value, NumCondition.EXCLUDES.value]:
-        if not isinstance(default_condition_value, list):
-            default_condition_value = [default_condition_value]
         return st.multiselect(
             label="Condition Values",
             options=condition_values,
+            default=_saved_values(default_condition_value, condition_values),
             key=f"duplicates_{prefix}condition_numeric_multivalue_key",
             help="Select the numeric values to filter the condition column.",
             on_change=trigger_save,
             kwargs={"state_name": state_name},
         )
 
-    if isinstance(default_condition_value, list):
-        default_condition_value = default_condition_value[0]
-    else:
-        default_condition_value = None
-
     return st.number_input(
         label="Condition Value",
-        value=default_condition_value,
+        value=_saved_value(default_condition_value, int | float),
         key=f"duplicates_{prefix}condition_numeric_value_key",
         help="Enter the numeric value to filter the condition column.",
         on_change=trigger_save,
@@ -694,15 +716,13 @@ def _render_string_condition_input(
     The selected condition value.
     """
     state_name = f"{TAB_NAME}_{prefix}condition_value"
-    default_condition_value = saved_settings.get(f"{prefix}condition_value", [])
-    if default_condition_value and not isinstance(default_condition_value, list):
-        default_condition_value = [default_condition_value]
+    saved = saved_settings.get(f"{prefix}condition_value")
 
     if condition_type in [StrCondition.INCLUDES.value, StrCondition.EXCLUDES.value]:
         return st.multiselect(
             label="Condition Values",
             options=condition_values,
-            default=default_condition_value,
+            default=_saved_values(saved, condition_values),
             key=f"duplicates_{prefix}condition_string_multivalue",
             help="Select the string values to filter the condition column.",
             on_change=trigger_save,
@@ -711,9 +731,7 @@ def _render_string_condition_input(
 
     return st.text_input(
         label="Condition Value",
-        value=default_condition_value
-        if isinstance(default_condition_value, str)
-        else None,
+        value=_saved_value(saved, str),
         key=f"duplicates_{prefix}condition_string_value_key",
         help="Enter the string value to filter the condition column.",
         on_change=trigger_save,
