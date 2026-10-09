@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Correction log**: New `source` column records which page made each entry;
+  existing logs load with `source = corrections_page`. A new `check_type`
+  column goes with the new `accept` action
+  (`CORRECTION_LOG_SCHEMA`, `ensure_log_columns` in the new Streamlit-free
+  `src/datasure/processing/correction_log.py`, shared with the replication
+  package, which now exports legacy logs with these columns) — #296
+- **Accept action**: `CorrectionProcessor.accept_value` records that a flagged
+  value (outliers, constraints, backchecks, duplicates, GPS) was reviewed and
+  is correct, with a required reason. An acceptance is rejected if the data
+  no longer holds the value being accepted. `get_active_acceptances` returns the
+  acceptances whose recorded value still matches the data (for GPS, both
+  latitude and longitude). Replay and the generated `4_corrections.do` skip
+  `accept` rows; `correction_log.csv` keeps them, and the README's correction
+  counts exclude them. Values compare by value, not text: missing matches
+  missing (None or NaN), numbers compare numerically, and every row with the
+  KEY must match — #296
+- **Atomic apply**: `CorrectionProcessor.apply_corrections` applies a list of
+  `CorrectionEntry` objects all or nothing; if the log save fails, the
+  corrected data is restored — #296
+- **Shared correction form**: `src/datasure/utils/correction_form.py`
+  (`render_correction_form`, `render_correction_inputs`,
+  `apply_correction_entries`) renders the action, new-value and reason inputs
+  for a prefilled KEY/column/current value, with namespaced widget keys. The
+  Correct Data page now uses it — #296
+
+### Fixed
+
+- **Corrections cache**: `CorrectionProcessor`'s cached reads were keyed only on
+  `alias`, so two projects sharing an alias shared cached corrected data and
+  logs. The processor is now hashed by `project_id` — #296
+- **Apply button**: A new value of `0` no longer disables Apply. An empty
+  string still does; use "remove value" to blank a cell — #296
+- **Correction log schema**: Removing the last correction entry now leaves an
+  empty log with the full schema, including status columns — #296
+
 ## [1.1.0] - 2026-09-21
 
 ### Added

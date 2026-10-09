@@ -10,6 +10,11 @@ from collections.abc import Callable
 
 import polars as pl
 
+from datasure.processing.correction_log import (
+    ACCEPT_ACTION,
+    CORRECTION_LOG_SCHEMA,
+    ensure_log_columns,
+)
 from datasure.replication.codebook import generate_codebook
 from datasure.replication.prep_script_generator import (
     generate_prepare_data_script,
@@ -73,7 +78,9 @@ def _load_prep_log(project_id: str, alias: str) -> pl.DataFrame:
 
 def _load_correction_log(project_id: str, alias: str) -> pl.DataFrame:
     try:
-        return duckdb_get_table(project_id, f"corr_log_{alias}", "logs")
+        return ensure_log_columns(
+            duckdb_get_table(project_id, f"corr_log_{alias}", "logs")
+        )
     except Exception:
         logger.warning(
             "Correction log for %s not found; returning empty DataFrame", alias
@@ -81,7 +88,15 @@ def _load_correction_log(project_id: str, alias: str) -> pl.DataFrame:
         return pl.DataFrame()
 
 
+def _applied_corrections(correction_log: pl.DataFrame) -> pl.DataFrame:
+    """Return the log rows that change data, dropping "accept" review records."""
+    if "action" not in correction_log.columns:
+        return correction_log
+    return correction_log.filter(pl.col("action") != ACCEPT_ACTION)
+
+
 def _action_summary(correction_log: pl.DataFrame) -> dict[str, int]:
+    correction_log = _applied_corrections(correction_log)
     if correction_log.is_empty():
         return {}
     counts = (
@@ -249,7 +264,7 @@ def build_replication_package(
         project_name=project_name,
         survey_name=survey_name,
         datasure_version=datasure_version,
-        correction_count=correction_log.height,
+        correction_count=_applied_corrections(correction_log).height,
         prep_count=prep_log.height,
         raw_rows=raw_df.height,
         prepped_rows=prepped_df.height if not prepped_df.is_empty() else 0,
@@ -269,7 +284,7 @@ def build_replication_package(
     correction_log_csv = (
         correction_log.write_csv()
         if not correction_log.is_empty()
-        else "date,KEY,ID,action,column,current_value,new_value,reason\n"
+        else ",".join(CORRECTION_LOG_SCHEMA) + "\n"
     )
     prep_log_csv = (
         prep_log.with_columns(

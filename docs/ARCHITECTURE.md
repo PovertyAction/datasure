@@ -35,13 +35,15 @@ src/datasure/
 │   └── local.py            # Local file import (csv/xlsx/xls/json/dta/parquet)
 ├── processing/
 │   ├── prep.py             # Data preparation operations (Polars)
-│   └── corrections.py      # Data correction application
+│   ├── corrections.py      # Corrections and accept entries (CorrectionProcessor)
+│   └── correction_log.py   # Correction log schema/backfill (no Streamlit)
 ├── replication/            # Stata/Python replication package export
 ├── models/
 │   ├── schemas.py          # Pydantic models
 │   └── enums.py            # Prep action/method enums
 ├── utils/                  # Shared utilities (DuckDB, cache, config, charts,
 │                           # credentials, SurveyCTO API, UI helpers, ...)
+│   └── correction_form.py  #   Shared correction form used across pages
 └── views/                  # Streamlit pages (top-level page scripts)
     ├── start_view.py       # Project selection/creation
     ├── import_view.py      # Credentials + data import
