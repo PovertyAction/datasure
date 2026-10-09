@@ -90,6 +90,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   logs. The processor is now hashed by `project_id` — #296
 - **Apply button**: A new value of `0` no longer disables Apply. An empty
   string still does; use "remove value" to blank a cell — #296
+- **Backcheck settings**: `backchecks_report_settings` passed the duplicate
+  option and target as `drop_duplicates` and `backcheck_goal`, which
+  `BackcheckSettings` silently dropped, so duplicates were always dropped and
+  the target was always 10. They are now passed as `drop_duplicates_option`
+  and `backcheck_target_percent`, and the target is saved under
+  `backcheck_target_percent` so it reloads in later sessions. Targets saved
+  under the old `backcheck_goal` key were never applied and are ignored — #299
 - **Correction log schema**: Removing the last correction entry now leaves an
   empty log with the full schema, including status columns — #296
 - **Constraint violations**: A value past a hard bound was reported as a soft

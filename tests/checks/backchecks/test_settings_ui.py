@@ -4,6 +4,7 @@ import importlib
 import sys
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import pytest
 
 from datasure.checks.backchecks.models import BackcheckSettings, StrCompareOptions
@@ -17,7 +18,9 @@ from datasure.checks.backchecks.settings_ui import (
     _render_survey_identifiers,
     _render_tracking_options,
     _render_value_list_display,
+    backchecks_report_settings,
 )
+from datasure.utils.settings_utils import load_check_settings
 from tests.checks.backchecks.conftest import make_mock_st
 
 # ============================================
@@ -227,3 +230,76 @@ def test_render_exclude_values_settings_fragment(bc):
     """_render_exclude_values_settings runs without error and returns a list."""
     result = bc._render_exclude_values_settings("settings.json")
     assert isinstance(result, list)
+
+
+# ============================================
+# backchecks_report_settings: user choices reach the returned settings
+# ============================================
+
+
+@pytest.fixture
+def report_settings_with_choices(patched_bc):
+    """Run backchecks_report_settings with non-default UI selections."""
+    module = "datasure.checks.backchecks.settings_ui"
+    with (
+        patch(
+            f"{module}.load_default_backchecks_settings",
+            return_value=BackcheckSettings(survey_key=None),
+        ),
+        patch(f"{module}._render_survey_identifiers", return_value=("key", "sid")),
+        patch(f"{module}._render_date_columns", return_value=(None, None)),
+        patch(f"{module}._render_staff_identifiers", return_value=(None, None)),
+        patch(f"{module}._render_tracking_options", return_value=35),
+        patch(
+            f"{module}._render_additional_options",
+            return_value=("last", [], [], StrCompareOptions()),
+        ),
+    ):
+        yield backchecks_report_settings(
+            "project",
+            "settings.json",
+            pd.DataFrame(),
+            pd.DataFrame(),
+            BackcheckSettings(survey_key=None),
+            [],
+            [],
+            [],
+            [],
+        )
+
+
+def test_report_settings_keeps_selected_duplicate_option(
+    report_settings_with_choices,
+):
+    """A non-default duplicate-handling choice is not replaced by the default."""
+    assert report_settings_with_choices.drop_duplicates_option == "last"
+
+
+def test_report_settings_keeps_selected_target_percent(
+    report_settings_with_choices,
+):
+    """A non-default backcheck target is not replaced by the default."""
+    assert report_settings_with_choices.backcheck_target_percent == 35
+
+
+def test_render_tracking_options_persists_changed_target(tmp_path):
+    """A changed target passes the real save guard and reloads from disk."""
+    settings_file = str(tmp_path / "settings.json")
+    session_state: dict = {}
+    mock_st = make_mock_st()
+    mock_st.session_state = session_state
+
+    def change_target(*_args, on_change, kwargs, **_widget_kwargs):
+        on_change(**kwargs)
+        return 35
+
+    mock_st.number_input.side_effect = change_target
+    with (
+        patch("datasure.checks.backchecks.settings_ui.st", mock_st),
+        patch("datasure.utils.settings_utils.st", mock_st),
+    ):
+        _render_tracking_options(settings_file, BackcheckSettings(survey_key=None))
+
+    assert load_check_settings(settings_file, "backchecks") == {
+        "backcheck_target_percent": 35
+    }
