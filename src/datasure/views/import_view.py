@@ -141,15 +141,16 @@ def _refresh_downstream_data(project_id: str, alias: str) -> list[ReapplyFailure
 
     Without this, the Prep and Correction pages keep showing data derived
     from the previous import, since both stages are cached copies that are
-    otherwise only rebuilt when a prep step or correction is removed.
+    otherwise only rebuilt when their own logs change.
     """
     failures: list[ReapplyFailure] = []
 
     if duckdb_table_exists(project_id, alias=alias, db_name="prep"):
         failures.extend(prep_apply_action(project_id, alias))
 
-    if duckdb_table_exists(project_id, alias=alias, db_name="corrected"):
-        failures.extend(CorrectionProcessor(project_id).refresh_corrected_data(alias))
+    failures.extend(
+        CorrectionProcessor(project_id).refresh_existing_corrected_data(alias)
+    )
 
     return failures
 
