@@ -2,11 +2,17 @@
 
 import re
 from contextlib import suppress
+from dataclasses import dataclass
 from typing import Any
 
 import polars as pl
 from scipy import stats
 
+from datasure.checks.backchecks.attribution import (
+    ErrorSource,
+    adjusted_error_rate,
+    count_error_sources,
+)
 from datasure.checks.backchecks.models import (
     BACKCHECK_SUFFIX,
     TAB_NAME,
@@ -30,7 +36,8 @@ def load_default_backchecks_settings(
     Loads previously saved backcheck report settings from the settings file
     and merges them with the provided default configuration. Saved settings
     take precedence over defaults, except a cleared or invalid backcheck
-    target, which falls back to the configured one.
+    target and an invalid error rate target, which fall back to the
+    configured one. A cleared error rate target stays cleared.
 
     Parameters
     ----------
@@ -45,11 +52,19 @@ def load_default_backchecks_settings(
         Merged settings combining saved and default configurations.
     """
     saved_settings = load_check_settings(settings_file, TAB_NAME)
-    # A cleared target falls back to the configured one, as does a value saved
-    # by the old count-based input that is not a valid percentage.
-    saved_target = saved_settings.get("backcheck_target_percent")
-    if not isinstance(saved_target, int | float) or not 0 <= saved_target <= 100:
-        saved_settings.pop("backcheck_target_percent", None)
+    # A cleared backcheck target falls back to the configured one, as does a
+    # value saved by the old count-based input that is not a valid percentage.
+    # The error rate target is optional: clearing it means "highlight
+    # nothing", so a saved None is kept and only invalid values fall back.
+    for target, keep_cleared in (
+        ("backcheck_target_percent", False),
+        ("error_rate_target_percent", True),
+    ):
+        saved_target = saved_settings.get(target)
+        if saved_target is None and keep_cleared:
+            continue
+        if not isinstance(saved_target, int | float) or not 0 <= saved_target <= 100:
+            saved_settings.pop(target, None)
 
     default_settings: dict = dict(config)
     default_settings.update(saved_settings)
@@ -839,7 +854,7 @@ def _calculate_average_days(
 
 
 def _calculate_category_statistics(
-    cat_data: pl.DataFrame, category: int
+    cat_data: pl.DataFrame, category: int, staff_type: str = "enumerator"
 ) -> dict[str, int | float]:
     """Calculate statistics for a single category.
 
@@ -849,6 +864,9 @@ def _calculate_category_statistics(
         Category-specific data.
     category : int
         Category number (1, 2, or 3).
+    staff_type : str
+        Either "enumerator" or "backchecker", whose adjusted error rate to
+        report.
 
     Returns
     -------
@@ -862,6 +880,7 @@ def _calculate_category_statistics(
             f"Values Compared (Cat {category})": 0,
             f"Mismatches (Cat {category})": 0,
             f"Error Rate % (Cat {category})": 0.0,
+            f"Adjusted Error Rate % (Cat {category})": 0.0,
         }
 
     # Count non-missing values
@@ -887,6 +906,9 @@ def _calculate_category_statistics(
         f"Values Compared (Cat {category})": n_cat_compared,
         f"Mismatches (Cat {category})": n_mismatches,
         f"Error Rate % (Cat {category})": round(error_rate, 2),
+        f"Adjusted Error Rate % (Cat {category})": adjusted_error_rate(
+            n_mismatches, n_cat_compared, cat_data, staff_type
+        ),
     }
 
 
@@ -897,6 +919,7 @@ def _calculate_staff_statistics(
     survey_key: str,
     survey_date: str | None,
     backcheck_date: str | None,
+    staff_type: str = "enumerator",
 ) -> dict[str, Any]:
     """Calculate all statistics for a single staff member.
 
@@ -914,6 +937,9 @@ def _calculate_staff_statistics(
         Survey date column name.
     backcheck_date : str | None
         Backcheck date column name.
+    staff_type : str
+        Either "enumerator" or "backchecker", whose adjusted error rate to
+        report.
 
     Returns
     -------
@@ -935,7 +961,7 @@ def _calculate_staff_statistics(
     # Calculate statistics for each category
     for category in [1, 2, 3]:
         cat_data = staff_data.filter(pl.col("category") == category)
-        cat_stats = _calculate_category_statistics(cat_data, category)
+        cat_stats = _calculate_category_statistics(cat_data, category, staff_type)
 
         # Add category stats to staff_stats
         staff_stats.update(cat_stats)
@@ -960,6 +986,12 @@ def _calculate_staff_statistics(
             "Values Compared (Total)": total_compared,
             "Mismatches (Total)": total_mismatches,
             "Error Rate % (Total)": round(total_error_rate, 2),
+            "Adjusted Error Rate % (Total)": adjusted_error_rate(
+                total_mismatches,
+                total_compared,
+                staff_data.filter(pl.col("category").is_in([1, 2, 3])),
+                staff_type,
+            ),
         }
     )
 
@@ -1049,6 +1081,7 @@ def compute_enumerator_backchecker_stats(
             survey_key,
             backcheck_settings.survey_date,
             backcheck_settings.backcheck_date,
+            staff_type,
         )
         stats_list.append(staff_stats)
 
@@ -1224,6 +1257,7 @@ def _build_column_stats_dict(
     n_mismatches: int,
     error_rate: float,
     test_results_str: str,
+    source_counts: dict[ErrorSource, int] | None = None,
 ) -> dict[str, Any]:
     """Build statistics dictionary for a column.
 
@@ -1245,12 +1279,17 @@ def _build_column_stats_dict(
         Error rate percentage.
     test_results_str : str
         Formatted test results string.
+    source_counts : dict[ErrorSource, int] | None
+        Mismatches by error source; all Unattributed if not given.
 
     Returns
     -------
     dict[str, Any]
         Statistics dictionary.
     """
+    if source_counts is None:
+        source_counts = dict.fromkeys(ErrorSource, 0)
+        source_counts[ErrorSource.UNATTRIBUTED] = n_mismatches
     return {
         "Column Name": col_name,
         "Category": category,
@@ -1259,6 +1298,7 @@ def _build_column_stats_dict(
         "Values Compared": n_compared,
         "Mismatches": n_mismatches,
         "Error Rate (%)": round(error_rate, 2),
+        **{f"{source} Mismatches": source_counts[source] for source in ErrorSource},
         "Test Results": test_results_str,
     }
 
@@ -1311,6 +1351,7 @@ def compute_column_stats(
             n_mismatches,
             error_rate,
             test_results_str,
+            count_error_sources(col_data),
         )
         stats_list.append(stats_dict)
 
@@ -1318,6 +1359,72 @@ def compute_column_stats(
         return pl.DataFrame()
 
     return pl.DataFrame(stats_list)
+
+
+@dataclass(frozen=True)
+class OverallErrorRate:
+    """Error rates over every compared value in a category, or in total.
+
+    `error_rate` is None when no values were compared; the adjusted rates
+    are then 0.
+    """
+
+    label: str
+    compared: int
+    mismatches: int
+    error_rate: float | None
+    enumerator_adjusted: float
+    backchecker_adjusted: float
+
+
+def _overall_error_rate(label: str, rows: pl.DataFrame) -> OverallErrorRate:
+    _, compared, mismatches, error_rate = _calculate_column_statistics(rows)
+    return OverallErrorRate(
+        label=label,
+        compared=compared,
+        mismatches=mismatches,
+        error_rate=round(error_rate, 2) if compared > 0 else None,
+        enumerator_adjusted=adjusted_error_rate(
+            mismatches, compared, rows, "enumerator"
+        ),
+        backchecker_adjusted=adjusted_error_rate(
+            mismatches, compared, rows, "backchecker"
+        ),
+    )
+
+
+def compute_overall_error_rates(
+    backcheck_analysis: pl.DataFrame,
+) -> list[OverallErrorRate]:
+    """Compute the error rates over all comparisons, in total and by category.
+
+    Parameters
+    ----------
+    backcheck_analysis : pl.DataFrame
+        Results from compute_backcheck_analysis, optionally marked with
+        their error sources.
+
+    Returns
+    -------
+    list[OverallErrorRate]
+        The total over categories 1-3, then each category; empty if there
+        are no results.
+    """
+    if backcheck_analysis.is_empty():
+        return []
+
+    categories = [1, 2, 3]
+    in_categories = backcheck_analysis.filter(pl.col("category").is_in(categories))
+    return [
+        _overall_error_rate("Total", in_categories),
+        *(
+            _overall_error_rate(
+                f"Cat {category}",
+                backcheck_analysis.filter(pl.col("category") == category),
+            )
+            for category in categories
+        ),
+    ]
 
 
 # ==============================================================================

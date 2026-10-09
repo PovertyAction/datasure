@@ -85,6 +85,12 @@ class BackcheckSettings(BaseModel):
     survey_target: int | None = Field(
         None, ge=0, description="Target number of survey responses"
     )
+    error_rate_target_percent: float | None = Field(
+        None,
+        ge=0,
+        le=100,
+        description="Highest acceptable error rate, in percent; None if not set",
+    )
     eligibility_column: str | None = Field(
         None, description="Survey column that marks a survey eligible"
     )

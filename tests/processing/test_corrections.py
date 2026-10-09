@@ -1311,7 +1311,10 @@ class TestAcceptAction:
 
         assert processor.get_correction_log("survey").is_empty()
 
-    def test_accept_rejects_unknown_check_type(self, store, sample_data):
+    # Backcheck results measure data quality, so a mismatch can't be accepted
+    # away; it can only be attributed on the Backchecks page.
+    @pytest.mark.parametrize("check_type", ["missing", "backchecks"])
+    def test_accept_rejects_unknown_check_type(self, store, sample_data, check_type):
         _seed_prep(store, sample_data)
         processor = CorrectionProcessor("p1")
 
@@ -1320,7 +1323,7 @@ class TestAcceptAction:
                 alias="survey",
                 key_col="survey_key",
                 key_value="key1",
-                check_type="missing",
+                check_type=check_type,
                 column="age",
                 current_value=25,
                 reason="ok",

@@ -33,7 +33,10 @@ CORRECTION_ACTIONS: tuple[Action, ...] = (
     Action.REMOVE_ROW,
 )
 
-ACCEPT_CHECK_TYPES = ("outliers", "constraints", "backchecks", "duplicates", "gps")
+# Backchecks is deliberately absent: backcheck results measure data quality,
+# so a mismatch can't be accepted away. The Backchecks page attributes
+# mismatches to an error source instead (see checks/backchecks/attribution.py).
+ACCEPT_CHECK_TYPES = ("outliers", "constraints", "duplicates", "gps")
 
 # `severity` of an acceptance that overrides a hard constraint bound.
 HARD_SEVERITY = "hard"
