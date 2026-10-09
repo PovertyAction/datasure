@@ -25,12 +25,12 @@ def _cards_app(data, settings_file, survey_data=None, date_col="date"):
     render_id_duplicates(view, settings_file)
 
 
-def _switcher_app(has_backcheck):
+def _switcher_app(survey_count, backcheck_count):
     import streamlit as st
 
     from datasure.checks.id_duplicates_ui import render_dataset_switcher
 
-    st.session_state["chosen"] = render_dataset_switcher(has_backcheck)
+    st.session_state["chosen"] = render_dataset_switcher(survey_count, backcheck_count)
 
 
 @pytest.fixture
@@ -193,18 +193,33 @@ def test_backcheck_view_lists_duplicate_and_unmatched_cards(survey, settings_fil
     assert list(unmatched_grid["Record 1"]) == ["b3", "2024-02-03", "bc1"]
 
 
-def test_switcher_hidden_without_backcheck():
-    at = AppTest.from_function(_switcher_app, args=(False,)).run()
+def _switcher_labels(at):
+    return list(at.button_group[0].proto.options[i].content for i in range(2))
+
+
+def test_switcher_shows_duplicate_counts():
+    at = AppTest.from_function(_switcher_app, args=(3, 0)).run()
 
     assert not at.exception
-    assert len(at.get("button_group")) == 0
+    assert _switcher_labels(at) == ["Survey data (3)", "Backcheck data (0)"]
     assert at.session_state["chosen"] == "Survey data"
 
 
 def test_switcher_chooses_backcheck_data():
-    at = AppTest.from_function(_switcher_app, args=(True,)).run()
-    assert at.session_state["chosen"] == "Survey data"
+    at = AppTest.from_function(_switcher_app, args=(3, 0)).run()
 
     at.button_group[0].set_value("Backcheck data").run()
 
     assert at.session_state["chosen"] == "Backcheck data"
+
+
+def test_switcher_without_backcheck_shows_na_and_keeps_survey_data():
+    at = AppTest.from_function(_switcher_app, args=(2, None)).run()
+
+    assert not at.exception
+    assert _switcher_labels(at) == ["Survey data (2)", "Backcheck data (N/A)"]
+
+    at.button_group[0].set_value("Backcheck data").run()
+
+    assert at.session_state["chosen"] == "Survey data"
+    assert at.button_group[0].value == "Survey data"

@@ -650,9 +650,11 @@ Configure detection:
 
 ##### ID Duplicates
 
-Pages with back check data show a **Survey data** / **Backcheck data**
-switcher. The back check view uses the Survey ID and Survey Key set on the
-Backcheck Analysis tab.
+A **Survey data** / **Backcheck data** switcher picks the dataset. Each option
+shows its number of unresolved duplicate IDs, for example **Survey data (3)**.
+On pages without back checks, the option reads **Backcheck data (N/A)** and
+cannot be selected. The back check view uses the Survey ID and Survey Key set
+on the Backcheck Analysis tab.
 
 Metrics above the cards:
 

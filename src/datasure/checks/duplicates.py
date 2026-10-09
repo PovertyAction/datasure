@@ -12,6 +12,7 @@ This module provides comprehensive duplicate detection functionality with:
 import datetime
 import logging
 import re
+from dataclasses import dataclass
 
 import polars as pl
 import streamlit as st
@@ -20,6 +21,7 @@ from datasure.checks.backchecks.models import TAB_NAME as BACKCHECKS_TAB_NAME
 from datasure.checks.id_duplicates_ui import (
     BACKCHECK_DATA,
     IdView,
+    count_duplicate_ids,
     render_dataset_switcher,
     render_id_duplicates,
 )
@@ -1959,29 +1961,64 @@ def compute_column_duplicates(
 # =============================================================================
 
 
+@dataclass(frozen=True)
+class _FilteredRecords:
+    """The records a Records to Include filter keeps, and any problem with it.
+
+    Attributes
+    ----------
+    data : pl.DataFrame
+        The records to check. Empty when the filter is invalid.
+    label : str
+        ``"survey"`` or ``"backcheck"``, for messages.
+    error : str | None
+        Why the filter could not be applied, if it could not.
+    matches_nothing : bool
+        Whether an active filter matches no records.
+    """
+
+    data: pl.DataFrame
+    label: str
+    error: str | None = None
+    matches_nothing: bool = False
+
+
 def _records_to_include(
     data: pl.DataFrame, conditions: dict, label: str
-) -> pl.DataFrame:
-    """Apply a Records to Include filter, warning when it leaves no records.
+) -> _FilteredRecords:
+    """Apply a Records to Include filter without showing anything.
 
-    An invalid filter shows an error and, like a filter that matches nothing,
-    leaves no records to check.
+    An invalid filter, like a filter that matches nothing, leaves no records
+    to check. Show its problems with `_render_filter_messages`.
     """
     try:
         filtered = apply_records_to_include(data, conditions)
     except ValueError as e:
         logger.warning("Records to Include filter for %s data failed: %s", label, e)
-        st.error(f"The {label} Records to Include filter could not be applied: {e}")
-        return data.clear()
+        return _FilteredRecords(data.clear(), label, error=str(e))
 
-    if has_active_filter(conditions) and filtered.is_empty():
+    return _FilteredRecords(
+        filtered,
+        label,
+        matches_nothing=has_active_filter(conditions) and filtered.is_empty(),
+    )
+
+
+def _render_filter_messages(records: _FilteredRecords) -> None:
+    """Show an error for an invalid filter or a warning for an empty one."""
+    label = records.label
+    if records.error:
+        st.error(
+            f"The {label} Records to Include filter could not be applied: "
+            f"{records.error}"
+        )
+    elif records.matches_nothing:
         st.warning(
             f"The {label} Records to Include filter matches no records, so no "
             f"{label} records are checked. Change the filter in "
             ":material/settings: settings.",
             icon=":material/filter_alt_off:",
         )
-    return filtered
 
 
 def _backcheck_view(
@@ -1990,19 +2027,21 @@ def _backcheck_view(
     duplicates_settings: DuplicatesSettings,
     config: dict,
     setting_file: str,
-) -> IdView:
+) -> tuple[IdView, _FilteredRecords]:
     """Build the backcheck view from the page's backcheck settings.
 
     The ID and KEY columns are the ones set on the Backcheck Analysis tab,
     falling back to the survey's. Unmatched IDs are matched against every
-    survey record, not only the survey's Records to Include.
+    survey record, not only the survey's Records to Include. Also returns the
+    filtered backcheck records, for their filter messages.
     """
     saved = load_check_settings(setting_file, BACKCHECKS_TAB_NAME)
-    return IdView(
+    records = _records_to_include(
+        backcheck_data, duplicates_settings.backcheck_conditions, "backcheck"
+    )
+    view = IdView(
         name="backcheck",
-        data=_records_to_include(
-            backcheck_data, duplicates_settings.backcheck_conditions, "backcheck"
-        ),
+        data=records.data,
         id_col=saved.get("survey_id") or duplicates_settings.survey_id,
         key_col=saved.get("survey_key") or duplicates_settings.survey_key,
         date_col=saved.get("backcheck_date") or config.get("backcheck_date"),
@@ -2011,6 +2050,7 @@ def _backcheck_view(
         display_cols_setting="backcheck_id_table_display_cols",
         survey_data=survey_data,
     )
+    return view, records
 
 
 # =============================================================================
@@ -2094,40 +2134,40 @@ def duplicates_report(
             "context columns such as **enum_name** or **state** to every card."
         )
 
-    dataset = render_dataset_switcher(bool(config.get("backcheck_data_name")))
-    if dataset == BACKCHECK_DATA:
-        if backcheck_data is None:
-            st.info("No backcheck data available for this page.")
-        else:
-            render_id_duplicates(
-                _backcheck_view(
-                    backcheck_data,
-                    data,
-                    duplicates_settings,
-                    config,
-                    setting_file,
-                ),
-                setting_file,
-            )
+    # Build both views first: the switcher shows each one's duplicate count.
+    survey_records = _records_to_include(data, duplicates_settings.conditions, "survey")
+    survey_view = IdView(
+        name="survey",
+        data=survey_records.data,
+        id_col=duplicates_settings.survey_id,
+        key_col=duplicates_settings.survey_key,
+        date_col=duplicates_settings.survey_date,
+        staff_col=duplicates_settings.enumerator,
+        team_col=duplicates_settings.team,
+        display_cols_setting="id_table_display_cols",
+    )
+    backcheck = None
+    if config.get("backcheck_data_name") and backcheck_data is not None:
+        backcheck = _backcheck_view(
+            backcheck_data, data, duplicates_settings, config, setting_file
+        )
+
+    dataset = render_dataset_switcher(
+        count_duplicate_ids(survey_view),
+        None if backcheck is None else count_duplicate_ids(backcheck[0]),
+    )
+    if dataset == BACKCHECK_DATA and backcheck is not None:
+        backcheck_view, backcheck_records = backcheck
+        _render_filter_messages(backcheck_records)
+        render_id_duplicates(backcheck_view, setting_file)
         return
 
-    data = _records_to_include(data, duplicates_settings.conditions, "survey")
+    _render_filter_messages(survey_records)
+    data = survey_records.data
     if not duplicates_settings.survey_id:
         st.info("Survey ID column is not configured for duplicates check.")
     else:
-        render_id_duplicates(
-            IdView(
-                name="survey",
-                data=data,
-                id_col=duplicates_settings.survey_id,
-                key_col=duplicates_settings.survey_key,
-                date_col=duplicates_settings.survey_date,
-                staff_col=duplicates_settings.enumerator,
-                team_col=duplicates_settings.team,
-                display_cols_setting="id_table_display_cols",
-            ),
-            setting_file,
-        )
+        render_id_duplicates(survey_view, setting_file)
 
     # Duplicates column configuration
     st.divider()

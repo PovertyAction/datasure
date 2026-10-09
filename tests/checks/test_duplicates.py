@@ -2985,12 +2985,13 @@ def report_backcheck():
 class TestDuplicatesReportIdViews:
     """duplicates_report picks the dataset, filter and columns for the cards."""
 
-    def test_switcher_hidden_without_backcheck_data_name(self, report_data):
+    def test_backcheck_not_available_without_backcheck_data_name(self, report_data):
         settings = DuplicatesSettings(survey_id="hhid", survey_key="KEY")
 
         mocks = _run_report(report_data, settings, {"survey_id": "hhid"})
 
-        mocks["render_dataset_switcher"].assert_called_once_with(False)
+        # One survey duplicate ID (A); no backchecks.
+        mocks["render_dataset_switcher"].assert_called_once_with(1, None)
         view = mocks["render_id_duplicates"].call_args.args[0]
         assert view.name == "survey"
         assert view.survey_data is None
@@ -3083,7 +3084,8 @@ class TestDuplicatesReportIdViews:
             saved_backcheck_settings={"backchecker": "bc"},
         )
 
-        mocks["render_dataset_switcher"].assert_called_once_with(True)
+        # The counts are after each dataset's Records to Include filter.
+        mocks["render_dataset_switcher"].assert_called_once_with(0, 0)
         view = mocks["render_id_duplicates"].call_args.args[0]
         assert view.name == "backcheck"
         assert view.data["KEY"].to_list() == ["b3"]
@@ -3098,7 +3100,46 @@ class TestDuplicatesReportIdViews:
         # Other duplicates is only in the survey view.
         mocks["_render_duplicates_column_actions"].assert_not_called()
 
-    def test_backcheck_view_without_backcheck_data(self, report_data):
+    def test_switcher_counts_duplicate_ids_in_both_datasets(
+        self, report_data, report_backcheck
+    ):
+        settings = DuplicatesSettings(survey_id="hhid", survey_key="KEY")
+        config = {"survey_id": "hhid", "backcheck_data_name": "bc_data"}
+
+        mocks = _run_report(
+            report_data, settings, config, backcheck_data=report_backcheck
+        )
+
+        # Survey: A twice. Backcheck: Z twice.
+        mocks["render_dataset_switcher"].assert_called_once_with(1, 1)
+        assert mocks["render_id_duplicates"].call_args.args[0].name == "survey"
+
+    def test_backcheck_view_shows_only_the_backcheck_filter_messages(
+        self, report_data, report_backcheck
+    ):
+        settings = DuplicatesSettings(
+            survey_id="hhid",
+            survey_key="KEY",
+            conditions={
+                "condition_col": "consent",
+                "condition_type": StrCondition.EQUALS.value,
+                "condition_value": "maybe",
+            },
+        )
+        config = {"survey_id": "hhid", "backcheck_data_name": "bc_data"}
+
+        mocks = _run_report(
+            report_data,
+            settings,
+            config,
+            backcheck_data=report_backcheck,
+            dataset="Backcheck data",
+        )
+
+        mocks["st"].warning.assert_not_called()
+        assert mocks["render_id_duplicates"].call_args.args[0].name == "backcheck"
+
+    def test_backcheck_not_available_without_backcheck_data(self, report_data):
         settings = DuplicatesSettings(survey_id="hhid", survey_key="KEY")
 
         mocks = _run_report(
@@ -3108,8 +3149,8 @@ class TestDuplicatesReportIdViews:
             dataset="Backcheck data",
         )
 
-        mocks["render_id_duplicates"].assert_not_called()
-        mocks["st"].info.assert_called_once()
+        mocks["render_dataset_switcher"].assert_called_once_with(1, None)
+        assert mocks["render_id_duplicates"].call_args.args[0].name == "survey"
 
 
 def _filters_app(settings_file):
