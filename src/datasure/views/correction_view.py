@@ -500,7 +500,9 @@ def render_correction_input_form(
     """
     corrected_data = correction_processor.get_corrected_data(alias)
 
-    if corrected_data.is_empty():
+    # A table with no rows, such as one whose every record was dropped, still
+    # has corrections to remove; only a missing table has no columns.
+    if corrected_data.width == 0:
         st.warning("No data available for correction.")
         return
 
@@ -828,7 +830,9 @@ def render_correction_tab(
     # Ensure corrected data exists
     corrected_data = correction_processor.get_corrected_data(dataset.alias)
 
-    if corrected_data.is_empty():
+    # Keep the log and the remove form for a table with no rows, so dropping
+    # every record can be undone.
+    if corrected_data.width == 0:
         st.warning(f"No data available for {dataset.alias}")
         return
 

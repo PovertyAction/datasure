@@ -1095,6 +1095,35 @@ class TestRenderCorrectionInputForm:
             render_correction_input_form(processor, "KEY", "survey", 0)
             assert _st.warning.called
 
+    def test_data_with_no_rows_keeps_the_remove_form(self):
+        """Dropping every record leaves corrections to undo."""
+        processor = MagicMock()
+        processor.get_corrected_data.return_value = pl.DataFrame(
+            {"KEY": [], "name": []}, schema={"KEY": pl.String, "name": pl.String}
+        )
+
+        with (
+            _patched_st(
+                columns=MagicMock(
+                    return_value=[
+                        _mock_context_widget(),
+                        _mock_context_widget(),
+                        _mock_context_widget(),
+                    ]
+                ),
+                warning=MagicMock(),
+            ),
+            patch("datasure.views.correction_view.render_add_correction_form"),
+            patch(
+                "datasure.views.correction_view.render_remove_correction_form"
+            ) as mock_remove_form,
+        ):
+            render_correction_input_form(processor, "KEY", "survey", 0)
+
+            mock_remove_form.assert_called_once_with(
+                correction_processor=processor, alias="survey", tab_index=0
+            )
+
     def test_populated_data_renders_add_form_and_calls_remove_form(self):
         """render_remove_correction_form is `@st.fragment`-wrapped, so under
         the test harness's mock it becomes an opaque callable - this only
