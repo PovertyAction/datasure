@@ -6,11 +6,12 @@ from datasure.checks.gpschecks.compute import load_default_gpschecks_settings
 from datasure.checks.gpschecks.models import TAB_NAME
 from datasure.models.schemas import GPSSettings
 from datasure.utils.onboarding_utils import demo_output_onboarding
-from datasure.utils.settings_utils import (
-    save_check_settings,
-    save_secrets,
-    trigger_save,
+from datasure.utils.secure_credentials import (
+    SecureCredentialError,
+    retrieve_mapbox_token,
+    store_mapbox_token,
 )
+from datasure.utils.settings_utils import save_check_settings, trigger_save
 
 
 #  gps check settings
@@ -169,14 +170,18 @@ def gpschecks_report_settings(
             st.subheader("Mapbox API Token Configuration")
             st.caption("Configure your Mapbox API key for map visualizations. ")
 
-            current_mapbox_token = st.secrets.get("mapbox_token", None)
+            # Saved tokens live in the system keyring. A token set by hand in
+            # secrets.toml is still read, for setups made before that.
+            saved_mapbox_token = retrieve_mapbox_token() or st.secrets.get(
+                "mapbox_token", None
+            )
 
             # Show text input if user wants to add own key
             mt1, mt2 = st.columns([0.7, 0.3])
             with mt1:
                 mapbox_custom_token = st.text_input(
                     "Your Mapbox API Key",
-                    value=current_mapbox_token,
+                    value=saved_mapbox_token,
                     type="password",
                     key="mapbox_custom_token_gpschecks",
                     help="Enter your Mapbox API key. Get one free at https://account.mapbox.com/",
@@ -190,8 +195,13 @@ def gpschecks_report_settings(
                     width="stretch",
                     disabled=not mapbox_custom_token,
                 ):
-                    save_secrets("mapbox_token", mapbox_custom_token)
-                    st.success("Mapbox Token saved successfully.")
+                    try:
+                        store_mapbox_token(mapbox_custom_token)
+                    except SecureCredentialError as e:
+                        # UI boundary: report a keyring failure, keep the page.
+                        st.error(f"Mapbox token not saved: {e}")
+                    else:
+                        st.success("Mapbox Token saved successfully.")
 
     return GPSSettings(
         survey_key=survey_key,
@@ -199,5 +209,6 @@ def gpschecks_report_settings(
         survey_date=survey_date,
         enumerator=enumerator,
         team=team,
-        mapbox_custom_key=mapbox_custom_token,
+        # An emptied box falls back to the saved token.
+        mapbox_custom_key=(mapbox_custom_token or "").strip() or saved_mapbox_token,
     )

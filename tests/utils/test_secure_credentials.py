@@ -20,7 +20,9 @@ from datasure.utils.secure_credentials import (
     has_scto_credentials,
     list_stored_credentials,
     migrate_plaintext_credentials,
+    retrieve_mapbox_token,
     retrieve_scto_credentials,
+    store_mapbox_token,
     store_scto_credentials,
     test_keyring_availability,
 )
@@ -951,3 +953,50 @@ class TestListCredentialsExtended:
             keys = list(creds.keys())
             assert any("server1" in key for key in keys)
             assert any("server2" in key for key in keys)
+
+
+class TestMapboxToken:
+    """The Mapbox token is kept in the keyring, one per machine."""
+
+    def test_a_saved_token_is_retrieved(self):
+        store = {}
+        with patch("datasure.utils.secure_credentials.keyring") as mock_keyring:
+            mock_keyring.set_password.side_effect = lambda s, u, p: store.update(
+                {(s, u): p}
+            )
+            mock_keyring.get_password.side_effect = lambda s, u: store.get((s, u))
+
+            store_mapbox_token("pk.first")
+            assert retrieve_mapbox_token() == "pk.first"
+
+            store_mapbox_token("pk.second")
+            assert retrieve_mapbox_token() == "pk.second"
+        assert len(store) == 1
+
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_no_saved_token_is_none(self, mock_keyring):
+        mock_keyring.get_password.return_value = None
+        assert retrieve_mapbox_token() is None
+
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_a_keyring_read_failure_is_none(self, mock_keyring):
+        mock_keyring.get_password.side_effect = KeyringError("locked")
+        assert retrieve_mapbox_token() is None
+
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_a_keyring_write_failure_raises(self, mock_keyring):
+        mock_keyring.set_password.side_effect = KeyringError("no backend")
+        with pytest.raises(SecureCredentialError, match="Mapbox token"):
+            store_mapbox_token("pk.token")
+
+    @pytest.mark.parametrize("token", ["", "   "])
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_a_blank_token_is_rejected(self, mock_keyring, token):
+        with pytest.raises(SecureCredentialError, match="blank"):
+            store_mapbox_token(token)
+        mock_keyring.set_password.assert_not_called()
+
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_surrounding_whitespace_is_stripped(self, mock_keyring):
+        store_mapbox_token("  pk.token\n")
+        assert mock_keyring.set_password.call_args.args[2] == "pk.token"

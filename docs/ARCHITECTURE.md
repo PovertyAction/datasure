@@ -129,8 +129,10 @@ project is selected. If cross-page state looks corrupted, check `app.py` first.
 
 SurveyCTO passwords are stored in the OS keyring
 (`utils/secure_credentials.py`); only non-sensitive metadata (server, username)
-is written to JSON. Credentials are never written to disk, logs, or session
-state.
+is written to JSON. The Mapbox token saved from the GPS Checks settings is also
+kept in the keyring, as one entry shared by every project on the machine; a
+token set by hand in `secrets.toml` is still read as a fallback. Credentials
+are never written to disk, logs, or session state.
 
 ## DataFrames and SQL
 
