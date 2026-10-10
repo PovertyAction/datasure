@@ -59,14 +59,6 @@ class GPSAction(StrEnum):
     ACCEPT = "accept"
 
 
-# Actions that read or write the latitude and longitude columns.
-_COORDINATE_ACTIONS = (
-    GPSAction.MODIFY_COORDINATES,
-    GPSAction.REMOVE_COORDINATES,
-    GPSAction.ACCEPT,
-)
-
-
 @dataclass(frozen=True)
 class CoordinateColumns:
     """The configured latitude and longitude columns of a GPS configuration."""
