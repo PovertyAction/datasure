@@ -2160,6 +2160,7 @@ def _backcheck_view(
     view = IdView(
         name="backcheck",
         data=records.data,
+        all_data=backcheck_data,
         id_col=id_col,
         key_col=key_col,
         date_col=saved.get("backcheck_date") or config.get("backcheck_date"),
@@ -2279,6 +2280,7 @@ def duplicates_report(
     survey_view = IdView(
         name="survey",
         data=survey_records.data,
+        all_data=data,
         id_col=duplicates_settings.survey_id,
         key_col=duplicates_settings.survey_key,
         date_col=duplicates_settings.survey_date,

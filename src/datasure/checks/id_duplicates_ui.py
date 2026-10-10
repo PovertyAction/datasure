@@ -25,7 +25,7 @@ from datasure.checks.id_corrections import (
     RecordDecision,
     all_dropped,
     build_entries,
-    has_repeated_keys,
+    has_untargetable_keys,
     log_reason,
     save_blockers,
 )
@@ -95,6 +95,10 @@ class IdView:
         Applies and logs the cards' corrections. Required with `alias`.
     resolved : int
         Duplicate IDs resolved by corrections, for the Resolved metric.
+    all_data : pl.DataFrame | None
+        Every record of the dataset, before Records to Include. A card can be
+        corrected only if each of its KEYs is on exactly one of these rows.
+        Defaults to `data`.
     """
 
     name: str
@@ -109,6 +113,7 @@ class IdView:
     alias: str | None = None
     processor: CorrectionProcessor | None = None
     resolved: int = 0
+    all_data: pl.DataFrame | None = None
 
 
 _SWITCHER_KEY = "duplicates_dataset"
@@ -351,15 +356,19 @@ def _render_card_corrections(
     if not view.key_col or view.key_col not in records.columns:
         st.caption("Set the KEY column to correct these records.")
         return
-    if has_repeated_keys(records, view.key_col):
+    all_data = view.data if view.all_data is None else view.all_data
+    if has_untargetable_keys(records, all_data, view.key_col):
         st.warning(
-            "Some of these records share a KEY, and a correction applies to "
-            "every row with its KEY, so they can't be corrected here. Give "
-            "each record a unique KEY in the source data first."
+            "Some of these records have no KEY or share a KEY with another "
+            "record, and a correction applies to every row with its KEY, so "
+            "they can't be corrected here. Give each record a unique KEY in "
+            "the source data first."
         )
         return
 
-    namespace = json.dumps([view.name, card["kind"], card["id"]])
+    # Scoped to the dataset, so cards with the same ID in two datasets don't
+    # share decisions.
+    namespace = json.dumps([view.alias, view.name, card["kind"], card["id"]])
     st.markdown("**Resolve**")
     keys = records[view.key_col].to_list()
     labels = [f"Record {i}" for i in range(1, len(keys) + 1)]
