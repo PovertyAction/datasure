@@ -2127,8 +2127,8 @@ def _resolved_ids(
     uncorrected = processor.get_uncorrected_data(alias)
     try:
         uncorrected = apply_records_to_include(uncorrected, conditions)
-    except ValueError:
-        logger.warning("Records to Include failed on uncorrected %s data", alias)
+    except ValueError as e:
+        logger.warning("Records to Include failed on uncorrected %s data: %s", alias, e)
         return 0
     return count_resolved_ids(uncorrected, included, id_col)
 
