@@ -823,7 +823,7 @@ def render_correction_tab(
                 "removed, for example to resolve duplicate or unmatched IDs."
             ),
         )
-        dataset = datasets[labels.index(chosen)] if chosen in labels else dataset
+        dataset = datasets[labels.index(chosen)]
 
     # Ensure corrected data exists
     corrected_data = correction_processor.get_corrected_data(dataset.alias)

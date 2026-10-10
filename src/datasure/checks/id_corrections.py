@@ -8,6 +8,7 @@ changed record, all or nothing, with the same reason on every entry.
 The functions here are pure; `id_duplicates_ui` renders the controls.
 """
 
+import logging
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -17,6 +18,8 @@ import polars as pl
 
 from datasure.processing.correction_log import Action
 from datasure.processing.corrections import CorrectionEntry
+
+logger = logging.getLogger(__name__)
 
 # Recorded as the `source` of every log entry a card save makes.
 SOURCE = "duplicates"
@@ -80,6 +83,7 @@ def _fits(new_id: str, dtype: pl.DataType) -> bool:
     try:
         pl.Series([new_id]).cast(dtype, strict=True)
     except pl.exceptions.PolarsError:
+        logger.debug("New ID %r does not fit %s", new_id, dtype, exc_info=True)
         return False
     return True
 
