@@ -247,3 +247,27 @@ def test_decision_widgets_are_scoped_to_the_dataset(survey, settings_file):
 
     assert "survey_alias" in _radio(at, "k1").key
     assert "survey_alias" in _reason(at).key
+
+
+@pytest.mark.parametrize("scope", ["_logged_key", "_notice_scope"])
+def test_session_state_is_scoped_to_the_dataset(survey, scope):
+    # A count or notice from one dataset's cards must not show on another's.
+    from datasure.checks import id_duplicates_ui
+    from datasure.checks.id_duplicates_ui import IdView
+
+    def view(alias):
+        return IdView(
+            name="survey",
+            data=survey,
+            id_col="hhid",
+            key_col="KEY",
+            date_col=None,
+            staff_col=None,
+            team_col=None,
+            display_cols_setting="id_table_display_cols",
+            alias=alias,
+            processor=FakeProcessor(),
+        )
+
+    key = getattr(id_duplicates_ui, scope)
+    assert key(view("alias_a")) != key(view("alias_b"))
