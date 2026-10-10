@@ -4,7 +4,23 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from datasure.utils.settings_utils import load_check_settings
+
 TAB_NAME: str = "backchecks"
+
+
+def backcheck_id_columns(
+    setting_file: str, survey_key: str | None, survey_id: str | None
+) -> tuple[str | None, str | None]:
+    """Return the backcheck data's KEY and ID columns.
+
+    These are the ones set on the Backcheck Analysis tab, falling back to the
+    survey's `survey_key` and `survey_id`. The Duplicates tab and the
+    Corrections page both correct backcheck IDs in these columns.
+    """
+    saved = load_check_settings(setting_file, TAB_NAME)
+    return saved.get("survey_key") or survey_key, saved.get("survey_id") or survey_id
+
 
 # Suffix the survey/backcheck merge adds to backcheck columns whose names
 # clash with survey columns, e.g. the backcheck KEY becomes "KEY__BCCL".
@@ -96,9 +112,6 @@ class BackcheckSettings(BaseModel):
     )
     eligibility_values: list[str] | None = Field(
         None, description="Values of eligibility_column that mark a survey eligible"
-    )
-    drop_duplicates_option: str = Field(
-        "drop", description="How to handle duplicate entries"
     )
     no_differences_list: list[str] | None = Field(
         None,

@@ -1,8 +1,9 @@
 """Backcheck coverage against the backcheck target.
 
 The target % resolves from the settings panel, then the page config, then
-`DEFAULT_TARGET_PERCENT`. Coverage counts unique survey IDs, after duplicate
-handling and the optional eligibility filter, that have a matching backcheck.
+`DEFAULT_TARGET_PERCENT`. Coverage counts unique survey IDs, leaving out
+duplicated IDs and applying the optional eligibility filter, that have a
+matching backcheck.
 """
 
 import math
@@ -10,7 +11,7 @@ from dataclasses import dataclass
 
 import polars as pl
 
-from datasure.checks.backchecks.compute import _prepare_data_for_merge
+from datasure.checks.backchecks.compute import exclude_duplicate_ids
 from datasure.checks.backchecks.models import BackcheckSettings
 
 DEFAULT_TARGET_PERCENT: float = 10.0
@@ -66,13 +67,13 @@ def backchecked_surveys(
 ) -> pl.DataFrame | None:
     """Return one row per eligible survey ID, flagged if it was backchecked.
 
-    Both datasets go through the duplicate-handling option first, as in the
-    backcheck comparison. Matching is by survey ID only.
+    Records with a duplicated survey ID are left out of both datasets first,
+    as in the backcheck comparison. Matching is by survey ID only.
 
     Returns
     -------
     pl.DataFrame | None
-        The deduplicated eligible survey rows plus a boolean `BACKCHECKED`
+        The eligible survey rows with a unique ID plus a boolean `BACKCHECKED`
         column, or None if either dataset lacks the survey ID column.
     """
     survey_id = settings.survey_id
@@ -83,11 +84,8 @@ def backchecked_surveys(
     ):
         return None
 
-    option = settings.drop_duplicates_option
-    surveys = _prepare_data_for_merge(survey_data, survey_id, option).unique(
-        subset=[survey_id], keep="first", maintain_order=True
-    )
-    backchecked_ids = _prepare_data_for_merge(backcheck_data, survey_id, option)[
+    surveys = exclude_duplicate_ids(survey_data, survey_id)
+    backchecked_ids = exclude_duplicate_ids(backcheck_data, survey_id)[
         survey_id
     ].drop_nulls()
 
@@ -201,9 +199,7 @@ def compute_staff_coverage(
     survey_id = settings.survey_id
     backchecked_ids = surveys.filter(pl.col(BACKCHECKED))[survey_id]
     return (
-        _prepare_data_for_merge(
-            backcheck_data, survey_id, settings.drop_duplicates_option
-        )
+        exclude_duplicate_ids(backcheck_data, survey_id)
         .filter(
             pl.col(survey_id).is_in(backchecked_ids.implode())
             & pl.col(staff_col).is_not_null()

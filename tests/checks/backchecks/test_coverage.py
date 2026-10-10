@@ -118,13 +118,12 @@ def _coverage_settings(**overrides) -> BackcheckSettings:
         survey_id="hhid",
         enumerator="enum",
         backchecker="bcer",
-        drop_duplicates_option="drop",
         **overrides,
     )
 
 
-def test_on_track_counts_unique_ids_after_duplicate_handling():
-    """Duplicated survey IDs are dropped from the base before counting."""
+def test_on_track_leaves_out_duplicated_survey_ids():
+    """Duplicated survey IDs are left out of the base before counting."""
     survey = pl.DataFrame(
         {
             "KEY": ["k1", "k2", "k3", "k4", "k5"],

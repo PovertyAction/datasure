@@ -51,6 +51,13 @@ from datasure.checks.backchecks.models import (
     SearchType,
     merged_backcheck_name,
 )
+from datasure.checks.backchecks.scope import (
+    ComparisonScope,
+    comparison_scope,
+    id_problem_counts,
+    id_problem_warning,
+    scope_captions,
+)
 from datasure.checks.backchecks.settings_ui import backchecks_report_settings
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
@@ -2023,6 +2030,31 @@ def _render_attribution_log(log: pl.DataFrame) -> None:
 # ==============================================================================
 
 
+def _render_comparison_scope(scope: ComparisonScope) -> None:
+    """State which records are compared, and any filter that failed."""
+    for records in (scope.survey, scope.backcheck):
+        if records.error:
+            st.error(
+                f"The {records.label} Records to Include filter on the "
+                f"Duplicates tab could not be applied, so no {records.label} "
+                f"records are compared: {records.error}"
+            )
+    lines = scope_captions(scope)
+    if lines:
+        hint = "Change Records to Include in the Duplicates tab settings."
+        # Two trailing spaces make a Markdown line break.
+        st.caption("  \n".join([*lines, hint]))
+
+
+def _render_id_problem_warning(
+    scope: ComparisonScope, survey_data: pl.DataFrame, survey_id: str | None
+) -> None:
+    """Warn about duplicate and unmatched IDs left out of the comparison."""
+    warning = id_problem_warning(id_problem_counts(scope, survey_data, survey_id))
+    if warning:
+        st.warning(warning, icon=":material/content_copy:")
+
+
 def backchecks_report(
     project_id: str,
     page_name_id: str,
@@ -2095,6 +2127,13 @@ def backchecks_report(
         backcheck_datetime_columns,
     )
 
+    # The comparison and coverage use the records the Duplicates tab's
+    # Records to Include filters keep; the settings above list every column.
+    all_survey_data = survey_data
+    scope = comparison_scope(survey_data, backcheck_data, setting_file)
+    _render_comparison_scope(scope)
+    survey_data = scope.survey.data
+
     # Outlier columns configuration
     st.subheader("Backchecks Columns Configuration")
 
@@ -2128,7 +2167,7 @@ def backchecks_report(
         set(survey_categorical_columns).intersection(set(backcheck_categorical_columns))
     )
     _render_backchecks_column_actions(
-        project_id, page_name_id, survey_data, backcheck_data, common_columns
+        project_id, page_name_id, all_survey_data, backcheck_data, common_columns
     )
 
     # Compute backcheck analysis
@@ -2138,7 +2177,10 @@ def backchecks_report(
         "logs",
     )
     _backcheck_analysis = compute_backcheck_analysis(
-        survey_data, backcheck_data, backcheck_settings, backcheck_column_settings
+        survey_data,
+        scope.backcheck.data,
+        backcheck_settings,
+        backcheck_column_settings,
     )
     review = AttributionContext(
         project_id, page_name_id, load_attribution_log(project_id, page_name_id)
@@ -2170,7 +2212,7 @@ def backchecks_report(
     )
 
     _render_backcheck_summary(
-        survey_data, backcheck_data, backcheck_settings, _backcheck_analysis
+        survey_data, scope.backcheck.data, backcheck_settings, _backcheck_analysis
     )
 
     _render_backchecker_productivity(
@@ -2196,7 +2238,7 @@ def backchecks_report(
 
     _render_enum_bcer_stats(
         survey_data,
-        backcheck_data,
+        scope.backcheck.data,
         _backcheck_analysis,
         backcheck_settings,
         setting_file,
@@ -2234,8 +2276,13 @@ def backchecks_report(
         type="success",
     )
 
+    _render_id_problem_warning(scope, all_survey_data, backcheck_settings.survey_id)
     _render_comparison_results_section(
-        survey_data, backcheck_data, _backcheck_analysis, backcheck_settings, review
+        survey_data,
+        scope.backcheck.data,
+        _backcheck_analysis,
+        backcheck_settings,
+        review,
     )
     _render_attribution_log(review.log)
 

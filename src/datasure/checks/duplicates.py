@@ -18,6 +18,8 @@ import polars as pl
 import streamlit as st
 
 from datasure.checks.backchecks.models import TAB_NAME as BACKCHECKS_TAB_NAME
+from datasure.checks.backchecks.models import backcheck_id_columns
+from datasure.checks.id_duplicates import count_resolved_ids
 from datasure.checks.id_duplicates_ui import (
     BACKCHECK_DATA,
     IdView,
@@ -36,6 +38,7 @@ from datasure.models.schemas import (
     DuplicatesStats,
     FilterCondition,
 )
+from datasure.processing.corrections import CorrectionProcessor
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.navigations_utils import demo_callout
@@ -1355,6 +1358,74 @@ def apply_records_to_include(
         raise ValueError(f"Error applying filter: {e}") from e
 
 
+def saved_records_to_include(settings_file: str, prefix: str = "") -> dict:
+    """Return a page's saved Records to Include filter, without rendering it.
+
+    Other tabs, such as Backchecks, use this to check the same records as the
+    Duplicates tab. Apply the result with `apply_records_to_include`.
+
+    Parameters
+    ----------
+    settings_file : str
+        The page's settings file.
+    prefix : str, default=""
+        ``""`` for the survey filter, `BACKCHECK_PREFIX` for the backcheck
+        filter.
+
+    Returns
+    -------
+    dict
+        The conditions, as returned by `_render_duplicates_condition_options`,
+        or an empty dict when no condition column is saved.
+    """
+    saved = load_check_settings(settings_file, TAB_NAME)
+    condition_col = saved.get(f"{prefix}condition_col")
+    if not condition_col:
+        return {}
+    return {
+        "condition_col": condition_col,
+        "condition_type": saved.get(f"{prefix}condition_type"),
+        "condition_value": saved.get(f"{prefix}condition_value"),
+        "missing_as_duplicates": saved.get("missing_as_duplicates", False),
+    }
+
+
+# How each condition type reads in a filter description.
+_CONDITION_OPERATORS = {
+    NumCondition.EQUALS.value: "==",
+    NumCondition.NOT_EQUALS.value: "!=",
+    NumCondition.GREATER_THAN.value: ">",
+    NumCondition.GREATER_THAN_OR_EQUAL.value: ">=",
+    NumCondition.LESS_THAN.value: "<",
+    NumCondition.LESS_THAN_OR_EQUAL.value: "<=",
+    NumCondition.INCLUDES.value: "in",
+    NumCondition.EXCLUDES.value: "not in",
+    NumCondition.IN_RANGE.value: "between",
+    StrCondition.STARTWITH.value: "starts with",
+    StrCondition.ENDWITH.value: "ends with",
+    StrCondition.CONTAINS.value: "contains",
+}
+
+
+def describe_records_to_include(conditions: dict | None) -> str | None:
+    """Describe an active Records to Include filter, e.g. "status == Complete".
+
+    Returns None when no filter is active (see `has_active_filter`).
+    """
+    if not has_active_filter(conditions):
+        return None
+    column = conditions["condition_col"]
+    condition_type = conditions["condition_type"]
+    value = conditions["condition_value"]
+    operator = _CONDITION_OPERATORS.get(condition_type, condition_type)
+    if isinstance(value, list | tuple):
+        if condition_type == NumCondition.IN_RANGE.value and len(value) == 2:
+            value = f"{value[0]} and {value[1]}"
+        else:
+            value = ", ".join(str(v) for v in value)
+    return f"{column} {operator} {value}"
+
+
 # =============================================================================
 # Duplicates Column Configuration Management
 # =============================================================================
@@ -1980,7 +2051,7 @@ def compute_column_duplicates(
 
 
 @dataclass(frozen=True)
-class _FilteredRecords:
+class FilteredRecords:
     """The records a Records to Include filter keeps, and any problem with it.
 
     Attributes
@@ -2001,28 +2072,28 @@ class _FilteredRecords:
     matches_nothing: bool = False
 
 
-def _records_to_include(
+def filter_records_to_include(
     data: pl.DataFrame, conditions: dict, label: str
-) -> _FilteredRecords:
+) -> FilteredRecords:
     """Apply a Records to Include filter without showing anything.
 
     An invalid filter, like a filter that matches nothing, leaves no records
-    to check. Show its problems with `_render_filter_messages`.
+    to check. Show its problems with `render_filter_messages`.
     """
     try:
         filtered = apply_records_to_include(data, conditions)
     except ValueError as e:
         logger.warning("Records to Include filter for %s data failed: %s", label, e)
-        return _FilteredRecords(data.clear(), label, error=str(e))
+        return FilteredRecords(data.clear(), label, error=str(e))
 
-    return _FilteredRecords(
+    return FilteredRecords(
         filtered,
         label,
         matches_nothing=has_active_filter(conditions) and filtered.is_empty(),
     )
 
 
-def _render_filter_messages(records: _FilteredRecords) -> None:
+def render_filter_messages(records: FilteredRecords) -> None:
     """Show an error for an invalid filter or a warning for an empty one."""
     label = records.label
     if records.error:
@@ -2039,34 +2110,72 @@ def _render_filter_messages(records: _FilteredRecords) -> None:
         )
 
 
+def _resolved_ids(
+    processor: CorrectionProcessor,
+    alias: str | None,
+    conditions: dict,
+    id_col: str | None,
+    included: pl.DataFrame,
+) -> int:
+    """Count the duplicate IDs corrections resolved among the included records.
+
+    Compares the included corrected records with the records the same
+    Records to Include filter keeps from the uncorrected data.
+    """
+    if not alias or not id_col:
+        return 0
+    uncorrected = processor.get_uncorrected_data(alias)
+    try:
+        uncorrected = apply_records_to_include(uncorrected, conditions)
+    except ValueError:
+        logger.warning("Records to Include failed on uncorrected %s data", alias)
+        return 0
+    return count_resolved_ids(uncorrected, included, id_col)
+
+
 def _backcheck_view(
     backcheck_data: pl.DataFrame,
     survey_data: pl.DataFrame,
     duplicates_settings: DuplicatesSettings,
     config: dict,
     setting_file: str,
-) -> tuple[IdView, _FilteredRecords]:
+    processor: CorrectionProcessor,
+) -> tuple[IdView, FilteredRecords]:
     """Build the backcheck view from the page's backcheck settings.
 
     The ID and KEY columns are the ones set on the Backcheck Analysis tab,
     falling back to the survey's. Unmatched IDs are matched against every
-    survey record, not only the survey's Records to Include. Also returns the
-    filtered backcheck records, for their filter messages.
+    survey record, not only the survey's Records to Include. Corrections go
+    to the backcheck alias's log. Also returns the filtered backcheck
+    records, for their filter messages.
     """
     saved = load_check_settings(setting_file, BACKCHECKS_TAB_NAME)
-    records = _records_to_include(
+    records = filter_records_to_include(
         backcheck_data, duplicates_settings.backcheck_conditions, "backcheck"
     )
+    key_col, id_col = backcheck_id_columns(
+        setting_file, duplicates_settings.survey_key, duplicates_settings.survey_id
+    )
+    alias = config.get("backcheck_data_name")
     view = IdView(
         name="backcheck",
         data=records.data,
-        id_col=saved.get("survey_id") or duplicates_settings.survey_id,
-        key_col=saved.get("survey_key") or duplicates_settings.survey_key,
+        id_col=id_col,
+        key_col=key_col,
         date_col=saved.get("backcheck_date") or config.get("backcheck_date"),
         staff_col=saved.get("backchecker") or config.get("backchecker"),
         team_col=config.get("backchecker_team"),
         display_cols_setting="backcheck_id_table_display_cols",
         survey_data=survey_data,
+        alias=alias,
+        processor=processor,
+        resolved=_resolved_ids(
+            processor,
+            alias,
+            duplicates_settings.backcheck_conditions,
+            id_col,
+            records.data,
+        ),
     )
     return view, records
 
@@ -2084,6 +2193,7 @@ def duplicates_report(
     config: dict,
     survey_columns: ColumnByType,
     backcheck_data: pl.DataFrame | None = None,
+    alias: str | None = None,
 ) -> None:
     """Generate a comprehensive duplicates report.
 
@@ -2111,6 +2221,10 @@ def duplicates_report(
         The survey data's columns by type.
     backcheck_data : pl.DataFrame | None, default=None
         The page's backcheck data, if any.
+    alias : str | None, default=None
+        The survey data's alias. When set, the ID duplicate cards can
+        correct the survey data; the backcheck cards correct the
+        ``backcheck_data_name`` alias.
     """
     categorical_columns = survey_columns.categorical_columns
     datetime_columns = survey_columns.datetime_columns
@@ -2149,11 +2263,19 @@ def duplicates_report(
             "by side and highlights the fields that differ. "
             "Use **Compare all fields** on a card to see every column, and "
             "expand **:material/clarify: Show more columns in report** to add "
-            "context columns such as **enum_name** or **state** to every card."
+            "context columns such as **enum_name** or **state** to every card.\n\n"
+            "To resolve a card, choose **Keep**, **Modify ID** or **Drop** for "
+            "each record so that at most one record keeps the ID, then give a "
+            "reason and a note and click **Save**. The card disappears, and "
+            "**Resolved** counts the duplicate IDs that corrections have "
+            "resolved. Undo a save on the **Correct Data** page."
         )
 
     # Build both views first: the switcher shows each one's duplicate count.
-    survey_records = _records_to_include(data, duplicates_settings.conditions, "survey")
+    processor = CorrectionProcessor(project_id)
+    survey_records = filter_records_to_include(
+        data, duplicates_settings.conditions, "survey"
+    )
     survey_view = IdView(
         name="survey",
         data=survey_records.data,
@@ -2163,11 +2285,20 @@ def duplicates_report(
         staff_col=duplicates_settings.enumerator,
         team_col=duplicates_settings.team,
         display_cols_setting="id_table_display_cols",
+        alias=alias,
+        processor=processor,
+        resolved=_resolved_ids(
+            processor,
+            alias,
+            duplicates_settings.conditions,
+            duplicates_settings.survey_id,
+            survey_records.data,
+        ),
     )
     backcheck = None
     if config.get("backcheck_data_name") and backcheck_data is not None:
         backcheck = _backcheck_view(
-            backcheck_data, data, duplicates_settings, config, setting_file
+            backcheck_data, data, duplicates_settings, config, setting_file, processor
         )
 
     dataset = render_dataset_switcher(
@@ -2176,11 +2307,11 @@ def duplicates_report(
     )
     if dataset == BACKCHECK_DATA and backcheck is not None:
         backcheck_view, backcheck_records = backcheck
-        _render_filter_messages(backcheck_records)
+        render_filter_messages(backcheck_records)
         render_id_duplicates(backcheck_view, setting_file)
         return
 
-    _render_filter_messages(survey_records)
+    render_filter_messages(survey_records)
     data = survey_records.data
     if not duplicates_settings.survey_id:
         st.info("Survey ID column is not configured for duplicates check.")

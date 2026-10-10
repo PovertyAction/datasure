@@ -2919,8 +2919,13 @@ def _run_report(
     backcheck_data=None,
     dataset="Survey data",
     saved_backcheck_settings=None,
+    alias=None,
+    uncorrected=None,
 ):
-    """Run duplicates_report with the UI mocked; return the mocks used."""
+    """Run duplicates_report with the UI mocked; return the mocks used.
+
+    `uncorrected` maps an alias to the data `get_uncorrected_data` returns.
+    """
     from contextlib import ExitStack
 
     from datasure.utils.dataframe_utils import ColumnByType
@@ -2938,8 +2943,13 @@ def _run_report(
                 "duckdb_get_table",
                 "_render_duplicates_column_actions",
                 "_render_other_duplicates_metrics",
+                "CorrectionProcessor",
             )
         }
+        uncorrected = uncorrected or {}
+        mocks["CorrectionProcessor"].return_value.get_uncorrected_data.side_effect = (
+            lambda a: uncorrected.get(a, pl.DataFrame())
+        )
         for attr in ("columns", "container", "expander"):
             setattr(mocks["st"], attr, getattr(mock_st_obj, attr))
         mocks["duplicates_report_settings"].return_value = settings
@@ -2955,6 +2965,7 @@ def _run_report(
             config,
             ColumnByType(categorical_columns=[], datetime_columns=[]),
             backcheck_data,
+            alias=alias,
         )
     return mocks
 
@@ -3138,6 +3149,86 @@ class TestDuplicatesReportIdViews:
 
         mocks["st"].warning.assert_not_called()
         assert mocks["render_id_duplicates"].call_args.args[0].name == "backcheck"
+
+    def test_survey_cards_correct_the_survey_alias(self, report_data):
+        settings = DuplicatesSettings(survey_id="hhid", survey_key="KEY")
+
+        mocks = _run_report(
+            report_data, settings, {"survey_id": "hhid"}, alias="survey_alias"
+        )
+
+        view = mocks["render_id_duplicates"].call_args.args[0]
+        assert view.alias == "survey_alias"
+        assert view.processor is mocks["CorrectionProcessor"].return_value
+        mocks["CorrectionProcessor"].assert_called_once_with("project1")
+
+    def test_backcheck_cards_correct_the_backcheck_alias(
+        self, report_data, report_backcheck
+    ):
+        settings = DuplicatesSettings(survey_id="hhid", survey_key="KEY")
+        config = {"survey_id": "hhid", "backcheck_data_name": "bc_data"}
+
+        mocks = _run_report(
+            report_data,
+            settings,
+            config,
+            backcheck_data=report_backcheck,
+            dataset="Backcheck data",
+            alias="survey_alias",
+        )
+
+        assert mocks["render_id_duplicates"].call_args.args[0].alias == "bc_data"
+
+    def test_resolved_counts_duplicates_removed_by_corrections(self, report_data):
+        """B was duplicated before a correction dropped one of its records."""
+        settings = DuplicatesSettings(survey_id="hhid", survey_key="KEY")
+        uncorrected = report_data.vstack(
+            pl.DataFrame({"hhid": ["B"], "KEY": ["k4"], "consent": ["yes"]})
+        )
+
+        mocks = _run_report(
+            report_data,
+            settings,
+            {"survey_id": "hhid"},
+            alias="survey_alias",
+            uncorrected={"survey_alias": uncorrected},
+        )
+
+        assert mocks["render_id_duplicates"].call_args.args[0].resolved == 1
+
+    def test_resolved_uses_the_records_to_include_filter(self, report_data):
+        """A duplicate only among left-out records was never a duplicate."""
+        settings = DuplicatesSettings(
+            survey_id="hhid",
+            survey_key="KEY",
+            conditions={
+                "condition_col": "consent",
+                "condition_type": StrCondition.EQUALS.value,
+                "condition_value": "yes",
+            },
+        )
+        uncorrected = report_data.vstack(
+            pl.DataFrame({"hhid": ["B"], "KEY": ["k4"], "consent": ["no"]})
+        )
+
+        mocks = _run_report(
+            report_data,
+            settings,
+            {"survey_id": "hhid"},
+            alias="survey_alias",
+            uncorrected={"survey_alias": uncorrected},
+        )
+
+        assert mocks["render_id_duplicates"].call_args.args[0].resolved == 0
+
+    def test_without_an_alias_the_cards_cannot_correct(self, report_data):
+        settings = DuplicatesSettings(survey_id="hhid", survey_key="KEY")
+
+        mocks = _run_report(report_data, settings, {"survey_id": "hhid"})
+
+        view = mocks["render_id_duplicates"].call_args.args[0]
+        assert view.alias is None
+        assert view.resolved == 0
 
     def test_backcheck_not_available_without_backcheck_data(self, report_data):
         settings = DuplicatesSettings(survey_id="hhid", survey_key="KEY")

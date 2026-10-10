@@ -58,18 +58,15 @@ def test_backcheck_settings_model_valid():
         enumerator="enumerator",
         backchecker="backchecker",
         backcheck_target_percent=10,
-        drop_duplicates_option="drop",
     )
     assert settings.survey_key == "survey_id"
     assert settings.backcheck_target_percent == 10
-    assert settings.drop_duplicates_option == "drop"
 
 
 def test_backcheck_settings_model_defaults():
     """Test BackcheckSettings model with default values."""
     settings = BackcheckSettings(survey_key="survey_id")
     assert settings.backcheck_target_percent is None
-    assert settings.drop_duplicates_option == "drop"
     assert settings.no_differences_list is None
     assert settings.exclude_values_list is None
     assert settings.trimspaces_option is False
@@ -165,3 +162,38 @@ def test_backcheck_test_options_defaults():
     assert options.prtest is False
     assert options.signrank is False
     assert options.reliability is False
+
+
+def test_backcheck_settings_ignores_removed_duplicate_option():
+    """Settings saved with the removed duplicate-handling option still load.
+
+    Duplicates are always left out of the comparison now, whatever was saved.
+    """
+    settings = BackcheckSettings(survey_key="KEY", drop_duplicates_option="last")
+    assert "drop_duplicates_option" not in settings.model_dump()
+
+
+class TestBackcheckIdColumns:
+    """The backcheck KEY and ID columns, from the Backcheck Analysis tab."""
+
+    def test_saved_columns_win(self, tmp_path):
+        import json
+
+        from datasure.checks.backchecks.models import backcheck_id_columns
+
+        settings_file = tmp_path / "page.json"
+        settings_file.write_text(
+            json.dumps({"backchecks": {"survey_key": "bc_key", "survey_id": "bc_id"}})
+        )
+
+        assert backcheck_id_columns(str(settings_file), "KEY", "hhid") == (
+            "bc_key",
+            "bc_id",
+        )
+
+    def test_fall_back_to_the_survey_columns(self, tmp_path):
+        from datasure.checks.backchecks.models import backcheck_id_columns
+
+        missing = str(tmp_path / "none.json")
+
+        assert backcheck_id_columns(missing, "KEY", "hhid") == ("KEY", "hhid")

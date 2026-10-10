@@ -428,49 +428,6 @@ def _render_eligibility_filter(
     return eligibility_column, eligibility_values
 
 
-def _render_duplicate_handling(
-    settings_file: str, default_settings: BackcheckSettings
-) -> str:
-    """Render duplicate handling section.
-
-    Parameters
-    ----------
-    settings_file : str
-        Path to settings file.
-    default_settings : BackcheckSettings
-        Default settings.
-
-    Returns
-    -------
-    str
-        Drop duplicates option.
-    """
-    with st.container(border=True):
-        st.markdown("##### Duplicate Handling")
-        st.write("How would you like to handle duplicates?")
-        options_map = {
-            "drop": ":material/remove_selection: Drop All Entries",
-            "first": ":material/first_page: Keep First Entry",
-            "last": ":material/last_page: Keep Last Entry",
-        }
-        drop_duplicates_option = st.pills(
-            "Select an option for handling duplicates",
-            options=list(options_map.keys()),
-            format_func=lambda x: options_map[x],
-            key="drop_duplicates_option_backchecks",
-            default=default_settings.drop_duplicates_option,
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_drop_duplicates_option"},
-        )
-        save_check_settings(
-            settings_file,
-            TAB_NAME,
-            {"drop_duplicates_option": drop_duplicates_option},
-        )
-
-    return drop_duplicates_option
-
-
 def _render_value_list_display(
     values: list[str], info_message: str, warning_message: str, help_text: str
 ) -> None:
@@ -509,8 +466,11 @@ def _render_value_list_display(
 def _render_additional_options(
     settings_file: str,
     config: BackcheckSettings,
-) -> tuple[str, list[str], list[str], StrCompareOptions]:
+) -> tuple[list[str], list[str], StrCompareOptions]:
     """Render additional options section.
+
+    Records with a duplicated survey ID are always left out of the
+    comparison, so there is no duplicate-handling option.
 
     Parameters
     ----------
@@ -519,18 +479,15 @@ def _render_additional_options(
 
     Returns
     -------
-    tuple[str, list[str], list[str], StrCompareOptions]
-        Drop duplicates option, no diff values, exclude values,
-        and string comparison options.
+    tuple[list[str], list[str], StrCompareOptions]
+        No diff values, exclude values, and string comparison options.
     """
     with st.container(border=True):
         st.subheader("Additional Options")
-
-        default_settings = load_default_backchecks_settings(settings_file, config)
-
-        # Duplicate handling
-        drop_duplicates_option = _render_duplicate_handling(
-            settings_file, default_settings
+        st.caption(
+            "Records whose survey ID is duplicated, in the survey or the "
+            "backcheck data, are left out of the comparison until the "
+            "duplicate is resolved on the Duplicates tab."
         )
 
         # No differences settings
@@ -567,7 +524,7 @@ def _render_additional_options(
             st.write("Settings for string comparison in backcheck comparisons.")
             string_comp_options = _render_string_comparison_options(settings_file)
 
-    return drop_duplicates_option, no_diff_values, exclude_values, string_comp_options
+    return no_diff_values, exclude_values, string_comp_options
 
 
 @demo_output_onboarding(TAB_NAME)
@@ -654,12 +611,9 @@ def backchecks_report_settings(
             settings_file, default_settings, survey_data
         )
 
-        (
-            drop_duplicates_option,
-            no_diff_values,
-            exclude_values,
-            string_comp_options,
-        ) = _render_additional_options(settings_file, config)
+        no_diff_values, exclude_values, string_comp_options = (
+            _render_additional_options(settings_file, config)
+        )
 
     return BackcheckSettings(
         survey_key=survey_key,
@@ -673,7 +627,6 @@ def backchecks_report_settings(
         error_rate_target_percent=error_rate_target_percent,
         eligibility_column=eligibility_column,
         eligibility_values=eligibility_values,
-        drop_duplicates_option=drop_duplicates_option,
         no_differences_list=no_diff_values,
         exclude_values_list=exclude_values,
         case_option=string_comp_options.case_option,

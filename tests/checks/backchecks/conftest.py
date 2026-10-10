@@ -72,7 +72,6 @@ def sample_backcheck_settings():
         enumerator="enumerator",
         backchecker="backchecker",
         backcheck_target_percent=10,
-        drop_duplicates_option="drop",
         no_differences_list=["refuse", "dk"],
         exclude_values_list=["na", "skip"],
         case_option="lowercase",
@@ -160,7 +159,6 @@ def backcheck_settings_file(tmp_path):
             "enumerator": "enumerator",
             "backchecker": "backchecker",
             "backcheck_target_percent": 10,
-            "drop_duplicates_option": "drop",
         }
     }
     file_path = tmp_path / "backcheck_settings.json"
