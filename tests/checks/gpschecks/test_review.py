@@ -488,3 +488,34 @@ def test_an_acceptance_survives_an_accuracy_change(processor):
     )
     active = processor.get_active_acceptances("survey", GPS_CHECK_TYPE, "KEY")
     assert accepted_gps_keys(active, COLUMNS) == {"K1": "ok"}
+
+
+# =============================================================================
+# Numeric KEYs that pandas turned into floats
+# =============================================================================
+
+
+@pytest.fixture
+def float_key_outliers() -> pd.DataFrame:
+    """An integer KEY column with a null, as `to_pandas` returns it (float64)."""
+    return pl.DataFrame(
+        {
+            "KEY": [1, 2, None],
+            "latitude": [6.7, 6.5, 6.6],
+            "longitude": [-0.2, -0.3, -0.1],
+            "Outlier": [True, True, False],
+        }
+    ).to_pandas()
+
+
+def test_mark_gps_reviewed_matches_integral_float_keys(float_key_outliers):
+    assert float_key_outliers["KEY"].dtype == "float64"
+    marked = mark_gps_reviewed(float_key_outliers, {"1": "ok"}, "KEY")
+    assert marked[REVIEW_STATUS_COL].tolist() == [REVIEWED_BADGE, None, None]
+
+
+def test_select_gps_outlier_returns_integral_float_keys_as_int(float_key_outliers):
+    table = outliers_table(float_key_outliers, show_reviewed=False)
+    selection = select_gps_outlier(table, [0], "KEY")
+    assert selection == GPSSelection(1, reviewed=False)
+    assert type(selection.key_value) is int

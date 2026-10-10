@@ -852,7 +852,9 @@ class GPSReview:
     survey_id: str | None = None
 
 
-def _mark_accepted_outliers(outlier_df, survey_key: str, review: GPSReview):
+def _mark_accepted_outliers(
+    outlier_df: pd.DataFrame, survey_key: str, review: GPSReview
+) -> pd.DataFrame:
     """Mark the outliers accepted for the selected configuration's columns."""
     if review.columns is None:
         accepted = {}
@@ -865,7 +867,7 @@ def _mark_accepted_outliers(outlier_df, survey_key: str, review: GPSReview):
 
 
 def _render_reviewable_outliers_table(
-    table,
+    table: pd.DataFrame,
     selected_alias: str,
     survey_key: str,
     review: GPSReview,
