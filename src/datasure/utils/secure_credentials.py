@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 # Service identifiers for keyring
 SCTO_SERVICE_PREFIX = "datasure"
 CREDENTIAL_METADATA_FILE = "credential_metadata.json"
+# The Mapbox token is shared by every project on the machine.
+MAPBOX_SERVICE_NAME = f"{SCTO_SERVICE_PREFIX}_mapbox"
+MAPBOX_USERNAME = "mapbox_token"
 
 
 class SecureCredentialError(Exception):
@@ -52,6 +55,41 @@ def _get_metadata_path(project_id: str) -> Path:
         Path to metadata file
     """
     return get_cache_path(project_id, "settings", CREDENTIAL_METADATA_FILE)
+
+
+def store_mapbox_token(token: str) -> None:
+    """Save the Mapbox API token in the system keyring.
+
+    The token replaces any saved before it and persists until another is
+    saved.
+
+    Raises
+    ------
+    SecureCredentialError
+        If the token is blank or the keyring can't store it.
+    """
+    token = token.strip() if token else ""
+    if not token:
+        raise SecureCredentialError("The Mapbox token is blank")
+    try:
+        keyring.set_password(MAPBOX_SERVICE_NAME, MAPBOX_USERNAME, token)
+    except KeyringError as e:
+        raise SecureCredentialError(
+            f"Could not save the Mapbox token in the system keyring: {e}"
+        ) from e
+
+
+def retrieve_mapbox_token() -> str | None:
+    """Return the Mapbox API token saved in the system keyring, if any.
+
+    A keyring that can't be read is logged and treated as having no token,
+    so the page still renders and asks for one.
+    """
+    try:
+        return keyring.get_password(MAPBOX_SERVICE_NAME, MAPBOX_USERNAME)
+    except KeyringError:
+        logger.warning("Could not read the Mapbox token from the system keyring")
+        return None
 
 
 def store_scto_credentials(
