@@ -395,6 +395,7 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             config.setting_file,
             gpschecks_config,
             survey_columns,
+            alias=config.survey_data_name,
         )
 
     with enumerator_stats:
