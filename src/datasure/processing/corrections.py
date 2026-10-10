@@ -319,7 +319,8 @@ class CorrectionProcessor:
     def get_corrected_data(self, alias: str) -> pl.DataFrame:
         """Get corrected data for a given alias.
 
-        If no corrected data exists, initializes from prepped data.
+        If no corrected data exists, initializes it from the uncorrected data
+        (see `get_uncorrected_data`).
 
         Parameters
         ----------
@@ -338,17 +339,36 @@ class CorrectionProcessor:
         )
 
         if corrected_data.is_empty():
-            # Initialize from prepped data
-            prepped_data = duckdb_get_table(
-                project_id=self.project_id,
-                alias=alias,
-                db_name="prep",
-            )
-            if not prepped_data.is_empty():
-                self.save_corrected_data(alias, prepped_data)
-                return prepped_data
+            uncorrected_data = self.get_uncorrected_data(alias)
+            if not uncorrected_data.is_empty():
+                self.save_corrected_data(alias, uncorrected_data)
+                return uncorrected_data
 
         return corrected_data
+
+    def get_uncorrected_data(self, alias: str) -> pl.DataFrame:
+        """Return the data corrections apply to: prep data, else raw data.
+
+        An alias with no prep table, such as backcheck data that was never
+        prepared, is corrected from its raw table.
+
+        Parameters
+        ----------
+        alias : str
+            The data alias/table name
+
+        Returns
+        -------
+        pl.DataFrame
+            The prep table, or the raw table if there is no prep table. Has
+            no columns when neither exists.
+        """
+        prepped_data = duckdb_get_table(
+            project_id=self.project_id, alias=alias, db_name="prep"
+        )
+        if prepped_data.width > 0:
+            return prepped_data
+        return duckdb_get_table(project_id=self.project_id, alias=alias, db_name="raw")
 
     def save_corrected_data(self, alias: str, data: pl.DataFrame) -> None:
         """Save corrected data to storage.
@@ -1150,14 +1170,10 @@ class CorrectionProcessor:
         list[ReapplyFailure]
             Corrections that failed to reapply and were skipped, in log order.
         """
-        fresh_data = duckdb_get_table(
-            project_id=self.project_id,
-            alias=alias,
-            db_name="prep",
-        )
+        fresh_data = self.get_uncorrected_data(alias)
 
         if fresh_data.width == 0:
-            # Prep table doesn't exist yet, nothing to correct
+            # Neither a prep nor a raw table exists yet, nothing to correct
             return []
 
         correction_log = self.get_correction_log(alias)

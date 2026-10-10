@@ -12,7 +12,6 @@ from datasure.checks.backchecks.settings_ui import (
     _get_default_index,
     _render_additional_options,
     _render_date_columns,
-    _render_duplicate_handling,
     _render_selectbox_with_save,
     _render_staff_identifiers,
     _render_survey_identifiers,
@@ -176,15 +175,6 @@ def test_render_tracking_options_saves_error_rate_target(patched_bc):
     assert {"error_rate_target_percent": None} in saved
 
 
-def test_render_duplicate_handling(patched_bc):
-    """_render_duplicate_handling returns selected option string."""
-    patched_bc.pills.return_value = "drop"
-    result = _render_duplicate_handling(
-        "settings.json", BackcheckSettings(survey_key=None)
-    )
-    assert result == "drop"
-
-
 def test_render_value_list_display_with_values(patched_bc):
     """_render_value_list_display shows info when values exist."""
     _render_value_list_display(["val1", "val2"], "Has values", "No values", "help")
@@ -198,7 +188,7 @@ def test_render_value_list_display_empty(patched_bc):
 
 
 def test_render_additional_options(patched_bc):
-    """_render_additional_options returns 4-tuple of settings."""
+    """_render_additional_options returns 3-tuple of settings."""
     with (
         patch(
             "datasure.checks.backchecks.settings_ui._render_no_differences_settings",
@@ -222,7 +212,7 @@ def test_render_additional_options(patched_bc):
         )
 
     assert isinstance(result, tuple)
-    assert len(result) == 4
+    assert len(result) == 3
 
 
 def test_render_no_differences_settings_fragment(bc):
@@ -264,7 +254,7 @@ def report_settings_with_choices(patched_bc):
         patch(f"{module}._render_tracking_options", return_value=(35, 4.5)),
         patch(
             f"{module}._render_additional_options",
-            return_value=("last", [], [], StrCompareOptions()),
+            return_value=([], [], StrCompareOptions()),
         ),
     ):
         yield backchecks_report_settings(
@@ -278,13 +268,6 @@ def report_settings_with_choices(patched_bc):
             [],
             [],
         )
-
-
-def test_report_settings_keeps_selected_duplicate_option(
-    report_settings_with_choices,
-):
-    """A non-default duplicate-handling choice is not replaced by the default."""
-    assert report_settings_with_choices.drop_duplicates_option == "last"
 
 
 def test_report_settings_keeps_selected_target_percent(

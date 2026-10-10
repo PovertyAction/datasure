@@ -8,6 +8,7 @@ from pathlib import Path
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
 
+from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
 
 # Try to import toml for writing, use fallback if not available
@@ -116,6 +117,20 @@ def get_hash_id(name: str, length=6) -> str:
     """
     hash_val = hashlib.sha256(name.encode()).hexdigest()
     return hash_val[:length]
+
+
+def page_settings_file(project_id: str, page_name: str) -> Path:
+    """Return the settings file of a report page, where its checks save settings.
+
+    Parameters
+    ----------
+    project_id : str
+        The project identifier.
+    page_name : str
+        The page name, as configured on the Configure Checks page.
+    """
+    page_name_id = page_name.lower().replace(" ", "_").replace("-", "_")
+    return get_cache_path(project_id, "settings", f"page_{page_name_id}_settings.json")
 
 
 # --- Get Check Config Settings from DuckDB --- #

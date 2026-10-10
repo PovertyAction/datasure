@@ -438,7 +438,8 @@ Delete entire survey records:
 **Use Cases**:
 
 - Test submissions
-- Duplicate surveys (after investigation)
+- Duplicate surveys (after investigation; the Duplicates tab cards are
+  quicker, see [ID Duplicates](#id-duplicates))
 - Invalid records
 
 **Steps**:
@@ -478,6 +479,15 @@ are highlighted in red.
 To blank a cell, use "remove value": "modify value" needs a non-empty new
 value (`0` is valid).
 
+#### Correcting Back Check Data
+
+On a page with back check data, a **Survey data** / **Backcheck data**
+switcher at the top of the page's tab picks the dataset. The back check data
+has its own Correction Log, removal list and preview. Back check results
+measure data quality, so on back check data you can only modify the ID (the
+Survey ID column set on the Backcheck Analysis tab) or remove a row. Back
+check data that was never prepared is corrected from its imported data.
+
 #### Verifying Corrections
 
 After applying corrections:
@@ -495,16 +505,16 @@ Correcting duplicate household ID:
 
 **Steps**:
 
-1. Go to Correct Data page
-2. Click "Add correction step" (+ button)
-3. **Select Key**: "uuid:0dk0vt97-786b-250u-34k7-z34615zz820c"
-4. **Select Action**: "modify value"
-5. **Select Column**: "hhid"
-6. **Current Value**: "UP015-005" (auto-loaded)
-7. **New Value**: "UP015-055"
-8. **Reason**: "Correcting duplicate HHID after investigation"
-9. Click "Apply"
-10. Return to Duplicates tab to verify resolution
+1. Open the Duplicates tab and find the card for "UP015-005"
+2. On the record with KEY "uuid:0dk0vt97-786b-250u-34k7-z34615zz820c",
+   choose **Modify ID** and enter "UP015-055"
+3. Leave the other record on **Keep**
+4. **Reason**: "Wrong ID entered"; **Note**: "Typo confirmed with the field
+   team"
+5. Click **Save**. The card disappears and **Resolved** goes up by one.
+
+The same correction can be made on the Correct Data page with "modify value"
+on the "hhid" column.
 
 ---
 
@@ -663,7 +673,8 @@ Metrics above the cards:
 - **Missing IDs**: Records with no ID
 - **Unmatched IDs** (back check view): Back checks whose ID is not in the
   survey data
-- **Resolved**: Duplicate IDs resolved on this page
+- **Resolved**: Duplicate IDs that corrections have resolved, made on the
+  cards or on the Correct Data page
 
 Each duplicate ID has a card showing its record count and date range. The card
 compares the records side by side, one column per record, and highlights the
@@ -678,6 +689,37 @@ KEY, ID, date and back checker.
 Search by ID or KEY, sort by group size or latest date, and move between pages
 of 10 cards. **Download duplicates (CSV)** exports every record on the cards
 that match the search, across all pages, with the displayed columns.
+
+##### Resolving a card
+
+An ID belongs to one record, so a duplicate ID can't be accepted as valid. A
+repeat visit that legitimately shares an ID, such as a failed first attempt
+followed by a completed interview, is handled with **Records to Include**
+instead.
+
+Each card lists its records with a choice of **Keep**, **Modify ID** or
+**Drop**. **Modify ID** asks for the new ID. Choose a **Reason** and enter a
+**Note**, then click **Save**. Save stays disabled, with a message saying
+what's missing, until:
+
+- at most one record keeps the ID;
+- every new ID is filled in, differs from the current ID and from the other
+  new IDs, fits the ID column (a number for a numeric ID), and is not already
+  held by an included record (the message names that record's KEY); and
+- a reason and a note are given.
+
+Dropping every record removes the ID from the data, so it asks for a
+confirmation first. An unmatched back check card offers **Modify ID** or
+**Drop**; its new ID must be an ID in the survey data.
+
+One save logs one correction per changed record, with the reason and note on
+each, in the survey or back check data's Correction Log, with source
+`duplicates`. Either every correction is saved or none are. The card then
+disappears. A caption above the cards counts the corrections logged in this
+session and links to the Correction Log, which is where you undo one: remove
+it there, and the card comes back if the ID is duplicated again. Records that
+share a KEY can't be corrected on a card, because a correction applies to
+every row with its KEY.
 
 ##### Other Duplicates
 
@@ -1024,7 +1066,14 @@ Configure validation:
 - **Eligibility Filter**: Optional survey column and values that mark a survey
   eligible for back checks (e.g., `consent` in `1`). Only eligible surveys
   count towards coverage.
-- **Handle Duplicates**: Include or exclude duplicates
+
+The comparison and coverage use the records kept by the **Records to Include**
+filters on the Duplicates tab: the survey filter for survey data and the
+**Backcheck Records to Include** filter for back check data. When a filter is
+set, the page says so, for example "Comparing 1,240 of 1,310 surveys (Records
+to Include: interview_status == Complete)". Records whose survey ID is
+duplicated, in the survey or the back check data, are left out of the
+comparison and of coverage until the duplicate is resolved.
 
 ##### Backchecks Summary
 
@@ -1033,8 +1082,8 @@ back checkers) and **Mismatches Attributed**, the share of mismatches given an
 error source (see [Attributing Mismatches](#attributing-mismatches)). Then a
 **Targets** section with two metrics side by side:
 
-- **Backcheck Coverage**: Share of eligible unique survey IDs (after duplicate
-  handling) with at least one matching back check, and how many points it is
+- **Backcheck Coverage**: Share of eligible survey IDs (leaving out
+  duplicated IDs) with a matching back check, and how many points it is
   above or below the target. It is calculated before any back check columns
   are configured.
 - **Backchecks vs Expected**: When the page configuration sets the target
@@ -1170,9 +1219,10 @@ with 10 values compared and 4 mismatches, 1 attributed to the respondent and 1
 to the back checker, has an error rate of 40% and an adjusted error rate of
 20%.
 
-Duplicate and unmatched back check IDs are listed in the **Backcheck data**
-view of the Duplicates tab, but are not resolved there yet. Until they are, the
-**Handle Duplicates** setting decides which duplicates are compared.
+Above Comparison Results Details, a warning counts the duplicate survey IDs,
+duplicate back check IDs and unmatched back check IDs that are left out of the
+comparison. Resolve them in the **Backcheck data** or **Survey data** view of
+the Duplicates tab; a resolved record is compared again.
 
 ---
 

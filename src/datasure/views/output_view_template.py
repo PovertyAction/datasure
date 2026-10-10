@@ -357,6 +357,7 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             duplicates_config,
             survey_columns,
             data.backcheck_data,
+            alias=config.survey_data_name,
         )
 
     with outliers:
