@@ -289,7 +289,9 @@ def _save_corrections(view: IdView, card_id: str, entries: list[CorrectionEntry]
     """Apply and log a card's entries, all or none, then rerun the page.
 
     The outcome is queued, so it survives the rerun, and the rerun drops a
-    resolved card. Used directly and as a `confirm_dialog` callback.
+    resolved card. The rerun is of the whole page, not the card's fragment,
+    so the metrics and remaining cards update too. Used directly and as a
+    `confirm_dialog` callback.
     """
     try:
         view.processor.apply_corrections(
@@ -313,7 +315,7 @@ def _save_corrections(view: IdView, card_id: str, entries: list[CorrectionEntry]
             "toast",
             f"Saved {n} correction{'' if n == 1 else 's'} for {view.id_col} {card_id}.",
         )
-    st.rerun()
+    st.rerun(scope="app")
 
 
 def _render_record_decision(
@@ -418,6 +420,7 @@ def _render_card_corrections(
         type="primary",
         disabled=bool(blockers),
         key=f"iddup_save_{namespace}",
+        width="stretch",
         help="Log one correction per changed record. Undo on the Correct Data page.",
     ):
         return
@@ -465,6 +468,9 @@ def _render_logged_caption(view: IdView) -> None:
             )
 
 
+# Each card is a fragment, so its toggles and decision widgets rerun only the
+# card, not the whole page. Saving reruns the page (see `_save_corrections`).
+@st.fragment
 def _render_duplicate_card(
     view: IdView, card: dict, fields: list[str], all_fields: list[str]
 ) -> None:
@@ -499,6 +505,7 @@ def _render_duplicate_card(
             _render_card_corrections(view, card, records, DUPLICATE_DECISIONS)
 
 
+@st.fragment
 def _render_unmatched_card(view: IdView, card: dict, fields: list[str]) -> None:
     with st.container(border=True):
         _render_card_header(view, card, "not found in the survey data")
