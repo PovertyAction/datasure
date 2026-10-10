@@ -8,7 +8,7 @@ from datasure.checks.id_corrections import (
     RecordDecision,
     all_dropped,
     build_entries,
-    has_repeated_keys,
+    has_untargetable_keys,
     log_reason,
     save_blockers,
 )
@@ -182,14 +182,28 @@ class TestBuildEntries:
         )
 
 
-class TestRepeatedKeys:
+class TestUntargetableKeys:
     def test_repeated_keys(self):
         records = pl.DataFrame({"KEY": ["k1", "k1"], "hhid": ["A", "A"]})
-        assert has_repeated_keys(records, "KEY")
+        assert has_untargetable_keys(records, records, "KEY")
 
     def test_distinct_keys(self):
         records = pl.DataFrame({"KEY": ["k1", "k2"], "hhid": ["A", "A"]})
-        assert not has_repeated_keys(records, "KEY")
+        assert not has_untargetable_keys(records, records, "KEY")
+
+    def test_missing_key(self):
+        records = pl.DataFrame({"KEY": ["k1", None], "hhid": ["A", "A"]})
+        assert has_untargetable_keys(records, records, "KEY")
+
+    def test_key_also_on_a_record_outside_the_card(self):
+        records = pl.DataFrame({"KEY": ["k1", "k2"], "hhid": ["A", "A"]})
+        all_data = pl.DataFrame({"KEY": ["k1", "k2", "k1"], "hhid": ["A", "A", "Z"]})
+        assert has_untargetable_keys(records, all_data, "KEY")
+
+    def test_keys_unique_in_the_whole_dataset(self):
+        records = pl.DataFrame({"KEY": ["k1", "k2"], "hhid": ["A", "A"]})
+        all_data = pl.DataFrame({"KEY": ["k1", "k2", "k3"], "hhid": ["A", "A", "Z"]})
+        assert not has_untargetable_keys(records, all_data, "KEY")
 
 
 class TestNewIdType:
@@ -226,3 +240,43 @@ class TestNewIdType:
             note="n",
         )
         assert blockers == []
+
+
+class TestNumericNewId:
+    """A numeric ID column stores `01` as `1`, so new IDs compare that way."""
+
+    @pytest.fixture
+    def numeric(self):
+        return pl.DataFrame({"hhid": [1, 1, 7], "KEY": ["k1", "k2", "k9"]})
+
+    def _blockers(self, numeric, *new_ids, **kw):
+        decisions = [RecordDecision("k1", Decision.KEEP)] + [
+            RecordDecision(f"k{i}", Decision.MODIFY_ID, new_id)
+            for i, new_id in enumerate(new_ids, start=2)
+        ]
+        return save_blockers(
+            decisions,
+            original_id="1",
+            included=numeric,
+            id_col="hhid",
+            key_col="KEY",
+            reason="Wrong ID entered",
+            note="n",
+            **kw,
+        )
+
+    def test_leading_zero_is_the_current_id(self, numeric):
+        assert self._blockers(numeric, "01") == [
+            "The new ID for KEY k2 is the same as its current ID."
+        ]
+
+    def test_leading_zero_matches_an_existing_id(self, numeric):
+        assert self._blockers(numeric, "007") == ["ID 7 already belongs to KEY k9."]
+
+    def test_two_spellings_of_one_new_id_clash(self, numeric):
+        assert self._blockers(numeric, "12", "012") == [
+            "KEY k2 and KEY k3 have the same new ID 12."
+        ]
+
+    def test_leading_zero_matches_a_survey_id(self, numeric):
+        assert self._blockers(numeric, "012", survey_ids=["12"]) == []

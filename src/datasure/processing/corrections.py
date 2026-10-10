@@ -319,8 +319,9 @@ class CorrectionProcessor:
     def get_corrected_data(self, alias: str) -> pl.DataFrame:
         """Get corrected data for a given alias.
 
-        If no corrected data exists, initializes it from the uncorrected data
-        (see `get_uncorrected_data`).
+        If no corrected table exists, initializes it from the uncorrected data
+        (see `get_uncorrected_data`). A corrected table with no rows, such as
+        one whose every record was dropped, is returned as it is.
 
         Parameters
         ----------
@@ -338,7 +339,8 @@ class CorrectionProcessor:
             db_name="corrected",
         )
 
-        if corrected_data.is_empty():
+        # A missing table has no columns.
+        if corrected_data.width == 0:
             uncorrected_data = self.get_uncorrected_data(alias)
             if not uncorrected_data.is_empty():
                 self.save_corrected_data(alias, uncorrected_data)

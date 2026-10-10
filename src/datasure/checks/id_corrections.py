@@ -73,19 +73,21 @@ def _id_text(id_col: str) -> pl.Expr:
     return pl.col(id_col).cast(pl.String)
 
 
-def _fits(new_id: str, dtype: pl.DataType) -> bool:
-    """Whether `new_id` can be stored in a column of `dtype` as it is.
+def _stored_text(new_id: str, dtype: pl.DataType) -> str | None:
+    """Return `new_id` as text once stored in a column of `dtype`.
 
-    A value that doesn't fit would turn the whole ID column into text.
+    A numeric column stores `01` as `1`, so `01` must compare as `1`. Returns
+    None if `new_id` doesn't fit `dtype`: it would turn the whole ID column
+    into text.
     """
     if dtype == pl.String:
-        return True
+        return new_id
     try:
-        pl.Series([new_id]).cast(dtype, strict=True)
+        stored = pl.Series([new_id]).cast(dtype, strict=True)
     except pl.exceptions.PolarsError:
         logger.debug("New ID %r does not fit %s", new_id, dtype, exc_info=True)
-        return False
-    return True
+        return None
+    return stored.cast(pl.String)[0]
 
 
 def _unresolved(decisions: Sequence[RecordDecision], original_id: str) -> list[str]:
@@ -115,6 +117,7 @@ def _new_id_problems(
     problems: list[str] = []
     survey_id_set = None if survey_ids is None else {str(i) for i in survey_ids}
     claimed: dict[str, Any] = {}
+    dtype = included.schema[id_col]
     for d in decisions:
         if d.decision != Decision.MODIFY_ID:
             continue
@@ -122,24 +125,26 @@ def _new_id_problems(
         if not new_id:
             problems.append(f"Enter a new ID for KEY {d.key}.")
             continue
-        if new_id == original_id:
+        stored = _stored_text(new_id, dtype)
+        if stored is None:
+            kind = "a number" if dtype.is_numeric() else f"a {dtype} value"
+            problems.append(f"ID {new_id} is not {kind}, as {id_col} values are.")
+            continue
+        if stored == original_id:
             problems.append(
                 f"The new ID for KEY {d.key} is the same as its current ID."
             )
             continue
-        if new_id in claimed:
+        if stored in claimed:
             problems.append(
-                f"KEY {claimed[new_id]} and KEY {d.key} have the same new ID {new_id}."
+                f"KEY {claimed[stored]} and KEY {d.key} have the same new ID {stored}."
             )
             continue
-        claimed[new_id] = d.key
-        if not _fits(new_id, dtype := included.schema[id_col]):
-            kind = "a number" if dtype.is_numeric() else f"a {dtype} value"
-            problems.append(f"ID {new_id} is not {kind}, as {id_col} values are.")
-        elif holders := _keys_holding(included, id_col, key_col, new_id):
-            problems.append(f"ID {new_id} already belongs to KEY {', '.join(holders)}.")
-        elif survey_id_set is not None and new_id not in survey_id_set:
-            problems.append(f"ID {new_id} is not in the survey data.")
+        claimed[stored] = d.key
+        if holders := _keys_holding(included, id_col, key_col, stored):
+            problems.append(f"ID {stored} already belongs to KEY {', '.join(holders)}.")
+        elif survey_id_set is not None and stored not in survey_id_set:
+            problems.append(f"ID {stored} is not in the survey data.")
     return problems
 
 
@@ -161,7 +166,9 @@ def save_blockers(
     not empty, differs from the current ID and from the other new IDs in the
     save, and is not held by any of the `included` records (the records
     Records to Include keeps). For an unmatched backcheck, `survey_ids` lists
-    the survey IDs, and the new ID must be one of them. IDs compare as text.
+    the survey IDs, and the new ID must be one of them. IDs compare as text,
+    a new ID as it would be stored in `id_col`: in a numeric column, `01` is
+    `1`.
 
     Parameters
     ----------
@@ -240,10 +247,18 @@ def build_entries(
     return entries
 
 
-def has_repeated_keys(records: pl.DataFrame, key_col: str) -> bool:
-    """Whether two of `records` share a KEY.
+def has_untargetable_keys(
+    records: pl.DataFrame, all_data: pl.DataFrame, key_col: str
+) -> bool:
+    """Whether a KEY of `records` is missing or on more than one row.
 
-    A correction applies to every row with its KEY, so the records on such a
-    card can't be told apart.
+    A correction applies to every row with its KEY, including rows Records
+    to Include hides, so each KEY on a card must be on exactly one row of
+    `all_data`, the whole dataset. KEYs compare as text, as corrections
+    match them.
     """
-    return records[key_col].n_unique() < records.height
+    keys = records[key_col].cast(pl.String)
+    if keys.null_count() or keys.n_unique() < records.height:
+        return True
+    holders = all_data[key_col].cast(pl.String).is_in(keys.implode()).sum()
+    return holders != records.height

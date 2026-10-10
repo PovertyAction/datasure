@@ -22,7 +22,9 @@ class FakeProcessor:
         )
 
 
-def _cards_app(data, settings_file, processor, survey_data=None, resolved=0):
+def _cards_app(
+    data, settings_file, processor, survey_data=None, resolved=0, all_data=None
+):
     from datasure.checks.id_duplicates_ui import IdView, render_id_duplicates
 
     view = IdView(
@@ -38,6 +40,7 @@ def _cards_app(data, settings_file, processor, survey_data=None, resolved=0):
         alias="bc_alias" if survey_data is not None else "survey_alias",
         processor=processor,
         resolved=resolved,
+        all_data=all_data,
     )
     render_id_duplicates(view, settings_file)
 
@@ -219,3 +222,28 @@ def test_cards_sharing_a_key_cannot_be_corrected(settings_file):
 
     assert not at.radio
     assert "share a KEY" in at.warning[0].value
+
+
+def test_a_key_also_on_a_hidden_record_cannot_be_corrected(survey, settings_file):
+    # Records to Include hides a fourth record that also has KEY k1.
+    all_data = pl.concat([survey, pl.DataFrame({"hhid": ["Z"], "KEY": ["k1"]})])
+    at = _run(survey, settings_file, FakeProcessor(), all_data=all_data)
+
+    assert not at.radio
+    assert "share a KEY" in at.warning[0].value
+
+
+def test_a_missing_key_cannot_be_corrected(settings_file):
+    data = pl.DataFrame({"hhid": ["A", "A"], "KEY": ["k1", None]})
+    at = _run(data, settings_file, FakeProcessor())
+
+    assert not at.radio
+    assert "have no KEY" in at.warning[0].value
+
+
+def test_decision_widgets_are_scoped_to_the_dataset(survey, settings_file):
+    # Cards with the same ID in another dataset must not share decisions.
+    at = _run(survey, settings_file, FakeProcessor())
+
+    assert "survey_alias" in _radio(at, "k1").key
+    assert "survey_alias" in _reason(at).key

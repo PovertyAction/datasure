@@ -717,9 +717,10 @@ each, in the survey or back check data's Correction Log, with source
 `duplicates`. Either every correction is saved or none are. The card then
 disappears. A caption above the cards counts the corrections logged in this
 session and links to the Correction Log, which is where you undo one: remove
-it there, and the card comes back if the ID is duplicated again. Records that
-share a KEY can't be corrected on a card, because a correction applies to
-every row with its KEY.
+it there, and the card comes back if the ID is duplicated again. A record with
+no KEY, or whose KEY is also on another record (even one Records to Include
+hides), can't be corrected on a card, because a correction applies to every
+row with its KEY.
 
 ##### Other Duplicates
 

@@ -123,6 +123,20 @@ class TestCorrectionProcessor:
         # Note: save_corrected_data is called from get_corrected_data
         mock_save.assert_called_once()
 
+    def test_get_corrected_data_keeps_a_table_with_no_rows(
+        self, correction_processor, sample_data
+    ):
+        """A corrected table whose every record was dropped is not reseeded."""
+        processor, mock_get, mock_save = correction_processor
+        mock_get.return_value = sample_data.clear()
+
+        result = processor.get_corrected_data("test_alias")
+
+        assert result.is_empty()
+        assert result.columns == sample_data.columns
+        mock_get.assert_called_once()
+        mock_save.assert_not_called()
+
     def test_get_corrected_data_both_empty(self, correction_processor):
         """Test getting corrected data when both corrected and prep are empty."""
         processor, mock_get, _ = correction_processor
