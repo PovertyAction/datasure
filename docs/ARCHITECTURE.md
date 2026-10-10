@@ -27,7 +27,9 @@ src/datasure/
 │   ├── id_duplicates.py    #   ID duplicate/unmatched cards logic (no Streamlit)
 │   ├── id_duplicates_ui.py #   ID duplicate cards UI, with correction controls
 │   ├── id_corrections.py   #   Card decisions -> log entries (no Streamlit)
-│   ├── gpschecks.py        #   GPS validation and outlier mapping
+│   ├── gpschecks/          #   GPS validation and outlier mapping; review.py
+│                           #   turns outlier corrections and acceptances
+│                           #   into log entries (no Streamlit)
 │   ├── outliers.py         #   Statistical outlier detection
 │   ├── enumerator.py       #   Enumerator performance
 │   ├── progress.py         #   Survey progress tracking
