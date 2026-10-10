@@ -274,6 +274,19 @@ def accepted_gps_keys(
     return accepted
 
 
+def _native(value: Any) -> Any:
+    """Return a KEY from the detection output as polars and the log hold it.
+
+    Numpy scalars become Python values. An integer KEY column with nulls
+    comes back from `to_pandas` as floats, so an integral float becomes an
+    int again: the log stores KEY 1 as "1", not "1.0".
+    """
+    value = value.item() if hasattr(value, "item") else value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
 def _is_outlier(outliers: pd.DataFrame, outlier_col: str = OUTLIER_COL) -> pd.Series:
     return outliers[outlier_col].fillna(False).astype(bool)
 
@@ -314,7 +327,7 @@ def mark_gps_reviewed(
         raise ValueError(
             f"The Survey KEY column '{survey_key}' has the name of a review column"
         )
-    reasons = outliers[survey_key].astype(str).map(accepted)
+    reasons = outliers[survey_key].map(lambda key: accepted.get(str(_native(key))))
     reviewed = _is_outlier(outliers) & reasons.notna()
 
     marked = outliers.copy()
@@ -361,11 +374,6 @@ def outliers_table(outliers: pd.DataFrame, *, show_reviewed: bool) -> pd.DataFra
     if REVIEW_STATUS_COL in table.columns and not show_reviewed:
         table = table[~_is_reviewed(table)].drop(columns=list(REVIEW_COLUMNS))
     return table.reset_index(drop=True)
-
-
-def _native(value: Any) -> Any:
-    """Return a numpy scalar as the Python value polars and the log compare."""
-    return value.item() if hasattr(value, "item") else value
 
 
 def select_gps_outlier(
