@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
 import pydeck
@@ -25,12 +27,44 @@ from datasure.checks.gpschecks.compute import (
     detect_outliers_with_lof,
 )
 from datasure.checks.gpschecks.models import MAPBOX_STYLE
+from datasure.checks.gpschecks.review import (
+    ACCEPTED_STATUS,
+    GPS_CHECK_TYPE,
+    OUTLIER_STATUS,
+    CoordinateColumns,
+    GPSAction,
+    GPSSelection,
+    accepted_gps_keys,
+    allowed_gps_actions,
+    build_gps_entries,
+    coordinate_columns,
+    count_unreviewed_outliers,
+    mark_gps_reviewed,
+    outlier_status,
+    outliers_table,
+    select_gps_outlier,
+    validate_coordinates,
+)
 from datasure.checks.gpschecks.settings_ui import gpschecks_report_settings
+from datasure.checks.outliers.review import (
+    REVIEW_COLUMNS,
+    REVIEW_STATUS_COL,
+    highlight_reviewed_row,
+    key_has_conflicting_values,
+)
 from datasure.models.enums import DelimiterType, GPSFormatType, GPSOutlierMethod
 from datasure.models.schemas import GPSColumnConfig, GPSSettings
+from datasure.processing.corrections import CorrectionProcessor
+from datasure.utils.correction_form import apply_correction_entries, get_current_value
 from datasure.utils.dataframe_utils import ColumnByType, get_df_columns
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import is_demo_project
+from datasure.utils.ui_utils import (
+    queue_notice,
+    row_styler,
+    show_queued_notices,
+    styled_dataframe,
+)
 
 # =============================================================================
 # GPS Column Configuration Functions
@@ -700,6 +734,7 @@ def _render_outliers_data_table(
     enumerator: str | None,
     detection_method: str,
     clustering_col: str | None,
+    review: GPSReview | None = None,
 ) -> None:
     """Render the outliers data table with download button.
 
@@ -719,12 +754,25 @@ def _render_outliers_data_table(
         Detection method used.
     clustering_col : str | None
         Clustering column name (for cluster method).
+    review : GPSReview | None
+        If given, accepted outliers are hidden (unless "Show reviewed" is
+        on) and each row has a Review button that opens the correction form.
     """
-    with st.expander("View Outliers Data", expanded=False):
-        outliers_only = outlier_df[outlier_df["Outlier"]].copy()
+    with st.expander("View Outliers Data", expanded=review is not None):
+        show_reviewed = review is not None and st.toggle(
+            "Show reviewed",
+            key=f"gps_show_reviewed_{selected_alias}",
+            help="Also show outliers accepted as valid, highlighted green, "
+            "with the reason.",
+        )
+        outliers_only = outliers_table(outlier_df, show_reviewed=show_reviewed)
 
         if outliers_only.empty:
-            st.success("No outliers detected!")
+            # Every outlier may have been accepted as valid.
+            if outlier_df["Outlier"].any():
+                st.success("No outliers left to review!")
+            else:
+                st.success("No outliers detected!")
             return
 
         display_cols = _identity_optional_fields(
@@ -743,11 +791,291 @@ def _render_outliers_data_table(
                 )
             )
 
-        _render_table_with_csv_download(
-            outliers_only,
-            display_cols,
-            "Download Outliers Data",
-            f"gps_outliers_{selected_alias}.csv",
+        if review is None:
+            _render_table_with_csv_download(
+                outliers_only,
+                display_cols,
+                "Download Outliers Data",
+                f"gps_outliers_{selected_alias}.csv",
+            )
+            return
+
+        display_cols.extend(c for c in REVIEW_COLUMNS if c in outliers_only.columns)
+        _render_reviewable_outliers_table(
+            outliers_only[_filter_available_columns(outliers_only, display_cols)],
+            selected_alias,
+            survey_key,
+            review,
+        )
+
+
+# =============================================================================
+# Correcting and Accepting GPS Outliers
+# =============================================================================
+
+# `queue_notice` scope of the confirmation shown after the post-save rerun.
+_NOTICE_SCOPE = "gps_corrections"
+
+# First column of the outliers table: a button that opens the correction dialog.
+REVIEW_BUTTON_COL = "_review"
+REVIEW_BUTTON_LABEL = ":material/edit_note: Review"
+
+# Map colors of outlier, accepted and normal points.
+_OUTLIER_COLOR = [255, 0, 0, 160]
+_ACCEPTED_COLOR = [25, 135, 84, 200]
+_NORMAL_COLOR = [0, 0, 255, 160]
+
+
+@dataclass(frozen=True)
+class GPSReview:
+    """What the outliers table needs to correct or accept GPS outliers.
+
+    Attributes
+    ----------
+    processor : CorrectionProcessor
+        Saves the entries and reads the active acceptances.
+    alias : str
+        The survey dataset alias.
+    data : pl.DataFrame
+        The corrected survey data, for current values.
+    columns : CoordinateColumns | None
+        The selected GPS configuration's coordinate columns; None if it
+        stores both in one column, so only observations can be removed.
+    survey_id : str | None
+        The Survey ID column, recorded with each entry.
+    """
+
+    processor: CorrectionProcessor
+    alias: str
+    data: pl.DataFrame
+    columns: CoordinateColumns | None
+    survey_id: str | None = None
+
+
+def _mark_accepted_outliers(
+    outlier_df: pd.DataFrame, survey_key: str, review: GPSReview
+) -> pd.DataFrame:
+    """Mark the outliers accepted for the selected configuration's columns."""
+    if review.columns is None:
+        accepted = {}
+    else:
+        acceptances = review.processor.get_active_acceptances(
+            review.alias, GPS_CHECK_TYPE, survey_key
+        )
+        accepted = accepted_gps_keys(acceptances, review.columns)
+    return mark_gps_reviewed(outlier_df, accepted, survey_key)
+
+
+def _render_reviewable_outliers_table(
+    table: pd.DataFrame,
+    selected_alias: str,
+    survey_key: str,
+    review: GPSReview,
+) -> None:
+    """Render the outliers table with a Review button on each row.
+
+    Clicking Review opens the correction form for that row in a dialog.
+    """
+    click_key = f"gps_outlier_review_click_{selected_alias}"
+    button_col = REVIEW_BUTTON_COL
+    while button_col in table.columns:
+        button_col = f"_{button_col}"
+    shown = pl.from_pandas(table).select(
+        pl.lit(REVIEW_BUTTON_LABEL).alias(button_col), pl.all()
+    )
+    dataframe_kwargs: dict[str, Any] = {
+        "width": "stretch",
+        "hide_index": True,
+        "column_config": {
+            button_col: st.column_config.ButtonColumn(
+                "",
+                type="tertiary",
+                pinned=True,
+                key=click_key,
+                help="Correct the coordinates or accept them as valid.",
+            )
+        },
+    }
+    if REVIEW_STATUS_COL in shown.columns:
+        # "Show reviewed" is on: colour the accepted outliers green.
+        styled_dataframe(row_styler(shown, highlight_reviewed_row), **dataframe_kwargs)
+    else:
+        st.dataframe(shown, **dataframe_kwargs)
+
+    st.download_button(
+        label="Download Outliers Data",
+        data=table.to_csv(index=False),
+        file_name=f"gps_outliers_{selected_alias}.csv",
+        mime="text/csv",
+    )
+
+    # The click is only present during the rerun it triggers, so the dialog
+    # opens once per click; widgets inside the dialog rerun just the dialog.
+    click = st.session_state.get(click_key)
+    rows = [click["row"]] if click else []
+    selection = select_gps_outlier(table, rows, survey_key)
+    if selection is not None:
+        _gps_correction_dialog(survey_key, selection, review)
+
+
+@st.dialog("Correct or accept GPS outlier", width="medium")
+def _gps_correction_dialog(
+    survey_key: str, selection: GPSSelection, review: GPSReview
+) -> None:
+    """Show the correction form for a GPS outlier in a dialog."""
+    _render_gps_correction_form(survey_key, selection, review)
+
+
+def _render_gps_correction_form(
+    survey_key: str, selection: GPSSelection, review: GPSReview
+) -> None:
+    """Render the correction form for the selected GPS outlier.
+
+    The form is prefilled with the KEY and its coordinates. Modifying or
+    removing the coordinates saves one entry per coordinate column with a
+    shared reason, all or none. A successful save reruns the page so the
+    map, metrics and table reflect it.
+
+    A KEY shared by rows with different coordinates can't be reviewed, since
+    a correction would change every one of those rows.
+    """
+    data, columns = review.data, review.columns
+    key_value = selection.key_value
+
+    st.markdown(f"GPS outlier for KEY **{key_value}**")
+    rows = data.filter(pl.col(survey_key) == key_value)
+    if rows.is_empty():
+        st.warning(f"KEY {key_value} is no longer in the data. Refresh the page.")
+        return
+    coordinate_cols = columns.as_tuple() if columns else ()
+    if any(
+        key_has_conflicting_values(data, survey_key, key_value, col)
+        for col in coordinate_cols
+    ):
+        st.warning(
+            f"KEY {key_value} is on more than one row, with different "
+            "coordinates. Corrections and acceptances apply to every row with "
+            "the KEY, so this outlier can't be reviewed here. Give each record "
+            "a unique KEY in the source data first; the Duplicates check lists "
+            "duplicated KEYs."
+        )
+        return
+
+    current = {col: rows[0, col] for col in coordinate_cols}
+    if columns is None:
+        st.info(
+            "This GPS configuration stores the coordinates in one column, so "
+            "they can't be corrected or accepted here. You can remove the "
+            "observation, or correct the column on the Correct Data page."
+        )
+    else:
+        st.write(f"**{columns.latitude}:** {current[columns.latitude]}")
+        st.write(f"**{columns.longitude}:** {current[columns.longitude]}")
+    if selection.reviewed:
+        st.info(
+            "This outlier was accepted as valid. Remove the acceptance on the "
+            "Correct Data page to flag it again."
+        )
+
+    # JSON keeps the parts distinct, and the columns keep forms for two GPS
+    # configurations apart.
+    namespace = json.dumps([GPS_CHECK_TYPE, str(key_value), *coordinate_cols])
+    action = st.selectbox(
+        label="Select Action",
+        options=allowed_gps_actions(columns, reviewed=selection.reviewed),
+        key=f"gps_correction_action_{namespace}",
+    )
+
+    new_latitude = new_longitude = validation_error = None
+    if action == GPSAction.MODIFY_COORDINATES and columns is not None:
+        lat_input, lon_input = st.columns(2)
+        new_latitude = lat_input.text_input(
+            f"New {columns.latitude}",
+            key=f"gps_correction_new_lat_{namespace}",
+            placeholder="Enter new latitude",
+        )
+        new_longitude = lon_input.text_input(
+            f"New {columns.longitude}",
+            key=f"gps_correction_new_lon_{namespace}",
+            placeholder="Enter new longitude",
+        )
+        if new_latitude and new_longitude:
+            validation_error = validate_coordinates(new_latitude, new_longitude)
+            if validation_error:
+                st.error(validation_error)
+    elif action == GPSAction.REMOVE_COORDINATES and columns is not None:
+        st.caption(
+            f"Clears {columns.latitude} and {columns.longitude}. Accuracy and "
+            "altitude are kept."
+        )
+    elif action == GPSAction.REMOVE_OBSERVATION:
+        st.warning(
+            f"This will remove the {rows.height} rows with KEY {key_value} "
+            "from the dataset."
+            if rows.height > 1
+            else f"This will remove the row with KEY {key_value} from the dataset."
+        )
+
+    reason = st.text_input(
+        label="Reason for Correction",
+        key=f"gps_correction_reason_{namespace}",
+        placeholder="Enter reason for correction",
+    )
+
+    apply_enabled = bool(reason and reason.strip()) and not validation_error
+    if action == GPSAction.MODIFY_COORDINATES:
+        apply_enabled = apply_enabled and bool(new_latitude and new_longitude)
+    if not st.button(
+        label="Apply",
+        key=f"gps_correction_apply_{namespace}",
+        width="stretch",
+        disabled=not apply_enabled,
+        type="primary",
+    ):
+        return
+
+    survey_id_value = (
+        get_current_value(data, survey_key, key_value, review.survey_id)
+        if review.survey_id
+        else None
+    )
+    entries = build_gps_entries(
+        action,
+        key_value,
+        reason,
+        columns=columns,
+        current=current,
+        new_latitude=new_latitude,
+        new_longitude=new_longitude,
+        survey_id_value=survey_id_value,
+    )
+    if not apply_correction_entries(
+        review.processor, review.alias, survey_key, entries, source=GPS_CHECK_TYPE
+    ):
+        return
+
+    # A full rerun closes the dialog and refreshes the map, metrics and table.
+    queue_notice(
+        _NOTICE_SCOPE,
+        "toast",
+        f"Saved {action} for KEY {key_value}. "
+        "It is listed in the Correction Log on the Correct Data page.",
+    )
+    st.rerun()
+
+
+def _show_saved_toast() -> None:
+    """Show the confirmation queued by a save before the page reran."""
+    if not show_queued_notices(_NOTICE_SCOPE):
+        return
+    # A markdown link in the toast would open a new browser session and lose
+    # the selected project; a page link navigates within this session.
+    corrections_page = st.session_state.get("st_corr_page")
+    if corrections_page is not None:
+        st.page_link(
+            corrections_page,
+            label="Open the Correction Log",
+            icon=":material/cleaning_services:",
         )
 
 
@@ -849,6 +1177,8 @@ def _render_gps_outliers_checks(
     survey_key: str,
     survey_date: str | None,
     enumerator: str | None,
+    alias: str | None = None,
+    survey_id: str | None = None,
 ) -> None:
     """Render GPS outliers detection and visualization.
 
@@ -858,6 +1188,7 @@ def _render_gps_outliers_checks(
     - Configure detection parameters
     - View outliers on interactive map
     - Download outliers data
+    - Correct or accept outliers (when `alias` is given)
 
     Parameters
     ----------
@@ -873,13 +1204,18 @@ def _render_gps_outliers_checks(
         Survey date column name.
     enumerator : str | None
         Enumerator column name.
+    alias : str | None
+        The survey dataset alias. If given, outliers can be corrected or
+        accepted from the outliers table, and accepted ones are not counted.
+    survey_id : str | None
+        Survey ID column name, recorded with each correction.
     """
     st.subheader("GPS Outliers Detection")
 
     go1, go2, go3 = st.columns([0.4, 0.3, 0.3])
 
     with go1:
-        _gps_settings, selected_alias, parsed_data = _load_and_parse_gps_data(
+        gps_settings, selected_alias, parsed_data = _load_and_parse_gps_data(
             project_id, page_name_id, data, alias_select_key="outlier_gps_config"
         )
 
@@ -909,8 +1245,22 @@ def _render_gps_outliers_checks(
     if outlier_df is None:
         return
 
+    review = None
+    if alias and survey_key and survey_key in outlier_df.columns:
+        selected_config = gps_settings.filter(
+            pl.col("alias") == selected_alias
+        ).to_dicts()[0]
+        review = GPSReview(
+            processor=CorrectionProcessor(project_id),
+            alias=alias,
+            data=data,
+            columns=coordinate_columns(selected_config),
+            survey_id=survey_id,
+        )
+        outlier_df = _mark_accepted_outliers(outlier_df, survey_key, review)
+
     # Display summary statistics
-    num_outliers = outlier_df["Outlier"].sum()
+    num_outliers = count_unreviewed_outliers(outlier_df)
     total_points = len(outlier_df)
     outlier_pct = (num_outliers / total_points * 100) if total_points > 0 else 0
 
@@ -918,7 +1268,11 @@ def _render_gps_outliers_checks(
     with col1:
         st.metric("Total GPS Points", f"{total_points:,}")
     with col2:
-        st.metric("Outliers Detected", f"{num_outliers:,}")
+        st.metric(
+            "Outliers Detected",
+            f"{num_outliers:,}",
+            help="Outliers accepted as valid are not counted.",
+        )
     with col3:
         st.metric("Outlier Percentage", f"{outlier_pct:.2f}%")
 
@@ -943,6 +1297,7 @@ def _render_gps_outliers_checks(
         enumerator,
         detection_method,
         clustering_col,
+        review,
     )
 
 
@@ -1350,6 +1705,9 @@ def plot_clusters_on_map(
     """
     Plot clusters of GPS points on a map, highlighting outliers.
 
+    Outliers are red and other points blue. Outliers accepted as valid
+    (marked by `mark_gps_reviewed`) are green, labelled "Accepted".
+
     Parameters
     ----------
     df : pd.DataFrame
@@ -1375,7 +1733,7 @@ def plot_clusters_on_map(
     df = df.rename(columns={gps_lat_col: "lat", gps_lon_col: "lon"})
 
     # Create outlier status column for coloring
-    df["outlier_status"] = df[outlier_col].map({True: "Outlier", False: "Normal"})
+    df["outlier_status"] = outlier_status(df, outlier_col)
 
     # Build tooltip fields
     tooltip_fields = _identity_optional_fields(
@@ -1385,10 +1743,9 @@ def plot_clusters_on_map(
     if clustering_col and clustering_col in df.columns:
         tooltip_fields.append(clustering_col)
 
-    # Color outliers red, normal points blue
-    df["color"] = df["outlier_status"].apply(
-        lambda x: [255, 0, 0, 160] if x == "Outlier" else [0, 0, 255, 160]
-    )
+    # Color outliers red, accepted outliers green, normal points blue
+    colors = {OUTLIER_STATUS: _OUTLIER_COLOR, ACCEPTED_STATUS: _ACCEPTED_COLOR}
+    df["color"] = df["outlier_status"].apply(lambda x: colors.get(x, _NORMAL_COLOR))
 
     _render_scatterplot_map(df, tooltip_fields, fill_color="color", zoom=7)
 
@@ -1400,6 +1757,7 @@ def gpschecks_report(
     setting_file: str,
     config: dict,
     survey_columns: ColumnByType,
+    alias: str | None = None,
 ) -> None:
     """
     Generate the GPS checks report.
@@ -1416,12 +1774,16 @@ def gpschecks_report(
         The path to the settings file.
     config : dict
         Configuration settings for the report.
+    alias : str | None
+        The survey dataset alias. If given, GPS outliers can be corrected
+        or accepted from the outliers table.
 
     Returns
     -------
     None
     """
     st.title("GPS Checks Report")
+    _show_saved_toast()
 
     if is_demo_project():
         demo_callout(
@@ -1546,6 +1908,8 @@ def gpschecks_report(
         config_settings.survey_key,
         config_settings.survey_date,
         config_settings.enumerator,
+        alias=alias,
+        survey_id=config_settings.survey_id,
     )
 
     st.write("---")

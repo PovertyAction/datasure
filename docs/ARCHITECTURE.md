@@ -27,7 +27,9 @@ src/datasure/
 │   ├── id_duplicates.py    #   ID duplicate/unmatched cards logic (no Streamlit)
 │   ├── id_duplicates_ui.py #   ID duplicate cards UI, with correction controls
 │   ├── id_corrections.py   #   Card decisions -> log entries (no Streamlit)
-│   ├── gpschecks.py        #   GPS validation and outlier mapping
+│   ├── gpschecks/          #   GPS validation and outlier mapping; review.py
+│                           #   turns outlier corrections and acceptances
+│                           #   into log entries (no Streamlit)
 │   ├── outliers.py         #   Statistical outlier detection
 │   ├── enumerator.py       #   Enumerator performance
 │   ├── progress.py         #   Survey progress tracking
@@ -127,8 +129,10 @@ project is selected. If cross-page state looks corrupted, check `app.py` first.
 
 SurveyCTO passwords are stored in the OS keyring
 (`utils/secure_credentials.py`); only non-sensitive metadata (server, username)
-is written to JSON. Credentials are never written to disk, logs, or session
-state.
+is written to JSON. The Mapbox token saved from the GPS Checks settings is also
+kept in the keyring, as one entry shared by every project on the machine; a
+token set by hand in `secrets.toml` is still read as a fallback. Credentials
+are never written to disk, logs, or session state.
 
 ## DataFrames and SQL
 

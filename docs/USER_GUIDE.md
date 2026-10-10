@@ -1285,6 +1285,37 @@ Map display:
 - Click points for details
 - Identify geographic outliers
 
+##### Correcting or Accepting GPS Outliers
+
+Each row of the outliers table (expand **View Outliers Data**) starts with a
+**Review** button. Click it to open a correction form in a dialog, with the
+KEY and its latitude and longitude filled in. Choose an action, enter a reason
+and click "Apply":
+
+- **modify coordinates** sets a new latitude and longitude. Latitude must be
+  between -90 and 90 and longitude between -180 and 180.
+- **remove coordinates** clears the configured latitude and longitude columns.
+  Accuracy and altitude are kept.
+- **remove observation** removes the record from the dataset, so it
+  disappears from every GPS section.
+- **accept** records that the location is correct.
+
+Modifying or removing coordinates writes two Correction Log entries, one for
+latitude and one for longitude, with the same reason. Both are applied or
+neither is. Every entry has source `gps`. The page reloads after a save.
+
+Accepted outliers are hidden from the table and are not counted in
+**Outliers Detected**. On the map they are drawn in green and labelled
+Accepted. Turn on **Show reviewed** to list them in the table, highlighted in
+green, with the reason. An acceptance lapses, and the point is flagged again,
+if either coordinate changes. You can also remove the acceptance on the Correct
+Data page.
+
+Corrections need separate latitude and longitude columns. For a configuration
+that stores both in one column, the only action offered is **remove
+observation**. As on the outliers page, a KEY on more than one row with
+different coordinates can't be reviewed here.
+
 ---
 
 ## Demo Mode
