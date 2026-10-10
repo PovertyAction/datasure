@@ -278,11 +278,13 @@ def _render_card_header(view: IdView, card: dict, summary: str) -> None:
 
 
 def _notice_scope(view: IdView) -> str:
-    return f"iddup_{view.name}"
+    # Scoped to the alias, as the card widgets are: session state outlives
+    # navigation, and another page's cards share the view name.
+    return f"iddup_{view.alias}_{view.name}"
 
 
 def _logged_key(view: IdView) -> str:
-    return f"iddup_{view.name}_logged"
+    return f"{_notice_scope(view)}_logged"
 
 
 def _save_corrections(view: IdView, card_id: str, entries: list[CorrectionEntry]):

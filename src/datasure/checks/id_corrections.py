@@ -106,6 +106,15 @@ def _keys_holding(included: pl.DataFrame, id_col: str, key_col: str, new_id: str
     )
 
 
+def _holders_text(holders: list[str | None]) -> str:
+    # A record outside the card may have no KEY; name it rather than crash.
+    keys = [k for k in holders if k is not None]
+    parts = [f"KEY {', '.join(keys)}"] if keys else []
+    if len(keys) < len(holders):
+        parts.append("a record with no KEY")
+    return " and ".join(parts)
+
+
 def _new_id_problems(
     decisions: Sequence[RecordDecision],
     original_id: str,
@@ -142,7 +151,7 @@ def _new_id_problems(
             continue
         claimed[stored] = d.key
         if holders := _keys_holding(included, id_col, key_col, stored):
-            problems.append(f"ID {stored} already belongs to KEY {', '.join(holders)}.")
+            problems.append(f"ID {stored} already belongs to {_holders_text(holders)}.")
         elif survey_id_set is not None and stored not in survey_id_set:
             problems.append(f"ID {stored} is not in the survey data.")
     return problems

@@ -124,6 +124,13 @@ class TestModifyIdValidation:
         )
         assert blockers == ["ID 7 already belongs to KEY k9."]
 
+    def test_existing_id_on_a_record_with_no_key_is_blocked(self):
+        # A missing KEY outside the card must not crash the message.
+        included = pl.DataFrame({"hhid": ["A", "A", "C"], "KEY": ["k1", "k2", None]})
+        assert _blockers(self._modify("C"), included) == [
+            "ID C already belongs to a record with no KEY."
+        ]
+
     def test_new_unused_id_is_allowed(self, included):
         assert _blockers(self._modify("Z"), included) == []
 
