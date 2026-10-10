@@ -14,6 +14,7 @@ from datasure.checks.id_duplicates import (
     card_records,
     comparison_grid,
     count_missing_ids,
+    count_resolved_ids,
     default_fields,
     find_duplicate_groups,
     find_unmatched_ids,
@@ -371,3 +372,34 @@ def test_build_export_matches_the_searched_cards_across_pages():
 
     assert found.height == 10
     assert export["KEY"].to_list() == shown
+
+
+class TestCountResolvedIds:
+    def test_counts_ids_no_longer_duplicated(self):
+        before = pl.DataFrame({"hhid": ["A", "A", "B", "B", "C", "C"]})
+        # A resolved by a drop, B by a modify ID; C still duplicated.
+        after = pl.DataFrame({"hhid": ["A", "B", "D", "C", "C"]})
+
+        assert count_resolved_ids(before, after, "hhid") == 2
+
+    def test_nothing_resolved_without_corrections(self):
+        data = pl.DataFrame({"hhid": ["A", "A", "B"]})
+
+        assert count_resolved_ids(data, data, "hhid") == 0
+
+    def test_new_duplicates_are_not_resolved(self):
+        before = pl.DataFrame({"hhid": ["A", "B"]})
+        after = pl.DataFrame({"hhid": ["A", "A"]})
+
+        assert count_resolved_ids(before, after, "hhid") == 0
+
+    def test_ids_compare_as_text(self):
+        before = pl.DataFrame({"hhid": [1, 1]})
+        after = pl.DataFrame({"hhid": ["1"]})
+
+        assert count_resolved_ids(before, after, "hhid") == 1
+
+    def test_missing_id_column(self):
+        data = pl.DataFrame({"x": [1, 1]})
+
+        assert count_resolved_ids(data, data, "hhid") == 0

@@ -129,6 +129,25 @@ def count_missing_ids(data: pl.DataFrame, id_col: str) -> int:
     return data[id_col].null_count()
 
 
+def _duplicated_ids(data: pl.DataFrame, id_col: str) -> set[str]:
+    if id_col not in data.columns:
+        return set()
+    return set(find_duplicate_groups(data, id_col, None, None)["id"].to_list())
+
+
+def count_resolved_ids(
+    uncorrected: pl.DataFrame, corrected: pl.DataFrame, id_col: str
+) -> int:
+    """Count the IDs duplicated before corrections and no longer after.
+
+    Corrections from any page count, so this is how many duplicate IDs the
+    correction log has resolved. IDs compare as text.
+    """
+    return len(
+        _duplicated_ids(uncorrected, id_col) - _duplicated_ids(corrected, id_col)
+    )
+
+
 def card_records(data: pl.DataFrame, card: dict) -> pl.DataFrame:
     """Return the records on `card`, a row of a cards DataFrame."""
     return data[list(card["rows"])]

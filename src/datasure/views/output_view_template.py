@@ -102,7 +102,8 @@ def load_data_with_fallback(
     Load data with cascading fallback through multiple databases.
 
     Attempts to load data from databases in the specified order, returning the
-    first non-empty dataset found.
+    first table found. A table with no rows counts as found: a corrected table
+    whose every record was dropped must not fall back to the prep data.
 
     Parameters
     ----------
@@ -116,7 +117,7 @@ def load_data_with_fallback(
     Returns
     -------
     pd.DataFrame
-        The loaded data, or an empty DataFrame if none found.
+        The loaded data, or a DataFrame with no columns if none found.
     """
     for db_name in db_names:
         data = duckdb_get_table(
@@ -124,7 +125,8 @@ def load_data_with_fallback(
             alias=data_name,
             db_name=db_name,
         )
-        if not data.is_empty():
+        # A missing table has no columns.
+        if data.width > 0:
             return data
 
     # Return empty DataFrame if all attempts fail
@@ -357,6 +359,7 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             duplicates_config,
             survey_columns,
             data.backcheck_data,
+            alias=config.survey_data_name,
         )
 
     with outliers:

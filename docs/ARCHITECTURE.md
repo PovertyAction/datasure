@@ -25,13 +25,16 @@ src/datasure/
 │   ├── missing.py          #   Missing data analysis
 │   ├── duplicates.py       #   Duplicate detection
 │   ├── id_duplicates.py    #   ID duplicate/unmatched cards logic (no Streamlit)
-│   ├── id_duplicates_ui.py #   ID duplicate cards UI
+│   ├── id_duplicates_ui.py #   ID duplicate cards UI, with correction controls
+│   ├── id_corrections.py   #   Card decisions -> log entries (no Streamlit)
 │   ├── gpschecks.py        #   GPS validation and outlier mapping
 │   ├── outliers.py         #   Statistical outlier detection
 │   ├── enumerator.py       #   Enumerator performance
 │   ├── progress.py         #   Survey progress tracking
 │   ├── descriptive.py      #   Descriptive statistics
-│   └── backchecks.py       #   Back-check comparison workflows
+│   └── backchecks/         #   Back-check comparison workflows; scope.py
+│                           #   applies the Duplicates tab's Records to
+│                           #   Include filters to the comparison
 ├── connectors/
 │   ├── scto.py             # SurveyCTO download/UI (uses utils/scto_api.py)
 │   └── local.py            # Local file import (csv/xlsx/xls/json/dta/parquet)
@@ -73,7 +76,9 @@ The `archived/` directory holds legacy code and is gitignored.
    corrected table, any change to its prep data (a re-import, a prep step
    added or removed, or a project bundle re-seeding its prep steps) rebuilds it
    by replaying the correction log against the new prep output
-   (`CorrectionProcessor.refresh_existing_corrected_data`)
+   (`CorrectionProcessor.refresh_existing_corrected_data`). An alias with no
+   prep table, such as unprepared backcheck data, is corrected from its raw
+   table (`CorrectionProcessor.get_uncorrected_data`)
 
 ## Generated output views
 

@@ -30,7 +30,6 @@ from datasure.checks.backchecks.compute import (
     _join_backcheck_columns,
     _join_staff_information,
     _perform_statistical_tests,
-    _prepare_data_for_merge,
     _preprocess_string_values,
     _process_backcheck_column,
     _validate_backcheck_inputs,
@@ -38,6 +37,7 @@ from datasure.checks.backchecks.compute import (
     compute_backchecker_productivity,
     compute_column_stats,
     compute_enumerator_backchecker_stats,
+    exclude_duplicate_ids,
     expand_col_names,
     load_default_backchecks_settings,
 )
@@ -248,12 +248,10 @@ def test_compute_backcheck_analysis_missing_survey_key(
     assert result.is_empty()
 
 
-def test_compute_backcheck_analysis_drop_duplicates_first(
+def test_compute_backcheck_analysis_ignores_saved_keep_first_option(
     sample_backcheck_settings,
-    sample_backcheck_column_settings_pl,
 ):
-    """Test compute_backcheck_analysis with drop_duplicates_option='first'."""
-    # Create data with duplicates
+    """A page that saved "keep first" now leaves duplicates out too."""
     survey_data = pl.DataFrame(
         {
             "survey_id": ["S001", "S001", "S002"],
@@ -268,9 +266,11 @@ def test_compute_backcheck_analysis_drop_duplicates_first(
             "age": [25, 35],
         }
     )
-
-    settings = sample_backcheck_settings
-    settings.drop_duplicates_option = "first"
+    # Settings saved before the option was removed still hold it.
+    settings = BackcheckSettings(
+        **{**sample_backcheck_settings.model_dump(), "drop_duplicates_option": "first"}
+    )
+    assert not hasattr(settings, "drop_duplicates_option")
 
     col_settings = pl.DataFrame(
         {
@@ -291,32 +291,23 @@ def test_compute_backcheck_analysis_drop_duplicates_first(
         survey_data, backcheck_data, settings, col_settings
     )
 
-    # Should keep first occurrence of S001
-    assert not result.is_empty()
+    assert result["survey_id"].unique().to_list() == ["S002"]
 
 
-def test_compute_backcheck_analysis_drop_duplicates_last(
+def test_compute_backcheck_analysis_leaves_out_duplicate_backcheck_ids(
     sample_backcheck_settings,
 ):
-    """Test compute_backcheck_analysis with drop_duplicates_option='last'."""
+    """A survey ID backchecked twice is not compared until it is resolved."""
     survey_data = pl.DataFrame(
-        {
-            "survey_id": ["S001", "S001", "S002"],
-            "enumerator": ["E1", "E1", "E2"],
-            "age": [25, 30, 35],
-        }
+        {"survey_id": ["S001", "S002"], "enumerator": ["E1", "E2"], "age": [25, 35]}
     )
     backcheck_data = pl.DataFrame(
         {
-            "survey_id": ["S001", "S002"],
-            "backchecker": ["B1", "B2"],
-            "age": [30, 35],
+            "survey_id": ["S001", "S001", "S002"],
+            "backchecker": ["B1", "B2", "B2"],
+            "age": [25, 26, 35],
         }
     )
-
-    settings = sample_backcheck_settings
-    settings.drop_duplicates_option = "last"
-
     col_settings = pl.DataFrame(
         {
             "search_type": ["exact"],
@@ -333,17 +324,22 @@ def test_compute_backcheck_analysis_drop_duplicates_last(
     )
 
     result = compute_backcheck_analysis(
-        survey_data, backcheck_data, settings, col_settings
+        survey_data, backcheck_data, sample_backcheck_settings, col_settings
     )
+    assert result["survey_id"].unique().to_list() == ["S002"]
 
-    # Should keep last occurrence of S001
-    assert not result.is_empty()
+    # Resolving the duplicate brings the survey back into the comparison.
+    resolved = backcheck_data[[0, 2]]
+    result = compute_backcheck_analysis(
+        survey_data, resolved, sample_backcheck_settings, col_settings
+    )
+    assert sorted(result["survey_id"].unique().to_list()) == ["S001", "S002"]
 
 
 def test_compute_backcheck_analysis_drop_duplicates_drop(
     sample_backcheck_settings,
 ):
-    """Test compute_backcheck_analysis with drop_duplicates_option='drop'."""
+    """Survey IDs on more than one survey record are left out."""
     survey_data = pl.DataFrame(
         {
             "survey_id": ["S001", "S001", "S002"],
@@ -360,7 +356,6 @@ def test_compute_backcheck_analysis_drop_duplicates_drop(
     )
 
     settings = sample_backcheck_settings
-    settings.drop_duplicates_option = "drop"
 
     col_settings = pl.DataFrame(
         {
@@ -1892,64 +1887,18 @@ def test_validate_backcheck_inputs_missing_survey_id(
     assert result is None
 
 
-def test_prepare_data_for_merge_first():
-    """Test _prepare_data_for_merge with 'first' option."""
-    data = pl.DataFrame(
-        {
-            "id": ["A", "A", "B", "C"],
-            "value": [1, 2, 3, 4],
-        }
-    )
+def test_exclude_duplicate_ids_leaves_out_every_duplicated_record():
+    data = pl.DataFrame({"id": ["A", "A", "B", "C"], "value": [1, 2, 3, 4]})
 
-    result = _prepare_data_for_merge(data, "id", "first")
+    result = exclude_duplicate_ids(data, "id")
 
-    assert len(result) == 3
-    assert result.filter(pl.col("id") == "A")["value"][0] == 1
+    assert result["id"].to_list() == ["B", "C"]
 
 
-def test_prepare_data_for_merge_last():
-    """Test _prepare_data_for_merge with 'last' option."""
-    data = pl.DataFrame(
-        {
-            "id": ["A", "A", "B", "C"],
-            "value": [1, 2, 3, 4],
-        }
-    )
+def test_exclude_duplicate_ids_keeps_unique_records():
+    data = pl.DataFrame({"id": ["A", "B"], "value": [1, 2]})
 
-    result = _prepare_data_for_merge(data, "id", "last")
-
-    assert len(result) == 3
-    assert result.filter(pl.col("id") == "A")["value"][0] == 2
-
-
-def test_prepare_data_for_merge_drop():
-    """Test _prepare_data_for_merge with 'drop' option."""
-    data = pl.DataFrame(
-        {
-            "id": ["A", "A", "B", "C"],
-            "value": [1, 2, 3, 4],
-        }
-    )
-
-    result = _prepare_data_for_merge(data, "id", "drop")
-
-    assert len(result) == 2
-    assert "A" not in result["id"].to_list()
-    assert set(result["id"].to_list()) == {"B", "C"}
-
-
-def test_prepare_data_for_merge_none():
-    """Test _prepare_data_for_merge with 'none' option."""
-    data = pl.DataFrame(
-        {
-            "id": ["A", "A", "B", "C"],
-            "value": [1, 2, 3, 4],
-        }
-    )
-
-    result = _prepare_data_for_merge(data, "id", "none")
-
-    assert len(result) == 4
+    assert exclude_duplicate_ids(data, "id").equals(data)
 
 
 def test_add_statistical_test_columns_with_results():
@@ -2669,11 +2618,11 @@ def test_add_numeric_columns():
     assert "within_ok_range" in updated_result.columns
 
 
-def test_prepare_data_for_merge_empty():
-    """Test _prepare_data_for_merge with empty data."""
+def test_exclude_duplicate_ids_empty():
+    """Test exclude_duplicate_ids with empty data."""
     data = pl.DataFrame({"id": []})
 
-    result = _prepare_data_for_merge(data, "id", "first")
+    result = exclude_duplicate_ids(data, "id")
 
     assert result.is_empty()
 

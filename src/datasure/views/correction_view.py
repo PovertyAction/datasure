@@ -6,13 +6,17 @@ data corrections across multiple datasets. Corrections are logged and can be
 removed or modified as needed.
 """
 
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import polars as pl
 import streamlit as st
 from pydantic import BaseModel, Field
 
+from datasure.checks.backchecks.models import backcheck_id_columns
 from datasure.processing.correction_log import (
+    CORRECTION_ACTIONS,
     CORRECTIONS_PAGE_SOURCE,
     HARD_SEVERITY,
     Action,
@@ -34,7 +38,10 @@ from datasure.utils.navigations_utils import (
 )
 from datasure.utils.onboarding_utils import ImportDemoInfo, demo_expander
 from datasure.utils.reapply_utils import highlight_status, warn_reapply_failures
-from datasure.utils.settings_utils import get_check_config_settings
+from datasure.utils.settings_utils import (
+    get_check_config_settings,
+    page_settings_file,
+)
 from datasure.utils.ui_utils import (
     confirm_dialog,
     metric_row,
@@ -54,6 +61,89 @@ class TabConfig(BaseModel):
     survey_id: str | None = Field(
         None, description="Name of the survey ID column, if configured"
     )
+    backcheck_data_name: str | None = Field(
+        None, description="Name of the backcheck data alias, if configured"
+    )
+    backcheck_key: str | None = Field(
+        None, description="Name of the backcheck KEY column"
+    )
+    backcheck_id: str | None = Field(
+        None, description="Name of the backcheck ID column, if configured"
+    )
+
+
+SURVEY_DATA = "Survey data"
+BACKCHECK_DATA = "Backcheck data"
+
+# Backcheck data measures data quality, so the only backcheck corrections are
+# fixing an ID and removing a record, as on the duplicate cards.
+BACKCHECK_ACTIONS = (Action.MODIFY_VALUE, Action.REMOVE_ROW)
+
+
+@dataclass(frozen=True)
+class CorrectionDataset:
+    """A dataset a Corrections page tab corrects, and what it may change.
+
+    Attributes
+    ----------
+    label : str
+        `SURVEY_DATA` or `BACKCHECK_DATA`, shown on the switcher.
+    alias : str
+        The data alias whose corrected table and log are used.
+    key_col : str
+        The KEY column.
+    id_col : str | None
+        The ID column, if configured.
+    actions : tuple[Action, ...]
+        The correction actions offered.
+    column : str | None
+        The only column "modify value" may change, or None for any column.
+    key_namespace : str | int
+        Suffix for the dataset's widget keys, unique across tabs and datasets.
+    """
+
+    label: str
+    alias: str
+    key_col: str
+    id_col: str | None
+    actions: tuple[Action, ...]
+    column: str | None
+    key_namespace: str | int
+
+
+def correction_datasets(
+    config: TabConfig, tab_index: int = 0
+) -> list[CorrectionDataset]:
+    """Return the datasets a tab corrects: survey data, then any backcheck data.
+
+    On backcheck data only the ID can be modified, and rows removed; with no
+    ID column configured, rows can only be removed.
+    """
+    datasets = [
+        CorrectionDataset(
+            label=SURVEY_DATA,
+            alias=config.survey_data_name,
+            key_col=config.survey_key,
+            id_col=config.survey_id,
+            actions=CORRECTION_ACTIONS,
+            column=None,
+            key_namespace=tab_index,
+        )
+    ]
+    if config.backcheck_data_name:
+        id_col = config.backcheck_id
+        datasets.append(
+            CorrectionDataset(
+                label=BACKCHECK_DATA,
+                alias=config.backcheck_data_name,
+                key_col=config.backcheck_key or config.survey_key,
+                id_col=id_col,
+                actions=BACKCHECK_ACTIONS if id_col else (Action.REMOVE_ROW,),
+                column=id_col,
+                key_namespace=f"{tab_index}_backcheck",
+            )
+        )
+    return datasets
 
 
 def render_value_input_widget(
@@ -147,11 +237,23 @@ def load_tab_config(project_id: str, tab_index: int) -> TabConfig | None:
         page_row_index=tab_index,
     )
 
+    backcheck_key = backcheck_id = None
+    backcheck_data_name = page_config.get("backcheck_data_name")
+    if backcheck_data_name:
+        backcheck_key, backcheck_id = backcheck_id_columns(
+            str(page_settings_file(project_id, page_config.get("page_name"))),
+            page_config.get("survey_key"),
+            page_config.get("survey_id"),
+        )
+
     return TabConfig(
         page_name=page_config.get("page_name"),
         survey_data_name=page_config.get("survey_data_name"),
         survey_key=page_config.get("survey_key"),
         survey_id=page_config.get("survey_id"),
+        backcheck_data_name=backcheck_data_name,
+        backcheck_key=backcheck_key,
+        backcheck_id=backcheck_id,
     )
 
 
@@ -202,8 +304,10 @@ def render_add_correction_form(
     correction_processor: CorrectionProcessor,
     key_col: str,
     alias: str,
-    tab_index: int,
+    tab_index: str | int,
     survey_id_col: str | None = None,
+    actions: Sequence[Action] = CORRECTION_ACTIONS,
+    column: str | None = None,
 ) -> None:
     """
     Render the add correction step form.
@@ -221,12 +325,17 @@ def render_add_correction_form(
         The name of the Survey KEY column in the DataFrame.
     alias : str
         The data alias/table name.
-    tab_index : int
-        The tab index for unique widget keys.
+    tab_index : str | int
+        Suffix for unique widget keys: the tab index, plus the dataset for
+        backcheck data.
     survey_id_col : str | None
         The name of the configured Survey ID column, if any. When set (and
         present in the data), the corresponding Survey ID is shown once a
         KEY is selected.
+    actions : Sequence[Action]
+        The correction actions to offer.
+    column : str | None
+        The only column to offer, or None to let the user pick any column.
     """
     corrected_data = correction_processor.get_corrected_data(alias)
 
@@ -264,6 +373,8 @@ def render_add_correction_form(
             key_value=corr_key_val,
             key_namespace=tab_index,
             source=CORRECTIONS_PAGE_SOURCE,
+            actions=actions,
+            column=column,
             survey_id_value=survey_id_value,
             on_apply=lambda state: _handle_apply_correction(
                 correction_processor=correction_processor,
@@ -362,8 +473,10 @@ def render_correction_input_form(
     correction_processor: CorrectionProcessor,
     key_col: str,
     alias: str,
-    tab_index: int,
+    tab_index: str | int,
     survey_id_col: str | None = None,
+    actions: Sequence[Action] = CORRECTION_ACTIONS,
+    column: str | None = None,
 ) -> None:
     """
     Render input form for corrections with add and remove functionality.
@@ -376,14 +489,20 @@ def render_correction_input_form(
         The name of the Survey KEY column in the DataFrame.
     alias : str
         The data alias/table name.
-    tab_index : int
-        The tab index for unique widget keys.
+    tab_index : str | int
+        Suffix for unique widget keys.
     survey_id_col : str | None
         The name of the configured Survey ID column, if any.
+    actions : Sequence[Action]
+        The correction actions the add form offers.
+    column : str | None
+        The only column the add form offers, or None for any column.
     """
     corrected_data = correction_processor.get_corrected_data(alias)
 
-    if corrected_data.is_empty():
+    # A table with no rows, such as one whose every record was dropped, still
+    # has corrections to remove; only a missing table has no columns.
+    if corrected_data.width == 0:
         st.warning("No data available for correction.")
         return
 
@@ -396,6 +515,8 @@ def render_correction_input_form(
             alias=alias,
             tab_index=tab_index,
             survey_id_col=survey_id_col,
+            actions=actions,
+            column=column,
         )
 
     with fc2:
@@ -410,7 +531,7 @@ def render_correction_input_form(
 def render_remove_correction_form(
     correction_processor: CorrectionProcessor,
     alias: str,
-    tab_index: int,
+    tab_index: str | int,
 ) -> None:
     """
     Render the remove correction step form.
@@ -421,7 +542,7 @@ def render_remove_correction_form(
         The correction processor instance.
     alias : str
         The data alias/table name.
-    tab_index : int
+    tab_index : str | int
         The tab index for unique widget keys.
     """
     correction_summaries = correction_processor.get_correction_summary(alias)
@@ -599,7 +720,7 @@ def highlight_hard_acceptance(row: Any) -> list[str]:
 
 @st.fragment
 def render_correction_log(
-    correction_processor: CorrectionProcessor, alias: str, tab_index: int
+    correction_processor: CorrectionProcessor, alias: str, tab_index: str | int
 ) -> None:
     """
     Render the correction log display.
@@ -610,7 +731,7 @@ def render_correction_log(
         The correction processor instance.
     alias : str
         The data alias/table name.
-    tab_index : int
+    tab_index : str | int
         The tab index for unique widget keys.
     """
     correction_log = correction_processor.get_correction_log(alias)
@@ -689,26 +810,47 @@ def render_correction_tab(
     section_header(f"{config.page_name}")
     st.write("Add corrections to the data based on issues identified in checks.")
 
-    # Ensure corrected data exists
-    corrected_data = correction_processor.get_corrected_data(config.survey_data_name)
+    datasets = correction_datasets(config, tab_index)
+    dataset = datasets[0]
+    if len(datasets) > 1:
+        labels = [d.label for d in datasets]
+        chosen = st.segmented_control(
+            "Dataset",
+            options=labels,
+            default=SURVEY_DATA,
+            required=True,
+            key=f"correction_dataset_{tab_index}",
+            help=(
+                "Backcheck data can only have its ID modified or rows "
+                "removed, for example to resolve duplicate or unmatched IDs."
+            ),
+        )
+        dataset = datasets[labels.index(chosen)]
 
-    if corrected_data.is_empty():
-        st.warning(f"No data available for {config.survey_data_name}")
+    # Ensure corrected data exists
+    corrected_data = correction_processor.get_corrected_data(dataset.alias)
+
+    # Keep the log and the remove form for a table with no rows, so dropping
+    # every record can be undone.
+    if corrected_data.width == 0:
+        st.warning(f"No data available for {dataset.alias}")
         return
 
     # Render components
     render_correction_input_form(
         correction_processor=correction_processor,
-        key_col=config.survey_key,
-        alias=config.survey_data_name,
-        tab_index=tab_index,
-        survey_id_col=config.survey_id,
+        key_col=dataset.key_col,
+        alias=dataset.alias,
+        tab_index=dataset.key_namespace,
+        survey_id_col=dataset.id_col,
+        actions=dataset.actions,
+        column=dataset.column,
     )
 
     render_correction_log(
         correction_processor=correction_processor,
-        alias=config.survey_data_name,
-        tab_index=tab_index,
+        alias=dataset.alias,
+        tab_index=dataset.key_namespace,
     )
 
     render_data_summary(

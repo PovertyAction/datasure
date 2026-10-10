@@ -123,6 +123,20 @@ class TestCorrectionProcessor:
         # Note: save_corrected_data is called from get_corrected_data
         mock_save.assert_called_once()
 
+    def test_get_corrected_data_keeps_a_table_with_no_rows(
+        self, correction_processor, sample_data
+    ):
+        """A corrected table whose every record was dropped is not reseeded."""
+        processor, mock_get, mock_save = correction_processor
+        mock_get.return_value = sample_data.clear()
+
+        result = processor.get_corrected_data("test_alias")
+
+        assert result.is_empty()
+        assert result.columns == sample_data.columns
+        mock_get.assert_called_once()
+        mock_save.assert_not_called()
+
     def test_get_corrected_data_both_empty(self, correction_processor):
         """Test getting corrected data when both corrected and prep are empty."""
         processor, mock_get, _ = correction_processor
@@ -131,7 +145,7 @@ class TestCorrectionProcessor:
         result = processor.get_corrected_data("test_alias")
 
         assert result.is_empty()
-        assert mock_get.call_count == 2  # Called for both corrected and prep
+        assert mock_get.call_count == 3  # Called for corrected, prep and raw
 
     def test_save_corrected_data(self, correction_processor, sample_data):
         """Test saving corrected data."""
@@ -1312,8 +1326,10 @@ class TestAcceptAction:
         assert processor.get_correction_log("survey").is_empty()
 
     # Backcheck results measure data quality, so a mismatch can't be accepted
-    # away; it can only be attributed on the Backchecks page.
-    @pytest.mark.parametrize("check_type", ["missing", "backchecks"])
+    # away; it can only be attributed on the Backchecks page. An ID belongs to
+    # one record, so a duplicate ID can't be accepted either; it is resolved
+    # on the duplicate cards.
+    @pytest.mark.parametrize("check_type", ["missing", "backchecks", "duplicates"])
     def test_accept_rejects_unknown_check_type(self, store, sample_data, check_type):
         _seed_prep(store, sample_data)
         processor = CorrectionProcessor("p1")
@@ -2214,3 +2230,72 @@ class TestActiveCorrectionsMatchStoredValues:
         )
 
         assert processor.get_active_corrections("survey", "KEY").is_empty()
+
+
+def _tables(tables: dict):
+    """A `duckdb_get_table` stand-in serving `tables[(alias, db_name)]`.
+
+    Missing tables come back empty, with no columns, as from DuckDB.
+    """
+
+    def get(project_id, alias, db_name):
+        return tables.get((alias, db_name), pl.DataFrame())
+
+    return get
+
+
+class TestRawFallback:
+    """An alias with no prep table is corrected from its raw table."""
+
+    def test_uncorrected_data_prefers_prep(self, correction_processor, sample_data):
+        processor, mock_get, _ = correction_processor
+        raw = sample_data.with_columns(pl.lit("raw").alias("name"))
+        mock_get.side_effect = _tables(
+            {("bc", "prep"): sample_data, ("bc", "raw"): raw}
+        )
+
+        assert processor.get_uncorrected_data("bc").equals(sample_data)
+
+    def test_uncorrected_data_falls_back_to_raw(
+        self, correction_processor, sample_data
+    ):
+        processor, mock_get, _ = correction_processor
+        mock_get.side_effect = _tables({("bc", "raw"): sample_data})
+
+        assert processor.get_uncorrected_data("bc").equals(sample_data)
+
+    def test_corrected_data_is_seeded_from_raw(self, correction_processor, sample_data):
+        processor, mock_get, mock_save = correction_processor
+        mock_get.side_effect = _tables({("bc", "raw"): sample_data})
+
+        result = processor.get_corrected_data("bc")
+
+        assert result.equals(sample_data)
+        saved = mock_save.call_args.kwargs
+        assert saved["db_name"] == "corrected"
+        assert saved["table_data"].equals(sample_data)
+
+    def test_reapply_starts_from_raw(self, correction_processor, sample_data):
+        processor, mock_get, mock_save = correction_processor
+        log = pl.DataFrame(
+            {
+                "date": [datetime.now()],
+                "KEY": ["key2"],
+                "ID": [None],
+                "action": ["remove row"],
+                "column": [None],
+                "current_value": [None],
+                "new_value": [None],
+                "reason": ["Duplicate"],
+            },
+            schema_overrides={"ID": pl.String, "column": pl.String},
+        )
+        mock_get.side_effect = _tables(
+            {("bc", "raw"): sample_data, ("corr_log_bc", "logs"): log}
+        )
+
+        failures = processor._reapply_all_corrections("bc")
+
+        assert failures == []
+        corrected = mock_save.call_args_list[-1].kwargs["table_data"]
+        assert corrected["survey_key"].to_list() == ["key1", "key3"]

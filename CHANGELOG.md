@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `src/datasure/processing/correction_log.py`, shared with the replication
   package, which now exports legacy logs with these columns) — #296
 - **Accept action**: `CorrectionProcessor.accept_value` records that a flagged
-  value (outliers, constraints, duplicates, GPS) was reviewed and
+  value (outliers, constraints, GPS) was reviewed and
   is correct, with a required reason. An acceptance is rejected if the data
   no longer holds the value being accepted. `get_active_acceptances` returns the
   acceptances whose recorded value still matches the data (for GPS, both
@@ -143,6 +143,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   saved under `backcheck_`-prefixed keys. Logic is in the new Streamlit-free
   `checks/id_duplicates.py`, rendering in `checks/id_duplicates_ui.py`;
   `DuplicatesSettings` gains `team` and `backcheck_conditions` — #306
+- **Duplicate card corrections**: Each duplicate ID card has a Keep / Modify
+  ID / Drop choice per record, and each unmatched backcheck card a Modify ID /
+  Drop choice, with one required reason and note and one Save. A save logs one
+  entry per changed record ("modify value" on the ID column or "remove row",
+  source `duplicates`) to the survey or backcheck alias's log, through the
+  atomic `apply_corrections`. Save is disabled, with the reasons listed, until
+  at most one record keeps the ID and every new ID is non-empty, changed,
+  distinct within the save, valid for the ID column's type and not held by an
+  included record (naming its KEY); an unmatched backcheck's new ID must be a
+  survey ID. Dropping every record goes through `confirm_dialog`. Records
+  sharing a KEY can't be corrected on a card. A caption above the cards counts
+  the corrections logged this session and links to the Correction Log, where
+  they are undone. Decision logic is in the new Streamlit-free
+  `checks/id_corrections.py`; `IdView` gains `alias`, `processor` and
+  `resolved`, and `duplicates_report` takes the survey `alias` — #303
+- **Corrections page dataset switcher**: Pages with backcheck data get a
+  Survey data / Backcheck data switcher on their Correct Data tab. On backcheck
+  data, the add form offers only "modify value" on the backcheck ID column and
+  "remove row" (`correction_datasets`, `CorrectionDataset`); the log, removal
+  and preview use the backcheck alias. The backcheck KEY and ID columns come
+  from the Backcheck Analysis tab (`backchecks.models.backcheck_id_columns`,
+  read from `settings_utils.page_settings_file`) — #303
+- **Backcheck comparison scope**: The comparison and coverage use the
+  Duplicates tab's survey and backcheck Records to Include filters (new
+  `checks/backchecks/scope.py`, `duplicates.saved_records_to_include`,
+  `describe_records_to_include`). The page states the active filters and
+  counts, and a warning above Comparison Results Details counts the duplicate
+  survey IDs, duplicate backcheck IDs and unmatched backcheck IDs left out —
+  #303
 
 ### Changed
 
@@ -153,6 +182,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is gone), and its condition column is restored from the page settings.
   `duplicates_report` and `duplicates_report_settings` take an optional
   `backcheck_data` — #306
+- **Breaking**: `duplicates` is no longer in `ACCEPT_CHECK_TYPES`: an ID
+  belongs to one record, so a duplicate ID is resolved on its card, not
+  accepted — #303
+- **Breaking**: The backcheck `drop_duplicates_option` setting (Duplicate
+  Handling) is removed. Records whose survey ID is duplicated among the
+  included records are always left out of the comparison and coverage
+  (`compute.exclude_duplicate_ids` replaces `_prepare_data_for_merge`), and
+  come back once resolved. Pages that saved "first" or "last" now exclude
+  duplicates; the saved value is ignored — #303
+- `duplicates._FilteredRecords`, `_records_to_include` and
+  `_render_filter_messages` are now public as `FilteredRecords`,
+  `filter_records_to_include` and `render_filter_messages` — #303
 
 - **Breaking**: `backchecks` is no longer in `ACCEPT_CHECK_TYPES`, so a
   backcheck mismatch can't be accepted; it can only be attributed — #301
@@ -171,6 +212,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Resolved metric**: The Resolved metric on the ID duplicate cards was
+  always 0. It now counts the duplicate IDs, among the included records, that
+  corrections from any page have resolved (`id_duplicates.count_resolved_ids`)
+  — #303
+- **Raw fallback**: `CorrectionProcessor.get_corrected_data` and
+  `_reapply_all_corrections` seeded only from `prep`, so an alias with no prep
+  table, such as unprepared backcheck data, could not be corrected. They now
+  fall back to `raw` (`get_uncorrected_data`) — #303
 - **Duplicates filter**: Pages in one project shared the Records to Include
   filter through `filtered_duplicates_data`, so one page's filter overwrote
   another's. Each page now applies its own saved conditions — #306

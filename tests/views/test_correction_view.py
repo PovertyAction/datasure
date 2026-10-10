@@ -1095,6 +1095,35 @@ class TestRenderCorrectionInputForm:
             render_correction_input_form(processor, "KEY", "survey", 0)
             assert _st.warning.called
 
+    def test_data_with_no_rows_keeps_the_remove_form(self):
+        """Dropping every record leaves corrections to undo."""
+        processor = MagicMock()
+        processor.get_corrected_data.return_value = pl.DataFrame(
+            {"KEY": [], "name": []}, schema={"KEY": pl.String, "name": pl.String}
+        )
+
+        with (
+            _patched_st(
+                columns=MagicMock(
+                    return_value=[
+                        _mock_context_widget(),
+                        _mock_context_widget(),
+                        _mock_context_widget(),
+                    ]
+                ),
+                warning=MagicMock(),
+            ),
+            patch("datasure.views.correction_view.render_add_correction_form"),
+            patch(
+                "datasure.views.correction_view.render_remove_correction_form"
+            ) as mock_remove_form,
+        ):
+            render_correction_input_form(processor, "KEY", "survey", 0)
+
+            mock_remove_form.assert_called_once_with(
+                correction_processor=processor, alias="survey", tab_index=0
+            )
+
     def test_populated_data_renders_add_form_and_calls_remove_form(self):
         """render_remove_correction_form is `@st.fragment`-wrapped, so under
         the test harness's mock it becomes an opaque callable - this only
@@ -1319,3 +1348,122 @@ class TestMain:
         mock_render_tab.assert_any_call(mock_processor_instance, "proj1", 0)
         mock_render_tab.assert_any_call(mock_processor_instance, "proj1", 1)
         mock_page_nav.assert_called_once()
+
+
+class TestCorrectionDatasets:
+    """The datasets a Corrections page tab can correct."""
+
+    def _config(self, **overrides):
+        from datasure.views.correction_view import TabConfig
+
+        return TabConfig(
+            **{
+                "page_name": "HH",
+                "survey_data_name": "survey",
+                "survey_key": "KEY",
+                "survey_id": "hhid",
+                **overrides,
+            }
+        )
+
+    def test_survey_only_without_backcheck_data(self):
+        from datasure.processing.correction_log import CORRECTION_ACTIONS
+        from datasure.views.correction_view import SURVEY_DATA, correction_datasets
+
+        (survey,) = correction_datasets(self._config())
+
+        assert survey.label == SURVEY_DATA
+        assert survey.alias == "survey"
+        assert survey.key_col == "KEY"
+        assert survey.id_col == "hhid"
+        assert survey.actions == CORRECTION_ACTIONS
+        assert survey.column is None
+        assert survey.key_namespace == 0
+
+    def test_backcheck_data_allows_only_id_fixes_and_row_removal(self):
+        from datasure.processing.correction_log import Action
+        from datasure.views.correction_view import BACKCHECK_DATA, correction_datasets
+
+        config = self._config(
+            backcheck_data_name="bc", backcheck_key="bc_key", backcheck_id="bc_id"
+        )
+
+        _, backcheck = correction_datasets(config, tab_index=2)
+
+        assert backcheck.label == BACKCHECK_DATA
+        assert backcheck.alias == "bc"
+        assert backcheck.key_col == "bc_key"
+        assert backcheck.id_col == "bc_id"
+        assert backcheck.actions == (Action.MODIFY_VALUE, Action.REMOVE_ROW)
+        # Modify value is fixed to the ID column.
+        assert backcheck.column == "bc_id"
+        assert backcheck.key_namespace == "2_backcheck"
+
+    def test_backcheck_without_an_id_column_can_only_remove_rows(self):
+        from datasure.processing.correction_log import Action
+        from datasure.views.correction_view import correction_datasets
+
+        config = self._config(
+            survey_id=None, backcheck_data_name="bc", backcheck_key="KEY"
+        )
+
+        _, backcheck = correction_datasets(config)
+
+        assert backcheck.actions == (Action.REMOVE_ROW,)
+
+
+class TestLoadTabConfigBackcheck:
+    @patch("datasure.views.correction_view.page_settings_file")
+    @patch("datasure.views.correction_view.get_check_config_settings")
+    def test_reads_the_backcheck_columns(self, mock_get_settings, mock_file, tmp_path):
+        import json
+
+        settings_file = tmp_path / "page.json"
+        settings_file.write_text(json.dumps({"backchecks": {"survey_id": "bc_id"}}))
+        mock_file.return_value = settings_file
+        mock_get_settings.return_value = {
+            "page_name": "HH",
+            "survey_data_name": "survey",
+            "survey_key": "KEY",
+            "survey_id": "hhid",
+            "backcheck_data_name": "bc",
+        }
+
+        config = load_tab_config("proj1", 0)
+
+        mock_file.assert_called_once_with("proj1", "HH")
+        assert config.backcheck_data_name == "bc"
+        assert config.backcheck_key == "KEY"
+        assert config.backcheck_id == "bc_id"
+
+
+class TestAddCorrectionFormRestrictions:
+    def test_passes_the_allowed_actions_and_column_to_the_form(self):
+        data = pl.DataFrame({"KEY": ["b1"], "hhid": ["H1"]})
+        processor = MagicMock()
+        processor.get_corrected_data.return_value = data
+        popover = _mock_context_widget()
+
+        with (
+            _patched_st(
+                popover=MagicMock(return_value=popover),
+                selectbox=MagicMock(return_value="b1"),
+                write=MagicMock(),
+            ),
+            patch("datasure.views.correction_view.render_correction_form") as form,
+        ):
+            render_add_correction_form(
+                correction_processor=processor,
+                key_col="KEY",
+                alias="bc",
+                tab_index="0_backcheck",
+                survey_id_col="hhid",
+                actions=("modify value", "remove row"),
+                column="hhid",
+            )
+
+        kwargs = form.call_args.kwargs
+        assert kwargs["actions"] == ("modify value", "remove row")
+        assert kwargs["column"] == "hhid"
+        assert kwargs["alias"] == "bc"
+        assert kwargs["key_namespace"] == "0_backcheck"

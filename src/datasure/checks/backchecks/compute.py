@@ -174,41 +174,26 @@ def _validate_backcheck_inputs(
     return survey_key, survey_id
 
 
-def _prepare_data_for_merge(
-    data: pl.DataFrame, survey_id: str, drop_duplicates_option: str
-) -> pl.DataFrame:
-    """Prepare dataset for merge by handling duplicates according to settings.
+def exclude_duplicate_ids(data: pl.DataFrame, survey_id: str) -> pl.DataFrame:
+    """Leave out every record whose survey ID is on more than one record.
+
+    An ID belongs to one record, so a duplicated ID can't be compared until it
+    is resolved on the Duplicates tab. Once resolved, the record is compared
+    again.
 
     Parameters
     ----------
     data : pl.DataFrame
-        Dataset to prepare.
+        Survey or backcheck records.
     survey_id : str
-        Column name to use for duplicate detection.
-    drop_duplicates_option : str
-        How to handle duplicates: 'first', 'last', 'drop', or 'none'.
+        The survey ID column.
 
     Returns
     -------
     pl.DataFrame
-        Prepared dataset with duplicates handled.
+        The records whose survey ID is unique, in their original order.
     """
-    prepared_data = data.clone()
-
-    if drop_duplicates_option == "first":
-        return prepared_data.unique(subset=[survey_id], keep="first")
-
-    if drop_duplicates_option == "last":
-        return prepared_data.unique(subset=[survey_id], keep="last")
-
-    if drop_duplicates_option == "drop":
-        # Keep only non-duplicate rows
-        duplicates = (
-            prepared_data.group_by(survey_id).len().filter(pl.col("len") > 1)[survey_id]
-        )
-        return prepared_data.filter(~pl.col(survey_id).is_in(duplicates))
-
-    return prepared_data
+    return data.filter(pl.len().over(survey_id) == 1)
 
 
 def _add_statistical_test_columns(
@@ -460,14 +445,8 @@ def compute_backcheck_analysis(
 
     survey_key, survey_id = validation_result
 
-    # Prepare datasets for merge
-    drop_duplicates_option = backcheck_settings.drop_duplicates_option
-    survey_for_merge = _prepare_data_for_merge(
-        survey_data, survey_id, drop_duplicates_option
-    )
-    backcheck_for_merge = _prepare_data_for_merge(
-        backcheck_data, survey_id, drop_duplicates_option
-    )
+    survey_for_merge = exclude_duplicate_ids(survey_data, survey_id)
+    backcheck_for_merge = exclude_duplicate_ids(backcheck_data, survey_id)
 
     # Merge datasets on survey id
     merged_data = survey_for_merge.join(
