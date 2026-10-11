@@ -704,31 +704,48 @@ def render_correction_log(
     correction_log = correction_processor.get_correction_log(alias)
 
     with st.container(border=True):
-        if correction_log.is_empty():
-            st.info(
-                "No corrections have been made yet. You can add corrections "
-                "using the form above."
-            )
-        else:
-            section_header("Correction Log")
+        _render_correction_log_contents(correction_log, tab_index)
 
-            log_display = _build_correction_log_display(correction_log)
-            sources, actions = _render_log_filters(log_display, tab_index)
-            log_display = filter_correction_log(log_display, sources, actions)
-            if log_display.is_empty():
-                st.info("No log entries match the selected filters.")
-                return
-            if sources or actions:
-                st.caption(
-                    f"Showing {log_display.height:,} of "
-                    f"{correction_log.height:,} entries."
-                )
-            styled_dataframe(
-                row_styler(log_display, highlight_hard_acceptance).map(
-                    highlight_status, subset=["status"]
-                ),
-                width="stretch",
-            )
+
+def _render_correction_log_contents(
+    correction_log: pl.DataFrame, tab_index: str | int
+) -> None:
+    """Render the Correction Log filters, entry count and table.
+
+    Parameters
+    ----------
+    correction_log : pl.DataFrame
+        The raw correction log, as persisted.
+    tab_index : str | int
+        The tab index for unique widget keys.
+    """
+    if correction_log.is_empty():
+        st.info(
+            "No corrections have been made yet. You can add corrections "
+            "using the form above."
+        )
+        return
+
+    section_header("Correction Log")
+
+    log_display = _build_correction_log_display(correction_log)
+    sources, actions = _render_log_filters(log_display, tab_index)
+    log_display = filter_correction_log(log_display, sources, actions)
+    # Show the count whenever a filter is active, including when nothing
+    # matches, so "Showing 0 of Y" explains the empty result.
+    if sources or actions:
+        st.caption(
+            f"Showing {log_display.height:,} of {correction_log.height:,} entries."
+        )
+    if log_display.is_empty():
+        st.info("No log entries match the selected filters.")
+        return
+    styled_dataframe(
+        row_styler(log_display, highlight_hard_acceptance).map(
+            highlight_status, subset=["status"]
+        ),
+        width="stretch",
+    )
 
 
 @st.fragment

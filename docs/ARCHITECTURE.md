@@ -114,11 +114,15 @@ also reads.
   column) and duplicate card saves (one entry per changed record) use it.
 - **`status` / `status_reason`**: the outcome of the last replay of each entry.
 
-Check pages render the shared correction form in
-`utils/correction_form.py` (`render_correction_form`,
-`render_correction_inputs`, `apply_correction_entries`), prefilled with the
-KEY, column and current value, with widget keys namespaced per caller. The
-Correct Data page uses the same form. Check-specific logic that turns a
+The shared correction form lives in `utils/correction_form.py`
+(`render_correction_form`, `render_correction_inputs`,
+`apply_correction_entries`), with widget keys namespaced per caller. The
+Correct Data page renders it in full, and the Outliers page renders its
+inputs prefilled with the KEY, column and current value. GPS renders its own
+two-coordinate form in `checks/gpschecks/report_ui.py` and reuses only
+`get_current_value` and `apply_correction_entries`; duplicates use card
+controls that save through `CorrectionProcessor.apply_corrections`.
+Check-specific logic that turns a
 selection into log entries is kept free of Streamlit: `checks/outliers/review.py`,
 `checks/gpschecks/review.py` and `checks/id_corrections.py`.
 

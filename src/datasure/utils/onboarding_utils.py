@@ -164,9 +164,9 @@ class ImportDemoInfo:
         Inside each tab you will find:
         - :material/add: **Add correction step** — open a popover to apply a new correction.
         - :material/delete: **Remove correction step** — open a popover to undo a previous correction.
-        - **Correction Log** — appears after the first correction is applied; shows all
-          corrections made so far with their reasons, including those made from the
-          check pages. Filter it by source or action.
+        - **Correction Log** — appears after the first correction or acceptance; shows
+          every correction made so far, plus flags accepted on the check pages without
+          changing the data, with their reasons. Filter it by source or action.
         - **Preview Corrected Data** — a live preview of the dataset after all corrections
           have been applied, with row/column/missingness metrics.
 

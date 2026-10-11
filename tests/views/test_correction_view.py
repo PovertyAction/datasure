@@ -25,6 +25,7 @@ from datasure.views.correction_view import (
     _build_correction_log_display,
     _display_correction_details,
     _handle_remove_correction,
+    _render_correction_log_contents,
     _render_log_filters,
     filter_correction_log,
     get_current_value,
@@ -618,6 +619,69 @@ class TestRenderLogFilters:
             columns=MagicMock(return_value=[MagicMock(), MagicMock()]), pills=pills
         ):
             assert _render_log_filters(_sample_display_log(), "tab0") == ([], [])
+
+
+def _sample_raw_log() -> pl.DataFrame:
+    """A persisted correction log with entries from several sources."""
+    return pl.DataFrame(
+        {
+            "date": ["2026-01-01"] * 4,
+            "KEY": ["k1", "k2", "k3", "k4"],
+            "ID": [None] * 4,
+            "action": ["modify value", "accept", "remove row", "accept"],
+            "column": ["name", "age", None, "lat"],
+            "current_value": ["John", "99", None, "1.0"],
+            "new_value": ["Johnny", None, None, None],
+            "reason": ["typo", "verified", "duplicate", "verified"],
+            "source": ["corrections_page", "outliers", "duplicates", "gps"],
+        }
+    )
+
+
+class TestRenderCorrectionLogContents:
+    """The Correction Log shows the filtered entries and how many match."""
+
+    def _render(self, log: pl.DataFrame, selections: tuple[list, list]):
+        with (
+            patch(
+                "datasure.views.correction_view._render_log_filters",
+                return_value=selections,
+            ),
+            patch("datasure.views.correction_view.section_header"),
+            patch("datasure.views.correction_view.styled_dataframe") as table,
+            _patched_st(caption=MagicMock(), info=MagicMock()),
+        ):
+            _render_correction_log_contents(log, "tab0")
+            return table, _st.caption, _st.info
+
+    def test_filtered_log_shows_matching_entries_and_count(self):
+        table, caption, info = self._render(_sample_raw_log(), ([], ["accept"]))
+
+        shown = table.call_args.args[0].data
+        assert shown["KEY"].to_list() == ["k2", "k4"]
+        caption.assert_called_once_with("Showing 2 of 4 entries.")
+        info.assert_not_called()
+
+    def test_no_matching_entries_shows_zero_count_and_message(self):
+        table, caption, info = self._render(
+            _sample_raw_log(), (["corrections_page"], ["accept"])
+        )
+
+        caption.assert_called_once_with("Showing 0 of 4 entries.")
+        info.assert_called_once_with("No log entries match the selected filters.")
+        table.assert_not_called()
+
+    def test_unfiltered_log_shows_every_entry_without_count(self):
+        table, caption, _info = self._render(_sample_raw_log(), ([], []))
+
+        assert len(table.call_args.args[0].data) == 4
+        caption.assert_not_called()
+
+    def test_empty_log_shows_no_corrections_message(self):
+        table, _caption, info = self._render(_sample_raw_log().clear(), ([], []))
+
+        assert "No corrections have been made yet" in info.call_args.args[0]
+        table.assert_not_called()
 
 
 class TestHighlightHardAcceptance:
