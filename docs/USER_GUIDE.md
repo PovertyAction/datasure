@@ -1251,7 +1251,7 @@ Configure GPS validation:
 
 - Toggle "GPS has latitude and longitude columns"
 - Select latitude column
-- Select longitude column
+- Select longitude column (a different column from latitude)
 - Select accuracy column (optional)
 
 **Option B: Combined GPS Column**:

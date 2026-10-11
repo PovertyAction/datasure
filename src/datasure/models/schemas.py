@@ -270,6 +270,18 @@ class GPSColumnConfig(BaseModel):
             )
         return v
 
+    @field_validator("longitude_column")
+    @classmethod
+    def validate_distinct_lat_lon_columns(cls, v: str | None, info) -> str | None:
+        """Validate latitude and longitude are different columns."""
+        if (
+            info.data.get("format_type") == GPSFormatType.SEPARATE_COLUMNS
+            and v
+            and v == info.data.get("latitude_column")
+        ):
+            raise ValueError("Latitude and longitude must be different columns")
+        return v
+
 
 ## ============================================================================
 # CHECK CONFIGURATION MODELS

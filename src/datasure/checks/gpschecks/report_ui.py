@@ -765,7 +765,9 @@ def _render_outliers_data_table(
             help="Also show outliers accepted as valid, highlighted green, "
             "with the reason.",
         )
-        outliers_only = outliers_table(outlier_df, show_reviewed=show_reviewed)
+        outliers_only = outliers_table(
+            outlier_df, marked=review is not None, show_reviewed=show_reviewed
+        )
 
         if outliers_only.empty:
             # Every outlier may have been accepted as valid.
@@ -1334,7 +1336,7 @@ def _render_gps_outliers_checks(
         outlier_df = _mark_accepted_outliers(outlier_df, survey_key, review)
 
     # Display summary statistics
-    num_outliers = count_unreviewed_outliers(outlier_df)
+    num_outliers = count_unreviewed_outliers(outlier_df, marked=review is not None)
     total_points = len(outlier_df)
     outlier_pct = (num_outliers / total_points * 100) if total_points > 0 else 0
 
@@ -1361,6 +1363,7 @@ def _render_gps_outliers_checks(
         survey_key,
         clustering_col if detection_method == "Cluster by Column" else None,
         "Outlier",
+        marked=review is not None,
     )
 
     _render_outliers_data_table(
@@ -1775,12 +1778,14 @@ def plot_clusters_on_map(
     survey_id: str | None,
     clustering_col: str | None,
     outlier_col: str | None,
+    *,
+    marked: bool = False,
 ):
     """
     Plot clusters of GPS points on a map, highlighting outliers.
 
-    Outliers are red and other points blue. Outliers accepted as valid
-    (marked by `mark_gps_reviewed`) are green, labelled "Accepted".
+    Outliers are red and other points blue. If `marked`, outliers accepted
+    as valid by `mark_gps_reviewed` are green, labelled "Accepted".
 
     Parameters
     ----------
@@ -1798,6 +1803,9 @@ def plot_clusters_on_map(
         The name of the longitude column.
     outlier_col : str
         The name of the column indicating outliers.
+    marked : bool
+        Whether `df` comes from `mark_gps_reviewed`. Otherwise a column named
+        like a review column is source data, not a review result.
 
     Returns
     -------
@@ -1807,7 +1815,7 @@ def plot_clusters_on_map(
     df = df.rename(columns={gps_lat_col: "lat", gps_lon_col: "lon"})
 
     # Create outlier status column for coloring
-    df["outlier_status"] = outlier_status(df, outlier_col)
+    df["outlier_status"] = outlier_status(df, outlier_col, marked=marked)
 
     # Build tooltip fields
     tooltip_fields = _identity_optional_fields(

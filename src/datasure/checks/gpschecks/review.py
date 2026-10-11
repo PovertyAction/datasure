@@ -83,13 +83,14 @@ def coordinate_columns(gps_config: dict[str, Any]) -> CoordinateColumns | None:
     """Return the latitude and longitude columns of a GPS configuration.
 
     None for a configuration that stores the coordinates in one delimited
-    column, which corrections can't write to.
+    column, which corrections can't write to, or that uses one column for
+    both, where the longitude would overwrite the latitude.
     """
     if gps_config.get("format_type") != GPSFormatType.SEPARATE_COLUMNS.value:
         return None
     latitude = gps_config.get("latitude_column")
     longitude = gps_config.get("longitude_column")
-    if not latitude or not longitude:
+    if not latitude or not longitude or latitude == longitude:
         return None
     return CoordinateColumns(latitude=latitude, longitude=longitude)
 
@@ -283,8 +284,10 @@ def _is_outlier(outliers: pd.DataFrame, outlier_col: str = OUTLIER_COL) -> pd.Se
     return outliers[outlier_col].fillna(False).astype(bool)
 
 
-def _is_reviewed(outliers: pd.DataFrame) -> pd.Series:
-    if REVIEW_STATUS_COL not in outliers.columns:
+def _is_reviewed(outliers: pd.DataFrame, *, marked: bool) -> pd.Series:
+    # Without `marked`, a REVIEW_STATUS_COL is a source column, such as a
+    # Survey KEY with that name, not the output of `mark_gps_reviewed`.
+    if not marked or REVIEW_STATUS_COL not in outliers.columns:
         return pd.Series(False, index=outliers.index)
     return outliers[REVIEW_STATUS_COL] == REVIEWED_BADGE
 
@@ -336,14 +339,24 @@ def mark_gps_reviewed(
     return marked
 
 
-def count_unreviewed_outliers(outliers: pd.DataFrame) -> int:
-    """Return the number of outliers not accepted as valid."""
-    return int((_is_outlier(outliers) & ~_is_reviewed(outliers)).sum())
+def count_unreviewed_outliers(outliers: pd.DataFrame, *, marked: bool) -> int:
+    """Return the number of outliers not accepted as valid.
+
+    `marked` says whether `outliers` comes from `mark_gps_reviewed`;
+    otherwise no outlier counts as accepted.
+    """
+    return int((_is_outlier(outliers) & ~_is_reviewed(outliers, marked=marked)).sum())
 
 
-def outlier_status(outliers: pd.DataFrame, outlier_col: str = OUTLIER_COL) -> pd.Series:
-    """Label each point Accepted, Outlier or Normal, for the map."""
-    reviewed = _is_reviewed(outliers)
+def outlier_status(
+    outliers: pd.DataFrame, outlier_col: str = OUTLIER_COL, *, marked: bool
+) -> pd.Series:
+    """Label each point Accepted, Outlier or Normal, for the map.
+
+    `marked` says whether `outliers` comes from `mark_gps_reviewed`;
+    otherwise no point is Accepted.
+    """
+    reviewed = _is_reviewed(outliers, marked=marked)
     is_outlier = _is_outlier(outliers, outlier_col)
     return pd.Series(
         [
@@ -355,16 +368,20 @@ def outlier_status(outliers: pd.DataFrame, outlier_col: str = OUTLIER_COL) -> pd
     )
 
 
-def outliers_table(outliers: pd.DataFrame, *, show_reviewed: bool) -> pd.DataFrame:
+def outliers_table(
+    outliers: pd.DataFrame, *, marked: bool, show_reviewed: bool
+) -> pd.DataFrame:
     """Return the outliers to show in the table, indexed by row position.
 
-    Accepted outliers and the review columns are hidden unless
-    `show_reviewed`. The index is reset so a clicked row position maps to a
-    row of the result.
+    If `outliers` comes from `mark_gps_reviewed` (`marked`), accepted
+    outliers and the review columns are hidden unless `show_reviewed`. The
+    index is reset so a clicked row position maps to a row of the result.
     """
     table = outliers[_is_outlier(outliers)]
-    if REVIEW_STATUS_COL in table.columns and not show_reviewed:
-        table = table[~_is_reviewed(table)].drop(columns=list(REVIEW_COLUMNS))
+    if marked and not show_reviewed:
+        table = table[~_is_reviewed(table, marked=True)].drop(
+            columns=list(REVIEW_COLUMNS)
+        )
     return table.reset_index(drop=True)
 
 

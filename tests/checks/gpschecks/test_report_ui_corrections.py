@@ -464,13 +464,44 @@ def test_reserved_survey_key_name_disables_review(
     assert mock_table.call_args.args[-1] is None
 
 
+@patch(f"{MODULE}._render_table_with_csv_download")
+@patch(f"{MODULE}.st")
+def test_unreviewable_table_keeps_a_review_status_key(st_mock, mock_render, outlier_df):
+    renamed = outlier_df.rename(columns={"KEY": REVIEW_STATUS_COL})
+
+    _render_outliers_data_table(
+        renamed,
+        "gps1",
+        REVIEW_STATUS_COL,
+        None,
+        None,
+        GPSOutlierMethod.auto_lof.value,
+        None,
+        None,
+    )
+
+    shown = mock_render.call_args.args[0]
+    assert shown[REVIEW_STATUS_COL].tolist() == ["K1", "K2"]
+
+
+@patch(f"{MODULE}._render_scatterplot_map")
+def test_map_ignores_an_unmarked_review_status_column(mock_map, outlier_df):
+    renamed = outlier_df.assign(**{REVIEW_STATUS_COL: ["Reviewed", None, None]})
+    plot_clusters_on_map(
+        renamed, "latitude", "longitude", None, None, "KEY", None, "Outlier"
+    )
+
+    plotted = mock_map.call_args.args[0]
+    assert plotted["outlier_status"].tolist() == ["Outlier", "Outlier", "Normal"]
+
+
 @patch(f"{MODULE}._render_scatterplot_map")
 def test_map_draws_accepted_outliers_green(mock_map, outlier_df):
     marked = outlier_df.assign(
         **{REVIEW_STATUS_COL: ["Reviewed", None, None], REVIEW_REASON_COL: None}
     )
     plot_clusters_on_map(
-        marked, "latitude", "longitude", None, None, "KEY", None, "Outlier"
+        marked, "latitude", "longitude", None, None, "KEY", None, "Outlier", marked=True
     )
 
     plotted = mock_map.call_args.args[0]

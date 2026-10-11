@@ -60,6 +60,16 @@ def test_coordinate_columns_single_column_format_is_none():
     assert coordinate_columns(config) is None
 
 
+def test_coordinate_columns_with_one_column_for_both_is_none():
+    # Corrections would write longitude over latitude in the shared column.
+    config = {
+        "format_type": GPSFormatType.SEPARATE_COLUMNS.value,
+        "latitude_column": "gps",
+        "longitude_column": "gps",
+    }
+    assert coordinate_columns(config) is None
+
+
 # =============================================================================
 # allowed_gps_actions
 # =============================================================================
@@ -289,13 +299,13 @@ def test_mark_gps_reviewed_does_not_modify_its_input(outliers):
 
 def test_count_unreviewed_outliers_leaves_out_accepted_ones(outliers):
     marked = mark_gps_reviewed(outliers, {"K1": "ok"}, "KEY")
-    assert count_unreviewed_outliers(marked) == 2
-    assert count_unreviewed_outliers(outliers) == 3
+    assert count_unreviewed_outliers(marked, marked=True) == 2
+    assert count_unreviewed_outliers(outliers, marked=False) == 3
 
 
 def test_outlier_status_labels_accepted_points(outliers):
     marked = mark_gps_reviewed(outliers, {"K1": "ok"}, "KEY")
-    assert outlier_status(marked).tolist() == [
+    assert outlier_status(marked, marked=True).tolist() == [
         "Normal",
         ACCEPTED_STATUS,
         "Outlier",
@@ -310,7 +320,7 @@ def test_outlier_status_labels_accepted_points(outliers):
 
 def test_outliers_table_hides_accepted_outliers_and_review_columns(outliers):
     marked = mark_gps_reviewed(outliers, {"K1": "ok"}, "KEY")
-    table = outliers_table(marked, show_reviewed=False)
+    table = outliers_table(marked, marked=True, show_reviewed=False)
     assert table["KEY"].tolist() == ["K2", 7]
     assert REVIEW_STATUS_COL not in table.columns
     assert table.index.tolist() == [0, 1]
@@ -318,25 +328,36 @@ def test_outliers_table_hides_accepted_outliers_and_review_columns(outliers):
 
 def test_outliers_table_shows_accepted_outliers_on_request(outliers):
     marked = mark_gps_reviewed(outliers, {"K1": "ok"}, "KEY")
-    table = outliers_table(marked, show_reviewed=True)
+    table = outliers_table(marked, marked=True, show_reviewed=True)
     assert table["KEY"].tolist() == ["K1", "K2", 7]
     assert table[REVIEW_STATUS_COL].tolist() == [REVIEWED_BADGE, None, None]
 
 
 def test_outliers_table_without_review_columns(outliers):
-    table = outliers_table(outliers, show_reviewed=False)
+    table = outliers_table(outliers, marked=False, show_reviewed=False)
     assert table["KEY"].tolist() == ["K1", "K2", 7]
+
+
+def test_unmarked_review_status_column_is_not_a_review_result(outliers):
+    # A source column (here, the Survey KEY) named like a review column.
+    data = outliers.rename(columns={"KEY": REVIEW_STATUS_COL})
+    data[REVIEW_STATUS_COL] = ["K3", REVIEWED_BADGE, "K2", 7]
+
+    assert count_unreviewed_outliers(data, marked=False) == 3
+    assert outlier_status(data, marked=False).tolist()[1] == "Outlier"
+    table = outliers_table(data, marked=False, show_reviewed=False)
+    assert table[REVIEW_STATUS_COL].tolist() == [REVIEWED_BADGE, "K2", 7]
 
 
 def test_select_gps_outlier_returns_the_clicked_row(outliers):
     marked = mark_gps_reviewed(outliers, {"K1": "ok"}, "KEY")
-    table = outliers_table(marked, show_reviewed=True)
+    table = outliers_table(marked, marked=True, show_reviewed=True)
     assert select_gps_outlier(table, [0], "KEY") == GPSSelection("K1", reviewed=True)
     assert select_gps_outlier(table, [1], "KEY") == GPSSelection("K2", reviewed=False)
 
 
 def test_select_gps_outlier_returns_native_keys(outliers):
-    table = outliers_table(outliers, show_reviewed=False)
+    table = outliers_table(outliers, marked=False, show_reviewed=False)
     selection = select_gps_outlier(table, [2], "KEY")
     assert selection == GPSSelection(7, reviewed=False)
     assert type(selection.key_value) is int
@@ -344,7 +365,7 @@ def test_select_gps_outlier_returns_native_keys(outliers):
 
 @pytest.mark.parametrize("rows", [[], [9], [-1]])
 def test_select_gps_outlier_without_a_valid_row(outliers, rows):
-    table = outliers_table(outliers, show_reviewed=False)
+    table = outliers_table(outliers, marked=False, show_reviewed=False)
     assert select_gps_outlier(table, rows, "KEY") is None
 
 
@@ -515,7 +536,7 @@ def test_mark_gps_reviewed_matches_integral_float_keys(float_key_outliers):
 
 
 def test_select_gps_outlier_returns_integral_float_keys_as_int(float_key_outliers):
-    table = outliers_table(float_key_outliers, show_reviewed=False)
+    table = outliers_table(float_key_outliers, marked=False, show_reviewed=False)
     selection = select_gps_outlier(table, [0], "KEY")
     assert selection == GPSSelection(1, reviewed=False)
     assert type(selection.key_value) is int
