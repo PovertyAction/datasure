@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0a1] - 2026-10-11
+
 ### Added
 
 - **Correction log**: New `source` column records which page made each entry;
@@ -218,10 +220,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `duplicates._FilteredRecords`, `_records_to_include` and
   `_render_filter_messages` are now public as `FilteredRecords`,
   `filter_records_to_include` and `render_filter_messages` — #303
-
 - **Breaking**: `backchecks` is no longer in `ACCEPT_CHECK_TYPES`, so a
   backcheck mismatch can't be accepted; it can only be attributed — #301
-
 - **Breaking**: `BackcheckSettings.backcheck_target_percent` is now
   `float | None` (0–100), defaulting to None instead of 10;
   `effective_target_percent` applies the 10% default. The target resolves from
