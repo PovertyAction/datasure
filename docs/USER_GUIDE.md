@@ -406,10 +406,16 @@ place shows up in the other and in every report that uses the dataset.
 | Back Checks: Comparison Details | attribute a mismatch to the Enumerator, Backchecker or Respondent (the data is not changed) | [Attributing Mismatches](#attributing-mismatches) |
 | Correct Data | modify value, remove value, remove row, for any KEY and column | [Correction Actions](#correction-actions) |
 
-On a check page, click **Review** on a flagged row to open a correction form
-with the KEY, column and current value filled in. You correct one record at a
-time. After you save, the page reloads and shows a confirmation. A correction
-applies to every row with the same KEY.
+On the Outliers and GPS Checks pages, click **Review** on a flagged row to open
+a correction form with the KEY and current value filled in: one column on
+Outliers, the latitude and longitude pair on GPS Checks. You correct one record
+at a time. After you save, the page reloads and shows a confirmation. A
+correction applies to every row with the same KEY.
+
+Duplicates and Back Checks work differently. Duplicate and unmatched IDs are
+resolved on per-ID cards (see [Resolving a card](#resolving-a-card)), and back
+check mismatches are attributed rather than corrected, one or several at a
+time (see [Attributing Mismatches](#attributing-mismatches)).
 
 The Correct Data page keeps working as before, for any record, including ones
 no check flagged. It is also the only place to undo a correction or an
@@ -569,8 +575,9 @@ Above the Correction Log, **Source** and **Action** filters list the sources
 and actions that appear in the log. Select one or more values to show only
 the matching entries; with nothing selected, a filter shows everything. The
 two filters combine, so selecting the `gps` source and the `accept` action
-shows only GPS acceptances. A caption counts the entries shown out of the
-total. The filters only change what the table shows: "Remove correction step"
+shows only GPS acceptances. While a filter is on, a caption counts the entries
+shown out of the total; if nothing matches, a message says so instead. The
+filters only change what the table shows: "Remove correction step"
 still lists every entry.
 
 #### Correcting Back Check Data
