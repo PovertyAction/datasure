@@ -940,44 +940,17 @@ def _render_gps_correction_form(
     a correction would change every one of those rows. Without coordinate
     columns to compare, any KEY on more than one row can't be reviewed.
     """
-    data, columns = review.data, review.columns
+    columns = review.columns
     key_value = selection.key_value
 
     st.markdown(f"GPS outlier for KEY **{key_value}**")
-    rows = data.filter(pl.col(survey_key) == key_value)
-    if rows.is_empty():
-        st.warning(f"KEY {key_value} is no longer in the data. Refresh the page.")
-        return
-    coordinate_cols = columns.as_tuple() if columns else ()
-    if (columns is None and rows.height > 1) or any(
-        key_has_conflicting_values(data, survey_key, key_value, col)
-        for col in coordinate_cols
-    ):
-        st.warning(
-            f"KEY {key_value} is on more than one row, and the rows' "
-            "coordinates may differ. Corrections and acceptances apply to "
-            "every row with the KEY, so this outlier can't be reviewed here. "
-            "Give each record "
-            "a unique KEY in the source data first; the Duplicates check lists "
-            "duplicated KEYs."
-        )
+    rows = _reviewable_rows(survey_key, key_value, review)
+    if rows is None:
         return
 
+    coordinate_cols = columns.as_tuple() if columns else ()
     current = {col: rows[0, col] for col in coordinate_cols}
-    if columns is None:
-        st.info(
-            "This GPS configuration stores the coordinates in one column, so "
-            "they can't be corrected or accepted here. You can remove the "
-            "observation, or correct the column on the Correct Data page."
-        )
-    else:
-        st.write(f"**{columns.latitude}:** {current[columns.latitude]}")
-        st.write(f"**{columns.longitude}:** {current[columns.longitude]}")
-    if selection.reviewed:
-        st.info(
-            "This outlier was accepted as valid. Remove the acceptance on the "
-            "Correct Data page to flag it again."
-        )
+    _show_current_state(columns, current, reviewed=selection.reviewed)
 
     # JSON keeps the parts distinct, and the columns keep forms for two GPS
     # configurations apart.
@@ -987,36 +960,7 @@ def _render_gps_correction_form(
         options=allowed_gps_actions(columns, reviewed=selection.reviewed),
         key=f"gps_correction_action_{namespace}",
     )
-
-    new_latitude = new_longitude = validation_error = None
-    if action == GPSAction.MODIFY_COORDINATES and columns is not None:
-        lat_input, lon_input = st.columns(2)
-        new_latitude = lat_input.text_input(
-            f"New {columns.latitude}",
-            key=f"gps_correction_new_lat_{namespace}",
-            placeholder="Enter new latitude",
-        )
-        new_longitude = lon_input.text_input(
-            f"New {columns.longitude}",
-            key=f"gps_correction_new_lon_{namespace}",
-            placeholder="Enter new longitude",
-        )
-        if new_latitude and new_longitude:
-            validation_error = validate_coordinates(new_latitude, new_longitude)
-            if validation_error:
-                st.error(validation_error)
-    elif action == GPSAction.REMOVE_COORDINATES and columns is not None:
-        st.caption(
-            f"Clears {columns.latitude} and {columns.longitude}. Accuracy and "
-            "altitude are kept."
-        )
-    elif action == GPSAction.REMOVE_OBSERVATION:
-        st.warning(
-            f"This will remove the {rows.height} rows with KEY {key_value} "
-            "from the dataset."
-            if rows.height > 1
-            else f"This will remove the row with KEY {key_value} from the dataset."
-        )
+    inputs = _render_action_inputs(action, columns, rows.height, key_value, namespace)
 
     reason = st.text_input(
         label="Reason for Correction",
@@ -1024,9 +968,7 @@ def _render_gps_correction_form(
         placeholder="Enter reason for correction",
     )
 
-    apply_enabled = bool(reason and reason.strip()) and not validation_error
-    if action == GPSAction.MODIFY_COORDINATES:
-        apply_enabled = apply_enabled and bool(new_latitude and new_longitude)
+    apply_enabled = bool(reason and reason.strip()) and inputs.ready
     if not st.button(
         label="Apply",
         key=f"gps_correction_apply_{namespace}",
@@ -1036,8 +978,132 @@ def _render_gps_correction_form(
     ):
         return
 
+    _save_gps_correction(survey_key, review, action, key_value, reason, current, inputs)
+
+
+@dataclass(frozen=True)
+class _CoordinateInputs:
+    """The new coordinates entered in the correction form.
+
+    Attributes
+    ----------
+    latitude, longitude : str | None
+        The entered values; None unless the action modifies coordinates.
+    ready : bool
+        Whether the action has the input it needs: always True unless the
+        action modifies coordinates, then True once both are entered and valid.
+    """
+
+    latitude: str | None = None
+    longitude: str | None = None
+    ready: bool = True
+
+
+def _reviewable_rows(
+    survey_key: str, key_value: Any, review: GPSReview
+) -> pl.DataFrame | None:
+    """Return the rows with the KEY, or None with a warning if it can't be reviewed."""
+    data, columns = review.data, review.columns
+    rows = data.filter(pl.col(survey_key) == key_value)
+    if rows.is_empty():
+        st.warning(f"KEY {key_value} is no longer in the data. Refresh the page.")
+        return None
+    coordinate_cols = columns.as_tuple() if columns else ()
+    if (columns is None and rows.height > 1) or any(
+        key_has_conflicting_values(data, survey_key, key_value, col)
+        for col in coordinate_cols
+    ):
+        st.warning(
+            f"KEY {key_value} is on more than one row, and the rows' "
+            "coordinates may differ. Corrections and acceptances apply to "
+            "every row with the KEY, so this outlier can't be reviewed here. "
+            "Give each record a unique KEY in the source data first; the "
+            "Duplicates check lists duplicated KEYs."
+        )
+        return None
+    return rows
+
+
+def _show_current_state(
+    columns: CoordinateColumns | None, current: dict[str, Any], *, reviewed: bool
+) -> None:
+    """Show the outlier's coordinates and whether it was accepted."""
+    if columns is None:
+        st.info(
+            "This GPS configuration stores the coordinates in one column, so "
+            "they can't be corrected or accepted here. You can remove the "
+            "observation, or correct the column on the Correct Data page."
+        )
+    else:
+        st.write(f"**{columns.latitude}:** {current[columns.latitude]}")
+        st.write(f"**{columns.longitude}:** {current[columns.longitude]}")
+    if reviewed:
+        st.info(
+            "This outlier was accepted as valid. Remove the acceptance on the "
+            "Correct Data page to flag it again."
+        )
+
+
+def _render_action_inputs(
+    action: GPSAction,
+    columns: CoordinateColumns | None,
+    row_count: int,
+    key_value: Any,
+    namespace: str,
+) -> _CoordinateInputs:
+    """Render the inputs or notes specific to the chosen action."""
+    if action == GPSAction.MODIFY_COORDINATES and columns is not None:
+        return _render_new_coordinates(columns, namespace)
+    if action == GPSAction.REMOVE_COORDINATES and columns is not None:
+        st.caption(
+            f"Clears {columns.latitude} and {columns.longitude}. Accuracy and "
+            "altitude are kept."
+        )
+    elif action == GPSAction.REMOVE_OBSERVATION:
+        st.warning(
+            f"This will remove the {row_count} rows with KEY {key_value} "
+            "from the dataset."
+            if row_count > 1
+            else f"This will remove the row with KEY {key_value} from the dataset."
+        )
+    return _CoordinateInputs()
+
+
+def _render_new_coordinates(
+    columns: CoordinateColumns, namespace: str
+) -> _CoordinateInputs:
+    """Render the new latitude and longitude inputs and validate them."""
+    lat_input, lon_input = st.columns(2)
+    latitude = lat_input.text_input(
+        f"New {columns.latitude}",
+        key=f"gps_correction_new_lat_{namespace}",
+        placeholder="Enter new latitude",
+    )
+    longitude = lon_input.text_input(
+        f"New {columns.longitude}",
+        key=f"gps_correction_new_lon_{namespace}",
+        placeholder="Enter new longitude",
+    )
+    if not (latitude and longitude):
+        return _CoordinateInputs(latitude, longitude, ready=False)
+    validation_error = validate_coordinates(latitude, longitude)
+    if validation_error:
+        st.error(validation_error)
+    return _CoordinateInputs(latitude, longitude, ready=not validation_error)
+
+
+def _save_gps_correction(
+    survey_key: str,
+    review: GPSReview,
+    action: GPSAction,
+    key_value: Any,
+    reason: str,
+    current: dict[str, Any],
+    inputs: _CoordinateInputs,
+) -> None:
+    """Save the correction and rerun the page if it succeeds."""
     survey_id_value = (
-        get_current_value(data, survey_key, key_value, review.survey_id)
+        get_current_value(review.data, survey_key, key_value, review.survey_id)
         if review.survey_id
         else None
     )
@@ -1045,10 +1111,10 @@ def _render_gps_correction_form(
         action,
         key_value,
         reason,
-        columns=columns,
+        columns=review.columns,
         current=current,
-        new_latitude=new_latitude,
-        new_longitude=new_longitude,
+        new_latitude=inputs.latitude,
+        new_longitude=inputs.longitude,
         survey_id_value=survey_id_value,
     )
     if not apply_correction_entries(
