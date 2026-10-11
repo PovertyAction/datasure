@@ -342,6 +342,17 @@ class TestCorrectionForm:
         st_mock.selectbox.assert_not_called()
         apply.assert_not_called()
 
+    def test_duplicate_key_in_a_single_column_configuration_cannot_be_reviewed(
+        self,
+    ):
+        data = pl.DataFrame({"KEY": ["K1", "K1"], "gps": ["1 2", "1.5 2"]})
+        st_mock = _form_st(GPSAction.REMOVE_OBSERVATION)
+        apply, _ = self._render(GPSReview(MagicMock(), "s", data, None), st_mock)
+
+        st_mock.warning.assert_called_once()
+        st_mock.selectbox.assert_not_called()
+        apply.assert_not_called()
+
     def test_widget_keys_are_unique_per_configuration(self, data):
         keys = []
         for columns in (COLUMNS, CoordinateColumns("bc_lat", "bc_lon")):
@@ -424,6 +435,30 @@ def test_without_alias_outliers_are_not_reviewable(
 
     _render_gps_outliers_checks.__wrapped__("proj", "page", data, "KEY", None, None)
 
+    metrics = {c.args[0]: c.args[1] for c in st_mock.metric.call_args_list}
+    assert metrics["Outliers Detected"] == "2"
+    assert mock_table.call_args.args[-1] is None
+
+
+@patch(f"{MODULE}._render_outliers_data_table")
+@patch(f"{MODULE}.plot_clusters_on_map")
+@patch(f"{MODULE}._run_lof_detection")
+@patch(f"{MODULE}._load_and_parse_gps_data")
+@patch(f"{MODULE}.st")
+def test_reserved_survey_key_name_disables_review(
+    st_mock, mock_load, mock_lof, mock_plot, mock_table, data, outlier_df
+):
+    st_mock.columns.side_effect = _columns_mock
+    st_mock.selectbox.return_value = GPSOutlierMethod.auto_lof.value
+    renamed = outlier_df.rename(columns={"KEY": REVIEW_STATUS_COL})
+    mock_load.return_value = (pl.DataFrame({"alias": ["gps1"]}), "gps1", data)
+    mock_lof.return_value = renamed
+
+    _render_gps_outliers_checks.__wrapped__(
+        "proj", "page", data, REVIEW_STATUS_COL, None, None, alias="survey"
+    )
+
+    st_mock.warning.assert_called_once()
     metrics = {c.args[0]: c.args[1] for c in st_mock.metric.call_args_list}
     assert metrics["Outliers Detected"] == "2"
     assert mock_table.call_args.args[-1] is None

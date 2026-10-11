@@ -937,7 +937,8 @@ def _render_gps_correction_form(
     map, metrics and table reflect it.
 
     A KEY shared by rows with different coordinates can't be reviewed, since
-    a correction would change every one of those rows.
+    a correction would change every one of those rows. Without coordinate
+    columns to compare, any KEY on more than one row can't be reviewed.
     """
     data, columns = review.data, review.columns
     key_value = selection.key_value
@@ -948,14 +949,15 @@ def _render_gps_correction_form(
         st.warning(f"KEY {key_value} is no longer in the data. Refresh the page.")
         return
     coordinate_cols = columns.as_tuple() if columns else ()
-    if any(
+    if (columns is None and rows.height > 1) or any(
         key_has_conflicting_values(data, survey_key, key_value, col)
         for col in coordinate_cols
     ):
         st.warning(
-            f"KEY {key_value} is on more than one row, with different "
-            "coordinates. Corrections and acceptances apply to every row with "
-            "the KEY, so this outlier can't be reviewed here. Give each record "
+            f"KEY {key_value} is on more than one row, and the rows' "
+            "coordinates may differ. Corrections and acceptances apply to "
+            "every row with the KEY, so this outlier can't be reviewed here. "
+            "Give each record "
             "a unique KEY in the source data first; the Duplicates check lists "
             "duplicated KEYs."
         )
@@ -1246,7 +1248,13 @@ def _render_gps_outliers_checks(
         return
 
     review = None
-    if alias and survey_key and survey_key in outlier_df.columns:
+    if alias and survey_key in REVIEW_COLUMNS:
+        st.warning(
+            f"Outliers can't be corrected or accepted on this page because the "
+            f"Survey KEY column is named '{survey_key}', which this report uses "
+            "for review results. Rename the column to review outliers here."
+        )
+    elif alias and survey_key and survey_key in outlier_df.columns:
         selected_config = gps_settings.filter(
             pl.col("alias") == selected_alias
         ).to_dicts()[0]

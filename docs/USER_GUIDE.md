@@ -1314,8 +1314,12 @@ Data page.
 
 Corrections need separate latitude and longitude columns. For a configuration
 that stores both in one column, the only action offered is **remove
-observation**. As on the outliers page, a KEY on more than one row with
-different coordinates can't be reviewed here.
+observation**, and a KEY on more than one row can't be reviewed. For separate
+columns, as on the outliers page, a KEY on more than one row with different
+coordinates can't be reviewed here. An acceptance applies to every GPS
+configuration that uses the same latitude and longitude columns. Outliers
+can't be reviewed if the Survey KEY column is named `review status` or
+`review reason`.
 
 ---
 
