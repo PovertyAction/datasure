@@ -175,6 +175,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   counts, and a warning above Comparison Results Details counts the duplicate
   survey IDs, duplicate backcheck IDs and unmatched backcheck IDs left out —
   #303
+- **GPS outlier corrections**: Each row of the GPS outliers table has a Review
+  button that opens the correction form in a dialog, prefilled from the KEY and
+  the configured latitude and longitude, to modify coordinates, remove
+  coordinates, remove the observation or accept the location (source and check
+  type `gps`). Coordinate changes write one log entry per coordinate column
+  with a shared reason through `CorrectionProcessor.apply_corrections`, so both
+  apply or neither does; removing coordinates clears only the latitude and
+  longitude columns. Acceptances are (`gps`, KEY, no column), record both
+  coordinates and lapse if either changes. Accepted outliers are hidden from
+  the table and the outlier count unless "Show reviewed" is on, and are drawn
+  green on the map. A single-column GPS configuration, or one that uses the
+  same column for latitude and longitude (now rejected by the settings schema),
+  offers only "remove observation". Review is blocked for a KEY on several rows
+  with different coordinates, and turned off with a warning for a Survey KEY
+  named "review status" or "review reason". Logic is in the new Streamlit-free
+  `checks/gpschecks/review.py` — #304
 
 ### Changed
 
@@ -270,6 +286,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   above the hard maximum read "above soft maximum"), so hard violations were
   undercounted. Hard bounds are now tested first
   (`compute_constraint_violations`) — #298
+- **Mapbox token**: Saving the token from the GPS settings never persisted it:
+  `save_secrets` returned early unless a session-state flag nobody set was
+  true. The token is now kept in the OS keyring, shared by every project on
+  the machine, with `secrets.toml` read as a fallback; the plain-text
+  `settings_utils.save_secrets` is removed — #304
+- **GPS acceptances on integer KEYs**: An integer KEY column with nulls came
+  back from `to_pandas` as floats, so KEY `1` read as `1.0` and never matched
+  its acceptance. Integral float KEYs are converted back to ints before
+  matching and prefilling the form — #304
 
 ## [1.1.0] - 2026-09-21
 
