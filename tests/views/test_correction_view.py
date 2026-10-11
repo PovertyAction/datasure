@@ -522,7 +522,7 @@ class TestBuildCorrectionLogDisplay:
         assert result["user"].to_list() == [None]
 
 
-def _filter_log() -> pl.DataFrame:
+def _sample_display_log() -> pl.DataFrame:
     """A display log with entries from several sources and actions."""
     return pl.DataFrame(
         {
@@ -537,36 +537,38 @@ class TestFilterCorrectionLog:
     """Source and action filters narrow the Correction Log together."""
 
     def test_no_selection_keeps_every_entry(self):
-        result = filter_correction_log(_filter_log(), sources=[], actions=[])
+        result = filter_correction_log(_sample_display_log(), sources=[], actions=[])
 
         assert result["KEY"].to_list() == ["k1", "k2", "k3", "k4"]
 
     def test_filters_by_source(self):
         result = filter_correction_log(
-            _filter_log(), sources=["outliers", "gps"], actions=[]
+            _sample_display_log(), sources=["outliers", "gps"], actions=[]
         )
 
         assert result["KEY"].to_list() == ["k2", "k4"]
 
     def test_filters_by_action(self):
-        result = filter_correction_log(_filter_log(), sources=[], actions=["accept"])
+        result = filter_correction_log(
+            _sample_display_log(), sources=[], actions=["accept"]
+        )
 
         assert result["KEY"].to_list() == ["k2", "k4"]
 
     def test_source_and_action_filters_combine(self):
         result = filter_correction_log(
-            _filter_log(), sources=["gps", "duplicates"], actions=["accept"]
+            _sample_display_log(), sources=["gps", "duplicates"], actions=["accept"]
         )
 
         assert result["KEY"].to_list() == ["k4"]
 
     def test_no_matching_entries_returns_an_empty_log(self):
         result = filter_correction_log(
-            _filter_log(), sources=["corrections_page"], actions=["accept"]
+            _sample_display_log(), sources=["corrections_page"], actions=["accept"]
         )
 
         assert result.is_empty()
-        assert result.columns == _filter_log().columns
+        assert result.columns == _sample_display_log().columns
 
 
 class TestRenderLogFilters:
@@ -578,7 +580,7 @@ class TestRenderLogFilters:
         with _patched_st(
             columns=MagicMock(return_value=[MagicMock(), MagicMock()]), pills=pills
         ):
-            sources, actions = _render_log_filters(_filter_log(), "tab0")
+            sources, actions = _render_log_filters(_sample_display_log(), "tab0")
 
         assert (sources, actions) == (["gps"], ["accept"])
         source_call, action_call = pills.call_args_list
@@ -602,7 +604,7 @@ class TestRenderLogFilters:
         with _patched_st(
             columns=MagicMock(return_value=[MagicMock(), MagicMock()]), pills=pills
         ):
-            _render_log_filters(_filter_log(), "tab0")
+            _render_log_filters(_sample_display_log(), "tab0")
 
         format_source = pills.call_args_list[0].kwargs["format_func"]
         assert format_source("corrections_page") == "Corrections page"
@@ -615,7 +617,7 @@ class TestRenderLogFilters:
         with _patched_st(
             columns=MagicMock(return_value=[MagicMock(), MagicMock()]), pills=pills
         ):
-            assert _render_log_filters(_filter_log(), "tab0") == ([], [])
+            assert _render_log_filters(_sample_display_log(), "tab0") == ([], [])
 
 
 class TestHighlightHardAcceptance:

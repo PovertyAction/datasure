@@ -15,6 +15,7 @@ import streamlit as st
 from pydantic import BaseModel, Field
 
 from datasure.checks.backchecks.models import backcheck_id_columns
+from datasure.checks.gpschecks.review import GPS_CHECK_TYPE
 from datasure.processing.correction_log import (
     CORRECTION_ACTIONS,
     CORRECTIONS_PAGE_SOURCE,
@@ -613,7 +614,7 @@ def _build_correction_log_display(correction_log: pl.DataFrame) -> pl.DataFrame:
 
 # Display labels for log sources whose stored value doesn't read well
 # capitalized. Other sources (outliers, constraints, duplicates) are capitalized.
-_SOURCE_LABELS = {CORRECTIONS_PAGE_SOURCE: "Corrections page", "gps": "GPS"}
+_SOURCE_LABELS = {CORRECTIONS_PAGE_SOURCE: "Corrections page", GPS_CHECK_TYPE: "GPS"}
 
 
 def _source_label(source: str) -> str:

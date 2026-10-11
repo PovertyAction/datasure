@@ -442,10 +442,13 @@ is attributed instead.
 
 The Back Checks page never changes survey or back check data. Instead, click
 **Review** on a mismatch in Comparison Details and attribute it to the
-**Enumerator**, the **Backchecker** or the **Respondent**. Attribution leaves
-the mismatch counts and the regular error rate unchanged. The statistics show
-an **adjusted error rate** next to the error rate, which leaves out the
-mismatches attributed to someone else. Attributions are kept in their own
+**Enumerator**, the **Backchecker** or the **Respondent**. To attribute several
+mismatches at once, select their rows first. Attribution leaves the mismatch
+counts and the regular error rate unchanged. The statistics show an **adjusted
+error rate** next to the error rate. There are two: the enumerator adjusted
+rate leaves out mismatches attributed to the back checker or the respondent,
+and the back checker adjusted rate leaves out those attributed to the
+enumerator or the respondent. Attributions are kept in their own
 attribution log, not in the Correction Log. See
 [Attributing Mismatches](#attributing-mismatches).
 
