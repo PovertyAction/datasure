@@ -191,6 +191,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with different coordinates, and turned off with a warning for a Survey KEY
   named "review status" or "review reason". Logic is in the new Streamlit-free
   `checks/gpschecks/review.py` — #304
+- **Correction Log filters**: Source and Action `st.pills` (multi-select)
+  above the Correction Log on the Correct Data page, offering only the values
+  present in the log. An empty selection doesn't filter; the two combine.
+  Filtering is `correction_view.filter_correction_log`; the removal form still
+  lists every entry. USER_GUIDE Step 6 and the best practices cover check-page
+  corrections, and ARCHITECTURE documents the correction log tables — #305
 
 ### Changed
 

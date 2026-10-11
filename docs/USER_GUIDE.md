@@ -381,15 +381,94 @@ Each report is accessible from the navigation sidebar after configuration:
 
 ### Step 6: Correct Data
 
-**Purpose**: Fix identified data quality issues
+**Purpose**: Fix identified data quality issues, or record that a flagged value
+is correct
 
 **What You'll Do**:
 
-- Apply corrections to specific records
-- Track correction history
-- Re-run quality checks to verify improvements
+- Correct a flagged record from the check page that flagged it, or any record
+  from the Correct Data page
+- Accept outliers, constraint violations and GPS outliers that are correct
+- Attribute back check mismatches to whoever caused them
+- Review, filter and undo entries in the Correction Log
+
+#### Where to Make Corrections
+
+You can correct data from the check pages and from the Correct Data page. Both
+write to the same Correction Log, one per dataset, so a change made in one
+place shows up in the other and in every report that uses the dataset.
+
+| Page | What you can do | Details |
+| --- | --- | --- |
+| Outliers: constraint violations and outlier inspection tables | modify value, remove value, accept | [Correcting or Accepting Flagged Values](#correcting-or-accepting-flagged-values) |
+| GPS Checks: outliers table | modify coordinates, remove coordinates, remove observation, accept | [Correcting or Accepting GPS Outliers](#correcting-or-accepting-gps-outliers) |
+| Duplicates: ID duplicate cards | Keep, Modify ID or Drop each record | [Resolving a card](#resolving-a-card) |
+| Back Checks: Comparison Details | attribute a mismatch to the Enumerator, Backchecker or Respondent (the data is not changed) | [Attributing Mismatches](#attributing-mismatches) |
+| Correct Data | modify value, remove value, remove row, for any KEY and column | [Correction Actions](#correction-actions) |
+
+On a check page, click **Review** on a flagged row to open a correction form
+with the KEY, column and current value filled in. You correct one record at a
+time. After you save, the page reloads and shows a confirmation. A correction
+applies to every row with the same KEY.
+
+The Correct Data page keeps working as before, for any record, including ones
+no check flagged. It is also the only place to undo a correction or an
+acceptance. It lists acceptances but can't create them, because it has no
+check flag to accept.
+
+#### Accept as Valid
+
+**accept** records that a flagged value was reviewed and is correct, without
+changing the data. It is offered for outliers, constraint violations and GPS
+outliers only:
+
+- A reason is required.
+- An acceptance covers one check, one KEY and one column: accepting an outlier
+  does not accept a constraint violation on the same value. A GPS acceptance
+  covers the KEY's latitude and longitude together.
+- Accepted flags are hidden from the tables and left out of the metrics. Turn
+  on **Show reviewed** to see them again, highlighted in green.
+- An acceptance lapses, and the value is flagged again, if the value changes
+  (for GPS, if either coordinate changes).
+- Accepting a **hard** constraint violation needs an extra confirmation, and
+  the entry is highlighted in red in the Correction Log.
+
+Duplicates and back checks can't be accepted. An ID belongs to one record, so
+a duplicate ID is resolved on its card or left out with **Records to
+Include**. Back check results measure data collection quality, so a mismatch
+is attributed instead.
+
+#### Back Check Mismatches
+
+The Back Checks page never changes survey or back check data. Instead, click
+**Review** on a mismatch in Comparison Details and attribute it to the
+**Enumerator**, the **Backchecker** or the **Respondent**. Attribution leaves
+the mismatch counts and the regular error rate unchanged. The statistics show
+an **adjusted error rate** next to the error rate, which leaves out the
+mismatches attributed to someone else. Attributions are kept in their own
+attribution log, not in the Correction Log. See
+[Attributing Mismatches](#attributing-mismatches).
+
+#### Duplicate and Unmatched IDs
+
+All ID problems are resolved on the Duplicates tab, where each duplicate ID
+has a card that compares its records side by side. A **Survey data** /
+**Backcheck data** switcher adds cards for duplicate back check IDs and for
+back checks whose ID is not in the survey data. Choose **Keep**, **Modify ID**
+or **Drop** for each record, then save the card once with one reason. Either
+every correction on the card is saved or none are. Save is allowed only when
+at most one included record keeps the ID. See
+[Resolving a card](#resolving-a-card).
+
+A repeat visit that legitimately shares an ID, such as a failed first attempt
+followed by a completed interview, is handled with the **Records to Include**
+filter in the [Duplicates Settings](#duplicates-settings) instead. The Back
+Checks comparison uses the same filters, and leaves out unresolved duplicate
+IDs until they are resolved on the Duplicates tab.
 
 #### Correction Actions
+
+These actions are on the Correct Data page.
 
 ##### Modify Value
 
@@ -462,7 +541,8 @@ All corrections are tracked with:
 - Reason for correction
 - Timestamp
 - Status of the last reapply, with the reason if it failed
-- Source: the page that made the entry (`corrections_page` for this page)
+- Source: the page that made the entry: `corrections_page` (the Correct Data
+  page), `outliers`, `constraints`, `duplicates` or `gps`
 - User: who made the entry. This is your computer login unless you set a
   **Reviewer name** in the sidebar, which DataSure remembers across sessions.
   Entries logged before DataSure recorded the user show an empty User.
@@ -480,6 +560,16 @@ are highlighted in red.
 To blank a cell, use "remove value": "modify value" needs a non-empty new
 value (`0` is valid).
 
+##### Filtering the Log
+
+Above the Correction Log, **Source** and **Action** filters list the sources
+and actions that appear in the log. Select one or more values to show only
+the matching entries; with nothing selected, a filter shows everything. The
+two filters combine, so selecting the `gps` source and the `accept` action
+shows only GPS acceptances. A caption counts the entries shown out of the
+total. The filters only change what the table shows: "Remove correction step"
+still lists every entry.
+
 #### Correcting Back Check Data
 
 On a page with back check data, a **Survey data** / **Backcheck data**
@@ -487,16 +577,22 @@ switcher at the top of the page's tab picks the dataset. The back check data
 has its own Correction Log, removal list and preview. Back check results
 measure data quality, so on back check data you can only modify the ID (the
 Survey ID column set on the Backcheck Analysis tab) or remove a row. Back
-check data that was never prepared is corrected from its imported data.
+check data that was never prepared is corrected from its imported data. The
+Duplicates tab has the same switcher, and its back check cards write to the
+back check data's Correction Log.
 
 #### Verifying Corrections
 
-After applying corrections:
+Reports read the corrected data every time they load, so there is nothing to
+refresh:
 
-1. Navigate back to relevant quality report
-2. Click "Refresh" or re-run checks
-3. Verify issue is resolved
-4. Document in correction notes
+1. After saving on a check page, the page reloads with the correction applied.
+   After saving on the Correct Data page, open the report again.
+2. Check that the flag is gone. On the Outliers page, turn on **Show
+   reviewed** to see corrected values marked Corrected.
+3. In the Correction Log, check that the entry's Status is `Successful`. If
+   new data or a prep change means a correction can no longer be applied, its
+   Status shows why.
 
 **Demo Example**:
 Correcting duplicate household ID:
@@ -1462,14 +1558,41 @@ After completing all 6 steps:
 1. **Always Document**:
    - Provide detailed correction reason
    - Reference investigation notes
-   - Include date and source
+   - Set a **Reviewer name** in the sidebar so the log shows who made each
+     entry; the date and source are recorded for you
 
-2. **Verify After Correction**:
-   - Re-run relevant quality check
-   - Confirm issue resolved
+2. **Correct Where the Flag Is**:
+   - Review flagged values from the Outliers and GPS Checks pages, and
+     resolve ID problems on the Duplicates tab cards
+   - Use the Correct Data page for records no check flagged, and to undo
+     corrections and acceptances
+
+3. **Accept Only What You Have Checked**:
+   - Accept a flagged value only after confirming it with the field team or
+     the respondent, and say how in the reason
+   - Accept a hard constraint violation only when the bound itself is wrong
+     for this record
+   - Use **Show reviewed** now and then to look over what has been accepted
+
+4. **Keep Back Check Results Honest**:
+   - Back check mismatches can't be corrected or accepted; attribute each one
+     to the Enumerator, Backchecker or Respondent instead
+   - Report the regular error rate next to the adjusted error rate
+   - In the note, say how you know who caused the mismatch
+
+5. **Resolve IDs Before Comparing**:
+   - Use **Records to Include** for repeat visits that legitimately share an
+     ID, rather than dropping them
+   - Resolve the remaining duplicate and unmatched IDs on the Duplicates tab
+     so they are included in the back check comparison
+
+6. **Verify After Correction**:
+   - Open the report again and confirm the issue is resolved
+   - Check the Correction Log for entries whose Status is not `Successful`,
+     for example after new data is imported
    - Check for new issues created
 
-3. **Correction Workflow**:
+7. **Correction Workflow**:
    - Identify issue in quality report
    - Investigate root cause
    - Apply correction with documentation

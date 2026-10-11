@@ -25,6 +25,8 @@ from datasure.views.correction_view import (
     _build_correction_log_display,
     _display_correction_details,
     _handle_remove_correction,
+    _render_log_filters,
+    filter_correction_log,
     get_current_value,
     get_key_options,
     highlight_hard_acceptance,
@@ -518,6 +520,102 @@ class TestBuildCorrectionLogDisplay:
         result = _build_correction_log_display(self._base_log())
 
         assert result["user"].to_list() == [None]
+
+
+def _filter_log() -> pl.DataFrame:
+    """A display log with entries from several sources and actions."""
+    return pl.DataFrame(
+        {
+            "KEY": ["k1", "k2", "k3", "k4"],
+            "action": ["modify value", "accept", "remove row", "accept"],
+            "source": ["corrections_page", "outliers", "duplicates", "gps"],
+        }
+    )
+
+
+class TestFilterCorrectionLog:
+    """Source and action filters narrow the Correction Log together."""
+
+    def test_no_selection_keeps_every_entry(self):
+        result = filter_correction_log(_filter_log(), sources=[], actions=[])
+
+        assert result["KEY"].to_list() == ["k1", "k2", "k3", "k4"]
+
+    def test_filters_by_source(self):
+        result = filter_correction_log(
+            _filter_log(), sources=["outliers", "gps"], actions=[]
+        )
+
+        assert result["KEY"].to_list() == ["k2", "k4"]
+
+    def test_filters_by_action(self):
+        result = filter_correction_log(_filter_log(), sources=[], actions=["accept"])
+
+        assert result["KEY"].to_list() == ["k2", "k4"]
+
+    def test_source_and_action_filters_combine(self):
+        result = filter_correction_log(
+            _filter_log(), sources=["gps", "duplicates"], actions=["accept"]
+        )
+
+        assert result["KEY"].to_list() == ["k4"]
+
+    def test_no_matching_entries_returns_an_empty_log(self):
+        result = filter_correction_log(
+            _filter_log(), sources=["corrections_page"], actions=["accept"]
+        )
+
+        assert result.is_empty()
+        assert result.columns == _filter_log().columns
+
+
+class TestRenderLogFilters:
+    """The filter pills offer only the sources and actions in the log."""
+
+    def test_offers_values_present_in_the_log_and_returns_selections(self):
+        pills = MagicMock(side_effect=[["gps"], ["accept"]])
+
+        with _patched_st(
+            columns=MagicMock(return_value=[MagicMock(), MagicMock()]), pills=pills
+        ):
+            sources, actions = _render_log_filters(_filter_log(), "tab0")
+
+        assert (sources, actions) == (["gps"], ["accept"])
+        source_call, action_call = pills.call_args_list
+        assert source_call.kwargs["options"] == [
+            "corrections_page",
+            "duplicates",
+            "gps",
+            "outliers",
+        ]
+        assert action_call.kwargs["options"] == [
+            "accept",
+            "modify value",
+            "remove row",
+        ]
+        assert source_call.kwargs["selection_mode"] == "multi"
+        assert source_call.kwargs["key"] != action_call.kwargs["key"]
+
+    def test_source_labels_are_readable(self):
+        pills = MagicMock(side_effect=[[], []])
+
+        with _patched_st(
+            columns=MagicMock(return_value=[MagicMock(), MagicMock()]), pills=pills
+        ):
+            _render_log_filters(_filter_log(), "tab0")
+
+        format_source = pills.call_args_list[0].kwargs["format_func"]
+        assert format_source("corrections_page") == "Corrections page"
+        assert format_source("gps") == "GPS"
+        assert format_source("outliers") == "Outliers"
+
+    def test_none_selection_is_treated_as_no_filter(self):
+        pills = MagicMock(side_effect=[None, None])
+
+        with _patched_st(
+            columns=MagicMock(return_value=[MagicMock(), MagicMock()]), pills=pills
+        ):
+            assert _render_log_filters(_filter_log(), "tab0") == ([], [])
 
 
 class TestHighlightHardAcceptance:

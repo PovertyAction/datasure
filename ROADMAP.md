@@ -51,6 +51,21 @@ For feature requests and bug reports, see our [GitHub Issues](https://github.com
 
 Features currently in development or planned for the next release cycle.
 
+### Check-Page Corrections ([#295](https://github.com/PovertyAction/datasure/issues/295))
+
+**Status:** In Development (v1.2.0)
+
+Correct flagged data, or accept it as valid, from the check pages that flag it.
+Check pages and the Correct Data page write to the same correction log.
+
+- Correct or accept outliers, constraint violations and GPS outliers from the
+  flagged tables, with accepted flags hidden behind a "Show reviewed" toggle
+- Resolve duplicate and unmatched survey and back check IDs on per-ID cards
+- Attribute back check mismatches to the enumerator, back checker or
+  respondent, with an adjusted error rate next to the regular one
+- Correction log audit trail: who made each entry, from which page, filterable
+  by source and action
+
 ### Other Specify Check ([#155](https://github.com/PovertyAction/datasure/issues/155))
 
 **Status:** In Development
@@ -99,7 +114,6 @@ Features under exploration for future releases. These are not yet committed to t
 | **Longitudinal Tracking** | Compare data quality metrics across survey rounds | Exploring |
 | **Automated Correction Suggestions** | ML-assisted flagging and correction recommendations | Exploring |
 | **Report Export** | Generate printable PDF or Word summary reports for project managers | Exploring |
-| **Audit Trail** | Log all corrections with timestamps and reviewer attribution | Exploring |
 | **API Mode** | Programmatic access to check results for integration with other tools | Exploring |
 
 ---

@@ -611,6 +611,60 @@ def _build_correction_log_display(correction_log: pl.DataFrame) -> pl.DataFrame:
     return correction_log.select(display_columns).rename({"ID": "Survey ID"})
 
 
+# Display labels for log sources whose stored value doesn't read well
+# capitalized. Other sources (outliers, constraints, duplicates) are capitalized.
+_SOURCE_LABELS = {CORRECTIONS_PAGE_SOURCE: "Corrections page", "gps": "GPS"}
+
+
+def _source_label(source: str) -> str:
+    return _SOURCE_LABELS.get(source, source.capitalize())
+
+
+def filter_correction_log(
+    log: pl.DataFrame, sources: Sequence[str], actions: Sequence[str]
+) -> pl.DataFrame:
+    """Keep the log entries matching the selected sources and actions.
+
+    An empty selection does not filter on that column, so both filters
+    together keep entries that match every non-empty selection.
+    """
+    if sources:
+        log = log.filter(pl.col("source").is_in(list(sources)))
+    if actions:
+        log = log.filter(pl.col("action").is_in(list(actions)))
+    return log
+
+
+def _render_log_filters(
+    log: pl.DataFrame, tab_index: str | int
+) -> tuple[list[str], list[str]]:
+    """Render source and action pills for the Correction Log.
+
+    Only values present in the log are offered. Returns the selected
+    sources and actions; an empty list means no filter.
+    """
+    source_col, action_col = st.columns(2)
+    with source_col:
+        sources = st.pills(
+            "Source",
+            options=sorted(log["source"].drop_nulls().unique().to_list()),
+            selection_mode="multi",
+            format_func=_source_label,
+            key=f"correction_log_source_filter_{tab_index}",
+            help="Show only entries made from these pages. Select none to show all.",
+        )
+    with action_col:
+        actions = st.pills(
+            "Action",
+            options=sorted(log["action"].drop_nulls().unique().to_list()),
+            selection_mode="multi",
+            format_func=lambda action: action.capitalize(),
+            key=f"correction_log_action_filter_{tab_index}",
+            help="Show only entries with these actions. Select none to show all.",
+        )
+    return list(sources or []), list(actions or [])
+
+
 def highlight_hard_acceptance(row: Any) -> list[str]:
     """Style every cell of a hard-violation acceptance in the Correction Log.
 
@@ -658,6 +712,16 @@ def render_correction_log(
             section_header("Correction Log")
 
             log_display = _build_correction_log_display(correction_log)
+            sources, actions = _render_log_filters(log_display, tab_index)
+            log_display = filter_correction_log(log_display, sources, actions)
+            if log_display.is_empty():
+                st.info("No log entries match the selected filters.")
+                return
+            if sources or actions:
+                st.caption(
+                    f"Showing {log_display.height:,} of "
+                    f"{correction_log.height:,} entries."
+                )
             styled_dataframe(
                 row_styler(log_display, highlight_hard_acceptance).map(
                     highlight_status, subset=["status"]

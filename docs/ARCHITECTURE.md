@@ -82,6 +82,53 @@ The `archived/` directory holds legacy code and is gitignored.
    prep table, such as unprepared backcheck data, is corrected from its raw
    table (`CorrectionProcessor.get_uncorrected_data`)
 
+## Correction log
+
+Every correction and acceptance, from the Correct Data page or a check page,
+goes through `CorrectionProcessor` (`processing/corrections.py`) and is
+recorded in `corr_log_{alias}` in `logs.duckdb`. Logs are scoped to the
+dataset alias, not the report page, so all pages that use a dataset share its
+log; backcheck data has its own log under the backcheck alias. The schema,
+the `Action` enum and the backfill rules for older logs live in the
+Streamlit-free `processing/correction_log.py`, which the replication package
+also reads.
+
+- **Actions**: `modify value`, `remove value` and `remove row` change the
+  data. They are applied to the corrected table in `corrected.duckdb` and
+  replayed, in log order, when the prep data changes. `accept` never changes
+  the data and is skipped on replay and in the replication script.
+- **`source`**: the page that made the entry: `corrections_page`, `outliers`,
+  `constraints`, `duplicates` or `gps`. Entries logged before the column
+  existed are backfilled as `corrections_page`.
+- **`user`**: who made the entry: the Reviewer name from
+  `utils/reviewer.py`, else the OS login. Null for older entries.
+- **`accept`**: identified by (`check_type`, `KEY`, `column`), where
+  `check_type` is one of `ACCEPT_CHECK_TYPES` (`outliers`, `constraints`,
+  `gps`). A GPS acceptance has no column; its `current_value` records the
+  latitude and longitude. `CorrectionProcessor.get_active_acceptances` returns
+  only acceptances whose recorded value still matches the corrected data, so
+  an acceptance lapses when the value changes. `severity` is `hard` on an
+  acceptance of a hard constraint violation.
+- **Atomic apply**: `CorrectionProcessor.apply_corrections` applies a list of
+  entries all or nothing. GPS coordinate changes (one entry per coordinate
+  column) and duplicate card saves (one entry per changed record) use it.
+- **`status` / `status_reason`**: the outcome of the last replay of each entry.
+
+Check pages render the shared correction form in
+`utils/correction_form.py` (`render_correction_form`,
+`render_correction_inputs`, `apply_correction_entries`), prefilled with the
+KEY, column and current value, with widget keys namespaced per caller. The
+Correct Data page uses the same form. Check-specific logic that turns a
+selection into log entries is kept free of Streamlit: `checks/outliers/review.py`,
+`checks/gpschecks/review.py` and `checks/id_corrections.py`.
+
+Backcheck mismatches are never corrected or accepted. Their attributions are
+written to the append-only `bc_attribution_{page_name_id}` tables in
+`logs.duckdb` by `checks/backchecks/attribution.py`, one table per report
+page. The latest entry per survey KEY, backcheck KEY and column applies while
+the survey and backcheck values are unchanged, and only feeds the adjusted
+error rate.
+
 ## Generated output views
 
 Report pages are created at runtime: `ConfigurationService`
@@ -105,10 +152,10 @@ Per project (UUID-keyed):
 
 - `cache/{project_id}/data/` — the DuckDB databases `raw.duckdb`,
   `prep.duckdb`, `corrected.duckdb`
-- `cache/{project_id}/settings/` — `logs.duckdb` (import/prep logs, and the
-  append-only backcheck attribution logs `bc_attribution_{page_name_id}`
-  written by `checks/backchecks/attribution.py`), JSON settings, and
-  credential metadata
+- `cache/{project_id}/settings/` — `logs.duckdb` (import/prep logs, the
+  correction logs `corr_log_{alias}`, and the backcheck attribution logs
+  `bc_attribution_{page_name_id}`; see [Correction log](#correction-log)),
+  JSON settings, and credential metadata
 - `cache/projects.json` — the project registry
 - `cache/user_settings.json` — per-user preferences, currently the
   "Reviewer name" recorded as `user` in correction logs
