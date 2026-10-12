@@ -705,10 +705,10 @@ def _render_condition_value_input(
     default_condition_value = saved_settings.get("condition_value")
     col_dtype = data[condition_col].dtype
 
-    if col_dtype in pl.DATETIME_DTYPES:
+    if isinstance(col_dtype, pl.Datetime):
         return _render_datetime_condition_input(condition_type, default_condition_value)
 
-    if col_dtype in pl.NUMERIC_DTYPES:
+    if col_dtype.is_numeric():
         condition_value = _render_numeric_condition_input(
             condition_type, default_condition_value, condition_values
         )
@@ -810,8 +810,10 @@ def _render_duplicates_condition_options(
 
     if condition_col:
         with co2:
-            NUMERIC_DTYPES = pl.NUMERIC_DTYPES | pl.DATETIME_DTYPES
-            col_is_numeric = data[condition_col].dtype in NUMERIC_DTYPES
+            col_dtype = data[condition_col].dtype
+            col_is_numeric = col_dtype.is_numeric() or isinstance(
+                col_dtype, pl.Datetime
+            )
             condition_type = NumCondition if col_is_numeric else StrCondition
             condition_type_options = [e.value for e in condition_type]
 
@@ -1183,7 +1185,7 @@ def _coerce_numeric_value(
     ValueError
         If a string value cannot be converted to the column's numeric type.
     """
-    cast_fn = int if col_dtype in pl.INTEGER_DTYPES else float
+    cast_fn = int if col_dtype.is_integer() else float
 
     try:
         if isinstance(condition_value, str):
@@ -1212,9 +1214,9 @@ def _coerce_condition_value(conditions: dict, data: pl.DataFrame) -> None:
 
     col_dtype = data[condition_col].dtype
 
-    if col_dtype in pl.DATETIME_DTYPES:
+    if isinstance(col_dtype, pl.Datetime):
         conditions["condition_value"] = _coerce_datetime_value(condition_value)
-    elif col_dtype in pl.NUMERIC_DTYPES:
+    elif col_dtype.is_numeric():
         conditions["condition_value"] = _coerce_numeric_value(
             condition_value, col_dtype
         )

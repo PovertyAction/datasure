@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Polars 2.0 compatibility**: Replaced polars APIs removed in 2.0
+  (`NUMERIC_DTYPES`, `INTEGER_DTYPES`, `DATETIME_DTYPES`, `with_row_count`,
+  `pl.count()`, String-to-Date `cast`), which crashed the Prep page and
+  several checks on fresh installs that resolved polars 2.0. The dependency
+  is now `polars>=1.30.0,<3` and the lock moves to 2.0.0
+  (`src/datasure/utils/dataframe_utils.py`, `src/datasure/checks/`,
+  `src/datasure/processing/prep.py`)
+
 ## [1.1.0] - 2026-09-21
 
 ### Added

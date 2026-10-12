@@ -560,7 +560,7 @@ def _get_numeric_columns(
     return [
         col
         for col in data.columns
-        if data[col].dtype in pl.NUMERIC_DTYPES and col not in exclude_cols
+        if data[col].dtype.is_numeric() and col not in exclude_cols
     ]
 
 

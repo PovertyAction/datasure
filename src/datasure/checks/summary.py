@@ -264,6 +264,17 @@ polars_to_pandas = _polars_to_pandas
 # =============================================================================
 
 
+def _to_date_expr(data: pl.DataFrame, column: str) -> pl.Expr:
+    """Return an expression converting `column` to Date, nulling unparseable values.
+
+    String columns are parsed as ISO dates, since polars 2.0 no longer casts
+    String to Date; other dtypes are cast.
+    """
+    if data.schema[column] == pl.String:
+        return pl.col(column).str.to_date("%Y-%m-%d", strict=False)
+    return pl.col(column).cast(pl.Date, strict=False)
+
+
 def _validate_and_convert_date_column(
     data: pl.DataFrame, date_column: str
 ) -> pl.DataFrame:
@@ -292,9 +303,7 @@ def _validate_and_convert_date_column(
             raise ValueError(f"Column {date_column} not found in dataframe")  # noqa: TRY301
 
         # Try to cast to date type, selecting only the date column
-        df = data.select(
-            pl.col(date_column).cast(pl.Date, strict=False).alias(date_column)
-        )
+        df = data.select(_to_date_expr(data, date_column).alias(date_column))
         return df  # noqa: TRY300
     except Exception as e:
         raise ValueError(
@@ -758,7 +767,7 @@ def compute_summary_progress_by_col(
     # Validate and convert date column
     try:
         progress_data = progress_data.with_columns(
-            pl.col(date).cast(pl.Date, strict=False).alias(date)
+            _to_date_expr(progress_data, date).alias(date)
         )
     except Exception as e:
         raise ValueError(f"Column {date} is not a datetime column: {e}") from e

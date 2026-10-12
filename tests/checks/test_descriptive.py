@@ -91,9 +91,9 @@ def mixed_type_df() -> pl.DataFrame:
         {
             "num_col": [1.0, 2.0, 3.0],
             "cat_col": ["a", "b", "c"],
-            "date_col": pl.Series(["2021-01-01", "2021-01-02", "2021-01-03"]).cast(
-                pl.Date
-            ),
+            "date_col": pl.Series(
+                ["2021-01-01", "2021-01-02", "2021-01-03"]
+            ).str.to_date(),
             "str_col": ["x", "y", "z"],
             "bool_col": [True, False, True],
         }

@@ -272,7 +272,7 @@ class RemoveRowsOperation(PrepOperation):
                 rows_to_drop.append(int(item))
 
         # Create row number column for filtering
-        data_with_idx = data.with_row_count("__row_idx__")
+        data_with_idx = data.with_row_index("__row_idx__")
         filtered_data = data_with_idx.filter(~pl.col("__row_idx__").is_in(rows_to_drop))
         return filtered_data.drop("__row_idx__")
 
@@ -777,14 +777,14 @@ class AddNewColumnOperation(PrepOperation):
     ) -> pl.DataFrame:
         """Add special columns like index, uuid, or random."""
         if method == "index":
-            return data.with_row_count(col_name)
+            return data.with_row_index(col_name)
 
         elif method == "uuid":
             # Generate UUID-like hash based on project ID and row index
             project_id = st.session_state.st_project_id
 
             return (
-                data.with_row_count("__temp_idx__")
+                data.with_row_index("__temp_idx__")
                 .with_columns(
                     pl.col("__temp_idx__")
                     .map_elements(

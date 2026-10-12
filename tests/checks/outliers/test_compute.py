@@ -135,19 +135,19 @@ class TestSafeToNumeric:
         """Test converting series that's already numeric."""
         series = pl.Series([1, 2, 3])
         result = safe_to_numeric(series)
-        assert result.dtype in pl.NUMERIC_DTYPES
+        assert result.dtype.is_numeric()
 
     def test_convert_series_string_numbers(self):
         """Test converting string series with numbers."""
         series = pl.Series(["1", "2", "3"])
         result = safe_to_numeric(series)
-        assert result.dtype in pl.NUMERIC_DTYPES
+        assert result.dtype.is_numeric()
 
     def test_convert_dataframe_column(self):
         """Test converting DataFrame column."""
         df = pl.DataFrame({"col": ["1", "2", "3"]})
         result = safe_to_numeric(df, "col")
-        assert result["col"].dtype in pl.NUMERIC_DTYPES
+        assert result["col"].dtype.is_numeric()
 
     def test_convert_dataframe_no_column(self):
         """Test that column is required for DataFrames."""
@@ -651,7 +651,7 @@ class TestSafeToNumericEdgeCases:
         """Test Series that's already numeric."""
         series = pl.Series([1, 2, 3])
         result = safe_to_numeric(series)
-        assert result.dtype in pl.NUMERIC_DTYPES
+        assert result.dtype.is_numeric()
 
     def test_dataframe_without_column(self):
         """Test DataFrame without specifying column."""

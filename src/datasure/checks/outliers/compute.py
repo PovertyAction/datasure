@@ -1085,7 +1085,7 @@ def compute_column_outlier_summary(
     outlier_summary = outlier_data.unique(subset=["column name", survey_key])
 
     # Count occurrences per column
-    col_counts = outlier_summary.group_by("column name").agg(pl.count().alias("count"))
+    col_counts = outlier_summary.group_by("column name").agg(pl.len().alias("count"))
 
     # Join counts back
     outlier_summary = outlier_summary.join(col_counts, on="column name", how="left")
