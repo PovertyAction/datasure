@@ -466,7 +466,8 @@ All corrections are tracked with:
 The log can also contain **accept** entries. An accept entry records that a
 flagged value was reviewed and is correct. It never changes the data, and the
 Check type column shows which check it applies to. It stays in effect only
-while the value is unchanged. Accept entries are kept in `correction_log.csv`
+while the value is unchanged; once the value changes, its Status shows
+`Inactive` with the reason. Accept entries are kept in `correction_log.csv`
 in the replication package but are not part of the corrections script. You can
 remove an accept entry with "Remove correction step" like any other entry.
 

@@ -1168,6 +1168,92 @@ class TestCorrectionLogSource:
         ]
 
 
+class TestCorrectionsCheckTheValueTheyChange:
+    """Modify/remove entries are checked against the data when applied and
+    compare values, not string forms, on replay.
+    """
+
+    def _modify_age(self, processor, current_value, new_value):
+        processor.apply_corrections(
+            alias="survey",
+            key_col="survey_key",
+            entries=[
+                CorrectionEntry(
+                    key_value="key1",
+                    action="modify value",
+                    reason="r",
+                    column="age",
+                    current_value=current_value,
+                    new_value=new_value,
+                )
+            ],
+            source="outliers",
+        )
+
+    def test_float_form_of_an_integer_survives_replay(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._modify_age(processor, 25.0, "30")
+
+        failures = processor.refresh_corrected_data("survey")
+
+        assert failures == []
+        assert processor.get_corrected_data("survey")["age"][0] == 30
+
+    def test_correction_of_an_already_corrected_value_is_rejected(
+        self, store, sample_data
+    ):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._modify_age(processor, 25, "26")
+
+        with pytest.raises(ValueError, match="has changed since it was flagged"):
+            self._modify_age(processor, 25, "40")
+
+        assert processor.get_corrected_data("survey")["age"][0] == 26
+        assert len(processor.get_correction_log("survey")) == 1
+
+    def test_string_cell_matches_the_float_form_of_its_number(self, store):
+        _seed_prep(store, pl.DataFrame({"KEY": ["k1"], "age": ["25"]}))
+        processor = CorrectionProcessor("p1")
+
+        processor.accept_value(
+            alias="survey",
+            key_col="KEY",
+            key_value="k1",
+            check_type="outliers",
+            column="age",
+            current_value=25.0,
+            reason="verified",
+        )
+
+        active = processor.get_active_acceptances("survey", "outliers", "KEY")
+        assert active["KEY"].to_list() == ["k1"]
+
+    def test_replay_marks_an_acceptance_that_no_longer_holds_inactive(
+        self, store, sample_data
+    ):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        processor.accept_value(
+            alias="survey",
+            key_col="survey_key",
+            key_value="key1",
+            check_type="outliers",
+            column="age",
+            current_value=25,
+            reason="verified",
+        )
+        _seed_prep(store, sample_data.with_columns(pl.lit(99).alias("age")))
+
+        failures = processor.refresh_corrected_data("survey")
+
+        assert failures == []
+        log = processor.get_correction_log("survey")
+        assert log["status"].to_list() == ["Inactive"]
+        assert "has changed" in log["status_reason"][0]
+
+
 class TestAcceptAction:
     """Accepting a flagged value records a decision without changing data."""
 
@@ -1457,7 +1543,7 @@ class TestAcceptAction:
         corrected = processor.get_corrected_data("survey")
         assert corrected["name"].to_list() == ["Janet", "Bob"]
         assert processor.get_correction_log("survey")["status"].to_list() == [
-            "Successful",
+            "Inactive",
             "Successful",
         ]
 

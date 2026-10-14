@@ -20,11 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is correct, with a required reason. An acceptance is rejected if the data
   no longer holds the value being accepted. `get_active_acceptances` returns the
   acceptances whose recorded value still matches the data (for GPS, both
-  latitude and longitude). Replay and the generated `4_corrections.do` skip
+  latitude and longitude). Replay never changes data for `accept` rows, but
+  marks an acceptance whose value no longer matches the data with status
+  `Inactive` (not a reapply failure). The generated `4_corrections.do` skips
   `accept` rows; `correction_log.csv` keeps them, and the README's correction
   counts exclude them. Values compare by value, not text: missing matches
-  missing (None or NaN), numbers compare numerically, and every row with the
-  KEY must match — #296
+  missing (None or NaN), values that both read as numbers compare numerically
+  (a String cell `"25"` matches `25.0`), and every row with the KEY must
+  match — #296
 - **Atomic apply**: `CorrectionProcessor.apply_corrections` applies a list of
   `CorrectionEntry` objects all or nothing; if the log save fails, the
   corrected data is restored — #296
@@ -43,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   string still does; use "remove value" to blank a cell — #296
 - **Correction log schema**: Removing the last correction entry now leaves an
   empty log with the full schema, including status columns — #296
+- **Stale corrections**: `apply_corrections` now rejects a "modify value" or
+  "remove value" entry whose `current_value` doesn't match the data, as it
+  already did for acceptances. Replay (`_current_value_mismatch`) compares the
+  recorded value by value instead of by `str()`, so a correction saved with a
+  prefilled `25.0` against an integer `25` is no longer reverted on the next
+  refresh — #296
 
 ## [1.1.0] - 2026-09-21
 

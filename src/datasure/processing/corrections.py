@@ -79,20 +79,20 @@ def _encode_log_value(value: Any) -> str | None:
 def _values_match(actual: Any, recorded: str | None) -> bool:
     """Whether a data value equals a value recorded in the log as a string.
 
-    Missing matches missing. Numbers compare numerically, so an integer cell
-    holding 25 matches "25.0", which is how pandas reports an integer column
-    that has nulls.
+    Missing matches missing. Values that both read as numbers compare
+    numerically, so a cell holding 25 (or "25") matches "25.0", which is how
+    pandas reports an integer column that has nulls.
     """
     if _is_missing(actual) or recorded is None:
         return _is_missing(actual) and recorded is None
     if str(actual) == recorded:
         return True
-    if isinstance(actual, int | float) and not isinstance(actual, bool):
-        try:
-            return float(actual) == float(recorded)
-        except ValueError:
-            return False
-    return False
+    if isinstance(actual, bool):
+        return False
+    try:
+        return float(actual) == float(recorded)
+    except (TypeError, ValueError):
+        return False
 
 
 def _accepted_values(row: dict[str, Any]) -> dict[str, str | None]:
@@ -703,6 +703,14 @@ class CorrectionProcessor:
         ):
             raise ValueError(f"Unknown correction action '{entry.action}'")
 
+        if (
+            entry.action in (MODIFY_VALUE_ACTION, REMOVE_VALUE_ACTION)
+            and entry.current_value is not None
+        ):
+            _check_acceptance_against_data(
+                data, key_col, entry.key_value, entry.column, entry.current_value
+            )
+
         is_valid, error_msg = self.validate_correction_input(
             data, key_col, entry.key_value, entry.action, entry.column, entry.new_value
         )
@@ -1035,6 +1043,11 @@ class CorrectionProcessor:
         statuses: list[str] = []
         status_reasons: list[str | None] = []
         for row in correction_log.iter_rows(named=True):
+            if row["action"] == ACCEPT_ACTION:
+                inactive_reason = self._inactive_acceptance_reason(corrected_data, row)
+                statuses.append("Inactive" if inactive_reason else "Successful")
+                status_reasons.append(inactive_reason)
+                continue
             corrected_data, error = self._apply_correction_row(corrected_data, row)
             if error:
                 statuses.append("Failed")
@@ -1128,6 +1141,15 @@ class CorrectionProcessor:
 
         return data, None
 
+    def _inactive_acceptance_reason(
+        self, data: pl.DataFrame, row: dict[str, Any]
+    ) -> str | None:
+        """Explain why an accept row no longer holds for `data`, or None if it does."""
+        key_col = self._find_key_column(data, row["KEY"])
+        if not key_col:
+            return f"Key '{row['KEY']}' not found in current data"
+        return _acceptance_mismatch(data, key_col, row["KEY"], _accepted_values(row))
+
     @staticmethod
     def _current_value_mismatch(
         data: pl.DataFrame,
@@ -1163,9 +1185,9 @@ class CorrectionProcessor:
             return None
 
         actual_value = data.filter(pl.col(key_col) == key_value)[0, column]
-        actual_str = None if actual_value is None else str(actual_value)
 
-        if actual_str != recorded_value:
+        if not _values_match(actual_value, recorded_value):
+            actual_str = None if actual_value is None else str(actual_value)
             return (
                 f"Current value for '{column}' has changed since this correction "
                 f"was recorded (expected '{recorded_value}', found '{actual_str}')"
