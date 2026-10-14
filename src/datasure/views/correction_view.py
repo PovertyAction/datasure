@@ -206,8 +206,10 @@ def render_add_correction_form(
 
     The page picks the KEY and shows its Survey ID; the shared correction
     form renders the action, new-value and reason inputs and the Apply
-    button. Apply goes through `_handle_apply_correction`, so the page keeps
-    offering any KEY, any column and every correction action.
+    button. The page offers any KEY, any column and every correction action.
+    Apply saves through the form's default `apply_correction_entries`, so
+    the page gets the same checks as the check pages: the entry is rejected
+    if the value changed since it was shown.
 
     Parameters
     ----------
@@ -261,97 +263,7 @@ def render_add_correction_form(
             key_namespace=tab_index,
             source=CORRECTIONS_PAGE_SOURCE,
             survey_id_value=survey_id_value,
-            on_apply=lambda state: _handle_apply_correction(
-                correction_processor=correction_processor,
-                corrected_data=corrected_data,
-                alias=alias,
-                key_col=key_col,
-                key_value=state.key_value,
-                action=state.action,
-                column=state.column,
-                current_value=state.current_value,
-                new_value=state.new_value,
-                reason=state.reason,
-                survey_id_value=survey_id_value,
-            ),
         )
-
-
-def _handle_apply_correction(
-    correction_processor: CorrectionProcessor,
-    corrected_data: pl.DataFrame,
-    alias: str,
-    key_col: str,
-    key_value: str,
-    action: str,
-    column: str | None,
-    current_value: Any,
-    new_value: Any,
-    reason: str,
-    survey_id_value: Any = None,
-) -> None:
-    """
-    Handle the application of a correction with validation.
-
-    Parameters
-    ----------
-    correction_processor : CorrectionProcessor
-        The correction processor instance.
-    corrected_data : pl.DataFrame
-        The current corrected data.
-    alias : str
-        The data alias/table name.
-    key_col : str
-        The name of the Survey KEY column.
-    key_value : str
-        The key value to correct.
-    action : str
-        The correction action type.
-    column : str | None
-        The column to modify (if applicable).
-    current_value : Any
-        The current value (if applicable).
-    new_value : Any
-        The new value (if applicable).
-    reason : str
-        The reason for correction.
-    survey_id_value : Any
-        The Survey ID value for this KEY, if a Survey ID column is
-        configured, to record alongside the correction log entry.
-    """
-    try:
-        # Validate input
-        is_valid, error_msg = correction_processor.validate_correction_input(
-            corrected_data,
-            key_col,
-            key_value,
-            action,
-            column,
-            new_value,
-        )
-
-        if not is_valid:
-            st.error(f"Validation error: {error_msg}")
-            return
-
-        # Apply the correction
-        correction_processor.apply_correction(
-            alias=alias,
-            key_col=key_col,
-            key_value=key_value,
-            action=action,
-            column=column,
-            current_value=current_value,
-            new_value=new_value,
-            reason=reason,
-            survey_id_value=survey_id_value,
-        )
-
-        st.success("Correction applied successfully!")
-        st.rerun()
-
-    except Exception as e:
-        st.error(f"Error applying correction: {e!s}")
 
 
 def render_correction_input_form(

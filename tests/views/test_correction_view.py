@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import polars as pl
 import pytest
 
+from datasure.processing.correction_log import CORRECTIONS_PAGE_SOURCE
 from datasure.utils.correction_form import (
     CorrectionFormState,
     _render_action_ui,
@@ -22,7 +23,6 @@ from datasure.utils.correction_form import (
 from datasure.views.correction_view import (
     _build_correction_log_display,
     _display_correction_details,
-    _handle_apply_correction,
     _handle_remove_correction,
     get_current_value,
     get_key_options,
@@ -630,11 +630,13 @@ class TestRenderAddCorrectionFormSurveyId:
             written = [str(c.args[0]) for c in _st.write.call_args_list]
             assert not any("Survey ID" in text for text in written)
 
-    def test_apply_passes_survey_id_to_processor(self):
-        """Clicking Apply forwards the looked-up Survey ID to apply_correction."""
+    def test_apply_saves_through_apply_corrections_with_survey_id(self):
+        """Clicking Apply saves one entry through `apply_corrections` (which
+        checks the current value), with the looked-up Survey ID and the
+        Correct Data page as source.
+        """
         data = pl.DataFrame({"KEY": ["uuid:1", "uuid:2"], "hhid": ["HH001", "HH002"]})
         processor = self._mock_processor(data)
-        processor.validate_correction_input.return_value = (True, "")
 
         with self._mocked_widgets(
             selected_key="uuid:1", click_apply=True, reason="Test reason"
@@ -647,8 +649,17 @@ class TestRenderAddCorrectionFormSurveyId:
                 survey_id_col="hhid",
             )
 
-            processor.apply_correction.assert_called_once()
-            assert processor.apply_correction.call_args[1]["survey_id_value"] == "HH001"
+            processor.apply_correction.assert_not_called()
+            processor.apply_corrections.assert_called_once()
+            kwargs = processor.apply_corrections.call_args.kwargs
+            assert kwargs["source"] == CORRECTIONS_PAGE_SOURCE
+            [entry] = kwargs["entries"]
+            assert (entry.key_value, entry.action, entry.reason) == (
+                "uuid:1",
+                "remove row",
+                "Test reason",
+            )
+            assert entry.survey_id_value == "HH001"
 
 
 class TestGetKeyOptions:
@@ -970,64 +981,6 @@ class TestRenderActionUi:
         ):
             _render_action_ui(action, data, "KEY", "k1", 0)
         warning.assert_not_called()
-
-
-class TestHandleApplyCorrection:
-    """Test _handle_apply_correction: validation failure, success, exception."""
-
-    def _base_kwargs(self, processor):
-        return dict(
-            correction_processor=processor,
-            corrected_data=pl.DataFrame({"KEY": ["k1"], "name": ["Alice"]}),
-            alias="survey",
-            key_col="KEY",
-            key_value="k1",
-            action="modify value",
-            column="name",
-            current_value="Alice",
-            new_value="Alicia",
-            reason="typo fix",
-        )
-
-    def test_validation_error_shows_error_and_does_not_apply(self):
-        processor = MagicMock()
-        processor.validate_correction_input.return_value = (False, "bad input")
-
-        with _patched_st(error=MagicMock(), success=MagicMock(), rerun=MagicMock()):
-            _handle_apply_correction(**self._base_kwargs(processor))
-
-            assert _st.error.called
-            assert "bad input" in _st.error.call_args[0][0]
-            processor.apply_correction.assert_not_called()
-            assert not _st.success.called
-
-    def test_success_applies_and_reruns(self):
-        processor = MagicMock()
-        processor.validate_correction_input.return_value = (True, "")
-
-        with _patched_st(error=MagicMock(), success=MagicMock(), rerun=MagicMock()):
-            _handle_apply_correction(
-                survey_id_value="HH001", **self._base_kwargs(processor)
-            )
-
-            processor.apply_correction.assert_called_once()
-            assert processor.apply_correction.call_args[1]["survey_id_value"] == (
-                "HH001"
-            )
-            assert _st.success.called
-            assert _st.rerun.called
-
-    def test_exception_during_apply_shows_error(self):
-        processor = MagicMock()
-        processor.validate_correction_input.return_value = (True, "")
-        processor.apply_correction.side_effect = RuntimeError("boom")
-
-        with _patched_st(error=MagicMock(), success=MagicMock(), rerun=MagicMock()):
-            _handle_apply_correction(**self._base_kwargs(processor))
-
-            assert _st.error.called
-            assert "boom" in _st.error.call_args[0][0]
-            assert not _st.success.called
 
 
 class TestRenderCorrectionInputForm:

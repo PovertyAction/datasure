@@ -52,6 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recorded value by value instead of by `str()`, so a correction saved with a
   prefilled `25.0` against an integer `25` is no longer reverted on the next
   refresh — #296
+- **Correct Data page**: Apply now saves through the shared form's
+  `apply_correction_entries` (`apply_corrections`) instead of
+  `CorrectionProcessor.apply_correction`, so it gets the same stale-value
+  check and all-or-nothing save as the check pages. `_handle_apply_correction`
+  is removed — #296
 
 ## [1.1.0] - 2026-09-21
 
