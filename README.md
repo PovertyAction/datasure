@@ -150,7 +150,7 @@ The web interface will open in your default browser (typically at `http://localh
 
 - **Import Data Page**: Connect your data sources
 - **SurveyCTO Integration**: Connect to your SurveyCTO server with authentication
-- **Local Files**: Upload CSV, Excel (.xlsx/.xls), Stata (.dta), JSON, or Parquet files
+- **Local Files**: Upload CSV, Excel (.xlsx), Stata (.dta), JSON, or Parquet files
 - **Multiple Datasets**: Import and manage up to 10 datasets per project
 
 ### 4. Prepare Data

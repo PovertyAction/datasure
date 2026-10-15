@@ -47,6 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Start page**: "Learn more" listed SPSS as a supported local file format; it
   now lists CSV, Excel, Stata, JSON and Parquet
   (`src/datasure/views/start_view.py`)
+- **Local import**: Legacy `.xls` files passed the file-type check and then
+  failed with an openpyxl error, because openpyxl cannot read `.xls`. They are
+  now rejected up front, in the form and in `FileConfig`, with an instruction to
+  save the file as `.xlsx`; README, User Guide and Architecture no longer list
+  `.xls` (`src/datasure/connectors/local.py`)
 
 ## [1.2.0a1] - 2026-10-11
 
