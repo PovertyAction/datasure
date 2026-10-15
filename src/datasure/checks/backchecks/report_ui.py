@@ -1,16 +1,43 @@
 """Report-rendering UI for the backchecks report."""
 
-from typing import Literal
+import logging
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Literal
 
+import duckdb
 import polars as pl
 import streamlit as st
 
+from datasure.checks.backchecks.attribution import (
+    ERROR_SOURCE_COL,
+    ErrorSource,
+    attributed_share,
+    attribution_history,
+    backcheck_key_col,
+    build_attribution_entries,
+    is_mismatch,
+    load_attribution_log,
+    mark_error_sources,
+    note_required,
+    rows_to_review,
+    save_attributions,
+)
 from datasure.checks.backchecks.compute import (
     compute_backcheck_analysis,
     compute_backchecker_productivity,
     compute_column_stats,
     compute_enumerator_backchecker_stats,
+    compute_overall_error_rates,
     expand_col_names,
+)
+from datasure.checks.backchecks.coverage import (
+    BackcheckCoverage,
+    compute_backcheck_coverage,
+    compute_staff_coverage,
+    effective_target_percent,
+    settings_from_page_config,
 )
 from datasure.checks.backchecks.models import (
     TAB_NAME,
@@ -22,16 +49,33 @@ from datasure.checks.backchecks.models import (
     OkRangeType,
     OkRangeValues,
     SearchType,
+    merged_backcheck_name,
+)
+from datasure.checks.backchecks.scope import (
+    ComparisonScope,
+    comparison_scope,
+    id_problem_counts,
+    id_problem_warning,
+    scope_captions,
 )
 from datasure.checks.backchecks.settings_ui import backchecks_report_settings
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.navigations_utils import demo_callout, show_demo_next_action
+from datasure.utils.reviewer import get_reviewer_name
 from datasure.utils.settings_utils import (
     load_check_settings,
     save_check_settings,
     trigger_save,
 )
+from datasure.utils.ui_utils import (
+    metric_row,
+    queue_notice,
+    show_queued_notices,
+    styled_dataframe,
+)
+
+logger = logging.getLogger(__name__)
 
 # ==============================================================================
 # COLUMN CONFIGURATION FUNCTIONS
@@ -566,10 +610,10 @@ def _render_backcheck_test_options(backcheck_category: int) -> BackcheckTestOpti
 def _render_backcheck_summary(
     survey_data: pl.DataFrame,
     backcheck_data: pl.DataFrame,
-    backcheck_analysis: pl.DataFrame,
     backcheck_settings: BackcheckSettings,
+    backcheck_analysis: pl.DataFrame | None = None,
 ) -> None:
-    """Render summary metrics for backcheck analysis.
+    """Render summary metrics and progress against the backcheck target.
 
     Parameters
     ----------
@@ -577,25 +621,15 @@ def _render_backcheck_summary(
         Survey dataset.
     backcheck_data : pl.DataFrame
         Backcheck dataset.
-    backcheck_analysis : pl.DataFrame
-        Results from compute_backcheck_analysis.
     backcheck_settings : BackcheckSettings
-        Backcheck settings including enumerator and backchecker columns.
+        Backcheck settings including the staff columns and targets.
+    backcheck_analysis : pl.DataFrame | None
+        Comparison results marked with their error sources, for the share of
+        mismatches attributed.
     """
-    # Calculate basic metrics
-    n_survey_obs = len(survey_data)
-    n_backcheck_obs = len(backcheck_data)
-
-    # Calculate percentage of surveys with backcheck responses
-    # Get unique survey keys that have backchecks
-    survey_key = backcheck_settings.survey_key
-    if survey_key and not backcheck_analysis.is_empty():
-        unique_backchecked_surveys = backcheck_analysis[survey_key].n_unique()
-        backcheck_coverage_pct = (
-            (unique_backchecked_surveys / n_survey_obs * 100) if n_survey_obs > 0 else 0
-        )
-    else:
-        backcheck_coverage_pct = 0
+    coverage = compute_backcheck_coverage(
+        survey_data, backcheck_data, backcheck_settings
+    )
 
     # Count unique enumerators and back checkers
     enumerator_col = backcheck_settings.enumerator
@@ -611,31 +645,126 @@ def _render_backcheck_summary(
     else:
         n_backcheckers = 0
 
-    # Display metrics in columns
-    uc1, uc2, uc3, _ = st.columns(4)
-    lc1, lc2, _, _ = st.columns(4)
+    share = attributed_share(
+        backcheck_analysis if backcheck_analysis is not None else pl.DataFrame()
+    )
+    metric_row(
+        [
+            ("Survey Observations", f"{len(survey_data):,}"),
+            ("Backcheck Observations", f"{len(backcheck_data):,}"),
+            (
+                "Total Enumerators",
+                f"{n_enumerators:,}" if n_enumerators > 0 else "N/A",
+            ),
+            (
+                "Total Back Checkers",
+                f"{n_backcheckers:,}" if n_backcheckers > 0 else "N/A",
+            ),
+            (
+                "Mismatches Attributed",
+                f"{share:.1f}%" if share is not None else "N/A",
+                "Share of mismatches attributed to the enumerator, backchecker "
+                "or respondent in Comparison Results Details.",
+            ),
+        ]
+    )
 
-    with uc1, st.container(border=True):
-        st.metric("Survey Observations", f"{n_survey_obs:,}")
+    st.markdown("##### Targets")
+    tc1, tc2 = st.columns(2)
 
-    with uc2, st.container(border=True):
-        st.metric("Backcheck Observations", f"{n_backcheck_obs:,}")
+    with tc1, st.container(border=True):
+        _render_coverage_metric(coverage)
 
-    with uc3, st.container(border=True):
+    if coverage is not None:
+        with tc2:
+            _render_expected_backchecks(coverage)
+
+    _render_overall_error_rates(
+        backcheck_analysis if backcheck_analysis is not None else pl.DataFrame()
+    )
+
+
+def _render_overall_error_rates(backcheck_analysis: pl.DataFrame) -> None:
+    """Render one card per error rate, total then by category.
+
+    Each card shows the regular error rate, with the enumerator adjusted
+    rate as a grey delta; the backchecker adjusted rate is in the help.
+    """
+    st.markdown("##### Error Rates")
+    rates = compute_overall_error_rates(backcheck_analysis)
+    if not rates:
+        st.info(
+            "Error rates appear here once backcheck columns are configured in "
+            "the Backchecks Columns Configuration section above."
+        )
+        return
+
+    # Bordered columns stretch to the tallest card, and every card has a
+    # delta line, so the cards in the row are the same height.
+    for col, rate in zip(st.columns(len(rates), border=True), rates, strict=True):
+        compared = rate.error_rate is not None
+        with col:
+            st.metric(
+                f"Error Rate ({rate.label})",
+                f"{rate.error_rate:.2f}%" if compared else "N/A",
+                delta=f"{rate.enumerator_adjusted:.2f}% adjusted"
+                if compared
+                else "No values compared",
+                delta_color="off",
+                delta_arrow="off",
+                help=f"{rate.mismatches:,} mismatches out of {rate.compared:,} "
+                "values compared. The delta is the adjusted error rate for "
+                "enumerators, which leaves out mismatches attributed to the "
+                "backchecker or respondent. Adjusted error rate for "
+                f"backcheckers: {rate.backchecker_adjusted:.2f}%."
+                if compared
+                else "No values compared in this category.",
+            )
+
+
+def _render_coverage_metric(coverage: BackcheckCoverage | None) -> None:
+    """Render the on-track coverage card with its delta against the target."""
+    if coverage is None or coverage.on_track_percent is None:
         st.metric(
             "Backcheck Coverage",
-            f"{backcheck_coverage_pct:.1f}%",
+            "N/A",
+            help="Needs the survey ID column in both the survey and backcheck "
+            "data, and at least one eligible survey.",
         )
+        return
 
-    with lc1, st.container(border=True):
-        st.metric(
-            "Total Enumerators", f"{n_enumerators:,}" if n_enumerators > 0 else "N/A"
+    target_percent = coverage.target_percent
+    st.metric(
+        "Backcheck Coverage",
+        f"{coverage.on_track_percent:.1f}%",
+        delta=f"{coverage.points_vs_target:+.1f} pts vs {target_percent:g}%",
+        help=f"{coverage.backchecked:,} of {coverage.eligible:,} eligible unique "
+        f"surveys have been backchecked. Target: {target_percent:g}%.",
+    )
+
+
+def _render_expected_backchecks(coverage: BackcheckCoverage) -> None:
+    """Render backchecks done against expected, with the deviation as a delta."""
+    if coverage.expected_backchecks is None:
+        st.info(
+            "Set the target number of responses for the survey in the page "
+            "configuration to track progress towards the expected total "
+            "number of backchecks."
         )
+        return
 
-    with lc2, st.container(border=True):
+    deviation = coverage.backchecked - coverage.expected_backchecks
+    value = f"{coverage.backchecked:,} / {coverage.expected_backchecks:,}"
+    # A 0% target expects no backchecks, so there is no percentage to show.
+    if coverage.expected_progress_percent is not None:
+        value += f" ({coverage.expected_progress_percent:.0f}%)"
+    with st.container(border=True):
         st.metric(
-            "Total Back Checkers",
-            f"{n_backcheckers:,}" if n_backcheckers > 0 else "N/A",
+            "Backchecks vs Expected",
+            value,
+            delta=f"{deviation:+,} backchecks vs target",
+            help=f"Expected backchecks: {coverage.target_percent:g}% of the "
+            "survey target, rounded up.",
         )
 
 
@@ -826,10 +955,11 @@ def _render_enum_bcer_stats(
     backcheck_settings: BackcheckSettings,
     settings_file: str,
 ) -> None:
-    """Render enumerator and backchecker error rate statistics.
+    """Render enumerator and backchecker coverage and error rate statistics.
 
-    Displays statistics tables showing error rates by category for either
-    enumerators or backcheckers, with a pills selector to switch between views.
+    Displays per-staff backcheck coverage, plus error rates by category once
+    backcheck columns are configured, with a pills selector to switch
+    between enumerators and backcheckers.
 
     Parameters
     ----------
@@ -844,12 +974,6 @@ def _render_enum_bcer_stats(
     settings_file : str
         Path to settings file for saving/loading configurations.
     """
-    if backcheck_analysis.is_empty():
-        st.info(
-            "No backcheck analysis results available. Configure backcheck columns in the settings section above."
-        )
-        return
-
     # Check if required columns are configured
     enumerator_col = backcheck_settings.enumerator
     backchecker_col = backcheck_settings.backchecker
@@ -868,6 +992,44 @@ def _render_enum_bcer_stats(
         backcheck_settings,
         settings_file,
     )
+
+
+_ADJUSTED_RATE_HELP = {
+    "enumerator": "Mismatches not attributed to the backchecker or respondent, "
+    "divided by values compared.",
+    "backchecker": "Mismatches not attributed to the enumerator or respondent, "
+    "divided by values compared.",
+}
+
+
+def _highlight_where(off_target: Callable[[float], bool]):
+    """Return a Styler cell function that flags numbers `off_target` accepts."""
+
+    def style(value: object) -> str:
+        if isinstance(value, int | float) and off_target(value):
+            return "background-color: #f8d7da; color: #842029"
+        return ""
+
+    return style
+
+
+def _highlight_below_target(target_percent: float):
+    """Return a Styler cell function that flags coverage below the target."""
+    return _highlight_where(lambda value: value < target_percent)
+
+
+def _highlight_above_target(target_percent: float):
+    """Return a Styler cell function that flags error rates above the target."""
+    return _highlight_where(lambda value: value > target_percent)
+
+
+def _error_rate_columns(columns: list[str]) -> list[str]:
+    """Return the regular and adjusted error rate columns of a stats table."""
+    return [
+        col
+        for col in columns
+        if col.startswith(("Error Rate % (", "Adjusted Error Rate % ("))
+    ]
 
 
 @st.fragment
@@ -919,8 +1081,8 @@ def _render_enum_bcer_stats_table(
 
     # Compute and display statistics
     staff_type = "enumerator" if view_selection == "Enumerator" else "backchecker"
-    stats_df = compute_enumerator_backchecker_stats(
-        survey_data, backcheck_data, backcheck_analysis, backcheck_settings, staff_type
+    stats_df = compute_staff_coverage(
+        survey_data, backcheck_data, backcheck_settings, staff_type
     )
 
     if stats_df.is_empty():
@@ -930,11 +1092,35 @@ def _render_enum_bcer_stats_table(
     # Get staff column name for display
     staff_col = enumerator_col if staff_type == "enumerator" else backchecker_col
 
+    if backcheck_analysis.is_empty():
+        st.info(
+            "Error rates appear here once backcheck columns are configured in "
+            "the Backchecks Columns Configuration section above."
+        )
+    else:
+        error_stats = compute_enumerator_backchecker_stats(
+            survey_data,
+            backcheck_data,
+            backcheck_analysis,
+            backcheck_settings,
+            staff_type,
+        )
+        if not error_stats.is_empty():
+            stats_df = stats_df.join(error_stats, on=staff_col, how="left")
+
     # Configure columns for wide format
     column_config = {
         staff_col: st.column_config.TextColumn(view_selection, pinned=True),
-        "Surveys": st.column_config.NumberColumn("Surveys", format="%d"),
-        "Backchecks": st.column_config.NumberColumn("Backchecks", format="%d"),
+        "Surveys": st.column_config.NumberColumn(
+            "Surveys", format="%d", help="Eligible unique submissions"
+        ),
+        "Backchecks": st.column_config.NumberColumn(
+            "Backchecks", format="%d", help="Unique submissions backchecked"
+        ),
+        "Coverage %": st.column_config.NumberColumn("Coverage %"),
+        "vs target": st.column_config.NumberColumn(
+            "vs target", help="Coverage minus the target, in percentage points"
+        ),
         "Avg Days": st.column_config.NumberColumn("Avg Days", format="%.1f"),
     }
 
@@ -959,6 +1145,13 @@ def _render_enum_bcer_stats_table(
         column_config[f"Error Rate % (Cat {category})"] = st.column_config.NumberColumn(
             f"Error % (Cat {category})", format="%.2f"
         )
+        column_config[f"Adjusted Error Rate % (Cat {category})"] = (
+            st.column_config.NumberColumn(
+                f"Adjusted Error % (Cat {category})",
+                format="%.2f",
+                help=_ADJUSTED_RATE_HELP[staff_type],
+            )
+        )
 
     # Add total columns
     column_config["Non-Missing Survey (Total)"] = st.column_config.NumberColumn(
@@ -976,9 +1169,40 @@ def _render_enum_bcer_stats_table(
     column_config["Error Rate % (Total)"] = st.column_config.NumberColumn(
         "Error % (Total)", format="%.2f"
     )
+    column_config["Adjusted Error Rate % (Total)"] = st.column_config.NumberColumn(
+        "Adjusted Error % (Total)",
+        format="%.2f",
+        help=_ADJUSTED_RATE_HELP[staff_type],
+    )
 
-    st.dataframe(
-        stats_df, hide_index=True, width="stretch", column_config=column_config
+    error_target = backcheck_settings.error_rate_target_percent
+    if staff_type == "backchecker" and error_target is None:
+        st.dataframe(
+            stats_df, hide_index=True, width="stretch", column_config=column_config
+        )
+        return
+
+    # st.dataframe shows a Styler's formatted text, so format every cell here:
+    # plain text by default, blank error rates for unbackchecked enumerators.
+    formatters = {col: str for col in stats_df.columns}
+    styler = stats_df.to_pandas(use_pyarrow_extension_array=True).style
+    if staff_type == "enumerator":
+        target_percent = effective_target_percent(backcheck_settings)
+        formatters.update({"Coverage %": "{:.1f}%", "vs target": "{:+.1f}"})
+        styler = styler.map(
+            _highlight_below_target(target_percent), subset=["Coverage %"]
+        )
+    # Each rate column is compared with the target on its own, so a rate can
+    # be over it while its adjusted rate is not.
+    rate_columns = _error_rate_columns(stats_df.columns)
+    formatters.update(dict.fromkeys(rate_columns, "{:.2f}"))
+    if error_target is not None and rate_columns:
+        styler = styler.map(_highlight_above_target(error_target), subset=rate_columns)
+    styled_dataframe(
+        styler.format(formatters, na_rep=""),
+        hide_index=True,
+        width="stretch",
+        column_config=column_config,
     )
 
 
@@ -1024,6 +1248,12 @@ def _render_column_stats(
         "Error Rate (%)": st.column_config.NumberColumn(
             "Error Rate (%)", format="%.2f"
         ),
+        **{
+            f"{source} Mismatches": st.column_config.NumberColumn(
+                f"{source} Mismatches", format="%d"
+            )
+            for source in ErrorSource
+        },
         "Test Results": st.column_config.TextColumn("Test Results", width="large"),
     }
 
@@ -1065,6 +1295,7 @@ def _get_available_additional_columns(
         "backcheck_value",
         "match_status",
         "category",
+        ERROR_SOURCE_COL,
     }
 
     return sorted(
@@ -1318,6 +1549,7 @@ def _build_display_columns(
         "survey_value",
         "backcheck_value",
         "match_status",
+        ERROR_SOURCE_COL,
         "category",
     ]
 
@@ -1372,8 +1604,20 @@ def _prepare_display_data(
     return display_data
 
 
+def _error_source_column(*, pinned: bool = False) -> Any:
+    """Return the column config of the Error Source column."""
+    return st.column_config.TextColumn(
+        "Error Source",
+        help="Who caused the mismatch, as attributed by a reviewer.",
+        pinned=pinned,
+    )
+
+
 def _build_column_config(
-    survey_key: str, survey_id: str, backcheck_key: str, filtered_data: pl.DataFrame
+    survey_key: str,
+    survey_id: str | None,
+    backcheck_key: str,
+    filtered_data: pl.DataFrame,
 ) -> dict:
     """Build column configuration for dataframe display.
 
@@ -1398,6 +1642,7 @@ def _build_column_config(
         "survey_value": st.column_config.TextColumn("Survey Value"),
         "backcheck_value": st.column_config.TextColumn("Backcheck Value"),
         "match_status": st.column_config.TextColumn("Match Status"),
+        ERROR_SOURCE_COL: _error_source_column(),
         "category": st.column_config.NumberColumn("Category", format="%d"),
     }
 
@@ -1416,16 +1661,37 @@ def _build_column_config(
     return column_config
 
 
+@st.fragment
+def _render_comparison_results_section(
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
+    backcheck_analysis: pl.DataFrame,
+    backcheck_settings: BackcheckSettings,
+    review: "AttributionContext | None",
+) -> None:
+    """Render Comparison Results Details as a fragment.
+
+    Filtering, selecting rows and opening the Review dialog rerun only this
+    section, not the whole report. Saving an attribution reruns the whole app
+    so the rates elsewhere on the page are refreshed.
+    """
+    _render_backcheck_comparison_results(
+        survey_data, backcheck_data, backcheck_analysis, backcheck_settings, review
+    )
+
+
 def _render_backcheck_comparison_results(
     survey_data: pl.DataFrame,
     backcheck_data: pl.DataFrame,
     backcheck_analysis: pl.DataFrame,
     backcheck_settings: BackcheckSettings,
+    review: "AttributionContext | None" = None,
 ) -> None:
     """Render detailed backcheck comparison results with filtering options.
 
     Displays a table showing each individual comparison with options to filter
     by match status, select specific columns, and add additional data columns.
+    With `review`, mismatches can be attributed to an error source.
 
     Parameters
     ----------
@@ -1437,6 +1703,8 @@ def _render_backcheck_comparison_results(
         Results from compute_backcheck_analysis.
     backcheck_settings : BackcheckSettings
         Backcheck configuration settings.
+    review : AttributionContext | None
+        Where attributions are saved; None for a read-only table.
     """
     if backcheck_analysis.is_empty():
         st.info(
@@ -1447,7 +1715,7 @@ def _render_backcheck_comparison_results(
     # Extract settings
     survey_key = backcheck_settings.survey_key
     survey_id = backcheck_settings.survey_id
-    backcheck_key = f"{survey_key}__BCCL"
+    backcheck_key = merged_backcheck_name(survey_key)
 
     # Get available columns from backcheck_analysis
     available_columns = sorted(
@@ -1503,24 +1771,288 @@ def _render_backcheck_comparison_results(
         st.info("No results match the selected filters.")
         return
 
+    # A stable order, so a row position reported by a Review click resolves
+    # to the same comparison on the rerun it triggers.
+    sort_cols = [
+        col
+        for col in ("column_name", survey_key, backcheck_key)
+        if col in display_data.columns
+    ]
+    display_data = display_data.sort(sort_cols, nulls_last=True, maintain_order=True)
+
     # Display results
     st.caption(f"Showing {len(display_data):,} comparison records")
+    if review is not None:
+        st.caption(
+            "Click **Review** on a mismatch to attribute it to the enumerator, "
+            "backchecker or respondent. To attribute several at once, select "
+            "their rows, then click **Review** on one of them. Attribution "
+            "never changes the data or the regular error rate."
+        )
 
     column_config = _build_column_config(
         survey_key, survey_id, backcheck_key, display_data
     )
 
-    st.dataframe(
-        display_data,
+    _render_comparison_table(display_data, column_config, survey_key, review)
+
+
+# ==============================================================================
+# MISMATCH ATTRIBUTION
+# ==============================================================================
+
+# `queue_notice` scope of the confirmation shown after the post-save rerun.
+_NOTICE_SCOPE = "backchecks_attribution"
+
+# First column of the comparison table: a button that opens the dialog.
+REVIEW_BUTTON_COL = "_review"
+REVIEW_BUTTON_LABEL = ":material/edit_note: Review"
+# Pixels that fit the label; left unset, the button column is sized too wide.
+REVIEW_BUTTON_WIDTH = 100
+_REVIEW_CLICK_KEY = "backchecks_attribution_review_click"
+_COMPARISON_TABLE_KEY = "backchecks_comparison_table"
+
+
+@dataclass(frozen=True)
+class AttributionContext:
+    """Where the Backchecks page saves attributions, and the current log."""
+
+    project_id: str
+    page_name_id: str
+    log: pl.DataFrame
+
+
+def _render_comparison_table(
+    display_data: pl.DataFrame,
+    column_config: dict[str, Any],
+    survey_key: str,
+    review: AttributionContext | None,
+) -> None:
+    """Render the comparison table; with `review`, mismatches can be reviewed.
+
+    Each mismatch row has a pinned Review button, and rows can be selected.
+    Clicking Review opens the attribution dialog for that row, or for every
+    selected mismatch if the row is selected.
+    """
+    if review is None:
+        st.dataframe(
+            display_data, hide_index=True, width="stretch", column_config=column_config
+        )
+        return
+
+    # Survey and backcheck fields can be added to the table, so avoid their names.
+    button_col = REVIEW_BUTTON_COL
+    while button_col in display_data.columns:
+        button_col = f"_{button_col}"
+    # Review and Error Source come first and stay pinned while scrolling.
+    shown = display_data.select(
+        pl.when(is_mismatch()).then(pl.lit(REVIEW_BUTTON_LABEL)).alias(button_col),
+        pl.col(ERROR_SOURCE_COL),
+        pl.all().exclude(ERROR_SOURCE_COL),
+    )
+    column_config = {
+        **column_config,
+        button_col: st.column_config.ButtonColumn(
+            "",
+            type="tertiary",
+            pinned=True,
+            width=REVIEW_BUTTON_WIDTH,
+            key=_REVIEW_CLICK_KEY,
+            help="Attribute this mismatch, or every selected one, to an error source.",
+        ),
+        ERROR_SOURCE_COL: _error_source_column(pinned=True),
+    }
+    event = st.dataframe(
+        shown,
         hide_index=True,
         width="stretch",
         column_config=column_config,
+        key=_COMPARISON_TABLE_KEY,
+        on_select="rerun",
+        selection_mode="multi-row",
     )
+
+    # The click is only present during the rerun it triggers, so the dialog
+    # opens once per click; widgets inside the dialog rerun just the dialog.
+    click = st.session_state.get(_REVIEW_CLICK_KEY)
+    if not click:
+        return
+    selected = list(event.selection.rows) if event is not None else []
+    rows = rows_to_review(display_data, click["row"], selected)
+    if not rows.is_empty():
+        _attribution_dialog(rows, survey_key, review)
+
+
+@st.dialog("Attribute mismatches to an error source", width="large")
+def _attribution_dialog(
+    rows: pl.DataFrame, survey_key: str, review: AttributionContext
+) -> None:
+    """Show the attribution form for `rows` in a dialog."""
+    _render_attribution_form(rows, survey_key, review)
+
+
+_SOURCE_HELP = {
+    ErrorSource.ENUMERATOR: "The survey value is wrong.",
+    ErrorSource.BACKCHECKER: "The backcheck value is wrong.",
+    ErrorSource.RESPONDENT: "The respondent gave different answers.",
+    ErrorSource.UNATTRIBUTED: "Clear an earlier attribution.",
+}
+
+
+def _plural_mismatches(n: int) -> str:
+    return f"{n:,} mismatch{'es' if n != 1 else ''}"
+
+
+def _render_attribution_form(
+    rows: pl.DataFrame, survey_key: str, review: AttributionContext
+) -> None:
+    """Render the attribution form for mismatch `rows` and save on submit.
+
+    The values are shown read-only: attribution never changes the data. A
+    note is required for Backchecker and Respondent. A successful save
+    reruns the page so the tables and rates reflect it.
+    """
+    st.markdown(
+        f"Attribute **{_plural_mismatches(rows.height)}** to an error source. "
+        "This changes only the adjusted error rate: the data, the mismatch "
+        "counts and the regular error rate stay as they are."
+    )
+    backcheck_key = backcheck_key_col(rows, survey_key)
+    # When the survey KEY is the merge ID, it is also the backcheck KEY.
+    shown_cols = [
+        col
+        for col in dict.fromkeys(
+            (
+                survey_key,
+                backcheck_key,
+                "column_name",
+                "survey_value",
+                "backcheck_value",
+                ERROR_SOURCE_COL,
+            )
+        )
+        if col in rows.columns
+    ]
+    st.dataframe(
+        rows.select(shown_cols),
+        hide_index=True,
+        width="stretch",
+        column_config=_build_column_config(survey_key, None, backcheck_key, rows),
+    )
+
+    sources = list(ErrorSource)
+    current = (
+        rows[ERROR_SOURCE_COL].unique().to_list()
+        if ERROR_SOURCE_COL in rows.columns
+        else []
+    )
+    default = sources.index(ErrorSource(current[0])) if len(current) == 1 else 0
+    source = st.radio(
+        "Error source",
+        options=sources,
+        index=default,
+        horizontal=True,
+        captions=[_SOURCE_HELP[option] for option in sources],
+        key="backchecks_attribution_source",
+    )
+    needs_note = note_required(source)
+    note = st.text_area(
+        "Note (required)" if needs_note else "Note (optional)",
+        key="backchecks_attribution_note",
+        placeholder="Why the mismatch has this source",
+    )
+    missing_note = needs_note and not note.strip()
+    if missing_note:
+        st.caption(f"A note is required to attribute a mismatch to {source}.")
+
+    if not st.button(
+        "Save attribution",
+        type="primary",
+        width="stretch",
+        disabled=missing_note,
+        key="backchecks_attribution_save",
+    ):
+        return
+
+    try:
+        entries = build_attribution_entries(
+            rows, survey_key, source, note, get_reviewer_name(), datetime.now()
+        )
+        save_attributions(review.project_id, review.page_name_id, entries)
+    except ValueError as e:
+        st.error(str(e))
+        return
+    except (OSError, duckdb.Error, pl.exceptions.PolarsError):
+        logger.exception("Could not save backcheck attributions")
+        st.error("Could not save the attribution. Check the cache folder.")
+        return
+
+    # A full rerun closes the dialog and refreshes the tables and rates. The
+    # dialog opens from a fragment, so ask for the whole app explicitly.
+    queue_notice(
+        _NOTICE_SCOPE,
+        "toast",
+        f"Attributed {_plural_mismatches(rows.height)} to {source}.",
+    )
+    st.rerun(scope="app")
+
+
+def _render_attribution_log(log: pl.DataFrame) -> None:
+    """Render the attribution history, newest first, in an expander."""
+    with st.expander("Attribution log", icon=":material/history:"):
+        if log.is_empty():
+            st.info("No mismatches have been attributed yet.")
+            return
+        st.caption(
+            "Every attribution, newest first. The latest one for a mismatch "
+            "applies while its survey and backcheck values are unchanged."
+        )
+        st.dataframe(
+            attribution_history(log),
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "survey_key": st.column_config.TextColumn("Survey Key"),
+                "backcheck_key": st.column_config.TextColumn("Backcheck Key"),
+                "column_name": st.column_config.TextColumn("Column Name"),
+                "survey_value": st.column_config.TextColumn("Survey Value"),
+                "backcheck_value": st.column_config.TextColumn("Backcheck Value"),
+                "source": st.column_config.TextColumn("Error Source"),
+                "note": st.column_config.TextColumn("Note"),
+                "user": st.column_config.TextColumn("User"),
+                "date": st.column_config.DatetimeColumn("Date"),
+            },
+        )
 
 
 # ==============================================================================
 # MAIN ENTRY POINT
 # ==============================================================================
+
+
+def _render_comparison_scope(scope: ComparisonScope) -> None:
+    """State which records are compared, and any filter that failed."""
+    for records in (scope.survey, scope.backcheck):
+        if records.error:
+            st.error(
+                f"The {records.label} Records to Include filter on the "
+                f"Duplicates tab could not be applied, so no {records.label} "
+                f"records are compared: {records.error}"
+            )
+    lines = scope_captions(scope)
+    if lines:
+        hint = "Change Records to Include in the Duplicates tab settings."
+        # Two trailing spaces make a Markdown line break.
+        st.caption("  \n".join([*lines, hint]))
+
+
+def _render_id_problem_warning(
+    scope: ComparisonScope, survey_data: pl.DataFrame, survey_id: str | None
+) -> None:
+    """Warn about duplicate and unmatched IDs left out of the comparison."""
+    warning = id_problem_warning(id_problem_counts(scope, survey_data, survey_id))
+    if warning:
+        st.warning(warning, icon=":material/content_copy:")
 
 
 def backchecks_report(
@@ -1552,6 +2084,7 @@ def backchecks_report(
         Configuration dictionary.
     """
     st.title("Backchecks Report")
+    show_queued_notices(_NOTICE_SCOPE)
 
     demo_callout(
         """
@@ -1573,10 +2106,6 @@ def backchecks_report(
         """
     )
 
-    # Convert Polars DataFrames to Pandas for compatibility
-    survey_data_pd = survey_data.to_pandas()
-    backcheck_data_pd = backcheck_data.to_pandas()
-
     # Get column information for settings UI
     survey_categorical_columns = survey_columns.categorical_columns
     survey_datetime_columns = survey_columns.datetime_columns
@@ -1585,18 +2114,25 @@ def backchecks_report(
     backcheck_datetime_columns = backcheck_columns.datetime_columns
 
     # Configure settings
-    config_settings = BackcheckSettings(**config)
+    config_settings = settings_from_page_config(config)
     backcheck_settings = backchecks_report_settings(
         project_id,
         setting_file,
-        survey_data_pd,
-        backcheck_data_pd,
+        survey_data,
+        backcheck_data,
         config_settings,
         survey_categorical_columns,
         survey_datetime_columns,
         backcheck_categorical_columns,
         backcheck_datetime_columns,
     )
+
+    # The comparison and coverage use the records the Duplicates tab's
+    # Records to Include filters keep; the settings above list every column.
+    all_survey_data = survey_data
+    scope = comparison_scope(survey_data, backcheck_data, setting_file)
+    _render_comparison_scope(scope)
+    survey_data = scope.survey.data
 
     # Outlier columns configuration
     st.subheader("Backchecks Columns Configuration")
@@ -1631,7 +2167,7 @@ def backchecks_report(
         set(survey_categorical_columns).intersection(set(backcheck_categorical_columns))
     )
     _render_backchecks_column_actions(
-        project_id, page_name_id, survey_data, backcheck_data, common_columns
+        project_id, page_name_id, all_survey_data, backcheck_data, common_columns
     )
 
     # Compute backcheck analysis
@@ -1641,7 +2177,16 @@ def backchecks_report(
         "logs",
     )
     _backcheck_analysis = compute_backcheck_analysis(
-        survey_data, backcheck_data, backcheck_settings, backcheck_column_settings
+        survey_data,
+        scope.backcheck.data,
+        backcheck_settings,
+        backcheck_column_settings,
+    )
+    review = AttributionContext(
+        project_id, page_name_id, load_attribution_log(project_id, page_name_id)
+    )
+    _backcheck_analysis = mark_error_sources(
+        _backcheck_analysis, review.log, backcheck_settings.survey_key
     )
 
     st.subheader("Backchecks Summary")
@@ -1649,8 +2194,16 @@ def backchecks_report(
     demo_callout(
         """
         ##### Backchecks Summary
-        Five metrics appear here: Survey Observations, Backcheck Observations,
-        Backcheck Coverage %, Total Enumerators, and Total Back Checkers.
+        Four metrics appear here: Survey Observations, Backcheck Observations,
+        Total Enumerators, and Total Back Checkers. Below them, the **Targets**
+        section shows Backcheck Coverage, the share of eligible unique surveys
+        that have been backchecked, with how far it is above or below the
+        backcheck target. When the survey's target number of responses is set
+        in the page configuration, it also shows backchecks done against the
+        total number of backchecks expected, with how many above or below.
+        Under **Error Rates**, one card each shows the total error rate and the
+        error rate for each category, with the adjusted error rate for
+        enumerators as the delta.
 
         Below the metrics, a **Backchecker Productivity** table shows submission
         counts per backchecker over time. Use the **Daily / Weekly / Monthly** pills
@@ -1659,7 +2212,7 @@ def backchecks_report(
     )
 
     _render_backcheck_summary(
-        survey_data, backcheck_data, _backcheck_analysis, backcheck_settings
+        survey_data, scope.backcheck.data, backcheck_settings, _backcheck_analysis
     )
 
     _render_backchecker_productivity(
@@ -1675,15 +2228,17 @@ def backchecks_report(
         """
         ##### Enumerator Backchecker Error Statistics
         Use the **Enumerator / Backchecker** pills to switch between two views.
-        Each view shows a table with submission counts, values compared, number of
-        mismatches, and error rate — broken down by category — for either the
-        original enumerator or the backchecker.
+        The enumerator view shows each enumerator's eligible surveys, how many
+        were backchecked, and their coverage against the target, with coverage
+        below target highlighted. The backchecker view shows backchecks done.
+        Once backcheck columns are configured, both views also show values
+        compared, number of mismatches, and error rate, broken down by category.
         """
     )
 
     _render_enum_bcer_stats(
         survey_data,
-        backcheck_data,
+        scope.backcheck.data,
         _backcheck_analysis,
         backcheck_settings,
         setting_file,
@@ -1721,9 +2276,15 @@ def backchecks_report(
         type="success",
     )
 
-    _render_backcheck_comparison_results(
-        survey_data, backcheck_data, _backcheck_analysis, backcheck_settings
+    _render_id_problem_warning(scope, all_survey_data, backcheck_settings.survey_id)
+    _render_comparison_results_section(
+        survey_data,
+        scope.backcheck.data,
+        _backcheck_analysis,
+        backcheck_settings,
+        review,
     )
+    _render_attribution_log(review.log)
 
     st.write("---")
     demo_callout(

@@ -20,12 +20,15 @@ class ReapplyFailure:
     reason: str
 
 
-def highlight_status(value: str) -> str:
+def highlight_status(value: object) -> str:
     """Style a log status cell: green text for Successful, red for Failed.
 
     Used with a pandas ``Styler`` (``df.style.map(highlight_status,
     subset=["status"])``) on the prep and correction Change Log tables.
     """
+    if not isinstance(value, str):
+        # Missing (None or pd.NA, which can't be used in a boolean test).
+        return ""
     if value == "Failed":
         return "color: #dc3545; font-weight: 600"
     if value == "Successful":
@@ -50,5 +53,18 @@ def warn_reapply_failures(failures: list[ReapplyFailure], context: str) -> None:
 
     import streamlit as st
 
+    st.warning(format_reapply_failures(failures, context))
+
+
+def format_reapply_failures(failures: list[ReapplyFailure], context: str) -> str:
+    """Summarize skipped steps as Markdown: a lead-in, then one bullet each.
+
+    Parameters
+    ----------
+    failures : list[ReapplyFailure]
+        Steps/corrections skipped during the reapply, in order.
+    context : str
+        Short lead-in describing what was being reapplied.
+    """
     lines = "\n".join(f"- {f.step}: {f.reason}" for f in failures)
-    st.warning(f"{context} ({len(failures)} skipped):\n{lines}")
+    return f"{context} ({len(failures)} skipped):\n{lines}"

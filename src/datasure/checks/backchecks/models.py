@@ -4,7 +4,33 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from datasure.utils.settings_utils import load_check_settings
+
 TAB_NAME: str = "backchecks"
+
+
+def backcheck_id_columns(
+    setting_file: str, survey_key: str | None, survey_id: str | None
+) -> tuple[str | None, str | None]:
+    """Return the backcheck data's KEY and ID columns.
+
+    These are the ones set on the Backcheck Analysis tab, falling back to the
+    survey's `survey_key` and `survey_id`. The Duplicates tab and the
+    Corrections page both correct backcheck IDs in these columns.
+    """
+    saved = load_check_settings(setting_file, TAB_NAME)
+    return saved.get("survey_key") or survey_key, saved.get("survey_id") or survey_id
+
+
+# Suffix the survey/backcheck merge adds to backcheck columns whose names
+# clash with survey columns, e.g. the backcheck KEY becomes "KEY__BCCL".
+BACKCHECK_SUFFIX: str = "__BCCL"
+
+
+def merged_backcheck_name(col: str) -> str:
+    """Return the merged-data name of backcheck column `col`."""
+    return f"{col}{BACKCHECK_SUFFIX}"
+
 
 # Weekday constants for productivity analysis
 WEEKDAY_NAMES = [
@@ -66,11 +92,26 @@ class BackcheckSettings(BaseModel):
     )
     enumerator: str | None = Field(None, description="Column containing enumerator")
     backchecker: str | None = Field(None, description="Column containing back checker")
-    backcheck_target_percent: int = Field(
-        10, description="Target percentage of backchecks"
+    backcheck_target_percent: float | None = Field(
+        None,
+        ge=0,
+        le=100,
+        description="Target percentage of surveys to backcheck; None if not set",
     )
-    drop_duplicates_option: str = Field(
-        "drop", description="How to handle duplicate entries"
+    survey_target: int | None = Field(
+        None, ge=0, description="Target number of survey responses"
+    )
+    error_rate_target_percent: float | None = Field(
+        None,
+        ge=0,
+        le=100,
+        description="Highest acceptable error rate, in percent; None if not set",
+    )
+    eligibility_column: str | None = Field(
+        None, description="Survey column that marks a survey eligible"
+    )
+    eligibility_values: list[str] | None = Field(
+        None, description="Values of eligibility_column that mark a survey eligible"
     )
     no_differences_list: list[str] | None = Field(
         None,

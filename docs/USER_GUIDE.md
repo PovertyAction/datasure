@@ -381,15 +381,103 @@ Each report is accessible from the navigation sidebar after configuration:
 
 ### Step 6: Correct Data
 
-**Purpose**: Fix identified data quality issues
+**Purpose**: Fix identified data quality issues, or record that a flagged value
+is correct
 
 **What You'll Do**:
 
-- Apply corrections to specific records
-- Track correction history
-- Re-run quality checks to verify improvements
+- Correct a flagged record from the check page that flagged it, or any record
+  from the Correct Data page
+- Accept outliers, constraint violations and GPS outliers that are correct
+- Attribute back check mismatches to whoever caused them
+- Review, filter and undo entries in the Correction Log
+
+#### Where to Make Corrections
+
+You can correct data from the check pages and from the Correct Data page. Both
+write to the same Correction Log, one per dataset, so a change made in one
+place shows up in the other and in every report that uses the dataset.
+
+| Page | What you can do | Details |
+| --- | --- | --- |
+| Outliers: constraint violations and outlier inspection tables | modify value, remove value, accept | [Correcting or Accepting Flagged Values](#correcting-or-accepting-flagged-values) |
+| GPS Checks: outliers table | modify coordinates, remove coordinates, remove observation, accept | [Correcting or Accepting GPS Outliers](#correcting-or-accepting-gps-outliers) |
+| Duplicates: ID duplicate cards | Keep, Modify ID or Drop each record | [Resolving a card](#resolving-a-card) |
+| Back Checks: Comparison Details | attribute a mismatch to the Enumerator, Backchecker or Respondent (the data is not changed) | [Attributing Mismatches](#attributing-mismatches) |
+| Correct Data | modify value, remove value, remove row, for any KEY and column | [Correction Actions](#correction-actions) |
+
+On the Outliers and GPS Checks pages, click **Review** on a flagged row to open
+a correction form with the KEY and current value filled in: one column on
+Outliers, the latitude and longitude pair on GPS Checks. You correct one record
+at a time. After you save, the page reloads and shows a confirmation. A
+correction applies to every row with the same KEY.
+
+Duplicates and Back Checks work differently. Duplicate and unmatched IDs are
+resolved on per-ID cards (see [Resolving a card](#resolving-a-card)), and back
+check mismatches are attributed rather than corrected, one or several at a
+time (see [Attributing Mismatches](#attributing-mismatches)).
+
+The Correct Data page keeps working as before, for any record, including ones
+no check flagged. It is also the only place to undo a correction or an
+acceptance. It lists acceptances but can't create them, because it has no
+check flag to accept.
+
+#### Accept as Valid
+
+**accept** records that a flagged value was reviewed and is correct, without
+changing the data. It is offered for outliers, constraint violations and GPS
+outliers only:
+
+- A reason is required.
+- An acceptance covers one check, one KEY and one column: accepting an outlier
+  does not accept a constraint violation on the same value. A GPS acceptance
+  covers the KEY's latitude and longitude together.
+- Accepted flags are hidden from the tables and left out of the metrics. Turn
+  on **Show reviewed** to see them again, highlighted in green.
+- An acceptance lapses, and the value is flagged again, if the value changes
+  (for GPS, if either coordinate changes).
+- Accepting a **hard** constraint violation needs an extra confirmation, and
+  the entry is highlighted in red in the Correction Log.
+
+Duplicates and back checks can't be accepted. An ID belongs to one record, so
+a duplicate ID is resolved on its card or left out with **Records to
+Include**. Back check results measure data collection quality, so a mismatch
+is attributed instead.
+
+#### Back Check Mismatches
+
+The Back Checks page never changes survey or back check data. Instead, click
+**Review** on a mismatch in Comparison Details and attribute it to the
+**Enumerator**, the **Backchecker** or the **Respondent**. To attribute several
+mismatches at once, select their rows first. Attribution leaves the mismatch
+counts and the regular error rate unchanged. The statistics show an **adjusted
+error rate** next to the error rate. There are two: the enumerator adjusted
+rate leaves out mismatches attributed to the back checker or the respondent,
+and the back checker adjusted rate leaves out those attributed to the
+enumerator or the respondent. Attributions are kept in their own
+attribution log, not in the Correction Log. See
+[Attributing Mismatches](#attributing-mismatches).
+
+#### Duplicate and Unmatched IDs
+
+All ID problems are resolved on the Duplicates tab, where each duplicate ID
+has a card that compares its records side by side. A **Survey data** /
+**Backcheck data** switcher adds cards for duplicate back check IDs and for
+back checks whose ID is not in the survey data. Choose **Keep**, **Modify ID**
+or **Drop** for each record, then save the card once with one reason. Either
+every correction on the card is saved or none are. Save is allowed only when
+at most one included record keeps the ID. See
+[Resolving a card](#resolving-a-card).
+
+A repeat visit that legitimately shares an ID, such as a failed first attempt
+followed by a completed interview, is handled with the **Records to Include**
+filter in the [Duplicates Settings](#duplicates-settings) instead. The Back
+Checks comparison uses the same filters, and leaves out unresolved duplicate
+IDs until they are resolved on the Duplicates tab.
 
 #### Correction Actions
+
+These actions are on the Correct Data page.
 
 ##### Modify Value
 
@@ -438,7 +526,8 @@ Delete entire survey records:
 **Use Cases**:
 
 - Test submissions
-- Duplicate surveys (after investigation)
+- Duplicate surveys (after investigation; the Duplicates tab cards are
+  quicker, see [ID Duplicates](#id-duplicates))
 - Invalid records
 
 **Steps**:
@@ -460,15 +549,60 @@ All corrections are tracked with:
 - Action type
 - Reason for correction
 - Timestamp
+- Status of the last reapply, with the reason if it failed
+- Source: the page that made the entry: `corrections_page` (the Correct Data
+  page), `outliers`, `constraints`, `duplicates` or `gps`
+- User: who made the entry. This is your computer login unless you set a
+  **Reviewer name** in the sidebar, which DataSure remembers across sessions.
+  Entries logged before DataSure recorded the user show an empty User.
+
+The log can also contain **accept** entries. An accept entry records that a
+flagged value was reviewed and is correct. It never changes the data, and the
+Check type column shows which check it applies to. It stays in effect only
+while the value is unchanged; once the value changes, its Status shows
+`Inactive` with the reason. Accept entries are kept in `correction_log.csv`
+in the replication package but are not part of the corrections script. You can
+remove an accept entry with "Remove correction step" like any other entry.
+Accepting a hard constraint violation sets Severity to `hard`, and those rows
+are highlighted in red.
+
+To blank a cell, use "remove value": "modify value" needs a non-empty new
+value (`0` is valid).
+
+##### Filtering the Log
+
+Above the Correction Log, **Source** and **Action** filters list the sources
+and actions that appear in the log. Select one or more values to show only
+the matching entries; with nothing selected, a filter shows everything. The
+two filters combine, so selecting the `gps` source and the `accept` action
+shows only GPS acceptances. While a filter is on, a caption counts the entries
+shown out of the total; if nothing matches, a message says so instead. The
+filters only change what the table shows: "Remove correction step"
+still lists every entry.
+
+#### Correcting Back Check Data
+
+On a page with back check data, a **Survey data** / **Backcheck data**
+switcher at the top of the page's tab picks the dataset. The back check data
+has its own Correction Log, removal list and preview. Back check results
+measure data quality, so on back check data you can only modify the ID (the
+Survey ID column set on the Backcheck Analysis tab) or remove a row. Back
+check data that was never prepared is corrected from its imported data. The
+Duplicates tab has the same switcher, and its back check cards write to the
+back check data's Correction Log.
 
 #### Verifying Corrections
 
-After applying corrections:
+Reports read the corrected data every time they load, so there is nothing to
+refresh:
 
-1. Navigate back to relevant quality report
-2. Click "Refresh" or re-run checks
-3. Verify issue is resolved
-4. Document in correction notes
+1. After saving on a check page, the page reloads with the correction applied.
+   After saving on the Correct Data page, open the report again.
+2. Check that the flag is gone. On the Outliers page, turn on **Show
+   reviewed** to see corrected values marked Corrected.
+3. In the Correction Log, check that the entry's Status is `Successful`. If
+   new data or a prep change means a correction can no longer be applied, its
+   Status shows why.
 
 **Demo Example**:
 Correcting duplicate household ID:
@@ -478,16 +612,16 @@ Correcting duplicate household ID:
 
 **Steps**:
 
-1. Go to Correct Data page
-2. Click "Add correction step" (+ button)
-3. **Select Key**: "uuid:0dk0vt97-786b-250u-34k7-z34615zz820c"
-4. **Select Action**: "modify value"
-5. **Select Column**: "hhid"
-6. **Current Value**: "UP015-005" (auto-loaded)
-7. **New Value**: "UP015-055"
-8. **Reason**: "Correcting duplicate HHID after investigation"
-9. Click "Apply"
-10. Return to Duplicates tab to verify resolution
+1. Open the Duplicates tab and find the card for "UP015-005"
+2. On the record with KEY "uuid:0dk0vt97-786b-250u-34k7-z34615zz820c",
+   choose **Modify ID** and enter "UP015-055"
+3. Leave the other record on **Keep**
+4. **Reason**: "Wrong ID entered"; **Note**: "Typo confirmed with the field
+   team"
+5. Click **Save**. The card disappears and **Resolved** goes up by one.
+
+The same correction can be made on the Correct Data page with "modify value"
+on the "hhid" column.
 
 ---
 
@@ -611,7 +745,8 @@ Monitor survey completion:
 
 ### 3. Duplicates Report
 
-**Purpose**: Identify duplicate records in survey data
+**Purpose**: Find survey and back check records that share an ID, and back
+checks whose ID is not in the survey data
 
 #### Sections
 
@@ -623,32 +758,80 @@ Configure detection:
 - **Survey Key**: Unique key column
 - **Date**: Submission date
 - **Enumerator ID**: Data collector identifier
-- **Columns**: Additional columns to check for duplicates
+- **Records to Include**: Check only the records that match a condition, for
+  example `consent == Yes`. Use it to leave out a failed first visit when the
+  enumerator interviewed the respondent again under the same ID. Pages with
+  back check data have a separate **Backcheck Records to Include** filter.
+  Each page keeps its own filters. A filter that matches no records shows a
+  warning and checks no records.
 
-##### Duplicate Statistics
+##### ID Duplicates
 
-Overview metrics:
+A **Survey data** / **Backcheck data** switcher picks the dataset. Each option
+shows its number of unresolved duplicate IDs, for example **Survey data (3)**.
+On pages without back checks, the option reads **Backcheck data (N/A)** and
+cannot be selected. The back check view uses the Survey ID and Survey Key set
+on the Backcheck Analysis tab.
 
-- Total duplicates found
-- Resolved duplicates
-- Columns checked
-- Columns with no duplicates
-- Columns with duplicates
-- Survey ID duplicates count
+Metrics above the cards:
 
-##### Duplicate Records Table
+- **Duplicate IDs**: IDs shared by two or more records
+- **Records involved**: Records that share an ID
+- **Missing IDs**: Records with no ID
+- **Unmatched IDs** (back check view): Back checks whose ID is not in the
+  survey data
+- **Resolved**: Duplicate IDs that corrections have resolved, made on the
+  cards or on the Correct Data page
 
-Detailed duplicate list:
+Each duplicate ID has a card showing its record count and date range. The card
+compares the records side by side, one column per record, and highlights the
+fields that differ. By default it shows the KEY, date, enumerator (back checker
+in the back check view) and team, plus the columns chosen in **Show more
+columns in report**. Turn on **Compare all fields** to see every column, and
+**Only differing fields** to hide fields that are the same in every record.
 
-- Survey ID
-- Duplicate column values
-- Count of duplicates
-- Resolution status
-- **Filter**: Select additional columns to display
+In the back check view, each unmatched back check has its own card with its
+KEY, ID, date and back checker.
 
-##### Duplicate Entries for Other Columns
+Search by ID or KEY, sort by group size or latest date, and move between pages
+of 10 cards. **Download duplicates (CSV)** exports every record on the cards
+that match the search, across all pages, with the displayed columns.
 
-Check duplicates in non-ID columns:
+##### Resolving a card
+
+An ID belongs to one record, so a duplicate ID can't be accepted as valid. A
+repeat visit that legitimately shares an ID, such as a failed first attempt
+followed by a completed interview, is handled with **Records to Include**
+instead.
+
+Each card lists its records with a choice of **Keep**, **Modify ID** or
+**Drop**. **Modify ID** asks for the new ID. Choose a **Reason** and enter a
+**Note**, then click **Save**. Save stays disabled, with a message saying
+what's missing, until:
+
+- at most one record keeps the ID;
+- every new ID is filled in, differs from the current ID and from the other
+  new IDs, fits the ID column (a number for a numeric ID), and is not already
+  held by an included record (the message names that record's KEY); and
+- a reason and a note are given.
+
+Dropping every record removes the ID from the data, so it asks for a
+confirmation first. An unmatched back check card offers **Modify ID** or
+**Drop**; its new ID must be an ID in the survey data.
+
+One save logs one correction per changed record, with the reason and note on
+each, in the survey or back check data's Correction Log, with source
+`duplicates`. Either every correction is saved or none are. The card then
+disappears. A caption above the cards counts the corrections logged in this
+session and links to the Correction Log, which is where you undo one: remove
+it there, and the card comes back if the ID is duplicated again. A record with
+no KEY, or whose KEY is also on another record (even one Records to Include
+hides), can't be corrected on a card, because a correction applies to every
+row with its KEY.
+
+##### Other Duplicates
+
+Shown in the survey view only. Check duplicates in non-ID columns:
 
 - Phone numbers
 - Addresses
@@ -815,6 +998,45 @@ Visual analysis:
 - **Box Plot**: Distribution with outliers highlighted
 - **Table**: All records with outlier indicators
 
+##### Correcting or Accepting Flagged Values
+
+Above each of the constraint violations and outlier inspection tables,
+**Show only flagged values** (on by default) limits the table to flagged
+values. Turn it off to see every checked value.
+
+Each row of the constraint violations table and the outlier inspection table
+starts with a **Review** button. Click it to open a correction form in a
+dialog, with the KEY, column and current value filled in. Choose an action,
+enter a reason and click "Apply":
+
+- **modify value** or **remove value** corrects the data. The page reloads, and
+  the flag is updated or disappears.
+- **accept** records that the flagged value is correct. The flag is hidden
+  and no longer counted in the metrics. Turn on "Show reviewed" to see
+  accepted flags highlighted in green, with a Reviewed badge and the reason.
+
+"Show reviewed" also highlights corrected values in green, with a Corrected
+badge and the correction's reason. A corrected value that is now in range is
+no longer flagged, so turn off "Show only flagged values" to see it. A
+corrected value that is still flagged stays in the table and in the metrics
+until it is fixed or accepted. The badge clears if the value changes again.
+
+Turn on **Show only reviewed** to list only accepted and corrected values. While
+it is on, the other two toggles are disabled.
+
+Outlier and constraint acceptances are separate: accepting an outlier does not
+accept a constraint violation on the same value. Accepting a **hard**
+constraint violation needs an extra confirmation. An accepted flag comes back
+if the value changes, or if you remove the acceptance on the Correct Data page.
+Every entry appears in the Correction Log with source `outliers` or
+`constraints`.
+
+Corrections and acceptances apply to every row with the same KEY. If a KEY is
+on more than one row with different values in the flagged column, Review shows
+a warning instead of the form, because a correction would change all those
+rows. Give each record a unique KEY in the source data first. The Duplicates
+check lists duplicated KEYs.
+
 ---
 
 ### 6. Enumerator Stats Report
@@ -941,8 +1163,49 @@ Configure validation:
 - **Enumerator**: Original data collector
 - **Back Checker**: QC validator
 - **Date**: Back check date
-- **Target %**: Target back check rate (e.g., 10%)
-- **Handle Duplicates**: Include or exclude duplicates
+- **Backcheck target (%)**: Share of surveys to back check (e.g., 10%).
+  Pre-filled from the page configuration. A value you enter here is saved and
+  overrides the page configuration; clear it to fall back. If neither is set,
+  10% is used and a warning is shown.
+- **Error rate target (%)**: Optional. The highest acceptable error rate. In
+  the enumerator and back checker statistics, every error rate and adjusted
+  error rate above it is highlighted, each column on its own. Leave blank to
+  highlight nothing.
+- **Eligibility Filter**: Optional survey column and values that mark a survey
+  eligible for back checks (e.g., `consent` in `1`). Only eligible surveys
+  count towards coverage.
+
+The comparison and coverage use the records kept by the **Records to Include**
+filters on the Duplicates tab: the survey filter for survey data and the
+**Backcheck Records to Include** filter for back check data. When a filter is
+set, the page says so, for example "Comparing 1,240 of 1,310 surveys (Records
+to Include: interview_status == Complete)". Records whose survey ID is
+duplicated, in the survey or the back check data, are left out of the
+comparison and of coverage until the duplicate is resolved.
+
+##### Backchecks Summary
+
+A row of counts (survey observations, back check observations, enumerators and
+back checkers) and **Mismatches Attributed**, the share of mismatches given an
+error source (see [Attributing Mismatches](#attributing-mismatches)). Then a
+**Targets** section with two metrics side by side:
+
+- **Backcheck Coverage**: Share of eligible survey IDs (leaving out
+  duplicated IDs) with a matching back check, and how many points it is
+  above or below the target. It is calculated before any back check columns
+  are configured.
+- **Backchecks vs Expected**: When the page configuration sets the target
+  number of survey responses, back checks done against the back checks
+  expected (survey target × target %, rounded up), and how many back checks
+  above or below that it is. Values over 100% are shown as is.
+
+Below the targets, an **Error Rates** section has one card for the total error
+rate and one for each category. Each card shows mismatches ÷ values compared
+over every back check. Its grey delta is the enumerator adjusted error rate,
+and the card's help gives the back checker adjusted error rate (see
+[Attributing Mismatches](#attributing-mismatches)). A category with no values
+compared shows N/A, with "No values compared" in place of the delta. The cards
+appear once back check columns are configured.
 
 **Add Back Check Columns**:
 Click "Add a back check column" (+ button):
@@ -980,26 +1243,31 @@ Detailed column-level validation:
 - \# surveys, backchecks, compared
 - \# different values
 - Error rate (%)
+- \# mismatches attributed to the enumerator, the back checker and the
+  respondent, and \# still unattributed (there is no adjusted rate per column)
 
 ##### Enumerator Statistics
 
 Performance by original enumerator:
 
 - Enumerator ID
-- \# surveys back checked
+- Surveys: eligible unique submissions
+- Backchecks: how many of those were back checked
+- Coverage % and points vs target (coverage below target is highlighted;
+  enumerators with no back checks show 0%)
 - \# values compared
 - \# different values
-- Error rate (%)
+- Error rate (%) and adjusted error rate (%), by category and in total
 
 ##### Back Checker Statistics
 
 Performance by validator:
 
 - Back Checker ID
-- \# surveys validated
+- Backchecks: unique surveys back checked
 - \# values compared
 - \# discrepancies
-- Error rate (%)
+- Error rate (%) and adjusted error rate (%), by category and in total
 
 ##### Comparison Details
 
@@ -1011,7 +1279,58 @@ Record-level validation results:
 - Survey value
 - Back check value
 - Comparison result
+- Error source, for mismatches
 - Column name
+
+##### Attributing Mismatches
+
+Back check results measure how well data was collected, so the Back Checks
+page never changes survey or back check data. There is no way to accept a
+mismatch as valid or to replace a survey value with the back check value.
+Expected differences, such as "Don't know" against "Refused", belong in the
+exclude and no-differences lists in the settings. The comparison uses the
+corrected survey data, so corrections made on the Correct Data page are
+reflected.
+
+What you can record is who caused each mismatch:
+
+- **Enumerator**: the survey value is wrong.
+- **Backchecker**: the back check value is wrong. A note is required.
+- **Respondent**: the respondent gave different answers. A note is required.
+- **Unattributed**: no source yet. Every mismatch starts here, and choosing it
+  clears an earlier attribution.
+
+Click **Review** on a mismatch in the Comparison Details table to open the
+attribution dialog. It shows the survey and back check values, which you
+can't edit. To attribute several mismatches at once, select their rows, then
+click **Review** on one of the selected rows. Only mismatches can be
+attributed.
+
+Each attribution records your reviewer name and the date. The latest
+attribution for a mismatch applies only while the survey and back check values
+are the ones you attributed. If either value changes, the mismatch is
+Unattributed again; if the values now match, there is no mismatch to
+attribute. The **Attribution log** expander below the table lists every
+attribution, newest first, including the ones later replaced.
+
+Attribution never changes the mismatch counts or the regular error rate. It
+only affects the **adjusted error rate**, which has the same denominator as
+the error rate (values compared):
+
+- Enumerator adjusted error rate = (mismatches − Backchecker − Respondent) ÷
+  values compared
+- Back checker adjusted error rate = (mismatches − Enumerator − Respondent) ÷
+  values compared
+
+Unattributed mismatches always count against both. For example, an enumerator
+with 10 values compared and 4 mismatches, 1 attributed to the respondent and 1
+to the back checker, has an error rate of 40% and an adjusted error rate of
+20%.
+
+Above Comparison Results Details, a warning counts the duplicate survey IDs,
+duplicate back check IDs and unmatched back check IDs that are left out of the
+comparison. Resolve them in the **Backcheck data** or **Survey data** view of
+the Duplicates tab; a resolved record is compared again.
 
 ---
 
@@ -1038,7 +1357,7 @@ Configure GPS validation:
 
 - Toggle "GPS has latitude and longitude columns"
 - Select latitude column
-- Select longitude column
+- Select longitude column (a different column from latitude)
 - Select accuracy column (optional)
 
 **Option B: Combined GPS Column**:
@@ -1072,6 +1391,41 @@ Map display:
 - Color-coded by quality
 - Click points for details
 - Identify geographic outliers
+
+##### Correcting or Accepting GPS Outliers
+
+Each row of the outliers table (expand **View Outliers Data**) starts with a
+**Review** button. Click it to open a correction form in a dialog, with the
+KEY and its latitude and longitude filled in. Choose an action, enter a reason
+and click "Apply":
+
+- **modify coordinates** sets a new latitude and longitude. Latitude must be
+  between -90 and 90 and longitude between -180 and 180.
+- **remove coordinates** clears the configured latitude and longitude columns.
+  Accuracy and altitude are kept.
+- **remove observation** removes the record from the dataset, so it
+  disappears from every GPS section.
+- **accept** records that the location is correct.
+
+Modifying or removing coordinates writes two Correction Log entries, one for
+latitude and one for longitude, with the same reason. Both are applied or
+neither is. Every entry has source `gps`. The page reloads after a save.
+
+Accepted outliers are hidden from the table and are not counted in
+**Outliers Detected**. On the map they are drawn in green and labelled
+Accepted. Turn on **Show reviewed** to list them in the table, highlighted in
+green, with the reason. An acceptance lapses, and the point is flagged again,
+if either coordinate changes. You can also remove the acceptance on the Correct
+Data page.
+
+Corrections need separate latitude and longitude columns. For a configuration
+that stores both in one column, the only action offered is **remove
+observation**, and a KEY on more than one row can't be reviewed. For separate
+columns, as on the outliers page, a KEY on more than one row with different
+coordinates can't be reviewed here. An acceptance applies to every GPS
+configuration that uses the same latitude and longitude columns. Outliers
+can't be reviewed if the Survey KEY column is named `review status` or
+`review reason`.
 
 ---
 
@@ -1214,14 +1568,41 @@ After completing all 6 steps:
 1. **Always Document**:
    - Provide detailed correction reason
    - Reference investigation notes
-   - Include date and source
+   - Set a **Reviewer name** in the sidebar so the log shows who made each
+     entry; the date and source are recorded for you
 
-2. **Verify After Correction**:
-   - Re-run relevant quality check
-   - Confirm issue resolved
+2. **Correct Where the Flag Is**:
+   - Review flagged values from the Outliers and GPS Checks pages, and
+     resolve ID problems on the Duplicates tab cards
+   - Use the Correct Data page for records no check flagged, and to undo
+     corrections and acceptances
+
+3. **Accept Only What You Have Checked**:
+   - Accept a flagged value only after confirming it with the field team or
+     the respondent, and say how in the reason
+   - Accept a hard constraint violation only when the bound itself is wrong
+     for this record
+   - Use **Show reviewed** now and then to look over what has been accepted
+
+4. **Keep Back Check Results Honest**:
+   - Back check mismatches can't be corrected or accepted; attribute each one
+     to the Enumerator, Backchecker or Respondent instead
+   - Report the regular error rate next to the adjusted error rate
+   - In the note, say how you know who caused the mismatch
+
+5. **Resolve IDs Before Comparing**:
+   - Use **Records to Include** for repeat visits that legitimately share an
+     ID, rather than dropping them
+   - Resolve the remaining duplicate and unmatched IDs on the Duplicates tab
+     so they are included in the back check comparison
+
+6. **Verify After Correction**:
+   - Open the report again and confirm the issue is resolved
+   - Check the Correction Log for entries whose Status is not `Successful`,
+     for example after new data is imported
    - Check for new issues created
 
-3. **Correction Workflow**:
+7. **Correction Workflow**:
    - Identify issue in quality report
    - Investigate root cause
    - Apply correction with documentation

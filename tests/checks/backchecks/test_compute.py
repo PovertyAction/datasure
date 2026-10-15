@@ -27,9 +27,9 @@ from datasure.checks.backchecks.compute import (
     _get_column_data_type,
     _get_staff_configuration,
     _get_test_value,
+    _join_backcheck_columns,
     _join_staff_information,
     _perform_statistical_tests,
-    _prepare_data_for_merge,
     _preprocess_string_values,
     _process_backcheck_column,
     _validate_backcheck_inputs,
@@ -37,6 +37,7 @@ from datasure.checks.backchecks.compute import (
     compute_backchecker_productivity,
     compute_column_stats,
     compute_enumerator_backchecker_stats,
+    exclude_duplicate_ids,
     expand_col_names,
     load_default_backchecks_settings,
 )
@@ -94,6 +95,39 @@ def test_load_default_backchecks_settings_partial_saved(tmp_path):
     assert result.survey_key == "saved_key"
     assert result.enumerator == "default_enum"
     assert result.backcheck_target_percent == 20
+
+
+@pytest.mark.parametrize("saved_target", [150, -1, "5"])
+def test_load_default_backchecks_settings_invalid_error_rate_target(
+    tmp_path, saved_target
+):
+    """An invalid saved error rate target falls back to the configured one."""
+    file_path = tmp_path / "settings.json"
+    file_path.write_text(
+        json.dumps({"backchecks": {"error_rate_target_percent": saved_target}})
+    )
+    config = BackcheckSettings(survey_key="KEY", error_rate_target_percent=5)
+    result = load_default_backchecks_settings(str(file_path), config)
+    assert result.error_rate_target_percent == 5
+
+
+def test_load_default_backchecks_settings_cleared_error_rate_target(tmp_path):
+    """A cleared error rate target stays cleared, so nothing is highlighted."""
+    file_path = tmp_path / "settings.json"
+    file_path.write_text(
+        json.dumps({"backchecks": {"error_rate_target_percent": None}})
+    )
+    config = BackcheckSettings(survey_key="KEY", error_rate_target_percent=5)
+    result = load_default_backchecks_settings(str(file_path), config)
+    assert result.error_rate_target_percent is None
+
+
+def test_load_default_backchecks_settings_saved_error_rate_target(tmp_path):
+    file_path = tmp_path / "settings.json"
+    file_path.write_text(json.dumps({"backchecks": {"error_rate_target_percent": 2.5}}))
+    config = BackcheckSettings(survey_key="KEY")
+    result = load_default_backchecks_settings(str(file_path), config)
+    assert result.error_rate_target_percent == 2.5
 
 
 def test_expand_col_names_exact():
@@ -214,12 +248,10 @@ def test_compute_backcheck_analysis_missing_survey_key(
     assert result.is_empty()
 
 
-def test_compute_backcheck_analysis_drop_duplicates_first(
+def test_compute_backcheck_analysis_ignores_saved_keep_first_option(
     sample_backcheck_settings,
-    sample_backcheck_column_settings_pl,
 ):
-    """Test compute_backcheck_analysis with drop_duplicates_option='first'."""
-    # Create data with duplicates
+    """A page that saved "keep first" now leaves duplicates out too."""
     survey_data = pl.DataFrame(
         {
             "survey_id": ["S001", "S001", "S002"],
@@ -234,9 +266,11 @@ def test_compute_backcheck_analysis_drop_duplicates_first(
             "age": [25, 35],
         }
     )
-
-    settings = sample_backcheck_settings
-    settings.drop_duplicates_option = "first"
+    # Settings saved before the option was removed still hold it.
+    settings = BackcheckSettings(
+        **{**sample_backcheck_settings.model_dump(), "drop_duplicates_option": "first"}
+    )
+    assert not hasattr(settings, "drop_duplicates_option")
 
     col_settings = pl.DataFrame(
         {
@@ -257,32 +291,23 @@ def test_compute_backcheck_analysis_drop_duplicates_first(
         survey_data, backcheck_data, settings, col_settings
     )
 
-    # Should keep first occurrence of S001
-    assert not result.is_empty()
+    assert result["survey_id"].unique().to_list() == ["S002"]
 
 
-def test_compute_backcheck_analysis_drop_duplicates_last(
+def test_compute_backcheck_analysis_leaves_out_duplicate_backcheck_ids(
     sample_backcheck_settings,
 ):
-    """Test compute_backcheck_analysis with drop_duplicates_option='last'."""
+    """A survey ID backchecked twice is not compared until it is resolved."""
     survey_data = pl.DataFrame(
-        {
-            "survey_id": ["S001", "S001", "S002"],
-            "enumerator": ["E1", "E1", "E2"],
-            "age": [25, 30, 35],
-        }
+        {"survey_id": ["S001", "S002"], "enumerator": ["E1", "E2"], "age": [25, 35]}
     )
     backcheck_data = pl.DataFrame(
         {
-            "survey_id": ["S001", "S002"],
-            "backchecker": ["B1", "B2"],
-            "age": [30, 35],
+            "survey_id": ["S001", "S001", "S002"],
+            "backchecker": ["B1", "B2", "B2"],
+            "age": [25, 26, 35],
         }
     )
-
-    settings = sample_backcheck_settings
-    settings.drop_duplicates_option = "last"
-
     col_settings = pl.DataFrame(
         {
             "search_type": ["exact"],
@@ -299,17 +324,22 @@ def test_compute_backcheck_analysis_drop_duplicates_last(
     )
 
     result = compute_backcheck_analysis(
-        survey_data, backcheck_data, settings, col_settings
+        survey_data, backcheck_data, sample_backcheck_settings, col_settings
     )
+    assert result["survey_id"].unique().to_list() == ["S002"]
 
-    # Should keep last occurrence of S001
-    assert not result.is_empty()
+    # Resolving the duplicate brings the survey back into the comparison.
+    resolved = backcheck_data[[0, 2]]
+    result = compute_backcheck_analysis(
+        survey_data, resolved, sample_backcheck_settings, col_settings
+    )
+    assert sorted(result["survey_id"].unique().to_list()) == ["S001", "S002"]
 
 
 def test_compute_backcheck_analysis_drop_duplicates_drop(
     sample_backcheck_settings,
 ):
-    """Test compute_backcheck_analysis with drop_duplicates_option='drop'."""
+    """Survey IDs on more than one survey record are left out."""
     survey_data = pl.DataFrame(
         {
             "survey_id": ["S001", "S001", "S002"],
@@ -326,7 +356,6 @@ def test_compute_backcheck_analysis_drop_duplicates_drop(
     )
 
     settings = sample_backcheck_settings
-    settings.drop_duplicates_option = "drop"
 
     col_settings = pl.DataFrame(
         {
@@ -618,8 +647,6 @@ def test_compute_enumerator_backchecker_stats_enumerator(
 
     assert not result.is_empty()
     assert "enumerator" in result.columns
-    assert "Surveys" in result.columns
-    assert "Backchecks" in result.columns
     assert "Error Rate % (Total)" in result.columns
 
 
@@ -651,9 +678,7 @@ def test_compute_enumerator_backchecker_stats_backchecker(
         col_settings,
     )
 
-    # Check that analysis has the backcheck key column
     assert not analysis.is_empty()
-    backcheck_key = f"{sample_backcheck_settings.survey_key}__BCCL"
 
     result = compute_enumerator_backchecker_stats(
         sample_survey_data_pl,
@@ -663,14 +688,8 @@ def test_compute_enumerator_backchecker_stats_backchecker(
         "backchecker",
     )
 
-    # The result might be empty if the backcheck key is not properly set up
-    # Check if backcheck key exists in analysis before asserting non-empty result
-    if backcheck_key in analysis.columns:
-        assert not result.is_empty()
-        assert "backchecker" in result.columns
-    else:
-        # If backcheck key is not in analysis, the result will be empty
-        assert result.is_empty()
+    assert not result.is_empty()
+    assert "backchecker" in result.columns
 
 
 def test_compute_enumerator_backchecker_stats_empty_analysis(
@@ -1868,64 +1887,18 @@ def test_validate_backcheck_inputs_missing_survey_id(
     assert result is None
 
 
-def test_prepare_data_for_merge_first():
-    """Test _prepare_data_for_merge with 'first' option."""
-    data = pl.DataFrame(
-        {
-            "id": ["A", "A", "B", "C"],
-            "value": [1, 2, 3, 4],
-        }
-    )
+def test_exclude_duplicate_ids_leaves_out_every_duplicated_record():
+    data = pl.DataFrame({"id": ["A", "A", "B", "C"], "value": [1, 2, 3, 4]})
 
-    result = _prepare_data_for_merge(data, "id", "first")
+    result = exclude_duplicate_ids(data, "id")
 
-    assert len(result) == 3
-    assert result.filter(pl.col("id") == "A")["value"][0] == 1
+    assert result["id"].to_list() == ["B", "C"]
 
 
-def test_prepare_data_for_merge_last():
-    """Test _prepare_data_for_merge with 'last' option."""
-    data = pl.DataFrame(
-        {
-            "id": ["A", "A", "B", "C"],
-            "value": [1, 2, 3, 4],
-        }
-    )
+def test_exclude_duplicate_ids_keeps_unique_records():
+    data = pl.DataFrame({"id": ["A", "B"], "value": [1, 2]})
 
-    result = _prepare_data_for_merge(data, "id", "last")
-
-    assert len(result) == 3
-    assert result.filter(pl.col("id") == "A")["value"][0] == 2
-
-
-def test_prepare_data_for_merge_drop():
-    """Test _prepare_data_for_merge with 'drop' option."""
-    data = pl.DataFrame(
-        {
-            "id": ["A", "A", "B", "C"],
-            "value": [1, 2, 3, 4],
-        }
-    )
-
-    result = _prepare_data_for_merge(data, "id", "drop")
-
-    assert len(result) == 2
-    assert "A" not in result["id"].to_list()
-    assert set(result["id"].to_list()) == {"B", "C"}
-
-
-def test_prepare_data_for_merge_none():
-    """Test _prepare_data_for_merge with 'none' option."""
-    data = pl.DataFrame(
-        {
-            "id": ["A", "A", "B", "C"],
-            "value": [1, 2, 3, 4],
-        }
-    )
-
-    result = _prepare_data_for_merge(data, "id", "none")
-
-    assert len(result) == 4
+    assert exclude_duplicate_ids(data, "id").equals(data)
 
 
 def test_add_statistical_test_columns_with_results():
@@ -2011,13 +1984,12 @@ def test_get_staff_configuration_enumerator(
         sample_survey_data_pl,
         sample_backcheck_data_pl,
         sample_backcheck_settings,
-        "survey_id",
     )
 
     assert result is not None
-    staff_col, _, join_key = result
+    staff_col, data_source = result
     assert staff_col == "enumerator"
-    assert join_key == "survey_id"
+    assert data_source is sample_survey_data_pl
 
 
 def test_get_staff_configuration_backchecker(
@@ -2029,13 +2001,12 @@ def test_get_staff_configuration_backchecker(
         sample_survey_data_pl,
         sample_backcheck_data_pl,
         sample_backcheck_settings,
-        "survey_id",
     )
 
     assert result is not None
-    staff_col, _, join_key = result
+    staff_col, data_source = result
     assert staff_col == "backchecker"
-    assert join_key == "survey_id__BCCL"
+    assert data_source is sample_backcheck_data_pl
 
 
 def test_join_staff_information():
@@ -2054,11 +2025,21 @@ def test_join_staff_information():
     )
 
     result = _join_staff_information(
-        analysis, survey_data, "staff", "survey_id", "survey_id", "enumerator"
+        analysis, survey_data, "staff", "survey_id", "enumerator"
     )
 
     assert "staff" in result.columns
     assert len(result) == 2
+
+
+def test_join_backcheck_columns_survey_key_is_merge_id():
+    """With no backcheck KEY column in the analysis, join on the shared survey_key."""
+    analysis = pl.DataFrame({"sid": ["A", "B"], "column_name": ["age", "age"]})
+    backcheck_data = pl.DataFrame({"sid": ["A", "B"], "bcer": ["B1", "B2"]})
+
+    result = _join_backcheck_columns(analysis, backcheck_data, "sid", {"bcer": "bcer"})
+
+    assert result["bcer"].to_list() == ["B1", "B2"]
 
 
 def test_add_date_columns():
@@ -2093,6 +2074,183 @@ def test_add_date_columns():
 
     assert "survey_date_col" in result.columns
     assert "backcheck_date_col" in result.columns
+
+
+def test_add_date_columns_distinct_survey_and_backcheck_keys():
+    """Backcheck dates join on the backcheck KEY when it differs from the survey KEY."""
+    analysis = pl.DataFrame(
+        {
+            "key": ["s-1", "s-2"],
+            "key__BCCL": ["b-1", "b-2"],
+            "column_name": ["age", "age"],
+        }
+    )
+    survey_data = pl.DataFrame(
+        {
+            "key": ["s-1", "s-2"],
+            "survey_date": [date(2024, 1, 1), date(2024, 1, 2)],
+        }
+    )
+    backcheck_data = pl.DataFrame(
+        {
+            "key": ["b-1", "b-2"],
+            "backcheck_date": [date(2024, 1, 5), date(2024, 1, 9)],
+        }
+    )
+
+    result = _add_date_columns(
+        analysis, survey_data, backcheck_data, "key", "survey_date", "backcheck_date"
+    )
+
+    assert result["backcheck_date_col"].to_list() == [
+        date(2024, 1, 5),
+        date(2024, 1, 9),
+    ]
+    assert _calculate_average_days(result, "survey_date", "backcheck_date") == 5.5
+
+
+def test_add_date_columns_backcheck_data_without_key():
+    """Backcheck dates are skipped, not a crash, when backcheck data has no KEY."""
+    analysis = pl.DataFrame({"key": ["s-1"], "column_name": ["age"]})
+    survey_data = pl.DataFrame({"key": ["s-1"], "survey_date": [date(2024, 1, 1)]})
+    backcheck_data = pl.DataFrame({"sid": ["A"], "backcheck_date": [date(2024, 1, 5)]})
+
+    result = _add_date_columns(
+        analysis, survey_data, backcheck_data, "key", "survey_date", "backcheck_date"
+    )
+
+    assert "survey_date_col" in result.columns
+    assert "backcheck_date_col" not in result.columns
+
+
+@pytest.mark.parametrize("staff_type", ["enumerator", "backchecker"])
+def test_stats_avg_days_with_distinct_survey_and_backcheck_keys(staff_type):
+    """Avg Days uses each backcheck's own date when the two datasets' KEYs differ."""
+    survey_data = pl.DataFrame(
+        {
+            "key": ["s-1", "s-2"],
+            "sid": ["A", "B"],
+            "enum": ["E1", "E1"],
+            "sdate": [date(2024, 1, 1), date(2024, 1, 1)],
+            "age": [25, 30],
+        }
+    )
+    backcheck_data = pl.DataFrame(
+        {
+            "key": ["b-1", "b-2"],
+            "sid": ["A", "B"],
+            "bcer": ["B1", "B1"],
+            "bdate": [date(2024, 1, 3), date(2024, 1, 5)],
+            "age": [25, 31],
+        }
+    )
+    settings = BackcheckSettings(
+        survey_key="key",
+        survey_id="sid",
+        survey_date="sdate",
+        backcheck_date="bdate",
+        enumerator="enum",
+        backchecker="bcer",
+    )
+    col_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["age"],
+            "column_name": [["age"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [False],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [False],
+        }
+    )
+    analysis = compute_backcheck_analysis(
+        survey_data, backcheck_data, settings, col_settings
+    )
+
+    result = compute_enumerator_backchecker_stats(
+        survey_data, backcheck_data, analysis, settings, staff_type
+    )
+
+    assert result["Avg Days"].to_list() == [3.0]
+
+
+def _age_column_settings() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": ["age"],
+            "column_name": [["age"]],
+            "category": [1],
+            "ok_range_type": [None],
+            "ok_range_values": [None],
+            "ttest": [False],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [False],
+        }
+    )
+
+
+def test_backchecker_stats_when_survey_key_is_merge_id():
+    """Backchecker stats are computed when survey_key is also the merge ID."""
+    survey_data = pl.DataFrame(
+        {
+            "sid": ["A", "B"],
+            "enum": ["E1", "E1"],
+            "sdate": [date(2024, 1, 1), date(2024, 1, 1)],
+            "age": [25, 30],
+        }
+    )
+    backcheck_data = pl.DataFrame(
+        {
+            "sid": ["A", "B"],
+            "bcer": ["B1", "B1"],
+            "bdate": [date(2024, 1, 3), date(2024, 1, 5)],
+            "age": [25, 31],
+        }
+    )
+    settings = BackcheckSettings(
+        survey_key="sid",
+        survey_id="sid",
+        survey_date="sdate",
+        backcheck_date="bdate",
+        enumerator="enum",
+        backchecker="bcer",
+    )
+    analysis = compute_backcheck_analysis(
+        survey_data, backcheck_data, settings, _age_column_settings()
+    )
+
+    result = compute_enumerator_backchecker_stats(
+        survey_data, backcheck_data, analysis, settings, "backchecker"
+    )
+
+    assert result["bcer"].to_list() == ["B1"]
+    assert result["Mismatches (Total)"].to_list() == [1]
+    assert result["Avg Days"].to_list() == [3.0]
+
+
+def test_backchecker_stats_empty_when_backcheck_data_has_no_survey_key():
+    """Backchecker stats are empty when the backcheck data lacks survey_key."""
+    survey_data = pl.DataFrame(
+        {"key": ["s-1", "s-2"], "sid": ["A", "B"], "age": [25, 30]}
+    )
+    backcheck_data = pl.DataFrame(
+        {"sid": ["A", "B"], "bcer": ["B1", "B1"], "age": [25, 31]}
+    )
+    settings = BackcheckSettings(survey_key="key", survey_id="sid", backchecker="bcer")
+    analysis = compute_backcheck_analysis(
+        survey_data, backcheck_data, settings, _age_column_settings()
+    )
+
+    result = compute_enumerator_backchecker_stats(
+        survey_data, backcheck_data, analysis, settings, "backchecker"
+    )
+
+    assert result.is_empty()
 
 
 def test_calculate_average_days():
@@ -2460,11 +2618,11 @@ def test_add_numeric_columns():
     assert "within_ok_range" in updated_result.columns
 
 
-def test_prepare_data_for_merge_empty():
-    """Test _prepare_data_for_merge with empty data."""
+def test_exclude_duplicate_ids_empty():
+    """Test exclude_duplicate_ids with empty data."""
     data = pl.DataFrame({"id": []})
 
-    result = _prepare_data_for_merge(data, "id", "first")
+    result = exclude_duplicate_ids(data, "id")
 
     assert result.is_empty()
 
@@ -2517,7 +2675,6 @@ def test_get_staff_configuration_missing_staff_col(
         sample_survey_data_pl,
         sample_backcheck_data_pl,
         settings,
-        "survey_id",
     )
 
     assert result is None
@@ -2655,15 +2812,15 @@ def test_process_backcheck_column_backcheck_col_missing():
 
 
 def test_join_staff_information_backchecker_path():
-    """_join_staff_information renames survey_key to join_key for backcheckers."""
-    analysis = pl.DataFrame({"key": [1, 2], "bc_key": [10, 20]})
-    data_source = pl.DataFrame({"key": [1, 2], "staff": ["a", "b"]})
+    """_join_staff_information joins backcheckers on the backcheck KEY."""
+    analysis = pl.DataFrame({"key": [1, 2], "key__BCCL": [10, 20]})
+    data_source = pl.DataFrame({"key": [20, 10], "staff": ["b", "a"]})
 
     result = _join_staff_information(
-        analysis, data_source, "staff", "key", "bc_key", "backchecker"
+        analysis, data_source, "staff", "key", "backchecker"
     )
 
-    assert "staff" in result.columns
+    assert result["staff"].to_list() == ["a", "b"]
 
 
 def test_add_date_columns_no_dates():
@@ -2852,3 +3009,209 @@ def test_compute_backchecker_productivity_month_period():
     )
     assert isinstance(result, pl.DataFrame)
     assert result.height > 0
+
+
+# ==============================================================================
+# ERROR SOURCE ATTRIBUTION IN THE STATISTICS TABLES
+# ==============================================================================
+
+
+def _attributed_staff_data() -> pl.DataFrame:
+    """One staff member: 5 category-1 values compared, 4 mismatches, plus a
+    category-2 mismatch. Sources: Enumerator, Backchecker, Respondent,
+    Unattributed in category 1 and Backchecker in category 2.
+    """
+    return pl.DataFrame(
+        {
+            "staff": ["S1"] * 6,
+            "category": [1, 1, 1, 1, 1, 2],
+            "match_status": ["mismatch"] * 4 + ["match", "mismatch"],
+            "survey_value": [1, 2, 3, 4, 5, 6],
+            "backcheck_value": [9, 9, 9, 9, 5, 9],
+            "error_source": [
+                "Enumerator",
+                "Backchecker",
+                "Respondent",
+                "Unattributed",
+                None,
+                "Backchecker",
+            ],
+        }
+    )
+
+
+def test_staff_statistics_adjusted_error_rate_for_enumerators():
+    stats = _calculate_staff_statistics(
+        _attributed_staff_data(), "staff", "S1", "KEY", None, None, "enumerator"
+    )
+    # Regular rates ignore attribution.
+    assert stats["Mismatches (Cat 1)"] == 4
+    assert stats["Error Rate % (Cat 1)"] == 80.0
+    assert stats["Error Rate % (Total)"] == round(5 / 6 * 100, 2)
+    # Cat 1: (4 - 1 Backchecker - 1 Respondent) / 5
+    assert stats["Adjusted Error Rate % (Cat 1)"] == 40.0
+    # Cat 2: (1 - 1 Backchecker) / 1
+    assert stats["Adjusted Error Rate % (Cat 2)"] == 0.0
+    assert stats["Adjusted Error Rate % (Cat 3)"] == 0.0
+    # Total: (5 - 2 Backchecker - 1 Respondent) / 6
+    assert stats["Adjusted Error Rate % (Total)"] == round(2 / 6 * 100, 2)
+
+
+def test_staff_statistics_adjusted_error_rate_for_backcheckers():
+    stats = _calculate_staff_statistics(
+        _attributed_staff_data(), "staff", "S1", "KEY", None, None, "backchecker"
+    )
+    # Cat 1: (4 - 1 Enumerator - 1 Respondent) / 5
+    assert stats["Adjusted Error Rate % (Cat 1)"] == 40.0
+    # Cat 2: the Backchecker mismatch counts against the backchecker.
+    assert stats["Adjusted Error Rate % (Cat 2)"] == 100.0
+    # Total: (5 - 1 Enumerator - 1 Respondent) / 6
+    assert stats["Adjusted Error Rate % (Total)"] == 50.0
+
+
+def test_staff_statistics_adjusted_rate_equals_regular_without_attribution():
+    stats = _calculate_staff_statistics(
+        _attributed_staff_data().drop("error_source"),
+        "staff",
+        "S1",
+        "KEY",
+        None,
+        None,
+    )
+    assert stats["Adjusted Error Rate % (Total)"] == stats["Error Rate % (Total)"]
+
+
+def test_compute_enumerator_backchecker_stats_reports_adjusted_rate(
+    sample_survey_data_pl,
+    sample_backcheck_data_pl,
+    sample_backcheck_settings,
+):
+    analysis = compute_backcheck_analysis(
+        sample_survey_data_pl,
+        sample_backcheck_data_pl,
+        sample_backcheck_settings,
+        _age_column_settings(),
+    )
+    marked = analysis.with_columns(
+        pl.when(pl.col("match_status") == "mismatch")
+        .then(pl.lit("Respondent"))
+        .alias("error_source")
+    )
+
+    unmarked_stats = compute_enumerator_backchecker_stats(
+        sample_survey_data_pl,
+        sample_backcheck_data_pl,
+        analysis,
+        sample_backcheck_settings,
+        "enumerator",
+    )
+    stats = compute_enumerator_backchecker_stats(
+        sample_survey_data_pl,
+        sample_backcheck_data_pl,
+        marked,
+        sample_backcheck_settings,
+        "enumerator",
+    )
+
+    # Attribution never changes the regular rate or the mismatch counts.
+    regular = ["Mismatches (Total)", "Error Rate % (Total)"]
+    assert (
+        stats.sort("enumerator")
+        .select(regular)
+        .equals(unmarked_stats.sort("enumerator").select(regular))
+    )
+    # Every mismatch is the respondent's, so no enumerator is charged.
+    assert stats["Adjusted Error Rate % (Total)"].to_list() == [0.0] * stats.height
+
+
+def test_compute_column_stats_counts_mismatches_by_error_source():
+    analysis = pl.DataFrame(
+        {
+            "column_name": ["age"] * 5 + ["income"],
+            "category": [1] * 6,
+            "match_status": ["mismatch"] * 4 + ["match", "mismatch"],
+            "survey_value": [1, 2, 3, 4, 5, 6],
+            "backcheck_value": [9, 9, 9, 9, 5, 9],
+            "error_source": [
+                "Enumerator",
+                "Backchecker",
+                "Backchecker",
+                "Unattributed",
+                None,
+                "Respondent",
+            ],
+        }
+    )
+
+    stats = compute_column_stats(pl.DataFrame(), analysis).sort("Column Name")
+
+    assert stats.select(
+        "Column Name",
+        "Mismatches",
+        "Error Rate (%)",
+        "Enumerator Mismatches",
+        "Backchecker Mismatches",
+        "Respondent Mismatches",
+        "Unattributed Mismatches",
+    ).rows() == [
+        ("age", 4, 80.0, 1, 2, 0, 1),
+        ("income", 1, 100.0, 0, 0, 1, 0),
+    ]
+    assert not any("Adjusted" in col for col in stats.columns)
+
+
+def test_compute_column_stats_without_attribution_counts_unattributed(
+    sample_survey_data_pl,
+    sample_backcheck_data_pl,
+    sample_backcheck_settings,
+):
+    analysis = compute_backcheck_analysis(
+        sample_survey_data_pl,
+        sample_backcheck_data_pl,
+        sample_backcheck_settings,
+        _age_column_settings(),
+    )
+    stats = compute_column_stats(sample_survey_data_pl, analysis)
+    assert stats["Unattributed Mismatches"].to_list() == stats["Mismatches"].to_list()
+
+
+def test_compute_overall_error_rates_total_and_categories():
+    from datasure.checks.backchecks.compute import compute_overall_error_rates
+
+    # Cat 1: 5 compared, 4 mismatches (Enumerator, Backchecker, Respondent,
+    # Unattributed). Cat 2: 1 compared, a Backchecker mismatch. Cat 3: none.
+    rates = compute_overall_error_rates(_attributed_staff_data())
+
+    assert [r.label for r in rates] == ["Total", "Cat 1", "Cat 2", "Cat 3"]
+    total, cat1, cat2, cat3 = rates
+    assert (total.compared, total.mismatches) == (6, 5)
+    assert total.error_rate == round(5 / 6 * 100, 2)
+    # Enumerators: (5 - 2 Backchecker - 1 Respondent) / 6
+    assert total.enumerator_adjusted == round(2 / 6 * 100, 2)
+    # Backcheckers: (5 - 1 Enumerator - 1 Respondent) / 6
+    assert total.backchecker_adjusted == 50.0
+    assert (cat1.error_rate, cat1.enumerator_adjusted) == (80.0, 40.0)
+    assert (cat2.error_rate, cat2.enumerator_adjusted) == (100.0, 0.0)
+    assert cat2.backchecker_adjusted == 100.0
+    assert (cat3.compared, cat3.error_rate) == (0, None)
+
+
+def test_compute_overall_error_rates_ignores_missing_and_excluded():
+    from datasure.checks.backchecks.compute import compute_overall_error_rates
+
+    analysis = pl.DataFrame(
+        {
+            "category": [1, 1, 1, 1],
+            "match_status": ["mismatch", "match", "missing", "excluded"],
+        }
+    )
+    total = compute_overall_error_rates(analysis)[0]
+    assert (total.compared, total.error_rate) == (2, 50.0)
+    # Without attribution, the adjusted rates equal the regular one.
+    assert total.enumerator_adjusted == total.backchecker_adjusted == 50.0
+
+
+def test_compute_overall_error_rates_empty_analysis():
+    from datasure.checks.backchecks.compute import compute_overall_error_rates
+
+    assert compute_overall_error_rates(pl.DataFrame()) == []

@@ -136,8 +136,12 @@ class DuplicatesSettings(BaseModel):
         Column name for survey date.
     enumerator : str | None
         Column name for enumerator ID.
+    team : str | None
+        Column name for the enumerator's team.
     conditions : dict
-        Dictionary of filtering conditions for duplicate detection.
+        Records to Include conditions for the survey data.
+    backcheck_conditions : dict
+        Records to Include conditions for the backcheck data.
     """
 
     filtered_data: pl.DataFrame | None = None
@@ -145,8 +149,13 @@ class DuplicatesSettings(BaseModel):
     survey_id: str | None = Field(..., min_length=1, description="Survey ID column")
     survey_date: str | None = Field(None, description="Survey date column")
     enumerator: str | None = Field(None, description="Enumerator ID column")
+    team: str | None = Field(None, description="Enumerator team column")
     conditions: dict = Field(
         default_factory=dict, description="Conditions for duplicates checks"
+    )
+    backcheck_conditions: dict = Field(
+        default_factory=dict,
+        description="Conditions for backcheck ID duplicates checks",
     )
 
     model_config = {
@@ -259,6 +268,18 @@ class GPSColumnConfig(BaseModel):
                 f"{field_name.replace('_', ' ').title()} is required "
                 "for separate columns format"
             )
+        return v
+
+    @field_validator("longitude_column")
+    @classmethod
+    def validate_distinct_lat_lon_columns(cls, v: str | None, info) -> str | None:
+        """Validate latitude and longitude are different columns."""
+        if (
+            info.data.get("format_type") == GPSFormatType.SEPARATE_COLUMNS
+            and v
+            and v == info.data.get("latitude_column")
+        ):
+            raise ValueError("Latitude and longitude must be different columns")
         return v
 
 

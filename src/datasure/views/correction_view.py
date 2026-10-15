@@ -6,14 +6,31 @@ data corrections across multiple datasets. Corrections are logged and can be
 removed or modified as needed.
 """
 
-from datetime import datetime
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import polars as pl
 import streamlit as st
 from pydantic import BaseModel, Field
 
+from datasure.checks.backchecks.models import backcheck_id_columns
+from datasure.checks.gpschecks.review import GPS_CHECK_TYPE
+from datasure.processing.correction_log import (
+    CORRECTION_ACTIONS,
+    CORRECTIONS_PAGE_SOURCE,
+    HARD_SEVERITY,
+    Action,
+    ensure_log_columns,
+)
 from datasure.processing.corrections import CorrectionProcessor
+from datasure.utils.correction_form import (
+    get_current_value,
+    render_correction_form,
+)
+from datasure.utils.correction_form import (
+    render_value_input_widget as render_shared_value_input_widget,
+)
 from datasure.utils.duckdb_utils import duckdb_get_table
 from datasure.utils.navigations_utils import (
     add_demo_navigation,
@@ -22,16 +39,18 @@ from datasure.utils.navigations_utils import (
 )
 from datasure.utils.onboarding_utils import ImportDemoInfo, demo_expander
 from datasure.utils.reapply_utils import highlight_status, warn_reapply_failures
-from datasure.utils.settings_utils import get_check_config_settings
+from datasure.utils.settings_utils import (
+    get_check_config_settings,
+    page_settings_file,
+)
 from datasure.utils.ui_utils import (
     confirm_dialog,
     metric_row,
     page_header,
+    row_styler,
     section_header,
+    styled_dataframe,
 )
-
-# DEFINE CONSTANTS FOR CORRECTION
-CORRECTION_ACTIONS = ("modify value", "remove value", "remove row")
 
 
 class TabConfig(BaseModel):
@@ -43,21 +62,117 @@ class TabConfig(BaseModel):
     survey_id: str | None = Field(
         None, description="Name of the survey ID column, if configured"
     )
-
-
-class CorrectionFormState(BaseModel):
-    """State management for correction form inputs."""
-
-    key_value: str = Field(..., description="The selected key value for correction")
-    action: str = Field(..., description="The correction action type")
-    column: str | None = Field(None, description="The column to modify (if applicable)")
-    current_value: Any | None = Field(
-        None, description="The current value (if applicable)"
+    backcheck_data_name: str | None = Field(
+        None, description="Name of the backcheck data alias, if configured"
     )
-    new_value: Any | None = Field(None, description="The new value (if applicable)")
-    validation_error: str | None = Field(
-        None, description="Validation error message (if any)"
+    backcheck_key: str | None = Field(
+        None, description="Name of the backcheck KEY column"
     )
+    backcheck_id: str | None = Field(
+        None, description="Name of the backcheck ID column, if configured"
+    )
+
+
+SURVEY_DATA = "Survey data"
+BACKCHECK_DATA = "Backcheck data"
+
+# Backcheck data measures data quality, so the only backcheck corrections are
+# fixing an ID and removing a record, as on the duplicate cards.
+BACKCHECK_ACTIONS = (Action.MODIFY_VALUE, Action.REMOVE_ROW)
+
+
+@dataclass(frozen=True)
+class CorrectionDataset:
+    """A dataset a Corrections page tab corrects, and what it may change.
+
+    Attributes
+    ----------
+    label : str
+        `SURVEY_DATA` or `BACKCHECK_DATA`, shown on the switcher.
+    alias : str
+        The data alias whose corrected table and log are used.
+    key_col : str
+        The KEY column.
+    id_col : str | None
+        The ID column, if configured.
+    actions : tuple[Action, ...]
+        The correction actions offered.
+    column : str | None
+        The only column "modify value" may change, or None for any column.
+    key_namespace : str | int
+        Suffix for the dataset's widget keys, unique across tabs and datasets.
+    """
+
+    label: str
+    alias: str
+    key_col: str
+    id_col: str | None
+    actions: tuple[Action, ...]
+    column: str | None
+    key_namespace: str | int
+
+
+def correction_datasets(
+    config: TabConfig, tab_index: int = 0
+) -> list[CorrectionDataset]:
+    """Return the datasets a tab corrects: survey data, then any backcheck data.
+
+    On backcheck data only the ID can be modified, and rows removed; with no
+    ID column configured, rows can only be removed.
+    """
+    datasets = [
+        CorrectionDataset(
+            label=SURVEY_DATA,
+            alias=config.survey_data_name,
+            key_col=config.survey_key,
+            id_col=config.survey_id,
+            actions=CORRECTION_ACTIONS,
+            column=None,
+            key_namespace=tab_index,
+        )
+    ]
+    if config.backcheck_data_name:
+        id_col = config.backcheck_id
+        datasets.append(
+            CorrectionDataset(
+                label=BACKCHECK_DATA,
+                alias=config.backcheck_data_name,
+                key_col=config.backcheck_key or config.survey_key,
+                id_col=id_col,
+                actions=BACKCHECK_ACTIONS if id_col else (Action.REMOVE_ROW,),
+                column=id_col,
+                key_namespace=f"{tab_index}_backcheck",
+            )
+        )
+    return datasets
+
+
+def render_value_input_widget(
+    column: str,
+    col_dtype: pl.DataType,
+    current_value: Any,
+    tab_index: int,
+) -> tuple[Any, str | None]:
+    """
+    Render the new-value input for a column on a Corrections page tab.
+
+    Parameters
+    ----------
+    column : str
+        The column name being modified.
+    col_dtype : pl.DataType
+        The column data type.
+    current_value : Any
+        The current value in the column.
+    tab_index : int
+        The tab index for unique widget keys.
+
+    Returns
+    -------
+    tuple[Any, str | None]
+        A tuple of (new_value, error_message).
+    """
+    return render_shared_value_input_widget(column, col_dtype, current_value, tab_index)
 
 
 def load_hfc_config(project_id: str) -> tuple[pl.DataFrame, list[str]]:
@@ -102,113 +217,6 @@ def get_key_options(data: pl.DataFrame, key_col: str) -> list:
     return data.select(key_col).unique(maintain_order=True).to_series().to_list()
 
 
-def get_current_value(
-    data: pl.DataFrame, key_col: str, key_value: str, column: str
-) -> Any:
-    (
-        """
-    Retrieve the current value for a specific key and column.
-
-    Parameters
-    ----------
-    data : pl.DataFrame
-        The dataset to query.
-    key_col : str
-        The name of the key column.
-    key_value : str
-        The key value to filter by.
-    column : str
-        The column to retrieve the value from.
-
-    Returns
-    -------
-    Any
-        The current value, or None if not found.
-    """
-        ""
-    )
-    try:
-        return data.filter(pl.col(key_col) == key_value).select(column)[0, 0]
-    except Exception:
-        return None
-
-
-def parse_date_value(value: Any) -> datetime.date:
-    """
-    Parse a datetime value to a date object.
-
-    Parameters
-    ----------
-    value : Any
-        The value to parse (can be string or datetime).
-
-    Returns
-    -------
-    datetime.date | None
-        Parsed date or None if parsing fails.
-    """
-    if not value:
-        return None
-
-    try:
-        if isinstance(value, str):
-            return datetime.fromisoformat(value).date()
-        return value.date()
-    except Exception:
-        return None
-
-
-def validate_numeric_input(value: str, dtype: pl.DataType) -> tuple[bool, str | None]:
-    """
-    Validate numeric input based on column data type.
-
-    Parameters
-    ----------
-    value : str
-        The input value to validate.
-    dtype : pl.DataType
-        The expected data type.
-
-    Returns
-    -------
-    tuple[bool, str | None]
-        A tuple of (is_valid, error_message).
-    """
-    if dtype in [pl.Int64, pl.Int32, pl.Float64, pl.Float32]:
-        try:
-            float(value)
-            return True, None  # noqa: TRY300
-        except ValueError:
-            return False, "New value must be a number."
-    return True, None
-
-
-def should_enable_apply_button(action: str, reason: str, new_value: Any = None) -> bool:
-    """
-    Determine if the apply button should be enabled.
-
-    Parameters
-    ----------
-    action : str
-        The correction action type.
-    reason : str
-        The reason for correction.
-    new_value : Any, optional
-        The new value (required for modify action).
-
-    Returns
-    -------
-    bool
-        True if apply button should be enabled.
-    """
-    if not reason:
-        return False
-
-    if action == "modify value":
-        return bool(new_value)
-    return action in ["remove value", "remove row"]
-
-
 def load_tab_config(project_id: str, tab_index: int) -> TabConfig | None:
     """
     Load configuration for a specific correction tab.
@@ -230,11 +238,23 @@ def load_tab_config(project_id: str, tab_index: int) -> TabConfig | None:
         page_row_index=tab_index,
     )
 
+    backcheck_key = backcheck_id = None
+    backcheck_data_name = page_config.get("backcheck_data_name")
+    if backcheck_data_name:
+        backcheck_key, backcheck_id = backcheck_id_columns(
+            str(page_settings_file(project_id, page_config.get("page_name"))),
+            page_config.get("survey_key"),
+            page_config.get("survey_id"),
+        )
+
     return TabConfig(
         page_name=page_config.get("page_name"),
         survey_data_name=page_config.get("survey_data_name"),
         survey_key=page_config.get("survey_key"),
         survey_id=page_config.get("survey_id"),
+        backcheck_data_name=backcheck_data_name,
+        backcheck_key=backcheck_key,
+        backcheck_id=backcheck_id,
     )
 
 
@@ -281,217 +301,24 @@ def validate_prerequisites(project_id: str | None) -> tuple[pl.DataFrame, list[s
     return hfc_config_logs, hfc_pages
 
 
-def render_value_input_widget(
-    column: str,
-    col_dtype: pl.DataType,
-    current_value: Any,
-    tab_index: int,
-) -> tuple[Any, str | None]:
-    """
-    Render appropriate input widget based on column data type.
-
-    Parameters
-    ----------
-    column : str
-        The column name being modified.
-    col_dtype : pl.DataType
-        The column data type.
-    current_value : Any
-        The current value in the column.
-    tab_index : int
-        The tab index for unique widget keys.
-
-    Returns
-    -------
-    tuple[Any, str | None]
-        A tuple of (new_value, error_message).
-    """
-    if col_dtype == pl.Datetime:
-        current_date = parse_date_value(current_value)
-        new_value = st.date_input(
-            label="New Value",
-            key=f"correction_new_value_{tab_index}",
-            value=current_date,
-            help="Select a date for the new value.",
-        )
-        return new_value, None
-
-    # Text input for other types
-    new_value = st.text_input(
-        label="New Value",
-        key=f"correction_new_value_{tab_index}",
-        placeholder="Enter new value",
-    )
-
-    if new_value:
-        is_valid, error_msg = validate_numeric_input(new_value, col_dtype)
-        if not is_valid:
-            return None, error_msg
-
-    return new_value, None
-
-
-def _render_column_selector(
-    corrected_data: pl.DataFrame,
-    key_col: str,
-    key_value: str,
-    tab_index: int,
-) -> tuple[str | None, Any]:
-    """
-    Render column selector and display current value.
-
-    Parameters
-    ----------
-    corrected_data : pl.DataFrame
-        The corrected dataset.
-    key_col : str
-        The key column name.
-    key_value : str
-        The selected key value.
-    tab_index : int
-        The tab index for unique widget keys.
-
-    Returns
-    -------
-    tuple[str | None, Any]
-        Column name and current value.
-    """
-    column = st.selectbox(
-        label="Select Column to Modify",
-        options=corrected_data.columns,
-        key=f"correction_col_to_modify_{tab_index}",
-    )
-
-    if not column:
-        return None, None
-
-    current_value = get_current_value(corrected_data, key_col, key_value, column)
-
-    st.write(f"**Current Value:** {current_value}")
-
-    return column, current_value
-
-
-def _render_modify_value_action(
-    corrected_data: pl.DataFrame,
-    key_col: str,
-    key_value: str,
-    tab_index: int,
-) -> CorrectionFormState:
-    """
-    Render UI elements for 'modify value' action.
-
-    Parameters
-    ----------
-    corrected_data : pl.DataFrame
-        The corrected dataset.
-    key_col : str
-        The key column name.
-    key_value : str
-        The selected key value.
-    tab_index : int
-        The tab index for unique widget keys.
-
-    Returns
-    -------
-    CorrectionFormState
-        Form state with column, values, and validation errors.
-    """
-    column, current_value = _render_column_selector(
-        corrected_data, key_col, key_value, tab_index
-    )
-
-    if not column:
-        return CorrectionFormState(
-            key_value=key_value, action="modify value", column=None
-        )
-
-    col_dtype = corrected_data.schema[column]
-    new_value, validation_error = render_value_input_widget(
-        column, col_dtype, current_value, tab_index
-    )
-
-    if validation_error:
-        st.error(validation_error)
-
-    return CorrectionFormState(
-        key_value=key_value,
-        action="modify value",
-        column=column,
-        current_value=current_value,
-        new_value=new_value,
-        validation_error=validation_error,
-    )
-
-
-def _render_remove_value_action(
-    corrected_data: pl.DataFrame,
-    key_col: str,
-    key_value: str,
-    tab_index: int,
-) -> CorrectionFormState:
-    """
-    Render UI elements for 'remove value' action.
-
-    Parameters
-    ----------
-    corrected_data : pl.DataFrame
-        The corrected dataset.
-    key_col : str
-        The key column name.
-    key_value : str
-        The selected key value.
-    tab_index : int
-        The tab index for unique widget keys.
-
-    Returns
-    -------
-    CorrectionFormState
-        Form state with column and current value.
-    """
-    column, current_value = _render_column_selector(
-        corrected_data, key_col, key_value, tab_index
-    )
-
-    return CorrectionFormState(
-        key_value=key_value,
-        action="remove value",
-        column=column,
-        current_value=current_value,
-    )
-
-
-def _render_remove_row_action(key_value: str) -> CorrectionFormState:
-    """
-    Render UI elements for 'remove row' action.
-
-    Parameters
-    ----------
-    key_value : str
-        The selected key value.
-
-    Returns
-    -------
-    CorrectionFormState
-        Form state for row removal.
-    """
-    st.warning("This will remove the row with the selected key value from the dataset.")
-
-    return CorrectionFormState(key_value=key_value, action="remove row")
-
-
 def render_add_correction_form(
     correction_processor: CorrectionProcessor,
     key_col: str,
     alias: str,
-    tab_index: int,
+    tab_index: str | int,
     survey_id_col: str | None = None,
+    actions: Sequence[Action] = CORRECTION_ACTIONS,
+    column: str | None = None,
 ) -> None:
     """
     Render the add correction step form.
 
-    This function orchestrates the correction form UI, delegating action-specific
-    rendering to helper functions to maintain low cognitive complexity.
+    The page picks the KEY and shows its Survey ID; the shared correction
+    form renders the action, new-value and reason inputs and the Apply
+    button. The page offers any KEY, any column and every correction action.
+    Apply saves through the form's default `apply_correction_entries`, so
+    the page gets the same checks as the check pages: the entry is rejected
+    if the value changed since it was shown.
 
     Parameters
     ----------
@@ -501,12 +328,17 @@ def render_add_correction_form(
         The name of the Survey KEY column in the DataFrame.
     alias : str
         The data alias/table name.
-    tab_index : int
-        The tab index for unique widget keys.
+    tab_index : str | int
+        Suffix for unique widget keys: the tab index, plus the dataset for
+        backcheck data.
     survey_id_col : str | None
         The name of the configured Survey ID column, if any. When set (and
         present in the data), the corresponding Survey ID is shown once a
         KEY is selected.
+    actions : Sequence[Action]
+        The correction actions to offer.
+    column : str | None
+        The only column to offer, or None to let the user pick any column.
     """
     corrected_data = correction_processor.get_corrected_data(alias)
 
@@ -535,224 +367,29 @@ def render_add_correction_form(
             )
             st.write(f"**Survey ID:** {survey_id_value}")
 
-        # Step 2: Select action
-        corr_action = st.selectbox(
-            label="Select Action",
-            options=CORRECTION_ACTIONS,
-            key=f"correction_action_{tab_index}",
-        )
-
-        # Step 3: Render action-specific UI and collect form state
-        form_state = _render_action_ui(
-            corr_action, corrected_data, key_col, corr_key_val, tab_index
-        )
-
-        # Step 4: Collect reason
-        reason = st.text_input(
-            label="Reason for Correction",
-            key=f"correction_reason_{tab_index}",
-            placeholder="Enter reason for correction",
-        )
-
-        # Step 5: Render apply button
-        _render_apply_button(
+        # Steps 2-5: action, new value, reason and Apply
+        render_correction_form(
             correction_processor=correction_processor,
-            corrected_data=corrected_data,
             alias=alias,
             key_col=key_col,
-            form_state=form_state,
-            reason=reason,
-            tab_index=tab_index,
-            survey_id_value=survey_id_value,
-        )
-
-
-def _render_action_ui(
-    action: str,
-    corrected_data: pl.DataFrame,
-    key_col: str,
-    key_value: str,
-    tab_index: int,
-) -> CorrectionFormState:
-    """
-    Render UI elements based on selected action type.
-
-    Parameters
-    ----------
-    action : str
-        The correction action type.
-    corrected_data : pl.DataFrame
-        The corrected dataset.
-    key_col : str
-        The key column name.
-    key_value : str
-        The selected key value.
-    tab_index : int
-        The tab index for unique widget keys.
-
-    Returns
-    -------
-    CorrectionFormState
-        Form state containing collected values.
-    """
-    if action == "modify value":
-        return _render_modify_value_action(
-            corrected_data, key_col, key_value, tab_index
-        )
-
-    if action == "remove value":
-        return _render_remove_value_action(
-            corrected_data, key_col, key_value, tab_index
-        )
-
-    # action == "remove row"
-    return _render_remove_row_action(key_value)
-
-
-def _render_apply_button(
-    correction_processor: CorrectionProcessor,
-    corrected_data: pl.DataFrame,
-    alias: str,
-    key_col: str,
-    form_state: CorrectionFormState,
-    reason: str,
-    tab_index: int,
-    survey_id_value: Any = None,
-) -> None:
-    """
-    Render apply button and handle correction application.
-
-    Parameters
-    ----------
-    correction_processor : CorrectionProcessor
-        The correction processor instance.
-    corrected_data : pl.DataFrame
-        The corrected dataset.
-    alias : str
-        The data alias/table name.
-    key_col : str
-        The key column name.
-    form_state : CorrectionFormState
-        Current form state.
-    reason : str
-        Reason for correction.
-    tab_index : int
-        The tab index for unique widget keys.
-    survey_id_value : Any
-        The Survey ID value for the selected KEY, if a Survey ID column is
-        configured, to record alongside the correction log entry.
-    """
-    apply_enabled = should_enable_apply_button(
-        form_state.action, reason, form_state.new_value
-    )
-
-    has_validation_error = bool(form_state.validation_error)
-
-    if st.button(
-        label="Apply",
-        key=f"correction_apply_{tab_index}",
-        width="stretch",
-        disabled=not apply_enabled or has_validation_error,
-        type="primary",
-    ):
-        _handle_apply_correction(
-            correction_processor=correction_processor,
-            corrected_data=corrected_data,
-            alias=alias,
-            key_col=key_col,
-            key_value=form_state.key_value,
-            action=form_state.action,
-            column=form_state.column,
-            current_value=form_state.current_value,
-            new_value=form_state.new_value,
-            reason=reason,
-            survey_id_value=survey_id_value,
-        )
-
-
-def _handle_apply_correction(
-    correction_processor: CorrectionProcessor,
-    corrected_data: pl.DataFrame,
-    alias: str,
-    key_col: str,
-    key_value: str,
-    action: str,
-    column: str | None,
-    current_value: Any,
-    new_value: Any,
-    reason: str,
-    survey_id_value: Any = None,
-) -> None:
-    """
-    Handle the application of a correction with validation.
-
-    Parameters
-    ----------
-    correction_processor : CorrectionProcessor
-        The correction processor instance.
-    corrected_data : pl.DataFrame
-        The current corrected data.
-    alias : str
-        The data alias/table name.
-    key_col : str
-        The name of the Survey KEY column.
-    key_value : str
-        The key value to correct.
-    action : str
-        The correction action type.
-    column : str | None
-        The column to modify (if applicable).
-    current_value : Any
-        The current value (if applicable).
-    new_value : Any
-        The new value (if applicable).
-    reason : str
-        The reason for correction.
-    survey_id_value : Any
-        The Survey ID value for this KEY, if a Survey ID column is
-        configured, to record alongside the correction log entry.
-    """
-    try:
-        # Validate input
-        is_valid, error_msg = correction_processor.validate_correction_input(
-            corrected_data,
-            key_col,
-            key_value,
-            action,
-            column,
-            new_value,
-        )
-
-        if not is_valid:
-            st.error(f"Validation error: {error_msg}")
-            return
-
-        # Apply the correction
-        correction_processor.apply_correction(
-            alias=alias,
-            key_col=key_col,
-            key_value=key_value,
-            action=action,
+            data=corrected_data,
+            key_value=corr_key_val,
+            key_namespace=tab_index,
+            source=CORRECTIONS_PAGE_SOURCE,
+            actions=actions,
             column=column,
-            current_value=current_value,
-            new_value=new_value,
-            reason=reason,
             survey_id_value=survey_id_value,
         )
-
-        st.success("Correction applied successfully!")
-        st.rerun()
-
-    except Exception as e:
-        st.error(f"Error applying correction: {e!s}")
 
 
 def render_correction_input_form(
     correction_processor: CorrectionProcessor,
     key_col: str,
     alias: str,
-    tab_index: int,
+    tab_index: str | int,
     survey_id_col: str | None = None,
+    actions: Sequence[Action] = CORRECTION_ACTIONS,
+    column: str | None = None,
 ) -> None:
     """
     Render input form for corrections with add and remove functionality.
@@ -765,14 +402,20 @@ def render_correction_input_form(
         The name of the Survey KEY column in the DataFrame.
     alias : str
         The data alias/table name.
-    tab_index : int
-        The tab index for unique widget keys.
+    tab_index : str | int
+        Suffix for unique widget keys.
     survey_id_col : str | None
         The name of the configured Survey ID column, if any.
+    actions : Sequence[Action]
+        The correction actions the add form offers.
+    column : str | None
+        The only column the add form offers, or None for any column.
     """
     corrected_data = correction_processor.get_corrected_data(alias)
 
-    if corrected_data.is_empty():
+    # A table with no rows, such as one whose every record was dropped, still
+    # has corrections to remove; only a missing table has no columns.
+    if corrected_data.width == 0:
         st.warning("No data available for correction.")
         return
 
@@ -785,6 +428,8 @@ def render_correction_input_form(
             alias=alias,
             tab_index=tab_index,
             survey_id_col=survey_id_col,
+            actions=actions,
+            column=column,
         )
 
     with fc2:
@@ -799,7 +444,7 @@ def render_correction_input_form(
 def render_remove_correction_form(
     correction_processor: CorrectionProcessor,
     alias: str,
-    tab_index: int,
+    tab_index: str | int,
 ) -> None:
     """
     Render the remove correction step form.
@@ -810,7 +455,7 @@ def render_remove_correction_form(
         The correction processor instance.
     alias : str
         The data alias/table name.
-    tab_index : int
+    tab_index : str | int
         The tab index for unique widget keys.
     """
     correction_summaries = correction_processor.get_correction_summary(alias)
@@ -871,6 +516,8 @@ def _display_correction_details(
         s for s in correction_summaries if s["action_index"] == selected_action
     )
     st.write(f"**Action:** {selected_summary['action']}")
+    if selected_summary.get("check_type"):
+        st.write(f"**Check type:** {selected_summary['check_type']}")
     st.write(f"**Key:** {selected_summary['key_value']}")
     if selected_summary["column"]:
         st.write(f"**Column:** {selected_summary['column']}")
@@ -923,9 +570,13 @@ def _handle_remove_correction(
 def _build_correction_log_display(correction_log: pl.DataFrame) -> pl.DataFrame:
     """Prepare a correction log for display in the Correction Log table.
 
-    Backfills the status columns for logs saved before they existed, orders
+    Backfills columns missing from logs saved before they existed, orders
     columns so status/status_reason sit right after action, and relabels the
-    "ID" column as "Survey ID" for display.
+    "ID" column as "Survey ID" for display. "accept" rows carry the check
+    whose flag was accepted in check_type and, for a hard constraint
+    violation, severity "hard"; source names the page that made each entry
+    and user names who made it (empty for entries logged before it was
+    recorded).
 
     Parameters
     ----------
@@ -938,35 +589,105 @@ def _build_correction_log_display(correction_log: pl.DataFrame) -> pl.DataFrame:
         The log with status columns present, in display column order, ready
         for display.
     """
-    if "status" not in correction_log.columns:
-        correction_log = correction_log.with_columns(
-            pl.lit("Successful").alias("status")
-        )
-    if "status_reason" not in correction_log.columns:
-        correction_log = correction_log.with_columns(
-            pl.lit(None, dtype=pl.String).alias("status_reason")
-        )
+    correction_log = ensure_log_columns(correction_log)
 
     display_columns = [
         "date",
+        "user",
         "KEY",
         "ID",
         "action",
         "status",
         "status_reason",
+        "check_type",
+        "severity",
         "column",
         "current_value",
         "new_value",
         "reason",
+        "source",
     ]
     # "ID" holds the Survey ID value recorded for the KEY, if one was
     # configured - rename it for display so the column reads clearly.
     return correction_log.select(display_columns).rename({"ID": "Survey ID"})
 
 
+# Display labels for log sources whose stored value doesn't read well
+# capitalized. Other sources (outliers, constraints, duplicates) are capitalized.
+_SOURCE_LABELS = {CORRECTIONS_PAGE_SOURCE: "Corrections page", GPS_CHECK_TYPE: "GPS"}
+
+
+def _source_label(source: str) -> str:
+    return _SOURCE_LABELS.get(source, source.capitalize())
+
+
+def filter_correction_log(
+    log: pl.DataFrame, sources: Sequence[str], actions: Sequence[str]
+) -> pl.DataFrame:
+    """Keep the log entries matching the selected sources and actions.
+
+    An empty selection does not filter on that column, so both filters
+    together keep entries that match every non-empty selection.
+    """
+    if sources:
+        log = log.filter(pl.col("source").is_in(list(sources)))
+    if actions:
+        log = log.filter(pl.col("action").is_in(list(actions)))
+    return log
+
+
+def _render_log_filters(
+    log: pl.DataFrame, tab_index: str | int
+) -> tuple[list[str], list[str]]:
+    """Render source and action pills for the Correction Log.
+
+    Only values present in the log are offered. Returns the selected
+    sources and actions; an empty list means no filter.
+    """
+    source_col, action_col = st.columns(2)
+    with source_col:
+        sources = st.pills(
+            "Source",
+            options=sorted(log["source"].drop_nulls().unique().to_list()),
+            selection_mode="multi",
+            format_func=_source_label,
+            key=f"correction_log_source_filter_{tab_index}",
+            help="Show only entries made from these pages. Select none to show all.",
+        )
+    with action_col:
+        actions = st.pills(
+            "Action",
+            options=sorted(log["action"].drop_nulls().unique().to_list()),
+            selection_mode="multi",
+            format_func=lambda action: action.capitalize(),
+            key=f"correction_log_action_filter_{tab_index}",
+            help="Show only entries with these actions. Select none to show all.",
+        )
+    return list(sources or []), list(actions or [])
+
+
+def highlight_hard_acceptance(row: Any) -> list[str]:
+    """Style every cell of a hard-violation acceptance in the Correction Log.
+
+    Used with a pandas ``Styler`` (``df.style.apply(highlight_hard_acceptance,
+    axis=1)``). Accepting a value that breaks a hard constraint overrides a
+    bound meant to be absolute, so those rows stand out for review.
+    """
+    action, severity = row.get("action"), row.get("severity")
+    # Missing values may be pd.NA, which can't be used in a boolean test.
+    is_hard_accept = (
+        isinstance(action, str)
+        and isinstance(severity, str)
+        and action == Action.ACCEPT
+        and severity == HARD_SEVERITY
+    )
+    style = "background-color: rgba(220, 53, 69, 0.15)" if is_hard_accept else ""
+    return [style] * len(row)
+
+
 @st.fragment
 def render_correction_log(
-    correction_processor: CorrectionProcessor, alias: str, tab_index: int
+    correction_processor: CorrectionProcessor, alias: str, tab_index: str | int
 ) -> None:
     """
     Render the correction log display.
@@ -977,25 +698,54 @@ def render_correction_log(
         The correction processor instance.
     alias : str
         The data alias/table name.
-    tab_index : int
+    tab_index : str | int
         The tab index for unique widget keys.
     """
     correction_log = correction_processor.get_correction_log(alias)
 
     with st.container(border=True):
-        if correction_log.is_empty():
-            st.info(
-                "No corrections have been made yet. You can add corrections "
-                "using the form above."
-            )
-        else:
-            section_header("Correction Log")
+        _render_correction_log_contents(correction_log, tab_index)
 
-            log_display = _build_correction_log_display(correction_log).to_pandas()
-            st.dataframe(
-                log_display.style.map(highlight_status, subset=["status"]),
-                width="stretch",
-            )
+
+def _render_correction_log_contents(
+    correction_log: pl.DataFrame, tab_index: str | int
+) -> None:
+    """Render the Correction Log filters, entry count and table.
+
+    Parameters
+    ----------
+    correction_log : pl.DataFrame
+        The raw correction log, as persisted.
+    tab_index : str | int
+        The tab index for unique widget keys.
+    """
+    if correction_log.is_empty():
+        st.info(
+            "No corrections have been made yet. You can add corrections "
+            "using the form above."
+        )
+        return
+
+    section_header("Correction Log")
+
+    log_display = _build_correction_log_display(correction_log)
+    sources, actions = _render_log_filters(log_display, tab_index)
+    log_display = filter_correction_log(log_display, sources, actions)
+    # Show the count whenever a filter is active, including when nothing
+    # matches, so "Showing 0 of Y" explains the empty result.
+    if sources or actions:
+        st.caption(
+            f"Showing {log_display.height:,} of {correction_log.height:,} entries."
+        )
+    if log_display.is_empty():
+        st.info("No log entries match the selected filters.")
+        return
+    styled_dataframe(
+        row_styler(log_display, highlight_hard_acceptance).map(
+            highlight_status, subset=["status"]
+        ),
+        width="stretch",
+    )
 
 
 @st.fragment
@@ -1054,26 +804,47 @@ def render_correction_tab(
     section_header(f"{config.page_name}")
     st.write("Add corrections to the data based on issues identified in checks.")
 
-    # Ensure corrected data exists
-    corrected_data = correction_processor.get_corrected_data(config.survey_data_name)
+    datasets = correction_datasets(config, tab_index)
+    dataset = datasets[0]
+    if len(datasets) > 1:
+        labels = [d.label for d in datasets]
+        chosen = st.segmented_control(
+            "Dataset",
+            options=labels,
+            default=SURVEY_DATA,
+            required=True,
+            key=f"correction_dataset_{tab_index}",
+            help=(
+                "Backcheck data can only have its ID modified or rows "
+                "removed, for example to resolve duplicate or unmatched IDs."
+            ),
+        )
+        dataset = datasets[labels.index(chosen)]
 
-    if corrected_data.is_empty():
-        st.warning(f"No data available for {config.survey_data_name}")
+    # Ensure corrected data exists
+    corrected_data = correction_processor.get_corrected_data(dataset.alias)
+
+    # Keep the log and the remove form for a table with no rows, so dropping
+    # every record can be undone.
+    if corrected_data.width == 0:
+        st.warning(f"No data available for {dataset.alias}")
         return
 
     # Render components
     render_correction_input_form(
         correction_processor=correction_processor,
-        key_col=config.survey_key,
-        alias=config.survey_data_name,
-        tab_index=tab_index,
-        survey_id_col=config.survey_id,
+        key_col=dataset.key_col,
+        alias=dataset.alias,
+        tab_index=dataset.key_namespace,
+        survey_id_col=dataset.id_col,
+        actions=dataset.actions,
+        column=dataset.column,
     )
 
     render_correction_log(
         correction_processor=correction_processor,
-        alias=config.survey_data_name,
-        tab_index=tab_index,
+        alias=dataset.alias,
+        tab_index=dataset.key_namespace,
     )
 
     render_data_summary(

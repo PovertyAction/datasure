@@ -284,6 +284,49 @@ class TestApplyProjectConfig:
         mock_correction_cls.return_value.refresh_corrected_data.assert_called_once_with(
             "household"
         )
+        mock_correction_cls.return_value.refresh_existing_corrected_data.assert_not_called()
+
+    @patch("datasure.utils.project_config.CorrectionProcessor")
+    @patch("datasure.utils.project_config.ConfigurationService")
+    @patch("datasure.utils.project_config.prep_apply_action")
+    @patch("datasure.utils.project_config.load_local_data")
+    @patch("datasure.utils.project_config.duckdb_save_table")
+    @patch("datasure.utils.project_config.duckdb_get_table")
+    def test_prep_steps_without_corrections_rebuild_existing_corrected_data(
+        self,
+        mock_get_table,
+        mock_save_table,
+        mock_load_local,
+        mock_prep_apply,
+        mock_config_service_cls,
+        mock_correction_cls,
+        tmp_path,
+    ):
+        """Re-seeded prep steps refresh a corrected table the bundle doesn't seed."""
+        mock_get_table.return_value = pl.DataFrame()
+        mock_prep_apply.return_value = []
+        mock_config_service_cls.return_value = self._config_service_mock()
+        failure = ReapplyFailure("modify value", "Column not found")
+        processor = mock_correction_cls.return_value
+        processor.refresh_existing_corrected_data.return_value = [failure]
+
+        data_file = tmp_path / "household.csv"
+        data_file.write_text("id,age\n1,30\n")
+
+        bundle = ProjectConfigBundle(
+            exported_from_project="p",
+            exported_at="t",
+            datasets=[ImportSourceEntry(alias="household", source="local storage")],
+            prep_steps={"household": [{"action": "transform column(s)"}]},
+        )
+
+        result = apply_project_config(
+            PROJECT_ID, bundle, local_file_paths={"household": str(data_file)}
+        )
+
+        processor.refresh_existing_corrected_data.assert_called_once_with("household")
+        processor.refresh_corrected_data.assert_not_called()
+        assert result.correction_failures == [failure]
 
     @patch("datasure.utils.project_config.ConfigurationService")
     @patch("datasure.utils.project_config.duckdb_get_table")

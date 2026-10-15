@@ -479,3 +479,17 @@ class TestSettingsUtilsIntegration:
         assert len(hash_10) == 10
         assert hash_6 == hash_8[:6]  # Should be prefix
         assert hash_6 == hash_10[:6]  # Should be prefix
+
+
+def test_page_settings_file_is_named_after_the_page(tmp_path):
+    from datasure.utils.settings_utils import page_settings_file
+
+    with patch(
+        "datasure.utils.settings_utils.get_cache_path",
+        side_effect=lambda *parts: tmp_path.joinpath(*parts),
+    ):
+        path = page_settings_file("proj", "Household Survey - Round-2")
+
+    assert path == tmp_path / "proj" / "settings" / (
+        "page_household_survey___round_2_settings.json"
+    )
