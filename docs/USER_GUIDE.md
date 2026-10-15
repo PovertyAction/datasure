@@ -556,6 +556,13 @@ All corrections are tracked with:
   **Reviewer name** in the sidebar, which DataSure remembers across sessions.
   Entries logged before DataSure recorded the user show an empty User.
 
+The replication package includes the full log as
+`4_output/3_logs/correction_log.csv`, User column included. Before sharing a
+package outside your team, check **Exclude reviewer names** on the Export
+Replication Package page, then build the package. The User column is kept
+but left blank in the exported copy. The project's own Correction Log is not
+changed. The option is off by default.
+
 The log can also contain **accept** entries. An accept entry records that a
 flagged value was reviewed and is correct. It never changes the data, and the
 Check type column shows which check it applies to. It stays in effect only
