@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Replication package**: An **Exclude reviewer names** checkbox on the Export
+  Replication Package page blanks the `user` column in the exported
+  `correction_log.csv`. The column is kept so the schema matches
+  `CORRECTION_LOG_SCHEMA`, and the project's stored log is not changed. Off by
+  default; changing it discards an already-built package
+  (`build_replication_package(exclude_reviewer_names=...)`,
+  `src/datasure/views/replication_view.py`) — closes #332
+
 ### Changed
 
 - **Dependencies**: `polars>=1.30.0,<3` (was `>=1.30.0`), lock moved from
