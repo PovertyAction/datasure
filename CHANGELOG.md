@@ -51,6 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   modify of the same cell showed `Successful` while the check pages treated it
   as inactive. Accept statuses are now judged against the final corrected data,
   as `get_active_acceptances` does, on replay and on every log save — closes #337
+- **Correction KEY lookup**: Replay and acceptance statuses found a record by
+  the first column holding its KEY value, so a value repeated in another column
+  could point them at the wrong record and mark an active acceptance
+  `Inactive`. They now use the KEY column the check config sets for the
+  dataset (the survey or backcheck KEY), falling back to the old lookup only
+  when none is set (`src/datasure/processing/corrections.py`) — #337
 
 ## [1.2.0a1] - 2026-10-11
 

@@ -115,7 +115,9 @@ also reads.
 - **`status` / `status_reason`**: the outcome of the last replay of each entry.
   An accept row is `Inactive` when `get_active_acceptances` would drop it;
   its status is judged against the final corrected data on replay and on
-  every log append.
+  every log append. Replay finds each entry's record by the KEY column the
+  check config sets for the dataset, or, if none is set, by the first column
+  holding the entry's KEY.
 
 The shared correction form lives in `utils/correction_form.py`
 (`render_correction_form`, `render_correction_inputs`,
