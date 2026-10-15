@@ -36,9 +36,7 @@ def get_df_columns(df: pl.DataFrame | pd.DataFrame) -> ColumnByType:
     else:  # get info from polars dataframe
         all_columns = df.columns
         string_columns = df.select(pl.col(pl.Utf8)).columns
-        integer_columns = df.select(
-            pl.col(pl.Int64, pl.Int32, pl.Int16, pl.Int8)
-        ).columns
+        integer_columns = df.select(cs.integer()).columns
         numeric_columns = df.select(cs.numeric()).columns
         datetime_columns = df.select(pl.col(pl.Date, pl.Datetime)).columns
         categorical_columns = list(
