@@ -495,6 +495,13 @@ class CorrectionProcessor:
             )
             updated_log = pl.concat([aligned_current_log, new_rows])
 
+        # The new rows may change a value an earlier acceptance recorded.
+        # Callers save the corrected data first, so it is current here.
+        if (updated_log["action"] == Action.ACCEPT).any():
+            updated_log = self._with_acceptance_statuses(
+                updated_log, self.get_corrected_data(alias)
+            )
+
         duckdb_save_table(
             project_id=self.project_id,
             table_data=updated_log,
@@ -835,10 +842,8 @@ class CorrectionProcessor:
         if entry.action not in CORRECTION_ACTIONS:
             raise ValueError(f"Unknown correction action '{entry.action}'")
 
-        if (
-            entry.action in (Action.MODIFY_VALUE, Action.REMOVE_VALUE)
-            and entry.current_value is not None
-        ):
+        # A missing current value is checked too: the cell must still be missing.
+        if entry.action in (Action.MODIFY_VALUE, Action.REMOVE_VALUE) and entry.column:
             _check_acceptance_against_data(
                 data, key_col, entry.key_value, entry.column, entry.current_value
             )
@@ -1193,11 +1198,6 @@ class CorrectionProcessor:
         statuses: list[str] = []
         status_reasons: list[str | None] = []
         for row in correction_log.iter_rows(named=True):
-            if row["action"] == Action.ACCEPT:
-                inactive_reason = self._inactive_acceptance_reason(corrected_data, row)
-                statuses.append("Inactive" if inactive_reason else "Successful")
-                status_reasons.append(inactive_reason)
-                continue
             corrected_data, error = self._apply_correction_row(corrected_data, row)
             if error:
                 statuses.append("Failed")
@@ -1209,9 +1209,14 @@ class CorrectionProcessor:
                 statuses.append("Successful")
                 status_reasons.append(None)
 
-        refreshed_log = correction_log.with_columns(
-            pl.Series("status", statuses, dtype=pl.String),
-            pl.Series("status_reason", status_reasons, dtype=pl.String),
+        # Accept rows don't change the data; their status depends on the final
+        # data, as for `get_active_acceptances`.
+        refreshed_log = self._with_acceptance_statuses(
+            correction_log.with_columns(
+                pl.Series("status", statuses, dtype=pl.String),
+                pl.Series("status_reason", status_reasons, dtype=pl.String),
+            ),
+            corrected_data,
         )
         duckdb_save_table(
             project_id=self.project_id,
@@ -1291,6 +1296,32 @@ class CorrectionProcessor:
 
         return data, None
 
+    def _with_acceptance_statuses(
+        self, log: pl.DataFrame, data: pl.DataFrame
+    ) -> pl.DataFrame:
+        """Return `log` with each accept row's status judged against `data`.
+
+        An accept row is `Successful` while `data` holds its recorded value
+        and `Inactive`, with the reason, once it doesn't. Other rows are
+        returned unchanged.
+        """
+        if log.is_empty():
+            return log
+        statuses: list[str | None] = []
+        status_reasons: list[str | None] = []
+        for row in log.iter_rows(named=True):
+            if row["action"] == Action.ACCEPT:
+                inactive_reason = self._inactive_acceptance_reason(data, row)
+                statuses.append("Inactive" if inactive_reason else "Successful")
+                status_reasons.append(inactive_reason)
+            else:
+                statuses.append(row["status"])
+                status_reasons.append(row["status_reason"])
+        return log.with_columns(
+            pl.Series("status", statuses, dtype=pl.String),
+            pl.Series("status_reason", status_reasons, dtype=pl.String),
+        )
+
     def _inactive_acceptance_reason(
         self, data: pl.DataFrame, row: dict[str, Any]
     ) -> str | None:
@@ -1323,17 +1354,14 @@ class CorrectionProcessor:
             The column the correction targets
         recorded_value : str | None
             The value recorded in the log at the time the correction was
-            made, or None if no value was recorded
+            made. None means the value was missing, so the correction still
+            applies only while the value is missing.
 
         Returns
         -------
         str | None
-            A description of the mismatch, or None if the value still
-            matches (or there is nothing recorded to compare against)
+            A description of the mismatch, or None if the value still matches
         """
-        if recorded_value is None:
-            return None
-
         actual_value = data.filter(pl.col(key_col) == key_value)[0, column]
 
         if not _values_match(actual_value, recorded_value):

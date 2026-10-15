@@ -602,7 +602,8 @@ refresh:
    reviewed** to see corrected values marked Corrected.
 3. In the Correction Log, check that the entry's Status is `Successful`. If
    new data or a prep change means a correction can no longer be applied, its
-   Status shows why.
+   Status shows why. This includes a correction of a blank value that was later
+   filled in at source: the source value is kept and the correction fails.
 
 **Demo Example**:
 Correcting duplicate household ID:

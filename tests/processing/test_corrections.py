@@ -2385,3 +2385,105 @@ class TestRawFallback:
         assert failures == []
         corrected = mock_save.call_args_list[-1].kwargs["table_data"]
         assert corrected["survey_key"].to_list() == ["key1", "key3"]
+
+
+class TestReplayOfCorrectionsOfMissingValues:
+    """A correction of a missing value is rechecked on replay like any other:
+    it reapplies while the source value is still missing, and fails with a
+    reason if the source value was filled in since (#337).
+    """
+
+    @pytest.fixture
+    def processor(self, store):
+        _seed_prep(store, pl.DataFrame({"KEY": ["k1", "k2"], "age": [None, 30]}))
+        processor = CorrectionProcessor("p1")
+        processor.apply_corrections(
+            "survey",
+            "KEY",
+            [CorrectionEntry("k1", "modify value", "r", "age", None, "5")],
+        )
+        return processor
+
+    def test_reapplies_while_the_source_value_is_still_missing(self, processor):
+        failures = processor.refresh_corrected_data("survey")
+
+        assert failures == []
+        assert processor.get_corrected_data("survey")["age"].to_list() == [5, 30]
+        assert processor.get_correction_log("survey")["status"].to_list() == [
+            "Successful"
+        ]
+
+    def test_fails_when_the_source_value_was_filled_in(self, store, processor):
+        _seed_prep(store, pl.DataFrame({"KEY": ["k1", "k2"], "age": [8, 30]}))
+
+        failures = processor.refresh_corrected_data("survey")
+
+        assert len(failures) == 1
+        assert "changed since this correction was recorded" in failures[0].reason
+        assert processor.get_corrected_data("survey")["age"].to_list() == [8, 30]
+        log = processor.get_correction_log("survey")
+        assert log["status"].to_list() == ["Failed"]
+        assert "found '8'" in log["status_reason"][0]
+
+    def test_a_correction_of_a_filled_in_value_is_rejected_when_applied(self, store):
+        _seed_prep(store, pl.DataFrame({"KEY": ["k1"], "age": [8]}))
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="has changed since it was flagged"):
+            processor.apply_corrections(
+                "survey",
+                "KEY",
+                [CorrectionEntry("k1", "modify value", "r", "age", None, "5")],
+            )
+
+        assert processor.get_correction_log("survey").is_empty()
+
+
+class TestAcceptanceStatusMatchesActiveAcceptances:
+    """An accept row's Status agrees with `get_active_acceptances`, which
+    judges it against the final corrected data, not the data at the accept
+    row's position in the log (#337).
+    """
+
+    def _accept_then_modify(self, store):
+        _seed_prep(store, pl.DataFrame({"KEY": ["k1"], "age": [25]}))
+        processor = CorrectionProcessor("p1")
+        processor.accept_value("survey", "KEY", "k1", "outliers", "age", 25, "ok")
+        processor.apply_corrections(
+            "survey",
+            "KEY",
+            [CorrectionEntry("k1", "modify value", "r", "age", 25, "30")],
+        )
+        return processor
+
+    def test_replay_marks_an_acceptance_of_a_later_corrected_value_inactive(
+        self, store
+    ):
+        processor = self._accept_then_modify(store)
+
+        processor.refresh_corrected_data("survey")
+
+        assert processor.get_active_acceptances("survey", "outliers", "KEY").is_empty()
+        log = processor.get_correction_log("survey")
+        assert log["status"].to_list() == ["Inactive", "Successful"]
+        assert "has changed" in log["status_reason"][0]
+
+    def test_saving_a_correction_marks_the_acceptance_it_overrides_inactive(
+        self, store
+    ):
+        processor = self._accept_then_modify(store)
+
+        assert processor.get_active_acceptances("survey", "outliers", "KEY").is_empty()
+        log = processor.get_correction_log("survey")
+        assert log["status"].to_list() == ["Inactive", "Successful"]
+
+    def test_an_acceptance_of_the_corrected_value_stays_successful(self, store):
+        processor = self._accept_then_modify(store)
+        processor.accept_value("survey", "KEY", "k1", "outliers", "age", 30, "ok")
+
+        processor.refresh_corrected_data("survey")
+
+        active = processor.get_active_acceptances("survey", "outliers", "KEY")
+        assert active["current_value"].to_list() == ["30"]
+        log = processor.get_correction_log("survey")
+        assert log["status"].to_list() == ["Inactive", "Successful", "Successful"]
