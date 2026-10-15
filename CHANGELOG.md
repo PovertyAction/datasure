@@ -40,6 +40,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   'http.response.body'` on image and video responses. Starlette 1.8.0 changed
   `IdentityResponder.send_with_compression`, which Streamlit 1.61.0's gzip
   middleware overrides; Streamlit 1.62+ is compatible — closes #330
+- **Correction replay**: Replay silently overwrote a value fixed at source when
+  the corrected value was originally missing. `_current_value_mismatch` no
+  longer skips a missing recorded value, so the correction applies only while
+  the cell is still missing and otherwise fails with a reason; the same check
+  runs when a correction is first applied
+  (`src/datasure/processing/corrections.py`) — #337
+- **Acceptance status**: An accept row's Status in the Correction Log was
+  judged against the data at that point in replay, so an accept followed by a
+  modify of the same cell showed `Successful` while the check pages treated it
+  as inactive. Accept statuses are now judged against the final corrected data,
+  as `get_active_acceptances` does, on replay and on every log save — closes #337
 
 ## [1.2.0a1] - 2026-10-11
 
