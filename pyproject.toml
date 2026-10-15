@@ -38,8 +38,9 @@ dependencies = [
     # polars interop; floor at the CVE-fixed release (see issue #186)
     "pyarrow>=23.0.1",
     "matplotlib>=3.10.0",
-    # Floor at the CVE-fixed release (see issue #186).
-    "polars>=1.30.0",
+    # Floor at the CVE-fixed release (see issue #186); capped below the next
+    # major, which may remove APIs as 2.0 did.
+    "polars>=1.30.0,<3",
     "duckdb>=1.3.1",
     "pydantic>=2.11.7",
     "keyring>=25.6.0",

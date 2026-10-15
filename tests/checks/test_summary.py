@@ -397,6 +397,25 @@ class TestDateValidation:
         assert isinstance(result, pl.DataFrame)
         assert "text" in result.columns
 
+    def test_validate_date_column_iso_strings(self):
+        """Valid ISO date strings convert; invalid strings and nulls become null."""
+        df = pl.DataFrame({"date": ["2024-01-01", "not a date", None, "2024-01-03"]})
+        result = validate_and_convert_date_column(df, "date")
+        assert result["date"].dtype == pl.Date
+        assert result["date"].to_list() == [
+            date(2024, 1, 1),
+            None,
+            None,
+            date(2024, 1, 3),
+        ]
+
+    def test_prepare_date_data_iso_strings(self):
+        """Only invalid and null date strings count as missing."""
+        df = pl.DataFrame({"date": ["2024-01-01", "not a date", None, "2024-01-03"]})
+        result_df, missing_count = prepare_date_data(df, "date")
+        assert missing_count == 2
+        assert result_df.height == 2
+
     def test_prepare_date_data_success(self, sample_polars_df):
         """Test successful date data preparation."""
         result_df, missing_count = prepare_date_data(sample_polars_df, "date")
@@ -634,6 +653,21 @@ class TestProgressByColumn:
         df_pl = pl.from_pandas(df)
         result = compute_summary_progress_by_col(df_pl, "date", "name", "Monthly")
         assert isinstance(result[0], pd.DataFrame)
+
+    def test_compute_summary_progress_by_col_iso_strings(self):
+        """Valid ISO date strings are counted; invalid strings and nulls are dropped."""
+        df = pl.DataFrame(
+            {
+                "date": ["2024-01-01", "2024-01-01", "2024-01-02", "bad", None],
+                "team": ["a", "b", "a", "a", "b"],
+            }
+        )
+        progress, _, _, _ = compute_summary_progress_by_col(df, "date", "team", "Daily")
+        assert progress.loc["a", "Jan 01, 2024"] == 1
+        assert progress.loc["a", "Jan 02, 2024"] == 1
+        assert progress.loc["b", "Jan 01, 2024"] == 1
+        assert progress.loc["b", "Jan 02, 2024"] == 0
+        assert progress.to_numpy().sum() == 3
 
     def test_compute_summary_progress_by_col_invalid_date(self):
         """Test progress by column with invalid date column."""

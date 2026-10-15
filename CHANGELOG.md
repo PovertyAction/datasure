@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Dependencies**: `polars>=1.30.0,<3` (was `>=1.30.0`), lock moved from
+  1.43.2 to 2.0.0. Every replacement below exists in polars 1.30.0, so the
+  floor is unchanged; polars 3 is excluded until tested
+
+### Fixed
+
+- **Polars 2.0 compatibility**: The Prep page and several checks crashed on
+  fresh installs that resolved polars 2.0
+  - Root cause: polars 2.0 removed `NUMERIC_DTYPES`, `INTEGER_DTYPES`,
+    `DATETIME_DTYPES`, `with_row_count`, `pl.count()` and String-to-Date
+    `cast`
+  - Solution: use `cs.numeric()`, `dtype.is_numeric()`,
+    `dtype.is_integer()`, `isinstance(dtype, pl.Datetime)`,
+    `with_row_index`, `pl.len()` and, for String columns,
+    `str.to_date("%Y-%m-%d", strict=False)` (`_to_date_expr`)
+  - Files: `src/datasure/utils/dataframe_utils.py`,
+    `src/datasure/checks/duplicates.py`, `src/datasure/checks/missing.py`,
+    `src/datasure/checks/summary.py`, `src/datasure/checks/outliers/compute.py`,
+    `src/datasure/checks/enumerator/report_ui.py`,
+    `src/datasure/processing/prep.py`
+- **Integer columns**: `get_df_columns` listed only signed `Int8`–`Int64`
+  columns as integer columns for polars data, missing unsigned and `Int128`
+  columns; it now uses `cs.integer()` (`src/datasure/utils/dataframe_utils.py`)
+
 ## [1.2.0a1] - 2026-10-11
 
 ### Added

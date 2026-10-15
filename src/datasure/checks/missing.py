@@ -502,7 +502,7 @@ def compute_missing_over_time(
     missingness_by_date = missing_with_date.group_by("missingness_trend_date").agg(
         [
             # Count total data points per date (rows * columns)
-            (pl.count() * n_cols).alias("total_data_points"),
+            (pl.len() * n_cols).alias("total_data_points"),
             # Count total missing values (sum of all values > 0 across all columns)
             pl.sum_horizontal([(pl.col(col) > 0).sum() for col in stat_cols]).alias(
                 "total_missing"
@@ -553,7 +553,7 @@ def compute_missing_compare(
         (group_by_data DataFrame, minimum value, maximum value)
     """
     # Get value counts for the grouping column from original data
-    group_counts = data.group_by(group_by_col).agg(pl.count().alias("values (count)"))
+    group_counts = data.group_by(group_by_col).agg(pl.len().alias("values (count)"))
     total_rows = data.height
 
     # Calculate percentage
@@ -571,7 +571,7 @@ def compute_missing_compare(
 
             # Calculate % missing (values > 0) for each group
             col_missing_pct = missing_with_group.group_by(group_by_col).agg(
-                [((pl.col(col) > 0).sum() / pl.count() * 100).alias(col)]
+                [((pl.col(col) > 0).sum() / pl.len() * 100).alias(col)]
             )
 
             # Merge into group_counts

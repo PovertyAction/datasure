@@ -861,7 +861,7 @@ class TestSafeToNumeric:
         """Test that already-numeric series is returned as Float64."""
         series = pl.Series([1, 2, 3])
         result = safe_to_numeric(series)
-        assert result.dtype in pl.NUMERIC_DTYPES
+        assert result.dtype.is_numeric()
 
     def test_series_with_string_numbers(self):
         """Test converting string series to numeric."""
@@ -873,7 +873,7 @@ class TestSafeToNumeric:
         """Test converting DataFrame column."""
         df = pl.DataFrame({"col": ["1", "2", "3"]})
         result = safe_to_numeric(df, "col")
-        assert result["col"].dtype in pl.NUMERIC_DTYPES
+        assert result["col"].dtype.is_numeric()
 
     def test_dataframe_numeric_column(self):
         """Test converting already-numeric DataFrame column."""
