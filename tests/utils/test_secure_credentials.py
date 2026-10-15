@@ -814,6 +814,9 @@ class TestDeleteCredentials:
 
             assert result["success"] is True
             assert "deleted successfully" in result["message"]
+            mock_keyring.delete_password.assert_called_once_with(
+                service_name, "test@example.com"
+            )
 
             # Verify service was removed from metadata
             with open(metadata_file, encoding="utf-8") as f:
@@ -833,8 +836,10 @@ class TestDeleteCredentials:
 
     @patch("datasure.utils.secure_credentials._get_metadata_path")
     @patch("datasure.utils.secure_credentials.keyring")
-    def test_delete_credentials_keyring_warning(self, mock_keyring, mock_metadata_path):
-        """Test deletion with keyring warning."""
+    def test_delete_credentials_keyring_error_is_failure(
+        self, mock_keyring, mock_metadata_path
+    ):
+        """A keyring failure is reported as a failure, not success."""
         with tempfile.TemporaryDirectory() as temp_dir:
             metadata_file = Path(temp_dir) / "metadata.json"
             service_name = "datasure_scto_login_testserver_test_project"
@@ -853,8 +858,16 @@ class TestDeleteCredentials:
 
             result = delete_stored_credentials("test_project", "testserver")
 
-            # Should still succeed but log warning
-            assert result["success"] is True
+            assert result["success"] is False
+            assert "Access denied" in result["error"]
+            assert result["error_type"] == "keyring_error"
+            mock_keyring.delete_password.assert_called_once_with(
+                service_name, "test@example.com"
+            )
+
+            # Metadata is kept so the entry stays listed and can be retried
+            with open(metadata_file, encoding="utf-8") as f:
+                assert service_name in json.load(f)
 
     @patch("datasure.utils.secure_credentials._get_metadata_path")
     def test_delete_credentials_unexpected_error(self, mock_metadata_path):

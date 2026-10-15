@@ -317,10 +317,9 @@ def delete_stored_credentials(
         with open(metadata_path, encoding="utf-8") as f:
             metadata = json.load(f)
 
-        service_name = metadata.get(
-            "service_name", _get_service_name(project_id, server, credential_type)
-        )
-        username = metadata.get("username")
+        # Metadata is keyed by service name (see store_scto_credentials)
+        service_name = _get_service_name(project_id, server, credential_type)
+        username = metadata.get(service_name, {}).get("username")
 
         # Delete from keyring
         if username:
@@ -330,7 +329,13 @@ def delete_stored_credentials(
                     f"Deleted password from keyring for {service_name}/{username}"
                 )
             except KeyringError as e:
-                logger.warning(f"Could not delete password from keyring: {e}")
+                error_msg = f"Could not delete password from keyring: {e}"
+                logger.warning(error_msg)
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "error_type": "keyring_error",
+                }
 
         # Delete metadata file
         try:
