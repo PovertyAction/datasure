@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dependencies**: `polars>=1.30.0,<3` (was `>=1.30.0`), lock moved from
   1.43.2 to 2.0.0. Every replacement below exists in polars 1.30.0, so the
   floor is unchanged; polars 3 is excluded until tested
+- **Dependencies**: Relaxed the exact `streamlit==1.61.0` pin to
+  `streamlit>=1.65.0,<2` (lock: Streamlit 1.66.0, Starlette 1.8.0). Only
+  Streamlit major releases now need a deliberate bump (`pyproject.toml`) — #330
 
 ### Fixed
 
@@ -32,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Integer columns**: `get_df_columns` listed only signed `Int8`–`Int64`
   columns as integer columns for polars data, missing unsigned and `Int128`
   columns; it now uses `cs.integer()` (`src/datasure/utils/dataframe_utils.py`)
+- **Server**: Fresh installs disconnected after the UI loaded, with
+  `RuntimeError: Expected ASGI message 'http.response.start', but got
+  'http.response.body'` on image and video responses. Starlette 1.8.0 changed
+  `IdentityResponder.send_with_compression`, which Streamlit 1.61.0's gzip
+  middleware overrides; Streamlit 1.62+ is compatible — closes #330
 
 ## [1.2.0a1] - 2026-10-11
 
