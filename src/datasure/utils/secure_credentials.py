@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import keyring
-from keyring.errors import KeyringError
+from keyring.errors import KeyringError, PasswordDeleteError
 
 from .cache_utils import get_cache_path
 
@@ -328,6 +328,9 @@ def delete_stored_credentials(
                 logger.info(
                     f"Deleted password from keyring for {service_name}/{username}"
                 )
+            except PasswordDeleteError:
+                # Already gone from the keyring; still clear the metadata entry
+                logger.info(f"No keyring password found for {service_name}/{username}")
             except KeyringError as e:
                 error_msg = f"Could not delete password from keyring: {e}"
                 logger.warning(error_msg)
