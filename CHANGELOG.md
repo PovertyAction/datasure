@@ -17,6 +17,300 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`src/datasure/utils/dataframe_utils.py`, `src/datasure/checks/`,
   `src/datasure/processing/prep.py`)
 
+## [1.2.0a1] - 2026-10-11
+
+### Added
+
+- **Correction log**: New `source` column records which page made each entry;
+  existing logs load with `source = corrections_page`. A new `check_type`
+  column goes with the new `accept` action
+  (`CORRECTION_LOG_SCHEMA`, `ensure_log_columns` in the new Streamlit-free
+  `src/datasure/processing/correction_log.py`, shared with the replication
+  package, which now exports legacy logs with these columns) — #296
+- **Accept action**: `CorrectionProcessor.accept_value` records that a flagged
+  value (outliers, constraints, GPS) was reviewed and
+  is correct, with a required reason. An acceptance is rejected if the data
+  no longer holds the value being accepted. `get_active_acceptances` returns the
+  acceptances whose recorded value still matches the data (for GPS, both
+  latitude and longitude). Replay never changes data for `accept` rows, but
+  marks an acceptance whose value no longer matches the data with status
+  `Inactive` (not a reapply failure). The generated `4_corrections.do` skips
+  `accept` rows; `correction_log.csv` keeps them, and the README's correction
+  counts exclude them. Values compare by value, not text: missing matches
+  missing (None or NaN), values that both read as numbers compare numerically
+  (a String cell `"25"` matches `25.0`), and every row with the KEY must
+  match — #296
+- **Atomic apply**: `CorrectionProcessor.apply_corrections` applies a list of
+  `CorrectionEntry` objects all or nothing; if the log save fails, the
+  corrected data is restored — #296
+- **Shared correction form**: `src/datasure/utils/correction_form.py`
+  (`render_correction_form`, `render_correction_inputs`,
+  `apply_correction_entries`) renders the action, new-value and reason inputs
+  for a prefilled KEY/column/current value, with namespaced widget keys. The
+  Correct Data page now uses it — #296
+- **Outliers and constraints corrections**: Each row of the constraint
+  violations and outlier inspection tables has a Review button (a pinned
+  `st.column_config.ButtonColumn`) that opens the shared correction form in a
+  dialog, prefilled with the row's KEY, column and current value, to modify the
+  value, remove it or accept it as valid (source and check type
+  `outliers`/`constraints`). Accepted flags are hidden and left out of the
+  metrics unless "Show reviewed" is on (then they are highlighted green), and
+  come back if the value changes or
+  the acceptance is removed. Accepting a hard violation needs a confirmation.
+  A "Show only flagged values" toggle (on by default) sits above both tables;
+  the outlier inspection table previously always listed unflagged values too.
+  With "Show reviewed" on, values whose current value comes from a modify or
+  remove correction are also highlighted green, with a "Corrected" badge and
+  the correction reason (new `CorrectionProcessor.get_active_corrections`);
+  unlike accepted flags, corrected values that are still flagged stay visible
+  and counted. A "Show only reviewed" toggle lists only accepted and
+  corrected rows and disables the other two toggles while on (toggle values
+  are a `review.TableFilters`, applied by `review.filter_table`). The outlier
+  inspection table now hides its index. Styled tables
+  are built with new `ui_utils.row_styler`, which keeps values displayed as in
+  the unstyled table (pandas' default Styler formatting showed `150` as
+  `150.000000` and missing values as `nan`).
+  Flag review logic lives in the new Streamlit-free
+  `src/datasure/checks/outliers/review.py`; `outliers_report` takes the
+  dataset `alias`. Removed the unused `_render_outlier_table`.
+  `queue_notice` gains a `toast` level, and `show_queued_notices` returns
+  whether it showed anything. New `ui_utils.ensure_styler_limit` raises
+  pandas' process-wide `styler.render.max_elements` under a lock and never
+  lowers it, so concurrent sessions can't cut it below what another render
+  needs; it replaces the `pd.set_option` calls in the summary, missing and
+  progress checks, which lowered the limit to fit their own tables and could
+  crash other styled tables. New `ui_utils.styled_dataframe` renders a Styler
+  after raising the limit to fit it; the results tables and the Correction
+  Log use it. A soft-violation acceptance no longer hides a value that has
+  since become a hard violation (e.g. after bounds are tightened): it needs a
+  new hard acceptance. A correction that failed to reapply to new prep data
+  is never shown as Corrected, even if the data holds its new value. Review
+  on a KEY whose rows hold different values of the column shows a warning
+  instead of the form, since a correction changes every row with the KEY
+  (`review.key_has_conflicting_values`). Survey fields added through "Show
+  more columns" that share a name with a results or review column get a
+  " (survey)" suffix, even while the review columns are hidden. A Survey KEY
+  named "review status" or "review reason" turns review off with a warning
+  instead of being overwritten — #298
+- **Correction log severity**: New `severity` column, `hard` on acceptances of
+  hard constraint violations (null otherwise and for legacy logs).
+  `CorrectionEntry.severity` sets it and is rejected on non-accept actions,
+  on acceptances of other checks, and with any value other than `hard`.
+  Hard acceptances are highlighted in the Correction Log — #298
+- **Backcheck targets**: New `checks/backchecks/coverage.py`.
+  `compute_backcheck_coverage` returns `BackcheckCoverage`: eligible unique
+  survey IDs (after duplicate handling and the optional eligibility filter),
+  how many have a matching backcheck, the on-track %, points vs the target, and
+  expected backchecks, `ceil(survey_target × target% / 100)`, when
+  `survey_target` is set. `compute_staff_coverage` returns per-enumerator
+  coverage, including enumerators with no backchecks, or backchecks done per
+  backchecker. Neither needs comparison columns. The Backchecks Summary has a
+  new Targets section showing coverage against the target % and backchecks
+  done against expected, each with its deviation as a delta. The settings
+  panel gains an eligibility filter (`eligibility_column`,
+  `eligibility_values`).
+  `settings_from_page_config` builds `BackcheckSettings` from the page config,
+  where a target of 0 means not set — #318
+- **Correction log user**: New `user` column records who made each entry,
+  from any source. `get_reviewer_name()` in the new
+  `src/datasure/utils/reviewer.py` returns the "Reviewer name" set in the
+  sidebar, saved in `cache/user_settings.json`, else the OS login
+  (`getpass.getuser()`). Existing logs load with a null `user`. The
+  Correction Log table and `correction_log.csv` include it — #321
+- **Backcheck mismatch attribution**: New Streamlit-free
+  `checks/backchecks/attribution.py`. Reviewers attribute mismatches in
+  Comparison Results Details to an `ErrorSource` (Enumerator, Backchecker,
+  Respondent, Unattributed) from a pinned Review button that opens a dialog;
+  selecting several mismatch rows and clicking Review on one of them
+  attributes them together. Only `match_status == "mismatch"` rows can be
+  attributed, and Backchecker and Respondent need a note. Entries are appended
+  to `bc_attribution_{page_name_id}` in the `logs` db with the survey and
+  backcheck KEYs, column, both values (as text), source, note, user
+  (`get_reviewer_name`) and date. `mark_error_sources` adds an `error_source`
+  column: the latest entry per KEY pair and column applies only while both
+  values still equal the stored ones, otherwise the mismatch is Unattributed.
+  An Attribution log expander lists the history. Attribution never changes
+  the data, the mismatch counts or the regular error rate — #301
+- **Adjusted error rate**: `compute_enumerator_backchecker_stats` adds
+  "Adjusted Error Rate % (Cat n)" and "(Total)": for enumerators
+  (mismatches − Backchecker − Respondent) ÷ values compared, for backcheckers
+  (mismatches − Enumerator − Respondent) ÷ values compared. Unattributed
+  mismatches always count. `compute_column_stats` adds "Enumerator / Backchecker
+  / Respondent / Unattributed Mismatches" counts. The Backchecks Summary shows
+  "Mismatches Attributed" (% of mismatches with a source). New optional
+  `BackcheckSettings.error_rate_target_percent` ("Error rate target (%)" in
+  Tracking Options): each regular and adjusted rate column above it is
+  highlighted in both the enumerator and backchecker views — #301
+- **Overall backcheck error rates**: `compute_overall_error_rates` returns an
+  `OverallErrorRate` (compared, mismatches, error rate, enumerator and
+  backchecker adjusted rates) for the total over categories 1–3 and for each
+  category. The Backchecks Summary gains an Error Rates section below Targets
+  with one card each, the enumerator adjusted rate as a grey, arrowless delta
+  and the backchecker adjusted rate in the help — #301
+- **ID duplicate cards**: The ID Duplicates section shows one card per
+  duplicate ID instead of a flat table. Each card compares the records side by
+  side (fields as rows, records as columns), highlights fields that differ, and
+  has "Compare all fields" and "Only differing fields" toggles. Metrics,
+  search by ID or KEY, sort by group size or latest date, 10 cards per page and
+  a "Download duplicates (CSV)" export sit above the cards. Pages with backcheck
+  data get a Survey data / Backcheck data switcher; the backcheck view also
+  lists unmatched backcheck IDs and has its own Records to Include filter,
+  saved under `backcheck_`-prefixed keys. Logic is in the new Streamlit-free
+  `checks/id_duplicates.py`, rendering in `checks/id_duplicates_ui.py`;
+  `DuplicatesSettings` gains `team` and `backcheck_conditions` — #306
+- **Duplicate card corrections**: Each duplicate ID card has a Keep / Modify
+  ID / Drop choice per record, and each unmatched backcheck card a Modify ID /
+  Drop choice, with one required reason and note and one Save. A save logs one
+  entry per changed record ("modify value" on the ID column or "remove row",
+  source `duplicates`) to the survey or backcheck alias's log, through the
+  atomic `apply_corrections`. Save is disabled, with the reasons listed, until
+  at most one record keeps the ID and every new ID is non-empty, changed,
+  distinct within the save, valid for the ID column's type and not held by an
+  included record (naming its KEY); an unmatched backcheck's new ID must be a
+  survey ID. Dropping every record goes through `confirm_dialog`. Records
+  sharing a KEY can't be corrected on a card. A caption above the cards counts
+  the corrections logged this session and links to the Correction Log, where
+  they are undone. Decision logic is in the new Streamlit-free
+  `checks/id_corrections.py`; `IdView` gains `alias`, `processor` and
+  `resolved`, and `duplicates_report` takes the survey `alias` — #303
+- **Corrections page dataset switcher**: Pages with backcheck data get a
+  Survey data / Backcheck data switcher on their Correct Data tab. On backcheck
+  data, the add form offers only "modify value" on the backcheck ID column and
+  "remove row" (`correction_datasets`, `CorrectionDataset`); the log, removal
+  and preview use the backcheck alias. The backcheck KEY and ID columns come
+  from the Backcheck Analysis tab (`backchecks.models.backcheck_id_columns`,
+  read from `settings_utils.page_settings_file`) — #303
+- **Backcheck comparison scope**: The comparison and coverage use the
+  Duplicates tab's survey and backcheck Records to Include filters (new
+  `checks/backchecks/scope.py`, `duplicates.saved_records_to_include`,
+  `describe_records_to_include`). The page states the active filters and
+  counts, and a warning above Comparison Results Details counts the duplicate
+  survey IDs, duplicate backcheck IDs and unmatched backcheck IDs left out —
+  #303
+- **GPS outlier corrections**: Each row of the GPS outliers table has a Review
+  button that opens the correction form in a dialog, prefilled from the KEY and
+  the configured latitude and longitude, to modify coordinates, remove
+  coordinates, remove the observation or accept the location (source and check
+  type `gps`). Coordinate changes write one log entry per coordinate column
+  with a shared reason through `CorrectionProcessor.apply_corrections`, so both
+  apply or neither does; removing coordinates clears only the latitude and
+  longitude columns. Acceptances are (`gps`, KEY, no column), record both
+  coordinates and lapse if either changes. Accepted outliers are hidden from
+  the table and the outlier count unless "Show reviewed" is on, and are drawn
+  green on the map. A single-column GPS configuration, or one that uses the
+  same column for latitude and longitude (now rejected by the settings schema),
+  offers only "remove observation". Review is blocked for a KEY on several rows
+  with different coordinates, and turned off with a warning for a Survey KEY
+  named "review status" or "review reason". Logic is in the new Streamlit-free
+  `checks/gpschecks/review.py` — #304
+- **Correction Log filters**: Source and Action `st.pills` (multi-select)
+  above the Correction Log on the Correct Data page, offering only the values
+  present in the log. An empty selection doesn't filter; the two combine.
+  Filtering is `correction_view.filter_correction_log`; the removal form still
+  lists every entry — #305
+
+### Changed
+
+- **Breaking**: `_filter_data_on_conditions`, which saved the filtered rows to
+  the project-wide DuckDB table `filtered_duplicates_data`, is replaced by
+  `apply_records_to_include(data, conditions)`, which returns them. The Records
+  to Include filter applies as soon as it has a value (the Apply Filter button
+  is gone), and its condition column is restored from the page settings.
+  `duplicates_report` and `duplicates_report_settings` take an optional
+  `backcheck_data` — #306
+- **Breaking**: `duplicates` is no longer in `ACCEPT_CHECK_TYPES`: an ID
+  belongs to one record, so a duplicate ID is resolved on its card, not
+  accepted — #303
+- **Breaking**: The backcheck `drop_duplicates_option` setting (Duplicate
+  Handling) is removed. Records whose survey ID is duplicated among the
+  included records are always left out of the comparison and coverage
+  (`compute.exclude_duplicate_ids` replaces `_prepare_data_for_merge`), and
+  come back once resolved. Pages that saved "first" or "last" now exclude
+  duplicates; the saved value is ignored — #303
+- `duplicates._FilteredRecords`, `_records_to_include` and
+  `_render_filter_messages` are now public as `FilteredRecords`,
+  `filter_records_to_include` and `render_filter_messages` — #303
+- **Breaking**: `backchecks` is no longer in `ACCEPT_CHECK_TYPES`, so a
+  backcheck mismatch can't be accepted; it can only be attributed — #301
+- **Breaking**: `BackcheckSettings.backcheck_target_percent` is now
+  `float | None` (0–100), defaulting to None instead of 10;
+  `effective_target_percent` applies the 10% default. The target resolves from
+  the settings panel, then the page config, then 10%. A cleared panel value, or
+  a saved value outside 0–100, falls back to the page config.
+  `BackcheckSettings` gains `survey_target` — #318
+- **Breaking**: `compute_enumerator_backchecker_stats` no longer returns the
+  "Surveys" and "Backchecks" columns (both were the count of compared survey
+  KEYs). The Enumerator Backchecker Error Statistics table now takes them from
+  `compute_staff_coverage` and renders before comparison columns are
+  configured — #318
+
+### Fixed
+
+- **Resolved metric**: The Resolved metric on the ID duplicate cards was
+  always 0. It now counts the duplicate IDs, among the included records, that
+  corrections from any page have resolved (`id_duplicates.count_resolved_ids`)
+  — #303
+- **Raw fallback**: `CorrectionProcessor.get_corrected_data` and
+  `_reapply_all_corrections` seeded only from `prep`, so an alias with no prep
+  table, such as unprepared backcheck data, could not be corrected. They now
+  fall back to `raw` (`get_uncorrected_data`) — #303
+- **Duplicates filter**: Pages in one project shared the Records to Include
+  filter through `filtered_duplicates_data`, so one page's filter overwrote
+  another's. Each page now applies its own saved conditions — #306
+- **Duplicates filter**: A filter that matched no records silently checked
+  every record. It now shows a warning and checks no records — #306
+- **Duplicates filter**: A saved single-value filter (string or numeric), or a
+  numeric includes/excludes filter, came back empty in a new session and was
+  then saved as empty, dropping the filter. Saved values are now restored, and
+  saved values no longer in the data are dropped instead of failing — #306
+- **ID duplicates**: `compute_id_duplicates` added a stray null column when no
+  date column was configured, and failed when the configured date (or KEY)
+  column was missing from the data. Both are now skipped — #306
+- **Corrections cache**: `CorrectionProcessor`'s cached reads were keyed only on
+  `alias`, so two projects sharing an alias shared cached corrected data and
+  logs. The processor is now hashed by `project_id` — #296
+- **Apply button**: A new value of `0` no longer disables Apply. An empty
+  string still does; use "remove value" to blank a cell — #296
+- **Backcheck settings**: `backchecks_report_settings` passed the duplicate
+  option and target as `drop_duplicates` and `backcheck_goal`, which
+  `BackcheckSettings` silently dropped, so duplicates were always dropped and
+  the target was always 10. They are now passed as `drop_duplicates_option`
+  and `backcheck_target_percent`, and the target is saved under
+  `backcheck_target_percent` so it reloads in later sessions. Targets saved
+  under the old `backcheck_goal` key were never applied and are ignored — #299
+- **Backcheck dates**: `_add_date_columns` joined backcheck dates on the survey
+  KEY, so when survey and backcheck KEYs differed the dates and the "Avg Days"
+  statistics were empty. Backcheck dates now join on the backcheck KEY
+  (`{survey_key}__BCCL`). Backchecker statistics were also always empty when
+  the survey KEY was the merge ID; they are now computed — #300
+- **Correction log schema**: Removing the last correction entry now leaves an
+  empty log with the full schema, including status columns — #296
+- **Stale corrections**: `apply_corrections` now rejects a "modify value" or
+  "remove value" entry whose `current_value` doesn't match the data, as it
+  already did for acceptances. Replay (`_current_value_mismatch`) compares the
+  recorded value by value instead of by `str()`, so a correction saved with a
+  prefilled `25.0` against an integer `25` is no longer reverted on the next
+  refresh — #296
+- **Correct Data page**: Apply now saves through the shared form's
+  `apply_correction_entries` (`apply_corrections`) instead of
+  `CorrectionProcessor.apply_correction`, so it gets the same stale-value
+  check and all-or-nothing save as the check pages. `_handle_apply_correction`
+  is removed — #296
+- **Constraint violations**: A value past a hard bound was reported as a soft
+  violation whenever a soft bound on the same side was set (for example,
+  above the hard maximum read "above soft maximum"), so hard violations were
+  undercounted. Hard bounds are now tested first
+  (`compute_constraint_violations`) — #298
+- **Mapbox token**: Saving the token from the GPS settings never persisted it:
+  `save_secrets` returned early unless a session-state flag nobody set was
+  true. The token is now kept in the OS keyring, shared by every project on
+  the machine, with `secrets.toml` read as a fallback; the plain-text
+  `settings_utils.save_secrets` is removed — #304
+- **GPS acceptances on integer KEYs**: An integer KEY column with nulls came
+  back from `to_pandas` as floats, so KEY `1` read as `1.0` and never matched
+  its acceptance. Integral float KEYs are converted back to ints before
+  matching and prefilling the form — #304
+
 ## [1.1.0] - 2026-09-21
 
 ### Added

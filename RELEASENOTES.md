@@ -18,6 +18,26 @@ This document tracks user-facing changes and improvements to help data managers,
 
 ---
 
+## Unreleased
+
+### New Features
+
+#### Resolve duplicate and unmatched IDs from the Duplicates tab
+
+Each duplicate ID card now lets you decide, for every record, whether to keep it, give it a new ID or drop it, and save the whole card in one step with a reason and a note. Save stays disabled, with a message saying what's missing, until at most one record keeps the ID and every new ID is valid, so a card can't be half fixed. Unmatched back check cards let you fix the mistyped ID or drop the back check. Every change is logged on the Correct Data page, where you can undo it. The **Resolved** metric now counts the duplicate IDs your corrections have resolved.
+
+#### Correct back check data on the Correct Data page
+
+Pages with back check data have a **Survey data** / **Backcheck data** switcher on the Correct Data page. Back check data can only have its ID fixed or a record removed, since back check results measure data quality. Back check data you never prepared can now be corrected too.
+
+### Changes
+
+#### Back check comparison follows Records to Include and leaves out duplicates
+
+The back check comparison and coverage now use the same records as the Duplicates tab: the **Records to Include** filters apply, and the page says how many surveys and back checks are compared. The **Duplicate Handling** setting is gone. Records whose ID is duplicated are always left out of the comparison until you resolve the duplicate, and a warning above Comparison Results Details counts them. If a page was set to keep the first or last duplicate, it now leaves duplicates out.
+
+---
+
 ## Version 1.1.0 — Reusable Project Setups
 
 Released: September 2026

@@ -1,10 +1,10 @@
 """Settings UI for the backchecks report."""
 
-import pandas as pd
 import polars as pl
 import streamlit as st
 
 from datasure.checks.backchecks.compute import load_default_backchecks_settings
+from datasure.checks.backchecks.coverage import DEFAULT_TARGET_PERCENT
 from datasure.checks.backchecks.models import (
     TAB_NAME,
     BackcheckSettings,
@@ -245,10 +245,38 @@ def _render_staff_identifiers(
     return enumerator, backchecker
 
 
+TARGET_INPUT_KEY: str = "backcheck_goal_backchecks"
+TARGET_STATE_NAME: str = TAB_NAME + "_backcheck_target_percent"
+
+
+def _on_target_change(settings_file: str, page_config_target: float | None) -> None:
+    """Flag a changed target for saving; on clear, fall back to the page config.
+
+    Clearing saves None (so the page config target applies in later sessions)
+    and shows the page config target in the input straight away. The save
+    clears the flag, so the input's restored value is not saved as a panel
+    value.
+    """
+    trigger_save(state_name=TARGET_STATE_NAME)
+    if (
+        TARGET_INPUT_KEY in st.session_state
+        and st.session_state[TARGET_INPUT_KEY] is None
+    ):
+        save_check_settings(settings_file, TAB_NAME, {"backcheck_target_percent": None})
+        if page_config_target is not None:
+            st.session_state[TARGET_INPUT_KEY] = float(page_config_target)
+
+
 def _render_tracking_options(
-    settings_file: str, default_settings: BackcheckSettings
-) -> int:
+    settings_file: str,
+    default_settings: BackcheckSettings,
+    page_config_target: float | None = None,
+) -> tuple[float | None, float | None]:
     """Render tracking options section.
+
+    The target input is pre-filled with the saved panel value, else the page
+    config target. A value the user changes is saved and wins over the page
+    config; clearing it saves None and falls back to the page config.
 
     Parameters
     ----------
@@ -256,37 +284,82 @@ def _render_tracking_options(
         Path to settings file.
     default_settings : BackcheckSettings
         Default settings.
+    page_config_target : float | None
+        Backcheck target % from the page configuration, if set.
+
+    The error rate target is optional: error rates above it are highlighted
+    in the enumerator and backchecker tables.
 
     Returns
     -------
-    int
-        Backcheck goal.
+    tuple[float | None, float | None]
+        Backcheck target percent, or None if not set anywhere, and the error
+        rate target percent, or None if not set.
     """
     with st.container(border=True):
         st.subheader("Tracking Options")
-        to1, _, _ = st.columns(3)
+        to1, to2, _ = st.columns(3)
 
         with to1:
-            backcheck_goal = st.number_input(
-                "Target number of backchecks",
-                min_value=0,
-                help="Total number of backchecks expected",
-                key="backcheck_goal_backchecks",
-                value=default_settings.backcheck_target_percent,
-                on_change=trigger_save,
-                kwargs={"state_name": TAB_NAME + "_backcheck_goal"},
+            default_target = default_settings.backcheck_target_percent
+            backcheck_target_percent = st.number_input(
+                "Backcheck target (%)",
+                min_value=0.0,
+                max_value=100.0,
+                step=1.0,
+                format="%.1f",
+                help="Percentage of survey submissions to backcheck. Leave blank "
+                "to use the target from the page configuration.",
+                key=TARGET_INPUT_KEY,
+                value=float(default_target) if default_target is not None else None,
+                on_change=_on_target_change,
+                args=(settings_file, page_config_target),
             )
             save_check_settings(
-                settings_file, TAB_NAME, {"backcheck_goal": backcheck_goal}
+                settings_file,
+                TAB_NAME,
+                {"backcheck_target_percent": backcheck_target_percent},
             )
 
-    return backcheck_goal
+        with to2:
+            default_error_target = default_settings.error_rate_target_percent
+            error_rate_target_percent = st.number_input(
+                "Error rate target (%)",
+                min_value=0.0,
+                max_value=100.0,
+                step=1.0,
+                format="%.1f",
+                help="Highest acceptable error rate. Error rates and adjusted "
+                "error rates above it are highlighted in the enumerator and "
+                "backchecker statistics. Leave blank to highlight nothing.",
+                key="backcheck_error_rate_target",
+                value=float(default_error_target)
+                if default_error_target is not None
+                else None,
+                on_change=trigger_save,
+                kwargs={"state_name": TAB_NAME + "_error_rate_target_percent"},
+            )
+            save_check_settings(
+                settings_file,
+                TAB_NAME,
+                {"error_rate_target_percent": error_rate_target_percent},
+            )
+
+        if backcheck_target_percent is None:
+            st.warning(
+                "No backcheck target is set here or in the page configuration, "
+                f"so the default of {DEFAULT_TARGET_PERCENT:g}% is used."
+            )
+
+    return backcheck_target_percent, error_rate_target_percent
 
 
-def _render_duplicate_handling(
-    settings_file: str, default_settings: BackcheckSettings
-) -> str:
-    """Render duplicate handling section.
+def _render_eligibility_filter(
+    settings_file: str,
+    default_settings: BackcheckSettings,
+    survey_data: pl.DataFrame,
+) -> tuple[str | None, list[str]]:
+    """Render the eligibility filter for the backcheck coverage base.
 
     Parameters
     ----------
@@ -294,36 +367,65 @@ def _render_duplicate_handling(
         Path to settings file.
     default_settings : BackcheckSettings
         Default settings.
+    survey_data : pl.DataFrame
+        Survey dataset, used for the column and value options.
 
     Returns
     -------
-    str
-        Drop duplicates option.
+    tuple[str | None, list[str]]
+        Eligibility column and the values that mark a survey eligible.
     """
     with st.container(border=True):
-        st.markdown("##### Duplicate Handling")
-        st.write("How would you like to handle duplicates?")
-        options_map = {
-            "drop": ":material/remove_selection: Drop All Entries",
-            "first": ":material/first_page: Keep First Entry",
-            "last": ":material/last_page: Keep Last Entry",
-        }
-        drop_duplicates_option = st.pills(
-            "Select an option for handling duplicates",
-            options=list(options_map.keys()),
-            format_func=lambda x: options_map[x],
-            key="drop_duplicates_option_backchecks",
-            default=default_settings.drop_duplicates_option,
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_drop_duplicates_option"},
+        st.markdown("##### Eligibility Filter (Optional)")
+        st.write(
+            "Only count surveys whose selected column has one of the selected "
+            "values towards backcheck coverage, for example `consent` in `1`. "
+            "With no values selected, every survey counts."
         )
-        save_check_settings(
-            settings_file,
-            TAB_NAME,
-            {"drop_duplicates_option": drop_duplicates_option},
-        )
+        ef1, ef2, _ = st.columns(3)
 
-    return drop_duplicates_option
+        with ef1:
+            eligibility_column = _render_selectbox_with_save(
+                "Eligibility column",
+                list(survey_data.columns),
+                "eligibility_column_backchecks",
+                settings_file,
+                "eligibility_column",
+                default_settings.eligibility_column,
+                "Select the survey column that marks a survey eligible",
+            )
+
+        value_options = []
+        if eligibility_column and eligibility_column in survey_data.columns:
+            # Cast as coverage.backchecked_surveys does, so the values match.
+            value_options = (
+                survey_data[eligibility_column]
+                .cast(pl.Utf8)
+                .drop_nulls()
+                .unique()
+                .sort()
+                .to_list()
+            )
+        saved_values = default_settings.eligibility_values or []
+
+        with ef2:
+            eligibility_values = st.multiselect(
+                "Eligible values",
+                options=value_options,
+                default=[v for v in saved_values if v in value_options],
+                key="eligibility_values_backchecks",
+                help="Select the values that mark a survey eligible",
+                disabled=not eligibility_column,
+                on_change=trigger_save,
+                kwargs={"state_name": TAB_NAME + "_eligibility_values"},
+            )
+            save_check_settings(
+                settings_file,
+                TAB_NAME,
+                {"eligibility_values": eligibility_values},
+            )
+
+    return eligibility_column, eligibility_values
 
 
 def _render_value_list_display(
@@ -364,8 +466,11 @@ def _render_value_list_display(
 def _render_additional_options(
     settings_file: str,
     config: BackcheckSettings,
-) -> tuple[str, list[str], list[str], StrCompareOptions]:
+) -> tuple[list[str], list[str], StrCompareOptions]:
     """Render additional options section.
+
+    Records with a duplicated survey ID are always left out of the
+    comparison, so there is no duplicate-handling option.
 
     Parameters
     ----------
@@ -374,18 +479,15 @@ def _render_additional_options(
 
     Returns
     -------
-    tuple[str, list[str], list[str], StrCompareOptions]
-        Drop duplicates option, no diff values, exclude values,
-        and string comparison options.
+    tuple[list[str], list[str], StrCompareOptions]
+        No diff values, exclude values, and string comparison options.
     """
     with st.container(border=True):
         st.subheader("Additional Options")
-
-        default_settings = load_default_backchecks_settings(settings_file, config)
-
-        # Duplicate handling
-        drop_duplicates_option = _render_duplicate_handling(
-            settings_file, default_settings
+        st.caption(
+            "Records whose survey ID is duplicated, in the survey or the "
+            "backcheck data, are left out of the comparison until the "
+            "duplicate is resolved on the Duplicates tab."
         )
 
         # No differences settings
@@ -422,15 +524,15 @@ def _render_additional_options(
             st.write("Settings for string comparison in backcheck comparisons.")
             string_comp_options = _render_string_comparison_options(settings_file)
 
-    return drop_duplicates_option, no_diff_values, exclude_values, string_comp_options
+    return no_diff_values, exclude_values, string_comp_options
 
 
 @demo_output_onboarding(TAB_NAME)
 def backchecks_report_settings(
     project_id: str,
     settings_file: str,
-    survey_data: pd.DataFrame,
-    backcheck_data: pd.DataFrame,
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
     config: BackcheckSettings,
     survey_categorical_columns: list[str],
     survey_datetime_columns: list[str],
@@ -444,7 +546,8 @@ def backchecks_report_settings(
     - Survey identifiers (key and ID columns)
     - Survey date column selection
     - Enumerator and backchecker columns
-    - Tracking options (backcheck goal and duplicate handling)
+    - Tracking options (backcheck and error rate targets, eligibility filter)
+    - Additional options (duplicate handling and value comparison)
 
     Settings are automatically saved to the settings file when changed
     and loaded from previous sessions if available.
@@ -455,9 +558,9 @@ def backchecks_report_settings(
         Unique project identifier for database operations.
     settings_file : str
         Path to settings file for saving/loading configurations.
-    survey_data : pd.DataFrame
+    survey_data : pl.DataFrame
         Survey dataset.
-    backcheck_data : pd.DataFrame
+    backcheck_data : pl.DataFrame
         Backcheck dataset.
     config : BackcheckSettings
         Default configuration used as fallback values.
@@ -500,14 +603,17 @@ def backchecks_report_settings(
             backcheck_categorical_columns,
         )
 
-        backcheck_goal = _render_tracking_options(settings_file, default_settings)
+        backcheck_target_percent, error_rate_target_percent = _render_tracking_options(
+            settings_file, default_settings, config.backcheck_target_percent
+        )
 
-        (
-            drop_duplicates_option,
-            no_diff_values,
-            exclude_values,
-            string_comp_options,
-        ) = _render_additional_options(settings_file, config)
+        eligibility_column, eligibility_values = _render_eligibility_filter(
+            settings_file, default_settings, survey_data
+        )
+
+        no_diff_values, exclude_values, string_comp_options = (
+            _render_additional_options(settings_file, config)
+        )
 
     return BackcheckSettings(
         survey_key=survey_key,
@@ -516,8 +622,11 @@ def backchecks_report_settings(
         backcheck_date=backcheck_date,
         enumerator=enumerator,
         backchecker=backchecker,
-        backcheck_goal=backcheck_goal,
-        drop_duplicates=drop_duplicates_option,
+        backcheck_target_percent=backcheck_target_percent,
+        survey_target=default_settings.survey_target,
+        error_rate_target_percent=error_rate_target_percent,
+        eligibility_column=eligibility_column,
+        eligibility_values=eligibility_values,
         no_differences_list=no_diff_values,
         exclude_values_list=exclude_values,
         case_option=string_comp_options.case_option,

@@ -164,8 +164,9 @@ class ImportDemoInfo:
         Inside each tab you will find:
         - :material/add: **Add correction step** — open a popover to apply a new correction.
         - :material/delete: **Remove correction step** — open a popover to undo a previous correction.
-        - **Correction Log** — appears after the first correction is applied; shows all
-          corrections made so far with their reasons.
+        - **Correction Log** — appears after the first correction or acceptance; shows
+          every correction made so far, plus flags accepted on the check pages without
+          changing the data, with their reasons. Filter it by source or action.
         - **Preview Corrected Data** — a live preview of the dataset after all corrections
           have been applied, with row/column/missingness metrics.
 
@@ -855,7 +856,10 @@ class OutputOnboardingInfo:
         - **Enumerator**: Column identifying the original data collector (e.g., enum_name).
         - **Backchecker**: Column in the backcheck dataset identifying who conducted
           the back check (e.g., backchecker_name).
-        - **Target number of backchecks**: Expected total number of back checks.
+        - **Backcheck target (%)**: Percentage of surveys to backcheck. Defaults to
+          the page configuration target, or 10% if neither is set.
+        - **Eligibility Filter**: Optional column and values that mark a survey
+          eligible for backchecks (e.g., consent = 1).
         - **Additional Options**: Duplicate handling (Drop All / Keep First / Keep Last),
           No Differences Values, Exclude Values, and String Comparison Options
           (case sensitivity, trim spaces, remove symbols).

@@ -5,33 +5,40 @@ import sys
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import polars as pl
 import pytest
 
-from datasure.views.correction_view import (
+from datasure.processing.correction_log import CORRECTIONS_PAGE_SOURCE
+from datasure.utils.correction_form import (
     CorrectionFormState,
-    _build_correction_log_display,
-    _display_correction_details,
-    _handle_apply_correction,
-    _handle_remove_correction,
     _render_action_ui,
     _render_column_selector,
     _render_modify_value_action,
     _render_remove_row_action,
     _render_remove_value_action,
+    parse_date_value,
+    should_enable_apply_button,
+    validate_numeric_input,
+)
+from datasure.views.correction_view import (
+    _build_correction_log_display,
+    _display_correction_details,
+    _handle_remove_correction,
+    _render_correction_log_contents,
+    _render_log_filters,
+    filter_correction_log,
     get_current_value,
     get_key_options,
+    highlight_hard_acceptance,
     load_hfc_config,
     load_tab_config,
     main,
-    parse_date_value,
     render_add_correction_form,
     render_correction_input_form,
     render_page_header,
     render_page_navigation,
     render_value_input_widget,
-    should_enable_apply_button,
-    validate_numeric_input,
     validate_prerequisites,
 )
 
@@ -457,16 +464,251 @@ class TestBuildCorrectionLogDisplay:
 
         assert result.columns == [
             "date",
+            "user",
             "KEY",
             "Survey ID",
             "action",
             "status",
             "status_reason",
+            "check_type",
+            "severity",
             "column",
             "current_value",
             "new_value",
             "reason",
+            "source",
         ]
+
+    def test_legacy_log_shows_corrections_page_source(self):
+        result = _build_correction_log_display(self._base_log())
+
+        assert result["source"].to_list() == ["corrections_page"]
+        assert result["check_type"].to_list() == [None]
+
+    def test_accept_rows_show_their_check_type_and_source(self):
+        log = self._base_log(
+            action=["accept"],
+            new_value=[None],
+            check_type=["outliers"],
+            source=["outliers"],
+        )
+
+        result = _build_correction_log_display(log)
+
+        assert result.select("action", "check_type", "source").rows() == [
+            ("accept", "outliers", "outliers")
+        ]
+
+    def test_hard_violation_acceptances_show_their_severity(self):
+        log = self._base_log(
+            action=["accept"],
+            new_value=[None],
+            check_type=["constraints"],
+            source=["constraints"],
+            severity=["hard"],
+        )
+
+        result = _build_correction_log_display(log)
+
+        assert result["severity"].to_list() == ["hard"]
+
+    def test_shows_who_made_each_entry(self):
+        result = _build_correction_log_display(self._base_log(user=["ama"]))
+
+        assert result["user"].to_list() == ["ama"]
+
+    def test_legacy_log_shows_an_empty_user(self):
+        result = _build_correction_log_display(self._base_log())
+
+        assert result["user"].to_list() == [None]
+
+
+def _sample_display_log() -> pl.DataFrame:
+    """A display log with entries from several sources and actions."""
+    return pl.DataFrame(
+        {
+            "KEY": ["k1", "k2", "k3", "k4"],
+            "action": ["modify value", "accept", "remove row", "accept"],
+            "source": ["corrections_page", "outliers", "duplicates", "gps"],
+        }
+    )
+
+
+class TestFilterCorrectionLog:
+    """Source and action filters narrow the Correction Log together."""
+
+    def test_no_selection_keeps_every_entry(self):
+        result = filter_correction_log(_sample_display_log(), sources=[], actions=[])
+
+        assert result["KEY"].to_list() == ["k1", "k2", "k3", "k4"]
+
+    def test_filters_by_source(self):
+        result = filter_correction_log(
+            _sample_display_log(), sources=["outliers", "gps"], actions=[]
+        )
+
+        assert result["KEY"].to_list() == ["k2", "k4"]
+
+    def test_filters_by_action(self):
+        result = filter_correction_log(
+            _sample_display_log(), sources=[], actions=["accept"]
+        )
+
+        assert result["KEY"].to_list() == ["k2", "k4"]
+
+    def test_source_and_action_filters_combine(self):
+        result = filter_correction_log(
+            _sample_display_log(), sources=["gps", "duplicates"], actions=["accept"]
+        )
+
+        assert result["KEY"].to_list() == ["k4"]
+
+    def test_no_matching_entries_returns_an_empty_log(self):
+        result = filter_correction_log(
+            _sample_display_log(), sources=["corrections_page"], actions=["accept"]
+        )
+
+        assert result.is_empty()
+        assert result.columns == _sample_display_log().columns
+
+
+class TestRenderLogFilters:
+    """The filter pills offer only the sources and actions in the log."""
+
+    def test_offers_values_present_in_the_log_and_returns_selections(self):
+        pills = MagicMock(side_effect=[["gps"], ["accept"]])
+
+        with _patched_st(
+            columns=MagicMock(return_value=[MagicMock(), MagicMock()]), pills=pills
+        ):
+            sources, actions = _render_log_filters(_sample_display_log(), "tab0")
+
+        assert (sources, actions) == (["gps"], ["accept"])
+        source_call, action_call = pills.call_args_list
+        assert source_call.kwargs["options"] == [
+            "corrections_page",
+            "duplicates",
+            "gps",
+            "outliers",
+        ]
+        assert action_call.kwargs["options"] == [
+            "accept",
+            "modify value",
+            "remove row",
+        ]
+        assert source_call.kwargs["selection_mode"] == "multi"
+        assert source_call.kwargs["key"] != action_call.kwargs["key"]
+
+    def test_source_labels_are_readable(self):
+        pills = MagicMock(side_effect=[[], []])
+
+        with _patched_st(
+            columns=MagicMock(return_value=[MagicMock(), MagicMock()]), pills=pills
+        ):
+            _render_log_filters(_sample_display_log(), "tab0")
+
+        format_source = pills.call_args_list[0].kwargs["format_func"]
+        assert format_source("corrections_page") == "Corrections page"
+        assert format_source("gps") == "GPS"
+        assert format_source("outliers") == "Outliers"
+
+    def test_none_selection_is_treated_as_no_filter(self):
+        pills = MagicMock(side_effect=[None, None])
+
+        with _patched_st(
+            columns=MagicMock(return_value=[MagicMock(), MagicMock()]), pills=pills
+        ):
+            assert _render_log_filters(_sample_display_log(), "tab0") == ([], [])
+
+
+def _sample_raw_log() -> pl.DataFrame:
+    """A persisted correction log with entries from several sources."""
+    return pl.DataFrame(
+        {
+            "date": ["2026-01-01"] * 4,
+            "KEY": ["k1", "k2", "k3", "k4"],
+            "ID": [None] * 4,
+            "action": ["modify value", "accept", "remove row", "accept"],
+            "column": ["name", "age", None, "lat"],
+            "current_value": ["John", "99", None, "1.0"],
+            "new_value": ["Johnny", None, None, None],
+            "reason": ["typo", "verified", "duplicate", "verified"],
+            "source": ["corrections_page", "outliers", "duplicates", "gps"],
+        }
+    )
+
+
+class TestRenderCorrectionLogContents:
+    """The Correction Log shows the filtered entries and how many match."""
+
+    def _render(self, log: pl.DataFrame, selections: tuple[list, list]):
+        with (
+            patch(
+                "datasure.views.correction_view._render_log_filters",
+                return_value=selections,
+            ),
+            patch("datasure.views.correction_view.section_header"),
+            patch("datasure.views.correction_view.styled_dataframe") as table,
+            _patched_st(caption=MagicMock(), info=MagicMock()),
+        ):
+            _render_correction_log_contents(log, "tab0")
+            return table, _st.caption, _st.info
+
+    def test_filtered_log_shows_matching_entries_and_count(self):
+        table, caption, info = self._render(_sample_raw_log(), ([], ["accept"]))
+
+        shown = table.call_args.args[0].data
+        assert shown["KEY"].to_list() == ["k2", "k4"]
+        caption.assert_called_once_with("Showing 2 of 4 entries.")
+        info.assert_not_called()
+
+    def test_no_matching_entries_shows_zero_count_and_message(self):
+        table, caption, info = self._render(
+            _sample_raw_log(), (["corrections_page"], ["accept"])
+        )
+
+        caption.assert_called_once_with("Showing 0 of 4 entries.")
+        info.assert_called_once_with("No log entries match the selected filters.")
+        table.assert_not_called()
+
+    def test_unfiltered_log_shows_every_entry_without_count(self):
+        table, caption, _info = self._render(_sample_raw_log(), ([], []))
+
+        assert len(table.call_args.args[0].data) == 4
+        caption.assert_not_called()
+
+    def test_empty_log_shows_no_corrections_message(self):
+        table, _caption, info = self._render(_sample_raw_log().clear(), ([], []))
+
+        assert "No corrections have been made yet" in info.call_args.args[0]
+        table.assert_not_called()
+
+
+class TestHighlightHardAcceptance:
+    """Hard-violation acceptances stand out in the Correction Log."""
+
+    def test_highlights_every_cell_of_a_hard_acceptance(self):
+        row = pd.Series({"action": "accept", "severity": "hard", "KEY": "k1"})
+
+        styles = highlight_hard_acceptance(row)
+
+        assert len(styles) == len(row)
+        assert all(style and "background" in style for style in styles)
+
+    @pytest.mark.parametrize(
+        ("action", "severity"),
+        [
+            ("accept", None),
+            ("modify value", None),
+            ("accept", "soft"),
+            ("accept", pd.NA),
+            (pd.NA, pd.NA),
+        ],
+    )
+    def test_leaves_other_rows_plain(self, action, severity):
+        row = pd.Series({"action": action, "severity": severity, "KEY": "k1"})
+
+        assert highlight_hard_acceptance(row) == ["", "", ""]
 
 
 class TestLoadTabConfig:
@@ -606,11 +848,13 @@ class TestRenderAddCorrectionFormSurveyId:
             written = [str(c.args[0]) for c in _st.write.call_args_list]
             assert not any("Survey ID" in text for text in written)
 
-    def test_apply_passes_survey_id_to_processor(self):
-        """Clicking Apply forwards the looked-up Survey ID to apply_correction."""
+    def test_apply_saves_through_apply_corrections_with_survey_id(self):
+        """Clicking Apply saves one entry through `apply_corrections` (which
+        checks the current value), with the looked-up Survey ID and the
+        Correct Data page as source.
+        """
         data = pl.DataFrame({"KEY": ["uuid:1", "uuid:2"], "hhid": ["HH001", "HH002"]})
         processor = self._mock_processor(data)
-        processor.validate_correction_input.return_value = (True, "")
 
         with self._mocked_widgets(
             selected_key="uuid:1", click_apply=True, reason="Test reason"
@@ -623,8 +867,17 @@ class TestRenderAddCorrectionFormSurveyId:
                 survey_id_col="hhid",
             )
 
-            processor.apply_correction.assert_called_once()
-            assert processor.apply_correction.call_args[1]["survey_id_value"] == "HH001"
+            processor.apply_correction.assert_not_called()
+            processor.apply_corrections.assert_called_once()
+            kwargs = processor.apply_corrections.call_args.kwargs
+            assert kwargs["source"] == CORRECTIONS_PAGE_SOURCE
+            [entry] = kwargs["entries"]
+            assert (entry.key_value, entry.action, entry.reason) == (
+                "uuid:1",
+                "remove row",
+                "Test reason",
+            )
+            assert entry.survey_id_value == "HH001"
 
 
 class TestGetKeyOptions:
@@ -718,6 +971,11 @@ class TestShouldEnableApplyButton:
         assert should_enable_apply_button("modify value", "reason", None) is False
         assert should_enable_apply_button("modify value", "reason", "") is False
         assert should_enable_apply_button("modify value", "reason", "new") is True
+
+    def test_modify_value_accepts_zero(self):
+        """Zero, as text or a number, is a real value, not a missing one."""
+        assert should_enable_apply_button("modify value", "reason", "0") is True
+        assert should_enable_apply_button("modify value", "reason", 0) is True
 
     def test_remove_value_enabled_with_reason(self):
         assert should_enable_apply_button("remove value", "reason") is True
@@ -931,63 +1189,16 @@ class TestRenderActionUi:
             state = _render_action_ui("remove row", data, "KEY", "k1", 0)
         assert state.action == "remove row"
 
-
-class TestHandleApplyCorrection:
-    """Test _handle_apply_correction: validation failure, success, exception."""
-
-    def _base_kwargs(self, processor):
-        return dict(
-            correction_processor=processor,
-            corrected_data=pl.DataFrame({"KEY": ["k1"], "name": ["Alice"]}),
-            alias="survey",
-            key_col="KEY",
-            key_value="k1",
-            action="modify value",
-            column="name",
-            current_value="Alice",
-            new_value="Alicia",
-            reason="typo fix",
-        )
-
-    def test_validation_error_shows_error_and_does_not_apply(self):
-        processor = MagicMock()
-        processor.validate_correction_input.return_value = (False, "bad input")
-
-        with _patched_st(error=MagicMock(), success=MagicMock(), rerun=MagicMock()):
-            _handle_apply_correction(**self._base_kwargs(processor))
-
-            assert _st.error.called
-            assert "bad input" in _st.error.call_args[0][0]
-            processor.apply_correction.assert_not_called()
-            assert not _st.success.called
-
-    def test_success_applies_and_reruns(self):
-        processor = MagicMock()
-        processor.validate_correction_input.return_value = (True, "")
-
-        with _patched_st(error=MagicMock(), success=MagicMock(), rerun=MagicMock()):
-            _handle_apply_correction(
-                survey_id_value="HH001", **self._base_kwargs(processor)
-            )
-
-            processor.apply_correction.assert_called_once()
-            assert processor.apply_correction.call_args[1]["survey_id_value"] == (
-                "HH001"
-            )
-            assert _st.success.called
-            assert _st.rerun.called
-
-    def test_exception_during_apply_shows_error(self):
-        processor = MagicMock()
-        processor.validate_correction_input.return_value = (True, "")
-        processor.apply_correction.side_effect = RuntimeError("boom")
-
-        with _patched_st(error=MagicMock(), success=MagicMock(), rerun=MagicMock()):
-            _handle_apply_correction(**self._base_kwargs(processor))
-
-            assert _st.error.called
-            assert "boom" in _st.error.call_args[0][0]
-            assert not _st.success.called
+    @pytest.mark.parametrize("action", ["modify ID", "", None])
+    def test_rejects_unknown_action_instead_of_removing_row(self, action):
+        data = pl.DataFrame({"KEY": ["k1"], "name": ["Alice"]})
+        warning = MagicMock()
+        with (
+            _patched_st(warning=warning),
+            pytest.raises(ValueError, match="Unsupported correction action"),
+        ):
+            _render_action_ui(action, data, "KEY", "k1", 0)
+        warning.assert_not_called()
 
 
 class TestRenderCorrectionInputForm:
@@ -1000,6 +1211,35 @@ class TestRenderCorrectionInputForm:
         with _patched_st(warning=MagicMock()):
             render_correction_input_form(processor, "KEY", "survey", 0)
             assert _st.warning.called
+
+    def test_data_with_no_rows_keeps_the_remove_form(self):
+        """Dropping every record leaves corrections to undo."""
+        processor = MagicMock()
+        processor.get_corrected_data.return_value = pl.DataFrame(
+            {"KEY": [], "name": []}, schema={"KEY": pl.String, "name": pl.String}
+        )
+
+        with (
+            _patched_st(
+                columns=MagicMock(
+                    return_value=[
+                        _mock_context_widget(),
+                        _mock_context_widget(),
+                        _mock_context_widget(),
+                    ]
+                ),
+                warning=MagicMock(),
+            ),
+            patch("datasure.views.correction_view.render_add_correction_form"),
+            patch(
+                "datasure.views.correction_view.render_remove_correction_form"
+            ) as mock_remove_form,
+        ):
+            render_correction_input_form(processor, "KEY", "survey", 0)
+
+            mock_remove_form.assert_called_once_with(
+                correction_processor=processor, alias="survey", tab_index=0
+            )
 
     def test_populated_data_renders_add_form_and_calls_remove_form(self):
         """render_remove_correction_form is `@st.fragment`-wrapped, so under
@@ -1082,6 +1322,26 @@ class TestDisplayCorrectionDetails:
 
         assert not any("Column" in t for t in written)
         assert not any("New Value" in t for t in written)
+        assert not any("Check type" in t for t in written)
+
+    def test_shows_check_type_for_accept_rows(self):
+        summaries = [
+            {
+                "action_index": "0 - accept - x",
+                "action": "accept",
+                "check_type": "outliers",
+                "key_value": "k1",
+                "column": "age",
+                "new_value": None,
+                "reason": "verified",
+            }
+        ]
+
+        with _patched_st(write=MagicMock()):
+            _display_correction_details(summaries, "0 - accept - x")
+            written = [str(c.args[0]) for c in _st.write.call_args_list]
+
+        assert any("Check type" in t and "outliers" in t for t in written)
 
 
 class TestHandleRemoveCorrection:
@@ -1205,3 +1465,122 @@ class TestMain:
         mock_render_tab.assert_any_call(mock_processor_instance, "proj1", 0)
         mock_render_tab.assert_any_call(mock_processor_instance, "proj1", 1)
         mock_page_nav.assert_called_once()
+
+
+class TestCorrectionDatasets:
+    """The datasets a Corrections page tab can correct."""
+
+    def _config(self, **overrides):
+        from datasure.views.correction_view import TabConfig
+
+        return TabConfig(
+            **{
+                "page_name": "HH",
+                "survey_data_name": "survey",
+                "survey_key": "KEY",
+                "survey_id": "hhid",
+                **overrides,
+            }
+        )
+
+    def test_survey_only_without_backcheck_data(self):
+        from datasure.processing.correction_log import CORRECTION_ACTIONS
+        from datasure.views.correction_view import SURVEY_DATA, correction_datasets
+
+        (survey,) = correction_datasets(self._config())
+
+        assert survey.label == SURVEY_DATA
+        assert survey.alias == "survey"
+        assert survey.key_col == "KEY"
+        assert survey.id_col == "hhid"
+        assert survey.actions == CORRECTION_ACTIONS
+        assert survey.column is None
+        assert survey.key_namespace == 0
+
+    def test_backcheck_data_allows_only_id_fixes_and_row_removal(self):
+        from datasure.processing.correction_log import Action
+        from datasure.views.correction_view import BACKCHECK_DATA, correction_datasets
+
+        config = self._config(
+            backcheck_data_name="bc", backcheck_key="bc_key", backcheck_id="bc_id"
+        )
+
+        _, backcheck = correction_datasets(config, tab_index=2)
+
+        assert backcheck.label == BACKCHECK_DATA
+        assert backcheck.alias == "bc"
+        assert backcheck.key_col == "bc_key"
+        assert backcheck.id_col == "bc_id"
+        assert backcheck.actions == (Action.MODIFY_VALUE, Action.REMOVE_ROW)
+        # Modify value is fixed to the ID column.
+        assert backcheck.column == "bc_id"
+        assert backcheck.key_namespace == "2_backcheck"
+
+    def test_backcheck_without_an_id_column_can_only_remove_rows(self):
+        from datasure.processing.correction_log import Action
+        from datasure.views.correction_view import correction_datasets
+
+        config = self._config(
+            survey_id=None, backcheck_data_name="bc", backcheck_key="KEY"
+        )
+
+        _, backcheck = correction_datasets(config)
+
+        assert backcheck.actions == (Action.REMOVE_ROW,)
+
+
+class TestLoadTabConfigBackcheck:
+    @patch("datasure.views.correction_view.page_settings_file")
+    @patch("datasure.views.correction_view.get_check_config_settings")
+    def test_reads_the_backcheck_columns(self, mock_get_settings, mock_file, tmp_path):
+        import json
+
+        settings_file = tmp_path / "page.json"
+        settings_file.write_text(json.dumps({"backchecks": {"survey_id": "bc_id"}}))
+        mock_file.return_value = settings_file
+        mock_get_settings.return_value = {
+            "page_name": "HH",
+            "survey_data_name": "survey",
+            "survey_key": "KEY",
+            "survey_id": "hhid",
+            "backcheck_data_name": "bc",
+        }
+
+        config = load_tab_config("proj1", 0)
+
+        mock_file.assert_called_once_with("proj1", "HH")
+        assert config.backcheck_data_name == "bc"
+        assert config.backcheck_key == "KEY"
+        assert config.backcheck_id == "bc_id"
+
+
+class TestAddCorrectionFormRestrictions:
+    def test_passes_the_allowed_actions_and_column_to_the_form(self):
+        data = pl.DataFrame({"KEY": ["b1"], "hhid": ["H1"]})
+        processor = MagicMock()
+        processor.get_corrected_data.return_value = data
+        popover = _mock_context_widget()
+
+        with (
+            _patched_st(
+                popover=MagicMock(return_value=popover),
+                selectbox=MagicMock(return_value="b1"),
+                write=MagicMock(),
+            ),
+            patch("datasure.views.correction_view.render_correction_form") as form,
+        ):
+            render_add_correction_form(
+                correction_processor=processor,
+                key_col="KEY",
+                alias="bc",
+                tab_index="0_backcheck",
+                survey_id_col="hhid",
+                actions=("modify value", "remove row"),
+                column="hhid",
+            )
+
+        kwargs = form.call_args.kwargs
+        assert kwargs["actions"] == ("modify value", "remove row")
+        assert kwargs["column"] == "hhid"
+        assert kwargs["alias"] == "bc"
+        assert kwargs["key_namespace"] == "0_backcheck"

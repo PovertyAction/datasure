@@ -458,21 +458,43 @@ def test_render_backcheck_summary(patched_bc):
     """_render_backcheck_summary renders metrics without errors."""
     survey_data = pl.DataFrame({"key": [1, 2], "enum": ["a", "b"]})
     backcheck_data = pl.DataFrame({"key": [1], "bcer": ["c"]})
-    analysis = pl.DataFrame(
-        {
-            "key": [1],
-            "column_name": ["age"],
-            "survey_value": ["25"],
-            "backcheck_value": ["26"],
-            "match_status": ["mismatch"],
-            "category": [1],
-        }
-    )
     settings = BackcheckSettings(
-        survey_key="key", enumerator="enum", backchecker="bcer"
+        survey_key="key",
+        survey_id="key",
+        enumerator="enum",
+        backchecker="bcer",
+        survey_target=30,
     )
-    _render_backcheck_summary(survey_data, backcheck_data, analysis, settings)
-    patched_bc.metric.assert_called()
+    _render_backcheck_summary(survey_data, backcheck_data, settings)
+    # 10% of 30 expects 3 backchecks; 1 is done, 2 short of the target.
+    expected_card = next(
+        c
+        for c in patched_bc.metric.call_args_list
+        if c.args[0] == "Backchecks vs Expected"
+    )
+    assert expected_card.args[1] == "1 / 3 (33%)"
+    assert expected_card.kwargs["delta"] == "-2 backchecks vs target"
+    patched_bc.progress.assert_not_called()
+
+
+def test_render_backcheck_summary_zero_target(patched_bc):
+    """A 0% target expects no backchecks and renders without a percentage."""
+    survey_data = pl.DataFrame({"key": [1, 2]})
+    backcheck_data = pl.DataFrame({"key": [1]})
+    settings = BackcheckSettings(
+        survey_key="key",
+        survey_id="key",
+        backcheck_target_percent=0,
+        survey_target=30,
+    )
+    _render_backcheck_summary(survey_data, backcheck_data, settings)
+    expected_card = next(
+        c
+        for c in patched_bc.metric.call_args_list
+        if c.args[0] == "Backchecks vs Expected"
+    )
+    assert expected_card.args[1] == "1 / 0"
+    assert expected_card.kwargs["delta"] == "+1 backchecks vs target"
 
 
 def test_render_time_period_selector_backchecks(patched_bc):
@@ -773,9 +795,8 @@ def test_render_backcheck_summary_no_key_no_enum_no_bcer(patched_bc):
     """_render_backcheck_summary hits else branches when key/enum/bcer are None."""
     survey_data = pl.DataFrame({"col1": [1, 2]})
     backcheck_data = pl.DataFrame({"col1": [1]})
-    analysis = pl.DataFrame()
     settings = BackcheckSettings(survey_key=None, enumerator=None, backchecker=None)
-    _render_backcheck_summary(survey_data, backcheck_data, analysis, settings)
+    _render_backcheck_summary(survey_data, backcheck_data, settings)
     patched_bc.metric.assert_called()
 
 

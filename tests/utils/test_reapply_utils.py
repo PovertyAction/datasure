@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from datasure.utils.reapply_utils import (
     ReapplyFailure,
+    format_reapply_failures,
     highlight_status,
     warn_reapply_failures,
 )
@@ -24,6 +25,13 @@ class TestHighlightStatus:
 
     def test_unknown_status_is_not_highlighted(self):
         assert highlight_status("") == ""
+
+    def test_missing_status_is_not_highlighted(self):
+        """A null status reaches a nullable-typed Styler as pd.NA."""
+        import pandas as pd
+
+        assert highlight_status(pd.NA) == ""
+        assert highlight_status(None) == ""
 
 
 class TestWarnReapplyFailures:
@@ -48,3 +56,18 @@ class TestWarnReapplyFailures:
         assert "2 skipped" in message
         assert "Remove columns [a, b]: Columns not found" in message
         assert "Modify value for key1: Key not found" in message
+
+
+class TestFormatReapplyFailures:
+    """Test the shared summary text for skipped reapply steps."""
+
+    def test_summarizes_each_failure_under_the_context(self):
+        message = format_reapply_failures(
+            [ReapplyFailure(step="Drop age", reason="Column not found")],
+            "Some steps could not be reapplied",
+        )
+
+        assert message == (
+            "Some steps could not be reapplied (1 skipped):\n"
+            "- Drop age: Column not found"
+        )
