@@ -292,6 +292,14 @@ def retrieve_scto_credentials(
         }
 
 
+def _keyring_password_absent(service_name: str, username: str) -> bool:
+    """Return True only if the keyring confirms no password is stored."""
+    try:
+        return keyring.get_password(service_name, username) is None
+    except KeyringError:
+        return False
+
+
 def delete_stored_credentials(
     project_id: str, server: str, credential_type: str = "scto_login"
 ) -> dict[str, Any]:
@@ -328,17 +336,25 @@ def delete_stored_credentials(
                 logger.info(
                     f"Deleted password from keyring for {service_name}/{username}"
                 )
-            except PasswordDeleteError:
-                # Already gone from the keyring; still clear the metadata entry
-                logger.info(f"No keyring password found for {service_name}/{username}")
             except KeyringError as e:
-                error_msg = f"Could not delete password from keyring: {e}"
-                logger.warning(error_msg)
-                return {
-                    "success": False,
-                    "error": error_msg,
-                    "error_type": "keyring_error",
-                }
+                # PasswordDeleteError usually means the password is already
+                # gone, but the macOS Keychain and KWallet backends also raise
+                # it for access errors or a cancelled unlock. Only clear the
+                # metadata entry once the password is confirmed absent.
+                if isinstance(e, PasswordDeleteError) and _keyring_password_absent(
+                    service_name, username
+                ):
+                    logger.info(
+                        f"No keyring password found for {service_name}/{username}"
+                    )
+                else:
+                    error_msg = f"Could not delete password from keyring: {e}"
+                    logger.warning(error_msg)
+                    return {
+                        "success": False,
+                        "error": error_msg,
+                        "error_type": "keyring_error",
+                    }
 
         # Delete metadata file
         try:
