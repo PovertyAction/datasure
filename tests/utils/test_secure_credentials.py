@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from keyring.errors import KeyringError
+from keyring.errors import KeyringError, PasswordDeleteError
 
 from datasure.utils.secure_credentials import (
     SecureCredentialError,
@@ -814,6 +814,9 @@ class TestDeleteCredentials:
 
             assert result["success"] is True
             assert "deleted successfully" in result["message"]
+            mock_keyring.delete_password.assert_called_once_with(
+                service_name, "test@example.com"
+            )
 
             # Verify service was removed from metadata
             with open(metadata_file, encoding="utf-8") as f:
@@ -833,8 +836,10 @@ class TestDeleteCredentials:
 
     @patch("datasure.utils.secure_credentials._get_metadata_path")
     @patch("datasure.utils.secure_credentials.keyring")
-    def test_delete_credentials_keyring_warning(self, mock_keyring, mock_metadata_path):
-        """Test deletion with keyring warning."""
+    def test_delete_credentials_keyring_error_is_failure(
+        self, mock_keyring, mock_metadata_path
+    ):
+        """A keyring failure is reported as a failure, not success."""
         with tempfile.TemporaryDirectory() as temp_dir:
             metadata_file = Path(temp_dir) / "metadata.json"
             service_name = "datasure_scto_login_testserver_test_project"
@@ -853,8 +858,99 @@ class TestDeleteCredentials:
 
             result = delete_stored_credentials("test_project", "testserver")
 
-            # Should still succeed but log warning
+            assert result["success"] is False
+            assert "Access denied" in result["error"]
+            assert result["error_type"] == "keyring_error"
+            mock_keyring.delete_password.assert_called_once_with(
+                service_name, "test@example.com"
+            )
+
+            # Metadata is kept so the entry stays listed and can be retried
+            with open(metadata_file, encoding="utf-8") as f:
+                assert service_name in json.load(f)
+
+    @patch("datasure.utils.secure_credentials._get_metadata_path")
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_delete_credentials_already_removed_from_keyring(
+        self, mock_keyring, mock_metadata_path
+    ):
+        """A password already gone from the keyring still clears the entry."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            metadata_file = Path(temp_dir) / "metadata.json"
+            service_name = "datasure_scto_login_testserver_test_project"
+            metadata = {
+                service_name: {
+                    "server": "testserver",
+                    "username": "test@example.com",
+                    "credential_type": "scto_login",
+                }
+            }
+            with open(metadata_file, "w", encoding="utf-8") as f:
+                json.dump(metadata, f)
+
+            mock_metadata_path.return_value = metadata_file
+            mock_keyring.delete_password.side_effect = PasswordDeleteError(
+                "Password not found"
+            )
+            mock_keyring.get_password.return_value = None
+
+            result = delete_stored_credentials("test_project", "testserver")
+
             assert result["success"] is True
+            mock_keyring.get_password.assert_called_once_with(
+                service_name, "test@example.com"
+            )
+            with open(metadata_file, encoding="utf-8") as f:
+                assert service_name not in json.load(f)
+
+    @pytest.mark.parametrize(
+        ("get_password_kwargs", "case"),
+        [
+            ({"return_value": "still-stored"}, "password_retained"),
+            (
+                {"side_effect": KeyringError("Keychain locked")},
+                "verification_error",
+            ),
+        ],
+    )
+    @patch("datasure.utils.secure_credentials._get_metadata_path")
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_delete_credentials_password_delete_error_not_confirmed(
+        self, mock_keyring, mock_metadata_path, get_password_kwargs, case
+    ):
+        """PasswordDeleteError is a failure unless the password is confirmed gone.
+
+        The macOS Keychain and KWallet backends raise PasswordDeleteError for
+        access errors and cancelled unlocks, not only for missing passwords.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            metadata_file = Path(temp_dir) / "metadata.json"
+            service_name = "datasure_scto_login_testserver_test_project"
+            metadata = {
+                service_name: {
+                    "server": "testserver",
+                    "username": "test@example.com",
+                    "credential_type": "scto_login",
+                }
+            }
+            with open(metadata_file, "w", encoding="utf-8") as f:
+                json.dump(metadata, f)
+
+            mock_metadata_path.return_value = metadata_file
+            mock_keyring.delete_password.side_effect = PasswordDeleteError(
+                "Can't delete password in keychain: access denied"
+            )
+            mock_keyring.get_password.configure_mock(**get_password_kwargs)
+
+            result = delete_stored_credentials("test_project", "testserver")
+
+            assert result["success"] is False, case
+            assert result["error_type"] == "keyring_error"
+            assert "access denied" in result["error"]
+
+            # Metadata is kept so the entry stays listed and can be retried
+            with open(metadata_file, encoding="utf-8") as f:
+                assert service_name in json.load(f)
 
     @patch("datasure.utils.secure_credentials._get_metadata_path")
     def test_delete_credentials_unexpected_error(self, mock_metadata_path):
