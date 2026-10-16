@@ -495,11 +495,13 @@ class TestModuleLevelCodeCoverage:
     @pytest.fixture(autouse=True)
     def _restore_module(self):
         """After each test, reload to a clean baseline so later tests are unaffected."""
+        orig_checkbox = _st.checkbox
         yield
         _st.stop.side_effect = None
         _st.session_state["st_project_id"] = "test_project"
         _st.selectbox = MagicMock(return_value=None)
         _st.button = MagicMock(return_value=False)
+        _st.checkbox = orig_checkbox
         orig_cd = _st.cache_data
         orig_cols = _st.columns
         _st.cache_data = lambda ttl=None, **kw: lambda f: f
@@ -519,10 +521,13 @@ class TestModuleLevelCodeCoverage:
         selectbox_val=None,
         button_val=False,
         stop_raises=False,
+        checkbox_val=False,
+        extra_patches=(),
     ):
         _st.session_state["st_project_id"] = project_id
         _st.selectbox = MagicMock(return_value=selectbox_val)
         _st.button = MagicMock(return_value=button_val)
+        _st.checkbox = MagicMock(return_value=checkbox_val)
         if stop_raises:
             _st.stop.side_effect = StopIteration
         orig_cd = _st.cache_data
@@ -530,7 +535,10 @@ class TestModuleLevelCodeCoverage:
         _st.cache_data = lambda ttl=None, **kw: lambda f: f
         _st.columns = MagicMock(side_effect=_columns_factory)
         try:
-            with _base_reload_patches(configs=configs), suppress(StopIteration):
+            with (
+                _base_reload_patches(configs=configs, extra_patches=extra_patches),
+                suppress(StopIteration),
+            ):
                 importlib.reload(_rv_mod)
         finally:
             _st.cache_data = orig_cd
@@ -548,6 +556,38 @@ class TestModuleLevelCodeCoverage:
         section (384-406) including the PII confirmation branch.
         """
         self._reload(selectbox_val="Household HFCs", button_val=True)
+
+    @pytest.mark.parametrize("exclude", [False, True])
+    def test_exclude_reviewer_names_passed_to_builder(self, exclude):
+        """The Exclude reviewer names checkbox is forwarded to the builder."""
+        build = MagicMock(return_value=b"zip")
+        self._reload(
+            selectbox_val="Household HFCs",
+            button_val=True,
+            checkbox_val=exclude,
+            extra_patches=(
+                patch(
+                    "datasure.replication.package_builder.build_replication_package",
+                    build,
+                ),
+            ),
+        )
+        build.assert_called_once()
+        assert build.call_args.kwargs["exclude_reviewer_names"] is exclude
+        labels = [c.args[0] for c in _st.checkbox.call_args_list]
+        assert "Exclude reviewer names" in labels
+
+    def test_toggling_exclude_reviewer_names_clears_built_zip(self):
+        """A zip built with the other setting is not offered for download."""
+        self._reload(selectbox_val="Household HFCs", checkbox_val=False)
+        _st.session_state["_replication_zip"] = b"old"
+        _st.session_state["_replication_filename"] = "old.zip"
+        try:
+            self._reload(selectbox_val="Household HFCs", checkbox_val=True)
+            assert "_replication_zip" not in _st.session_state
+        finally:
+            _st.session_state.pop("_replication_zip", None)
+            _st.session_state.pop("_replication_filename", None)
 
     def test_no_project_id_covers_first_guard(self):
         """Empty project_id covers st.info + st.stop guard (249-250)."""

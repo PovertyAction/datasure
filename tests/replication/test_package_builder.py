@@ -9,6 +9,7 @@ from unittest.mock import patch
 import polars as pl
 import pytest
 
+from datasure.processing.correction_log import CORRECTION_LOG_SCHEMA
 from datasure.replication.package_builder import (
     _action_summary,
     _load_corrected,
@@ -412,3 +413,90 @@ class TestPackageCountsAndLegacyLogs:
         assert audit["status"].to_list() == ["Successful"]
         assert "check_type" in audit.columns
         assert audit["user"].to_list() == [None]
+
+
+class TestExcludeReviewerNames:
+    _LOG_PATH = "replication_p_s/4_output/3_logs/correction_log.csv"
+
+    @staticmethod
+    def _corr_log() -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                "date": ["2026-01-01", "2026-01-02"],
+                "KEY": ["k1", "k2"],
+                "ID": [None, None],
+                "action": ["accept", "modify value"],
+                "column": ["age", "age"],
+                "current_value": ["25", "30"],
+                "new_value": [None, "31"],
+                "reason": ["verified", "typo"],
+                "source": ["outliers", "corrections_page"],
+                "check_type": ["outliers", None],
+                "user": ["Ama Mensah", "kofi"],
+            }
+        )
+
+    @staticmethod
+    def _duckdb_get(corr_log: pl.DataFrame):
+        def _get(project_id, table, db_name):
+            if "prep_log" in table:
+                return _PREP_LOG
+            if "corr_log" in table:
+                return corr_log
+            return _mock_loader(project_id, table, db_name)
+
+        return _get
+
+    def _build(self, corr_log: pl.DataFrame, **kwargs) -> pl.DataFrame:
+        with patch(
+            "datasure.replication.package_builder.duckdb_get_table",
+            side_effect=self._duckdb_get(corr_log),
+        ):
+            zip_bytes = build_replication_package(
+                project_id="p",
+                project_name="P",
+                survey_name="S",
+                alias="s",
+                key_col="key",
+                **kwargs,
+            )
+        with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
+            return pl.read_csv(BytesIO(zf.read(self._LOG_PATH)), infer_schema_length=0)
+
+    def test_names_kept_by_default(self):
+        audit = self._build(self._corr_log())
+        assert audit["user"].to_list() == ["Ama Mensah", "kofi"]
+
+    def test_names_kept_when_option_off(self):
+        audit = self._build(self._corr_log(), exclude_reviewer_names=False)
+        assert audit["user"].to_list() == ["Ama Mensah", "kofi"]
+
+    def test_names_blanked_when_option_on(self):
+        audit = self._build(self._corr_log(), exclude_reviewer_names=True)
+        assert audit["user"].to_list() == [None, None]
+
+    def test_blanked_export_keeps_full_schema_and_other_columns(self):
+        audit = self._build(self._corr_log(), exclude_reviewer_names=True)
+        assert set(audit.columns) == set(CORRECTION_LOG_SCHEMA)
+        assert audit.select("KEY", "action", "reason").rows() == [
+            ("k1", "accept", "verified"),
+            ("k2", "modify value", "typo"),
+        ]
+
+    def test_blanking_an_empty_log_keeps_full_header(self):
+        audit = self._build(pl.DataFrame(), exclude_reviewer_names=True)
+        assert audit.is_empty()
+        assert audit.columns == list(CORRECTION_LOG_SCHEMA)
+
+    def test_stored_log_not_modified(self):
+        stored = self._corr_log()
+        with (
+            patch("datasure.utils.duckdb_utils.duckdb_save_table") as save,
+            patch("datasure.utils.duckdb_utils.duckdb_remove_table") as remove,
+            patch("datasure.utils.duckdb_utils.duckdb_delete_rows") as delete,
+        ):
+            self._build(stored, exclude_reviewer_names=True)
+        assert stored["user"].to_list() == ["Ama Mensah", "kofi"]
+        save.assert_not_called()
+        remove.assert_not_called()
+        delete.assert_not_called()

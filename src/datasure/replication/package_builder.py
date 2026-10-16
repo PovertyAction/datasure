@@ -95,6 +95,18 @@ def _applied_corrections(correction_log: pl.DataFrame) -> pl.DataFrame:
     return correction_log.filter(pl.col("action") != Action.ACCEPT)
 
 
+def _blank_reviewer_names(correction_log: pl.DataFrame) -> pl.DataFrame:
+    """Return a copy of *correction_log* with every ``user`` value set to null.
+
+    The column is kept so the export still matches ``CORRECTION_LOG_SCHEMA``.
+    """
+    if "user" not in correction_log.columns:
+        return correction_log
+    return correction_log.with_columns(
+        pl.lit(None, dtype=CORRECTION_LOG_SCHEMA["user"]).alias("user")
+    )
+
+
 def _action_summary(correction_log: pl.DataFrame) -> dict[str, int]:
     correction_log = _applied_corrections(correction_log)
     if correction_log.is_empty():
@@ -148,6 +160,7 @@ def build_replication_package(
     form_def: dict | None = None,
     form_id: str = "",
     on_progress: Callable[[str], None] | None = None,
+    exclude_reviewer_names: bool = False,
 ) -> bytes:
     """Build the Stata replication package and return it as zip bytes.
 
@@ -176,6 +189,10 @@ def build_replication_package(
         Optional callback invoked with a human-readable status message at each
         major step.  Callers can pass ``st.write`` to stream progress into a
         Streamlit status block.
+    exclude_reviewer_names : bool
+        When ``True``, blank the ``user`` column in the exported
+        ``correction_log.csv``. The column is kept, and the project's stored
+        correction log is not modified.
 
     Returns
     -------
@@ -281,9 +298,13 @@ def build_replication_package(
     raw_csv = raw_df.write_csv() if not raw_df.is_empty() else ""
 
     # Audit logs as CSV
+    exported_log = correction_log
+    if exclude_reviewer_names:
+        exported_log = _blank_reviewer_names(correction_log)
+        _step("Reviewer names removed from `correction_log.csv`")
     correction_log_csv = (
-        correction_log.write_csv()
-        if not correction_log.is_empty()
+        exported_log.write_csv()
+        if not exported_log.is_empty()
         else ",".join(CORRECTION_LOG_SCHEMA) + "\n"
     )
     prep_log_csv = (
