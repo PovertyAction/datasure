@@ -39,7 +39,7 @@ src/datasure/
 │                           #   Include filters to the comparison
 ├── connectors/
 │   ├── scto.py             # SurveyCTO download/UI (uses utils/scto_api.py)
-│   └── local.py            # Local file import (csv/xlsx/xls/json/dta/parquet)
+│   └── local.py            # Local file import (csv/xlsx/json/dta/parquet)
 ├── processing/
 │   ├── prep.py             # Data preparation operations (Polars)
 │   ├── corrections.py      # Corrections and accept entries (CorrectionProcessor)

@@ -3,7 +3,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 
@@ -61,7 +61,11 @@ class SurveyCTOConfig:
     max_retries: int = 3
     timeout: int = 30
     chunk_size: int = 1000
-    default_date: datetime = datetime(2024, 1, 1, 13, 40, 40)
+    # Lower bound for the API `date` filter, earlier than any SurveyCTO data.
+    # Not 0: SurveyCTO throttles `date=0` (full pull) requests to one per
+    # licensed quiet period (HTTP 417), and every refresh is currently a full
+    # pull. Revisit once incremental refresh works (#340).
+    default_date: datetime = datetime(2010, 1, 1, tzinfo=UTC)
     date_format: str = "%b %d, %Y %I:%M:%S %p"
 
 

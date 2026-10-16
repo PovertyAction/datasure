@@ -145,7 +145,8 @@ Import sources are added via the **"Add Import Configuration"** popover. Click i
 2. Select **"local storage"** from the Import Type dropdown
 3. Upload file(s):
    - Drag and drop or browse
-   - Supported formats: .csv, .xlsx, .xls, .json, .dta (Stata), .parquet
+   - Supported formats: .csv, .xlsx, .json, .dta (Stata), .parquet. Save
+     legacy Excel (.xls) files as .xlsx first
 4. Configure settings:
    - Assign dataset alias (name)
    - Select sheet (for Excel files)
