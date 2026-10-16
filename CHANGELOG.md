@@ -40,6 +40,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   'http.response.body'` on image and video responses. Starlette 1.8.0 changed
   `IdentityResponder.send_with_compression`, which Streamlit 1.61.0's gzip
   middleware overrides; Streamlit 1.62+ is compatible — closes #330
+- **SurveyCTO import**: Submissions completed before 2024-01-01 were never
+  downloaded. `SurveyCTOConfig.default_date` is now 2010-01-01 UTC. It is not
+  `date=0`, which SurveyCTO throttles to one request per licensed quiet period
+  (HTTP 417) (`src/datasure/connectors/scto.py`) — closes #341
+- **Start page**: "Learn more" listed SPSS as a supported local file format; it
+  now lists CSV, Excel, Stata, JSON and Parquet
+  (`src/datasure/views/start_view.py`)
+- **Local import**: Legacy `.xls` files passed the file-type check and then
+  failed with an openpyxl error, because openpyxl cannot read `.xls`. They are
+  now rejected up front, in the form and in `FileConfig`, with an instruction to
+  save the file as `.xlsx`; README, User Guide and Architecture no longer list
+  `.xls` (`src/datasure/connectors/local.py`)
 - **Correction replay**: Replay silently overwrote a value fixed at source when
   the corrected value was originally missing. `_current_value_mismatch` no
   longer skips a missing recorded value, so the correction applies only while
