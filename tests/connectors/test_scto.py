@@ -1,6 +1,6 @@
 """Tests for the SurveyCTO connector module."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -73,7 +73,7 @@ class TestSurveyCTOConfig:
         assert config.max_retries == 3
         assert config.timeout == 30
         assert config.chunk_size == 1000
-        assert config.default_date == datetime(2024, 1, 1, 13, 40, 40)
+        assert config.default_date == datetime(2010, 1, 1, tzinfo=UTC)
         assert config.date_format == "%b %d, %Y %I:%M:%S %p"
 
     def test_config_custom_values(self):
@@ -1577,6 +1577,31 @@ class TestSurveyCTOClientExtended:
         assert result == 1
         saved_df = mock_save.call_args[0][1]
         assert len(saved_df) == 2
+
+    @patch("datasure.connectors.scto.standardize_missing_values")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_import_regular_form_first_import_sends_2010_date(
+        self, mock_save, mock_standardize
+    ):
+        """Test a first import requests submissions completed after 2010-01-01 UTC."""
+        client = SurveyCTOClient("test1234")
+        mock_scto_client = Mock()
+        client._scto_client = mock_scto_client
+
+        mock_scto_client.download_form_data_json.return_value = [{"name": "John"}]
+        mock_scto_client.download_form_definition.return_value = {
+            "fieldsRowsAndColumns": [["name", "type"], ["name", "text"]],
+            "choicesRowsAndColumns": [["list name", "name", "label"]],
+        }
+        mock_standardize.side_effect = lambda x: x
+
+        form_config = FormConfig(
+            alias="test_form", form_id="form123", server="testserver"
+        )
+        client._import_regular_form(form_config)
+
+        params = mock_scto_client.download_form_data_json.call_args.kwargs["params"]
+        assert params == {"date": 1262304000}
 
     @patch("datasure.connectors.scto.standardize_missing_values")
     @patch("datasure.connectors.scto.duckdb_save_table")
