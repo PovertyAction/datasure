@@ -8,6 +8,7 @@ from typing import Any
 import polars as pl
 import streamlit as st
 
+from datasure.checks.backchecks.models import backcheck_id_columns
 from datasure.processing.correction_log import (
     ACCEPT_CHECK_TYPES,
     CORRECTION_ACTIONS,
@@ -25,6 +26,7 @@ from datasure.utils.duckdb_utils import (
 )
 from datasure.utils.reapply_utils import ReapplyFailure
 from datasure.utils.reviewer import get_reviewer_name
+from datasure.utils.settings_utils import page_settings_file
 
 
 def _describe_correction_row(row: dict[str, Any]) -> str:
@@ -426,6 +428,7 @@ class CorrectionProcessor:
         reason: str,
         source: str = CORRECTIONS_PAGE_SOURCE,
         check_type: str | None = None,
+        key_col: str | None = None,
     ) -> None:
         """Add a new correction entry to the log.
 
@@ -453,6 +456,9 @@ class CorrectionProcessor:
             check page such as "outliers"
         check_type : str | None
             For "accept" entries, the check whose flag was accepted
+        key_col : str | None
+            The key column name. If None, the KEY column the check config
+            sets for `alias` is used.
         """
         self._append_log_rows(
             alias,
@@ -470,9 +476,12 @@ class CorrectionProcessor:
                     user=get_reviewer_name(),
                 )
             ],
+            key_col,
         )
 
-    def _append_log_rows(self, alias: str, rows: list[dict[str, Any]]) -> None:
+    def _append_log_rows(
+        self, alias: str, rows: list[dict[str, Any]], key_col: str | None = None
+    ) -> None:
         """Append rows to the correction log in a single save.
 
         Parameters
@@ -481,6 +490,9 @@ class CorrectionProcessor:
             The data alias/table name
         rows : list[dict[str, Any]]
             Log rows built by `_build_log_row`
+        key_col : str | None
+            The key column name. If None, the KEY column the check config
+            sets for `alias` is used.
         """
         current_log = self.get_correction_log(alias)
         new_rows = pl.DataFrame(rows, schema=CORRECTION_LOG_SCHEMA)
@@ -494,6 +506,14 @@ class CorrectionProcessor:
                 for name, dtype in CORRECTION_LOG_SCHEMA.items()
             )
             updated_log = pl.concat([aligned_current_log, new_rows])
+
+        # The new rows may change a value an earlier acceptance recorded.
+        # Callers save the corrected data first, so it is current here.
+        if (updated_log["action"] == Action.ACCEPT).any():
+            data = self.get_corrected_data(alias)
+            updated_log = self._with_acceptance_statuses(
+                updated_log, data, key_col or self._configured_key_column(alias, data)
+            )
 
         duckdb_save_table(
             project_id=self.project_id,
@@ -571,6 +591,7 @@ class CorrectionProcessor:
             reason=reason,
             source=source or check_type,
             check_type=check_type,
+            key_col=key_col,
         )
 
     def get_active_acceptances(
@@ -731,6 +752,7 @@ class CorrectionProcessor:
                 current_value=current_value,
                 new_value=new_value,
                 reason=reason,
+                key_col=key_col,
             )
 
         return corrected_data
@@ -795,7 +817,7 @@ class CorrectionProcessor:
 
         self.save_corrected_data(alias, corrected_data)
         try:
-            self._append_log_rows(alias, log_rows)
+            self._append_log_rows(alias, log_rows, key_col)
         except Exception:
             # Keep data and log in step: undo the data change, then re-raise.
             self.save_corrected_data(alias, original_data)
@@ -835,10 +857,8 @@ class CorrectionProcessor:
         if entry.action not in CORRECTION_ACTIONS:
             raise ValueError(f"Unknown correction action '{entry.action}'")
 
-        if (
-            entry.action in (Action.MODIFY_VALUE, Action.REMOVE_VALUE)
-            and entry.current_value is not None
-        ):
+        # A missing current value is checked too: the cell must still be missing.
+        if entry.action in (Action.MODIFY_VALUE, Action.REMOVE_VALUE) and entry.column:
             _check_acceptance_against_data(
                 data, key_col, entry.key_value, entry.column, entry.current_value
             )
@@ -1187,18 +1207,16 @@ class CorrectionProcessor:
             return []
 
         correction_log = self.get_correction_log(alias)
+        key_col = self._configured_key_column(alias, fresh_data)
 
         corrected_data = fresh_data
         failures: list[ReapplyFailure] = []
         statuses: list[str] = []
         status_reasons: list[str | None] = []
         for row in correction_log.iter_rows(named=True):
-            if row["action"] == Action.ACCEPT:
-                inactive_reason = self._inactive_acceptance_reason(corrected_data, row)
-                statuses.append("Inactive" if inactive_reason else "Successful")
-                status_reasons.append(inactive_reason)
-                continue
-            corrected_data, error = self._apply_correction_row(corrected_data, row)
+            corrected_data, error = self._apply_correction_row(
+                corrected_data, row, key_col
+            )
             if error:
                 statuses.append("Failed")
                 status_reasons.append(error)
@@ -1209,9 +1227,15 @@ class CorrectionProcessor:
                 statuses.append("Successful")
                 status_reasons.append(None)
 
-        refreshed_log = correction_log.with_columns(
-            pl.Series("status", statuses, dtype=pl.String),
-            pl.Series("status_reason", status_reasons, dtype=pl.String),
+        # Accept rows don't change the data; their status depends on the final
+        # data, as for `get_active_acceptances`.
+        refreshed_log = self._with_acceptance_statuses(
+            correction_log.with_columns(
+                pl.Series("status", statuses, dtype=pl.String),
+                pl.Series("status_reason", status_reasons, dtype=pl.String),
+            ),
+            corrected_data,
+            key_col,
         )
         duckdb_save_table(
             project_id=self.project_id,
@@ -1226,7 +1250,7 @@ class CorrectionProcessor:
         return failures
 
     def _apply_correction_row(
-        self, data: pl.DataFrame, row: dict[str, Any]
+        self, data: pl.DataFrame, row: dict[str, Any], key_col: str | None = None
     ) -> tuple[pl.DataFrame, str | None]:
         """Apply one correction-log row to data.
 
@@ -1241,6 +1265,9 @@ class CorrectionProcessor:
             The data to apply the correction to
         row : dict[str, Any]
             A single row from the correction log
+        key_col : str | None
+            The key column name. If None, the first column holding the row's
+            KEY is used.
 
         Returns
         -------
@@ -1255,7 +1282,7 @@ class CorrectionProcessor:
             return data, None
 
         key_value = row["KEY"]
-        key_col = self._find_key_column(data, key_value)
+        key_col = self._find_key_column(data, key_value, key_col)
         if not key_col:
             return data, f"Key '{key_value}' not found in current data"
 
@@ -1291,11 +1318,63 @@ class CorrectionProcessor:
 
         return data, None
 
+    def _configured_key_column(self, alias: str, data: pl.DataFrame) -> str | None:
+        """Return the KEY column the check config sets for `alias`.
+
+        That is the `survey_key` of a page whose survey data is `alias`, or
+        the backcheck KEY of a page whose backcheck data is `alias` (see
+        `backcheck_id_columns`). None if no page sets one that is in `data`.
+        """
+        pages = duckdb_get_table(
+            project_id=self.project_id, alias="check_config", db_name="logs"
+        )
+        for page in pages.iter_rows(named=True):
+            if page.get("survey_data_name") == alias:
+                key_col = page.get("survey_key")
+            elif page.get("backcheck_data_name") == alias:
+                key_col, _ = backcheck_id_columns(
+                    str(page_settings_file(self.project_id, page["page_name"])),
+                    page.get("survey_key"),
+                    page.get("survey_id"),
+                )
+            else:
+                continue
+            if key_col in data.columns:
+                return key_col
+        return None
+
+    def _with_acceptance_statuses(
+        self, log: pl.DataFrame, data: pl.DataFrame, key_col: str | None
+    ) -> pl.DataFrame:
+        """Return `log` with each accept row's status judged against `data`.
+
+        An accept row is `Successful` while `data` holds its recorded value
+        and `Inactive`, with the reason, once it doesn't. Other rows are
+        returned unchanged. Records are found by `key_col`, or, if None, by
+        the first column holding the row's KEY.
+        """
+        if log.is_empty():
+            return log
+        statuses: list[str | None] = []
+        status_reasons: list[str | None] = []
+        for row in log.iter_rows(named=True):
+            if row["action"] == Action.ACCEPT:
+                inactive_reason = self._inactive_acceptance_reason(data, row, key_col)
+                statuses.append("Inactive" if inactive_reason else "Successful")
+                status_reasons.append(inactive_reason)
+            else:
+                statuses.append(row["status"])
+                status_reasons.append(row["status_reason"])
+        return log.with_columns(
+            pl.Series("status", statuses, dtype=pl.String),
+            pl.Series("status_reason", status_reasons, dtype=pl.String),
+        )
+
     def _inactive_acceptance_reason(
-        self, data: pl.DataFrame, row: dict[str, Any]
+        self, data: pl.DataFrame, row: dict[str, Any], key_col: str | None
     ) -> str | None:
         """Explain why an accept row no longer holds for `data`, or None if it does."""
-        key_col = self._find_key_column(data, row["KEY"])
+        key_col = key_col or self._find_key_column(data, row["KEY"])
         if not key_col:
             return f"Key '{row['KEY']}' not found in current data"
         return _acceptance_mismatch(data, key_col, row["KEY"], _accepted_values(row))
@@ -1323,17 +1402,14 @@ class CorrectionProcessor:
             The column the correction targets
         recorded_value : str | None
             The value recorded in the log at the time the correction was
-            made, or None if no value was recorded
+            made. None means the value was missing, so the correction still
+            applies only while the value is missing.
 
         Returns
         -------
         str | None
-            A description of the mismatch, or None if the value still
-            matches (or there is nothing recorded to compare against)
+            A description of the mismatch, or None if the value still matches
         """
-        if recorded_value is None:
-            return None
-
         actual_value = data.filter(pl.col(key_col) == key_value)[0, column]
 
         if not _values_match(actual_value, recorded_value):
@@ -1345,8 +1421,10 @@ class CorrectionProcessor:
         return None
 
     @staticmethod
-    def _find_key_column(data: pl.DataFrame, key_value: str) -> str | None:
-        """Find the first column containing the given key value.
+    def _find_key_column(
+        data: pl.DataFrame, key_value: str, key_col: str | None = None
+    ) -> str | None:
+        """Find the column containing the given key value.
 
         Parameters
         ----------
@@ -1354,13 +1432,17 @@ class CorrectionProcessor:
             The data to search
         key_value : str
             The key value to look for
+        key_col : str | None
+            The configured key column. If given, only it is searched;
+            otherwise the first column holding `key_value` is used.
 
         Returns
         -------
         str | None
             The matching column name, or None if not found
         """
-        for col in data.columns:
+        candidates = data.columns if key_col is None else [key_col]
+        for col in candidates:
             try:
                 if data[col].is_in([key_value]).any():
                     return col
