@@ -52,6 +52,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now rejected up front, in the form and in `FileConfig`, with an instruction to
   save the file as `.xlsx`; README, User Guide and Architecture no longer list
   `.xls` (`src/datasure/connectors/local.py`)
+- **Correction replay**: Replay silently overwrote a value fixed at source when
+  the corrected value was originally missing. `_current_value_mismatch` no
+  longer skips a missing recorded value, so the correction applies only while
+  the cell is still missing and otherwise fails with a reason; the same check
+  runs when a correction is first applied
+  (`src/datasure/processing/corrections.py`) — #337
+- **Acceptance status**: An accept row's Status in the Correction Log was
+  judged against the data at that point in replay, so an accept followed by a
+  modify of the same cell showed `Successful` while the check pages treated it
+  as inactive. Accept statuses are now judged against the final corrected data,
+  as `get_active_acceptances` does, on replay and on every log save — closes #337
+- **Correction KEY lookup**: Replay and acceptance statuses found a record by
+  the first column holding its KEY value, so a value repeated in another column
+  could point them at the wrong record and mark an active acceptance
+  `Inactive`. They now use the KEY column the check config sets for the
+  dataset (the survey or backcheck KEY), falling back to the old lookup only
+  when none is set (`src/datasure/processing/corrections.py`) — #337
 - **Remove Credentials**: Reported success but left the SurveyCTO password in
   the OS keyring. The view passed the credential type as the server, and
   `delete_stored_credentials` read the username from the wrong level of the
