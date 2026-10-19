@@ -296,13 +296,23 @@ with st.container(border=True):
             disabled=not select_credentials,
         ):
             selected_server = saved_credentials[select_credentials].get("server", "")
-            selected_type = saved_credentials[select_credentials].get("type", "")
-            delete_stored_credentials(
+            selected_type = saved_credentials[select_credentials].get(
+                "credential_type", "scto_login"
+            )
+            result = delete_stored_credentials(
                 project_id=project_id,
-                server=selected_type,
+                server=selected_server,
                 credential_type=selected_type,
             )
-            st.success(f"Credentials for {select_credentials} deleted successfully.")
+            if result["success"]:
+                st.success(
+                    f"Credentials for {select_credentials} deleted successfully."
+                )
+            else:
+                st.error(
+                    f"Could not delete credentials for {select_credentials}: "
+                    f"{result['error']}"
+                )
 
     with (
         kc3,

@@ -69,6 +69,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Inactive`. They now use the KEY column the check config sets for the
   dataset (the survey or backcheck KEY), falling back to the old lookup only
   when none is set (`src/datasure/processing/corrections.py`) — #337
+- **Remove Credentials**: Reported success but left the SurveyCTO password in
+  the OS keyring. The view passed the credential type as the server, and
+  `delete_stored_credentials` read the username from the wrong level of the
+  metadata file, so `keyring.delete_password` never ran. A keyring failure now
+  returns an error, shown with `st.error`; a password already missing from the
+  keyring still clears the entry (`src/datasure/utils/secure_credentials.py`,
+  `src/datasure/views/import_view.py`) — closes #342
 
 ## [1.2.0a1] - 2026-10-11
 

@@ -726,7 +726,13 @@ class TestRemoveImportFlow:
 
 _SAVED_CREDENTIALS_OVERRIDE = {
     "return_value": {
-        "credentials": {"Test Cred": {"server": "srv", "type": "surveycto"}}
+        "credentials": {
+            "Test Cred": {
+                "server": "srv",
+                "username": "user@example.com",
+                "credential_type": "scto_login",
+            }
+        }
     }
 }
 
@@ -735,16 +741,50 @@ class TestCredentialsSection:
     """Test the Manage Credentials section: delete and keyring diagnostics."""
 
     def test_delete_credentials_button(self):
+        _st.success.reset_mock()
+        _st.error.reset_mock()
         with _reloaded_with(
             overrides={
                 "datasure.utils.secure_credentials.list_stored_credentials": (
                     _SAVED_CREDENTIALS_OVERRIDE
                 ),
+                "datasure.utils.secure_credentials.delete_stored_credentials": {
+                    "return_value": {"success": True, "message": "deleted"}
+                },
             },
             button_labels={"Delete Credentials"},
             selectbox_map={"Select Credentials to Delete": "Test Cred"},
         ) as iv:
-            iv.delete_stored_credentials.assert_called_once()
+            iv.delete_stored_credentials.assert_called_once_with(
+                project_id="test_project",
+                server="srv",
+                credential_type="scto_login",
+            )
+            assert _st.success.called
+            assert not _st.error.called
+
+    def test_delete_credentials_failure_shows_error(self):
+        _st.success.reset_mock()
+        _st.error.reset_mock()
+        with _reloaded_with(
+            overrides={
+                "datasure.utils.secure_credentials.list_stored_credentials": (
+                    _SAVED_CREDENTIALS_OVERRIDE
+                ),
+                "datasure.utils.secure_credentials.delete_stored_credentials": {
+                    "return_value": {
+                        "success": False,
+                        "error": "Access denied",
+                        "error_type": "keyring_error",
+                    }
+                },
+            },
+            button_labels={"Delete Credentials"},
+            selectbox_map={"Select Credentials to Delete": "Test Cred"},
+        ):
+            assert _st.error.called
+            assert "Access denied" in str(_st.error.call_args)
+            assert not _st.success.called
 
     def test_keyring_diagnostics_success(self):
         _st.success.reset_mock()
