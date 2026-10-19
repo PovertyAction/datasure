@@ -816,3 +816,75 @@ def test_compute_enumerator_statistics_overtime_unknown_period(sample_enumerator
             "UnknownPeriod",
             "SUN",
         )
+
+
+# ============================================
+# ZERO-ROW INPUT TESTS
+# ============================================
+
+
+@pytest.mark.parametrize("period", ["Daily", "Weekly", "Monthly"])
+def test_compute_enumerator_productivity_zero_rows(sample_enumerator_data, period):
+    """Data a step emptied gives an empty productivity table, not an error."""
+    result = compute_enumerator_productivity(
+        sample_enumerator_data.clear(), "submission_date", ["enumerator"], period, "MON"
+    )
+
+    assert result.is_empty()
+
+
+def test_compute_enumerator_statistics_zero_rows(sample_enumerator_data):
+    """Data a step emptied gives an empty statistics table, not an error."""
+    result = compute_enumerator_statistics(
+        sample_enumerator_data.clear(), ["enumerator"], ["age"], ["mean", "median"]
+    )
+
+    assert result.is_empty()
+
+
+@pytest.mark.parametrize("period", ["Daily", "Weekly", "Monthly"])
+def test_compute_enumerator_statistics_overtime_zero_rows(
+    sample_enumerator_data, period
+):
+    """Data a step emptied gives an empty over-time table, not an error."""
+    result = compute_enumerator_statistics_overtime(
+        sample_enumerator_data.clear(),
+        "submission_date",
+        ["enumerator"],
+        "age",
+        "mean",
+        period,
+        "MON",
+    )
+
+    assert result.is_empty()
+
+
+def test_compute_enumerator_missing_table_zero_rows(sample_enumerator_data):
+    """Data a step emptied gives an empty missing table, not an error."""
+    result = compute_enumerator_missing_table(
+        sample_enumerator_data.clear(), pl.DataFrame(), ["enumerator"]
+    )
+
+    assert result.is_empty()
+
+
+@patch("datasure.checks.enumerator.compute.load_missing_codes_from_db")
+def test_compute_enumerator_summary_zero_rows(
+    mock_load_missing, sample_enumerator_data
+):
+    """Data a step emptied gives an empty summary, not an error."""
+    mock_load_missing.return_value = pl.DataFrame()
+
+    result = compute_enumerator_summary(
+        "test_project",
+        sample_enumerator_data.clear(),
+        "submission_date",
+        "enumerator",
+        "team",
+        "formversion",
+        "duration",
+    )
+
+    assert result.is_empty()
+    assert "# submissions" in result.columns

@@ -573,6 +573,10 @@ are highlighted in red.
 To blank a cell, use "remove value": "modify value" needs a non-empty new
 value (`0` is valid).
 
+If corrections or prep steps remove every row, the tab warns you. The
+Correction Log and "Remove correction step" stay available, so you can remove
+the entry that caused it. There are no records left to add corrections to.
+
 ##### Filtering the Log
 
 Above the Correction Log, **Source** and **Action** filters list the sources

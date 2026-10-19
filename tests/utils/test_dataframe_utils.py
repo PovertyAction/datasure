@@ -9,9 +9,11 @@ import pytest
 
 from datasure.utils.dataframe_utils import (
     ColumnByType,
+    TableState,
     convert_dataframe_column_to_numeric,
     convert_series_to_numeric,
     get_df_columns,
+    get_table_state,
     safe_to_numeric,
     sanitize_df_for_join,
     standardize_missing_values,
@@ -908,3 +910,17 @@ class TestSafeToNumeric:
         df = pl.DataFrame({"col": [5, 10, 15]})
         result = safe_to_numeric(df, "col")
         assert result["col"].to_list() == [5.0, 10.0, 15.0]
+
+
+class TestGetTableState:
+    """Test get_table_state classifies loaded tables."""
+
+    def test_no_columns_is_missing(self):
+        assert get_table_state(pl.DataFrame()) is TableState.MISSING
+
+    def test_columns_without_rows_is_no_rows(self):
+        df = pl.DataFrame({"key": []}, schema={"key": pl.String})
+        assert get_table_state(df) is TableState.NO_ROWS
+
+    def test_rows_is_has_rows(self):
+        assert get_table_state(pl.DataFrame({"key": ["k1"]})) is TableState.HAS_ROWS

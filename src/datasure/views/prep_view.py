@@ -23,7 +23,12 @@ from datasure.processing.prep import (
     ValidationError,
     prep_apply_action,
 )
-from datasure.utils.dataframe_utils import ColumnByType, get_df_columns
+from datasure.utils.dataframe_utils import (
+    ColumnByType,
+    TableState,
+    get_df_columns,
+    get_table_state,
+)
 from datasure.utils.duckdb_utils import (
     duckdb_get_aliases,
     duckdb_get_table,
@@ -1089,14 +1094,18 @@ if show_prep_page_info:
             "prep",
         )
 
-        if prep_data.is_empty() and prep_log.is_empty():
+        # With no steps logged, prep must match raw, so seed it from raw. A
+        # zero-row prep table with steps logged is a step's result: keep it.
+        prep_state = get_table_state(prep_data)
+        if prep_state is not TableState.HAS_ROWS and prep_log.is_empty():
             prep_data = duckdb_get_table(
                 project_id,
                 label,
                 "raw",
             )
 
-            if not prep_data.is_empty():
+            prep_state = get_table_state(prep_data)
+            if prep_state is TableState.HAS_ROWS:
                 duckdb_save_table(
                     project_id,
                     prep_data,
@@ -1110,15 +1119,20 @@ if show_prep_page_info:
             # queued messages for this run.
             show_queued_notices(_notice_scope(label))
 
-            # A table with no columns was never imported. One with columns but
-            # no rows had every row removed by a step, which must stay removable.
-            if prep_data.width == 0:
+            # A table with no rows had every row removed by a step, which must
+            # stay removable, so only a missing table skips the controls.
+            if prep_state is TableState.MISSING:
                 st.warning(
                     "No data available to prepare. Please upload a dataset in the Import Data step."
                 )
                 continue
 
-            if prep_data.height == 0:
+            if prep_state is TableState.NO_ROWS and prep_log.is_empty():
+                st.warning(
+                    "This dataset has no rows. Import data with rows on the "
+                    "Import Data page."
+                )
+            elif prep_state is TableState.NO_ROWS:
                 st.warning(
                     "Your preparation steps removed every row. Remove the step "
                     "that caused this from the Change Log to restore the data."

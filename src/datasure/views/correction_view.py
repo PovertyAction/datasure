@@ -31,6 +31,7 @@ from datasure.utils.correction_form import (
 from datasure.utils.correction_form import (
     render_value_input_widget as render_shared_value_input_widget,
 )
+from datasure.utils.dataframe_utils import TableState, get_table_state
 from datasure.utils.duckdb_utils import duckdb_get_table
 from datasure.utils.navigations_utils import (
     add_demo_navigation,
@@ -342,8 +343,12 @@ def render_add_correction_form(
     """
     corrected_data = correction_processor.get_corrected_data(alias)
 
-    if corrected_data.is_empty():
+    # The tab already warns about data with no rows; there is no KEY to offer.
+    state = get_table_state(corrected_data)
+    if state is TableState.MISSING:
         st.warning("No data available for correction.")
+        return
+    if state is TableState.NO_ROWS:
         return
 
     with st.popover(":material/add: Add correction step", width="stretch"):
@@ -414,8 +419,8 @@ def render_correction_input_form(
     corrected_data = correction_processor.get_corrected_data(alias)
 
     # A table with no rows, such as one whose every record was dropped, still
-    # has corrections to remove; only a missing table has no columns.
-    if corrected_data.width == 0:
+    # has corrections to remove; only a missing table skips the forms.
+    if get_table_state(corrected_data) is TableState.MISSING:
         st.warning("No data available for correction.")
         return
 
@@ -779,6 +784,31 @@ def render_data_summary(
         st.dataframe(data=data, width="stretch")
 
 
+def warn_about_corrected_data(state: TableState, alias: str) -> None:
+    """
+    Warn when corrected data is missing or has no rows.
+
+    A table with no rows keeps the forms and the Correction Log, so the
+    correction that dropped every record can be undone.
+
+    Parameters
+    ----------
+    state : TableState
+        The state of the corrected data for the dataset.
+    alias : str
+        The data alias/table name, shown in the warning.
+    """
+    if state is TableState.MISSING:
+        st.warning(f"No data available for {alias}")
+    elif state is TableState.NO_ROWS:
+        st.warning(
+            f"**{alias}** has no rows. A correction or a step on the Prepare "
+            "Data page removed every record. Remove that correction with "
+            "**Remove correction step**, or that step on the Prepare Data "
+            "page, to restore the data."
+        )
+
+
 @st.fragment
 def render_correction_tab(
     correction_processor: CorrectionProcessor, project_id: str, tab_index: int
@@ -824,10 +854,9 @@ def render_correction_tab(
     # Ensure corrected data exists
     corrected_data = correction_processor.get_corrected_data(dataset.alias)
 
-    # Keep the log and the remove form for a table with no rows, so dropping
-    # every record can be undone.
-    if corrected_data.width == 0:
-        st.warning(f"No data available for {dataset.alias}")
+    state = get_table_state(corrected_data)
+    warn_about_corrected_data(state, dataset.alias)
+    if state is TableState.MISSING:
         return
 
     # Render components

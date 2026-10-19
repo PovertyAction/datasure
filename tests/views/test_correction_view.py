@@ -21,6 +21,7 @@ from datasure.utils.correction_form import (
     should_enable_apply_button,
     validate_numeric_input,
 )
+from datasure.utils.dataframe_utils import TableState
 from datasure.views.correction_view import (
     _build_correction_log_display,
     _display_correction_details,
@@ -40,6 +41,7 @@ from datasure.views.correction_view import (
     render_page_navigation,
     render_value_input_widget,
     validate_prerequisites,
+    warn_about_corrected_data,
 )
 
 _st = sys.modules["streamlit"]
@@ -760,6 +762,23 @@ class TestRenderAddCorrectionFormSurveyId:
             )
             assert _st.warning.called
 
+    def test_zero_row_corrected_data_offers_no_key(self):
+        """Data emptied by a correction offers no KEY; the tab already warns."""
+        processor = self._mock_processor(
+            pl.DataFrame({"KEY": []}, schema={"KEY": pl.String})
+        )
+
+        with _patched_st(warning=MagicMock(), info=MagicMock(), popover=MagicMock()):
+            render_add_correction_form(
+                correction_processor=processor,
+                key_col="KEY",
+                alias="survey",
+                tab_index=0,
+            )
+            _st.info.assert_not_called()
+            _st.warning.assert_not_called()
+            _st.popover.assert_not_called()
+
     @contextmanager
     def _mocked_widgets(
         self, selected_key: str, click_apply: bool = False, reason: str = ""
@@ -1277,6 +1296,30 @@ class TestRenderCorrectionInputForm:
             mock_remove_form.assert_called_once_with(
                 correction_processor=processor, alias="survey", tab_index=0
             )
+
+
+class TestWarnAboutCorrectedData:
+    """Test the Correct Data tab's warning for missing or emptied data."""
+
+    def test_zero_row_data_warns(self):
+        with _patched_st(warning=MagicMock()):
+            warn_about_corrected_data(TableState.NO_ROWS, "survey")
+            message = _st.warning.call_args.args[0]
+
+        assert "has no rows" in message
+        assert "Remove correction step" in message
+
+    def test_missing_data_warns(self):
+        with _patched_st(warning=MagicMock()):
+            warn_about_corrected_data(TableState.MISSING, "survey")
+            message = _st.warning.call_args.args[0]
+
+        assert "No data available" in message
+
+    def test_data_with_rows_does_not_warn(self):
+        with _patched_st(warning=MagicMock()):
+            warn_about_corrected_data(TableState.HAS_ROWS, "survey")
+            _st.warning.assert_not_called()
 
 
 class TestDisplayCorrectionDetails:

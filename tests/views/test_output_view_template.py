@@ -6,6 +6,7 @@ from unittest.mock import patch
 import polars as pl
 import pytest
 
+from datasure.utils.dataframe_utils import TableState
 from datasure.utils.duckdb_utils import duckdb_save_table
 from datasure.views import output_view_template as template
 
@@ -111,22 +112,30 @@ class TestLoadCheckData:
             survey_data_name=ALIAS, backcheck_data_name=backcheck_data_name
         )
 
-    def test_zero_row_backcheck_is_flagged(self):
+    def test_zero_row_backcheck_has_no_rows(self):
         _save(_rows(2), "raw")
         duckdb_save_table(PROJECT_ID, _rows(0), "backcheck", "prep")
 
         data = template.load_check_data(PROJECT_ID, self._config("backcheck"))
 
-        assert data.backcheck_data is None
-        assert data.backcheck_has_no_rows
+        assert data.backcheck_state is TableState.NO_ROWS
+        assert data.backcheck_data_with_rows is None
 
-    def test_missing_backcheck_is_not_flagged(self):
+    def test_unimported_backcheck_is_missing(self):
         _save(_rows(2), "raw")
 
         data = template.load_check_data(PROJECT_ID, self._config("backcheck"))
 
+        assert data.backcheck_state is TableState.MISSING
+        assert data.backcheck_data_with_rows is None
+
+    def test_unconfigured_backcheck_is_missing(self):
+        _save(_rows(2), "raw")
+
+        data = template.load_check_data(PROJECT_ID, self._config(None))
+
         assert data.backcheck_data is None
-        assert not data.backcheck_has_no_rows
+        assert data.backcheck_state is TableState.MISSING
 
     def test_backcheck_with_rows_is_loaded(self):
         _save(_rows(2), "raw")
@@ -134,5 +143,17 @@ class TestLoadCheckData:
 
         data = template.load_check_data(PROJECT_ID, self._config("backcheck"))
 
-        assert data.backcheck_data.height == 1
-        assert not data.backcheck_has_no_rows
+        assert data.backcheck_state is TableState.HAS_ROWS
+        assert data.backcheck_data_with_rows.height == 1
+
+
+class TestNoRowsMessage:
+    """Check pages and the backcheck tab share one no-rows message."""
+
+    def test_names_the_dataset_task_and_both_pages(self):
+        message = template.no_rows_message("survey", "analyze")
+
+        assert message.startswith("**survey** has no rows")
+        assert "nothing to analyze" in message
+        assert "Prepare Data" in message
+        assert "Correct Data" in message

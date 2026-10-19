@@ -10,7 +10,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-import pandas as pd
 import polars as pl
 import streamlit as st
 
@@ -25,7 +24,7 @@ from datasure.checks.progress import progress_report
 from datasure.checks.summary import summary_report
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import CheckConfiguration
-from datasure.utils.dataframe_utils import get_df_columns
+from datasure.utils.dataframe_utils import TableState, get_df_columns, get_table_state
 from datasure.utils.duckdb_utils import (
     duckdb_get_table,
     duckdb_table_exists,
@@ -70,10 +69,24 @@ class PageConfig:
 class CheckData:
     """Data required for running checks."""
 
-    page_data: pd.DataFrame
-    backcheck_data: pd.DataFrame | None = None
-    # The backcheck table exists but a prep step or correction emptied it.
-    backcheck_has_no_rows: bool = False
+    page_data: pl.DataFrame
+    # None when the page has no backcheck dataset. Otherwise kept as loaded,
+    # even with no rows, so the Backcheck Analysis tab can say why it is empty.
+    backcheck_data: pl.DataFrame | None = None
+
+    @property
+    def backcheck_state(self) -> TableState:
+        """The state of the backcheck table; MISSING when none is configured."""
+        if self.backcheck_data is None:
+            return TableState.MISSING
+        return get_table_state(self.backcheck_data)
+
+    @property
+    def backcheck_data_with_rows(self) -> pl.DataFrame | None:
+        """The backcheck data for check modules, or None when it has no rows."""
+        if self.backcheck_state is TableState.HAS_ROWS:
+            return self.backcheck_data
+        return None
 
 
 def extract_page_number(file_path: str) -> int | None:
@@ -100,7 +113,7 @@ def load_data_with_fallback(
     project_id: str,
     data_name: str,
     db_names: tuple[str, ...] = ("corrected", "prep", "raw"),
-) -> pd.DataFrame:
+) -> pl.DataFrame:
     """
     Load data with cascading fallback through multiple databases.
 
@@ -119,7 +132,7 @@ def load_data_with_fallback(
 
     Returns
     -------
-    pd.DataFrame
+    pl.DataFrame
         The loaded data, or a DataFrame with no columns if none found.
     """
     for db_name in db_names:
@@ -249,23 +262,38 @@ def load_check_data(project_id: str, config: PageConfig) -> CheckData:
 
     # Load backcheck data if configured
     backcheck_data = None
-    backcheck_has_no_rows = False
     if config.backcheck_data_name:
         backcheck_data = load_data_with_fallback(project_id, config.backcheck_data_name)
-        if backcheck_data.is_empty():
-            backcheck_has_no_rows = backcheck_data.width > 0
-            backcheck_data = None
 
-    return CheckData(
-        page_data=page_data,
-        backcheck_data=backcheck_data,
-        backcheck_has_no_rows=backcheck_has_no_rows,
+    return CheckData(page_data=page_data, backcheck_data=backcheck_data)
+
+
+def no_rows_message(data_name: str, task: str) -> str:
+    """
+    Explain that a dataset has no rows because a step or correction emptied it.
+
+    Parameters
+    ----------
+    data_name : str
+        The alias of the dataset.
+    task : str
+        What the page would do with the data, such as "check" or "analyze".
+
+    Returns
+    -------
+    str
+        The message to show.
+    """
+    return (
+        f"**{data_name}** has no rows, so there is nothing to {task}. A step on "
+        "the Prepare Data page or a correction on the Correct Data page removed "
+        "every record. Remove that step or correction to restore the data."
     )
 
 
 def stop_if_no_survey_data(page_data: pl.DataFrame, data_name: str) -> None:
     """
-    Stop the page with a message when the survey data has no rows.
+    Stop the page with a message when the survey data is missing or has no rows.
 
     Parameters
     ----------
@@ -277,22 +305,18 @@ def stop_if_no_survey_data(page_data: pl.DataFrame, data_name: str) -> None:
     Raises
     ------
     SystemExit
-        If the data has no rows (via st.stop()).
+        If the data is missing or has no rows (via st.stop()).
     """
-    if not page_data.is_empty():
+    state = get_table_state(page_data)
+    if state is TableState.HAS_ROWS:
         return
 
-    if page_data.width == 0:
+    if state is TableState.MISSING:
         st.info(
             f"No data found for **{data_name}**. Import it on the Import Data page."
         )
     else:
-        st.info(
-            f"**{data_name}** has no rows, so there is nothing to check. A step on "
-            "the Prepare Data page or a correction on the Correct Data page "
-            "removed every record. Remove that step or correction to restore "
-            "the data."
-        )
+        st.info(no_rows_message(data_name, "check"))
     st.stop()
 
 
@@ -398,7 +422,7 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             config.setting_file,
             duplicates_config,
             survey_columns,
-            data.backcheck_data,
+            data.backcheck_data_with_rows,
             alias=config.survey_data_name,
         )
 
@@ -457,7 +481,8 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
         )
 
     with backcheck_analysis:
-        if data.backcheck_data is not None:
+        backcheck_state = data.backcheck_state
+        if backcheck_state is TableState.HAS_ROWS:
             backcheck_columns = get_df_columns(data.backcheck_data)
             backcheck_config: dict = {
                 "survey_key": config.survey_key,
@@ -480,12 +505,8 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
                 survey_columns,
                 backcheck_columns,
             )
-        elif data.backcheck_has_no_rows:
-            st.info(
-                f"**{config.backcheck_data_name}** has no rows, so there is "
-                "nothing to analyze. A step on the Prepare Data page or a "
-                "correction on the Correct Data page removed every record."
-            )
+        elif backcheck_state is TableState.NO_ROWS:
+            st.info(no_rows_message(config.backcheck_data_name, "analyze"))
         else:
             st.info("No backcheck data available for analysis.")
 
