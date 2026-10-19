@@ -28,6 +28,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Demo guidance on non-demo projects** (#359): Renaming a report function
+  that shows demo guidance no longer crashes its page in every project
+  - Root cause: `demo_output_onboarding` read the message before checking
+    `is_demo_project()`, and a missing entry came back as the string
+    `"Invalid Message"`, so `.get` raised `AttributeError`
+  - Solution: The message is read only in the demo project, and
+    `OutputOnboardingInfo.get_onboarding_message` returns `None` for a
+    missing entry, which shows no guidance and logs a warning. The decorator
+    records each function in `DEMO_OUTPUT_FUNCTIONS`, and a test asserts
+    every one has a message
+  - Files: `src/datasure/utils/onboarding_utils.py`
 - **Polars 2.0 compatibility**: The Prep page and several checks crashed on
   fresh installs that resolved polars 2.0
   - Root cause: polars 2.0 removed `NUMERIC_DTYPES`, `INTEGER_DTYPES`,

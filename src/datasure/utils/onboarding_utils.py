@@ -1,4 +1,6 @@
+import functools
 import json
+import logging
 import random
 from datetime import datetime, timedelta
 from enum import Enum
@@ -11,6 +13,8 @@ import streamlit as st
 
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.duckdb_utils import duckdb_remove_table, duckdb_save_table
+
+logger = logging.getLogger(__name__)
 
 DEMO_PROJECT_NAME = "DataSure Demo"
 DEMO_PROJECT_ID = "demoproject"
@@ -904,8 +908,8 @@ class OutputOnboardingInfo:
     }
 
     @classmethod
-    def get_onboarding_message(cls, tab: CheckPage, message_id: str) -> str:
-        """Retrieve onboarding messages based on type."""
+    def get_onboarding_message(cls, tab: str, message_id: str) -> dict[str, str] | None:
+        """Return the onboarding message for a tab's function, or None if absent."""
         messages = {
             "summary": cls.SUMMARY,
             "progress": cls.PROGRESS,
@@ -917,24 +921,35 @@ class OutputOnboardingInfo:
             "backchecks": cls.BACKCHECKS,
             "gpschecks": cls.GPSCHECKS,
         }
-        return messages.get(tab, {"invalid": "Invalid Message"}).get(
-            message_id, "Invalid Message"
-        )
+        return messages.get(tab, {}).get(message_id)
+
+
+# (module, tab, function name) for every function decorated with
+# demo_output_onboarding, so tests can check each one has a message.
+DEMO_OUTPUT_FUNCTIONS: set[tuple[str, str, str]] = set()
 
 
 def demo_output_onboarding(tab: str):
-    """Decorator to display onboarding messages for demo functions."""
+    """Decorator to display onboarding messages for demo functions.
+
+    Each decorated function is recorded in DEMO_OUTPUT_FUNCTIONS.
+    """
 
     def decorator(func):
+        DEMO_OUTPUT_FUNCTIONS.add((func.__module__, tab, func.__name__))
+
+        @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            message_id = func.__name__
-            message = OutputOnboardingInfo.get_onboarding_message(tab, message_id)
-            title, content = message.get("title"), message.get("content")
             if is_demo_project():
-                demo_expander(
-                    title,
-                    content,
+                message = OutputOnboardingInfo.get_onboarding_message(
+                    tab, func.__name__
                 )
+                if message is None:
+                    logger.warning(
+                        "No demo guidance for %s on the %s tab", func.__name__, tab
+                    )
+                else:
+                    demo_expander(message.get("title"), message.get("content"))
             return func(*args, **kwargs)
 
         return wrapper
