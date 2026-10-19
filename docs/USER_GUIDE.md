@@ -264,6 +264,10 @@ All preparation steps are tracked:
 - Timestamp
 - Applied to which datasets
 
+If your steps remove every row, the Prepare Data page warns you and keeps the
+Change Log, so you can remove the step that caused it. Check pages show that
+the dataset has no rows instead of running checks.
+
 **Demo Example**:
 Convert `submissiondate` column to datetime format for both survey and backcheck datasets:
 

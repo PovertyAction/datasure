@@ -72,7 +72,11 @@ The `archived/` directory holds legacy code and is gitignored.
 3. **Preparation** (`views/prep_view.py` + `processing/prep.py`): Polars
    operations recorded in a prep log for reproducibility
 4. **Checks** (`views/config_view.py` + `checks/`): configurable per-page checks
-5. **Reports** (generated output views): charts and tables per check
+5. **Reports** (generated output views): charts and tables per check. Each
+   dataset is read from the first of its `corrected`, `prep` and `raw` tables
+   that exists (`load_data_with_fallback`). A table with no rows still counts,
+   so a prep step or correction that removed every record shows an empty
+   dataset rather than older data
 6. **Corrections / replication**: apply corrections; export a replication
    package that reproduces the pipeline outside DataSure. Once an alias has a
    corrected table, any change to its prep data (a re-import, a prep step

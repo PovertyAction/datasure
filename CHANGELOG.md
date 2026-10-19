@@ -21,7 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     missing table from one with no rows
   - Solution: `load_data_with_fallback` uses the first table that exists
     (`duckdb_table_exists`). Check pages stop with a "no rows" message
-    (`stop_if_no_survey_data`). The Prep page keeps its step controls and
+    (`stop_if_no_survey_data`), and the Backcheck Analysis tab says when
+    backcheck data has no rows (`CheckData.backcheck_has_no_rows`). The Prep
+    page keeps its step controls and
     Change Log when prep data has no rows. `compute_missing_columns`,
     `compute_average_interviews`, `compute_attempted_interviews` and
     `detect_outliers_with_clusters` accept zero-row input

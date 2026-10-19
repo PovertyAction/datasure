@@ -72,6 +72,8 @@ class CheckData:
 
     page_data: pd.DataFrame
     backcheck_data: pd.DataFrame | None = None
+    # The backcheck table exists but a prep step or correction emptied it.
+    backcheck_has_no_rows: bool = False
 
 
 def extract_page_number(file_path: str) -> int | None:
@@ -121,7 +123,7 @@ def load_data_with_fallback(
         The loaded data, or a DataFrame with no columns if none found.
     """
     for db_name in db_names:
-        if duckdb_table_exists(project_id, data_name, db_name):
+        if duckdb_table_exists(project_id=project_id, alias=data_name, db_name=db_name):
             return duckdb_get_table(
                 project_id=project_id,
                 alias=data_name,
@@ -247,12 +249,18 @@ def load_check_data(project_id: str, config: PageConfig) -> CheckData:
 
     # Load backcheck data if configured
     backcheck_data = None
+    backcheck_has_no_rows = False
     if config.backcheck_data_name:
         backcheck_data = load_data_with_fallback(project_id, config.backcheck_data_name)
         if backcheck_data.is_empty():
+            backcheck_has_no_rows = backcheck_data.width > 0
             backcheck_data = None
 
-    return CheckData(page_data=page_data, backcheck_data=backcheck_data)
+    return CheckData(
+        page_data=page_data,
+        backcheck_data=backcheck_data,
+        backcheck_has_no_rows=backcheck_has_no_rows,
+    )
 
 
 def stop_if_no_survey_data(page_data: pl.DataFrame, data_name: str) -> None:
@@ -471,6 +479,12 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
                 backcheck_config,
                 survey_columns,
                 backcheck_columns,
+            )
+        elif data.backcheck_has_no_rows:
+            st.info(
+                f"**{config.backcheck_data_name}** has no rows, so there is "
+                "nothing to analyze. A step on the Prepare Data page or a "
+                "correction on the Correct Data page removed every record."
             )
         else:
             st.info("No backcheck data available for analysis.")

@@ -1,5 +1,6 @@
 """Tests for loading check-page data in the output view template."""
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import polars as pl
@@ -100,3 +101,38 @@ class TestStopIfNoSurveyData:
             template.stop_if_no_survey_data(_rows(1), ALIAS)
 
         mock_st.stop.assert_not_called()
+
+
+class TestLoadCheckData:
+    """Zero-row backcheck data is told apart from no backcheck data."""
+
+    def _config(self, backcheck_data_name):
+        return SimpleNamespace(
+            survey_data_name=ALIAS, backcheck_data_name=backcheck_data_name
+        )
+
+    def test_zero_row_backcheck_is_flagged(self):
+        _save(_rows(2), "raw")
+        duckdb_save_table(PROJECT_ID, _rows(0), "backcheck", "prep")
+
+        data = template.load_check_data(PROJECT_ID, self._config("backcheck"))
+
+        assert data.backcheck_data is None
+        assert data.backcheck_has_no_rows
+
+    def test_missing_backcheck_is_not_flagged(self):
+        _save(_rows(2), "raw")
+
+        data = template.load_check_data(PROJECT_ID, self._config("backcheck"))
+
+        assert data.backcheck_data is None
+        assert not data.backcheck_has_no_rows
+
+    def test_backcheck_with_rows_is_loaded(self):
+        _save(_rows(2), "raw")
+        duckdb_save_table(PROJECT_ID, _rows(1), "backcheck", "raw")
+
+        data = template.load_check_data(PROJECT_ID, self._config("backcheck"))
+
+        assert data.backcheck_data.height == 1
+        assert not data.backcheck_has_no_rows
