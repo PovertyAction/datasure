@@ -1907,7 +1907,7 @@ class TestModuleLevelPageLayout:
             ),
             patch(
                 "datasure.utils.duckdb_utils.duckdb_get_table",
-                side_effect=[prep_log_df, zero_rows],
+                side_effect=[prep_log_df, zero_rows, prep_log_df, prep_log_df],
             ),
             patch("datasure.utils.duckdb_utils.duckdb_save_table"),
             patch("datasure.utils.navigations_utils.page_navigation"),
@@ -2003,6 +2003,96 @@ class TestModuleLevelPageLayout:
 
         # The Change Log table (first st.dataframe call) is a styled pandas
         # DataFrame with the status column positioned right after action
+        rendered = _st.dataframe.call_args_list[0][0][0]
+        assert list(rendered.data.columns) == ["action", "status", "description"]
+
+        _st.session_state["st_project_id"] = None
+        _st.stop = _orig_stop
+
+    def test_page_layout_with_zero_row_prep_data(self):
+        """Prep data with columns but no rows keeps the Change Log and controls."""
+        import importlib
+
+        _st.session_state["st_project_id"] = "test_project"
+        _st.session_state["st_import_data_page"] = "import_page"
+        _st.session_state["st_config_checks_page"] = "config_page"
+        _st.stop = MagicMock()
+        _st.warning = MagicMock()
+
+        zero_rows = pl.DataFrame(
+            {
+                "name": pl.Series([], dtype=pl.String),
+                "age": pl.Series([], dtype=pl.Int64),
+            }
+        )
+        prep_log_df = pl.DataFrame(
+            {
+                "action": ["remove row(s)"],
+                "description": ["Removed all rows"],
+                "status": ["Successful"],
+            }
+        )
+
+        mock_tab = MagicMock()
+        mock_tab.__enter__ = MagicMock(return_value=mock_tab)
+        mock_tab.__exit__ = MagicMock(return_value=False)
+        _st.tabs = MagicMock(return_value=[mock_tab])
+
+        mock_col = MagicMock()
+        mock_col.__enter__ = MagicMock(return_value=mock_col)
+        mock_col.__exit__ = MagicMock(return_value=False)
+        _st.columns = MagicMock(return_value=[mock_col, mock_col, mock_col])
+
+        mock_container = MagicMock()
+        mock_container.__enter__ = MagicMock(return_value=mock_container)
+        mock_container.__exit__ = MagicMock(return_value=False)
+        _st.container = MagicMock(return_value=mock_container)
+
+        mock_popover = MagicMock()
+        mock_popover.__enter__ = MagicMock(return_value=mock_popover)
+        mock_popover.__exit__ = MagicMock(return_value=False)
+        _st.popover = MagicMock(return_value=mock_popover)
+
+        _st.button = MagicMock(return_value=False)
+        _st.selectbox = MagicMock(return_value=None)
+        _st.multiselect = MagicMock(return_value=[])
+        _st.dataframe = MagicMock()
+
+        with (
+            patch(
+                "datasure.utils.duckdb_utils.duckdb_get_aliases",
+                return_value=["test_data"],
+            ),
+            patch(
+                "datasure.utils.duckdb_utils.duckdb_get_table",
+                side_effect=[
+                    prep_log_df,  # prep_log
+                    zero_rows,  # prep_data (columns, no rows)
+                    prep_log_df,  # prep_log in prep_remove_step
+                    prep_log_df,  # prep_log re-fetch in change log
+                ],
+            ),
+            patch("datasure.utils.duckdb_utils.duckdb_save_table") as mock_save,
+            patch("datasure.utils.navigations_utils.page_navigation"),
+            patch("datasure.utils.navigations_utils.add_demo_navigation"),
+            patch("datasure.utils.navigations_utils.demo_sidebar_help"),
+            patch("datasure.utils.navigations_utils.demo_callout"),
+            patch("datasure.utils.navigations_utils.show_demo_next_action"),
+            patch(
+                "datasure.utils.onboarding_utils.is_demo_project",
+                return_value=False,
+            ),
+            patch("datasure.utils.onboarding_utils.demo_expander"),
+            patch("datasure.processing.prep.prep_apply_action"),
+        ):
+            importlib.reload(pv)
+            # The zero-row prep table is kept, not reseeded from raw
+            mock_save.assert_not_called()
+
+        warnings = [c.args[0] for c in _st.warning.call_args_list]
+        assert not any("No data available" in w for w in warnings)
+        assert any("removed every row" in w for w in warnings)
+        # The Change Log is rendered so the step can be found and removed
         rendered = _st.dataframe.call_args_list[0][0][0]
         assert list(rendered.data.columns) == ["action", "status", "description"]
 

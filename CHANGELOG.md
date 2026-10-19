@@ -15,6 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Zero-row prep and corrected data** (#315): A prep step or correction
+  that removed every row no longer brings back raw data on check pages
+  - Root cause: `load_data_with_fallback` and the Prep page could not tell a
+    missing table from one with no rows
+  - Solution: `load_data_with_fallback` uses the first table that exists
+    (`duckdb_table_exists`). Check pages stop with a "no rows" message
+    (`stop_if_no_survey_data`). The Prep page keeps its step controls and
+    Change Log when prep data has no rows. `compute_missing_columns`,
+    `compute_average_interviews`, `compute_attempted_interviews` and
+    `detect_outliers_with_clusters` accept zero-row input
+  - Files: `src/datasure/views/output_view_template.py`,
+    `src/datasure/views/prep_view.py`, `src/datasure/checks/missing.py`,
+    `src/datasure/checks/progress.py`,
+    `src/datasure/checks/gpschecks/compute.py`
 - **Polars 2.0 compatibility**: The Prep page and several checks crashed on
   fresh installs that resolved polars 2.0
   - Root cause: polars 2.0 removed `NUMERIC_DTYPES`, `INTEGER_DTYPES`,

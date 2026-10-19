@@ -366,6 +366,14 @@ def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
     # Drop rows with missing latitude values or longitude values
     outlier_df = outlier_df.dropna(subset=[gps_lat_col, gps_lon_col])
 
+    if outlier_df.empty:
+        # No points to measure: apply() on an empty frame returns a frame,
+        # not a Series, so return the output columns directly.
+        return outlier_df.assign(
+            distance_from_centroid=np.array([], dtype=float),
+            Outlier=np.array([], dtype=bool),
+        )
+
     grouped_df = outlier_df.groupby(clustering_col)
 
     # Calculate centroids for each group

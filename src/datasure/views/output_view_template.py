@@ -28,6 +28,7 @@ from datasure.utils.config_utils import CheckConfiguration
 from datasure.utils.dataframe_utils import get_df_columns
 from datasure.utils.duckdb_utils import (
     duckdb_get_table,
+    duckdb_table_exists,
 )
 from datasure.utils.navigations_utils import (
     add_demo_navigation,
@@ -102,8 +103,8 @@ def load_data_with_fallback(
     Load data with cascading fallback through multiple databases.
 
     Attempts to load data from databases in the specified order, returning the
-    first table found. A table with no rows counts as found: a corrected table
-    whose every record was dropped must not fall back to the prep data.
+    first table that exists. A table with no rows counts as found: a prep step
+    or correction that dropped every record must not fall back to older data.
 
     Parameters
     ----------
@@ -120,14 +121,12 @@ def load_data_with_fallback(
         The loaded data, or a DataFrame with no columns if none found.
     """
     for db_name in db_names:
-        data = duckdb_get_table(
-            project_id=project_id,
-            alias=data_name,
-            db_name=db_name,
-        )
-        # A missing table has no columns.
-        if data.width > 0:
-            return data
+        if duckdb_table_exists(project_id, data_name, db_name):
+            return duckdb_get_table(
+                project_id=project_id,
+                alias=data_name,
+                db_name=db_name,
+            )
 
     # Return empty DataFrame if all attempts fail
     return pl.DataFrame()
@@ -254,6 +253,39 @@ def load_check_data(project_id: str, config: PageConfig) -> CheckData:
             backcheck_data = None
 
     return CheckData(page_data=page_data, backcheck_data=backcheck_data)
+
+
+def stop_if_no_survey_data(page_data: pl.DataFrame, data_name: str) -> None:
+    """
+    Stop the page with a message when the survey data has no rows.
+
+    Parameters
+    ----------
+    page_data : pl.DataFrame
+        The survey data loaded for the page.
+    data_name : str
+        The alias of the survey data, shown in the message.
+
+    Raises
+    ------
+    SystemExit
+        If the data has no rows (via st.stop()).
+    """
+    if not page_data.is_empty():
+        return
+
+    if page_data.width == 0:
+        st.info(
+            f"No data found for **{data_name}**. Import it on the Import Data page."
+        )
+    else:
+        st.info(
+            f"**{data_name}** has no rows, so there is nothing to check. A step on "
+            "the Prepare Data page or a correction on the Correct Data page "
+            "removed every record. Remove that step or correction to restore "
+            "the data."
+        )
+    st.stop()
 
 
 def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> None:
@@ -524,6 +556,7 @@ def main() -> None:
 
     # Load data for checks
     data = load_check_data(project_id, config)
+    stop_if_no_survey_data(data.page_data, config.survey_data_name)
 
     # Render check tabs
     render_check_tabs(project_id, config, data)

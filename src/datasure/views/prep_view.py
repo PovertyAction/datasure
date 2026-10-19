@@ -1110,11 +1110,19 @@ if show_prep_page_info:
             # queued messages for this run.
             show_queued_notices(_notice_scope(label))
 
-            if prep_data.is_empty():
+            # A table with no columns was never imported. One with columns but
+            # no rows had every row removed by a step, which must stay removable.
+            if prep_data.width == 0:
                 st.warning(
                     "No data available to prepare. Please upload a dataset in the Import Data step."
                 )
                 continue
+
+            if prep_data.height == 0:
+                st.warning(
+                    "Your preparation steps removed every row. Remove the step "
+                    "that caused this from the Change Log to restore the data."
+                )
 
             # count rows, columns, number missing & percent missing
             row_count = prep_data.height
