@@ -928,6 +928,10 @@ class OutputOnboardingInfo:
 # demo_output_onboarding, so tests can check each one has a message.
 DEMO_OUTPUT_FUNCTIONS: set[tuple[str, str, str]] = set()
 
+# (tab, function name) pairs already warned about, so a missing message is
+# logged once rather than on every Streamlit rerun.
+_WARNED_MISSING_MESSAGES: set[tuple[str, str]] = set()
+
 
 def demo_output_onboarding(tab: str):
     """Decorator to display onboarding messages for demo functions.
@@ -945,9 +949,13 @@ def demo_output_onboarding(tab: str):
                     tab, func.__name__
                 )
                 if message is None:
-                    logger.warning(
-                        "No demo guidance for %s on the %s tab", func.__name__, tab
-                    )
+                    if (tab, func.__name__) not in _WARNED_MISSING_MESSAGES:
+                        _WARNED_MISSING_MESSAGES.add((tab, func.__name__))
+                        logger.warning(
+                            "No demo guidance for %s on the %s tab",
+                            func.__name__,
+                            tab,
+                        )
                 else:
                     demo_expander(message.get("title"), message.get("content"))
             return func(*args, **kwargs)

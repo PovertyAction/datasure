@@ -483,6 +483,28 @@ class TestDemoOutputOnboarding:
         assert renamed_report() == "executed"
         mock_demo_expander.assert_not_called()
 
+    @patch("datasure.utils.onboarding_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.onboarding_utils.demo_expander")
+    def test_unknown_function_warns_once_in_demo(
+        self, mock_demo_expander, mock_is_demo, caplog
+    ):
+        """In the demo, a missing message logs one warning across reruns."""
+
+        @demo_output_onboarding("summary")
+        def warned_report():
+            return None
+
+        with caplog.at_level("WARNING", logger="datasure.utils.onboarding_utils"):
+            warned_report()
+            warned_report()
+
+        warnings = [
+            r
+            for r in caplog.records
+            if "No demo guidance for warned_report" in r.message
+        ]
+        assert len(warnings) == 1
+
     def test_decorator_preserves_function_name(self):
         """The wrapper keeps the decorated function's name."""
 
@@ -493,7 +515,7 @@ class TestDemoOutputOnboarding:
         assert summary_report.__name__ == "summary_report"
 
     def test_every_decorated_function_has_message(self):
-        """Every @demo_output_onboarding function in the checks has a message."""
+        """Every @demo_output_onboarding function in datasure has a message."""
         import datasure.checks
 
         for module in pkgutil.walk_packages(
@@ -504,7 +526,7 @@ class TestDemoOutputOnboarding:
         checked = {
             (tab, name)
             for module, tab, name in DEMO_OUTPUT_FUNCTIONS
-            if module.startswith("datasure.checks.")
+            if module.startswith("datasure.")
         }
         assert checked, "no decorated check functions were registered"
         missing = sorted(

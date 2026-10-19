@@ -37,8 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `OutputOnboardingInfo.get_onboarding_message` returns `None` for a
     missing entry, which shows no guidance and logs a warning. The decorator
     records each function in `DEMO_OUTPUT_FUNCTIONS`, and a test asserts
-    every one has a message
-  - Files: `src/datasure/utils/onboarding_utils.py`
+    every one has a message. The warning is logged once per function
+  - Files: `src/datasure/utils/onboarding_utils.py`,
+    `tests/utils/test_onboarding_utils.py`
 - **Polars 2.0 compatibility**: The Prep page and several checks crashed on
   fresh installs that resolved polars 2.0
   - Root cause: polars 2.0 removed `NUMERIC_DTYPES`, `INTEGER_DTYPES`,
