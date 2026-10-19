@@ -316,15 +316,28 @@ with page_name_col:
             "The associated dataset will be included as raw data in the package."
         ),
     )
+    exclude_reviewer_names = bool(
+        st.checkbox(
+            "Exclude reviewer names",
+            value=False,
+            key="_replication_exclude_reviewer_names",
+        )
+    )
+    st.caption(
+        "`correction_log.csv` records who made each correction: the Reviewer "
+        "name, or the computer login if no name was set. Check this to leave "
+        "that column blank in the package. The project's own log is not changed."
+    )
 
 alias: str = ""
 key_col: str = ""
 
-# Clear any previously built zip when the page selection changes.
-if st.session_state.get("_replication_page_sel") != selected_page:
+# Clear any previously built zip when the page or export options change.
+build_settings = (selected_page, exclude_reviewer_names)
+if st.session_state.get("_replication_build_settings") != build_settings:
     st.session_state.pop("_replication_zip", None)
     st.session_state.pop("_replication_filename", None)
-    st.session_state["_replication_page_sel"] = selected_page
+    st.session_state["_replication_build_settings"] = build_settings
 
 if selected_page:
     resolved = _resolve_page_config(configs, selected_page)
@@ -371,6 +384,7 @@ if st.button(
             form_def=scto_form_def,
             form_id=scto_form_id,
             on_progress=_on_progress,
+            exclude_reviewer_names=exclude_reviewer_names,
         )
         build_status.update(label="Package ready!", state="complete", expanded=False)
 
