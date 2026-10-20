@@ -82,12 +82,13 @@ from datasure.utils.ui_utils import (
     show_queued_notices,
     styled_dataframe,
 )
-from datasure.utils.view_state import ViewState, bind_widget
+from datasure.utils.view_state import ViewState, bind_widget, view_factory
 
 logger = logging.getLogger(__name__)
 
 # Saved view state scope: the check's catalogue slug.
 VIEW_SCOPE = "backchecks"
+check_view = view_factory(VIEW_SCOPE)
 
 # ==============================================================================
 # COLUMN CONFIGURATION FUNCTIONS
@@ -2417,7 +2418,7 @@ def backchecks_report(
         _backcheck_analysis,
         backcheck_settings,
         review,
-        ViewState(setting_file, VIEW_SCOPE),
+        check_view(setting_file),
     )
     _render_attribution_log(review.log)
 

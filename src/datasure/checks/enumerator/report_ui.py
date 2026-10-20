@@ -36,10 +36,11 @@ from datasure.utils.settings_utils import (
     save_check_settings,
     trigger_save,
 )
-from datasure.utils.view_state import ViewState, bind_widget
+from datasure.utils.view_state import ViewState, bind_widget, view_factory
 
 # Saved view state scope: the check's catalogue slug.
 VIEW_SCOPE = "enumerator"
+check_view = view_factory(VIEW_SCOPE)
 
 # =============================================================================
 # Display Functions - Overview
@@ -1188,7 +1189,7 @@ def enumerator_report(
         enumerator_settings.team,
         enumerator_settings.formversion,
         enumerator_settings.duration,
-        ViewState(setting_file, VIEW_SCOPE),
+        check_view(setting_file),
     )
 
     st.write("---")

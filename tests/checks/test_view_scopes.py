@@ -6,24 +6,30 @@ check's slug, so a check saving under any other name could not be reset.
 
 import pytest
 
-from datasure.checks import catalogue
+from datasure.checks import catalogue, id_duplicates_ui
 from datasure.checks.backchecks import report_ui as backchecks
 from datasure.checks.enumerator import report_ui as enumerator
 from datasure.checks.gpschecks import report_ui as gps
-from datasure.checks.id_duplicates_ui import VIEW_SCOPE as DUPLICATES_SCOPE
 from datasure.checks.outliers import report_ui as outliers
 
+MODULES = [
+    (id_duplicates_ui, "duplicates"),
+    (outliers, "outliers"),
+    (gps, "gps"),
+    (enumerator, "enumerator"),
+    (backchecks, "backchecks"),
+]
 
-@pytest.mark.parametrize(
-    ("scope", "slug"),
-    [
-        (DUPLICATES_SCOPE, "duplicates"),
-        (outliers.VIEW_SCOPE, "outliers"),
-        (gps.VIEW_SCOPE, "gps"),
-        (enumerator.VIEW_SCOPE, "enumerator"),
-        (backchecks.VIEW_SCOPE, "backchecks"),
-    ],
-)
-def test_view_scope_is_the_catalogue_slug(scope, slug):
-    assert scope == slug
-    assert catalogue.get_check(scope).slug == slug
+
+@pytest.mark.parametrize(("module", "slug"), MODULES)
+def test_view_scope_is_the_catalogue_slug(module, slug):
+    assert slug == module.VIEW_SCOPE
+    assert catalogue.get_check(module.VIEW_SCOPE).slug == slug
+
+
+@pytest.mark.parametrize(("module", "slug"), MODULES)
+def test_check_view_opens_the_slug_scope(module, slug, tmp_path):
+    view = module.check_view(tmp_path / "page_settings.json")
+
+    assert view.scope == slug
+    assert view.settings_file == tmp_path / "page_settings.json"

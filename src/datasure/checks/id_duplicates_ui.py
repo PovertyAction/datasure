@@ -58,13 +58,14 @@ from datasure.utils.ui_utils import (
     show_queued_notices,
     styled_dataframe,
 )
-from datasure.utils.view_state import ViewState
+from datasure.utils.view_state import view_factory
 
 logger = logging.getLogger(__name__)
 
 TAB_NAME = "duplicates"
 # Saved view state scope: the check's catalogue slug.
 VIEW_SCOPE = "duplicates"
+check_view = view_factory(VIEW_SCOPE)
 
 SURVEY_DATA = "Survey data"
 BACKCHECK_DATA = "Backcheck data"
@@ -165,7 +166,7 @@ def render_dataset_switcher(
     if settings_file is None:
         widget = {"key": _SWITCHER_KEY, "on_change": on_change, "default": SURVEY_DATA}
     else:
-        widget = ViewState(settings_file, VIEW_SCOPE).bind(
+        widget = check_view(settings_file).bind(
             _SWITCHER_KEY, options=options, on_change=on_change, default=SURVEY_DATA
         )
     labels = {
@@ -619,7 +620,7 @@ def render_id_duplicates(view: IdView, settings_file: str) -> None:
         sort_by = st.selectbox(
             "Sort by",
             options=sort_options,
-            **ViewState(settings_file, VIEW_SCOPE).bind(
+            **check_view(settings_file).bind(
                 f"iddup_{view.name}_sort",
                 options=sort_options,
                 on_change=_reset_page,

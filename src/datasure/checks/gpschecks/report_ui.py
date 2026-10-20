@@ -68,7 +68,7 @@ from datasure.utils.ui_utils import (
     show_queued_notices,
     styled_dataframe,
 )
-from datasure.utils.view_state import ViewState, bind_widget
+from datasure.utils.view_state import ViewState, bind_widget, view_factory
 
 # =============================================================================
 # GPS Column Configuration Functions
@@ -77,11 +77,12 @@ from datasure.utils.view_state import ViewState, bind_widget
 
 # Saved view state scope: the check's catalogue slug.
 VIEW_SCOPE = "gps"
+check_view = view_factory(VIEW_SCOPE)
 
 
 def _page_view(project_id: str, page_name_id: str) -> ViewState:
     """Return the GPS check's saved view state on a check page."""
-    return ViewState(page_settings_file(project_id, page_name_id), VIEW_SCOPE)
+    return check_view(page_settings_file(project_id, page_name_id))
 
 
 def _render_gps_column_actions(

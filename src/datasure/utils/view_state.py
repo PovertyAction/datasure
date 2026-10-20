@@ -254,6 +254,21 @@ class ViewState:
             st.session_state.pop(key, None)
 
 
+def view_factory(scope: str) -> Callable[[str | Path], ViewState]:
+    """Return a function that opens ``scope``'s view state in a settings file.
+
+    Each check module builds its own once, from its catalogue slug::
+
+        check_view = view_factory(VIEW_SCOPE)
+        st.selectbox("Sort by", options, **check_view(settings_file).bind(...))
+    """
+
+    def open_view(settings_file: str | Path) -> ViewState:
+        return ViewState(settings_file, scope)
+
+    return open_view
+
+
 def bind_widget(view: ViewState | None, key: str, **kwargs: Any) -> dict[str, Any]:
     """Bind a widget to ``view``, or only key it when there is no view.
 

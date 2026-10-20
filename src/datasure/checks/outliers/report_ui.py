@@ -80,12 +80,13 @@ from datasure.utils.ui_utils import (
     show_queued_notices,
     styled_dataframe,
 )
-from datasure.utils.view_state import ViewState
+from datasure.utils.view_state import view_factory
 
 logger = logging.getLogger(__name__)
 
 # Saved view state scope: the check's catalogue slug.
 VIEW_SCOPE = "outliers"
+check_view = view_factory(VIEW_SCOPE)
 
 # =============================================================================
 # Streamlit UI - Metrics Display
@@ -242,7 +243,7 @@ def _render_table_toggles(
     `review`. While "Show only reviewed" is on, the other two toggles are
     disabled, since it overrides them. The toggles are saved view state.
     """
-    view = ViewState(setting_file, VIEW_SCOPE)
+    view = check_view(setting_file)
     flagged_only = view.bind(f"{check.check_type}_flagged_only", value=True)
     reviewed_only_key = f"{check.check_type}_reviewed_only"
     show_reviewed_widget = view.bind(f"{check.check_type}_show_reviewed")
@@ -722,7 +723,7 @@ def _render_outlier_column_inspection(
             options=display_options,
             help="Select the columns to display in the inspection table.",
             disabled=not selected_col,
-            **ViewState(setting_file, VIEW_SCOPE).bind(
+            **check_view(setting_file).bind(
                 "outlier_inspect_display_cols", options=display_options, multi=True
             ),
         )
