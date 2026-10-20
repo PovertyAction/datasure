@@ -25,7 +25,12 @@ from datasure.utils.duckdb_utils import (
     duckdb_get_table,
     duckdb_table_exists,
 )
-from datasure.utils.nav_ui import draw_nav, render_selected, resolve_selection
+from datasure.utils.nav_ui import (
+    LAST_CHECK_PAGE_KEY,
+    draw_nav,
+    render_selected,
+    resolve_selection,
+)
 from datasure.utils.navigations_utils import (
     add_demo_navigation,
     demo_sidebar_help,
@@ -282,6 +287,7 @@ def render_checks(project_id: str, config: PageConfig, data: CheckData) -> None:
         survey_columns=get_df_columns(data.page_data),
     )
     nav_key = check_nav_key(config.page_name_id)
+    st.session_state[LAST_CHECK_PAGE_KEY] = config.page_name_id
 
     # The navigation sits above the check but is drawn after it, so a check
     # that fails while rendering is already marked in it.

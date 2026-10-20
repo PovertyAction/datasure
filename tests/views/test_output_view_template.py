@@ -10,6 +10,7 @@ import pytest
 
 from datasure.checks import catalogue
 from datasure.checks.catalogue import CheckEntry
+from datasure.utils import nav_ui
 from datasure.utils.dataframe_utils import TableState
 from datasure.utils.duckdb_utils import duckdb_save_table
 from datasure.utils.view_state import ViewState, save_selection
@@ -625,6 +626,18 @@ class TestSavedSelection:
         save_selection(check_page.config.setting_file, "removed_check")
 
         assert check_page.render(SURVEY) == ["summary_report"]
+
+
+class TestLastViewedCheckPage:
+    def test_rendering_a_check_page_records_it_for_corrections(self, page):
+        check_page = page(page_name_id="household_survey")
+
+        check_page.render(SURVEY)
+
+        assert (
+            check_page.st.session_state[nav_ui.LAST_CHECK_PAGE_KEY]
+            == "household_survey"
+        )
 
 
 class TestResetFilters:
