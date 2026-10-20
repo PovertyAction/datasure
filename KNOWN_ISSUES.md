@@ -16,12 +16,12 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ## Open issues
 
-### KI-027: Outliers, Constraints and GPS tabs crash with `unable to find column "action"`
+### KI-027: Outliers & Constraints and GPS Checks tabs crash with `unable to find column "action"`
 
 - **Status:** 🔴 Open
 - **Affected versions:** 1.2.0a1 only
-- **Symptom:** In a project with no corrections yet, the Outliers tab (and other tabs that let you accept flagged values) shows `ColumnNotFoundError: unable to find column "action"` after you re-run prep or refresh the data.
-- **Workaround:** None yet.
+- **Symptom:** In a project with no corrections yet, the **Outliers & Constraints** and **GPS Checks** tabs show `ColumnNotFoundError: unable to find column "action"`. This can start after you re-run prep or refresh the data. It can also start as soon as you open a project you used with 1.1.0, if you re-imported its data in that version.
+- **Workaround:** On the **Correct Data** page, use **Add correction step** to add any correction, then remove it with **Remove correction step**. The tabs load again.
 - **Issue:** [#368](https://github.com/PovertyAction/datasure/issues/368)
 
 ### KI-026: Outliers tab crashes after you delete an outlier column
