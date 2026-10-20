@@ -995,11 +995,7 @@ def _render_outlier_column_actions(
     numeric_columns : list[str]
         List of numeric columns.
     """
-    outlier_settings = duckdb_get_table(
-        project_id,
-        f"outliers_{page_name_id}",
-        "logs",
-    )
+    outlier_settings = _load_outlier_settings(project_id, page_name_id)
 
     os1, os2, _ = st.columns([0.4, 0.3, 0.3])
     with os1:
@@ -1264,11 +1260,7 @@ def _update_outlier_column_config(
         Constraint bounds settings.
     """
     # get existing config
-    existing_config = duckdb_get_table(
-        project_id,
-        f"outliers_{page_name_id}",
-        db_name="logs",
-    )
+    existing_config = _load_outlier_settings(project_id, page_name_id)
 
     # Prepare new configurations
     new_config = {
@@ -1310,9 +1302,7 @@ def _update_outlier_column_config(
     # Append new configurations to existing polars DataFrame
     new_config_df = pl.DataFrame(new_config, schema=schema)
     if not existing_config.is_empty():
-        formatted_existing_config = _ensure_column_formats(
-            _drop_saved_row_index(existing_config)
-        )
+        formatted_existing_config = _ensure_column_formats(existing_config)
         updated_config = pl.concat(
             [formatted_existing_config, new_config_df], how="vertical"
         )
@@ -1395,9 +1385,16 @@ def _render_outlier_settings_table(outlier_settings: pl.DataFrame) -> None:
         )
 
 
-def _drop_saved_row_index(outliers_settings: pl.DataFrame) -> pl.DataFrame:
-    """Drop the `index` helper column older versions saved with the settings."""
-    return outliers_settings.drop("index", strict=False)
+def _load_outlier_settings(project_id: str, page_name_id: str) -> pl.DataFrame:
+    """Load the outlier column settings for a page.
+
+    Drops the `index` helper column older versions saved with the settings.
+    The report saves the settings back on every render, which removes it from
+    the stored table too.
+    """
+    return duckdb_get_table(project_id, f"outliers_{page_name_id}", "logs").drop(
+        "index", strict=False
+    )
 
 
 def _delete_outlier_column(
@@ -1425,11 +1422,10 @@ def _delete_outlier_column(
         if outliers_settings.is_empty():
             st.info("No outlier columns have been added yet. ")
         else:
-            outliers_settings = _drop_saved_row_index(outliers_settings)
             settings_columns = outliers_settings.columns
-            outliers_settings = outliers_settings.with_row_index().with_columns(
+            outliers_settings = outliers_settings.with_row_index("row_nr").with_columns(
                 (
-                    pl.col("index").cast(pl.Utf8)
+                    pl.col("row_nr").cast(pl.Utf8)
                     + " - "
                     + pl.col("search_type")
                     + " - "
@@ -1564,11 +1560,7 @@ def outliers_report(
     _render_outlier_column_actions(project_id, page_name_id, numeric_columns)
 
     # get outlier column config
-    outliers_column_config = duckdb_get_table(
-        project_id,
-        f"outliers_{page_name_id}",
-        "logs",
-    )
+    outliers_column_config = _load_outlier_settings(project_id, page_name_id)
 
     if outliers_column_config.is_empty():
         return

@@ -19,6 +19,7 @@ from datasure.processing.correction_log import (
     empty_correction_log,
     ensure_log_columns,
 )
+from datasure.utils.dataframe_utils import TableState, get_table_state
 from datasure.utils.duckdb_utils import (
     duckdb_get_table,
     duckdb_save_table,
@@ -1208,6 +1209,13 @@ class CorrectionProcessor:
             return []
 
         correction_log = self.get_correction_log(alias)
+        if get_table_state(correction_log) is TableState.MISSING:
+            # No log, or one `get_correction_log` reads as none, so there are
+            # no statuses to refresh. Saving the status columns alone would
+            # leave a log without its other columns.
+            self.save_corrected_data(alias, fresh_data)
+            return []
+
         key_col = self._configured_key_column(alias, fresh_data)
 
         corrected_data = fresh_data
@@ -1228,27 +1236,24 @@ class CorrectionProcessor:
                 statuses.append("Successful")
                 status_reasons.append(None)
 
-        # With no log there are no statuses to refresh, and saving the status
-        # columns alone would leave a log without its other columns.
-        if correction_log.width > 0:
-            # Accept rows don't change the data; their status depends on the
-            # final data, as for `get_active_acceptances`.
-            refreshed_log = self._with_acceptance_statuses(
-                correction_log.with_columns(
-                    pl.Series("status", statuses, dtype=pl.String),
-                    pl.Series("status_reason", status_reasons, dtype=pl.String),
-                ),
-                corrected_data,
-                key_col,
-            )
-            duckdb_save_table(
-                project_id=self.project_id,
-                table_data=refreshed_log,
-                alias=f"corr_log_{alias}",
-                db_name="logs",
-            )
-            self.get_correction_log.clear()
-            self.get_correction_summary.clear()
+        # Accept rows don't change the data; their status depends on the final
+        # data, as for `get_active_acceptances`.
+        refreshed_log = self._with_acceptance_statuses(
+            correction_log.with_columns(
+                pl.Series("status", statuses, dtype=pl.String),
+                pl.Series("status_reason", status_reasons, dtype=pl.String),
+            ),
+            corrected_data,
+            key_col,
+        )
+        duckdb_save_table(
+            project_id=self.project_id,
+            table_data=refreshed_log,
+            alias=f"corr_log_{alias}",
+            db_name="logs",
+        )
+        self.get_correction_log.clear()
+        self.get_correction_summary.clear()
 
         self.save_corrected_data(alias, corrected_data)
         return failures

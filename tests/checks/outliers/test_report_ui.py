@@ -21,6 +21,7 @@ from datasure.checks.outliers.report_ui import (
     _ensure_column_formats,
     _format_constraint_validation_error,
     _format_outlier_validation_error,
+    _load_outlier_settings,
     _render_column_grouping_options,
     _render_constraint_metrics,
     _render_constraint_options,
@@ -959,17 +960,48 @@ class TestDeleteOutlierColumn:
             [outlier_column_config, outlier_column_config]
         ).with_row_index()
         with (
+            patch(
+                "datasure.checks.outliers.report_ui.duckdb_get_table",
+                return_value=settings,
+            ),
             patch("datasure.checks.outliers.report_ui.st") as st_mock,
             patch("datasure.checks.outliers.report_ui.duckdb_save_table") as mock_save,
         ):
             st_mock.selectbox.return_value = "1 - exact - "
             st_mock.button.return_value = True
-            _delete_outlier_column("proj1", "page1", settings)
+            _delete_outlier_column(
+                "proj1", "page1", _load_outlier_settings("proj1", "page1")
+            )
         options = st_mock.selectbox.call_args.kwargs["options"]
         assert options == ["0 - exact - ", "1 - exact - "]
         saved = mock_save.call_args.args[1]
         assert saved.columns == outlier_column_config.columns
         assert saved.height == 1
+
+
+# ============================================================================
+# TESTS: _load_outlier_settings
+# ============================================================================
+
+
+class TestLoadOutlierSettings:
+    """Test _load_outlier_settings function."""
+
+    def test_drops_saved_index_column(self, outlier_column_config):
+        """The `index` helper column older versions saved is dropped."""
+        with patch(
+            "datasure.checks.outliers.report_ui.duckdb_get_table",
+            return_value=outlier_column_config.with_row_index(),
+        ):
+            loaded = _load_outlier_settings("proj1", "page1")
+        assert loaded.columns == outlier_column_config.columns
+
+    def test_missing_table_loads_empty(self):
+        with patch(
+            "datasure.checks.outliers.report_ui.duckdb_get_table",
+            return_value=pl.DataFrame(),
+        ):
+            assert _load_outlier_settings("proj1", "page1").is_empty()
 
 
 # ============================================================================

@@ -2059,10 +2059,12 @@ class TestRefreshExistingCorrectedData:
         _seed_prep(store, sample_data)
         processor = CorrectionProcessor("p1")
         processor.get_corrected_data("survey")
+        store[("p1", "corrected", "survey")] = sample_data.head(1)
 
         failures = processor.refresh_existing_corrected_data("survey")
 
         assert failures == []
+        assert store[("p1", "corrected", "survey")].equals(sample_data)
         assert ("p1", "logs", "corr_log_survey") not in store
         assert processor.get_active_acceptances(
             "survey", "outliers", "survey_key"

@@ -882,6 +882,36 @@ def compute_outlier_output(
 # =============================================================================
 
 
+def _build_violation_expression(
+    col: str,
+    hard_min: float | None,
+    soft_min: float | None,
+    soft_max: float | None,
+    hard_max: float | None,
+) -> pl.Expr:
+    """Build the expression giving the constraint violation reason for a column.
+
+    Hard bounds are tested before soft ones: a value past a hard bound is also
+    past the soft bound inside it. Unset bounds get no branch, since comparing
+    with None makes polars warn.
+    """
+    bound_rules = [
+        (hard_min, operator.lt, "below hard minimum"),
+        (hard_max, operator.gt, "above hard maximum"),
+        (soft_min, operator.lt, "below soft minimum"),
+        (soft_max, operator.gt, "above soft maximum"),
+    ]
+    violation_expr = pl.lit("no violation")
+    for bound, compare, description in reversed(bound_rules):
+        if bound is not None:
+            violation_expr = (
+                pl.when(compare(pl.col(col), bound))
+                .then(pl.lit(f"Value is {description} {bound}"))
+                .otherwise(violation_expr)
+            )
+    return violation_expr
+
+
 def compute_constraint_violations(
     data: pl.DataFrame,
     settings: OutlierSettings,
@@ -921,23 +951,9 @@ def compute_constraint_violations(
         for col in outlier_cols:
             col_df = data.select([survey_key, col])
 
-            # Hard bounds are tested before soft ones: a value past a hard
-            # bound is also past the soft bound inside it. Unset bounds get
-            # no branch, since comparing with None makes polars warn.
-            checks = [
-                (hard_min, operator.lt, "below hard minimum"),
-                (hard_max, operator.gt, "above hard maximum"),
-                (soft_min, operator.lt, "below soft minimum"),
-                (soft_max, operator.gt, "above soft maximum"),
-            ]
-            violation_expr = pl.lit("no violation")
-            for bound, compare, description in reversed(checks):
-                if bound is not None:
-                    violation_expr = (
-                        pl.when(compare(pl.col(col), bound))
-                        .then(pl.lit(f"Value is {description} {bound}"))
-                        .otherwise(violation_expr)
-                    )
+            violation_expr = _build_violation_expression(
+                col, hard_min, soft_min, soft_max, hard_max
+            )
 
             col_df = safe_to_numeric(col_df, col)
 

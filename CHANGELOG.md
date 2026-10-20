@@ -76,8 +76,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Solution: Reapplying with no log saves the corrected data and writes no
     log. `ensure_log_columns` reads a log with no `action` column as no log,
     so projects that already hold one recover. Deleting an outlier column
-    saves only the settings columns. Adding and deleting outlier columns drop
-    an `index` column saved by earlier versions.
+    numbers its rows in a `row_nr` column and saves only the settings
+    columns. Loading the outlier settings drops an `index` column saved by
+    earlier versions, and the next render saves the cleaned settings.
     Constraint checks add a branch only for the bounds that are set
   - Files: `src/datasure/processing/correction_log.py`,
     `src/datasure/processing/corrections.py`,
