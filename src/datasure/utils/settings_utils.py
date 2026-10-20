@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
+from datasure.utils.duckdb_utils import name_id
 
 
 class ProjectID(BaseModel):
@@ -117,7 +118,7 @@ def page_settings_file(project_id: str, page_name: str) -> Path:
     page_name : str
         The page name, as configured on the Configure Checks page.
     """
-    page_name_id = page_name.lower().replace(" ", "_").replace("-", "_")
+    page_name_id = name_id(page_name)
     return get_cache_path(project_id, "settings", f"page_{page_name_id}_settings.json")
 
 

@@ -33,7 +33,11 @@ from datasure.utils.correction_form import (
     render_value_input_widget as render_shared_value_input_widget,
 )
 from datasure.utils.dataframe_utils import TableState, get_table_state
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_table_exists
+from datasure.utils.duckdb_utils import (
+    duckdb_get_table,
+    duckdb_table_exists,
+    name_id,
+)
 from datasure.utils.nav_ui import (
     LAST_CHECK_PAGE_KEY,
     draw_nav,
@@ -976,11 +980,6 @@ def render_page_navigation() -> None:
     )
 
 
-def page_slug(page_name: str) -> str:
-    """Return a check page's ``page`` URL value: its page_name_id."""
-    return page_name.lower().replace(" ", "_").replace("-", "_")
-
-
 def check_page_status(project_id: str, page_config: dict) -> StatusResult:
     """Return whether a check page has anything to correct, and why not.
 
@@ -1017,7 +1016,7 @@ def check_page_items(
     for page_name, page_config in zip(
         hfc_pages, hfc_config_logs.to_dicts(), strict=False
     ):
-        slug = page_slug(page_name)
+        slug = name_id(page_name)
         status = guarded_status(
             slug, lambda config=page_config: check_page_status(project_id, config)
         )

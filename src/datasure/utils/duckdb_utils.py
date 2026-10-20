@@ -12,6 +12,15 @@ from .cache_utils import get_cache_path
 logger = logging.getLogger(__name__)
 
 
+def name_id(name: str) -> str:
+    """Return the identifier form of a page or dataset name.
+
+    Lower case, with spaces and hyphens as underscores. Used for table names,
+    settings file names and the Corrections ``page`` URL value.
+    """
+    return name.lower().replace(" ", "_").replace("-", "_")
+
+
 def _validate_table_name(table_name: str) -> str:
     """Validate and sanitize table name to prevent SQL injection.
 
@@ -90,7 +99,7 @@ def duckdb_save_table(
     )
 
     # convert alias to table name format and validate
-    table_id = _validate_table_name(alias.lower().replace(" ", "_").replace("-", "_"))
+    table_id = _validate_table_name(name_id(alias))
 
     with duckdb.connect(db_path) as conn:
         table_exists = (
@@ -134,7 +143,7 @@ def duckdb_get_table(
         else get_cache_path(project_id, "data", f"{db_name}.duckdb")
     )
 
-    table_id = _validate_table_name(alias.lower().replace(" ", "_").replace("-", "_"))
+    table_id = _validate_table_name(name_id(alias))
 
     with duckdb.connect(db_path) as conn:
         # Check if the table exists
@@ -175,7 +184,7 @@ def duckdb_remove_table(project_id: str, alias: str, db_name: str) -> None:
         if db_name == "logs"
         else get_cache_path(project_id, "data", f"{db_name}.duckdb")
     )
-    table_id = _validate_table_name(alias.lower().replace(" ", "_").replace("-", "_"))
+    table_id = _validate_table_name(name_id(alias))
     with duckdb.connect(db_path) as conn:
         # Check if the table exists
         table_exists = (
@@ -237,7 +246,7 @@ def duckdb_delete_rows(
         if db_name == "logs"
         else get_cache_path(project_id, "data", f"{db_name}.duckdb")
     )
-    table_id = _validate_table_name(alias.lower().replace(" ", "_").replace("-", "_"))
+    table_id = _validate_table_name(name_id(alias))
     column_id = _validate_column_name(column)
     with duckdb.connect(db_path) as conn:
         conn.execute(f"DELETE FROM {table_id} WHERE {column_id} = ?", [value])
@@ -336,7 +345,7 @@ def duckdb_table_exists(project_id: str, alias: str, db_name: str) -> bool:
         else get_cache_path(project_id, "data", f"{db_name}.duckdb")
     )
 
-    table_id = _validate_table_name(alias.lower().replace(" ", "_").replace("-", "_"))
+    table_id = _validate_table_name(name_id(alias))
 
     with duckdb.connect(db_path) as conn:
         # Check if the table exists

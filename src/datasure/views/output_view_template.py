@@ -24,6 +24,7 @@ from datasure.utils.dataframe_utils import (
 from datasure.utils.duckdb_utils import (
     duckdb_get_table,
     duckdb_table_exists,
+    name_id,
 )
 from datasure.utils.nav_ui import (
     LAST_CHECK_PAGE_KEY,
@@ -174,7 +175,7 @@ def load_page_config(project_id: str, page_number: int) -> PageConfig:
     page_name = check_config.page_name
 
     # Generate page name ID for file naming
-    page_name_id = page_name.lower().replace(" ", "_").replace("-", "_")
+    page_name_id = name_id(page_name)
 
     # Set up setting file paths
     cache_settings_base = get_cache_path(project_id, "settings")
