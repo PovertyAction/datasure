@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0a2] - 2026-10-20
+
 ### Added
 
 - **Replication package**: An **Exclude reviewer names** checkbox on the Export
