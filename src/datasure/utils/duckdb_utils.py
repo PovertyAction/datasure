@@ -1,5 +1,6 @@
 import logging
 import re
+from pathlib import Path
 
 import duckdb  # type: ignore
 import pandas as pd
@@ -54,6 +55,17 @@ def _validate_table_name(table_name: str) -> str:
         sanitized = f"{sanitized}_table"
 
     return sanitized
+
+
+def database_path(project_id: str, db_name: str) -> Path:
+    """Return the path of a project's DuckDB database file.
+
+    The ``logs`` database lives with the project's settings; the others
+    (``raw``, ``prep``, ``corrected``, ``intermediate``) with its data.
+    """
+    if db_name == "logs":
+        return get_cache_path(project_id, "settings", "logs.duckdb")
+    return get_cache_path(project_id, "data", f"{db_name}.duckdb")
 
 
 #     ------- Save data to database ---#

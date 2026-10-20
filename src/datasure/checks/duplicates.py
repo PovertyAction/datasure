@@ -2417,3 +2417,40 @@ def duplicates_status(setting_file: str, config: dict) -> StatusResult:
             "Select a survey ID column in the settings below to find duplicate IDs.",
         )
     return READY
+
+
+def duplicates_headline(data: pl.DataFrame, setting_file: str, config: dict) -> str:
+    """Return the duplicates headline for the Summary health grid.
+
+    The number of unresolved duplicate survey IDs among the records the saved
+    Records to Include filter keeps: the count the check's Survey data
+    switcher shows.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        The survey data.
+    setting_file : str
+        Path to the page's settings file.
+    config : dict
+        The page configuration the check starts from.
+    """
+    settings = load_default_duplicates_settings(
+        setting_file, DuplicatesSettings(**config)
+    )
+    records = filter_records_to_include(
+        data, saved_records_to_include(setting_file), "survey"
+    )
+    count = count_duplicate_ids(
+        IdView(
+            name="survey",
+            data=records.data,
+            id_col=settings.survey_id,
+            key_col=settings.survey_key,
+            date_col=settings.survey_date,
+            staff_col=settings.enumerator,
+            team_col=settings.team,
+            display_cols_setting="id_table_display_cols",
+        )
+    )
+    return f"{count:,} duplicate ID{'' if count == 1 else 's'}"

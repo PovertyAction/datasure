@@ -30,6 +30,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer match the data are dropped. Each check gets a "Reset filters" action
   (`reset_filters_button`) that clears only its own view state. `ViewState`
   takes any settings file, for reuse by Prepare Data and Corrections
+- **Summary check health grid** (#376): Under its tiles, Summary shows a card
+  for every other catalogue check with its group, status (text and icon) and
+  either a headline or the reason it is not ready. "Open →" (ready or error)
+  and "Set up →" (not set up) select the check through `select_nav_item`, so
+  `?check=` follows (`checks/health.py`: `health_cards`,
+  `render_health_grid`)
+  - Six checks expose a headline function, registered as
+    `CheckEntry.headline`: `progress_headline` (share of target, or
+    submissions), `missing_headline` (mean % of values missing),
+    `duplicates_headline` (unresolved duplicate IDs after Records to
+    Include), `outliers_headline` (total outliers and constraint violations,
+    accepted flags left out), `enumerator_headline` (enumerators active in
+    the past 7 days out of all) and `backchecks_headline` (total error rate).
+    Descriptive Stats shows status only
+  - Headlines run only for ready checks and are cached on the page's data,
+    settings files, the logs and intermediate databases and the date; a
+    headline that raises is shown on its card and not cached
+  - `flagged_outlier_percent` and `outliers_headline` share one helper
+    (`_reviewed_flags`); `database_path` (`utils/duckdb_utils.py`) returns a
+    project database's file path; `CHECK_PARAM` and `check_nav_key` move to
+    `checks/catalogue.py`
 
 ### Changed
 
@@ -40,7 +61,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `view_state` (`without_view_state`), and applying a configuration keeps
   the local `view_state` and ignores any in the bundle
   (`utils/project_config.py`)
-
 - **Check page navigation** (#374): The nine check tabs are replaced by a
   segmented control for the group (Overview, Data integrity, Field team,
   Exploration) and pills for that group's checks, with short labels

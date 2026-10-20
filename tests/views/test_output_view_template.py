@@ -176,6 +176,16 @@ REPORTS = (
     "backchecks_report",
 )
 
+# Headlines the mocked checks report on their Summary health cards.
+HEADLINES = {
+    "progress_headline": "2 submitted interviews",
+    "missing_headline": "0.00% of values missing",
+    "duplicates_headline": "0 duplicate IDs",
+    "outliers_headline": "1 outlier, 0 constraint violations",
+    "enumerator_headline": "1 of 1 enumerators active in the past 7 days",
+    "backchecks_headline": "4.25% error rate",
+}
+
 
 def _config(tmp_path: Path, **overrides) -> template.PageConfig:
     values = {
@@ -221,6 +231,10 @@ class CheckPage:
         self.reports = {name: MagicMock(name=name) for name in REPORTS}
         self.reports["flagged_outlier_percent"] = MagicMock(return_value=12.5)
         self.reports["overall_error_rate_percent"] = MagicMock(return_value=4.25)
+        self.headlines = {
+            name: MagicMock(name=name, return_value=value)
+            for name, value in HEADLINES.items()
+        }
 
     def render(self, data: template.CheckData) -> list[str]:
         """Render the page once; return the reports that ran."""
@@ -230,7 +244,7 @@ class CheckPage:
         with (
             self.monkeypatch.context() as m,
             patch.object(template, "st", self.st),
-            patch.multiple(catalogue, **self.reports),
+            patch.multiple(catalogue, **self.reports, **self.headlines),
         ):
             m.setitem(sys.modules, "streamlit", self.st)
             template.render_checks(PROJECT_ID, self.config, data)
@@ -255,6 +269,46 @@ class CheckPage:
 
     def messages(self, kind: str) -> str:
         return "\n".join(str(c.args[0]) for c in getattr(self.st, kind).call_args_list)
+
+    def cards(self) -> dict[str, str]:
+        """The Summary health cards: each card's text by its check label.
+
+        A card starts with its bold label; the text up to the next card's
+        label belongs to it.
+        """
+        cards: dict[str, list[str]] = {}
+        texts = [
+            str(c.args[0])
+            for c in self.st.method_calls
+            if c[0] in {"markdown", "caption", "error"} and c.args
+        ]
+        current = None
+        for text in texts:
+            if text.startswith("**") and text.endswith("**"):
+                current = text.strip("*")
+                cards[current] = []
+            elif current is not None:
+                cards[current].append(text)
+        return {label: "\n".join(lines) for label, lines in cards.items()}
+
+    def card_buttons(self) -> dict[str, str]:
+        """The health card buttons: label by check slug."""
+        return {
+            c.kwargs["args"][0]: c.args[0]
+            for c in self.st.button.call_args_list
+            if c.kwargs.get("key", "").startswith("health_card_")
+        }
+
+    def click_card(self, slug: str) -> None:
+        """Click a health card's button."""
+        call = next(
+            c
+            for c in self.st.button.call_args_list
+            if c.kwargs.get("key") == f"health_card_{slug}"
+        )
+        with self.monkeypatch.context() as m:
+            m.setitem(sys.modules, "streamlit", self.st)
+            call.kwargs["on_click"](*call.kwargs["args"])
 
 
 @pytest.fixture
@@ -302,6 +356,96 @@ class TestSummaryCheckRates:
 
         check_page.reports["flagged_outlier_percent"].assert_not_called()
         check_page.reports["overall_error_rate_percent"].assert_not_called()
+
+
+class TestSummaryHealthGrid:
+    """Summary shows a health card per check, with a button to open it."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh_headlines(self):
+        from datasure.checks.health import clear_headline_cache
+
+        clear_headline_cache()
+        yield
+        clear_headline_cache()
+
+    def test_a_card_for_every_check_except_summary(self, page):
+        check_page = page()
+
+        check_page.render(SURVEY)
+
+        assert list(check_page.cards()) == [
+            entry.label
+            for entry in catalogue.CHECK_CATALOGUE
+            if entry.slug != "summary"
+        ]
+
+    def test_ready_cards_show_their_status_and_headline(self, page):
+        check_page = page()
+
+        check_page.render(SURVEY)
+
+        cards = check_page.cards()
+        assert ":material/check_circle: Ready" in cards["Duplicates"]
+        assert "0 duplicate IDs" in cards["Duplicates"]
+        assert "4.25% error rate" in cards["Backchecks"]
+        assert "2 submitted interviews" in cards["Progress"]
+        assert check_page.card_buttons()["duplicates"] == "Open →"
+
+    def test_descriptive_stats_shows_status_only(self, page):
+        check_page = page()
+
+        check_page.render(SURVEY)
+
+        card = check_page.cards()["Descriptive Stats"]
+        assert card.splitlines() == [
+            "Exploration",
+            ":green[:material/check_circle: Ready]",
+        ]
+
+    def test_not_ready_cards_show_their_status_and_reason(self, page):
+        check_page = page()
+
+        check_page.render(SURVEY)
+
+        cards, buttons = check_page.cards(), check_page.card_buttons()
+        assert ":material/do_not_disturb_on: Not applicable" in cards["GPS Checks"]
+        assert "No GPS column found in this dataset." in cards["GPS Checks"]
+        assert "gps" not in buttons
+        assert ":material/build: Not set up" in cards["Outliers & Constraints"]
+        assert "No outlier or constraint columns" in cards["Outliers & Constraints"]
+        assert buttons["outliers"] == "Set up →"
+        # Not-ready checks do not compute a headline.
+        check_page.headlines["outliers_headline"].assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("slug", "report"),
+        [("duplicates", "duplicates_report"), ("outliers", "outliers_report")],
+    )
+    def test_card_buttons_select_the_check(self, page, slug, report):
+        check_page = page()
+        check_page.render(SURVEY)
+
+        check_page.click_card(slug)
+
+        assert check_page.render(SURVEY) == [report]
+        assert check_page.st.query_params == {"check": slug}
+
+    def test_headlines_are_cached_between_runs(self, page):
+        check_page = page()
+
+        check_page.render(SURVEY)
+        check_page.render(SURVEY)
+
+        check_page.headlines["duplicates_headline"].assert_called_once()
+
+    def test_headlines_are_not_computed_when_another_check_is_shown(self, page):
+        check_page = page(url="missing")
+
+        check_page.render(SURVEY)
+
+        for headline in check_page.headlines.values():
+            headline.assert_not_called()
 
 
 class TestNavigation:

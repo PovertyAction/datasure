@@ -748,6 +748,36 @@ Key quality metrics:
 - % missing values in dataset
 - Backcheck error rate
 
+##### Check Health
+
+Under the tiles, Summary shows a card for every other check, so you can see
+where to start triage. Each card shows:
+
+- The check's name and group
+- Its status, as text and an icon: **Ready**, **Not set up**,
+  **Not applicable** or **Error**
+- For a ready check, its headline number. For a check that is not ready, the
+  reason
+
+| Check | Headline |
+| --- | --- |
+| Progress | Share of the target reached, for example "62.00% of target (310 of 500)", or the submissions when no target is set |
+| Missing Values | Mean percentage of values missing, counting missing codes |
+| Duplicates | Duplicate survey IDs not yet resolved, for example "14 duplicate IDs" |
+| Outliers & Constraints | Outliers and constraint violations, leaving out accepted flags |
+| Enumerator Stats | Enumerators active in the past 7 days, out of all enumerators |
+| Backchecks | Total error rate |
+| Descriptive Stats, GPS Checks | Status only |
+
+Each headline is the number the check itself shows. Headlines are worked out
+again only when the data or the check's settings change, so Summary stays
+quick.
+
+Click **Open →** on a card to go to that check, or **Set up →** to open a check
+that is not set up and configure it. Both update the page address, like
+choosing the check in the navigation. Checks that do not apply to your data
+have no button; their card says why.
+
 ---
 
 ### Progress Report

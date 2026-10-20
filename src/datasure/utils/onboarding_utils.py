@@ -525,6 +525,8 @@ class OutputOnboardingInfo:
         - % of values flagged as outliers: Percentage of checked values flagged as outliers in the **Outliers & Constraints** check, leaving out accepted outliers. It appears once you add outlier columns in that check — return here afterwards to see it.
         - % of missing values in survey dataset: Percentage of missing or null values in the survey dataset.
         - Backcheck error rate: The total error rate from the **Backchecks** check, the percentage of compared values that differ between the survey and backcheck data. It appears once you add backcheck columns in that check.
+
+        Below the tiles, **Check health** shows a card for every other check with its status and headline number, such as the duplicate IDs found. Click **Open →** to go to a check, or **Set up →** to configure one that is not set up yet.
         """,
         },
     }
