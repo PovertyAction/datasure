@@ -457,7 +457,6 @@ class OutputOnboardingInfo:
         ##### Setup for Summary
         In this section, you can configure global settings for the Summary check, you will notice that some settings are pre-filled based on your check configuration.
         This check contains the following settings:
-        - Survey ID: The main identifier for your survey respondents (e.g., household ID, Respondent ID).
         - Survey Date: The date when the survey was conducted or submitted. (e.g., submissiondate, starttime).
         - Total Expected Interviews: The total number of survey interviews you expect to have in your dataset (e.g., 1000).
 
@@ -517,17 +516,17 @@ class OutputOnboardingInfo:
         The "Auto" view automatically adjusts the time interval based on the data density while the other options allow you to manually select the desired time frame for analysis.
         """,
         },
-        "summary_data_quality": {
-            "title": "Data Quality",
+        "summary_check_health": {
+            "title": "Check health",
             "content": """
-        ##### Data Quality
-        This section provides an overview of the overall data quality of your survey dataset, including:
-        - % of duplicate values on ID column: Percentage of duplicate entries found in the ID column.
-        - % of values flagged as outliers: Percentage of checked values flagged as outliers in the **Outliers & Constraints** check, leaving out accepted outliers. It appears once you add outlier columns in that check — return here afterwards to see it.
-        - % of missing values in survey dataset: Percentage of missing or null values in the survey dataset.
-        - Backcheck error rate: The total error rate from the **Backchecks** check, the percentage of compared values that differ between the survey and backcheck data. It appears once you add backcheck columns in that check.
+        ##### Check health
+        This section shows a card for every other check with its status and headline number, such as the duplicate IDs found, the share of values missing, or the backcheck error rate. Each number comes from its check and uses that check's settings, so it matches what you see when you open the check.
 
-        Below the tiles, **Check health** shows a card for every other check with its status and headline number, such as the duplicate IDs found. Click **Open →** to go to a check, or **Set up →** to configure one that is not set up yet.
+        - **Ready**: the check is set up and shows its headline.
+        - **Not set up**: the check needs settings first. Click **Set up →** to configure it.
+        - **Not applicable**: the check has nothing to work with on this page, for example Backchecks without backcheck data.
+
+        Click **Open →** on a card to go to that check. Cards for checks you have not set up yet, such as Outliers & Constraints, show a headline once you set them up — return here afterwards to see it.
         """,
         },
     }

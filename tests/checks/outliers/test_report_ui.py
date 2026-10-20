@@ -36,7 +36,7 @@ from datasure.checks.outliers.report_ui import (
     _update_outlier_column_config,
     _validate_constraint_settings,
     _validate_outlier_settings,
-    flagged_outlier_percent,
+    outliers_headline,
     outliers_report,
 )
 from datasure.utils.dataframe_utils import get_df_columns
@@ -1161,8 +1161,8 @@ class TestOutliersReport:
         st_mock.info.assert_called()
 
 
-class TestFlaggedOutlierPercent:
-    """The outlier % on the Summary tab, computed as the Outliers tab does."""
+class TestOutliersHeadlineSavedSettings:
+    """The Summary health card's outlier count when saved settings drift."""
 
     CONFIG: ClassVar[dict] = {
         "survey_key": "survey_key",
@@ -1171,8 +1171,9 @@ class TestFlaggedOutlierPercent:
         "team": "team",
         "survey_date": "survey_date",
     }
+    FLAGGED = "1 outlier, 1 constraint violation"
 
-    def _percent(self, data, column_config, tmp_path, acceptances=None, alias="s"):
+    def _headline(self, data, column_config, tmp_path, alias="s"):
         from datasure.processing.correction_log import empty_correction_log
 
         with (
@@ -1185,12 +1186,12 @@ class TestFlaggedOutlierPercent:
             ) as processor,
         ):
             processor.return_value.get_active_acceptances.return_value = (
-                empty_correction_log() if acceptances is None else acceptances
+                empty_correction_log()
             )
             processor.return_value.get_active_corrections.return_value = (
                 empty_correction_log()
             )
-            return flagged_outlier_percent(
+            return outliers_headline(
                 "project",
                 "page",
                 data,
@@ -1200,42 +1201,15 @@ class TestFlaggedOutlierPercent:
                 alias,
             )
 
-    def test_share_of_checked_values_flagged(
-        self, sample_polars_df, outlier_column_config, tmp_path
-    ):
-        # numeric_col1 is [1, 2, 3, 100, 5]: 100 is the one outlier.
-        assert self._percent(sample_polars_df, outlier_column_config, tmp_path) == 20.0
-
-    def test_accepted_outliers_are_left_out(
-        self, sample_polars_df, outlier_column_config, tmp_path
-    ):
-        acceptances = pl.DataFrame(
-            {
-                "KEY": ["K004"],
-                "action": ["accept"],
-                "column": ["numeric_col1"],
-                "reason": ["checked"],
-                "severity": [None],
-            },
-            schema_overrides={"severity": pl.String},
-        )
-        assert (
-            self._percent(
-                sample_polars_df, outlier_column_config, tmp_path, acceptances
-            )
-            == 0.0
-        )
-
     def test_without_alias_counts_every_flag(
         self, sample_polars_df, outlier_column_config, tmp_path
     ):
+        # numeric_col1 is [1, 2, 3, 100, 5]: 100 is an outlier and breaks a
+        # constraint.
         assert (
-            self._percent(sample_polars_df, outlier_column_config, tmp_path, alias=None)
-            == 20.0
+            self._headline(sample_polars_df, outlier_column_config, tmp_path, None)
+            == self.FLAGGED
         )
-
-    def test_none_without_outlier_columns(self, sample_polars_df, tmp_path):
-        assert self._percent(sample_polars_df, pl.DataFrame(), tmp_path) is None
 
     def test_none_when_a_saved_option_is_invalid(
         self, sample_polars_df, outlier_column_config, tmp_path
@@ -1243,21 +1217,21 @@ class TestFlaggedOutlierPercent:
         column_config = outlier_column_config.with_columns(
             pl.lit(-1.0).alias("outlier_multiplier")
         )
-        assert self._percent(sample_polars_df, column_config, tmp_path) is None
+        assert self._headline(sample_polars_df, column_config, tmp_path) is None
 
     def test_ignores_a_saved_team_column_that_is_gone(
         self, sample_polars_df, outlier_column_config, tmp_path
     ):
         # The settings panel shows a missing column as unset, so the tab
-        # still reports; the Summary must too.
+        # still reports; the health card must too.
         data = sample_polars_df.drop("team")
-        assert self._percent(data, outlier_column_config, tmp_path) == 20.0
+        assert self._headline(data, outlier_column_config, tmp_path) == self.FLAGGED
 
     def test_none_when_a_configured_column_is_gone(
         self, sample_polars_df, outlier_column_config, tmp_path
     ):
         data = sample_polars_df.drop("numeric_col1")
-        assert self._percent(data, outlier_column_config, tmp_path) is None
+        assert self._headline(data, outlier_column_config, tmp_path) is None
 
 
 # ============================================================================

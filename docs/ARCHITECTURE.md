@@ -25,7 +25,7 @@ src/datasure/
 │                           #   icon, group, status, render and headline
 │   ├── context.py          #   PageConfig, CheckData, CheckContext
 │   ├── health.py           #   Summary's check health grid, cached headlines
-│   ├── summary.py          #   Overall data quality summary
+│   ├── summary.py          #   Data, submission and progress summary
 │   ├── missing.py          #   Missing data analysis
 │   ├── duplicates.py       #   Duplicate detection
 │   ├── id_duplicates.py    #   ID duplicate/unmatched cards logic (no Streamlit)

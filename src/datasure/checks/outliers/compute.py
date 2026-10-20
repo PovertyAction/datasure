@@ -22,7 +22,7 @@ from datasure.checks.outliers.models import (
     OutlierThresholds,
     SearchType,
 )
-from datasure.checks.outliers.review import CONSTRAINTS, OUTLIERS
+from datasure.checks.outliers.review import CONSTRAINTS
 from datasure.utils.dataframe_utils import safe_to_numeric
 from datasure.utils.settings_utils import load_check_settings
 
@@ -1121,29 +1121,6 @@ def _compute_outlier_metrics(
         total_outliers=total_outliers,
         enumerators_with_outliers=enumerators_with_outliers,
     )
-
-
-def flagged_value_percent(outliers_data: pl.DataFrame) -> float | None:
-    """Return the percentage of checked values flagged as outliers.
-
-    Parameters
-    ----------
-    outliers_data : pl.DataFrame
-        Output of `compute_outlier_output`: one row per KEY and column name.
-        Missing values are not checked, so they are left out.
-
-    Returns
-    -------
-    float | None
-        The percentage, or None when no values were checked.
-    """
-    if "column value" not in outliers_data.columns:
-        return None
-    checked = outliers_data.filter(pl.col("column value").is_not_null())
-    if checked.is_empty():
-        return None
-    flagged = checked.filter(pl.col(OUTLIERS.reason_col) != OUTLIERS.no_flag).height
-    return flagged / checked.height * 100
 
 
 def compute_column_outlier_summary(

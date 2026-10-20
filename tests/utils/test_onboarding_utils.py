@@ -295,13 +295,19 @@ class TestOutputOnboardingInfo:
         assert message["title"] == "Progress"
         assert "Submission Progress" in message["content"]
 
-    def test_get_onboarding_message_summary_data_quality(self):
-        """Test summary_data_quality entry."""
+    def test_get_onboarding_message_summary_check_health(self):
+        """Test summary_check_health entry, which replaced Data Quality."""
         message = OutputOnboardingInfo.get_onboarding_message(
-            "summary", "summary_data_quality"
+            "summary", "summary_check_health"
         )
-        assert message["title"] == "Data Quality"
-        assert "duplicate" in message["content"].lower()
+        assert message["title"] == "Check health"
+        assert "Open →" in message["content"]
+        assert (
+            OutputOnboardingInfo.get_onboarding_message(
+                "summary", "summary_data_quality"
+            )
+            is None
+        )
 
     def test_get_onboarding_message_progress_display_summary(self):
         """Test display_progress_summary entry."""

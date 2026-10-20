@@ -743,7 +743,6 @@ on the "hhid" column.
 
 Configure global parameters:
 
-- **Survey ID**: Main respondent identifier
 - **Survey Date**: Submission date column
 - **Total Expected Interviews**: Target sample size
 
@@ -781,18 +780,9 @@ Collection progress metrics:
 - View progress by category
 - Toggle time intervals (Auto, Daily, Weekly, Monthly)
 
-##### Data Quality Overview
-
-Key quality metrics:
-
-- % duplicate values on ID column
-- % values flagged as outliers
-- % missing values in dataset
-- Backcheck error rate
-
 ##### Check Health
 
-Under the tiles, Summary shows a card for every other check, so you can see
+After Progress, Summary shows a card for every other check, so you can see
 where to start triage. Each card shows:
 
 - The check's name and group

@@ -3,7 +3,6 @@
 This module provides comprehensive summary functionality with:
 - Submission tracking and metrics
 - Progress monitoring against targets
-- Data quality assessment
 - Polars-based optimizations for performance
 - Pydantic validation for data integrity
 """
@@ -12,7 +11,6 @@ from datetime import date as Date
 from datetime import datetime, timedelta
 from typing import Any
 
-import matplotlib.pyplot as plt
 import pandas as pd
 import plotly.express as px
 import polars as pl
@@ -21,9 +19,7 @@ import streamlit as st
 from dateutil.relativedelta import relativedelta
 from pydantic import BaseModel, Field, field_validator
 
-from datasure.utils.chart_utils import donut_chart
 from datasure.utils.dataframe_utils import ColumnByType
-from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.settings_utils import (
     save_check_settings,
@@ -59,7 +55,6 @@ check_view = view_factory(
 class SummarySettings(BaseModel):
     """Settings configuration for the summary report with validation."""
 
-    survey_id: str | None = None
     survey_date: str | None = None
     survey_target: int | None = Field(None, ge=0)
 
@@ -158,26 +153,6 @@ class DataSummaryMetrics(BaseModel):
                     "Total columns count must equal sum of string, numeric, and date columns counts"
                 )
         return v
-
-
-class CheckRates(BaseModel):
-    """Rates the Summary tab shows from the Outliers and Backchecks tabs.
-
-    Each is None when its tab has nothing to report.
-    """
-
-    outliers_pct: float | None = None
-    backcheck_error_pct: float | None = None
-
-
-class DataQualityMetrics(BaseModel):
-    """Metrics for data quality assessment with validation."""
-
-    duplicates_pct: float | None = Field(None, ge=0.0, le=100.0)
-    # None when the Outliers or Backchecks tab has nothing to report yet.
-    outliers_pct: float | None = Field(None, ge=0.0, le=100.0)
-    missing_pct: float = Field(ge=0.0, le=100.0)
-    backcheck_error_pct: float | None = Field(None, ge=0.0, le=100.0)
 
 
 # =============================================================================
@@ -948,90 +923,6 @@ def compute_summary_data_summary(data: pl.DataFrame) -> tuple:
 
 
 # =============================================================================
-# Data Quality - Computation Functions
-# =============================================================================
-
-
-def calculate_data_quality_metrics(
-    data: pl.DataFrame,
-    survey_id: str | None,
-    check_rates: CheckRates | None = None,
-) -> DataQualityMetrics:
-    """Calculate data quality metrics using Polars.
-
-    Parameters
-    ----------
-    data : pl.DataFrame
-        The survey data.
-    survey_id : str | None
-        The survey ID column in the survey data.
-    check_rates : CheckRates | None
-        The outlier % and backcheck error rate; None if there are none.
-
-    Returns
-    -------
-    DataQualityMetrics
-        Structured data quality metrics.
-    """
-    # Calculate duplicates percentage
-    if survey_id and survey_id in data.columns:
-        total_rows = data.height
-        unique_rows = data.select(pl.col(survey_id)).unique().height
-        duplicates_pct = (
-            ((total_rows - unique_rows) / total_rows * 100) if total_rows > 0 else 0.0
-        )
-    else:
-        duplicates_pct = None
-
-    # Calculate missing percentage
-    if data.height > 0:
-        null_counts = data.null_count()
-        total_cells = data.height * len(data.columns)
-        missing_pct = (
-            (null_counts.sum_horizontal().item() / total_cells * 100)
-            if total_cells > 0
-            else 0.0
-        )
-    else:
-        missing_pct = 0.0
-
-    check_rates = check_rates or CheckRates()
-    return DataQualityMetrics(
-        duplicates_pct=duplicates_pct,
-        outliers_pct=check_rates.outliers_pct,
-        missing_pct=missing_pct,
-        backcheck_error_pct=check_rates.backcheck_error_pct,
-    )
-
-
-@st.cache_data
-def compute_summary_data_quality(data: pl.DataFrame, survey_id: str | None) -> tuple:
-    """Compute data quality metrics.
-
-    This function is maintained for backward compatibility.
-
-    Parameters
-    ----------
-    data : pd.DataFrame
-        The survey data (pandas).
-    survey_id : str | None
-        The survey ID column in the survey data.
-
-    Returns
-    -------
-    tuple
-        A tuple containing data quality metrics.
-    """
-    metrics = calculate_data_quality_metrics(data, survey_id)
-    return (
-        metrics.duplicates_pct,
-        metrics.outliers_pct,
-        metrics.missing_pct,
-        metrics.backcheck_error_pct,
-    )
-
-
-# =============================================================================
 # Streamlit UI - Settings Configuration
 # =============================================================================
 
@@ -1057,45 +948,20 @@ def summary_settings(
     Returns
     -------
     tuple
-        A tuple containing (date_column, target, survey_id_column).
+        A tuple containing (date_column, target).
     """
     with st.expander("settings", icon=":material/settings:"):
         st.markdown("## Configure settings for summary report")
         st.write("---")
 
         # Load defaults
-        default_survey_id, default_date, default_target = (
-            config.survey_id,
+        default_date, default_target = (
             config.survey_date,
             config.survey_target,
         )
 
         # Get column information
         datetime_columns = survey_columns.datetime_columns
-        categorical_columns = survey_columns.categorical_columns
-
-        st.markdown("#### Survey Identifiers")
-        with st.container(border=True):
-            si1, _, _ = st.columns(spec=3)
-            # Survey ID selection
-            with si1:
-                id_col_options = categorical_columns
-                default_survey_id_index = (
-                    id_col_options.index(default_survey_id)
-                    if default_survey_id and default_survey_id in id_col_options
-                    else None
-                )
-
-                survey_id = st.selectbox(
-                    label="Survey ID",
-                    options=id_col_options,
-                    help="Column containing survey ID",
-                    index=default_survey_id_index,
-                    key="survey_id_summary",
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_survey_id"},
-                )
-                save_check_settings(setting_file, TAB_NAME, {"survey_id": survey_id})
 
         st.markdown("#### Survey Date")
         with st.container(border=True):
@@ -1134,7 +1000,7 @@ def summary_settings(
                 )
                 save_check_settings(setting_file, TAB_NAME, {"target": target})
 
-    return date, target, survey_id or None
+    return date, target
 
 
 # =============================================================================
@@ -1376,87 +1242,6 @@ def summary_data_summary(data: pl.DataFrame) -> None:
     )
 
 
-@demo_output_onboarding(TAB_NAME)
-def summary_data_quality(
-    data: pl.DataFrame,
-    survey_id: str | None,
-    check_rates: CheckRates | None = None,
-) -> None:
-    """Render data quality section.
-
-    Parameters
-    ----------
-    data : pd.DataFrame
-        The survey data (pandas).
-    survey_id : str | None
-        The survey ID column.
-    check_rates : CheckRates | None
-        The outlier % and backcheck error rate; None if there are none.
-    """
-    metrics = calculate_data_quality_metrics(data, survey_id, check_rates)
-
-    # Create donut charts
-    if metrics.duplicates_pct is not None:
-        perc_duplicates_chart = donut_chart(actual_value=metrics.duplicates_pct)
-        plt.close(perc_duplicates_chart)
-
-    if metrics.outliers_pct is not None:
-        perc_outliers_chart = donut_chart(actual_value=metrics.outliers_pct)
-        plt.close(perc_outliers_chart)
-
-    perc_missing_chart = donut_chart(actual_value=metrics.missing_pct)
-    plt.close(perc_missing_chart)
-
-    if metrics.backcheck_error_pct is not None:
-        perc_back_check_error_rate_chart = donut_chart(
-            actual_value=metrics.backcheck_error_pct
-        )
-        plt.close(perc_back_check_error_rate_chart)
-
-    # Display charts
-    dq1, dq2, dq3, dq4 = st.columns(spec=4, border=True)
-
-    with dq1:
-        if metrics.duplicates_pct is not None:
-            st.markdown(f"**% of duplicates values on {survey_id}**")
-            st.pyplot(perc_duplicates_chart)
-        else:
-            st.markdown("**% of duplicates values ID Column**")
-            st.info(
-                "Percentage of duplicate values requires a survey ID column to be selected. "
-                "Go to the :material/settings: settings section above."
-            )
-
-    with dq2:
-        st.markdown("**% of values flagged as outliers**")
-        if metrics.outliers_pct is not None:
-            st.pyplot(perc_outliers_chart)
-        else:
-            st.info(
-                "No outlier results to show. Add outlier columns, or check "
-                "their settings, in **Data integrity → Outliers & Constraints**."
-            )
-
-    with dq3:
-        st.markdown("**% of missing values in survey dataset**")
-        st.pyplot(perc_missing_chart)
-
-    with dq4:
-        st.markdown("**Back check error rate**")
-        if metrics.backcheck_error_pct is not None:
-            st.pyplot(perc_back_check_error_rate_chart)
-        else:
-            st.info(
-                "No backcheck values compared. Add backcheck data to the page, "
-                "then add backcheck columns, or check their settings, in "
-                "**Field team → Backchecks**."
-            )
-
-    demo_callout(
-        "**Next**: :material/arrow_upward: Scroll up and select **Overview → Progress**."
-    )
-
-
 # =============================================================================
 # Main Report Function
 # =============================================================================
@@ -1467,9 +1252,11 @@ def summary_report(
     setting_file: str,
     config: dict,
     survey_columns: ColumnByType,
-    check_rates: CheckRates | None = None,
 ) -> None:
     """Generate comprehensive summary report.
+
+    The check health grid drawn after it replaces the former Data Quality
+    section.
 
     Parameters
     ----------
@@ -1481,13 +1268,10 @@ def summary_report(
         Configuration dictionary.
     survey_columns : ColumnByType
         Columns of `data` by type.
-    check_rates : CheckRates | None
-        The outlier % from `flagged_outlier_percent` and the backcheck error
-        rate from `overall_error_rate_percent`.
     """
     # Get settings
     config_settings = SummarySettings(**config)
-    survey_date, survey_target, survey_id = summary_settings(
+    survey_date, survey_target = summary_settings(
         data, setting_file, config_settings, survey_columns
     )
 
@@ -1504,7 +1288,3 @@ def summary_report(
     summary_progress(
         data=data, date=survey_date, target=survey_target, setting_file=setting_file
     )
-
-    st.write("---")
-    st.markdown("## Data Quality")
-    summary_data_quality(data=data, survey_id=survey_id, check_rates=check_rates)

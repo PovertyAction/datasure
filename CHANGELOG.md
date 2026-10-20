@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer match the data are dropped. Each check gets a "Reset filters" action
   (`reset_filters_button`) that clears only its own view state. `ViewState`
   takes any settings file, for reuse by Prepare Data and Corrections
-- **Summary check health grid** (#376): Under its tiles, Summary shows a card
+- **Summary check health grid** (#376): After Progress, Summary shows a card
   for every other catalogue check with its group, status (text and icon) and
   either a headline or the reason it is not ready. "Open →" (ready or error)
   and "Set up →" (not set up) select the check through `select_nav_item`, so
@@ -48,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Headlines run only for ready checks and are cached on the page's data,
     settings files, the logs and intermediate databases and the date; a
     headline that raises is shown on its card and not cached
-  - `flagged_outlier_percent` and `outliers_headline` share one helper
+  - `outliers_headline` computes the check's results without rendering it
     (`_reviewed_flags`); `database_path` (`utils/duckdb_utils.py`) returns a
     project database's file path; `CHECK_PARAM` and `check_nav_key` move to
     `checks/catalogue.py`
@@ -109,6 +109,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Correction Log filters are saved in `view_state` per check page, with a
     Reset filters action
   - Onboarding text and the user guide describe both pages' pills
+
+### Removed
+
+- **Summary's Data Quality section** (#378): Removed in favor of the check
+  health grid, which now follows Progress. Its four donuts duplicated the
+  Duplicates, Missing Values, Outliers & Constraints and Backchecks health
+  cards but were computed differently (duplicates on Summary's own ID column
+  and the raw data, missing values without missing codes), so Summary could
+  show two different numbers for one check. The health cards use each
+  check's own settings and corrections
+  - Summary's Survey ID setting, which only fed the duplicates donut, is
+    removed; `summary_settings` returns `(date, target)` and
+    `SummarySettings` has no `survey_id`
+  - Removed `summary_data_quality`, `calculate_data_quality_metrics`,
+    `compute_summary_data_quality`, `DataQualityMetrics` and `CheckRates`
+    (`checks/summary.py`), `summary_report(check_rates=...)`,
+    `flagged_outlier_percent` (`checks/outliers/report_ui.py`) and
+    `flagged_value_percent` (`checks/outliers/compute.py`)
+  - The demo guidance moves to the health grid (`summary_check_health` in
+    `checks/catalogue.py`)
 
 ### Fixed
 

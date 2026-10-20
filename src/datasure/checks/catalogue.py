@@ -15,7 +15,6 @@ from datasure.checks.backchecks.report_ui import (
     backchecks_report,
     backchecks_settings_section,
     backchecks_status,
-    overall_error_rate_percent,
 )
 from datasure.checks.context import CheckContext
 from datasure.checks.descriptive import descriptive_report
@@ -37,15 +36,14 @@ from datasure.checks.gpschecks.report_ui import (
 from datasure.checks.health import health_cards, render_health_grid
 from datasure.checks.missing import missing_headline, missing_report
 from datasure.checks.outliers.report_ui import (
-    flagged_outlier_percent,
     outliers_headline,
     outliers_report,
     outliers_settings_section,
     outliers_status,
 )
 from datasure.checks.progress import progress_headline, progress_report
-from datasure.checks.summary import CheckRates, summary_report
-from datasure.utils.dataframe_utils import TableState, get_df_columns
+from datasure.checks.summary import summary_report
+from datasure.utils.dataframe_utils import get_df_columns
 from datasure.utils.nav_ui import (
     SET_UP_BELOW,
     guarded_status,
@@ -59,6 +57,8 @@ from datasure.utils.navigation import (
     rows_status,
     with_errors,
 )
+from datasure.utils.navigations_utils import demo_callout
+from datasure.utils.onboarding_utils import demo_output_onboarding
 
 OVERVIEW = "Overview"
 DATA_INTEGRITY = "Data integrity"
@@ -151,47 +151,25 @@ def _backcheck_config(ctx: CheckContext) -> dict:
 
 def _render_summary(ctx: CheckContext) -> None:
     config, data = ctx.config, ctx.data
-    # Summary shows rates from the Outliers and Backchecks checks. They are
-    # computed here, so they only run when Summary is shown.
-    check_rates = CheckRates(
-        outliers_pct=flagged_outlier_percent(
-            ctx.project_id,
-            config.page_name_id,
-            data.page_data,
-            ctx.survey_columns,
-            config.setting_file,
-            _outliers_config(ctx),
-            config.survey_data_name,
-        ),
-        backcheck_error_pct=(
-            overall_error_rate_percent(
-                ctx.project_id,
-                config.page_name_id,
-                data.page_data,
-                data.backcheck_data,
-                config.setting_file,
-                _backcheck_config(ctx),
-            )
-            if data.backcheck_state is TableState.HAS_ROWS
-            else None
-        ),
-    )
     summary_report(
         data.page_data,
         config.setting_file,
         {
-            "survey_id": config.survey_id,
             "survey_date": config.survey_date,
             "survey_target": config.survey_target,
         },
         ctx.survey_columns,
-        check_rates=check_rates,
     )
-    _render_health_grid(ctx)
+    summary_check_health(ctx)
 
 
-def _render_health_grid(ctx: CheckContext) -> None:
-    """Draw a health card for every check but Summary, under its tiles."""
+@demo_output_onboarding("summary")
+def summary_check_health(ctx: CheckContext) -> None:
+    """Draw a health card for every check but Summary, under its sections.
+
+    Replaces Summary's former Data Quality section: each card's headline
+    comes from its check, with that check's settings and corrections.
+    """
     nav_key = check_nav_key(ctx.config.page_name_id)
     items = with_errors(nav_items(ctx), render_errors(nav_key))
     entries = {entry.slug: entry for entry in CHECK_CATALOGUE}
@@ -201,6 +179,9 @@ def _render_health_grid(ctx: CheckContext) -> None:
         {slug: entry.headline for slug, entry in entries.items() if entry.headline},
     )
     render_health_grid(cards, on_select=partial(select_nav_item, nav_key, CHECK_PARAM))
+    demo_callout(
+        "**Next**: :material/arrow_upward: Scroll up and select **Overview → Progress**."
+    )
 
 
 def _render_descriptive(ctx: CheckContext) -> None:

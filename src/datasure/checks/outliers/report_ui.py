@@ -21,7 +21,6 @@ from datasure.checks.outliers.compute import (
     compute_constraint_violations,
     compute_outlier_output,
     expand_col_names,
-    flagged_value_percent,
     load_default_settings,
 )
 from datasure.checks.outliers.models import (
@@ -1428,7 +1427,7 @@ def _reviewed_flags(
     config: dict,
     alias: str | None,
 ) -> _ReviewedFlags | None:
-    """Compute the check's results without rendering it, for Summary.
+    """Compute the check's results without rendering it, for the health grid.
 
     Uses the saved settings and outlier columns, and clears accepted flags,
     as the Outliers tab does. None when no outlier columns are configured or
@@ -1464,7 +1463,11 @@ def _reviewed_flags(
     return _ReviewedFlags(outlier_data, violations)
 
 
-def flagged_outlier_percent(
+def _plural(count: int, noun: str) -> str:
+    return f"{count:,} {noun}{'' if count == 1 else 's'}"
+
+
+def outliers_headline(
     project_id: str,
     page_name_id: str,
     data: pl.DataFrame,
@@ -1472,12 +1475,11 @@ def flagged_outlier_percent(
     setting_file: str,
     config: dict,
     alias: str | None,
-) -> float | None:
-    """Return the percentage of checked values flagged as outliers.
+) -> str | None:
+    """Return the outliers headline for the Summary health grid.
 
-    Uses the saved settings and outlier columns, and leaves out accepted
-    flags, so it matches the counts on the Outliers tab. Computed without
-    rendering the tab, for the Summary tab.
+    The check's "Total Outliers" and "Total Violations", leaving out
+    accepted flags. Computed without rendering the tab.
 
     Parameters
     ----------
@@ -1496,36 +1498,6 @@ def flagged_outlier_percent(
     alias : str | None
         The survey dataset alias, whose correction log holds the accepted
         flags. If None, every flag is counted.
-
-    Returns
-    -------
-    float | None
-        The percentage, or None when no outlier columns are configured, no
-        values were checked, or the saved settings no longer fit the data.
-    """
-    flags = _reviewed_flags(
-        project_id, page_name_id, data, survey_columns, setting_file, config, alias
-    )
-    return None if flags is None else flagged_value_percent(flags.outliers)
-
-
-def _plural(count: int, noun: str) -> str:
-    return f"{count:,} {noun}{'' if count == 1 else 's'}"
-
-
-def outliers_headline(
-    project_id: str,
-    page_name_id: str,
-    data: pl.DataFrame,
-    survey_columns: ColumnByType,
-    setting_file: str,
-    config: dict,
-    alias: str | None,
-) -> str | None:
-    """Return the outliers headline for the Summary health grid.
-
-    The check's "Total Outliers" and "Total Violations", leaving out
-    accepted flags. Takes the same parameters as `flagged_outlier_percent`.
 
     Returns
     -------

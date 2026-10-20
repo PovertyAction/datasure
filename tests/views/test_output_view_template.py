@@ -238,8 +238,6 @@ class CheckPage:
         self.tmp_path = tmp_path
         self.config = _config(tmp_path, **config)
         self.reports = {name: MagicMock(name=name) for name in REPORTS}
-        self.reports["flagged_outlier_percent"] = MagicMock(return_value=12.5)
-        self.reports["overall_error_rate_percent"] = MagicMock(return_value=4.25)
         self.headlines = {
             name: MagicMock(name=name, return_value=value)
             for name, value in HEADLINES.items()
@@ -340,42 +338,6 @@ def page(monkeypatch, tmp_path):
 
 
 SURVEY = template.CheckData(page_data=_rows(2), backcheck_data=_rows(1))
-
-
-class TestSummaryCheckRates:
-    """Summary gets the outlier % and backcheck error rate when it is shown."""
-
-    def test_rates_are_passed_to_the_summary(self, page):
-        check_page = page()
-
-        check_page.render(SURVEY)
-
-        mocks = check_page.reports
-        mocks["flagged_outlier_percent"].assert_called_once()
-        rates = mocks["summary_report"].call_args.kwargs["check_rates"]
-        assert rates.outliers_pct == 12.5
-        assert rates.backcheck_error_pct == 4.25
-
-    @pytest.mark.parametrize("backcheck_rows", [None, 0])
-    def test_no_error_rate_without_backcheck_rows(self, page, backcheck_rows):
-        backcheck = None if backcheck_rows is None else _rows(backcheck_rows)
-        data = template.CheckData(page_data=_rows(2), backcheck_data=backcheck)
-        check_page = page()
-
-        check_page.render(data)
-
-        mocks = check_page.reports
-        mocks["overall_error_rate_percent"].assert_not_called()
-        rates = mocks["summary_report"].call_args.kwargs["check_rates"]
-        assert rates.backcheck_error_pct is None
-
-    def test_rates_are_not_computed_when_another_check_is_shown(self, page):
-        check_page = page(url="missing")
-
-        check_page.render(SURVEY)
-
-        check_page.reports["flagged_outlier_percent"].assert_not_called()
-        check_page.reports["overall_error_rate_percent"].assert_not_called()
 
 
 class TestSummaryHealthGrid:
