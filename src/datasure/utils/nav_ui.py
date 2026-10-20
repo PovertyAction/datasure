@@ -163,8 +163,9 @@ def _on_item_change(key: str, param: str) -> None:
 def draw_nav(state: NavState, *, key: str, param: str, label: str) -> None:
     """Draw the navigation controls for a resolved selection.
 
-    Grouped items get a segmented control for the group and pills for the
-    group's items; a flat list gets one row of pills. Items that are not
+    Grouped items get a full-width segmented control for the group, a
+    divider, and pills for the group's items; a flat list gets one row of
+    pills. Items that are not
     ready, or that raised when they last rendered, are muted with a text and
     icon marker.
 
@@ -196,7 +197,10 @@ def draw_nav(state: NavState, *, key: str, param: str, label: str) -> None:
             label_visibility="collapsed",
             on_change=_on_group_change,
             args=(key, param, items),
+            width="stretch",
         )
+        # Separates the groups from the selected group's items below.
+        st.divider()
         options = [item.slug for item in items if item.group == state.group]
     else:
         options = [item.slug for item in items]
