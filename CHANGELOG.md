@@ -23,8 +23,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `utils/nav_ui.py` the Streamlit helper (`resolve_selection`, `draw_nav`,
   `select_nav_item`, `render_selected`, `run_guarded`, `guarded_status`),
   for reuse by Prepare Data and Corrections
+- **Saved view state** (#375): `utils/view_state.py` keeps the last selected
+  check and each check's filter, selection and sort widget values in a
+  `view_state` section of the page settings file (`ViewState.bind`,
+  `bind_widget`, `saved_selection`, `save_selection`). Saved values that no
+  longer match the data are dropped. Each check gets a "Reset filters" action
+  (`reset_filters_button`) that clears only its own view state. `ViewState`
+  takes any settings file, for reuse by Prepare Data and Corrections
 
 ### Changed
+
+- **Check page opens on the last viewed check** (#375): With no `?check=`
+  URL parameter, a check page opens on the check last viewed on it, also in
+  a new session. A valid URL parameter still wins
+- **View state stays local** (#375): Project configuration exports leave out
+  `view_state` (`without_view_state`), and applying a configuration keeps
+  the local `view_state` and ignores any in the bundle
+  (`utils/project_config.py`)
 
 - **Check page navigation** (#374): The nine check tabs are replaced by a
   segmented control for the group (Overview, Data integrity, Field team,

@@ -386,9 +386,29 @@ Every check is at most two clicks away. Choosing a group opens the check you
 last used in that group, or its first check. Only the selected check runs, so
 the page responds faster than when every check ran at once.
 
-The page opens on **Summary**. The selected check is part of the page address,
-for example `...?check=duplicates`, so you can bookmark or share a link to a
-check. A link to a check that does not exist opens Summary.
+The page opens on the check you last viewed on it, or on **Summary** the first
+time. The selected check is part of the page address, for example
+`...?check=duplicates`, so you can bookmark or share a link to a check. A link
+always opens the check it points to; a link to a check that does not exist
+opens the last viewed check or Summary.
+
+#### Remembered Filters
+
+Each check remembers its filters, selections and sort order, such as the
+duplicates sort order, the outlier table toggles, the GPS map colour and
+filter, the enumerator summary information and the backcheck comparison
+filters. They stay set when you switch to another check and back, and when you
+reopen the app.
+
+- Pagination, search boxes and the inputs in dialogs always start fresh.
+- A remembered value that no longer matches your data, for example an
+  enumerator, column or dataset that was removed, is dropped quietly and the
+  filter goes back to its default.
+- **Reset filters**, above each check, clears that check's remembered filters
+  only. Its settings and the other checks' filters stay.
+- Remembered filters are personal. They are not included when you export a
+  project configuration, apply one to a project, or build a replication
+  package.
 
 #### Check Status
 

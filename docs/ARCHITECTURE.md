@@ -187,7 +187,61 @@ the only change needed for a check to appear.
 - **Widget state.** Streamlit drops the state of widgets that are not drawn,
   so a check's widgets are rebuilt from its saved settings each time it is
   opened. Settings loaders must therefore read the settings file directly,
-  not through `st.cache_data`.
+  not through `st.cache_data`. Filter, selection and sort widgets that are
+  not check settings are kept as [view state](#view-state).
+
+### View state
+
+`utils/view_state.py` keeps personal view settings in a `view_state` section
+of a settings JSON file, so they survive switching checks and new sessions.
+On a check page this is the page settings file
+(`page_{page_name_id}_settings.json`):
+
+```json
+{
+  "duplicates": {"survey_id": "hhid"},
+  "view_state": {
+    "selected": "duplicates",
+    "scopes": {"duplicates": {"iddup_survey_sort": "Latest date"}}
+  }
+}
+```
+
+- **Selection.** `saved_selection` / `save_selection` hold the last selected
+  item. `render_checks` passes it to `nav_ui.resolve_selection` as `saved`,
+  so precedence is a valid `?check=` URL value, then the selection made
+  earlier in this session, then the saved selection, then Summary. A saved
+  slug that is no longer in the catalogue is ignored.
+- **Widget values.** `ViewState(settings_file, scope).bind(key, options=...,
+  multi=..., on_change=..., **initial)` returns the widget's `key` and
+  `on_change` keyword arguments. Before the widget is drawn, it copies a
+  saved value into `st.session_state` when this session has none, and it
+  saves the value when the user changes it. A saved value that is not in
+  `options` is removed and the widget shows its default; a multiselect keeps
+  only the values that still exist. The widget's own default (`index`,
+  `default`, `value`) goes through `initial`, so it is left out once session
+  state holds a value. `bind_widget(view, key, ...)` does the same for
+  helpers that may have no view.
+- **Scopes.** A check's scope is its catalogue slug (`VIEW_SCOPE` in each
+  check module). "Reset filters" (`reset_filters_button`, drawn by
+  `render_checks` above the selected check) calls `ViewState.reset_widgets`,
+  which clears only that scope's saved values and their session state. It
+  does not touch the check's own settings.
+- **Not saved.** Pagination, search boxes and inputs inside dialogs or
+  popovers are never bound, so they start fresh. Bound today: the duplicates
+  dataset switcher, card sort and column selector; the outliers table toggles
+  and inspection columns; the GPS map colour, filter and category values,
+  configuration choices and Show reviewed toggle; the enumerator summary
+  information pills; and the backcheck comparison filters. Descriptive Stats
+  saves its column selection to DuckDB instead.
+- **Not shared.** View state is personal. `without_view_state` drops it from
+  project configuration exports, and applying a configuration (a project
+  template) keeps the local `view_state` and ignores any in the bundle
+  (`utils/project_config.py`). The replication package never reads settings
+  files.
+- **Other pages.** `ViewState` and the selection functions take any settings
+  file, so Prepare Data and Corrections can keep their own, for example
+  `get_cache_path(project_id, "settings", "prep_view_settings.json")`.
 
 ## Cache and data locations
 
@@ -206,7 +260,8 @@ Per project (UUID-keyed):
 - `cache/{project_id}/settings/` — `logs.duckdb` (import/prep logs, the
   correction logs `corr_log_{alias}`, and the backcheck attribution logs
   `bc_attribution_{page_name_id}`; see [Correction log](#correction-log)),
-  JSON settings, and credential metadata
+  JSON settings (including each check page's
+  [view state](#view-state)), and credential metadata
 - `cache/projects.json` — the project registry
 - `cache/user_settings.json` — per-user preferences, currently the
   "Reviewer name" recorded as `user` in correction logs
@@ -228,7 +283,8 @@ project is selected. If cross-page state looks corrupted, check `app.py` first.
 The check page's selected check is the `check` URL query parameter, for
 example `?check=duplicates`. Each generated check page is its own page, so the
 parameter is per page. `nav_ui.resolve_selection` reads it on every run; a
-valid value wins over the remembered selection, and an invalid one is ignored.
+valid value wins over the remembered and saved selections (see
+[View state](#view-state)), and an invalid one is ignored.
 Changing the selection writes the parameter, so links and bookmarks open the
 same check. To select a check from code (for example a button), call
 `nav_ui.select_nav_item(key, "check", slug)`, ideally in an `on_click`
