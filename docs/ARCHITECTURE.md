@@ -22,8 +22,9 @@ src/datasure/
 ├── assets/                 # Logos and demo CSV data bundled with the package
 ├── checks/                 # Data quality check modules (one per check type)
 │   ├── catalogue.py        #   Every check on a check page: slug, label,
-│                           #   icon, group, status and render functions
+│                           #   icon, group, status, render and headline
 │   ├── context.py          #   PageConfig, CheckData, CheckContext
+│   ├── health.py           #   Summary's check health grid, cached headlines
 │   ├── summary.py          #   Overall data quality summary
 │   ├── missing.py          #   Missing data analysis
 │   ├── duplicates.py       #   Duplicate detection
@@ -178,6 +179,15 @@ the only change needed for a check to appear.
   reason; a not-set-up check then shows its settings (`setup`, or its report,
   which starts with its settings). Summary computes the outlier and backcheck
   rates inside its own render, so they only run when Summary is shown.
+- **Health grid.** Summary ends with a card per other check
+  (`checks/health.py`). A catalogue entry's optional `headline` function
+  returns the number its card shows, computed the way the check computes it
+  but without rendering it. Headlines run only for ready checks and are
+  cached in a small in-process LRU keyed on the page's data (row hashes),
+  settings files (content hash), the logs and intermediate databases
+  (modification time and size) and today's date. The card buttons call
+  `select_nav_item`, so they select the check exactly as the navigation
+  does. The navigation itself never shows counts.
 - **Render wrapper.** Every check renders through `nav_ui.run_guarded`. An
   exception becomes an error state with the traceback in an expander, is
   logged, and is remembered so the navigation marks the check until it
