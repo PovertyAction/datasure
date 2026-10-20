@@ -926,7 +926,7 @@ class PrepStepHandler:
 # Both step handlers end in a rerun, which would clear any message rendered
 # straight away, so their messages are queued and shown on the next run.
 def _notice_scope(alias: str) -> str:
-    """Return the queued-notice scope for an alias's Prep tab."""
+    """Return the queued-notice scope for a dataset on Prepare Data."""
     return f"prep_{alias}"
 
 

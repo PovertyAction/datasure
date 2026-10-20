@@ -78,6 +78,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     in the navigation; the rest of the page keeps working
   - Onboarding and demo guidance describe the new navigation; the unused
     `CheckPage` enum is removed
+- **Prepare Data navigation** (#377): The per-dataset tabs are replaced by one
+  wrapping row of pills, and only the selected dataset's preparation UI
+  renders (`render_dataset`, `views/prep_view.py`)
+  - Every dataset's prep table is still seeded from raw on each page load
+    (`seed_prep_from_raw`), so Configure Checks and the replication package
+    see datasets never opened on Prepare Data
+  - Datasets with no imported rows are muted with a reason
+    (`dataset_status`)
+  - The `dataset` URL query parameter reflects and drives the selection,
+    which is saved in the `view_state` of `prep_view_settings.json`
+  - `prep_add_step` and `prep_remove_step` take the dataset and its step
+    index as arguments instead of reading the page's loop variables
+- **Corrections navigation** (#377): The per-check-page tabs are replaced by
+  one wrapping row of pills, and only the selected check page's corrections
+  render. Configuration is still loaded by the page's position in
+  `check_config` (`render_selected_check_page`, `views/correction_view.py`)
+  - The selection follows the `page` URL query parameter (the page's
+    `page_name_id`), then the check page last viewed in this session
+    (`st_last_check_page`, set by `render_checks`), then the selection saved
+    in `correction_view_settings.json`, then the first page
+  - Check pages with no survey KEY column or no imported survey data are
+    muted with a reason (`check_page_status`)
+  - The Survey data / Backcheck data selector (`choose_dataset`) and the
+    Correction Log filters are saved in `view_state` per check page, with a
+    Reset filters action
+  - Onboarding text and the user guide describe both pages' pills
 
 ### Fixed
 

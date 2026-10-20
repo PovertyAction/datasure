@@ -187,6 +187,19 @@ Both datasets contain realistic data quality issues including:
 - Remove problematic data
 - Apply preparation steps to multiple datasets
 
+#### Choosing a Dataset
+
+The buttons at the top of the page list your imported datasets. They wrap onto
+more lines on projects with many forms. Only the selected dataset's
+preparation steps, Change Log and preview load, so the page responds quickly.
+
+- A dataset with no imported rows is muted and marked **not set up**.
+  Selecting it explains what to import on the Import Data page.
+- The selected dataset is part of the page address, for example
+  `...?dataset=demo_survey`, and the page reopens on it next time.
+- Every dataset stays available on Configure Checks, including datasets you
+  never opened here.
+
 #### Data Preparation Actions
 
 ##### Transform Column
@@ -206,7 +219,7 @@ Convert or modify existing column data:
 
 **Steps**:
 
-1. Select dataset tab
+1. Select the dataset
 2. Click "Add data prep step"
 3. Choose "Transform Column"
 4. Select column to transform
@@ -272,7 +285,7 @@ the dataset has no rows instead of running checks.
 **Demo Example**:
 Convert `submissiondate` column to datetime format for both survey and backcheck datasets:
 
-1. Select **demo_survey** tab
+1. Select the **demo_survey** dataset
 2. Click "Add data prep step"
 3. Select "Transform Column"
 4. Choose "submissiondate" column
@@ -474,6 +487,24 @@ no check flagged. It is also the only place to undo a correction or an
 acceptance. It lists acceptances but can't create them, because it has no
 check flag to accept.
 
+#### Choosing a Check Page
+
+The buttons at the top of the Correct Data page list your check pages, one per
+check configuration. They wrap onto more lines on projects with many forms.
+Only the selected check page's corrections load.
+
+- The page opens on the check page you last reviewed, so you can fix what you
+  found straight away. Otherwise it opens on the check page you last chose
+  here, also after you reopen the app, or on the first one.
+- The selected check page is part of the page address, for example
+  `...?page=household_hfcs`. A link always opens the check page it points to.
+- A check page with nothing to correct is muted and marked **not set up**: it
+  has no survey KEY column configured, or its survey data has not been
+  imported. Selecting it explains what is missing.
+- The **Survey data** / **Backcheck data** choice and the Correction Log
+  filters are remembered for each check page, also after you reopen the app.
+  **Reset filters** clears them for the selected check page.
+
 #### Accept as Valid
 
 **accept** records that a flagged value was reviewed and is correct, without
@@ -628,7 +659,7 @@ are highlighted in red.
 To blank a cell, use "remove value": "modify value" needs a non-empty new
 value (`0` is valid).
 
-If corrections or prep steps remove every row, the tab warns you. The
+If corrections or prep steps remove every row, the page warns you. The
 Correction Log and "Remove correction step" stay available, so you can remove
 the entry that caused it. There are no records left to add corrections to.
 
@@ -646,7 +677,7 @@ still lists every entry.
 #### Correcting Back Check Data
 
 On a page with back check data, a **Survey data** / **Backcheck data**
-switcher at the top of the page's tab picks the dataset. The back check data
+switcher under the check page name picks the dataset. The back check data
 has its own Correction Log, removal list and preview. Back check results
 measure data quality, so on back check data you can only modify the ID (the
 Survey ID column set in the Backchecks settings) or remove a row. Back

@@ -50,11 +50,11 @@ class ImportDemoInfo:
         - **Removes problematic data**: Delete unnecessary columns or filter out rows with critical data quality issues
 
         ##### For this demo, you can:
-        1. **Explore your data**: Alternate between the **demo_survey** and **demo_backcheck**
-        tabs below to see your survey data and backcheck data.
+        1. **Explore your data**: Switch between the **demo_survey** and **demo_backcheck**
+        dataset buttons at the top to see your survey data and backcheck data.
         2. **Transform date column**: Add data preparation steps if you want to experiment.
         Do the following:
-            - Select the **demo_survey** tab
+            - Select the **demo_survey** dataset button
             - Click on the ":material/add: Add data prep step" button
             - Under "Select Action", choose "Transform Column"
             - For "Select Column to Transform", choose "submissiondate"
@@ -62,7 +62,7 @@ class ImportDemoInfo:
               available depend on the type of column selected.
             - Click on ":material/check: Apply" to save the preparation step.
             - Review the "submissiondate" column to see the changes.
-        3. **Apply same step to backcheck data**: Select the **demo_backcheck** tab and repeat
+        3. **Apply same step to backcheck data**: Select the **demo_backcheck** dataset button and repeat
         the same steps to transform the "submissiondate" column there as well.
 
 
@@ -149,8 +149,9 @@ class ImportDemoInfo:
         issues identified in the quality reports. Corrections are logged and can be
         undone at any time.
 
-        **Page structure:** There is one tab per HFC configuration (e.g., "Household HFCs").
-        Inside each tab you will find:
+        **Page structure:** The buttons at the top list one check page per HFC
+        configuration (e.g., "Household HFCs"); the page opens on the check page you
+        last reviewed. For the selected check page you will find:
         - :material/add: **Add correction step** — open a popover to apply a new correction.
         - :material/delete: **Remove correction step** — open a popover to undo a previous correction.
         - **Correction Log** — appears after the first correction or acceptance; shows
@@ -262,7 +263,7 @@ class OnboardingSteps:
         One preparation step is required before you can continue: convert the
         **submissiondate** column from text to a datetime format in **both** datasets.
 
-        **:material/arrow_forward: To do this for each dataset tab (demo_survey and demo_backcheck):**
+        **:material/arrow_forward: To do this for each dataset (demo_survey and demo_backcheck):**
         1. Click **:material/add: Add data prep step**
         2. Under **Select Action**, choose **Transform Column**
         3. Under **Select Column to Transform**, choose **submissiondate**

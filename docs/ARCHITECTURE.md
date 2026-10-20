@@ -251,8 +251,34 @@ On a check page this is the page settings file
   (`utils/project_config.py`). The replication package never reads settings
   files.
 - **Other pages.** `ViewState` and the selection functions take any settings
-  file, so Prepare Data and Corrections can keep their own, for example
-  `get_cache_path(project_id, "settings", "prep_view_settings.json")`.
+  file. Prepare Data keeps the selected dataset in
+  `settings/prep_view_settings.json`. Corrections keeps the selected check
+  page in `settings/correction_view_settings.json`, with one scope per check
+  page (its `page_name_id`) holding the Survey data / Backcheck data choice
+  and the Correction Log filters.
+
+### Prepare Data and Corrections navigation
+
+Both pages draw one wrapping row of pills with `nav_ui.draw_nav` (items with
+no group) and render only the selected item through `nav_ui.run_guarded`.
+
+- **Prepare Data** (`views/prep_view.py`). Before anything is drawn,
+  `seed_prep_from_raw` runs for **every** dataset: with no prep steps logged,
+  raw data is copied into the prep table. This must not move into the
+  selected dataset's render, because Configure Checks and the replication
+  package read columns only from prep. `dataset_status` dims a dataset with
+  no imported rows (missing, or zero rows and no steps); a dataset whose
+  steps removed every row stays ready so the step can be removed. The
+  dataset's position in the sorted list (`step_index`) still namespaces its
+  widget keys and is passed to `prep_add_step` / `prep_remove_step`.
+- **Corrections** (`views/correction_view.py`). Item slugs are page
+  `page_name_id`s; the selected page's position in `check_config` is the
+  index `render_correction_tab` and `load_tab_config` use. `check_page_status`
+  dims a page with no survey KEY column or no survey data in the corrected,
+  prep or raw database (it only checks the table exists). Precedence: a valid
+  `?page=` value, then the check page last viewed (see
+  [Session state](#session-state)), then the selection made earlier in this
+  session or saved, then the first page.
 
 ## Cache and data locations
 
@@ -271,8 +297,8 @@ Per project (UUID-keyed):
 - `cache/{project_id}/settings/` — `logs.duckdb` (import/prep logs, the
   correction logs `corr_log_{alias}`, and the backcheck attribution logs
   `bc_attribution_{page_name_id}`; see [Correction log](#correction-log)),
-  JSON settings (including each check page's
-  [view state](#view-state)), and credential metadata
+  JSON settings (including each check page's, Prepare Data's and
+  Corrections' [view state](#view-state)), and credential metadata
 - `cache/projects.json` — the project registry
 - `cache/user_settings.json` — per-user preferences, currently the
   "Reviewer name" recorded as `user` in correction logs
@@ -289,6 +315,13 @@ The `cache/` directory is gitignored.
 on every rerun and guard on `st_project_id`, calling `st.stop()` when no
 project is selected. If cross-page state looks corrupted, check `app.py` first.
 
+`st_last_check_page` (`nav_ui.LAST_CHECK_PAGE_KEY`) is set by
+`render_checks` to the `page_name_id` of the check page being viewed.
+Corrections pops it on load and selects that check page, so it opens on the
+page the user was reviewing; popping it keeps a page chosen on Corrections
+until another check page is viewed. It is session-only; a new session falls
+back to the saved Corrections selection.
+
 ### URL state
 
 The check page's selected check is the `check` URL query parameter, for
@@ -303,7 +336,11 @@ callback.
 
 Navigation state lives under keys prefixed with the page's navigation key
 (`check_nav_{page_name_id}` on check pages): `__selected`, `__group`, `__item`,
-`__last_by_group` and `__errors`. No other page uses query parameters yet.
+`__last_by_group` and `__errors`.
+
+Prepare Data uses `?dataset=<alias>` (navigation key `prep_nav`) and
+Corrections uses `?page=<page_name_id>` (navigation key `corrections_nav`) in
+the same way. No other page uses query parameters.
 
 ## Credentials
 

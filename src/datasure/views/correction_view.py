@@ -79,7 +79,7 @@ CORRECTIONS_SETTINGS_FILE = "correction_view_settings.json"
 
 
 class TabConfig(BaseModel):
-    """Configuration for a correction tab."""
+    """Configuration for one check page on the Corrections page."""
 
     page_name: str = Field(..., description="Name of the page/check")
     survey_data_name: str = Field(..., description="Name of the survey data alias")
@@ -108,7 +108,7 @@ BACKCHECK_ACTIONS = (Action.MODIFY_VALUE, Action.REMOVE_ROW)
 
 @dataclass(frozen=True)
 class CorrectionDataset:
-    """A dataset a Corrections page tab corrects, and what it may change.
+    """A dataset a Corrections check page corrects, and what it may change.
 
     Attributes
     ----------
@@ -125,7 +125,7 @@ class CorrectionDataset:
     column : str | None
         The only column "modify value" may change, or None for any column.
     key_namespace : str | int
-        Suffix for the dataset's widget keys, unique across tabs and datasets.
+        Suffix for the dataset's widget keys, unique across check pages and datasets.
     """
 
     label: str
@@ -140,7 +140,7 @@ class CorrectionDataset:
 def correction_datasets(
     config: TabConfig, tab_index: int = 0
 ) -> list[CorrectionDataset]:
-    """Return the datasets a tab corrects: survey data, then any backcheck data.
+    """Return the datasets a check page corrects: survey data, then any backcheck data.
 
     On backcheck data only the ID can be modified, and rows removed; with no
     ID column configured, rows can only be removed.
@@ -179,7 +179,7 @@ def render_value_input_widget(
     tab_index: int,
 ) -> tuple[Any, str | None]:
     """
-    Render the new-value input for a column on a Corrections page tab.
+    Render the new-value input for a column on the Corrections page.
 
     Parameters
     ----------
@@ -190,7 +190,7 @@ def render_value_input_widget(
     current_value : Any
         The current value in the column.
     tab_index : int
-        The tab index for unique widget keys.
+        The check page index for unique widget keys.
 
     Returns
     -------
@@ -244,19 +244,19 @@ def get_key_options(data: pl.DataFrame, key_col: str) -> list:
 
 def load_tab_config(project_id: str, tab_index: int) -> TabConfig | None:
     """
-    Load configuration for a specific correction tab.
+    Load the configuration of one check page.
 
     Parameters
     ----------
     project_id : str
         The project identifier.
     tab_index : int
-        The index of the tab to load configuration for.
+        The check page's position in the check configuration.
 
     Returns
     -------
     TabConfig | None
-        Tab configuration or None if loading fails.
+        Check page configuration or None if loading fails.
     """
     page_config = get_check_config_settings(
         project_id=project_id,
@@ -354,7 +354,7 @@ def render_add_correction_form(
     alias : str
         The data alias/table name.
     tab_index : str | int
-        Suffix for unique widget keys: the tab index, plus the dataset for
+        Suffix for unique widget keys: the check page index, plus the dataset for
         backcheck data.
     survey_id_col : str | None
         The name of the configured Survey ID column, if any. When set (and
@@ -367,7 +367,7 @@ def render_add_correction_form(
     """
     corrected_data = correction_processor.get_corrected_data(alias)
 
-    # The tab already warns about data with no rows; there is no KEY to offer.
+    # The page already warns about data with no rows; there is no KEY to offer.
     state = get_table_state(corrected_data)
     if state is TableState.MISSING:
         st.warning("No data available for correction.")
@@ -485,7 +485,7 @@ def render_remove_correction_form(
     alias : str
         The data alias/table name.
     tab_index : str | int
-        The tab index for unique widget keys.
+        The check page index for unique widget keys.
     """
     correction_summaries = correction_processor.get_correction_summary(alias)
 
@@ -1101,7 +1101,7 @@ def main() -> None:
     - Setting up navigation and demo helpers
     - Validating prerequisites
     - Creating correction processor
-    - Rendering correction tabs
+    - Rendering the selected check page's corrections
     """
     # Set up demo navigation
     demo_sidebar_help()
