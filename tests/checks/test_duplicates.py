@@ -3018,7 +3018,9 @@ class TestDuplicatesReportIdViews:
         mocks = _run_report(report_data, settings, {"survey_id": "hhid"})
 
         # One survey duplicate ID (A); no backchecks.
-        mocks["render_dataset_switcher"].assert_called_once_with(1, None)
+        mocks["render_dataset_switcher"].assert_called_once_with(
+            1, None, "settings.json"
+        )
         view = mocks["render_id_duplicates"].call_args.args[0]
         assert view.name == "survey"
         assert view.survey_data is None
@@ -3112,7 +3114,7 @@ class TestDuplicatesReportIdViews:
         )
 
         # The counts are after each dataset's Records to Include filter.
-        mocks["render_dataset_switcher"].assert_called_once_with(0, 0)
+        mocks["render_dataset_switcher"].assert_called_once_with(0, 0, "settings.json")
         view = mocks["render_id_duplicates"].call_args.args[0]
         assert view.name == "backcheck"
         assert view.data["KEY"].to_list() == ["b3"]
@@ -3138,7 +3140,7 @@ class TestDuplicatesReportIdViews:
         )
 
         # Survey: A twice. Backcheck: Z twice.
-        mocks["render_dataset_switcher"].assert_called_once_with(1, 1)
+        mocks["render_dataset_switcher"].assert_called_once_with(1, 1, "settings.json")
         assert mocks["render_id_duplicates"].call_args.args[0].name == "survey"
 
     def test_backcheck_view_shows_only_the_backcheck_filter_messages(
@@ -3256,7 +3258,9 @@ class TestDuplicatesReportIdViews:
             dataset="Backcheck data",
         )
 
-        mocks["render_dataset_switcher"].assert_called_once_with(1, None)
+        mocks["render_dataset_switcher"].assert_called_once_with(
+            1, None, "settings.json"
+        )
         assert mocks["render_id_duplicates"].call_args.args[0].name == "survey"
 
 

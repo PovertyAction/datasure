@@ -1283,3 +1283,30 @@ class TestFlaggedOutlierPercent:
     ):
         data = sample_polars_df.drop("numeric_col1")
         assert self._percent(data, outlier_column_config, tmp_path) is None
+
+
+# ============================================================================
+# TESTS: saved view state of the table toggles
+# ============================================================================
+
+
+def _toggles_app(settings_file):
+    from datasure.checks.outliers.report_ui import _render_table_toggles
+    from datasure.checks.outliers.review import OUTLIERS
+
+    _render_table_toggles(OUTLIERS, None, settings_file)
+
+
+class TestTableTogglesViewState:
+    def test_a_toggle_is_restored_in_a_new_session(self, tmp_path):
+        from streamlit.testing.v1 import AppTest
+
+        settings_file = str(tmp_path / "page_settings.json")
+        at = AppTest.from_function(_toggles_app, args=(settings_file,)).run()
+        assert at.toggle[0].value is True
+        at.toggle[0].set_value(False).run()
+
+        new_session = AppTest.from_function(_toggles_app, args=(settings_file,)).run()
+
+        assert not new_session.exception
+        assert new_session.toggle[0].value is False

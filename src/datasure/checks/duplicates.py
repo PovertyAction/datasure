@@ -22,6 +22,7 @@ from datasure.checks.backchecks.models import backcheck_id_columns
 from datasure.checks.id_duplicates import count_resolved_ids
 from datasure.checks.id_duplicates_ui import (
     BACKCHECK_DATA,
+    VIEW_SCOPE,
     IdView,
     count_duplicate_ids,
     render_dataset_switcher,
@@ -49,6 +50,7 @@ from datasure.utils.settings_utils import (
     save_check_settings,
     trigger_save,
 )
+from datasure.utils.view_state import ViewState
 
 logger = logging.getLogger(__name__)
 
@@ -1748,7 +1750,9 @@ def _render_other_duplicates_table(
         col_checked = st.selectbox(
             label="Select column to check for duplicates",
             options=dup_cols,
-            key="other_dup_col_selectbox",
+            **ViewState(settings_file, VIEW_SCOPE).bind(
+                "other_dup_col_selectbox", options=dup_cols
+            ),
         )
 
     col_dups_data = compute_column_duplicates(
@@ -2307,6 +2311,7 @@ def duplicates_report(
     dataset = render_dataset_switcher(
         count_duplicate_ids(survey_view),
         None if backcheck is None else count_duplicate_ids(backcheck[0]),
+        setting_file,
     )
     if dataset == BACKCHECK_DATA and backcheck is not None:
         backcheck_view, backcheck_records = backcheck

@@ -146,6 +146,16 @@ class TestBind:
         assert fake_st.session_state["bc_filter_cols"] == ["age", "income"]
         assert view.values() == {"bc_filter_cols": ["age", "income"]}
 
+    def test_the_widget_default_is_only_used_without_a_state_value(
+        self, settings_file, fake_st
+    ):
+        view = ViewState(settings_file, "gps")
+
+        assert view.bind("gps_color_by", index=1)["index"] == 1
+
+        view.save("gps_color_by", "team")
+        assert "index" not in view.bind("gps_color_by", index=1)
+
     def test_clearing_a_value_removes_it(self, settings_file, fake_st):
         view = ViewState(settings_file, "gps")
         view.save("gps_config", "gps_1")

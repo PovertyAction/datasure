@@ -159,18 +159,24 @@ class ViewState:
         multi: bool = False,
         on_change: Callable[..., None] | None = None,
         args: tuple = (),
+        **initial: Any,
     ) -> dict[str, Any]:
         """Restore a widget's saved value and save it when the user changes it.
 
-        Spread the result into the widget call, and do not also pass the
-        widget a non-default ``index``/``default``/``value``::
+        Spread the result into the widget call. Pass the widget's own
+        ``index``/``default``/``value`` through ``initial`` rather than to the
+        widget, so it is only used when session state holds no value::
 
-            st.selectbox("Color by", cols, **view.bind("gps_color_by", options=cols))
+            widget = view.bind("color_by", options=cols, index=1)
+            st.selectbox("Color by", cols, **widget)
 
         A value already in session state (set earlier in this session) is
         kept. A saved value that is no longer in ``options`` falls back to the
         widget default and is removed; for a multiselect (``multi=True``) only
         the values that still exist are kept.
+
+        Bind only filter, selection and sort widgets. Pagination, search
+        boxes and dialog inputs must start fresh, so never bind them.
 
         Parameters
         ----------
@@ -185,11 +191,16 @@ class ViewState:
             The widget's own callback, run after saving.
         args : tuple
             Arguments for ``on_change``.
+        **initial
+            The widget's default argument, such as ``index=1``. Left out when
+            session state already holds the value, which avoids Streamlit's
+            warning about a widget with both a default and a state value.
 
         Returns
         -------
         dict
-            ``key`` and ``on_change`` keyword arguments for the widget.
+            ``key``, ``on_change`` and, when used, ``initial`` keyword
+            arguments for the widget.
         """
         import streamlit as st
 
@@ -206,7 +217,8 @@ class ViewState:
             if on_change is not None:
                 on_change(*args)
 
-        return {"key": key, "on_change": _save}
+        kwargs = {} if key in st.session_state else dict(initial)
+        return {**kwargs, "key": key, "on_change": _save}
 
     def _save_widget(self, key: str) -> None:
         import streamlit as st

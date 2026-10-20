@@ -58,10 +58,13 @@ from datasure.utils.ui_utils import (
     show_queued_notices,
     styled_dataframe,
 )
+from datasure.utils.view_state import ViewState
 
 logger = logging.getLogger(__name__)
 
 TAB_NAME = "duplicates"
+# Saved view state scope: the check's catalogue slug.
+VIEW_SCOPE = "duplicates"
 
 SURVEY_DATA = "Survey data"
 BACKCHECK_DATA = "Backcheck data"
@@ -145,15 +148,26 @@ def _keep_survey_data() -> None:
     st.session_state[_SWITCHER_KEY] = SURVEY_DATA
 
 
-def render_dataset_switcher(survey_count: int, backcheck_count: int | None) -> str:
+def render_dataset_switcher(
+    survey_count: int, backcheck_count: int | None, settings_file: str | None = None
+) -> str:
     """Render the Survey data / Backcheck data switcher and return the choice.
 
     Each option shows its number of unresolved duplicate IDs, for example
     "Survey data (3)". When `backcheck_count` is None the page has no
     backchecks: the option shows "Backcheck data (N/A)", cannot be chosen,
-    and the survey data is always returned.
+    and the survey data is always returned. With a `settings_file`, the
+    choice is saved view state.
     """
     has_backcheck = backcheck_count is not None
+    on_change = None if has_backcheck else _keep_survey_data
+    options = [SURVEY_DATA, BACKCHECK_DATA]
+    if settings_file is None:
+        widget = {"key": _SWITCHER_KEY, "on_change": on_change, "default": SURVEY_DATA}
+    else:
+        widget = ViewState(settings_file, VIEW_SCOPE).bind(
+            _SWITCHER_KEY, options=options, on_change=on_change, default=SURVEY_DATA
+        )
     labels = {
         SURVEY_DATA: f"{SURVEY_DATA} ({survey_count})",
         BACKCHECK_DATA: (
@@ -167,12 +181,10 @@ def render_dataset_switcher(survey_count: int, backcheck_count: int | None) -> s
 
     chosen = st.segmented_control(
         "Dataset",
-        options=[SURVEY_DATA, BACKCHECK_DATA],
+        options=options,
         format_func=labels.get,
-        default=SURVEY_DATA,
         required=True,
-        key=_SWITCHER_KEY,
-        on_change=None if has_backcheck else _keep_survey_data,
+        **widget,
         help=(
             "Find ID problems in the survey data or in the backcheck data. "
             "The number is the count of unresolved duplicate IDs."
@@ -607,9 +619,12 @@ def render_id_duplicates(view: IdView, settings_file: str) -> None:
         sort_by = st.selectbox(
             "Sort by",
             options=sort_options,
-            key=f"iddup_{view.name}_sort",
-            on_change=_reset_page,
-            args=(page_key,),
+            **ViewState(settings_file, VIEW_SCOPE).bind(
+                f"iddup_{view.name}_sort",
+                options=sort_options,
+                on_change=_reset_page,
+                args=(page_key,),
+            ),
         )
 
     found = sort_cards(search_cards(cards, query), SortBy(sort_by))

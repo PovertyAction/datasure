@@ -80,8 +80,12 @@ from datasure.utils.ui_utils import (
     show_queued_notices,
     styled_dataframe,
 )
+from datasure.utils.view_state import ViewState
 
 logger = logging.getLogger(__name__)
+
+# Saved view state scope: the check's catalogue slug.
+VIEW_SCOPE = "outliers"
 
 # =============================================================================
 # Streamlit UI - Metrics Display
@@ -230,15 +234,19 @@ def _with_review_status(
 
 
 def _render_table_toggles(
-    check: FlagCheck, review: ReviewContext | None
+    check: FlagCheck, review: ReviewContext | None, setting_file: str
 ) -> TableFilters:
     """Render the toggles above a results table and return their values.
 
     "Show reviewed" and "Show only reviewed" are only offered with
     `review`. While "Show only reviewed" is on, the other two toggles are
-    disabled, since it overrides them.
+    disabled, since it overrides them. The toggles are saved view state.
     """
+    view = ViewState(setting_file, VIEW_SCOPE)
+    flagged_only = view.bind(f"{check.check_type}_flagged_only", value=True)
     reviewed_only_key = f"{check.check_type}_reviewed_only"
+    show_reviewed_widget = view.bind(f"{check.check_type}_show_reviewed")
+    reviewed_only_widget = view.bind(reviewed_only_key)
     # Read before rendering so the toggles to its left can be disabled.
     reviewed_only_on = review is not None and bool(
         st.session_state.get(reviewed_only_key, False)
@@ -248,10 +256,9 @@ def _render_table_toggles(
     with tc1:
         flagged_only_on = st.toggle(
             "Show only flagged values",
-            key=f"{check.check_type}_flagged_only",
-            value=True,
             disabled=reviewed_only_on,
             help="Turn off to show every checked value, flagged or not.",
+            **flagged_only,
         )
     if review is None:
         return TableFilters(flagged_only=flagged_only_on)
@@ -259,16 +266,16 @@ def _render_table_toggles(
     with tc2:
         show_reviewed = st.toggle(
             "Show reviewed",
-            key=f"{check.check_type}_show_reviewed",
             disabled=reviewed_only_on,
             help="Also show flags accepted as valid and corrected values, "
             "highlighted green, with the reason.",
+            **show_reviewed_widget,
         )
     with tc3:
         reviewed_only = st.toggle(
             "Show only reviewed",
-            key=reviewed_only_key,
             help="Show only flags accepted as valid and corrected values.",
+            **reviewed_only_widget,
         )
     return TableFilters(
         flagged_only=flagged_only_on,
@@ -546,7 +553,7 @@ def _render_constraint_violations_table(
 
     violation_data = filter_table(
         _with_review_status(violation_data, settings, CONSTRAINTS, review),
-        _render_table_toggles(CONSTRAINTS, review),
+        _render_table_toggles(CONSTRAINTS, review, setting_file),
         CONSTRAINTS,
     )
 
@@ -713,9 +720,11 @@ def _render_outlier_column_inspection(
         inspect_display_cols = st.multiselect(
             label="Select columns to display",
             options=display_options,
-            default=None,
             help="Select the columns to display in the inspection table.",
             disabled=not selected_col,
+            **ViewState(setting_file, VIEW_SCOPE).bind(
+                "outlier_inspect_display_cols", options=display_options, multi=True
+            ),
         )
 
         if inspect_display_cols:
@@ -723,7 +732,7 @@ def _render_outlier_column_inspection(
 
     outliers_data = filter_table(
         _with_review_status(outliers_data, settings, OUTLIERS, review),
-        _render_table_toggles(OUTLIERS, review),
+        _render_table_toggles(OUTLIERS, review, setting_file),
         OUTLIERS,
     )
 
