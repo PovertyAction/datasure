@@ -22,7 +22,6 @@ from datasure.utils.duckdb_utils import (
     duckdb_save_table,
     load_missing_codes_from_db,
 )
-from datasure.utils.navigation import StatusResult, rows_status
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding, is_demo_project
 from datasure.utils.settings_utils import (
@@ -1299,14 +1298,6 @@ def missing_report(
     st.write("---")
     st.subheader("Nullity matrix")
     missing_matrix(missing_data=missing_data, color_map=sns_colormap)
-
-
-def missing_status(data: pl.DataFrame) -> StatusResult:
-    """Return the check's status for the check page navigation.
-
-    Missing Values works on any survey data with rows.
-    """
-    return rows_status(data.height)
 
 
 def missing_headline(project_id: str, data: pl.DataFrame) -> str:

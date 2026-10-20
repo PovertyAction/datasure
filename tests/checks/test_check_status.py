@@ -11,15 +11,13 @@ import polars as pl
 import pytest
 
 from datasure.checks.backchecks.report_ui import backchecks_status
-from datasure.checks.descriptive import descriptive_status
+from datasure.checks.catalogue import get_check
+from datasure.checks.context import CheckContext, CheckData, PageConfig
 from datasure.checks.duplicates import duplicates_status
 from datasure.checks.enumerator.report_ui import enumerator_status
 from datasure.checks.gpschecks.compute import find_gps_columns
 from datasure.checks.gpschecks.report_ui import gpschecks_status
-from datasure.checks.missing import missing_status
 from datasure.checks.outliers.report_ui import outliers_status
-from datasure.checks.progress import progress_status
-from datasure.checks.summary import summary_status
 from datasure.utils.dataframe_utils import get_df_columns
 from datasure.utils.duckdb_utils import duckdb_save_table
 from datasure.utils.navigation import CheckStatus
@@ -65,20 +63,52 @@ SURVEY = pl.DataFrame(
 )
 
 
-class TestAlwaysReadyChecks:
-    @pytest.mark.parametrize(
-        "status_fn",
-        [summary_status, progress_status, missing_status, descriptive_status],
+def _ctx(settings_file, data: pl.DataFrame, **config) -> CheckContext:
+    """A check page context for status functions read through the catalogue."""
+    values = dict.fromkeys(
+        (
+            "survey_id",
+            "survey_date",
+            "enumerator",
+            "team",
+            "formversion",
+            "duration",
+            "survey_target",
+            "backcheck_data_name",
+            "backcheck_date",
+            "backchecker",
+            "backchecker_team",
+            "backcheck_target_percent",
+            "tracking_data_name",
+        )
     )
-    def test_ready_with_survey_rows(self, status_fn):
-        assert status_fn(SURVEY) == (READY, "")
+    values.update(config)
+    page = PageConfig(
+        page_number=1,
+        page_name=PAGE,
+        page_name_id=PAGE,
+        survey_data_name="survey",
+        survey_key="key",
+        setting_file=settings_file,
+        missing_setting_file=settings_file.with_name("missing.json"),
+        **values,
+    )
+    return CheckContext(PROJECT_ID, page, CheckData(data), get_df_columns(data))
 
-    @pytest.mark.parametrize(
-        "status_fn",
-        [summary_status, progress_status, missing_status, descriptive_status],
-    )
-    def test_not_applicable_without_rows(self, status_fn):
-        status, reason = status_fn(SURVEY.clear())
+
+ROW_COUNT_CHECKS = ["summary", "progress", "missing", "descriptive"]
+
+
+class TestAlwaysReadyChecks:
+    """Checks that work on any survey data with rows share one status."""
+
+    @pytest.mark.parametrize("slug", ROW_COUNT_CHECKS)
+    def test_ready_with_survey_rows(self, slug, settings_file):
+        assert get_check(slug).status(_ctx(settings_file, SURVEY)) == (READY, "")
+
+    @pytest.mark.parametrize("slug", ROW_COUNT_CHECKS)
+    def test_not_applicable_without_rows(self, slug, settings_file):
+        status, reason = get_check(slug).status(_ctx(settings_file, SURVEY.clear()))
 
         assert status is NOT_APPLICABLE
         assert "no rows" in reason

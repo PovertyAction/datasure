@@ -9,12 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Check status** (#374): Each check module exposes a cheap status function
-  (`summary_status`, `progress_status`, `missing_status`,
-  `duplicates_status`, `outliers_status`, `gpschecks_status`,
-  `enumerator_status`, `backchecks_status`, `descriptive_status`) that returns
-  a `StatusResult` (ready, not set up, not applicable or error, with a reason)
-  from page configuration and data shape only. GPS Checks is not applicable
+- **Check status** (#374): Every check has a cheap status that returns a
+  `StatusResult` (ready, not set up, not applicable or error, with a reason)
+  from page configuration and data shape only. Checks with their own
+  conditions expose a status function (`duplicates_status`,
+  `outliers_status`, `gpschecks_status`, `enumerator_status`,
+  `backchecks_status`); Summary, Progress, Missing Values and Descriptive
+  Stats share one row-count status in the catalogue (`rows_status`). GPS Checks is not applicable
   when no column looks like GPS data (`find_gps_columns`,
   `checks/gpschecks/compute.py`); Backchecks is not set up without a
   backcheck dataset

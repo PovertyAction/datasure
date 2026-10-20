@@ -17,7 +17,6 @@ import streamlit as st
 
 from datasure.models.schemas import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
-from datasure.utils.navigation import StatusResult, rows_status
 from datasure.utils.navigations_utils import demo_callout, show_demo_next_action
 from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.settings_utils import (
@@ -758,11 +757,3 @@ def descriptive_report(
         type="success",
     )
     show_demo_next_action(5, "st_corr_page", "Proceed to Correct Data")
-
-
-def descriptive_status(data: pl.DataFrame) -> StatusResult:
-    """Return the check's status for the check page navigation.
-
-    Descriptive Stats works on any survey data with rows.
-    """
-    return rows_status(data.height)

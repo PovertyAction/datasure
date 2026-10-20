@@ -17,7 +17,7 @@ from datasure.checks.backchecks.report_ui import (
     overall_error_rate_percent,
 )
 from datasure.checks.context import CheckContext
-from datasure.checks.descriptive import descriptive_report, descriptive_status
+from datasure.checks.descriptive import descriptive_report
 from datasure.checks.duplicates import (
     duplicates_headline,
     duplicates_report,
@@ -30,18 +30,24 @@ from datasure.checks.enumerator.report_ui import (
 )
 from datasure.checks.gpschecks.report_ui import gpschecks_report, gpschecks_status
 from datasure.checks.health import health_cards, render_health_grid
-from datasure.checks.missing import missing_headline, missing_report, missing_status
+from datasure.checks.missing import missing_headline, missing_report
 from datasure.checks.outliers.report_ui import (
     flagged_outlier_percent,
     outliers_headline,
     outliers_report,
     outliers_status,
 )
-from datasure.checks.progress import progress_headline, progress_report, progress_status
-from datasure.checks.summary import CheckRates, summary_report, summary_status
+from datasure.checks.progress import progress_headline, progress_report
+from datasure.checks.summary import CheckRates, summary_report
 from datasure.utils.dataframe_utils import TableState, get_df_columns
 from datasure.utils.nav_ui import guarded_status, render_errors, select_nav_item
-from datasure.utils.navigation import READY, NavItem, StatusResult, with_errors
+from datasure.utils.navigation import (
+    READY,
+    NavItem,
+    StatusResult,
+    rows_status,
+    with_errors,
+)
 
 OVERVIEW = "Overview"
 DATA_INTEGRITY = "Data integrity"
@@ -328,17 +334,15 @@ def _setup_backchecks(ctx: CheckContext) -> None:
         st.page_link(page, label=f"Open {label}", icon=":material/arrow_forward:")
 
 
+def _survey_rows_status(ctx: CheckContext) -> StatusResult:
+    """Status of Summary, Progress, Missing Values and Descriptive Stats.
+
+    They work on any survey data with rows, so they share this one status.
+    """
+    return rows_status(ctx.data.page_data.height)
+
+
 # Status adapters look the module-level status functions up on each call.
-def _summary_status(ctx: CheckContext) -> StatusResult:
-    return summary_status(ctx.data.page_data)
-
-
-def _progress_status(ctx: CheckContext) -> StatusResult:
-    return progress_status(ctx.data.page_data)
-
-
-def _missing_status(ctx: CheckContext) -> StatusResult:
-    return missing_status(ctx.data.page_data)
 
 
 def _duplicates_status(ctx: CheckContext) -> StatusResult:
@@ -365,10 +369,6 @@ def _enumerator_status(ctx: CheckContext) -> StatusResult:
 
 def _backchecks_status(ctx: CheckContext) -> StatusResult:
     return backchecks_status(ctx.config.backcheck_data_name, ctx.data.backcheck_data)
-
-
-def _descriptive_status(ctx: CheckContext) -> StatusResult:
-    return descriptive_status(ctx.data.page_data)
 
 
 # Headline adapters also look the module-level functions up on each call.
@@ -429,7 +429,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         ":material/dashboard:",
         OVERVIEW,
         _render_summary,
-        _summary_status,
+        _survey_rows_status,
     ),
     CheckEntry(
         "progress",
@@ -437,7 +437,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         ":material/trending_up:",
         OVERVIEW,
         _render_progress,
-        _progress_status,
+        _survey_rows_status,
         headline=_progress_headline,
     ),
     CheckEntry(
@@ -446,7 +446,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         ":material/check_box_outline_blank:",
         DATA_INTEGRITY,
         _render_missing,
-        _missing_status,
+        _survey_rows_status,
         headline=_missing_headline,
     ),
     CheckEntry(
@@ -500,7 +500,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         ":material/bar_chart:",
         EXPLORATION,
         _render_descriptive,
-        _descriptive_status,
+        _survey_rows_status,
     ),
 )
 

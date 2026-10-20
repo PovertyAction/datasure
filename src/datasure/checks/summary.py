@@ -23,7 +23,6 @@ from pydantic import BaseModel, Field, field_validator
 
 from datasure.utils.chart_utils import donut_chart
 from datasure.utils.dataframe_utils import ColumnByType
-from datasure.utils.navigation import StatusResult, rows_status
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.settings_utils import (
@@ -1512,11 +1511,3 @@ def summary_report(
     st.write("---")
     st.markdown("## Data Quality")
     summary_data_quality(data=data, survey_id=survey_id, check_rates=check_rates)
-
-
-def summary_status(data: pl.DataFrame) -> StatusResult:
-    """Return the check's status for the check page navigation.
-
-    Summary works on any survey data with rows.
-    """
-    return rows_status(data.height)
