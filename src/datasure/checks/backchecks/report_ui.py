@@ -9,6 +9,7 @@ from typing import Any, Literal
 import duckdb
 import polars as pl
 import streamlit as st
+from pydantic import ValidationError
 
 from datasure.checks.backchecks.attribution import (
     ERROR_SOURCE_COL,
@@ -31,6 +32,7 @@ from datasure.checks.backchecks.compute import (
     compute_enumerator_backchecker_stats,
     compute_overall_error_rates,
     expand_col_names,
+    load_saved_backchecks_settings,
 )
 from datasure.checks.backchecks.coverage import (
     BackcheckCoverage,
@@ -682,6 +684,79 @@ def _render_backcheck_summary(
     _render_overall_error_rates(
         backcheck_analysis if backcheck_analysis is not None else pl.DataFrame()
     )
+
+
+def _scoped_backcheck_analysis(
+    project_id: str,
+    page_name_id: str,
+    scope: ComparisonScope,
+    settings: BackcheckSettings,
+) -> pl.DataFrame:
+    """Compare the records in `scope` on the page's backcheck columns.
+
+    Shared by the Backchecks tab and the Summary tab's error rate, so the
+    two compare the same values.
+    """
+    column_settings = duckdb_get_table(project_id, f"backchecks_{page_name_id}", "logs")
+    return compute_backcheck_analysis(
+        scope.survey.data, scope.backcheck.data, settings, column_settings
+    )
+
+
+def overall_error_rate_percent(
+    project_id: str,
+    page_name_id: str,
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+) -> float | None:
+    """Return the total error rate shown on the Backchecks tab, in percent.
+
+    Uses the saved settings, backcheck columns and Records to Include
+    filters, so it matches the tab. Computed without rendering the tab, for
+    the Summary tab.
+
+    Parameters
+    ----------
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page name identifier.
+    survey_data : pl.DataFrame
+        Survey data.
+    backcheck_data : pl.DataFrame
+        Backcheck data.
+    setting_file : str
+        Path to the page settings file.
+    config : dict
+        The page configuration the Backchecks tab starts from.
+
+    Returns
+    -------
+    float | None
+        The error rate, or None when no backcheck columns are configured,
+        no values were compared, or the saved settings no longer fit the data.
+    """
+    try:
+        settings = load_saved_backchecks_settings(
+            setting_file, settings_from_page_config(config)
+        )
+        analysis = _scoped_backcheck_analysis(
+            project_id,
+            page_name_id,
+            comparison_scope(survey_data, backcheck_data, setting_file),
+            settings,
+        )
+    except (pl.exceptions.PolarsError, ValidationError, ValueError):
+        logger.warning(
+            "Could not compute the backcheck error rate for page %s",
+            page_name_id,
+            exc_info=True,
+        )
+        return None
+    rates = compute_overall_error_rates(analysis)
+    return rates[0].error_rate if rates else None
 
 
 def _render_overall_error_rates(backcheck_analysis: pl.DataFrame) -> None:
@@ -2171,16 +2246,8 @@ def backchecks_report(
     )
 
     # Compute backcheck analysis
-    backcheck_column_settings = duckdb_get_table(
-        project_id,
-        f"backchecks_{page_name_id}",
-        "logs",
-    )
-    _backcheck_analysis = compute_backcheck_analysis(
-        survey_data,
-        scope.backcheck.data,
-        backcheck_settings,
-        backcheck_column_settings,
+    _backcheck_analysis = _scoped_backcheck_analysis(
+        project_id, page_name_id, scope, backcheck_settings
     )
     review = AttributionContext(
         project_id, page_name_id, load_attribution_log(project_id, page_name_id)

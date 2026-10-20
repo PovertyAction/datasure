@@ -531,9 +531,9 @@ class OutputOnboardingInfo:
         ##### Data Quality
         This section provides an overview of the overall data quality of your survey dataset, including:
         - % of duplicate values on ID column: Percentage of duplicate entries found in the ID column.
-        - % of values flagged as outliers: Percentage of data points identified as outliers. This will show **0%** until you configure the **Outliers & Constraints** tab — once configured, return here to see the updated value.
+        - % of values flagged as outliers: Percentage of checked values flagged as outliers on the **Outliers & Constraints** tab, leaving out accepted outliers. It appears once you add outlier columns on that tab — return here afterwards to see it.
         - % of missing values in survey dataset: Percentage of missing or null values in the survey dataset.
-        - Backcheck error rate: Percentage of discrepancies found between survey data and backcheck data.
+        - Backcheck error rate: The total error rate from the **Backcheck Analysis** tab, the percentage of compared values that differ between the survey and backcheck data. It appears once you add backcheck columns on that tab.
         """,
         },
     }

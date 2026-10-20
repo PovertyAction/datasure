@@ -144,13 +144,24 @@ class DataSummaryMetrics(BaseModel):
         return v
 
 
+class CheckRates(BaseModel):
+    """Rates the Summary tab shows from the Outliers and Backchecks tabs.
+
+    Each is None when its tab has nothing to report.
+    """
+
+    outliers_pct: float | None = None
+    backcheck_error_pct: float | None = None
+
+
 class DataQualityMetrics(BaseModel):
     """Metrics for data quality assessment with validation."""
 
     duplicates_pct: float | None = Field(None, ge=0.0, le=100.0)
-    outliers_pct: float = Field(ge=0.0, le=100.0)
+    # None when the Outliers or Backchecks tab has nothing to report yet.
+    outliers_pct: float | None = Field(None, ge=0.0, le=100.0)
     missing_pct: float = Field(ge=0.0, le=100.0)
-    backcheck_error_pct: float = Field(ge=0.0, le=100.0)
+    backcheck_error_pct: float | None = Field(None, ge=0.0, le=100.0)
 
 
 # =============================================================================
@@ -926,7 +937,9 @@ def compute_summary_data_summary(data: pl.DataFrame) -> tuple:
 
 
 def calculate_data_quality_metrics(
-    data: pl.DataFrame, survey_id: str | None
+    data: pl.DataFrame,
+    survey_id: str | None,
+    check_rates: CheckRates | None = None,
 ) -> DataQualityMetrics:
     """Calculate data quality metrics using Polars.
 
@@ -936,6 +949,8 @@ def calculate_data_quality_metrics(
         The survey data.
     survey_id : str | None
         The survey ID column in the survey data.
+    check_rates : CheckRates | None
+        The outlier % and backcheck error rate; None if there are none.
 
     Returns
     -------
@@ -964,15 +979,12 @@ def calculate_data_quality_metrics(
     else:
         missing_pct = 0.0
 
-    # Placeholder values for future implementation
-    outliers_pct = 0.0
-    backcheck_error_pct = 0.0
-
+    check_rates = check_rates or CheckRates()
     return DataQualityMetrics(
         duplicates_pct=duplicates_pct,
-        outliers_pct=outliers_pct,
+        outliers_pct=check_rates.outliers_pct,
         missing_pct=missing_pct,
-        backcheck_error_pct=backcheck_error_pct,
+        backcheck_error_pct=check_rates.backcheck_error_pct,
     )
 
 
@@ -1368,7 +1380,11 @@ def summary_data_summary(data: pl.DataFrame) -> None:
 
 
 @demo_output_onboarding(TAB_NAME)
-def summary_data_quality(data: pl.DataFrame, survey_id: str | None) -> None:
+def summary_data_quality(
+    data: pl.DataFrame,
+    survey_id: str | None,
+    check_rates: CheckRates | None = None,
+) -> None:
     """Render data quality section.
 
     Parameters
@@ -1377,23 +1393,28 @@ def summary_data_quality(data: pl.DataFrame, survey_id: str | None) -> None:
         The survey data (pandas).
     survey_id : str | None
         The survey ID column.
+    check_rates : CheckRates | None
+        The outlier % and backcheck error rate; None if there are none.
     """
-    metrics = calculate_data_quality_metrics(data, survey_id)
+    metrics = calculate_data_quality_metrics(data, survey_id, check_rates)
 
     # Create donut charts
     if metrics.duplicates_pct is not None:
         perc_duplicates_chart = donut_chart(actual_value=metrics.duplicates_pct)
         plt.close(perc_duplicates_chart)
 
-    perc_outliers_chart = donut_chart(actual_value=metrics.outliers_pct)
-    plt.close(perc_outliers_chart)
+    if metrics.outliers_pct is not None:
+        perc_outliers_chart = donut_chart(actual_value=metrics.outliers_pct)
+        plt.close(perc_outliers_chart)
 
     perc_missing_chart = donut_chart(actual_value=metrics.missing_pct)
     plt.close(perc_missing_chart)
 
-    perc_back_check_error_rate_chart = donut_chart(
-        actual_value=metrics.backcheck_error_pct
-    )
+    if metrics.backcheck_error_pct is not None:
+        perc_back_check_error_rate_chart = donut_chart(
+            actual_value=metrics.backcheck_error_pct
+        )
+        plt.close(perc_back_check_error_rate_chart)
 
     # Display charts
     dq1, dq2, dq3, dq4 = st.columns(spec=4, border=True)
@@ -1411,7 +1432,13 @@ def summary_data_quality(data: pl.DataFrame, survey_id: str | None) -> None:
 
     with dq2:
         st.markdown("**% of values flagged as outliers**")
-        st.pyplot(perc_outliers_chart)
+        if metrics.outliers_pct is not None:
+            st.pyplot(perc_outliers_chart)
+        else:
+            st.info(
+                "No outlier results to show. Add outlier columns, or check "
+                "their settings, on the **Outliers & Constraints** tab."
+            )
 
     with dq3:
         st.markdown("**% of missing values in survey dataset**")
@@ -1419,7 +1446,14 @@ def summary_data_quality(data: pl.DataFrame, survey_id: str | None) -> None:
 
     with dq4:
         st.markdown("**Back check error rate**")
-        st.pyplot(perc_back_check_error_rate_chart)
+        if metrics.backcheck_error_pct is not None:
+            st.pyplot(perc_back_check_error_rate_chart)
+        else:
+            st.info(
+                "No backcheck values compared. Add backcheck data to the page, "
+                "then add backcheck columns, or check their settings, on the "
+                "**Backcheck Analysis** tab."
+            )
 
     demo_callout(
         "**Next**: :material/arrow_upward: Scroll up and select the **Descriptive Statistics** tab."
@@ -1432,7 +1466,11 @@ def summary_data_quality(data: pl.DataFrame, survey_id: str | None) -> None:
 
 
 def summary_report(
-    data: pl.DataFrame, setting_file: str, config: dict, survey_columns: ColumnByType
+    data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+    survey_columns: ColumnByType,
+    check_rates: CheckRates | None = None,
 ) -> None:
     """Generate comprehensive summary report.
 
@@ -1444,6 +1482,11 @@ def summary_report(
         Path to the settings file.
     config : dict
         Configuration dictionary.
+    survey_columns : ColumnByType
+        Columns of `data` by type.
+    check_rates : CheckRates | None
+        The outlier % from `flagged_outlier_percent` and the backcheck error
+        rate from `overall_error_rate_percent`.
     """
     # Get settings
     config_settings = SummarySettings(**config)
@@ -1467,4 +1510,4 @@ def summary_report(
 
     st.write("---")
     st.markdown("## Data Quality")
-    summary_data_quality(data=data, survey_id=survey_id)
+    summary_data_quality(data=data, survey_id=survey_id, check_rates=check_rates)

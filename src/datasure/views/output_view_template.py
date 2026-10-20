@@ -13,15 +13,21 @@ from pathlib import Path
 import polars as pl
 import streamlit as st
 
-from datasure.checks.backchecks.report_ui import backchecks_report
+from datasure.checks.backchecks.report_ui import (
+    backchecks_report,
+    overall_error_rate_percent,
+)
 from datasure.checks.descriptive import descriptive_report
 from datasure.checks.duplicates import duplicates_report
 from datasure.checks.enumerator.report_ui import enumerator_report
 from datasure.checks.gpschecks.report_ui import gpschecks_report
 from datasure.checks.missing import missing_report
-from datasure.checks.outliers.report_ui import outliers_report
+from datasure.checks.outliers.report_ui import (
+    flagged_outlier_percent,
+    outliers_report,
+)
 from datasure.checks.progress import progress_report
-from datasure.checks.summary import summary_report
+from datasure.checks.summary import CheckRates, summary_report
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import CheckConfiguration
 from datasure.utils.dataframe_utils import TableState, get_df_columns, get_table_state
@@ -361,6 +367,26 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
     # get columns by type
     survey_columns = get_df_columns(data.page_data)
 
+    # The Summary tab shows rates from the Outliers and Backchecks tabs.
+    outliers_config: dict = {
+        "survey_key": config.survey_key,
+        "survey_id": config.survey_id,
+        "enumerator": config.enumerator,
+        "team": config.team,
+        "survey_date": config.survey_date,
+    }
+    backcheck_config: dict = {
+        "survey_key": config.survey_key,
+        "survey_id": config.survey_id,
+        "survey_date": config.survey_date,
+        "backcheck_date": config.backcheck_date,
+        "enumerator": config.enumerator,
+        "backchecker": config.backchecker,
+        "backchecker_team": config.backchecker_team,
+        "backcheck_target_percent": config.backcheck_target_percent,
+        "survey_target": config.survey_target,
+    }
+
     # Render each tab
     with summary:
         summary_config: dict = {
@@ -368,8 +394,35 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             "survey_date": config.survey_date,
             "survey_target": config.survey_target,
         }
+        check_rates = CheckRates(
+            outliers_pct=flagged_outlier_percent(
+                project_id,
+                config.page_name_id,
+                data.page_data,
+                survey_columns,
+                config.setting_file,
+                outliers_config,
+                config.survey_data_name,
+            ),
+            backcheck_error_pct=(
+                overall_error_rate_percent(
+                    project_id,
+                    config.page_name_id,
+                    data.page_data,
+                    data.backcheck_data,
+                    config.setting_file,
+                    backcheck_config,
+                )
+                if data.backcheck_state is TableState.HAS_ROWS
+                else None
+            ),
+        )
         summary_report(
-            data.page_data, config.setting_file, summary_config, survey_columns
+            data.page_data,
+            config.setting_file,
+            summary_config,
+            survey_columns,
+            check_rates=check_rates,
         )
 
     with descriptive_stats:
@@ -427,13 +480,6 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
         )
 
     with outliers:
-        outliers_config: dict = {
-            "survey_key": config.survey_key,
-            "survey_id": config.survey_id,
-            "enumerator": config.enumerator,
-            "team": config.team,
-            "survey_date": config.survey_date,
-        }
         outliers_report(
             project_id,
             config.page_name_id,
@@ -484,17 +530,6 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
         backcheck_state = data.backcheck_state
         if backcheck_state is TableState.HAS_ROWS:
             backcheck_columns = get_df_columns(data.backcheck_data)
-            backcheck_config: dict = {
-                "survey_key": config.survey_key,
-                "survey_id": config.survey_id,
-                "survey_date": config.survey_date,
-                "backcheck_date": config.backcheck_date,
-                "enumerator": config.enumerator,
-                "backchecker": config.backchecker,
-                "backchecker_team": config.backchecker_team,
-                "backcheck_target_percent": config.backcheck_target_percent,
-                "survey_target": config.survey_target,
-            }
             backchecks_report(
                 project_id,
                 config.page_name_id,

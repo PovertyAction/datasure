@@ -2,6 +2,7 @@
 
 import importlib
 import sys
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import polars as pl
@@ -38,6 +39,7 @@ from datasure.checks.backchecks.report_ui import (
     _render_time_period_selector_backchecks,
     _render_weekday_selector_backchecks,
     _update_backcheck_column_config,
+    overall_error_rate_percent,
 )
 from tests.checks.backchecks.conftest import make_mock_st
 
@@ -965,3 +967,136 @@ def test_render_backcheck_comparison_results_empty_display(patched_bc):
             BackcheckSettings(survey_key="key", survey_id="sid"),
         )
     patched_bc.info.assert_called()
+
+
+class TestOverallErrorRatePercent:
+    """The back check error rate on the Summary tab."""
+
+    CONFIG: ClassVar[dict] = {
+        "survey_key": "survey_id",
+        "survey_id": "survey_id",
+        "survey_date": "submission_date",
+        "backcheck_date": "backcheck_date",
+        "enumerator": "enumerator",
+        "backchecker": "backchecker",
+        "backcheck_target_percent": 10,
+        "survey_target": 0,
+    }
+
+    @pytest.fixture
+    def column_settings(self):
+        return pl.DataFrame(
+            {
+                "search_type": ["exact", "exact"],
+                "pattern": ["age", "gender"],
+                "column_name": [["age"], ["gender"]],
+                "category": [1, 3],
+                "ok_range_type": [None, None],
+                "ok_range_values": [None, None],
+                "ttest": [False, False],
+                "prtest": [False, False],
+                "signrank": [False, False],
+                "reliability": [False, False],
+            },
+            schema_overrides={
+                "ok_range_type": pl.String,
+                "ok_range_values": pl.List(pl.Float64),
+            },
+        )
+
+    def _rate(self, survey, backcheck, column_settings, settings_file):
+        with patch(
+            "datasure.checks.backchecks.report_ui.duckdb_get_table",
+            return_value=column_settings,
+        ):
+            return overall_error_rate_percent(
+                "project", "page", survey, backcheck, str(settings_file), self.CONFIG
+            )
+
+    def test_total_error_rate(
+        self,
+        sample_survey_data_pl,
+        sample_backcheck_data_pl,
+        column_settings,
+        tmp_path,
+    ):
+        # age: S002 differs (30 vs 31); gender: all 3 match. 1 of 6 values.
+        rate = self._rate(
+            sample_survey_data_pl,
+            sample_backcheck_data_pl,
+            column_settings,
+            tmp_path / "settings.json",
+        )
+        assert rate == pytest.approx(16.67)
+
+    def test_uses_saved_comparison_options(
+        self,
+        sample_survey_data_pl,
+        sample_backcheck_data_pl,
+        column_settings,
+        tmp_path,
+    ):
+        backcheck = sample_backcheck_data_pl.with_columns(
+            pl.Series("gender", ["m", "f", "m"])
+        )
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text('{"backchecks": {"string_case_option": "lowercase"}}')
+        rate = self._rate(
+            sample_survey_data_pl, backcheck, column_settings, settings_file
+        )
+        assert rate == pytest.approx(16.67)
+
+    def test_none_when_saved_settings_are_invalid(
+        self,
+        sample_survey_data_pl,
+        sample_backcheck_data_pl,
+        column_settings,
+        tmp_path,
+    ):
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text('{"backchecks": {"no_differences_values": 5}}')
+        rate = self._rate(
+            sample_survey_data_pl,
+            sample_backcheck_data_pl,
+            column_settings,
+            settings_file,
+        )
+        assert rate is None
+
+    def test_none_without_backcheck_columns(
+        self, sample_survey_data_pl, sample_backcheck_data_pl, tmp_path
+    ):
+        rate = self._rate(
+            sample_survey_data_pl,
+            sample_backcheck_data_pl,
+            pl.DataFrame(),
+            tmp_path / "settings.json",
+        )
+        assert rate is None
+
+    def test_none_when_nothing_was_compared(
+        self, sample_survey_data_pl, sample_backcheck_data_pl, column_settings, tmp_path
+    ):
+        backcheck = sample_backcheck_data_pl.with_columns(
+            pl.lit(None, dtype=pl.Int64).alias("age"),
+            pl.lit(None, dtype=pl.String).alias("gender"),
+        )
+        rate = self._rate(
+            sample_survey_data_pl, backcheck, column_settings, tmp_path / "s.json"
+        )
+        assert rate is None
+
+    def test_none_when_the_records_filter_fails(
+        self, sample_survey_data_pl, sample_backcheck_data_pl, column_settings, tmp_path
+    ):
+        with patch(
+            "datasure.checks.backchecks.report_ui.comparison_scope",
+            side_effect=pl.exceptions.ColumnNotFoundError("consent"),
+        ):
+            rate = self._rate(
+                sample_survey_data_pl,
+                sample_backcheck_data_pl,
+                column_settings,
+                tmp_path / "settings.json",
+            )
+        assert rate is None

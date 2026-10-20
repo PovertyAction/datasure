@@ -6,6 +6,11 @@ import streamlit as st
 from datasure.checks.backchecks.compute import load_default_backchecks_settings
 from datasure.checks.backchecks.coverage import DEFAULT_TARGET_PERCENT
 from datasure.checks.backchecks.models import (
+    EXCLUDE_VALUES_KEY,
+    NO_DIFFERENCES_KEY,
+    STRING_CASE_KEY,
+    STRING_NOSYMBOLS_KEY,
+    STRING_TRIMSPACES_KEY,
     TAB_NAME,
     BackcheckSettings,
     StrCompareOptions,
@@ -790,7 +795,7 @@ def _render_no_differences_settings(settings_file: str) -> list:
     """
     return _render_value_list_editor(
         settings_file,
-        setting_key="no_differences_values",
+        setting_key=NO_DIFFERENCES_KEY,
         add_popover_label="Add Value",
         add_text_label="Enter value to exclude from differences",
         add_text_key="new_no_diff_value_input",
@@ -823,7 +828,7 @@ def _render_string_comparison_options(settings_file) -> StrCompareOptions:
     st.markdown("##### String Comparison Options")
     sok1, sok2, sok3 = st.columns(3)
     default_settings = load_check_settings(settings_file, TAB_NAME)
-    default_case_setting = default_settings.get("string_case_option", None)
+    default_case_setting = default_settings.get(STRING_CASE_KEY, None)
     options_map = {
         "lowercase": ":material/lowercase: lowercase",
         "uppercase": ":material/uppercase: UPPERCASE",
@@ -841,13 +846,11 @@ def _render_string_comparison_options(settings_file) -> StrCompareOptions:
             kwargs={"state_name": TAB_NAME + "_string_case_option"},
         )
         save_check_settings(
-            settings_file, TAB_NAME, {"string_case_option": string_case_option}
+            settings_file, TAB_NAME, {STRING_CASE_KEY: string_case_option}
         )
 
     with sok2, st.container(border=True):
-        default_nosymbols_setting = default_settings.get(
-            "string_nosymbols_option", False
-        )
+        default_nosymbols_setting = default_settings.get(STRING_NOSYMBOLS_KEY, False)
         string_nosymbols_option = st.toggle(
             label="Ignore Symbols in String Comparison",
             value=default_nosymbols_setting,
@@ -859,13 +862,11 @@ def _render_string_comparison_options(settings_file) -> StrCompareOptions:
         save_check_settings(
             settings_file,
             TAB_NAME,
-            {"string_nosymbols_option": string_nosymbols_option},
+            {STRING_NOSYMBOLS_KEY: string_nosymbols_option},
         )
 
     with sok3, st.container(border=True):
-        default_trimspaces_setting = default_settings.get(
-            "string_trimspaces_option", False
-        )
+        default_trimspaces_setting = default_settings.get(STRING_TRIMSPACES_KEY, False)
         string_trimspaces_option = st.toggle(
             label="Trim Spaces in String Comparison",
             value=default_trimspaces_setting,
@@ -877,7 +878,7 @@ def _render_string_comparison_options(settings_file) -> StrCompareOptions:
         save_check_settings(
             settings_file,
             TAB_NAME,
-            {"string_trimspaces_option": string_trimspaces_option},
+            {STRING_TRIMSPACES_KEY: string_trimspaces_option},
         )
 
     return StrCompareOptions(
@@ -892,7 +893,7 @@ def _render_exclude_values_settings(settings_file: str) -> list:
     """Render UI for managing values to exclude from backcheck comparison."""
     return _render_value_list_editor(
         settings_file,
-        setting_key="exclude_values",
+        setting_key=EXCLUDE_VALUES_KEY,
         add_popover_label="Add Exclude Value",
         add_text_label="Enter value to exclude from backcheck comparison",
         add_text_key="new_exclude_value_input",

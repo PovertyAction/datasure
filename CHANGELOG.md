@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Summary tab data quality** (#358): The outlier % and back check error
+  rate tiles show the values from the Outliers & Constraints and Backcheck
+  Analysis tabs instead of always 0
+  - Root cause: both tiles were placeholders fixed at 0 in
+    `calculate_data_quality_metrics`
+  - Solution: `flagged_outlier_percent` (checked, non-missing values flagged
+    as outliers, leaving out accepted flags) and `overall_error_rate_percent`
+    (the tab's total error rate) compute the values from the saved settings
+    without rendering those tabs. With no outlier or backcheck columns
+    configured, or no backcheck data, the tile says where to configure it
+    instead of showing 0
+  - `load_saved_backchecks_settings` also reads the comparison options (no
+    differences, excluded values, string options), which the settings file
+    stores under their widget names, so the Summary error rate matches the
+    tab
+
 ## [1.2.0a2] - 2026-10-20
 
 ### Added
