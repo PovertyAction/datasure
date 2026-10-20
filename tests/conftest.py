@@ -19,6 +19,26 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 
+_VIEWS_DIR = Path(__file__).parent / "views"
+
+
+def pytest_collectstart(collector):
+    """Collect every module outside tests/views with the real streamlit.
+
+    tests/views/conftest.py swaps in a mock streamlit when it is loaded, and
+    view test modules import their views under it. Without this, a check
+    module first imported while collecting a later non-view test file (for
+    example ``tests/views/test_prep_view.py`` run before
+    ``tests/checks/test_check_status.py``) would apply ``@st.fragment`` from
+    the mock and fail to import. tests/views/conftest.py re-installs the mock
+    for view modules.
+    """
+    if isinstance(collector, pytest.Module) and (
+        _VIEWS_DIR not in Path(collector.path).parents
+    ):
+        sys.modules["streamlit"] = _real_streamlit_module
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _ensure_real_streamlit():
     """Restore real streamlit in sys.modules after test collection.
