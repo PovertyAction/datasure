@@ -216,6 +216,7 @@ Cache directories are created automatically — no manual setup required.
 | Document | What it covers |
 | --- | --- |
 | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | Step-by-step guide to using the application |
+| [KNOWN_ISSUES.md](KNOWN_ISSUES.md) | Known bugs, workarounds, and recent fixes |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, code quality, testing, releases |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Package layout, data flow, storage, session state |
 | [docs/changelog_guide.md](docs/changelog_guide.md) | How to write CHANGELOG entries |
@@ -226,6 +227,7 @@ Cache directories are created automatically — no manual setup required.
 ### Getting Help
 
 - **Documentation**: [data.poverty-action.org/data-quality/datasure](https://data.poverty-action.org/data-quality/datasure/) - Full user guides, installation instructions, and workflow documentation
+- **Known Issues**: Check [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for known bugs and workarounds before reporting a problem
 - **GitHub Issues**: [Report bugs and request features](https://github.com/PovertyAction/datasure/issues)
 - **Email Support**: <researchsupport@poverty-action.org>
 - **Release Notes**: See [RELEASENOTES.md](RELEASENOTES.md) for latest updates
@@ -242,7 +244,7 @@ We welcome contributions from the research community! DataSure is developed by I
 
 ### Ways to Contribute
 
-- **Report Issues**: Found a bug or have a feature request? [Open an issue](https://github.com/PovertyAction/datasure/issues)
+- **Report Issues**: Found a bug or have a feature request? Check [KNOWN_ISSUES.md](KNOWN_ISSUES.md), then [open an issue](https://github.com/PovertyAction/datasure/issues)
 - **Suggest Features**: Share ideas for new data quality checks or workflow improvements
 - **Share Use Cases**: Help us understand how DataSure fits into different research workflows
 - **Code Contributions**: Developers can contribute code improvements and new features

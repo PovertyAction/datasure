@@ -16,6 +16,7 @@ behavior changes.
 | Every available command | `just --list` and the [Justfile](Justfile) |
 | Test/coverage/lint configuration | [pyproject.toml](pyproject.toml), [.pre-commit-config.yaml](.pre-commit-config.yaml) |
 | End-user workflow | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) |
+| Known bugs, workarounds, recent fixes | [KNOWN_ISSUES.md](KNOWN_ISSUES.md) |
 | Changelog and release-notes style | [docs/changelog_guide.md](docs/changelog_guide.md), [docs/release_notes_guide.md](docs/release_notes_guide.md) |
 | Planned work | [ROADMAP.md](ROADMAP.md) |
 
@@ -41,6 +42,11 @@ every section, and complete the checklist. Write "N/A" for sections that do not
 apply rather than deleting them. With the `gh` CLI, pass the template
 explicitly (for example `gh pr create --body-file <filled-in template>`); do not
 write a freeform PR body.
+
+**Check [KNOWN_ISSUES.md](KNOWN_ISSUES.md) first when triaging a bug.** If
+the bug is listed, point to the linked issue instead of investigating from
+scratch. Update the file when a fix ships, following its "Maintaining this
+file" rules.
 
 **Do not commit generated files.** `src/datasure/views/output_view_?.py` is
 generated at runtime and gitignored — edit `views/output_view_template.py`

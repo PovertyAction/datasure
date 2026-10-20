@@ -390,6 +390,14 @@ Before making any release, developers must update both technical and user-facing
 - Describe features in terms of data quality outcomes
 - Avoid technical jargon and implementation details
 
+#### Known Issues (KNOWN_ISSUES.md)
+
+- Move entries whose fix ships in this release to "Recently fixed", with the
+  version and a link to its changelog section
+- Remove fixed entries older than 2–3 releases
+- Follow the rules in the file's
+  [Maintaining this file](KNOWN_ISSUES.md#maintaining-this-file) section
+
 ### Automated Release Steps
 
 ```bash
@@ -655,6 +663,10 @@ apply.
 | `good first issue` | Small, well-scoped work suitable for newcomers |
 | `help wanted` | Work the maintainers would welcome outside help with |
 | `dependencies` | Dependency updates (applied by Dependabot) |
+
+When triaging a bug, check [KNOWN_ISSUES.md](KNOWN_ISSUES.md) first. If the
+bug is already listed, close the new issue as a duplicate of the linked issue.
+If it is a confirmed, user-visible bug in a released version, add an entry.
 
 Releases are tracked with milestones (for example `v1.0.0`), not labels.
 Duplicate or out-of-scope issues are closed with GitHub's "Close as duplicate"
