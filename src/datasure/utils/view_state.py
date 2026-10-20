@@ -32,7 +32,12 @@ logger = logging.getLogger(__name__)
 VIEW_STATE_KEY = "view_state"
 
 
-def _read(settings_file: str | Path) -> dict:
+def read_settings(settings_file: str | Path) -> dict:
+    """Read a settings JSON file; a missing file reads as ``{}``.
+
+    The one reader for page settings files outside Streamlit code (view
+    state and project configuration export/apply).
+    """
     path = Path(settings_file)
     if not path.exists():
         return {}
@@ -40,7 +45,8 @@ def _read(settings_file: str | Path) -> dict:
         return json.load(f)
 
 
-def _write(settings_file: str | Path, settings: dict) -> None:
+def write_settings(settings_file: str | Path, settings: dict) -> None:
+    """Write a settings JSON file, creating its folder if needed."""
     path = Path(settings_file)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
@@ -63,7 +69,7 @@ def without_view_state(settings: dict) -> dict:
 
 def saved_selection(settings_file: str | Path) -> str | None:
     """Return the last selected item (check, dataset or page), if any."""
-    selected = _view_state(_read(settings_file)).get("selected")
+    selected = _view_state(read_settings(settings_file)).get("selected")
     return selected if isinstance(selected, str) else None
 
 
@@ -72,12 +78,12 @@ def save_selection(settings_file: str | Path, slug: str) -> None:
 
     Validation is the resolver's job: a stale saved slug is ignored there.
     """
-    settings = _read(settings_file)
+    settings = read_settings(settings_file)
     view_state = settings.setdefault(VIEW_STATE_KEY, {})
     if view_state.get("selected") == slug:
         return
     view_state["selected"] = slug
-    _write(settings_file, settings)
+    write_settings(settings_file, settings)
 
 
 class ViewState:
@@ -98,25 +104,25 @@ class ViewState:
 
     def values(self) -> dict[str, Any]:
         """Return the scope's saved values, keyed by widget key."""
-        scopes = _view_state(_read(self.settings_file)).get("scopes", {})
+        scopes = _view_state(read_settings(self.settings_file)).get("scopes", {})
         return dict(scopes.get(self.scope, {}))
 
     def save(self, key: str, value: Any) -> None:
         """Save one widget value; other settings in the file are kept."""
-        settings = _read(self.settings_file)
+        settings = read_settings(self.settings_file)
         view_state = settings.setdefault(VIEW_STATE_KEY, {})
         view_state.setdefault("scopes", {}).setdefault(self.scope, {})[key] = value
-        _write(self.settings_file, settings)
+        write_settings(self.settings_file, settings)
 
     def forget(self, *keys: str) -> None:
         """Remove saved values, for example ones that no longer match the data."""
-        settings = _read(self.settings_file)
+        settings = read_settings(self.settings_file)
         saved = _view_state(settings).get("scopes", {}).get(self.scope)
         if not saved or not any(key in saved for key in keys):
             return
         for key in keys:
             saved.pop(key, None)
-        _write(self.settings_file, settings)
+        write_settings(self.settings_file, settings)
 
     def reset(self) -> list[str]:
         """Clear every saved value of this scope, and only this scope.
