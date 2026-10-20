@@ -1417,6 +1417,59 @@ def _review_context(
     return ReviewContext(CorrectionProcessor(project_id), alias)
 
 
+@dataclass(frozen=True)
+class _ReviewedFlags:
+    """Outlier and constraint results with accepted flags cleared."""
+
+    outliers: pl.DataFrame
+    violations: pl.DataFrame
+
+
+def _reviewed_flags(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    survey_columns: ColumnByType,
+    setting_file: str,
+    config: dict,
+    alias: str | None,
+) -> _ReviewedFlags | None:
+    """Compute the check's results without rendering it, for Summary.
+
+    Uses the saved settings and outlier columns, and clears accepted flags,
+    as the Outliers tab does. None when no outlier columns are configured or
+    the saved settings no longer fit the data.
+    """
+    column_config = _load_outlier_settings(project_id, page_name_id)
+    if column_config.is_empty():
+        return None
+    try:
+        settings = clear_unavailable_columns(
+            load_default_settings(setting_file, OutlierSettings(**config)),
+            survey_columns.categorical_columns,
+            survey_columns.datetime_columns,
+        )
+        outlier_data = compute_outlier_output(data, settings, column_config)
+        violations = compute_constraint_violations(data, settings, column_config)
+    except (pl.exceptions.PolarsError, ValidationError, ValueError):
+        logger.warning(
+            "Could not compute the outlier results for page %s",
+            page_name_id,
+            exc_info=True,
+        )
+        return None
+    review = _review_context(project_id, alias, settings.survey_key)
+    outlier_data = clear_reviewed_flags(
+        _with_review_status(outlier_data, settings, OUTLIERS, review), OUTLIERS
+    )
+    if not violations.is_empty():
+        violations = clear_reviewed_flags(
+            _with_review_status(violations, settings, CONSTRAINTS, review),
+            CONSTRAINTS,
+        )
+    return _ReviewedFlags(outlier_data, violations)
+
+
 def flagged_outlier_percent(
     project_id: str,
     page_name_id: str,
@@ -1456,26 +1509,55 @@ def flagged_outlier_percent(
         The percentage, or None when no outlier columns are configured, no
         values were checked, or the saved settings no longer fit the data.
     """
-    column_config = _load_outlier_settings(project_id, page_name_id)
-    if column_config.is_empty():
-        return None
-    try:
-        settings = clear_unavailable_columns(
-            load_default_settings(setting_file, OutlierSettings(**config)),
-            survey_columns.categorical_columns,
-            survey_columns.datetime_columns,
-        )
-        outlier_data = compute_outlier_output(data, settings, column_config)
-    except (pl.exceptions.PolarsError, ValidationError, ValueError):
-        logger.warning(
-            "Could not compute the outlier %% for page %s", page_name_id, exc_info=True
-        )
-        return None
-    review = _review_context(project_id, alias, settings.survey_key)
-    outlier_data = clear_reviewed_flags(
-        _with_review_status(outlier_data, settings, OUTLIERS, review), OUTLIERS
+    flags = _reviewed_flags(
+        project_id, page_name_id, data, survey_columns, setting_file, config, alias
     )
-    return flagged_value_percent(outlier_data)
+    return None if flags is None else flagged_value_percent(flags.outliers)
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count:,} {noun}{'' if count == 1 else 's'}"
+
+
+def outliers_headline(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    survey_columns: ColumnByType,
+    setting_file: str,
+    config: dict,
+    alias: str | None,
+) -> str | None:
+    """Return the outliers headline for the Summary health grid.
+
+    The check's "Total Outliers" and "Total Violations", leaving out
+    accepted flags. Takes the same parameters as `flagged_outlier_percent`.
+
+    Returns
+    -------
+    str | None
+        For example "3 outliers, 1 constraint violation", or None when no
+        outlier columns are configured or the saved settings no longer fit
+        the data.
+    """
+    flags = _reviewed_flags(
+        project_id, page_name_id, data, survey_columns, setting_file, config, alias
+    )
+    if flags is None:
+        return None
+    outliers = (
+        0
+        if flags.outliers.is_empty()
+        else _compute_outlier_metrics(flags.outliers, None).total_outliers
+    )
+    violations = (
+        0
+        if flags.violations.is_empty()
+        else _compute_constraint_metrics(flags.violations).total_violations
+    )
+    return (
+        f"{_plural(outliers, 'outlier')}, {_plural(violations, 'constraint violation')}"
+    )
 
 
 def _delete_outlier_column(

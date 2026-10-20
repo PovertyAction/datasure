@@ -23,7 +23,10 @@ from datasure.checks.enumerator.models import (
     StatisticsOvertimeSettings,
     StatisticsSettings,
 )
-from datasure.checks.enumerator.settings_ui import enumerator_report_settings
+from datasure.checks.enumerator.settings_ui import (
+    enumerator_report_settings,
+    load_default_enumerator_settings,
+)
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
@@ -1129,14 +1132,7 @@ def enumerator_report(
     )
 
     # get data for enumerator report
-    data_enum_report = duckdb_get_table(
-        project_id,
-        "enumerator_data_with_consent_outcome",
-        "intermediate",
-    )
-
-    if data_enum_report.is_empty():
-        data_enum_report = data
+    data_enum_report = _enumerator_data(project_id, data)
 
     demo_callout(
         """
@@ -1279,3 +1275,53 @@ def enumerator_status(setting_file: str, config: dict) -> StatusResult:
             f"Select {' and '.join(missing)} in the settings below.",
         )
     return READY
+
+
+def _enumerator_data(project_id: str, data: pl.DataFrame) -> pl.DataFrame:
+    """Return the data the report uses: with consent and outcome, if saved."""
+    with_outcome = duckdb_get_table(
+        project_id, "enumerator_data_with_consent_outcome", "intermediate"
+    )
+    return data if with_outcome.is_empty() else with_outcome
+
+
+def enumerator_headline(
+    project_id: str, data: pl.DataFrame, setting_file: str, config: dict
+) -> str | None:
+    """Return the enumerator headline for the Summary health grid.
+
+    The active enumerators (past 7 days) out of all enumerators, as the
+    check's overview shows them. The check has no flagged-enumerator count,
+    so the headline does not invent one.
+
+    Parameters
+    ----------
+    project_id : str
+        The project identifier.
+    data : pl.DataFrame
+        The survey data.
+    setting_file : str
+        Path to the page's settings file.
+    config : dict
+        The page configuration the check starts from.
+
+    Returns
+    -------
+    str | None
+        For example "4 of 12 enumerators active in the past 7 days", or None
+        when the enumerator or survey date column is not set or there is no
+        data.
+    """
+    settings = load_default_enumerator_settings(
+        setting_file, EnumeratorSettings(**config)
+    )
+    report_data = _enumerator_data(project_id, data)
+    if not (settings.enumerator and settings.survey_date) or report_data.is_empty():
+        return None
+    metrics = compute_enumerator_overview(
+        report_data, settings.survey_date, settings.enumerator, settings.team
+    )
+    return (
+        f"{metrics.num_active_enumerators:,} of {metrics.num_enumerators:,} "
+        "enumerators active in the past 7 days"
+    )

@@ -1434,3 +1434,30 @@ def progress_status(data: pl.DataFrame) -> StatusResult:
     date columns are optional.
     """
     return rows_status(data.height)
+
+
+def progress_headline(data: pl.DataFrame, setting_file: str, config: dict) -> str:
+    """Return the progress headline for the Summary health grid.
+
+    The share of the target and the submissions, as the Progress Summary
+    shows them, or only the submissions when no target is set.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        The survey data.
+    setting_file : str
+        Path to the page's settings file.
+    config : dict
+        The page configuration the check starts from.
+    """
+    target = load_default_settings(
+        setting_file, ProgressSettings(**config)
+    ).survey_target
+    summary = compute_progress_summary(data, target)
+    if not target or target <= 0:
+        return f"{summary.total_submitted:,} submitted interviews"
+    return (
+        f"{summary.percentage_completed:.2f}% of target "
+        f"({summary.total_submitted:,} of {target:,})"
+    )

@@ -1307,3 +1307,17 @@ def missing_status(data: pl.DataFrame) -> StatusResult:
     Missing Values works on any survey data with rows.
     """
     return rows_status(data.height)
+
+
+def missing_headline(project_id: str, data: pl.DataFrame) -> str:
+    """Return the missing values headline for the Summary health grid.
+
+    The check's "Percentage of missing values": the mean share of missing
+    values across columns, with the project's missing codes counted as
+    missing.
+    """
+    missing_data = _compute_missing_data_paired(
+        data, load_missing_codes_from_db(project_id)
+    )
+    summary = compute_missing_summary(missing_data)
+    return f"{summary.mean_missing_pct:.2f}% of values missing"

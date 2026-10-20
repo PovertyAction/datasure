@@ -765,6 +765,30 @@ def overall_error_rate_percent(
     return rates[0].error_rate if rates else None
 
 
+def backchecks_headline(
+    project_id: str,
+    page_name_id: str,
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+) -> str | None:
+    """Return the backchecks headline for the Summary health grid.
+
+    The check's total error rate, from `overall_error_rate_percent`, which
+    takes the same parameters.
+
+    Returns
+    -------
+    str | None
+        For example "4.25% error rate", or None when no values were compared.
+    """
+    rate = overall_error_rate_percent(
+        project_id, page_name_id, survey_data, backcheck_data, setting_file, config
+    )
+    return None if rate is None else f"{rate:.2f}% error rate"
+
+
 def _render_overall_error_rates(backcheck_analysis: pl.DataFrame) -> None:
     """Render one card per error rate, total then by category.
 
