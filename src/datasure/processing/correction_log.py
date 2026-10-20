@@ -78,9 +78,14 @@ _LOG_BACKFILL_DEFAULTS: dict[str, str | None] = {
 
 
 def ensure_log_columns(df: pl.DataFrame) -> pl.DataFrame:
-    """Backfill columns missing from logs persisted before those columns existed."""
-    if df.width == 0:
-        return df
+    """Backfill columns missing from logs persisted before those columns existed.
+
+    A log with no `action` column holds no entries and reads as no log. 1.1.0
+    saved one, with only the status columns, when it reapplied corrections to
+    an alias that had none.
+    """
+    if "action" not in df.columns:
+        return pl.DataFrame()
     for column, default in _LOG_BACKFILL_DEFAULTS.items():
         if column not in df.columns:
             df = df.with_columns(

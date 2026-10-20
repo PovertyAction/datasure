@@ -63,6 +63,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     every one has a message. The warning is logged once per function
   - Files: `src/datasure/utils/onboarding_utils.py`,
     `tests/utils/test_onboarding_utils.py`
+- **Outliers & Constraints tab crashes** (#368): The tab no longer crashes
+  with `ColumnNotFoundError: "action"` or `DuplicateError: 'index'`, and
+  constraint checks no longer flood the terminal with polars warnings
+  - Root cause: Reapplying corrections for an alias with no correction log
+    saved a 0-row log of only `status` and `status_reason` (1.1.0 also did
+    this on every re-import). `get_active_acceptances` and
+    `get_active_corrections` then filtered on the missing `action` column.
+    Deleting an outlier column saved the `index` helper column into
+    `outliers_<page>`, which `with_row_index()` then added again. Constraint
+    checks built `pl.col(col) < None` for every unset bound
+  - Solution: Reapplying with no log saves the corrected data and writes no
+    log. `ensure_log_columns` reads a log with no `action` column as no log,
+    so projects that already hold one recover. Deleting an outlier column
+    saves only the settings columns. Adding and deleting outlier columns drop
+    an `index` column saved by earlier versions.
+    Constraint checks add a branch only for the bounds that are set
+  - Files: `src/datasure/processing/correction_log.py`,
+    `src/datasure/processing/corrections.py`,
+    `src/datasure/checks/outliers/report_ui.py`,
+    `src/datasure/checks/outliers/compute.py`
 - **Polars 2.0 compatibility**: The Prep page and several checks crashed on
   fresh installs that resolved polars 2.0
   - Root cause: polars 2.0 removed `NUMERIC_DTYPES`, `INTEGER_DTYPES`,

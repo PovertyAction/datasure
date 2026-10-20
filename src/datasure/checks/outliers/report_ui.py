@@ -1310,7 +1310,9 @@ def _update_outlier_column_config(
     # Append new configurations to existing polars DataFrame
     new_config_df = pl.DataFrame(new_config, schema=schema)
     if not existing_config.is_empty():
-        formatted_existing_config = _ensure_column_formats(existing_config)
+        formatted_existing_config = _ensure_column_formats(
+            _drop_saved_row_index(existing_config)
+        )
         updated_config = pl.concat(
             [formatted_existing_config, new_config_df], how="vertical"
         )
@@ -1393,6 +1395,11 @@ def _render_outlier_settings_table(outlier_settings: pl.DataFrame) -> None:
         )
 
 
+def _drop_saved_row_index(outliers_settings: pl.DataFrame) -> pl.DataFrame:
+    """Drop the `index` helper column older versions saved with the settings."""
+    return outliers_settings.drop("index", strict=False)
+
+
 def _delete_outlier_column(
     project_id: str, page_name_id: str, outliers_settings: pl.DataFrame
 ) -> None:
@@ -1418,6 +1425,8 @@ def _delete_outlier_column(
         if outliers_settings.is_empty():
             st.info("No outlier columns have been added yet. ")
         else:
+            outliers_settings = _drop_saved_row_index(outliers_settings)
+            settings_columns = outliers_settings.columns
             outliers_settings = outliers_settings.with_row_index().with_columns(
                 (
                     pl.col("index").cast(pl.Utf8)
@@ -1450,7 +1459,7 @@ def _delete_outlier_column(
             ):
                 updated_settings = outliers_settings.filter(
                     pl.col("composite_index") != selected_index
-                ).drop("composite_index")
+                ).select(settings_columns)
 
                 duckdb_save_table(
                     project_id,

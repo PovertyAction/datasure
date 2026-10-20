@@ -2,7 +2,11 @@
 
 import polars as pl
 
-from datasure.processing.correction_log import CORRECTION_ACTIONS, Action
+from datasure.processing.correction_log import (
+    CORRECTION_ACTIONS,
+    Action,
+    ensure_log_columns,
+)
 
 
 class TestAction:
@@ -33,3 +37,18 @@ class TestAction:
     def test_filters_a_persisted_log(self):
         log = pl.DataFrame({"action": ["accept", "modify value", "remove row"]})
         assert log.filter(pl.col("action") != Action.ACCEPT).height == 2
+
+
+class TestEnsureLogColumns:
+    """Logs persisted by older versions are read with the current columns."""
+
+    def test_backfills_missing_columns(self):
+        log = pl.DataFrame({"action": ["modify value"], "KEY": ["k1"]})
+        result = ensure_log_columns(log)
+        assert result["status"].to_list() == ["Successful"]
+        assert "user" in result.columns
+
+    def test_log_without_action_reads_as_no_log(self):
+        """The 1.1.0 reapply saved a 0-row log of only the status columns."""
+        log = pl.DataFrame(schema={"status": pl.String, "status_reason": pl.String})
+        assert ensure_log_columns(log).width == 0

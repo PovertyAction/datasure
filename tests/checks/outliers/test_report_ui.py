@@ -859,6 +859,32 @@ class TestUpdateOutlierColumnConfig:
         saved_df = mock_save.call_args[0][1]
         assert len(saved_df) == 2
 
+    def test_existing_config_with_index_column(self, outlier_column_config):
+        """Settings saved with the helper `index` column by older versions."""
+        bounds = ConstraintBounds(soft_min=0.0, soft_max=100.0)
+        with (
+            patch(
+                "datasure.checks.outliers.report_ui.duckdb_get_table",
+                return_value=outlier_column_config.with_row_index(),
+            ),
+            patch("datasure.checks.outliers.report_ui.duckdb_save_table") as mock_save,
+        ):
+            _update_outlier_column_config(
+                "proj1",
+                "page1",
+                "exact",
+                None,
+                ["col2"],
+                False,
+                False,
+                False,
+                None,
+                bounds,
+            )
+        saved_df = mock_save.call_args[0][1]
+        assert saved_df.columns == outlier_column_config.columns
+        assert len(saved_df) == 2
+
     def test_outlier_settings_none(self):
         bounds = ConstraintBounds(soft_min=0.0, soft_max=100.0)
         with (
@@ -912,6 +938,38 @@ class TestDeleteOutlierColumn:
             st_mock.button.return_value = True
             _delete_outlier_column("proj1", "page1", outlier_column_config)
         mock_save.assert_called_once()
+
+    def test_delete_saves_only_settings_columns(self, outlier_column_config):
+        """Deleting doesn't persist the dropdown's helper columns."""
+        settings = pl.concat([outlier_column_config, outlier_column_config])
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+            patch("datasure.checks.outliers.report_ui.duckdb_save_table") as mock_save,
+        ):
+            st_mock.selectbox.return_value = "0 - exact - "
+            st_mock.button.return_value = True
+            _delete_outlier_column("proj1", "page1", settings)
+        saved = mock_save.call_args.args[1]
+        assert saved.columns == outlier_column_config.columns
+        assert saved.height == 1
+
+    def test_settings_saved_with_index_column_render(self, outlier_column_config):
+        """Settings saved with the helper `index` column by older versions load."""
+        settings = pl.concat(
+            [outlier_column_config, outlier_column_config]
+        ).with_row_index()
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+            patch("datasure.checks.outliers.report_ui.duckdb_save_table") as mock_save,
+        ):
+            st_mock.selectbox.return_value = "1 - exact - "
+            st_mock.button.return_value = True
+            _delete_outlier_column("proj1", "page1", settings)
+        options = st_mock.selectbox.call_args.kwargs["options"]
+        assert options == ["0 - exact - ", "1 - exact - "]
+        saved = mock_save.call_args.args[1]
+        assert saved.columns == outlier_column_config.columns
+        assert saved.height == 1
 
 
 # ============================================================================
