@@ -219,7 +219,10 @@ def health_cards(
                 value = headline(ctx)
             else:
                 value = _cached((item.slug, fingerprint), lambda h=headline: h(ctx))
-        except Exception as exc:  # UI boundary: one headline must not stop the grid
+        # UI boundary: one headline must not stop the grid. The error is
+        # shown on the card by render_health_grid (deferred display, see
+        # CONTRIBUTING "Error Handling Conventions").
+        except Exception as exc:
             logger.exception("Could not compute the headline of %r", item.slug)
             cards.append(
                 HealthCard(item, headline_error=f"{type(exc).__name__}: {exc}")
@@ -240,8 +243,10 @@ def render_health_grid(
     """
     import streamlit as st
 
+    from datasure.utils.ui_utils import section_header
+
     st.divider()
-    st.markdown("## Check health")
+    section_header("Check health", ":material/health_and_safety:")
     for start in range(0, len(cards), _CARDS_PER_ROW):
         columns = st.columns(_CARDS_PER_ROW)
         for offset, card in enumerate(cards[start : start + _CARDS_PER_ROW]):

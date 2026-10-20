@@ -220,7 +220,10 @@ def guarded_status(slug: str, status: Callable[[], StatusResult]) -> StatusResul
     """
     try:
         return status()
-    except Exception as exc:  # UI boundary: one item's status must not stop the page
+    # UI boundary: one item's status must not stop the page. The error is
+    # shown by render_empty_state and the navigation marker (deferred display,
+    # see CONTRIBUTING "Error Handling Conventions").
+    except Exception as exc:
         logger.exception("Could not compute the status of %r", slug)
         return StatusResult(CheckStatus.ERROR, f"{type(exc).__name__}: {exc}")
 
