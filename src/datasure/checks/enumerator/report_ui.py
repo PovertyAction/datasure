@@ -33,6 +33,10 @@ from datasure.utils.settings_utils import (
     save_check_settings,
     trigger_save,
 )
+from datasure.utils.view_state import ViewState, bind_widget
+
+# Saved view state scope: the check's catalogue slug.
+VIEW_SCOPE = "enumerator"
 
 # =============================================================================
 # Display Functions - Overview
@@ -137,8 +141,11 @@ def _render_enumerator_summary_table(
     team: str | None,
     formversion: str | None,
     duration: str | None,
+    view: ViewState | None = None,
 ) -> None:
     """Display enumerator summary table.
+
+    The summary information chosen is saved to ``view``.
 
     Shows comprehensive enumerator statistics including submission counts,
     duration, missing data, consent rates, and outcome rates with styled
@@ -196,9 +203,11 @@ def _render_enumerator_summary_table(
             "Select Summary Information to Display",
             options=options_map.keys(),
             format_func=lambda x: options_map[x],
-            key="show_info_enumerator",
             help="Select which summary information to display in the table",
             selection_mode="multi",
+            **bind_widget(
+                view, "show_info_enumerator", options=list(options_map), multi=True
+            ),
         )
 
     # Define column groups
@@ -1183,6 +1192,7 @@ def enumerator_report(
         enumerator_settings.team,
         enumerator_settings.formversion,
         enumerator_settings.duration,
+        ViewState(setting_file, VIEW_SCOPE),
     )
 
     st.write("---")

@@ -248,6 +248,19 @@ class ViewState:
             st.session_state.pop(key, None)
 
 
+def bind_widget(view: ViewState | None, key: str, **kwargs: Any) -> dict[str, Any]:
+    """Bind a widget to ``view``, or only key it when there is no view.
+
+    For helpers that are also used outside a page with a settings file.
+    Takes the same keyword arguments as ``ViewState.bind``.
+    """
+    if view is None:
+        kwargs.pop("options", None)
+        kwargs.pop("multi", None)
+        return {"key": key, **kwargs}
+    return view.bind(key, **kwargs)
+
+
 def reset_filters_button(view: ViewState, *, key: str) -> None:
     """Draw a small "Reset filters" action that clears one scope's view state.
 

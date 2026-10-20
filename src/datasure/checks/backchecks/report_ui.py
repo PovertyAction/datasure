@@ -82,8 +82,12 @@ from datasure.utils.ui_utils import (
     show_queued_notices,
     styled_dataframe,
 )
+from datasure.utils.view_state import ViewState, bind_widget
 
 logger = logging.getLogger(__name__)
+
+# Saved view state scope: the check's catalogue slug.
+VIEW_SCOPE = "backchecks"
 
 # ==============================================================================
 # COLUMN CONFIGURATION FUNCTIONS
@@ -1394,8 +1398,11 @@ def _render_additional_columns_selector(
     survey_key: str,
     survey_id: str,
     backcheck_analysis: pl.DataFrame,
+    view: ViewState | None = None,
 ) -> tuple[list[str], list[str]]:
     """Render additional columns selector UI.
+
+    The columns chosen are saved to ``view``.
 
     Parameters
     ----------
@@ -1430,6 +1437,12 @@ def _render_additional_columns_selector(
                 "Additional Survey Columns",
                 options=survey_additional_cols,
                 help="Select additional columns from survey data to display",
+                **bind_widget(
+                    view,
+                    "bc_survey_extra_cols",
+                    options=survey_additional_cols,
+                    multi=True,
+                ),
             )
 
         with col2:
@@ -1437,6 +1450,12 @@ def _render_additional_columns_selector(
                 "Additional Backcheck Columns",
                 options=backcheck_additional_cols,
                 help="Select additional columns from backcheck data to display",
+                **bind_widget(
+                    view,
+                    "bc_backcheck_extra_cols",
+                    options=backcheck_additional_cols,
+                    multi=True,
+                ),
             )
 
     return survey_extra_cols, backcheck_extra_cols
@@ -1749,6 +1768,7 @@ def _render_comparison_results_section(
     backcheck_analysis: pl.DataFrame,
     backcheck_settings: BackcheckSettings,
     review: "AttributionContext | None",
+    view: ViewState | None = None,
 ) -> None:
     """Render Comparison Results Details as a fragment.
 
@@ -1757,7 +1777,12 @@ def _render_comparison_results_section(
     so the rates elsewhere on the page are refreshed.
     """
     _render_backcheck_comparison_results(
-        survey_data, backcheck_data, backcheck_analysis, backcheck_settings, review
+        survey_data,
+        backcheck_data,
+        backcheck_analysis,
+        backcheck_settings,
+        review,
+        view=view,
     )
 
 
@@ -1767,8 +1792,12 @@ def _render_backcheck_comparison_results(
     backcheck_analysis: pl.DataFrame,
     backcheck_settings: BackcheckSettings,
     review: "AttributionContext | None" = None,
+    *,
+    view: ViewState | None = None,
 ) -> None:
     """Render detailed backcheck comparison results with filtering options.
+
+    The column, extra column and match status filters are saved to ``view``.
 
     Displays a table showing each individual comparison with options to filter
     by match status, select specific columns, and add additional data columns.
@@ -1810,20 +1839,28 @@ def _render_backcheck_comparison_results(
     # Render filter controls
     selected_columns = st.multiselect(
         "Filter by Columns",
-        options=available_columns,
-        default=available_columns,
         help="Select which columns to show comparison results for",
+        **bind_widget(
+            view,
+            "bc_filter_columns",
+            options=available_columns,
+            multi=True,
+            default=available_columns,
+        ),
     )
 
     survey_extra_cols, backcheck_extra_cols = _render_additional_columns_selector(
-        survey_data, backcheck_data, survey_key, survey_id, backcheck_analysis
+        survey_data, backcheck_data, survey_key, survey_id, backcheck_analysis, view
     )
 
+    match_options = ["All Results", "Mismatches Only"]
     match_filter = st.pills(
         "Filter by Match Status",
-        options=["All Results", "Mismatches Only"],
-        default="All Results",
+        options=match_options,
         selection_mode="single",
+        **bind_widget(
+            view, "bc_match_filter", options=match_options, default="All Results"
+        ),
     )
 
     # Apply filters and add extra columns
@@ -2356,6 +2393,7 @@ def backchecks_report(
         _backcheck_analysis,
         backcheck_settings,
         review,
+        ViewState(setting_file, VIEW_SCOPE),
     )
     _render_attribution_log(review.log)
 

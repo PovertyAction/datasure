@@ -8,6 +8,7 @@ import pytest
 
 from datasure.utils.view_state import (
     ViewState,
+    bind_widget,
     save_selection,
     saved_selection,
     without_view_state,
@@ -155,6 +156,12 @@ class TestBind:
 
         view.save("gps_color_by", "team")
         assert "index" not in view.bind("gps_color_by", index=1)
+
+    def test_bind_without_a_view_only_keys_the_widget(self, fake_st):
+        assert bind_widget(None, "gps_color_by", options=["a"], index=0) == {
+            "key": "gps_color_by",
+            "index": 0,
+        }
 
     def test_clearing_a_value_removes_it(self, settings_file, fake_st):
         view = ViewState(settings_file, "gps")

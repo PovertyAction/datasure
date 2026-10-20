@@ -61,16 +61,27 @@ from datasure.utils.dataframe_utils import ColumnByType, get_df_columns
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import is_demo_project
+from datasure.utils.settings_utils import page_settings_file
 from datasure.utils.ui_utils import (
     queue_notice,
     row_styler,
     show_queued_notices,
     styled_dataframe,
 )
+from datasure.utils.view_state import ViewState, bind_widget
 
 # =============================================================================
 # GPS Column Configuration Functions
 # =============================================================================
+
+
+# Saved view state scope: the check's catalogue slug.
+VIEW_SCOPE = "gps"
+
+
+def _page_view(project_id: str, page_name_id: str) -> ViewState:
+    """Return the GPS check's saved view state on a check page."""
+    return ViewState(page_settings_file(project_id, page_name_id), VIEW_SCOPE)
 
 
 def _render_gps_column_actions(
@@ -409,7 +420,9 @@ def _delete_gps_column(
 # =============================================================================
 
 
-def _apply_category_filter(data: pl.DataFrame, filter_by: str | None) -> pl.DataFrame:
+def _apply_category_filter(
+    data: pl.DataFrame, filter_by: str | None, view: ViewState | None = None
+) -> pl.DataFrame:
     """Apply category-based filtering with a multiselect UI.
 
     Parameters
@@ -418,6 +431,9 @@ def _apply_category_filter(data: pl.DataFrame, filter_by: str | None) -> pl.Data
         Data to filter.
     filter_by : str | None
         Column name to filter by, or None to skip filtering.
+    view : ViewState | None
+        Where the chosen values are saved; values no longer in the data are
+        dropped.
 
     Returns
     -------
@@ -431,8 +447,14 @@ def _apply_category_filter(data: pl.DataFrame, filter_by: str | None) -> pl.Data
     filter_values = st.multiselect(
         label=f"Select {filter_by} values to display",
         options=unique_values,
-        default=unique_values,
         help=f"Choose which {filter_by} values to show on the map.",
+        **bind_widget(
+            view,
+            f"gps_filter_values_{filter_by}",
+            options=unique_values,
+            multi=True,
+            default=unique_values,
+        ),
     )
 
     if filter_values:
@@ -535,14 +557,13 @@ def _load_and_parse_gps_data(
 
     aliases = gps_settings["alias"].to_list()
 
-    selectbox_kwargs = {
-        "label": "Select GPS Configuration",
-        "options": aliases,
-    }
-    if alias_select_key:
-        selectbox_kwargs["key"] = alias_select_key
-
-    selected_alias = st.selectbox(**selectbox_kwargs)
+    selected_alias = st.selectbox(
+        "Select GPS Configuration",
+        aliases,
+        **_page_view(project_id, page_name_id).bind(
+            alias_select_key or "gps_config", options=aliases
+        ),
+    )
 
     if not selected_alias:
         return gps_settings, None, None
@@ -737,6 +758,8 @@ def _render_outliers_data_table(
     detection_method: str,
     clustering_col: str | None,
     review: GPSReview | None = None,
+    *,
+    view: ViewState | None = None,
 ) -> None:
     """Render the outliers data table with download button.
 
@@ -759,13 +782,15 @@ def _render_outliers_data_table(
     review : GPSReview | None
         If given, accepted outliers are hidden (unless "Show reviewed" is
         on) and each row has a Review button that opens the correction form.
+    view : ViewState | None
+        Where the "Show reviewed" toggle is saved.
     """
     with st.expander("View Outliers Data", expanded=review is not None):
         show_reviewed = review is not None and st.toggle(
             "Show reviewed",
-            key=f"gps_show_reviewed_{selected_alias}",
             help="Also show outliers accepted as valid, highlighted green, "
             "with the reason.",
+            **bind_widget(view, f"gps_show_reviewed_{selected_alias}"),
         )
         outliers_only = outliers_table(
             outlier_df, marked=review is not None, show_reviewed=show_reviewed
@@ -1203,12 +1228,14 @@ def _render_gps_coordinates(
     categorical_cols = df_columns.categorical_columns
 
     # UI controls
+    view = _page_view(project_id, page_name_id)
     with gp2:
         color_by = st.selectbox(
             label="Color Points By",
             options=categorical_cols,
             index=None,
             help="Select a categorical column to color the GPS points.",
+            **view.bind("gps_color_by", options=categorical_cols),
         )
 
     with gp3:
@@ -1217,10 +1244,11 @@ def _render_gps_coordinates(
             options=categorical_cols,
             index=None,
             help="Select a categorical column to filter the GPS points.",
+            **view.bind("gps_filter_by", options=categorical_cols),
         )
 
     # Apply filter if selected
-    filtered_data = _apply_category_filter(parsed_data, filter_by)
+    filtered_data = _apply_category_filter(parsed_data, filter_by, view)
 
     if filtered_data is None or filtered_data.is_empty():
         st.warning("No data matches the selected filters.")
@@ -1377,6 +1405,7 @@ def _render_gps_outliers_checks(
         detection_method,
         clustering_col,
         review,
+        view=_page_view(project_id, page_name_id),
     )
 
 
@@ -1416,8 +1445,12 @@ def _load_comparison_aliases(
 
 def _render_comparison_selectors(
     aliases: list[str],
+    view: ViewState | None = None,
 ) -> tuple[str, str, int] | None:
     """Render GPS comparison selection UI widgets.
+
+    The two configurations chosen are saved to `view`; the threshold is an
+    analysis parameter and is not.
 
     Returns
     -------
@@ -1430,8 +1463,8 @@ def _render_comparison_selectors(
         gps_config_1 = st.selectbox(
             label="First GPS Configuration",
             options=aliases,
-            key="comparison_gps_config_1",
             help="Select the first GPS configuration to compare.",
+            **bind_widget(view, "comparison_gps_config_1", options=aliases),
         )
 
     with gc2:
@@ -1439,8 +1472,8 @@ def _render_comparison_selectors(
         gps_config_2 = st.selectbox(
             label="Second GPS Configuration",
             options=remaining_aliases,
-            key="comparison_gps_config_2",
             help="Select the second GPS configuration to compare.",
+            **bind_widget(view, "comparison_gps_config_2", options=remaining_aliases),
         )
 
     if not gps_config_1 or not gps_config_2:
@@ -1676,7 +1709,9 @@ def _render_gps_comparison_checks(
     if aliases is None:
         return
 
-    selections = _render_comparison_selectors(aliases)
+    selections = _render_comparison_selectors(
+        aliases, _page_view(project_id, page_name_id)
+    )
     if selections is None:
         return
 

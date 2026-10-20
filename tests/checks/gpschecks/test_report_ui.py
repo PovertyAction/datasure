@@ -341,6 +341,51 @@ def test_apply_category_filter_no_filter():
     assert len(result) == 2
 
 
+def _category_filter_app(groups, settings_file):
+    import polars as pl
+    import streamlit as st
+
+    from datasure.checks.gpschecks.report_ui import (
+        VIEW_SCOPE,
+        _apply_category_filter,
+    )
+    from datasure.utils.view_state import ViewState
+
+    data = pl.DataFrame({"group": groups})
+    shown = _apply_category_filter(data, "group", ViewState(settings_file, VIEW_SCOPE))
+    st.session_state["shown"] = shown["group"].to_list()
+
+
+def _run_category_filter(groups, settings_file):
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_function(_category_filter_app, args=(groups, settings_file))
+    at.run()
+    assert not at.exception, at.exception
+    return at
+
+
+def test_category_filter_is_restored_in_a_new_session(tmp_path):
+    settings_file = str(tmp_path / "page_settings.json")
+    at = _run_category_filter(["A", "B", "C"], settings_file)
+    at.multiselect[0].set_value(["A", "C"]).run()
+
+    new_session = _run_category_filter(["A", "B", "C"], settings_file)
+
+    assert new_session.multiselect[0].value == ["A", "C"]
+    assert new_session.session_state["shown"] == ["A", "C"]
+
+
+def test_category_filter_drops_values_no_longer_in_the_data(tmp_path):
+    settings_file = str(tmp_path / "page_settings.json")
+    at = _run_category_filter(["A", "B", "C"], settings_file)
+    at.multiselect[0].set_value(["A", "C"]).run()
+
+    new_session = _run_category_filter(["B", "C"], settings_file)
+
+    assert new_session.multiselect[0].value == ["C"]
+
+
 # =============================================================================
 # Tests for _merge_parsed_gps_data
 # =============================================================================
