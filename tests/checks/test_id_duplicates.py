@@ -285,6 +285,19 @@ def test_paginate_cards_clamps_page():
     assert page.height == 5
 
 
+def test_zero_row_data_has_no_cards(survey):
+    """Data a Records to Include filter emptied has no cards or problems."""
+    empty = survey.clear()
+
+    assert find_duplicate_groups(empty, "hhid", "KEY", "date").is_empty()
+    assert find_unmatched_ids(empty, survey, "hhid", "KEY", "date").is_empty()
+    # Against an empty survey, every backcheck row with an ID is unmatched.
+    with_id = survey.filter(pl.col("hhid").is_not_null()).height
+    assert find_unmatched_ids(survey, empty, "hhid", "KEY", "date").height == with_id
+    assert count_missing_ids(empty, "hhid") == 0
+    assert count_resolved_ids(survey, empty, "hhid") == 2
+
+
 def test_paginate_cards_empty():
     page, n_pages, current = paginate_cards(_numbered_cards(0), 1)
 

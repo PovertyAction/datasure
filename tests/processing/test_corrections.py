@@ -140,6 +140,19 @@ class TestCorrectionProcessor:
         mock_get.assert_called_once()
         mock_save.assert_not_called()
 
+    def test_get_corrected_data_initialize_from_prep_with_no_rows(
+        self, correction_processor, sample_data
+    ):
+        """Prep data a step emptied seeds a corrected table with no rows."""
+        processor, mock_get, mock_save = correction_processor
+        mock_get.side_effect = [pl.DataFrame(), sample_data.clear()]
+
+        result = processor.get_corrected_data("test_alias")
+
+        assert result.is_empty()
+        assert result.columns == sample_data.columns
+        mock_save.assert_called_once()
+
     def test_get_corrected_data_both_empty(self, correction_processor):
         """Test getting corrected data when both corrected and prep are empty."""
         processor, mock_get, _ = correction_processor

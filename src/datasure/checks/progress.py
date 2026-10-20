@@ -517,7 +517,8 @@ def compute_average_interviews(period_stats: pl.DataFrame) -> float:
     float
         Average number of interviews per period
     """
-    return period_stats["num_interviews"].mean()
+    average = period_stats["num_interviews"].mean()
+    return 0.0 if average is None else average
 
 
 def render_time_period_selector(
@@ -1004,7 +1005,10 @@ def _expand_attempt_dates(attempts_df: pl.DataFrame) -> pl.DataFrame:
         DataFrame with expanded attempt date columns
     """
     # Get the maximum number of attempts to determine how many columns we need
-    max_attempts = attempts_df.select(pl.col("attempt_dates").list.len().max()).item()
+    # No survey IDs (zero-row data) means no attempt date columns.
+    max_attempts = (
+        attempts_df.select(pl.col("attempt_dates").list.len().max()).item() or 0
+    )
 
     # Explode attempt dates into separate columns
     # Use list.get with default=None to handle lists shorter than max_attempts
@@ -1072,6 +1076,8 @@ def _compute_summary_stats(attempts_df: pl.DataFrame) -> tuple[int, int, int]:
         (number_of_unique_ids, min_attempts, max_attempts)
     """
     num_unique = attempts_df.height
+    if num_unique == 0:
+        return 0, 0, 0
     min_attempts = attempts_df["num_interviews"].min()
     max_attempts = attempts_df["num_interviews"].max()
 

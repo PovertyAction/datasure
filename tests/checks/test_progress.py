@@ -492,6 +492,14 @@ class TestHelperFunctions:
         assert isinstance(avg, float)
         assert math.isclose(avg, 15.0)
 
+    def test_compute_average_interviews_zero_rows(self):
+        """No time periods average to 0.0 rather than None."""
+        period_stats = pl.DataFrame(
+            schema={"time_period": pl.Date, "num_interviews": pl.UInt32}
+        )
+
+        assert compute_average_interviews(period_stats) == 0.0
+
 
 class TestComputeProgressOvertimeUpdated:
     """Test compute_progress_overtime with new Polars API."""
@@ -629,6 +637,25 @@ class TestComputeAttemptedInterviewsUpdated:
         assert isinstance(result, AttemptedInterviewsResult)
         assert "enumerator" in result.attempted_interviews.columns
         assert "team" in result.attempted_interviews.columns
+
+    @pytest.mark.parametrize("display_cols", [[], ["enumerator"]])
+    def test_compute_attempted_interviews_zero_rows(self, display_cols):
+        """Zero-row data gives an empty table and zero counts."""
+        data = pl.DataFrame(
+            schema={
+                "survey_id": pl.String,
+                "date": pl.Datetime,
+                "enumerator": pl.String,
+            }
+        )
+
+        result = compute_attempted_interviews(data, "survey_id", "date", display_cols)
+
+        assert result.attempted_interviews.is_empty()
+        assert result.total_submitted == 0
+        assert result.number_of_unique_ids == 0
+        assert result.min_attempts == 0
+        assert result.max_attempts == 0
 
 
 # ==============================================================================

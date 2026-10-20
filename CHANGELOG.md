@@ -28,6 +28,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Zero-row prep and corrected data** (#315): A prep step or correction
+  that removed every row no longer brings back raw data on check pages
+  - Root cause: `load_data_with_fallback` and the Prep page could not tell a
+    missing table from one with no rows
+  - Solution: `load_data_with_fallback` uses the first table that exists
+    (`duckdb_table_exists`). A new `TableState` (missing, no rows, has rows)
+    replaces the ad hoc width and height checks. Check pages stop with a "no
+    rows" message (`stop_if_no_survey_data`), or an "import it" message when
+    the dataset was never imported. The Backcheck Analysis tab
+    says when backcheck data has no rows. The Prep page keeps its step
+    controls and Change Log when prep data has no rows, and the Correct Data
+    page warns while keeping its Correction Log and remove control. Prep data
+    with no rows seeds the corrected table, so Correct Data shows the dataset
+    as emptied rather than missing.
+    `compute_missing_columns`, `compute_average_interviews`,
+    `compute_attempted_interviews` and `detect_outliers_with_clusters` accept
+    zero-row input
+  - Files: `src/datasure/utils/dataframe_utils.py`,
+    `src/datasure/views/output_view_template.py`,
+    `src/datasure/views/prep_view.py`, `src/datasure/views/correction_view.py`,
+    `src/datasure/processing/corrections.py`,
+    `src/datasure/checks/missing.py`, `src/datasure/checks/progress.py`,
+    `src/datasure/checks/gpschecks/compute.py`
 - **Demo guidance on non-demo projects** (#359): Renaming a report function
   that shows demo guidance no longer crashes its page in every project
   - Root cause: `demo_output_onboarding` read the message before checking

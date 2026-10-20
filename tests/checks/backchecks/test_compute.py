@@ -41,6 +41,7 @@ from datasure.checks.backchecks.compute import (
     expand_col_names,
     load_default_backchecks_settings,
 )
+from datasure.checks.backchecks.coverage import compute_backcheck_coverage
 from datasure.checks.backchecks.models import BackcheckSettings
 
 
@@ -1498,6 +1499,44 @@ def test_edge_case_empty_dataframes():
     )
 
     assert result.is_empty()
+
+
+@pytest.mark.parametrize("emptied", ["survey", "backcheck"])
+def test_one_dataset_filtered_to_zero_rows(
+    emptied,
+    sample_survey_data_pl,
+    sample_backcheck_data_pl,
+    sample_backcheck_column_settings_pl,
+    sample_backcheck_settings,
+):
+    """A Records to Include filter that keeps no records of one dataset.
+
+    The comparison, staff statistics, column statistics and coverage run on
+    zero-row data with the full schema without raising.
+    """
+    survey = sample_survey_data_pl
+    backcheck = sample_backcheck_data_pl
+    if emptied == "survey":
+        survey = survey.clear()
+    else:
+        backcheck = backcheck.clear()
+    column_settings = sample_backcheck_column_settings_pl.with_columns(
+        pl.lit(True).alias(test) for test in ("ttest", "prtest", "signrank")
+    )
+
+    analysis = compute_backcheck_analysis(
+        survey, backcheck, sample_backcheck_settings, column_settings
+    )
+
+    assert analysis.is_empty()
+    for staff_type in ("enumerator", "backchecker"):
+        compute_enumerator_backchecker_stats(
+            survey, backcheck, analysis, sample_backcheck_settings, staff_type
+        )
+    assert compute_column_stats(survey, analysis).is_empty()
+    coverage = compute_backcheck_coverage(survey, backcheck, sample_backcheck_settings)
+    assert coverage.backchecked == 0
+    assert coverage.eligible == (0 if emptied == "survey" else 5)
 
 
 def test_edge_case_all_missing_values():

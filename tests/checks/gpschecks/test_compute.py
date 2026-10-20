@@ -288,6 +288,26 @@ def test_detect_outliers_with_clusters(sample_gps_data_with_outliers):
     assert far_points["Outlier"].any()
 
 
+@pytest.mark.parametrize("clustering_col", ["enumerator", None])
+def test_detect_outliers_with_clusters_zero_rows(clustering_col):
+    """No GPS points give an empty result with the output columns."""
+    empty = pd.DataFrame(
+        {
+            "enumerator": pd.Series(dtype=object),
+            "latitude": pd.Series(dtype=float),
+            "longitude": pd.Series(dtype=float),
+        }
+    )
+
+    result = detect_outliers_with_clusters(
+        empty, "latitude", "longitude", clustering_col
+    )
+
+    assert result.empty
+    assert "distance_from_centroid" in result.columns
+    assert "Outlier" in result.columns
+
+
 @patch("datasure.checks.gpschecks.compute.st.cache_data", lambda f: f)
 def test_detect_outliers_with_clusters_no_outliers():
     """Test outlier detection when there are no outliers."""

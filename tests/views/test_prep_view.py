@@ -1907,7 +1907,7 @@ class TestModuleLevelPageLayout:
             ),
             patch(
                 "datasure.utils.duckdb_utils.duckdb_get_table",
-                side_effect=[prep_log_df, zero_rows],
+                side_effect=[prep_log_df, zero_rows, prep_log_df, prep_log_df],
             ),
             patch("datasure.utils.duckdb_utils.duckdb_save_table"),
             patch("datasure.utils.navigations_utils.page_navigation"),
@@ -2008,6 +2008,135 @@ class TestModuleLevelPageLayout:
 
         _st.session_state["st_project_id"] = None
         _st.stop = _orig_stop
+
+    def _render_zero_row_prep_page(
+        self, prep_log_df: pl.DataFrame, get_table_side_effect: list
+    ) -> MagicMock:
+        """Render the Prep page for prep data with columns but no rows."""
+        import importlib
+
+        _st.session_state["st_project_id"] = "test_project"
+        _st.session_state["st_import_data_page"] = "import_page"
+        _st.session_state["st_config_checks_page"] = "config_page"
+        _st.stop = MagicMock()
+        _st.warning = MagicMock()
+
+        mock_tab = MagicMock()
+        mock_tab.__enter__ = MagicMock(return_value=mock_tab)
+        mock_tab.__exit__ = MagicMock(return_value=False)
+        _st.tabs = MagicMock(return_value=[mock_tab])
+
+        mock_col = MagicMock()
+        mock_col.__enter__ = MagicMock(return_value=mock_col)
+        mock_col.__exit__ = MagicMock(return_value=False)
+        _st.columns = MagicMock(return_value=[mock_col, mock_col, mock_col])
+
+        mock_container = MagicMock()
+        mock_container.__enter__ = MagicMock(return_value=mock_container)
+        mock_container.__exit__ = MagicMock(return_value=False)
+        _st.container = MagicMock(return_value=mock_container)
+
+        mock_popover = MagicMock()
+        mock_popover.__enter__ = MagicMock(return_value=mock_popover)
+        mock_popover.__exit__ = MagicMock(return_value=False)
+        _st.popover = MagicMock(return_value=mock_popover)
+
+        _st.button = MagicMock(return_value=False)
+        _st.selectbox = MagicMock(return_value=None)
+        _st.multiselect = MagicMock(return_value=[])
+        _st.dataframe = MagicMock()
+
+        try:
+            with (
+                patch(
+                    "datasure.utils.duckdb_utils.duckdb_get_aliases",
+                    return_value=["test_data"],
+                ),
+                patch(
+                    "datasure.utils.duckdb_utils.duckdb_get_table",
+                    side_effect=get_table_side_effect,
+                ),
+                patch("datasure.utils.duckdb_utils.duckdb_save_table") as mock_save,
+                patch("datasure.utils.navigations_utils.page_navigation"),
+                patch("datasure.utils.navigations_utils.add_demo_navigation"),
+                patch("datasure.utils.navigations_utils.demo_sidebar_help"),
+                patch("datasure.utils.navigations_utils.demo_callout"),
+                patch("datasure.utils.navigations_utils.show_demo_next_action"),
+                patch(
+                    "datasure.utils.onboarding_utils.is_demo_project",
+                    return_value=False,
+                ),
+                patch("datasure.utils.onboarding_utils.demo_expander"),
+                patch("datasure.processing.prep.prep_apply_action"),
+            ):
+                importlib.reload(pv)
+        finally:
+            _st.session_state["st_project_id"] = None
+            _st.stop = _orig_stop
+        return mock_save
+
+    def test_page_layout_with_zero_row_prep_data(self):
+        """Prep data with columns but no rows keeps the Change Log and controls."""
+        zero_rows = pl.DataFrame(
+            {
+                "name": pl.Series([], dtype=pl.String),
+                "age": pl.Series([], dtype=pl.Int64),
+            }
+        )
+        prep_log_df = pl.DataFrame(
+            {
+                "action": ["remove row(s)"],
+                "description": ["Removed all rows"],
+                "status": ["Successful"],
+            }
+        )
+
+        mock_save = self._render_zero_row_prep_page(
+            prep_log_df,
+            [
+                prep_log_df,  # prep_log
+                zero_rows,  # prep_data (columns, no rows)
+                prep_log_df,  # prep_log in prep_remove_step
+                prep_log_df,  # prep_log re-fetch in change log
+            ],
+        )
+
+        # The zero-row prep table is kept, not reseeded from raw
+        mock_save.assert_not_called()
+        warnings = [c.args[0] for c in _st.warning.call_args_list]
+        assert not any("No data available" in w for w in warnings)
+        assert any("removed every row" in w for w in warnings)
+        # The Remove control and the Change Log render so the step can be undone
+        popover_labels = [c.args[0] for c in _st.popover.call_args_list]
+        assert ":material/delete: Remove data prep step" in popover_labels
+        rendered = _st.dataframe.call_args_list[0][0][0]
+        assert list(rendered.data.columns) == ["action", "status", "description"]
+
+    def test_page_layout_with_zero_row_raw_data(self):
+        """Raw data imported with no rows is not blamed on prep steps."""
+        zero_rows = pl.DataFrame({"name": pl.Series([], dtype=pl.String)})
+        empty_log = pl.DataFrame(
+            {
+                "action": pl.Series([], dtype=pl.String),
+                "description": pl.Series([], dtype=pl.String),
+                "status": pl.Series([], dtype=pl.String),
+            }
+        )
+
+        self._render_zero_row_prep_page(
+            empty_log,
+            [
+                empty_log,  # prep_log
+                pl.DataFrame(),  # prep_data (no table yet)
+                zero_rows,  # raw data, imported with no rows
+                empty_log,  # prep_log in prep_remove_step
+                empty_log,  # prep_log re-fetch in change log
+            ],
+        )
+
+        warnings = [c.args[0] for c in _st.warning.call_args_list]
+        assert any("Import Data" in w for w in warnings)
+        assert not any("removed every row" in w for w in warnings)
 
     def test_page_layout_with_empty_prep_data(self):
         """Test when prep_data and prep_log are both empty (falls back to raw)."""

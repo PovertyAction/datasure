@@ -402,7 +402,7 @@ def compute_missing_columns(
     rows = []
     for col in missing_data.columns:
         null_count = stats[f"{col}_null"][0]
-        null_pct = (null_count / n_rows) * 100
+        null_pct = _safe_percentage(null_count, n_rows)
 
         row = {
             "Column": col,
@@ -413,13 +413,13 @@ def compute_missing_columns(
         # Add special code counts
         for label in missing_code_pairs:
             count = stats[f"{col}_{label}"][0]
-            pct = (count / n_rows) * 100
+            pct = _safe_percentage(count, n_rows)
             row[label] = count
             row[f"% {label}"] = pct
 
         # Add total
         total_count = stats[f"{col}_total"][0]
-        total_pct = (total_count / n_rows) * 100
+        total_pct = _safe_percentage(total_count, n_rows)
         row["Total Missing"] = total_count
         row["% Total Missing"] = total_pct
 

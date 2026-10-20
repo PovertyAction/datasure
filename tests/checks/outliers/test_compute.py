@@ -274,6 +274,15 @@ class TestComputeOutlierOutput:
         with pytest.raises(ValueError, match="The DataFrame is empty"):
             compute_outlier_output(df, outlier_settings, outlier_column_config)
 
+    def test_zero_row_dataframe(
+        self, sample_polars_df, outlier_settings, outlier_column_config
+    ):
+        """Data a step emptied is rejected; check pages stop before this."""
+        with pytest.raises(ValueError, match="The DataFrame is empty"):
+            compute_outlier_output(
+                sample_polars_df.clear(), outlier_settings, outlier_column_config
+            )
+
     def test_no_outliers_enabled(self, sample_polars_df, outlier_settings):
         """Test when no outliers are enabled."""
         config = pl.DataFrame(

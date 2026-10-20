@@ -1029,6 +1029,26 @@ def test_compute_id_duplicates_no_duplicates():
     assert result.is_empty()
 
 
+def test_compute_duplicates_zero_rows():
+    """Zero-row data (a filter matching nothing) gives empty results."""
+    data = pl.DataFrame(
+        schema={
+            "survey_id": pl.Utf8,
+            "survey_key": pl.Utf8,
+            "survey_date": pl.Date,
+            "age": pl.Int64,
+        }
+    )
+
+    id_dups = compute_id_duplicates(data, "survey_id", "survey_date", "survey_key")
+    col_dups = compute_column_duplicates(data, "survey_id", "survey_date", "age")
+
+    assert id_dups.is_empty()
+    assert "id_dup_percent" in id_dups.columns
+    assert col_dups.is_empty()
+    assert "age_dup_percent" in col_dups.columns
+
+
 def test_compute_column_duplicates(sample_data_pl):
     """Test compute_column_duplicates function."""
     result = compute_column_duplicates(

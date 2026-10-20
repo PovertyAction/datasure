@@ -600,6 +600,20 @@ def test_compute_missing_summary_single_column():
 # ----------------------- compute_missing_columns Tests -----------------------
 
 
+def test_compute_missing_columns_zero_rows():
+    """Zero-row data reports 0 missing values and 0% for every column."""
+    missing_data = pl.DataFrame(schema={"age": pl.Int32, "gender": pl.Int32})
+    missing_codes_df = pl.DataFrame({"label": ["DontKnow"], "codes": ["-999"]})
+
+    result = compute_missing_columns(missing_data, missing_codes_df)
+
+    assert result["Column"].tolist() == ["age", "gender"]
+    assert result["Total Missing"].tolist() == [0, 0]
+    assert result["% Total Missing"].tolist() == [0.0, 0.0]
+    assert result["% Null Values"].tolist() == [0.0, 0.0]
+    assert result["% DontKnow"].tolist() == [0.0, 0.0]
+
+
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_columns_basic():
     """Test compute_missing_columns with basic missing values."""

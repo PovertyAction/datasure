@@ -341,10 +341,11 @@ class CorrectionProcessor:
             db_name="corrected",
         )
 
-        # A missing table has no columns.
+        # A missing table has no columns. Prep data a step emptied still seeds
+        # it, so the Correct Data page shows the dataset as having no rows.
         if corrected_data.width == 0:
             uncorrected_data = self.get_uncorrected_data(alias)
-            if not uncorrected_data.is_empty():
+            if uncorrected_data.width > 0:
                 self.save_corrected_data(alias, uncorrected_data)
                 return uncorrected_data
 

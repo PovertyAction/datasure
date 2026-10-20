@@ -265,6 +265,10 @@ All preparation steps are tracked:
 - Timestamp
 - Applied to which datasets
 
+If your steps remove every row, the Prepare Data page warns you and keeps the
+Change Log, so you can remove the step that caused it. Check pages show that
+the dataset has no rows instead of running checks.
+
 **Demo Example**:
 Convert `submissiondate` column to datetime format for both survey and backcheck datasets:
 
@@ -576,6 +580,10 @@ are highlighted in red.
 
 To blank a cell, use "remove value": "modify value" needs a non-empty new
 value (`0` is valid).
+
+If corrections or prep steps remove every row, the tab warns you. The
+Correction Log and "Remove correction step" stay available, so you can remove
+the entry that caused it. There are no records left to add corrections to.
 
 ##### Filtering the Log
 
