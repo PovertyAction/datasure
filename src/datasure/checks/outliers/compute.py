@@ -22,7 +22,7 @@ from datasure.checks.outliers.models import (
     OutlierThresholds,
     SearchType,
 )
-from datasure.checks.outliers.review import CONSTRAINTS
+from datasure.checks.outliers.review import CONSTRAINTS, OUTLIERS
 from datasure.utils.dataframe_utils import safe_to_numeric
 from datasure.utils.settings_utils import load_check_settings
 
@@ -117,6 +117,45 @@ def load_default_settings(
 
     # Merge with defaults
     return OutlierSettings(**default_settings)
+
+
+def clear_unavailable_columns(
+    settings: OutlierSettings,
+    categorical_columns: list[str],
+    datetime_columns: list[str],
+) -> OutlierSettings:
+    """Unset optional columns the data no longer has, as the settings panel does.
+
+    The panel's selectboxes only offer columns of the right type, so a saved
+    column that is gone shows as unset there.
+
+    Parameters
+    ----------
+    settings : OutlierSettings
+        The saved settings.
+    categorical_columns : list[str]
+        Categorical columns of the data.
+    datetime_columns : list[str]
+        Datetime columns of the data.
+
+    Returns
+    -------
+    OutlierSettings
+        The settings, with unavailable optional columns set to None.
+    """
+    options = {
+        "survey_id": categorical_columns,
+        "enumerator": categorical_columns,
+        "team": categorical_columns,
+        "survey_date": datetime_columns,
+    }
+    return settings.model_copy(
+        update={
+            name: None
+            for name, columns in options.items()
+            if getattr(settings, name) not in columns
+        }
+    )
 
 
 @st.cache_data
@@ -1103,7 +1142,7 @@ def flagged_value_percent(outliers_data: pl.DataFrame) -> float | None:
     checked = outliers_data.filter(pl.col("column value").is_not_null())
     if checked.is_empty():
         return None
-    flagged = checked.filter(pl.col("outlier reason") != "no outlier").height
+    flagged = checked.filter(pl.col(OUTLIERS.reason_col) != OUTLIERS.no_flag).height
     return flagged / checked.height * 100
 
 

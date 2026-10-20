@@ -27,7 +27,7 @@ from datasure.checks.outliers.report_ui import (
     outliers_report,
 )
 from datasure.checks.progress import progress_report
-from datasure.checks.summary import summary_report
+from datasure.checks.summary import CheckRates, summary_report
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import CheckConfiguration
 from datasure.utils.dataframe_utils import TableState, get_df_columns, get_table_state
@@ -394,33 +394,35 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
             "survey_date": config.survey_date,
             "survey_target": config.survey_target,
         }
-        outliers_pct = flagged_outlier_percent(
-            project_id,
-            config.page_name_id,
-            data.page_data,
-            config.setting_file,
-            outliers_config,
-            config.survey_data_name,
-        )
-        backcheck_error_pct = (
-            overall_error_rate_percent(
+        check_rates = CheckRates(
+            outliers_pct=flagged_outlier_percent(
                 project_id,
                 config.page_name_id,
                 data.page_data,
-                data.backcheck_data,
+                survey_columns,
                 config.setting_file,
-                backcheck_config,
-            )
-            if data.backcheck_state is TableState.HAS_ROWS
-            else None
+                outliers_config,
+                config.survey_data_name,
+            ),
+            backcheck_error_pct=(
+                overall_error_rate_percent(
+                    project_id,
+                    config.page_name_id,
+                    data.page_data,
+                    data.backcheck_data,
+                    config.setting_file,
+                    backcheck_config,
+                )
+                if data.backcheck_state is TableState.HAS_ROWS
+                else None
+            ),
         )
         summary_report(
             data.page_data,
             config.setting_file,
             summary_config,
             survey_columns,
-            outliers_pct=outliers_pct,
-            backcheck_error_pct=backcheck_error_pct,
+            check_rates=check_rates,
         )
 
     with descriptive_stats:

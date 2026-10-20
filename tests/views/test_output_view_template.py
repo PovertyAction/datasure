@@ -218,9 +218,9 @@ class TestSummaryCheckRates:
         mocks = self._render(data)
 
         mocks["flagged_outlier_percent"].assert_called_once()
-        kwargs = mocks["summary_report"].call_args.kwargs
-        assert kwargs["outliers_pct"] == 12.5
-        assert kwargs["backcheck_error_pct"] == 4.25
+        rates = mocks["summary_report"].call_args.kwargs["check_rates"]
+        assert rates.outliers_pct == 12.5
+        assert rates.backcheck_error_pct == 4.25
 
     @pytest.mark.parametrize("backcheck_rows", [None, 0])
     def test_no_error_rate_without_backcheck_rows(self, backcheck_rows):
@@ -230,4 +230,5 @@ class TestSummaryCheckRates:
         mocks = self._render(data)
 
         mocks["overall_error_rate_percent"].assert_not_called()
-        assert mocks["summary_report"].call_args.kwargs["backcheck_error_pct"] is None
+        rates = mocks["summary_report"].call_args.kwargs["check_rates"]
+        assert rates.backcheck_error_pct is None

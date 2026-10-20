@@ -39,6 +39,7 @@ from datasure.checks.outliers.report_ui import (
     flagged_outlier_percent,
     outliers_report,
 )
+from datasure.utils.dataframe_utils import get_df_columns
 from tests.checks.outliers.conftest import _columns_side_effect, _make_st_mock
 
 # ============================================================================
@@ -1218,6 +1219,7 @@ class TestFlaggedOutlierPercent:
                 "project",
                 "page",
                 data,
+                get_df_columns(data),
                 str(tmp_path / "settings.json"),
                 self.CONFIG,
                 alias,
@@ -1267,6 +1269,14 @@ class TestFlaggedOutlierPercent:
             pl.lit(-1.0).alias("outlier_multiplier")
         )
         assert self._percent(sample_polars_df, column_config, tmp_path) is None
+
+    def test_ignores_a_saved_team_column_that_is_gone(
+        self, sample_polars_df, outlier_column_config, tmp_path
+    ):
+        # The settings panel shows a missing column as unset, so the tab
+        # still reports; the Summary must too.
+        data = sample_polars_df.drop("team")
+        assert self._percent(data, outlier_column_config, tmp_path) == 20.0
 
     def test_none_when_a_configured_column_is_gone(
         self, sample_polars_df, outlier_column_config, tmp_path

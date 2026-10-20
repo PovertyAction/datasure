@@ -17,6 +17,7 @@ from datasure.checks.outliers.compute import (
     _create_box_plot,
     _create_descriptive_stats,
     _update_unlocked_cols,
+    clear_unavailable_columns,
     compute_constraint_violations,
     compute_outlier_output,
     expand_col_names,
@@ -1402,10 +1403,24 @@ def _load_outlier_settings(project_id: str, page_name_id: str) -> pl.DataFrame:
     )
 
 
+def _review_context(
+    project_id: str, alias: str | None, survey_key: str
+) -> ReviewContext | None:
+    """Return the context for reviewing flags, or None if they can't be reviewed.
+
+    Flags can't be reviewed without a dataset alias, or when the Survey KEY
+    column has the name of a review results column.
+    """
+    if not alias or survey_key in REVIEW_COLUMNS:
+        return None
+    return ReviewContext(CorrectionProcessor(project_id), alias)
+
+
 def flagged_outlier_percent(
     project_id: str,
     page_name_id: str,
     data: pl.DataFrame,
+    survey_columns: ColumnByType,
     setting_file: str,
     config: dict,
     alias: str | None,
@@ -1424,6 +1439,8 @@ def flagged_outlier_percent(
         Page name identifier.
     data : pl.DataFrame
         The survey data of the page.
+    survey_columns : ColumnByType
+        Columns of `data` by type, which saved settings must still match.
     setting_file : str
         Path to the page settings file.
     config : dict
@@ -1442,18 +1459,21 @@ def flagged_outlier_percent(
     if column_config.is_empty():
         return None
     try:
-        settings = load_default_settings(setting_file, OutlierSettings(**config))
+        settings = clear_unavailable_columns(
+            load_default_settings(setting_file, OutlierSettings(**config)),
+            survey_columns.categorical_columns,
+            survey_columns.datetime_columns,
+        )
         outlier_data = compute_outlier_output(data, settings, column_config)
     except (pl.exceptions.PolarsError, ValidationError, ValueError):
         logger.warning(
             "Could not compute the outlier %% for page %s", page_name_id, exc_info=True
         )
         return None
-    if alias and settings.survey_key not in REVIEW_COLUMNS:
-        review = ReviewContext(CorrectionProcessor(project_id), alias)
-        outlier_data = clear_reviewed_flags(
-            _with_review_status(outlier_data, settings, OUTLIERS, review), OUTLIERS
-        )
+    review = _review_context(project_id, alias, settings.survey_key)
+    outlier_data = clear_reviewed_flags(
+        _with_review_status(outlier_data, settings, OUTLIERS, review), OUTLIERS
+    )
     return flagged_value_percent(outlier_data)
 
 
@@ -1562,8 +1582,6 @@ def outliers_report(
         or accepted from the results tables, and accepted flags are hidden
         and left out of the metrics.
     """
-    review = ReviewContext(CorrectionProcessor(project_id), alias) if alias else None
-
     # get column info
     categorical_columns = survey_columns.categorical_columns
     datetime_columns = survey_columns.datetime_columns
@@ -1589,14 +1607,14 @@ def outliers_report(
     outliers_settings = outliers_report_settings(
         setting_file, config_settings, categorical_columns, datetime_columns
     )
-    if review is not None and outliers_settings.survey_key in REVIEW_COLUMNS:
+    review = _review_context(project_id, alias, outliers_settings.survey_key)
+    if alias and review is None:
         st.warning(
             f"Flags can't be corrected or accepted on this page because the "
             f"Survey KEY column is named '{outliers_settings.survey_key}', "
             "which this report uses for review results. Rename the column to "
             "review flags here."
         )
-        review = None
 
     # Outlier columns configuration
     st.subheader("Outlier/Constraint Columns Configuration")

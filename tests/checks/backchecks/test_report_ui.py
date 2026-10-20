@@ -1085,3 +1085,18 @@ class TestOverallErrorRatePercent:
             sample_survey_data_pl, backcheck, column_settings, tmp_path / "s.json"
         )
         assert rate is None
+
+    def test_none_when_the_records_filter_fails(
+        self, sample_survey_data_pl, sample_backcheck_data_pl, column_settings, tmp_path
+    ):
+        with patch(
+            "datasure.checks.backchecks.report_ui.comparison_scope",
+            side_effect=pl.exceptions.ColumnNotFoundError("consent"),
+        ):
+            rate = self._rate(
+                sample_survey_data_pl,
+                sample_backcheck_data_pl,
+                column_settings,
+                tmp_path / "settings.json",
+            )
+        assert rate is None

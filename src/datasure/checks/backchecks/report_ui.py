@@ -686,6 +686,23 @@ def _render_backcheck_summary(
     )
 
 
+def _scoped_backcheck_analysis(
+    project_id: str,
+    page_name_id: str,
+    scope: ComparisonScope,
+    settings: BackcheckSettings,
+) -> pl.DataFrame:
+    """Compare the records in `scope` on the page's backcheck columns.
+
+    Shared by the Backchecks tab and the Summary tab's error rate, so the
+    two compare the same values.
+    """
+    column_settings = duckdb_get_table(project_id, f"backchecks_{page_name_id}", "logs")
+    return compute_backcheck_analysis(
+        scope.survey.data, scope.backcheck.data, settings, column_settings
+    )
+
+
 def overall_error_rate_percent(
     project_id: str,
     page_name_id: str,
@@ -721,16 +738,15 @@ def overall_error_rate_percent(
         The error rate, or None when no backcheck columns are configured,
         no values were compared, or the saved settings no longer fit the data.
     """
-    column_settings = duckdb_get_table(project_id, f"backchecks_{page_name_id}", "logs")
-    if column_settings.is_empty():
-        return None
-    scope = comparison_scope(survey_data, backcheck_data, setting_file)
     try:
         settings = load_saved_backchecks_settings(
             setting_file, settings_from_page_config(config)
         )
-        analysis = compute_backcheck_analysis(
-            scope.survey.data, scope.backcheck.data, settings, column_settings
+        analysis = _scoped_backcheck_analysis(
+            project_id,
+            page_name_id,
+            comparison_scope(survey_data, backcheck_data, setting_file),
+            settings,
         )
     except (pl.exceptions.PolarsError, ValidationError, ValueError):
         logger.warning(
@@ -2230,16 +2246,8 @@ def backchecks_report(
     )
 
     # Compute backcheck analysis
-    backcheck_column_settings = duckdb_get_table(
-        project_id,
-        f"backchecks_{page_name_id}",
-        "logs",
-    )
-    _backcheck_analysis = compute_backcheck_analysis(
-        survey_data,
-        scope.backcheck.data,
-        backcheck_settings,
-        backcheck_column_settings,
+    _backcheck_analysis = _scoped_backcheck_analysis(
+        project_id, page_name_id, scope, backcheck_settings
     )
     review = AttributionContext(
         project_id, page_name_id, load_attribution_log(project_id, page_name_id)

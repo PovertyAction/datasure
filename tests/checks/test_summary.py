@@ -14,6 +14,7 @@ from pydantic import ValidationError
 # Local application imports
 from datasure.checks.summary import (
     # Pydantic Models
+    CheckRates,
     DataQualityMetrics,
     DataSummaryMetrics,
     DateRangeCalculator,
@@ -775,7 +776,9 @@ class TestDataQuality:
     def test_calculate_data_quality_passes_check_rates_through(self, sample_polars_df):
         """The outlier % and error rate come from the Outliers and Backchecks tabs."""
         result = calculate_data_quality_metrics(
-            sample_polars_df, "id", outliers_pct=12.5, backcheck_error_pct=4.25
+            sample_polars_df,
+            "id",
+            CheckRates(outliers_pct=12.5, backcheck_error_pct=4.25),
         )
         assert result.outliers_pct == 12.5
         assert result.backcheck_error_pct == 4.25
@@ -1081,7 +1084,9 @@ class TestUIComponents:
         self._quality_columns(mock_st)
         df = pl.DataFrame({"id": [1, 2, 3]})
 
-        summary_data_quality(df, "id", outliers_pct=12.5, backcheck_error_pct=4.25)
+        summary_data_quality(
+            df, "id", CheckRates(outliers_pct=12.5, backcheck_error_pct=4.25)
+        )
 
         charted = [c.kwargs["actual_value"] for c in mock_chart.call_args_list]
         assert 12.5 in charted
@@ -1264,14 +1269,14 @@ class TestUIComponents:
             datetime_columns=["date_col"],
             categorical_columns=["id"],
         )
+        rates = CheckRates(outliers_pct=12.5, backcheck_error_pct=4.25)
         # Updated signature with survey_columns parameter
         summary_report(
             pl_df,
             "settings.json",
             config,
             survey_columns,
-            outliers_pct=12.5,
-            backcheck_error_pct=4.25,
+            check_rates=rates,
         )
 
         mock_settings.assert_called_once()
@@ -1281,6 +1286,5 @@ class TestUIComponents:
         mock_quality.assert_called_once_with(
             data=pl_df,
             survey_id="id_col",
-            outliers_pct=12.5,
-            backcheck_error_pct=4.25,
+            check_rates=rates,
         )
