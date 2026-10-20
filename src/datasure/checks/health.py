@@ -45,6 +45,16 @@ _STATUS_LINES: dict[CheckStatus, tuple[str, str, str]] = {
 
 _CARDS_PER_ROW = 3
 
+# Every card is at least this tall, and cards in a row stretch to the
+# tallest one, so the grid lines up whatever each card shows.
+_CARD_KEY_PREFIX = "health_card_box_"
+_CARD_MIN_HEIGHT_PX = 240
+_CARD_HEIGHT_CSS = f"""<style>
+[class*="st-key-{_CARD_KEY_PREFIX}"] {{
+    min-height: {_CARD_MIN_HEIGHT_PX}px;
+}}
+</style>"""
+
 
 @dataclass(frozen=True)
 class HealthCard:
@@ -237,6 +247,9 @@ def render_health_grid(
 ) -> None:
     """Draw the health grid: a bordered card per check, three to a row.
 
+    Cards share a minimum height and stretch to the tallest card in their
+    row; the full-width action button sits at the bottom of each card.
+
     Each card shows the check's label, group, status, and its headline or
     the reason it is not ready. "Open →" and "Set up →" call ``on_select``
     with the check's slug.
@@ -247,31 +260,42 @@ def render_health_grid(
 
     st.divider()
     section_header("Check health", ":material/health_and_safety:")
+    st.html(_CARD_HEIGHT_CSS)
     for start in range(0, len(cards), _CARDS_PER_ROW):
         columns = st.columns(_CARDS_PER_ROW)
         for offset, card in enumerate(cards[start : start + _CARDS_PER_ROW]):
-            with columns[offset], st.container(border=True):
+            with (
+                columns[offset],
+                st.container(
+                    border=True,
+                    height="stretch",
+                    key=f"{_CARD_KEY_PREFIX}{card.item.slug}",
+                ),
+            ):
                 _render_card(st, card, on_select)
 
 
 def _render_card(st, card: HealthCard, on_select: Callable[[str], None]) -> None:
     item = card.item
-    st.markdown(f"**{item.label}**")
-    st.caption(item.group or "")
-    st.markdown(card.status_line)
-    if card.headline_error:
-        st.error(
-            f"Could not compute the headline: {card.headline_error}",
-            icon=":material/error:",
-        )
-    elif card.headline:
-        st.markdown(f"### {card.headline}")
-    elif item.reason:
-        st.caption(item.reason)
+    # The content grows to fill the card, so the button sits at the bottom.
+    with st.container(height="stretch"):
+        st.markdown(f"**{item.label}**")
+        st.caption(item.group or "")
+        st.markdown(card.status_line)
+        if card.headline_error:
+            st.error(
+                f"Could not compute the headline: {card.headline_error}",
+                icon=":material/error:",
+            )
+        elif card.headline:
+            st.markdown(f"### {card.headline}")
+        elif item.reason:
+            st.caption(item.reason)
     if card.action:
         st.button(
             card.action,
             key=f"health_card_{item.slug}",
             on_click=on_select,
             args=(item.slug,),
+            width="stretch",
         )
