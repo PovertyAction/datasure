@@ -7,6 +7,8 @@ from unittest.mock import MagicMock, patch
 import polars as pl
 import pytest
 
+from datasure.checks import catalogue
+from datasure.checks.catalogue import CheckEntry
 from datasure.utils.dataframe_utils import TableState
 from datasure.utils.duckdb_utils import duckdb_save_table
 from datasure.views import output_view_template as template
@@ -207,7 +209,7 @@ class TestSummaryCheckRates:
         mocks["overall_error_rate_percent"] = MagicMock(return_value=4.25)
         with (
             patch.object(template, "st", mock_st),
-            patch.multiple(template, **mocks),
+            patch.multiple(catalogue, **mocks),
         ):
             template.render_check_tabs(PROJECT_ID, self._config(), data)
         return mocks
@@ -232,3 +234,38 @@ class TestSummaryCheckRates:
         mocks["overall_error_rate_percent"].assert_not_called()
         rates = mocks["summary_report"].call_args.kwargs["check_rates"]
         assert rates.backcheck_error_pct is None
+
+
+class TestCatalogueDrivesTheChecks:
+    """Adding a check to the catalogue is all it takes for it to appear."""
+
+    def test_every_catalogue_check_gets_a_tab_and_renders(self):
+        rendered = []
+
+        def render(slug):
+            return lambda ctx: rendered.append((slug, ctx))
+
+        entries = (
+            CheckEntry(
+                "alpha", "Alpha", ":material/star:", "Overview", render("alpha")
+            ),
+            CheckEntry("beta", "Beta", ":material/star:", "Overview", render("beta")),
+        )
+        mock_st = MagicMock()
+        mock_st.tabs.return_value = [MagicMock(), MagicMock()]
+        data = template.CheckData(page_data=_rows(2))
+        config = TestSummaryCheckRates()._config()
+
+        with (
+            patch.object(template, "st", mock_st),
+            patch.object(catalogue, "CHECK_CATALOGUE", entries),
+        ):
+            template.render_check_tabs(PROJECT_ID, config, data)
+
+        mock_st.tabs.assert_called_once_with(["Alpha", "Beta"])
+        assert [slug for slug, _ in rendered] == ["alpha", "beta"]
+        ctx = rendered[0][1]
+        assert ctx.project_id == PROJECT_ID
+        assert ctx.config is config
+        assert ctx.data is data
+        assert ctx.survey_columns.all_columns == ["key", "age"]

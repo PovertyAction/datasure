@@ -7,30 +7,20 @@ datasets and checks.
 """
 
 import re
-from dataclasses import dataclass
-from pathlib import Path
 
 import polars as pl
 import streamlit as st
 
-from datasure.checks.backchecks.report_ui import (
-    backchecks_report,
-    overall_error_rate_percent,
-)
-from datasure.checks.descriptive import descriptive_report
-from datasure.checks.duplicates import duplicates_report
-from datasure.checks.enumerator.report_ui import enumerator_report
-from datasure.checks.gpschecks.report_ui import gpschecks_report
-from datasure.checks.missing import missing_report
-from datasure.checks.outliers.report_ui import (
-    flagged_outlier_percent,
-    outliers_report,
-)
-from datasure.checks.progress import progress_report
-from datasure.checks.summary import CheckRates, summary_report
+from datasure.checks import catalogue
+from datasure.checks.context import CheckContext, CheckData, PageConfig
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import CheckConfiguration
-from datasure.utils.dataframe_utils import TableState, get_df_columns, get_table_state
+from datasure.utils.dataframe_utils import (
+    TableState,
+    get_df_columns,
+    get_table_state,
+    no_rows_message,
+)
 from datasure.utils.duckdb_utils import (
     duckdb_get_table,
     duckdb_table_exists,
@@ -44,55 +34,7 @@ from datasure.utils.settings_utils import (
 )
 from datasure.utils.ui_utils import page_header
 
-
-@dataclass
-class PageConfig:
-    """Configuration data for an output page."""
-
-    page_number: int
-    page_name: str
-    page_name_id: str
-    survey_data_name: str
-    survey_key: str
-    survey_id: str | None
-    survey_date: str | None
-    enumerator: str | None
-    team: str | None
-    formversion: str | None
-    duration: str | None
-    survey_target: int | None
-    backcheck_data_name: str | None
-    backcheck_date: str | None
-    backchecker: str | None
-    backchecker_team: str | None
-    backcheck_target_percent: int | None
-    tracking_data_name: str | None
-    setting_file: Path
-    missing_setting_file: Path
-
-
-@dataclass
-class CheckData:
-    """Data required for running checks."""
-
-    page_data: pl.DataFrame
-    # None when the page has no backcheck dataset. Otherwise kept as loaded,
-    # even with no rows, so the Backcheck Analysis tab can say why it is empty.
-    backcheck_data: pl.DataFrame | None = None
-
-    @property
-    def backcheck_state(self) -> TableState:
-        """The state of the backcheck table; MISSING when none is configured."""
-        if self.backcheck_data is None:
-            return TableState.MISSING
-        return get_table_state(self.backcheck_data)
-
-    @property
-    def backcheck_data_with_rows(self) -> pl.DataFrame | None:
-        """The backcheck data for check modules, or None when it has no rows."""
-        if self.backcheck_state is TableState.HAS_ROWS:
-            return self.backcheck_data
-        return None
+__all__ = ["CheckData", "PageConfig", "no_rows_message"]
 
 
 def extract_page_number(file_path: str) -> int | None:
@@ -274,29 +216,6 @@ def load_check_data(project_id: str, config: PageConfig) -> CheckData:
     return CheckData(page_data=page_data, backcheck_data=backcheck_data)
 
 
-def no_rows_message(data_name: str, task: str) -> str:
-    """
-    Explain that a dataset has no rows because a step or correction emptied it.
-
-    Parameters
-    ----------
-    data_name : str
-        The alias of the dataset.
-    task : str
-        What the page would do with the data, such as "check" or "analyze".
-
-    Returns
-    -------
-    str
-        The message to show.
-    """
-    return (
-        f"**{data_name}** has no rows, so there is nothing to {task}. A step on "
-        "the Prepare Data page or a correction on the Correct Data page removed "
-        "every record. Remove that step or correction to restore the data."
-    )
-
-
 def stop_if_no_survey_data(page_data: pl.DataFrame, data_name: str) -> None:
     """
     Stop the page with a message when the survey data is missing or has no rows.
@@ -328,7 +247,7 @@ def stop_if_no_survey_data(page_data: pl.DataFrame, data_name: str) -> None:
 
 def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> None:
     """
-    Render all data quality check tabs.
+    Render a tab for each check in the check catalogue.
 
     Parameters
     ----------
@@ -339,211 +258,17 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
     data : CheckData
         Loaded data for checks.
     """
-    # Create tabs
-    (
-        summary,
-        descriptive_stats,
-        progress,
-        missing,
-        duplicates,
-        outliers,
-        gps_checks,
-        enumerator_stats,
-        backcheck_analysis,
-    ) = st.tabs(
-        (
-            "Summary",
-            "Descriptive Statistics",
-            "Progress Tracking",
-            "Missing Values",
-            "Duplicates",
-            "Outliers & Constraints",
-            "GPS Checks",
-            "Enumerator Statistics",
-            "Backcheck Analysis",
-        )
+    entries = catalogue.CHECK_CATALOGUE
+    ctx = CheckContext(
+        project_id=project_id,
+        config=config,
+        data=data,
+        survey_columns=get_df_columns(data.page_data),
     )
-
-    # get columns by type
-    survey_columns = get_df_columns(data.page_data)
-
-    # The Summary tab shows rates from the Outliers and Backchecks tabs.
-    outliers_config: dict = {
-        "survey_key": config.survey_key,
-        "survey_id": config.survey_id,
-        "enumerator": config.enumerator,
-        "team": config.team,
-        "survey_date": config.survey_date,
-    }
-    backcheck_config: dict = {
-        "survey_key": config.survey_key,
-        "survey_id": config.survey_id,
-        "survey_date": config.survey_date,
-        "backcheck_date": config.backcheck_date,
-        "enumerator": config.enumerator,
-        "backchecker": config.backchecker,
-        "backchecker_team": config.backchecker_team,
-        "backcheck_target_percent": config.backcheck_target_percent,
-        "survey_target": config.survey_target,
-    }
-
-    # Render each tab
-    with summary:
-        summary_config: dict = {
-            "survey_id": config.survey_id,
-            "survey_date": config.survey_date,
-            "survey_target": config.survey_target,
-        }
-        check_rates = CheckRates(
-            outliers_pct=flagged_outlier_percent(
-                project_id,
-                config.page_name_id,
-                data.page_data,
-                survey_columns,
-                config.setting_file,
-                outliers_config,
-                config.survey_data_name,
-            ),
-            backcheck_error_pct=(
-                overall_error_rate_percent(
-                    project_id,
-                    config.page_name_id,
-                    data.page_data,
-                    data.backcheck_data,
-                    config.setting_file,
-                    backcheck_config,
-                )
-                if data.backcheck_state is TableState.HAS_ROWS
-                else None
-            ),
-        )
-        summary_report(
-            data.page_data,
-            config.setting_file,
-            summary_config,
-            survey_columns,
-            check_rates=check_rates,
-        )
-
-    with descriptive_stats:
-        descriptive_report(
-            project_id,
-            data.page_data,
-            config.setting_file,
-            survey_columns,
-        )
-
-    with progress:
-        progress_config: dict = {
-            "survey_key": config.survey_key,
-            "survey_id": config.survey_id,
-            "enumerator": config.enumerator,
-            "survey_date": config.survey_date,
-            "survey_target": config.survey_target,
-        }
-        progress_report(
-            data.page_data,
-            config.setting_file,
-            progress_config,
-            survey_columns,
-        )
-
-    with missing:
-        missing_report(
-            project_id,
-            config.page_name_id,
-            data.page_data,
-            config.setting_file,
-        )
-
-    with duplicates:
-        duplicates_config: dict = {
-            "survey_key": config.survey_key,
-            "survey_id": config.survey_id,
-            "enumerator": config.enumerator,
-            "team": config.team,
-            "survey_date": config.survey_date,
-            "backcheck_data_name": config.backcheck_data_name,
-            "backcheck_date": config.backcheck_date,
-            "backchecker": config.backchecker,
-            "backchecker_team": config.backchecker_team,
-        }
-        duplicates_report(
-            project_id,
-            config.page_name_id,
-            data.page_data,
-            config.setting_file,
-            duplicates_config,
-            survey_columns,
-            data.backcheck_data_with_rows,
-            alias=config.survey_data_name,
-        )
-
-    with outliers:
-        outliers_report(
-            project_id,
-            config.page_name_id,
-            data.page_data,
-            config.setting_file,
-            outliers_config,
-            survey_columns,
-            alias=config.survey_data_name,
-        )
-
-    with gps_checks:
-        gpschecks_config: dict = {
-            "survey_key": config.survey_key,
-            "survey_id": config.survey_id,
-            "survey_date": config.survey_date,
-            "enumerator": config.enumerator,
-            "team": config.team,
-        }
-        gpschecks_report(
-            project_id,
-            config.page_name_id,
-            data.page_data,
-            config.setting_file,
-            gpschecks_config,
-            survey_columns,
-            alias=config.survey_data_name,
-        )
-
-    with enumerator_stats:
-        enumerator_stats_config: dict = {
-            "survey_key": config.survey_key,
-            "survey_id": config.survey_id,
-            "survey_date": config.survey_date,
-            "enumerator": config.enumerator,
-            "formversion": config.formversion,
-            "duration": config.duration,
-            "team": config.team,
-        }
-        enumerator_report(
-            project_id,
-            data.page_data,
-            config.setting_file,
-            enumerator_stats_config,
-            survey_columns,
-        )
-
-    with backcheck_analysis:
-        backcheck_state = data.backcheck_state
-        if backcheck_state is TableState.HAS_ROWS:
-            backcheck_columns = get_df_columns(data.backcheck_data)
-            backchecks_report(
-                project_id,
-                config.page_name_id,
-                data.page_data,
-                data.backcheck_data,
-                config.setting_file,
-                backcheck_config,
-                survey_columns,
-                backcheck_columns,
-            )
-        elif backcheck_state is TableState.NO_ROWS:
-            st.info(no_rows_message(config.backcheck_data_name, "analyze"))
-        else:
-            st.info("No backcheck data available for analysis.")
+    tabs = st.tabs([entry.label for entry in entries])
+    for tab, entry in zip(tabs, entries, strict=True):
+        with tab:
+            entry.render(ctx)
 
 
 def validate_prerequisites(project_id: str | None) -> pl.DataFrame:
