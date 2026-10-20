@@ -1,12 +1,15 @@
 """Tests for the onboarding utilities module."""
 
+import importlib
 import json
+import pkgutil
 from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
 
 from datasure.utils.onboarding_utils import (
+    DEMO_OUTPUT_FUNCTIONS,
     DEMO_PROJECT_ID,
     DEMO_PROJECT_NAME,
     CheckPage,
@@ -398,14 +401,14 @@ class TestOutputOnboardingInfo:
         message = OutputOnboardingInfo.get_onboarding_message(
             "invalid_tab", "some_message"
         )
-        assert message == "Invalid Message"
+        assert message is None
 
     def test_get_onboarding_message_invalid_message_id(self):
         """Test getting onboarding message with invalid message ID."""
         message = OutputOnboardingInfo.get_onboarding_message(
             "summary", "invalid_message_id"
         )
-        assert message == "Invalid Message"
+        assert message is None
 
     def test_class_variables_exist(self):
         """Test that all class variables are defined."""
@@ -463,6 +466,75 @@ class TestDemoOutputOnboarding:
 
         result = summary_report("a", "b", kwarg1="c")
         assert result == "a-b-c"
+
+    @pytest.mark.parametrize("is_demo", [False, True])
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    @patch("datasure.utils.onboarding_utils.demo_expander")
+    def test_unknown_function_still_runs(
+        self, mock_demo_expander, mock_is_demo, is_demo
+    ):
+        """A function with no message entry runs, with no guidance, in any project."""
+        mock_is_demo.return_value = is_demo
+
+        @demo_output_onboarding("summary")
+        def renamed_report():
+            return "executed"
+
+        assert renamed_report() == "executed"
+        mock_demo_expander.assert_not_called()
+
+    @patch("datasure.utils.onboarding_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.onboarding_utils.demo_expander")
+    def test_unknown_function_warns_once_in_demo(
+        self, mock_demo_expander, mock_is_demo, caplog
+    ):
+        """In the demo, a missing message logs one warning across reruns."""
+
+        @demo_output_onboarding("summary")
+        def warned_report():
+            return None
+
+        with caplog.at_level("WARNING", logger="datasure.utils.onboarding_utils"):
+            warned_report()
+            warned_report()
+
+        warnings = [
+            r
+            for r in caplog.records
+            if "No demo guidance for warned_report" in r.message
+        ]
+        assert len(warnings) == 1
+
+    def test_decorator_preserves_function_name(self):
+        """The wrapper keeps the decorated function's name."""
+
+        @demo_output_onboarding("summary")
+        def summary_report():
+            return None
+
+        assert summary_report.__name__ == "summary_report"
+
+    def test_every_decorated_function_has_message(self):
+        """Every @demo_output_onboarding function in datasure has a message."""
+        import datasure.checks
+
+        for module in pkgutil.walk_packages(
+            datasure.checks.__path__, prefix="datasure.checks."
+        ):
+            importlib.import_module(module.name)
+
+        checked = {
+            (tab, name)
+            for module, tab, name in DEMO_OUTPUT_FUNCTIONS
+            if module.startswith("datasure.")
+        }
+        assert checked, "no decorated check functions were registered"
+        missing = sorted(
+            (tab, name)
+            for tab, name in checked
+            if OutputOnboardingInfo.get_onboarding_message(tab, name) is None
+        )
+        assert not missing, f"decorated functions without a message: {missing}"
 
 
 class TestDemoProjectFunctions:
