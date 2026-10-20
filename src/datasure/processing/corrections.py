@@ -19,6 +19,7 @@ from datasure.processing.correction_log import (
     empty_correction_log,
     ensure_log_columns,
 )
+from datasure.utils.dataframe_utils import TableState, get_table_state
 from datasure.utils.duckdb_utils import (
     duckdb_get_table,
     duckdb_save_table,
@@ -1208,6 +1209,13 @@ class CorrectionProcessor:
             return []
 
         correction_log = self.get_correction_log(alias)
+        if get_table_state(correction_log) is TableState.MISSING:
+            # No log, or one `get_correction_log` reads as none, so there are
+            # no statuses to refresh. Saving the status columns alone would
+            # leave a log without its other columns.
+            self.save_corrected_data(alias, fresh_data)
+            return []
+
         key_col = self._configured_key_column(alias, fresh_data)
 
         corrected_data = fresh_data

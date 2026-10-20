@@ -757,11 +757,11 @@ class TestCorrectionProcessor:
         processor, mock_get, mock_save = correction_processor
 
         # Mock sequence: get log for removal, get prep data for reapply,
-        # get updated log (empty)
+        # get updated log
         mock_get.side_effect = [
             sample_corrections_log,
             sample_data,  # prep data for reapply
-            pl.DataFrame(),  # empty log after removal
+            sample_corrections_log[[0, 2]],  # log after removal
         ]
 
         failures = processor.remove_correction_entry("test_alias", 1)
@@ -818,8 +818,9 @@ class TestCorrectionProcessor:
 
         failures = processor._reapply_all_corrections("test_alias")
 
-        # Should save the refreshed (empty) log and the fresh prep data
-        assert mock_save.call_count == 2
+        # Should save only the fresh prep data, with no partial log
+        mock_save.assert_called_once()
+        assert mock_save.call_args.kwargs["db_name"] == "corrected"
         assert failures == []
 
     def test_reapply_all_corrections_with_data(
@@ -2052,6 +2053,68 @@ class TestRefreshExistingCorrectedData:
 
         assert len(failures) == 1
         assert processor.get_correction_log("survey")["status"].to_list() == ["Failed"]
+
+    def test_does_not_create_a_log_without_corrections(self, store, sample_data):
+        """Reapplying with no log saves the data but writes no partial log."""
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        processor.get_corrected_data("survey")
+        store[("p1", "corrected", "survey")] = sample_data.head(1)
+
+        failures = processor.refresh_existing_corrected_data("survey")
+
+        assert failures == []
+        assert store[("p1", "corrected", "survey")].equals(sample_data)
+        assert ("p1", "logs", "corr_log_survey") not in store
+        assert processor.get_active_acceptances(
+            "survey", "outliers", "survey_key"
+        ).is_empty()
+        assert processor.get_active_corrections("survey", "survey_key").is_empty()
+
+
+class TestLogWithoutActionColumn:
+    """Projects can hold the 0-row status-only log 1.1.0 saved on re-import."""
+
+    @pytest.fixture
+    def broken_log_store(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        store[("p1", "corrected", "survey")] = sample_data
+        store[("p1", "logs", "corr_log_survey")] = pl.DataFrame(
+            schema={"status": pl.String, "status_reason": pl.String}
+        )
+        return store
+
+    def test_active_acceptances_are_empty(self, broken_log_store):
+        processor = CorrectionProcessor("p1")
+        result = processor.get_active_acceptances("survey", "outliers", "survey_key")
+        assert result.is_empty()
+
+    def test_active_corrections_are_empty(self, broken_log_store):
+        processor = CorrectionProcessor("p1")
+        assert processor.get_active_corrections("survey", "survey_key").is_empty()
+
+    def test_reapply_does_not_fail(self, broken_log_store):
+        processor = CorrectionProcessor("p1")
+        assert processor.refresh_existing_corrected_data("survey") == []
+        assert processor.get_active_corrections("survey", "survey_key").is_empty()
+
+    def test_adding_a_correction_replaces_the_broken_log(
+        self, broken_log_store, sample_data
+    ):
+        processor = CorrectionProcessor("p1")
+        processor.apply_correction(
+            alias="survey",
+            key_col="survey_key",
+            key_value="key1",
+            action="modify value",
+            column="name",
+            current_value="John",
+            new_value="Johnny",
+            reason="typo",
+        )
+        log = processor.get_correction_log("survey")
+        assert log["action"].to_list() == ["modify value"]
+        assert log["status"].to_list() == ["Successful"]
 
 
 class TestAcceptanceSeverity:

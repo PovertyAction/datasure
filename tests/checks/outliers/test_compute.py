@@ -2,6 +2,7 @@
 
 import importlib
 import sys
+import warnings
 from unittest.mock import patch
 
 import pandas as pd
@@ -360,6 +361,30 @@ class TestComputeConstraintViolations:
             "Value is above soft maximum 65.0",
             "Value is below hard minimum 0.0",
             "Value is below soft minimum 15.0",
+        ]
+
+    def test_partially_set_bounds_do_not_warn(self, outlier_settings):
+        """Unset bounds add no comparison against None, so polars doesn't warn."""
+        data = pl.DataFrame({"survey_key": ["K1", "K2", "K3"], "age": [150, 70, 10]})
+        config = pl.DataFrame(
+            {
+                "column_name": [["age"]],
+                "hard_min": [None],
+                "soft_min": [None],
+                "soft_max": [65.0],
+                "hard_max": [100.0],
+            },
+            schema_overrides={"hard_min": pl.Float64, "soft_min": pl.Float64},
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            result = compute_constraint_violations(data, outlier_settings, config)
+
+        assert result["violation reason"].to_list() == [
+            "Value is above hard maximum 100.0",
+            "Value is above soft maximum 65.0",
+            "no violation",
         ]
 
 
