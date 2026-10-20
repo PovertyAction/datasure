@@ -75,7 +75,6 @@ def _render_column_select(
     return selected
 
 
-@st.cache_data(ttl=60)
 def load_default_enumerator_settings(
     settings_file: str, config: EnumeratorSettings
 ) -> EnumeratorSettings:
@@ -85,7 +84,8 @@ def load_default_enumerator_settings(
     and merges them with the provided default configuration. Saved settings
     take precedence over defaults.
 
-    Cached for 60 seconds to reduce file I/O operations.
+    Not cached: the check page rebuilds a check's widgets from these
+    settings whenever the check is opened, so they must be current.
 
     Parameters
     ----------
