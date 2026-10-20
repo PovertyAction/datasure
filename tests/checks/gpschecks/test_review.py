@@ -395,7 +395,7 @@ def processor(monkeypatch) -> CorrectionProcessor:
     )
     monkeypatch.setattr(proc, "get_correction_log", lambda alias: store["log"])
 
-    def append(alias, rows):
+    def append(alias, rows, key_col=None):
         store["log"] = pl.concat(
             [store["log"], pl.DataFrame(rows)], how="diagonal_relaxed"
         )

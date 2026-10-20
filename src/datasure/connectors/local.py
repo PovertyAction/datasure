@@ -18,7 +18,13 @@ logger = logging.getLogger(__name__)
 # --- Pydantic Models for Validation ---
 
 # VALID FILE TYPES
-VALID_FILE_TYPES = {".csv", ".xlsx", ".xls", ".json", ".dta", ".parquet"}
+VALID_FILE_TYPES = {".csv", ".xlsx", ".json", ".dta", ".parquet"}
+
+# openpyxl cannot read the legacy .xls format
+XLS_NOT_SUPPORTED_MESSAGE = (
+    "Legacy Excel (.xls) files are not supported. "
+    "Open the file in Excel and save it as .xlsx."
+)
 
 
 class FileConfig(BaseModel):
@@ -50,6 +56,9 @@ class FileConfig(BaseModel):
 
         if not file_path.is_file():
             raise ValueError("Path is not a file")
+
+        if file_path.suffix.lower() == ".xls":
+            raise ValueError(XLS_NOT_SUPPORTED_MESSAGE)
 
         if file_path.suffix.lower() not in VALID_FILE_TYPES:
             raise ValueError(
@@ -123,7 +132,7 @@ def load_data_efficiently(filename: str, sheet_name: str | None = None) -> pl.Da
                 infer_schema_length=10000,  # Better type inference
             )
 
-        elif file_ext in [".xlsx", ".xls"]:
+        elif file_ext == ".xlsx":
             return pl.read_excel(filename, sheet_name=sheet_name, engine="openpyxl")
 
         elif file_ext == ".json":
@@ -203,8 +212,11 @@ def render_local_file_form(
                     "File is not accessible. Please check the path, filename or permissions."
                 )
 
+            elif path_obj.suffix.lower() == ".xls":
+                st.error(XLS_NOT_SUPPORTED_MESSAGE)
+
             else:
-                if path_obj.suffix.lower() in [".xlsx", ".xls"]:
+                if path_obj.suffix.lower() == ".xlsx":
                     # get_excel_sheet_names returns [] on read failure
                     sheets = get_excel_sheet_names(file_path)
                     if sheets and defaults.get("sheet_name") in sheets:
@@ -215,7 +227,7 @@ def render_local_file_form(
                     disable_submit = False  # Non-Excel files
                     sheets = []
 
-                if path_obj.suffix.lower() in [".xlsx", ".xls"]:
+                if path_obj.suffix.lower() == ".xlsx":
                     sheet_name = st.selectbox(
                         label="Sheet Name",
                         options=sheets,

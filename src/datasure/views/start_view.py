@@ -610,7 +610,7 @@ def _render_learn_more_section():
             st.write("""
             **Connect your data sources:**
             - SurveyCTO direct integration
-            - Local file uploads (CSV, Excel, SPSS)
+            - Local file uploads (CSV, Excel, Stata, JSON, Parquet)
             """)
 
         with workflow_tabs[1]:

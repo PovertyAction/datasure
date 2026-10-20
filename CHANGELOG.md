@@ -7,11 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Replication package**: An **Exclude reviewer names** checkbox on the Export
+  Replication Package page blanks the `user` column in the exported
+  `correction_log.csv`. The column is kept so the schema matches
+  `CORRECTION_LOG_SCHEMA`, and the project's stored log is not changed. Off by
+  default; changing it discards an already-built package
+  (`build_replication_package(exclude_reviewer_names=...)`,
+  `src/datasure/views/replication_view.py`) — closes #332
+
 ### Changed
 
 - **Dependencies**: `polars>=1.30.0,<3` (was `>=1.30.0`), lock moved from
   1.43.2 to 2.0.0. Every replacement below exists in polars 1.30.0, so the
   floor is unchanged; polars 3 is excluded until tested
+- **Dependencies**: Relaxed the exact `streamlit==1.61.0` pin to
+  `streamlit>=1.65.0,<2` (lock: Streamlit 1.66.0, Starlette 1.8.0). Only
+  Streamlit major releases now need a deliberate bump (`pyproject.toml`) — #330
 
 ### Fixed
 
@@ -38,6 +51,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `src/datasure/processing/corrections.py`,
     `src/datasure/checks/missing.py`, `src/datasure/checks/progress.py`,
     `src/datasure/checks/gpschecks/compute.py`
+- **Demo guidance on non-demo projects** (#359): Renaming a report function
+  that shows demo guidance no longer crashes its page in every project
+  - Root cause: `demo_output_onboarding` read the message before checking
+    `is_demo_project()`, and a missing entry came back as the string
+    `"Invalid Message"`, so `.get` raised `AttributeError`
+  - Solution: The message is read only in the demo project, and
+    `OutputOnboardingInfo.get_onboarding_message` returns `None` for a
+    missing entry, which shows no guidance and logs a warning. The decorator
+    records each function in `DEMO_OUTPUT_FUNCTIONS`, and a test asserts
+    every one has a message. The warning is logged once per function
+  - Files: `src/datasure/utils/onboarding_utils.py`,
+    `tests/utils/test_onboarding_utils.py`
 - **Polars 2.0 compatibility**: The Prep page and several checks crashed on
   fresh installs that resolved polars 2.0
   - Root cause: polars 2.0 removed `NUMERIC_DTYPES`, `INTEGER_DTYPES`,
@@ -55,6 +80,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Integer columns**: `get_df_columns` listed only signed `Int8`–`Int64`
   columns as integer columns for polars data, missing unsigned and `Int128`
   columns; it now uses `cs.integer()` (`src/datasure/utils/dataframe_utils.py`)
+- **Server**: Fresh installs disconnected after the UI loaded, with
+  `RuntimeError: Expected ASGI message 'http.response.start', but got
+  'http.response.body'` on image and video responses. Starlette 1.8.0 changed
+  `IdentityResponder.send_with_compression`, which Streamlit 1.61.0's gzip
+  middleware overrides; Streamlit 1.62+ is compatible — closes #330
+- **SurveyCTO import**: Submissions completed before 2024-01-01 were never
+  downloaded. `SurveyCTOConfig.default_date` is now 2010-01-01 UTC. It is not
+  `date=0`, which SurveyCTO throttles to one request per licensed quiet period
+  (HTTP 417) (`src/datasure/connectors/scto.py`) — closes #341
+- **Start page**: "Learn more" listed SPSS as a supported local file format; it
+  now lists CSV, Excel, Stata, JSON and Parquet
+  (`src/datasure/views/start_view.py`)
+- **Local import**: Legacy `.xls` files passed the file-type check and then
+  failed with an openpyxl error, because openpyxl cannot read `.xls`. They are
+  now rejected up front, in the form and in `FileConfig`, with an instruction to
+  save the file as `.xlsx`; README, User Guide and Architecture no longer list
+  `.xls` (`src/datasure/connectors/local.py`)
+- **Correction replay**: Replay silently overwrote a value fixed at source when
+  the corrected value was originally missing. `_current_value_mismatch` no
+  longer skips a missing recorded value, so the correction applies only while
+  the cell is still missing and otherwise fails with a reason; the same check
+  runs when a correction is first applied
+  (`src/datasure/processing/corrections.py`) — #337
+- **Acceptance status**: An accept row's Status in the Correction Log was
+  judged against the data at that point in replay, so an accept followed by a
+  modify of the same cell showed `Successful` while the check pages treated it
+  as inactive. Accept statuses are now judged against the final corrected data,
+  as `get_active_acceptances` does, on replay and on every log save — closes #337
+- **Correction KEY lookup**: Replay and acceptance statuses found a record by
+  the first column holding its KEY value, so a value repeated in another column
+  could point them at the wrong record and mark an active acceptance
+  `Inactive`. They now use the KEY column the check config sets for the
+  dataset (the survey or backcheck KEY), falling back to the old lookup only
+  when none is set (`src/datasure/processing/corrections.py`) — #337
+- **Remove Credentials**: Reported success but left the SurveyCTO password in
+  the OS keyring. The view passed the credential type as the server, and
+  `delete_stored_credentials` read the username from the wrong level of the
+  metadata file, so `keyring.delete_password` never ran. A keyring failure now
+  returns an error, shown with `st.error`; a password already missing from the
+  keyring still clears the entry (`src/datasure/utils/secure_credentials.py`,
+  `src/datasure/views/import_view.py`) — closes #342
 
 ## [1.2.0a1] - 2026-10-11
 

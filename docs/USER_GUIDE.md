@@ -145,7 +145,8 @@ Import sources are added via the **"Add Import Configuration"** popover. Click i
 2. Select **"local storage"** from the Import Type dropdown
 3. Upload file(s):
    - Drag and drop or browse
-   - Supported formats: .csv, .xlsx, .xls, .json, .dta (Stata), .parquet
+   - Supported formats: .csv, .xlsx, .json, .dta (Stata), .parquet. Save
+     legacy Excel (.xls) files as .xlsx first
 4. Configure settings:
    - Assign dataset alias (name)
    - Select sheet (for Excel files)
@@ -560,6 +561,13 @@ All corrections are tracked with:
   **Reviewer name** in the sidebar, which DataSure remembers across sessions.
   Entries logged before DataSure recorded the user show an empty User.
 
+The replication package includes the full log as
+`4_output/3_logs/correction_log.csv`, User column included. Before sharing a
+package outside your team, check **Exclude reviewer names** on the Export
+Replication Package page, then build the package. The User column is kept
+but left blank in the exported copy. The project's own Correction Log is not
+changed. The option is off by default.
+
 The log can also contain **accept** entries. An accept entry records that a
 flagged value was reviewed and is correct. It never changes the data, and the
 Check type column shows which check it applies to. It stays in effect only
@@ -610,7 +618,8 @@ refresh:
    reviewed** to see corrected values marked Corrected.
 3. In the Correction Log, check that the entry's Status is `Successful`. If
    new data or a prep change means a correction can no longer be applied, its
-   Status shows why.
+   Status shows why. This includes a correction of a blank value that was later
+   filled in at source: the source value is kept and the correction fails.
 
 **Demo Example**:
 Correcting duplicate household ID:
