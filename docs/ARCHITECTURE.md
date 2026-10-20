@@ -21,6 +21,9 @@ src/datasure/
 ├── cli.py                  # argparse CLI; launches Streamlit (localhost:8501)
 ├── assets/                 # Logos and demo CSV data bundled with the package
 ├── checks/                 # Data quality check modules (one per check type)
+│   ├── catalogue.py        #   Every check on a check page: slug, label,
+│                           #   icon, group, status and render functions
+│   ├── context.py          #   PageConfig, CheckData, CheckContext
 │   ├── summary.py          #   Overall data quality summary
 │   ├── missing.py          #   Missing data analysis
 │   ├── duplicates.py       #   Duplicate detection
@@ -30,12 +33,12 @@ src/datasure/
 │   ├── gpschecks/          #   GPS validation and outlier mapping; review.py
 │                           #   turns outlier corrections and acceptances
 │                           #   into log entries (no Streamlit)
-│   ├── outliers.py         #   Statistical outlier detection
-│   ├── enumerator.py       #   Enumerator performance
+│   ├── outliers/           #   Statistical outlier detection
+│   ├── enumerator/         #   Enumerator performance
 │   ├── progress.py         #   Survey progress tracking
 │   ├── descriptive.py      #   Descriptive statistics
 │   └── backchecks/         #   Back-check comparison workflows; scope.py
-│                           #   applies the Duplicates tab's Records to
+│                           #   applies the Duplicates check's Records to
 │                           #   Include filters to the comparison
 ├── connectors/
 │   ├── scto.py             # SurveyCTO download/UI (uses utils/scto_api.py)
@@ -50,7 +53,9 @@ src/datasure/
 │   └── enums.py            # Prep action/method enums
 ├── utils/                  # Shared utilities (DuckDB, cache, config, charts,
 │                           # credentials, SurveyCTO API, UI helpers, ...)
-│   └── correction_form.py  #   Shared correction form used across pages
+│   ├── correction_form.py  #   Shared correction form used across pages
+│   ├── navigation.py       #   Navigation resolver and status types (no Streamlit)
+│   └── nav_ui.py           #   Shared navigation controls and render wrapper
 └── views/                  # Streamlit pages (top-level page scripts)
     ├── start_view.py       # Project selection/creation
     ├── import_view.py      # Credentials + data import
@@ -151,6 +156,39 @@ registers them in `st.navigation`. The numbered files match the gitignore
 pattern `output_view_?.py` — never commit them and never edit them directly;
 edit the template instead.
 
+### Check navigation
+
+A check page draws its checks from the catalogue in `checks/catalogue.py`.
+Each `CheckEntry` has a slug, short label, icon, group, a `render` function
+and a `status` function, plus an optional `setup` function. Adding an entry is
+the only change needed for a check to appear.
+
+- **Status.** Each check module exposes a cheap `<check>_status(...)` that
+  returns a `StatusResult` (`CheckStatus` ready, not set up, not applicable or
+  error, plus a reason) from page configuration and data shape only. It never
+  computes results. `catalogue.nav_items` turns the statuses into `NavItem`s;
+  a status function that raises gives that check the error status.
+- **Selection.** `utils/navigation.py` is the pure resolver (no Streamlit):
+  `resolve_nav` picks a valid URL value, then the saved selection, then the
+  default (Summary), and `group_selection` picks the remembered or first
+  check when the group changes. `utils/nav_ui.py` wraps it for Streamlit and
+  is meant to be shared by every page that picks one item from many.
+- **Lazy rendering.** `render_checks` in the template runs only the selected
+  check. A check that is not ready shows a standard empty state with its
+  reason; a not-set-up check then shows its settings (`setup`, or its report,
+  which starts with its settings). Summary computes the outlier and backcheck
+  rates inside its own render, so they only run when Summary is shown.
+- **Render wrapper.** Every check renders through `nav_ui.run_guarded`. An
+  exception becomes an error state with the traceback in an expander, is
+  logged, and is remembered so the navigation marks the check until it
+  renders cleanly. `st.stop()` and `st.rerun()` raise `BaseException`
+  subclasses, so they pass through. The navigation is drawn after the check,
+  into a container placed above it, so the mark appears on the same run.
+- **Widget state.** Streamlit drops the state of widgets that are not drawn,
+  so a check's widgets are rebuilt from its saved settings each time it is
+  opened. Settings loaders must therefore read the settings file directly,
+  not through `st.cache_data`.
+
 ## Cache and data locations
 
 Resolved by `utils/cache_utils.py`:
@@ -184,6 +222,21 @@ The `cache/` directory is gitignored.
 `st_output_pages`, ...). View modules are page scripts: they run top to bottom
 on every rerun and guard on `st_project_id`, calling `st.stop()` when no
 project is selected. If cross-page state looks corrupted, check `app.py` first.
+
+### URL state
+
+The check page's selected check is the `check` URL query parameter, for
+example `?check=duplicates`. Each generated check page is its own page, so the
+parameter is per page. `nav_ui.resolve_selection` reads it on every run; a
+valid value wins over the remembered selection, and an invalid one is ignored.
+Changing the selection writes the parameter, so links and bookmarks open the
+same check. To select a check from code (for example a button), call
+`nav_ui.select_nav_item(key, "check", slug)`, ideally in an `on_click`
+callback.
+
+Navigation state lives under keys prefixed with the page's navigation key
+(`check_nav_{page_name_id}` on check pages): `__selected`, `__group`, `__item`,
+`__last_by_group` and `__errors`. No other page uses query parameters yet.
 
 ## Credentials
 

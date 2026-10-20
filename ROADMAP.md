@@ -109,6 +109,7 @@ Features under exploration for future releases. These are not yet committed to t
 
 | Feature | Description | Status |
 | ------- | ----------- | ------ |
+| **Debrief** | A check in the **Field team** group of the check page that collects the issues to discuss at the morning field team meeting | Exploring |
 | **Consent and Refusal Rates** | Track and flag unusual refusal or incomplete interview rates by enumerator | Exploring |
 | **Time-to-Complete Analysis** | Identify implausibly short or long interview durations | Exploring |
 | **Longitudinal Tracking** | Compare data quality metrics across survey rounds | Exploring |

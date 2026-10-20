@@ -7,7 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Check status** (#374): Each check module exposes a cheap status function
+  (`summary_status`, `progress_status`, `missing_status`,
+  `duplicates_status`, `outliers_status`, `gpschecks_status`,
+  `enumerator_status`, `backchecks_status`, `descriptive_status`) that returns
+  a `StatusResult` (ready, not set up, not applicable or error, with a reason)
+  from page configuration and data shape only. GPS Checks is not applicable
+  when no column looks like GPS data (`find_gps_columns`,
+  `checks/gpschecks/compute.py`); Backchecks is not set up without a
+  backcheck dataset
+- **Shared navigation** (#374): `utils/navigation.py` is a pure resolver
+  (`resolve_nav`, `group_selection`, `with_errors`, `nav_label`) and
+  `utils/nav_ui.py` the Streamlit helper (`resolve_selection`, `draw_nav`,
+  `select_nav_item`, `render_selected`, `run_guarded`, `guarded_status`),
+  for reuse by Prepare Data and Corrections
+
+### Changed
+
+- **Check page navigation** (#374): The nine check tabs are replaced by a
+  segmented control for the group (Overview, Data integrity, Field team,
+  Exploration) and pills for that group's checks, with short labels
+  (Progress, Enumerator Stats, Backchecks, Descriptive Stats). Only the
+  selected check's report runs. The `check` URL query parameter reflects and
+  drives the selection; Summary is the default
+  (`render_checks`, `views/output_view_template.py`)
+  - One catalogue lists every check (`CHECK_CATALOGUE`,
+    `checks/catalogue.py`); `PageConfig` and `CheckData` move to
+    `checks/context.py`
+  - Checks that are not ready are muted with a text and icon marker and open
+    to an empty state with the reason; not-set-up checks then show their
+    settings
+  - A check that raises shows an error state with the traceback and is marked
+    in the navigation; the rest of the page keeps working
+  - Onboarding and demo guidance describe the new navigation; the unused
+    `CheckPage` enum is removed
+
 ### Fixed
+
+- **Check settings** (#374): The progress, duplicates, GPS and enumerator
+  settings loaders no longer cache for 60 seconds, so a check opened again
+  shows the settings saved a moment ago (`load_default_settings`,
+  `load_default_duplicates_settings`, `load_default_gpschecks_settings`,
+  `load_default_enumerator_settings`)
 
 - **Summary tab data quality** (#358): The outlier % and back check error
   rate tiles show the values from the Outliers & Constraints and Backcheck

@@ -361,24 +361,51 @@ DataSure automatically creates a comprehensive quality analysis page with:
 
 **What You'll Do**:
 
-- Navigate through 9 quality check reports
+- Open a check page from **DQA Reports** in the sidebar (one page per check
+  configuration)
+- Move between the quality checks on that page
 - Review metrics and visualizations
 - Identify data quality issues
 - Export findings for action
 
-#### Available Quality Check Reports
+#### Finding a Check
 
-Each report is accessible from the navigation sidebar after configuration:
+Each check page shows two rows of controls above the report:
 
-1. **Summary** - Overall data quality dashboard
-2. **Survey Progress** - Collection progress and targets
-3. **Duplicates** - Duplicate record identification
-4. **Missing Data** - Missing value patterns
-5. **Outliers** - Statistical outlier detection
-6. **Enumerator Stats** - Performance by enumerator
-7. **Descriptive Stats** - Variable distributions
-8. **Back Checks** - Validation error rates
-9. **GPS Checks** - Location data quality
+1. **Group**: Overview, Data integrity, Field team or Exploration.
+2. **Check**: the checks in the selected group.
+
+| Group | Checks |
+| --- | --- |
+| Overview | Summary, Progress |
+| Data integrity | Missing Values, Duplicates, Outliers & Constraints, GPS Checks |
+| Field team | Enumerator Stats, Backchecks |
+| Exploration | Descriptive Stats |
+
+Every check is at most two clicks away. Choosing a group opens the check you
+last used in that group, or its first check. Only the selected check runs, so
+the page responds faster than when every check ran at once.
+
+The page opens on **Summary**. The selected check is part of the page address,
+for example `...?check=duplicates`, so you can bookmark or share a link to a
+check. A link to a check that does not exist opens Summary.
+
+#### Check Status
+
+A check that cannot show results yet is muted in the check row, with an icon
+and a text marker:
+
+- **not set up**: something you can configure is missing, for example
+  Backchecks with no backcheck dataset or Outliers & Constraints with no
+  columns added. Opening the check explains what is missing and shows its
+  settings below the message ("Set it up below"). Backchecks links to
+  Configure Checks or Import Data, where its dataset is chosen and imported.
+- **not applicable**: your data cannot support the check, for example GPS
+  Checks when no column looks like GPS data. Opening the check explains why.
+- **error**: the check failed. It shows the error and an **Error details**
+  section to include in a bug report. The other checks keep working.
+
+Muted checks can still be opened.
 
 *Detailed report information is provided in the [Quality Check Reports](#quality-check-reports) section below.*
 
@@ -465,7 +492,7 @@ attribution log, not in the Correction Log. See
 
 #### Duplicate and Unmatched IDs
 
-All ID problems are resolved on the Duplicates tab, where each duplicate ID
+All ID problems are resolved in the Duplicates check, where each duplicate ID
 has a card that compares its records side by side. A **Survey data** /
 **Backcheck data** switcher adds cards for duplicate back check IDs and for
 back checks whose ID is not in the survey data. Choose **Keep**, **Modify ID**
@@ -478,7 +505,7 @@ A repeat visit that legitimately shares an ID, such as a failed first attempt
 followed by a completed interview, is handled with the **Records to Include**
 filter in the [Duplicates Settings](#duplicates-settings) instead. The Back
 Checks comparison uses the same filters, and leaves out unresolved duplicate
-IDs until they are resolved on the Duplicates tab.
+IDs until they are resolved in the Duplicates check.
 
 #### Correction Actions
 
@@ -531,7 +558,7 @@ Delete entire survey records:
 **Use Cases**:
 
 - Test submissions
-- Duplicate surveys (after investigation; the Duplicates tab cards are
+- Duplicate surveys (after investigation; the Duplicates check cards are
   quicker, see [ID Duplicates](#id-duplicates))
 - Invalid records
 
@@ -602,9 +629,9 @@ On a page with back check data, a **Survey data** / **Backcheck data**
 switcher at the top of the page's tab picks the dataset. The back check data
 has its own Correction Log, removal list and preview. Back check results
 measure data quality, so on back check data you can only modify the ID (the
-Survey ID column set on the Backcheck Analysis tab) or remove a row. Back
+Survey ID column set in the Backchecks settings) or remove a row. Back
 check data that was never prepared is corrected from its imported data. The
-Duplicates tab has the same switcher, and its back check cards write to the
+Duplicates check has the same switcher, and its back check cards write to the
 back check data's Correction Log.
 
 #### Verifying Corrections
@@ -629,7 +656,7 @@ Correcting duplicate household ID:
 
 **Steps**:
 
-1. Open the Duplicates tab and find the card for "UP015-005"
+1. Open the Duplicates check and find the card for "UP015-005"
 2. On the record with KEY "uuid:0dk0vt97-786b-250u-34k7-z34615zz820c",
    choose **Modify ID** and enter "UP015-055"
 3. Leave the other record on **Keep**
@@ -644,7 +671,7 @@ on the "hhid" column.
 
 ## Quality Check Reports
 
-### 1. Summary Report
+### Summary Report
 
 **Purpose**: High-level overview of data quality
 
@@ -703,7 +730,7 @@ Key quality metrics:
 
 ---
 
-### 2. Survey Progress Report
+### Progress Report
 
 **Purpose**: Detailed submission tracking and progress monitoring
 
@@ -760,7 +787,7 @@ Monitor survey completion:
 
 ---
 
-### 3. Duplicates Report
+### Duplicates Report
 
 **Purpose**: Find survey and back check records that share an ID, and back
 checks whose ID is not in the survey data
@@ -788,7 +815,7 @@ A **Survey data** / **Backcheck data** switcher picks the dataset. Each option
 shows its number of unresolved duplicate IDs, for example **Survey data (3)**.
 On pages without back checks, the option reads **Backcheck data (N/A)** and
 cannot be selected. The back check view uses the Survey ID and Survey Key set
-on the Backcheck Analysis tab.
+in the Backchecks settings.
 
 Metrics above the cards:
 
@@ -857,7 +884,7 @@ Shown in the survey view only. Check duplicates in non-ID columns:
 
 ---
 
-### 4. Missing Data Report
+### Missing Values Report
 
 **Purpose**: Analyze missing value patterns
 
@@ -928,7 +955,7 @@ Visual representation:
 
 ---
 
-### 5. Outliers Report
+### Outliers & Constraints Report
 
 **Purpose**: Detect statistical outliers in numeric data
 
@@ -1056,7 +1083,7 @@ check lists duplicated KEYs.
 
 ---
 
-### 6. Enumerator Stats Report
+### Enumerator Stats Report
 
 **Purpose**: Monitor enumerator performance and data quality
 
@@ -1128,7 +1155,7 @@ Temporal performance trends:
 
 ---
 
-### 7. Descriptive Stats Report
+### Descriptive Stats Report
 
 **Purpose**: Understand variable distributions
 
@@ -1165,7 +1192,7 @@ Depending on data type:
 
 ---
 
-### 8. Back Checks Report
+### Backchecks Report
 
 **Purpose**: Validate survey data against quality control visits
 
@@ -1193,7 +1220,7 @@ Configure validation:
   count towards coverage.
 
 The comparison and coverage use the records kept by the **Records to Include**
-filters on the Duplicates tab: the survey filter for survey data and the
+filters in the Duplicates check: the survey filter for survey data and the
 **Backcheck Records to Include** filter for back check data. When a filter is
 set, the page says so, for example "Comparing 1,240 of 1,310 surveys (Records
 to Include: interview_status == Complete)". Records whose survey ID is
@@ -1347,11 +1374,11 @@ to the back checker, has an error rate of 40% and an adjusted error rate of
 Above Comparison Results Details, a warning counts the duplicate survey IDs,
 duplicate back check IDs and unmatched back check IDs that are left out of the
 comparison. Resolve them in the **Backcheck data** or **Survey data** view of
-the Duplicates tab; a resolved record is compared again.
+the Duplicates check; a resolved record is compared again.
 
 ---
 
-### 9. GPS Checks Report
+### GPS Checks Report
 
 **Purpose**: Validate GPS coordinate quality
 
@@ -1590,7 +1617,7 @@ After completing all 6 steps:
 
 2. **Correct Where the Flag Is**:
    - Review flagged values from the Outliers and GPS Checks pages, and
-     resolve ID problems on the Duplicates tab cards
+     resolve ID problems in the Duplicates check cards
    - Use the Correct Data page for records no check flagged, and to undo
      corrections and acceptances
 
@@ -1610,7 +1637,7 @@ After completing all 6 steps:
 5. **Resolve IDs Before Comparing**:
    - Use **Records to Include** for repeat visits that legitimately share an
      ID, rather than dropping them
-   - Resolve the remaining duplicate and unmatched IDs on the Duplicates tab
+   - Resolve the remaining duplicate and unmatched IDs in the Duplicates check
      so they are included in the back check comparison
 
 6. **Verify After Correction**:
