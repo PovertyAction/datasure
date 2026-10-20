@@ -1,7 +1,8 @@
 """Tests for loading check-page data in the output view template."""
 
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
@@ -157,3 +158,76 @@ class TestNoRowsMessage:
         assert "nothing to analyze" in message
         assert "Prepare Data" in message
         assert "Correct Data" in message
+
+
+class TestSummaryCheckRates:
+    """The Summary tab gets the outlier % and backcheck error rate."""
+
+    REPORTS = (
+        "summary_report",
+        "descriptive_report",
+        "progress_report",
+        "missing_report",
+        "duplicates_report",
+        "outliers_report",
+        "gpschecks_report",
+        "enumerator_report",
+        "backchecks_report",
+    )
+
+    def _config(self) -> template.PageConfig:
+        return template.PageConfig(
+            page_number=1,
+            page_name="HFCs",
+            page_name_id="hfcs",
+            survey_data_name=ALIAS,
+            survey_key="key",
+            survey_id="key",
+            survey_date=None,
+            enumerator=None,
+            team=None,
+            formversion=None,
+            duration=None,
+            survey_target=None,
+            backcheck_data_name="backcheck",
+            backcheck_date=None,
+            backchecker=None,
+            backchecker_team=None,
+            backcheck_target_percent=None,
+            tracking_data_name=None,
+            setting_file=Path("settings.json"),
+            missing_setting_file=Path("missing.json"),
+        )
+
+    def _render(self, data: template.CheckData) -> dict[str, MagicMock]:
+        mock_st = MagicMock()
+        mock_st.tabs.return_value = [MagicMock() for _ in self.REPORTS]
+        mocks = {name: MagicMock() for name in self.REPORTS}
+        mocks["flagged_outlier_percent"] = MagicMock(return_value=12.5)
+        mocks["overall_error_rate_percent"] = MagicMock(return_value=4.25)
+        with (
+            patch.object(template, "st", mock_st),
+            patch.multiple(template, **mocks),
+        ):
+            template.render_check_tabs(PROJECT_ID, self._config(), data)
+        return mocks
+
+    def test_rates_are_passed_to_the_summary(self):
+        data = template.CheckData(page_data=_rows(2), backcheck_data=_rows(1))
+
+        mocks = self._render(data)
+
+        mocks["flagged_outlier_percent"].assert_called_once()
+        kwargs = mocks["summary_report"].call_args.kwargs
+        assert kwargs["outliers_pct"] == 12.5
+        assert kwargs["backcheck_error_pct"] == 4.25
+
+    @pytest.mark.parametrize("backcheck_rows", [None, 0])
+    def test_no_error_rate_without_backcheck_rows(self, backcheck_rows):
+        backcheck = None if backcheck_rows is None else _rows(backcheck_rows)
+        data = template.CheckData(page_data=_rows(2), backcheck_data=backcheck)
+
+        mocks = self._render(data)
+
+        mocks["overall_error_rate_percent"].assert_not_called()
+        assert mocks["summary_report"].call_args.kwargs["backcheck_error_pct"] is None

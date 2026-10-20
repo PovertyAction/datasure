@@ -1,6 +1,7 @@
 """Report-rendering UI for the outliers report."""
 
 import json
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -19,6 +20,8 @@ from datasure.checks.outliers.compute import (
     compute_constraint_violations,
     compute_outlier_output,
     expand_col_names,
+    flagged_value_percent,
+    load_default_settings,
 )
 from datasure.checks.outliers.models import (
     TAB_NAME,
@@ -75,6 +78,8 @@ from datasure.utils.ui_utils import (
     show_queued_notices,
     styled_dataframe,
 )
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # Streamlit UI - Metrics Display
@@ -1395,6 +1400,61 @@ def _load_outlier_settings(project_id: str, page_name_id: str) -> pl.DataFrame:
     return duckdb_get_table(project_id, f"outliers_{page_name_id}", "logs").drop(
         "index", strict=False
     )
+
+
+def flagged_outlier_percent(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+    alias: str | None,
+) -> float | None:
+    """Return the percentage of checked values flagged as outliers.
+
+    Uses the saved settings and outlier columns, and leaves out accepted
+    flags, so it matches the counts on the Outliers tab. Computed without
+    rendering the tab, for the Summary tab.
+
+    Parameters
+    ----------
+    project_id : str
+        The project identifier.
+    page_name_id : str
+        Page name identifier.
+    data : pl.DataFrame
+        The survey data of the page.
+    setting_file : str
+        Path to the page settings file.
+    config : dict
+        The page configuration the Outliers tab starts from.
+    alias : str | None
+        The survey dataset alias, whose correction log holds the accepted
+        flags. If None, every flag is counted.
+
+    Returns
+    -------
+    float | None
+        The percentage, or None when no outlier columns are configured, no
+        values were checked, or the saved settings no longer fit the data.
+    """
+    column_config = _load_outlier_settings(project_id, page_name_id)
+    if column_config.is_empty():
+        return None
+    try:
+        settings = load_default_settings(setting_file, OutlierSettings(**config))
+        outlier_data = compute_outlier_output(data, settings, column_config)
+    except (pl.exceptions.PolarsError, ValidationError, ValueError):
+        logger.warning(
+            "Could not compute the outlier %% for page %s", page_name_id, exc_info=True
+        )
+        return None
+    if alias and settings.survey_key not in REVIEW_COLUMNS:
+        review = ReviewContext(CorrectionProcessor(project_id), alias)
+        outlier_data = clear_reviewed_flags(
+            _with_review_status(outlier_data, settings, OUTLIERS, review), OUTLIERS
+        )
+    return flagged_value_percent(outlier_data)
 
 
 def _delete_outlier_column(

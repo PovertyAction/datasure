@@ -1084,6 +1084,29 @@ def _compute_outlier_metrics(
     )
 
 
+def flagged_value_percent(outliers_data: pl.DataFrame) -> float | None:
+    """Return the percentage of checked values flagged as outliers.
+
+    Parameters
+    ----------
+    outliers_data : pl.DataFrame
+        Output of `compute_outlier_output`: one row per KEY and column name.
+        Missing values are not checked, so they are left out.
+
+    Returns
+    -------
+    float | None
+        The percentage, or None when no values were checked.
+    """
+    if "column value" not in outliers_data.columns:
+        return None
+    checked = outliers_data.filter(pl.col("column value").is_not_null())
+    if checked.is_empty():
+        return None
+    flagged = checked.filter(pl.col("outlier reason") != "no outlier").height
+    return flagged / checked.height * 100
+
+
 def compute_column_outlier_summary(
     outlier_data: pl.DataFrame, survey_key: str
 ) -> pl.DataFrame:

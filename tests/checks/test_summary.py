@@ -2,7 +2,7 @@
 
 # Standard library imports
 from datetime import date, datetime, timedelta
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 # Third-party imports
 import pandas as pd
@@ -770,7 +770,21 @@ class TestDataQuality:
         """Test data quality with empty dataframe."""
         result = calculate_data_quality_metrics(empty_polars_df, None)
         assert result.missing_pct == 0.0
-        assert result.outliers_pct == 0.0
+        assert result.outliers_pct is None
+
+    def test_calculate_data_quality_passes_check_rates_through(self, sample_polars_df):
+        """The outlier % and error rate come from the Outliers and Backchecks tabs."""
+        result = calculate_data_quality_metrics(
+            sample_polars_df, "id", outliers_pct=12.5, backcheck_error_pct=4.25
+        )
+        assert result.outliers_pct == 12.5
+        assert result.backcheck_error_pct == 4.25
+
+    def test_calculate_data_quality_check_rates_default_to_none(self, sample_polars_df):
+        """Without results from those tabs, there is no value to show, not 0."""
+        result = calculate_data_quality_metrics(sample_polars_df, "id")
+        assert result.outliers_pct is None
+        assert result.backcheck_error_pct is None
 
     def test_compute_summary_data_quality_backward_compat(self, sample_polars_df):
         """Test backward compatibility wrapper for data quality."""
@@ -1051,6 +1065,47 @@ class TestUIComponents:
 
         assert mock_st.columns.called
 
+    @staticmethod
+    def _quality_columns(mock_st) -> list[MagicMock]:
+        cols = [MagicMock() for _ in range(4)]
+        mock_st.columns.return_value = cols
+        return cols
+
+    @patch("datasure.checks.summary.st")
+    @patch("datasure.checks.summary.donut_chart")
+    @patch("datasure.checks.summary.plt")
+    def test_summary_data_quality_shows_check_rates(
+        self, mock_plt, mock_chart, mock_st
+    ):
+        """The outlier and error rate tiles chart the values they are given."""
+        self._quality_columns(mock_st)
+        df = pl.DataFrame({"id": [1, 2, 3]})
+
+        summary_data_quality(df, "id", outliers_pct=12.5, backcheck_error_pct=4.25)
+
+        charted = [c.kwargs["actual_value"] for c in mock_chart.call_args_list]
+        assert 12.5 in charted
+        assert 4.25 in charted
+        mock_st.info.assert_not_called()
+
+    @patch("datasure.checks.summary.st")
+    @patch("datasure.checks.summary.donut_chart")
+    @patch("datasure.checks.summary.plt")
+    def test_summary_data_quality_without_check_rates(
+        self, mock_plt, mock_chart, mock_st
+    ):
+        """Without values, the tiles say where to configure them, not 0."""
+        self._quality_columns(mock_st)
+        df = pl.DataFrame({"id": [1, 2, 3]})
+
+        summary_data_quality(df, "id")
+
+        # Only the duplicates and missing tiles have charts.
+        assert mock_chart.call_count == 2
+        messages = " ".join(c.args[0] for c in mock_st.info.call_args_list)
+        assert "Outliers & Constraints" in messages
+        assert "Backcheck Analysis" in messages
+
     def test_render_progress_by_column(self):
         """Test _render_progress_by_column UI component."""
 
@@ -1210,10 +1265,22 @@ class TestUIComponents:
             categorical_columns=["id"],
         )
         # Updated signature with survey_columns parameter
-        summary_report(pl_df, "settings.json", config, survey_columns)
+        summary_report(
+            pl_df,
+            "settings.json",
+            config,
+            survey_columns,
+            outliers_pct=12.5,
+            backcheck_error_pct=4.25,
+        )
 
         mock_settings.assert_called_once()
         mock_data_summary.assert_called_once()
         mock_submissions.assert_called_once()
         mock_progress.assert_called_once()
-        mock_quality.assert_called_once()
+        mock_quality.assert_called_once_with(
+            data=pl_df,
+            survey_id="id_col",
+            outliers_pct=12.5,
+            backcheck_error_pct=4.25,
+        )

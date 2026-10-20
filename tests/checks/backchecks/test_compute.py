@@ -40,6 +40,7 @@ from datasure.checks.backchecks.compute import (
     exclude_duplicate_ids,
     expand_col_names,
     load_default_backchecks_settings,
+    load_saved_backchecks_settings,
 )
 from datasure.checks.backchecks.coverage import compute_backcheck_coverage
 from datasure.checks.backchecks.models import BackcheckSettings
@@ -3254,3 +3255,42 @@ def test_compute_overall_error_rates_empty_analysis():
     from datasure.checks.backchecks.compute import compute_overall_error_rates
 
     assert compute_overall_error_rates(pl.DataFrame()) == []
+
+
+class TestLoadSavedBackchecksSettings:
+    """The settings the Backchecks tab compares with, read without its UI."""
+
+    def test_reads_comparison_options_saved_under_their_widget_names(self, tmp_path):
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(
+            json.dumps(
+                {
+                    "backchecks": {
+                        "survey_id": "hhid",
+                        "no_differences_values": ["-999"],
+                        "exclude_values": ["-888"],
+                        "string_case_option": "lowercase",
+                        "string_trimspaces_option": True,
+                        "string_nosymbols_option": True,
+                    }
+                }
+            )
+        )
+        settings = load_saved_backchecks_settings(
+            str(settings_file), BackcheckSettings(survey_key="KEY")
+        )
+        assert settings.survey_key == "KEY"
+        assert settings.survey_id == "hhid"
+        assert settings.no_differences_list == ["-999"]
+        assert settings.exclude_values_list == ["-888"]
+        assert settings.case_option == "lowercase"
+        assert settings.trimspaces_option is True
+        assert settings.nosymbols_option is True
+
+    def test_defaults_without_saved_options(self, tmp_path):
+        settings = load_saved_backchecks_settings(
+            str(tmp_path / "missing.json"), BackcheckSettings(survey_key="KEY")
+        )
+        assert settings.no_differences_list is None
+        assert settings.case_option is None
+        assert settings.trimspaces_option is False

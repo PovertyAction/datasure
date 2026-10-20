@@ -8,6 +8,13 @@ from datasure.utils.settings_utils import load_check_settings
 
 TAB_NAME: str = "backchecks"
 
+# Settings file keys of the comparison options, saved by the settings UI.
+NO_DIFFERENCES_KEY: str = "no_differences_values"
+EXCLUDE_VALUES_KEY: str = "exclude_values"
+STRING_CASE_KEY: str = "string_case_option"
+STRING_TRIMSPACES_KEY: str = "string_trimspaces_option"
+STRING_NOSYMBOLS_KEY: str = "string_nosymbols_option"
+
 
 def backcheck_id_columns(
     setting_file: str, survey_key: str | None, survey_id: str | None

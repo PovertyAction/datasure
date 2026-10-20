@@ -15,6 +15,11 @@ from datasure.checks.backchecks.attribution import (
 )
 from datasure.checks.backchecks.models import (
     BACKCHECK_SUFFIX,
+    EXCLUDE_VALUES_KEY,
+    NO_DIFFERENCES_KEY,
+    STRING_CASE_KEY,
+    STRING_NOSYMBOLS_KEY,
+    STRING_TRIMSPACES_KEY,
     TAB_NAME,
     WEEKDAY_OFFSET_TO_NUMERIC,
     BackcheckSettings,
@@ -70,6 +75,46 @@ def load_default_backchecks_settings(
     default_settings.update(saved_settings)
 
     return BackcheckSettings(**default_settings)
+
+
+# The settings file keys of the comparison options, by settings field.
+_COMPARISON_OPTION_KEYS = {
+    "no_differences_list": NO_DIFFERENCES_KEY,
+    "exclude_values_list": EXCLUDE_VALUES_KEY,
+    "case_option": STRING_CASE_KEY,
+    "trimspaces_option": STRING_TRIMSPACES_KEY,
+    "nosymbols_option": STRING_NOSYMBOLS_KEY,
+}
+
+
+def load_saved_backchecks_settings(
+    settings_file: str, config: BackcheckSettings
+) -> BackcheckSettings:
+    """Load the settings the Backchecks tab compares with, without its UI.
+
+    Like `load_default_backchecks_settings`, plus the comparison options,
+    which the settings file stores under other names.
+
+    Parameters
+    ----------
+    settings_file : str
+        Path to the settings file containing saved configurations.
+    config : BackcheckSettings
+        Default configuration to use as fallback for missing settings.
+
+    Returns
+    -------
+    BackcheckSettings
+        The merged settings, with the saved comparison options.
+    """
+    settings = load_default_backchecks_settings(settings_file, config)
+    saved_settings = load_check_settings(settings_file, TAB_NAME)
+    options = {
+        field: saved_settings[key]
+        for field, key in _COMPARISON_OPTION_KEYS.items()
+        if saved_settings.get(key) is not None
+    }
+    return BackcheckSettings(**{**settings.model_dump(), **options})
 
 
 # =============================================================================
