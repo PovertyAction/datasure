@@ -22,8 +22,11 @@ from datasure.checks.outliers.models import (
     OutlierThresholds,
     SearchType,
 )
+from datasure.checks.outliers.review import CONSTRAINTS
 from datasure.utils.dataframe_utils import safe_to_numeric
 from datasure.utils.settings_utils import load_check_settings
+
+VIOLATION_REASON_COL = CONSTRAINTS.reason_col
 
 # =============================================================================
 # Utility Functions
@@ -957,7 +960,7 @@ def compute_constraint_violations(
 
             col_df = safe_to_numeric(col_df, col)
 
-            col_df = col_df.with_columns(violation_expr.alias("violation reason"))
+            col_df = col_df.with_columns(violation_expr.alias(VIOLATION_REASON_COL))
 
             # add hard and soft bounds columns
             for bound_name, bound_value in [
@@ -978,7 +981,7 @@ def compute_constraint_violations(
                     "soft_min",
                     "soft_max",
                     "hard_max",
-                    "violation reason",
+                    VIOLATION_REASON_COL,
                 ]
             )
 
@@ -1011,20 +1014,20 @@ def _compute_constraint_metrics(violation_data: pl.DataFrame) -> ConstraintMetri
     """
     columns_checked = violation_data.select("column name").n_unique()
     total_violations = violation_data.filter(
-        pl.col("violation reason") != "no violation"
+        pl.col(VIOLATION_REASON_COL) != "no violation"
     ).height
 
     hard_min_violations = violation_data.filter(
-        pl.col("violation reason").str.contains("below hard minimum")
+        pl.col(VIOLATION_REASON_COL).str.contains("below hard minimum")
     ).height
     soft_min_violations = violation_data.filter(
-        pl.col("violation reason").str.contains("below soft minimum")
+        pl.col(VIOLATION_REASON_COL).str.contains("below soft minimum")
     ).height
     soft_max_violations = violation_data.filter(
-        pl.col("violation reason").str.contains("above soft maximum")
+        pl.col(VIOLATION_REASON_COL).str.contains("above soft maximum")
     ).height
     hard_max_violations = violation_data.filter(
-        pl.col("violation reason").str.contains("above hard maximum")
+        pl.col(VIOLATION_REASON_COL).str.contains("above hard maximum")
     ).height
 
     return ConstraintMetrics(
