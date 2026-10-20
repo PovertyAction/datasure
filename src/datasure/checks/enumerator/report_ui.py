@@ -1096,7 +1096,7 @@ def enumerator_report(
 
     demo_callout(
         """
-        This tab tracks enumerator performance across your survey dataset.
+        This check tracks enumerator performance across your survey dataset.
 
         It has four sections:
         - **Enumerator Overview**: 8 summary metrics at the top.
@@ -1254,7 +1254,7 @@ def enumerator_report(
     )
 
     demo_callout(
-        "**Next**: :material/arrow_upward: Scroll up and select the **Backcheck Analysis** tab."
+        "**Next**: :material/arrow_upward: Scroll up and select **Field team → Backchecks**."
     )
 
 

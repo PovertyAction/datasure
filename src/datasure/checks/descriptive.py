@@ -18,7 +18,7 @@ import streamlit as st
 from datasure.models.schemas import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.navigation import StatusResult, rows_status
-from datasure.utils.navigations_utils import demo_callout
+from datasure.utils.navigations_utils import demo_callout, show_demo_next_action
 from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.settings_utils import (
     load_check_settings,
@@ -746,8 +746,18 @@ def descriptive_report(
     _render_value_counts(data, selected_columns.all_columns, setting_file)
 
     demo_callout(
-        "**Next**: :material/arrow_upward: Scroll up and select the **Progress Tracking** tab."
+        "You have now explored every data quality check: **Overview** (Summary, "
+        "Progress), **Data integrity** (Missing Values, Duplicates, Outliers & "
+        "Constraints, GPS Checks), **Field team** (Enumerator Stats, Backchecks) "
+        "and **Exploration** (Descriptive Stats).\n\n"
+        "The next step is the **Correct Data** page, where you will learn how to "
+        "apply targeted corrections to your survey data based on the quality "
+        "findings from these checks.\n\n"
+        "To get there, click **Correct Data** in the sidebar or use the "
+        "**Proceed to Correct Data** button below.",
+        type="success",
     )
+    show_demo_next_action(5, "st_corr_page", "Proceed to Correct Data")
 
 
 def descriptive_status(data: pl.DataFrame) -> StatusResult:

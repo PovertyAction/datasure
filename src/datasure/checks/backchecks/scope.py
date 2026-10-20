@@ -147,5 +147,5 @@ def id_problem_warning(counts: IdProblemCounts) -> str | None:
     pronoun = "it" if total == 1 else "them"
     return (
         f"{listed} {verb} left out of the comparison. Resolve {pronoun} on the "
-        f"Duplicates tab to include {pronoun}."
+        f"Duplicates check to include {pronoun}."
     )

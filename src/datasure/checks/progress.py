@@ -1218,7 +1218,7 @@ def display_attempted_interviews(
     _display_chart_and_table(result.attempted_interviews, survey_id)
 
     demo_callout(
-        "**Next**: :material/arrow_upward: Scroll up and select the **Missing Values** tab."
+        "**Next**: :material/arrow_upward: Scroll up and select **Data integrity → Missing Values**."
     )
 
 

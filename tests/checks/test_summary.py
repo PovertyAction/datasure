@@ -1109,7 +1109,7 @@ class TestUIComponents:
         assert mock_chart.call_count == 2
         messages = " ".join(c.args[0] for c in mock_st.info.call_args_list)
         assert "Outliers & Constraints" in messages
-        assert "Backcheck Analysis" in messages
+        assert "Backchecks" in messages
 
     def test_render_progress_by_column(self):
         """Test _render_progress_by_column UI component."""

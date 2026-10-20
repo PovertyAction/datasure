@@ -1438,7 +1438,7 @@ def summary_data_quality(
         else:
             st.info(
                 "No outlier results to show. Add outlier columns, or check "
-                "their settings, on the **Outliers & Constraints** tab."
+                "their settings, in **Data integrity → Outliers & Constraints**."
             )
 
     with dq3:
@@ -1452,12 +1452,12 @@ def summary_data_quality(
         else:
             st.info(
                 "No backcheck values compared. Add backcheck data to the page, "
-                "then add backcheck columns, or check their settings, on the "
-                "**Backcheck Analysis** tab."
+                "then add backcheck columns, or check their settings, in "
+                "**Field team → Backchecks**."
             )
 
     demo_callout(
-        "**Next**: :material/arrow_upward: Scroll up and select the **Descriptive Statistics** tab."
+        "**Next**: :material/arrow_upward: Scroll up and select **Overview → Progress**."
     )
 
 

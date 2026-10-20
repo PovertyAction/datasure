@@ -3,7 +3,6 @@ import json
 import logging
 import random
 from datetime import datetime, timedelta
-from enum import Enum
 from pathlib import Path
 from typing import ClassVar
 
@@ -18,20 +17,6 @@ logger = logging.getLogger(__name__)
 
 DEMO_PROJECT_NAME = "DataSure Demo"
 DEMO_PROJECT_ID = "demoproject"
-
-
-class CheckPage(Enum):
-    """Enum for different check output pages."""
-
-    SUMMARY = "Summary"
-    SURVEY_PROGRESS = "Survey Progress"
-    DUPLICATES = "Duplicates"
-    MISSING_DATA = "Missing Data"
-    OUTLIERS = "Outliers"
-    ENUMERATOR_STATS = "Enumerator Stats"
-    DESCRIPTIVE_STATS = "Descriptive Stats"
-    BACK_CHECKS = "Back Checks"
-    GPS_CHECKS = "GPS Checks"
 
 
 # create a coloured container
@@ -180,7 +165,7 @@ class ImportDemoInfo:
         - **Remove Row**: Delete the entire row from the dataset.
 
         ##### Instructions for Demo:
-        Fix the duplicate **hhid** found in the Duplicates tab. Investigation confirmed that
+        Fix the duplicate **hhid** found in the Duplicates check. Investigation confirmed that
         the response with key **uuid:0dk0vt97-786b-250u-34k7-z34615zz820c** has the wrong
         household ID — it should be **UP015-055**, not **UP015-005**.
 
@@ -195,10 +180,10 @@ class ImportDemoInfo:
         7. Click **Apply** to save the correction.
 
         Once applied, check the **Correction Log** to confirm the entry, and return to
-        the **Duplicates** tab in the quality reports to verify the duplicate is resolved.
+        the **Duplicates** check in the quality reports to verify the duplicate is resolved.
 
         **You have completed the DataSure demo!** You have imported data, prepared it,
-        configured quality checks, reviewed reports across all tabs, and applied a
+        configured quality checks, reviewed every check's report, and applied a
         correction. Return to the quality reports at any time to see how corrections
         have improved data quality.
     """
@@ -322,14 +307,20 @@ class OnboardingSteps:
         "page": "output_view_1.py",
         "guidance_title": "Review Quality Reports",
         "guidance_content": """
-        Each tab covers a different data quality check. Start by expanding the
-        :material/settings: **settings panel** at the top of each tab and configuring
-        it for your data. Then work through the sections below — demo guidance is
-        available within each section to explain what you are seeing and what to do next.
+        The page opens on **Summary**. Pick a group in the top row, then a check
+        in the row below it; only the selected check runs. Checks that are not set
+        up or do not apply to your data are muted with a marker, and opening one
+        explains why. Start by expanding the :material/settings: **settings panel**
+        at the top of each check and configuring it for your data. Then work
+        through the sections below — demo guidance is available within each
+        section to explain what you are seeing and what to do next.
 
-        **Tabs to explore:** Summary, Descriptive Statistics, Progress Tracking,
-        Missing Values, Duplicates, Outliers & Constraints, GPS Checks,
-        Enumerator Statistics, Backcheck Analysis.
+        **Checks to explore:**
+        - **Overview:** Summary, Progress
+        - **Data integrity:** Missing Values, Duplicates, Outliers & Constraints,
+          GPS Checks
+        - **Field team:** Enumerator Stats, Backchecks
+        - **Exploration:** Descriptive Stats
         """,
     }
 
@@ -383,7 +374,7 @@ class OnboardingSteps:
                 - Under **New Value**, enter "UP015-055"
                 - Add **Reason for Correction** such as "Correcting duplicate HHID after investigation"
                 - Click on **:material/check: Apply** to save the correction.
-                - Go back to the **Duplicates** tab to verify that the duplicate has been resolved.
+                - Go back to the **Duplicates** check to verify that the duplicate has been resolved.
             2. You can apply a similar correction progress for all corrections. The options for corrections include:
                 - Modify Value: Modify a specific value in a column
                 - Remove Row: Remove an entire row from the dataset
@@ -452,19 +443,19 @@ class OutputOnboardingInfo:
             "content": """
         ##### Summary of Data Quality Checks
 
-        This tab provides an overview of the data quality checks performed on your survey data.
+        This check provides an overview of the data quality checks performed on your survey data.
         It summarizes key metrics such as the number of checks run, issues identified,
         and overall data quality score.
 
-        **Next**: Click on the :material/settings: settings icon to configure global settings for the summary tab.
+        **Next**: Click on the :material/settings: settings icon to configure global settings for the Summary check.
         """,
         },
         "summary_settings": {
             "title": "Summary Settings",
             "content": """
-        ##### Setup for Summary Tab
-        In this section, you can configure global settings for the summary tab, you will notice that some settings are pre-filled based on your check configuration.
-        This tab contains the following settings:
+        ##### Setup for Summary
+        In this section, you can configure global settings for the Summary check, you will notice that some settings are pre-filled based on your check configuration.
+        This check contains the following settings:
         - Survey ID: The main identifier for your survey respondents (e.g., household ID, Respondent ID).
         - Survey Date: The date when the survey was conducted or submitted. (e.g., submissiondate, starttime).
         - Total Expected Interviews: The total number of survey interviews you expect to have in your dataset (e.g., 1000).
@@ -531,9 +522,9 @@ class OutputOnboardingInfo:
         ##### Data Quality
         This section provides an overview of the overall data quality of your survey dataset, including:
         - % of duplicate values on ID column: Percentage of duplicate entries found in the ID column.
-        - % of values flagged as outliers: Percentage of checked values flagged as outliers on the **Outliers & Constraints** tab, leaving out accepted outliers. It appears once you add outlier columns on that tab — return here afterwards to see it.
+        - % of values flagged as outliers: Percentage of checked values flagged as outliers in the **Outliers & Constraints** check, leaving out accepted outliers. It appears once you add outlier columns in that check — return here afterwards to see it.
         - % of missing values in survey dataset: Percentage of missing or null values in the survey dataset.
-        - Backcheck error rate: The total error rate from the **Backcheck Analysis** tab, the percentage of compared values that differ between the survey and backcheck data. It appears once you add backcheck columns on that tab.
+        - Backcheck error rate: The total error rate from the **Backchecks** check, the percentage of compared values that differ between the survey and backcheck data. It appears once you add backcheck columns in that check.
         """,
         },
     }
@@ -543,17 +534,17 @@ class OutputOnboardingInfo:
             "title": "Progress Report",
             "content": """
         ### Survey Progress Report
-        This tab provides detailed insights into the progress of your survey data collection.
+        This check provides detailed insights into the progress of your survey data collection.
         It includes metrics such as submission counts over time, progress by enumerator or selected categories, and overall submission trends.
-        **Next**: Go to the :material/settings: settings icon to configure global settings for the survey progress tab.
+        **Next**: Go to the :material/settings: settings icon to configure global settings for the Progress check.
         """,
         },
         "progress_report_settings": {
             "title": "Progress Settings",
             "content": """
-        ##### Setup for Survey Progress Tab
-        In this section, you can configure global settings for the survey progress tab, you will notice that some settings are pre-filled based on your check configuration.
-        This tab contains the following settings:
+        ##### Setup for Progress
+        In this section, you can configure global settings for the Progress check, you will notice that some settings are pre-filled based on your check configuration.
+        This check contains the following settings:
         - Survey ID: The main identifier for your survey respondents (e.g., household ID, Respondent ID).
         - Date: The column indicating the date when the survey was conducted or submitted. (e.g., submissiondate, starttime).
         - Enumerator: The column indicating who collected the data (e.g., enumerator name or ID).
@@ -621,7 +612,7 @@ class OutputOnboardingInfo:
         For the demo, you will setup the consent and completion criteria as follows:
         - Consent Criteria: Select the "consent" column and set the value to "yes".
         - Completion Criteria: Select the "completion_status" column and set the value to "complete".
-        **Next**: Explore other tabs for more data quality insights.
+        **Next**: Explore the other checks for more data quality insights.
         """,
         },
     }
@@ -657,16 +648,16 @@ class OutputOnboardingInfo:
     }
     MISSING: ClassVar[dict] = {
         "missing_summary": {
-            "title": "Missing Values Tab",
+            "title": "Missing Values",
             "content": """
-        This tab helps you understand the extent and patterns of missing data in your survey dataset.
+        This check helps you understand the extent and patterns of missing data in your survey dataset.
 
-        **Start here**: At the top of this tab, configure your **missing value codes** (the
+        **Start here**: At the top of this check, configure your **missing value codes** (the
         :material/add: **Add** / :material/edit: **Modify** / :material/delete: **Delete** buttons).
         These codes tell DataSure which numeric values in your data represent survey-specific
         non-responses (e.g., -99 = Don't Know).
 
-        The tab then provides five sections:
+        The check then provides five sections:
         - **Missing Data Statistics**: High-level summary metrics.
         - **Missingness by Column**: Per-column breakdown with a filter slider.
         - **Compare Missing Data Within Groups**: Missing rates broken down by a grouping variable.
@@ -820,7 +811,7 @@ class OutputOnboardingInfo:
         "descriptive_report": {
             "title": "Descriptive Statistics",
             "content": """
-        This tab lets you explore the distribution and characteristics of any column
+        This check lets you explore the distribution and characteristics of any column
         in your dataset. Use the **column selector** below to choose which columns to
         analyse, then explore three sections:
 
@@ -952,7 +943,7 @@ def demo_output_onboarding(tab: str):
                     if (tab, func.__name__) not in _WARNED_MISSING_MESSAGES:
                         _WARNED_MISSING_MESSAGES.add((tab, func.__name__))
                         logger.warning(
-                            "No demo guidance for %s on the %s tab",
+                            "No demo guidance for %s on the %s check",
                             func.__name__,
                             tab,
                         )

@@ -1593,7 +1593,7 @@ def outliers_report(
 
     if is_demo_project():
         demo_callout(
-            "This tab checks your survey data against two types of rules:\n\n"
+            "This check tests your survey data against two types of rules:\n\n"
             "- **Constraint Violations**: Records that breach hard or soft numeric bounds "
             "you define (e.g., age below 0 or above 120).\n"
             "- **Outliers**: Records flagged by a statistical method (IQR or Standard "
@@ -1753,7 +1753,7 @@ def outliers_report(
         )
 
     demo_callout(
-        "**Next**: :material/arrow_upward: Scroll up and select the **GPS Checks** tab."
+        "**Next**: :material/arrow_upward: Scroll up and select **Data integrity → GPS Checks**."
     )
 
 

@@ -1871,7 +1871,7 @@ def gpschecks_report(
 
     if is_demo_project():
         demo_callout(
-            "This tab visualises your GPS data and checks coordinate quality. "
+            "This check visualises your GPS data and checks coordinate quality. "
             "It has three sections:\n\n"
             "- **GPS Coordinates Visualization**: Plot all survey GPS points on an "
             "interactive map, colour-coded by enumerator, team, or any categorical column.\n"
@@ -2019,7 +2019,7 @@ def gpschecks_report(
     )
 
     demo_callout(
-        "**Next**: :material/arrow_upward: Scroll up and select the **Enumerator Statistics** tab."
+        "**Next**: :material/arrow_upward: Scroll up and select **Field team → Enumerator Stats**."
     )
 
 

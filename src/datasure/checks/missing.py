@@ -1223,7 +1223,7 @@ def missing_matrix(missing_data: pl.DataFrame, color_map: list) -> None:
     st.plotly_chart(fig, width="stretch")
 
     demo_callout(
-        "**Next**: :material/arrow_upward: Scroll up and select the **Duplicates** tab."
+        "**Next**: :material/arrow_upward: Scroll up and select **Data integrity → Duplicates**."
     )
 
 

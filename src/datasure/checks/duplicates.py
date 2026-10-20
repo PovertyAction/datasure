@@ -2235,7 +2235,7 @@ def duplicates_report(
 
     if is_demo_project():
         demo_callout(
-            "This tab identifies duplicate records in your survey data. It has two sections:\n\n"
+            "This check identifies duplicate records in your survey data. It has two sections:\n\n"
             "- **ID Duplicates**: Records sharing the same Survey ID (e.g., two submissions "
             "with the same household ID).\n"
             "- **Other Duplicates**: Duplicates in any additional columns you configure.\n\n"
@@ -2388,7 +2388,7 @@ def duplicates_report(
     )
 
     demo_callout(
-        "**Next**: :material/arrow_upward: Scroll up and select the **Outliers & Constraints** tab."
+        "**Next**: :material/arrow_upward: Scroll up and select **Data integrity → Outliers & Constraints**."
     )
 
 

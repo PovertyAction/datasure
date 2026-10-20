@@ -69,7 +69,7 @@ from datasure.utils.dataframe_utils import (
 )
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
-from datasure.utils.navigations_utils import demo_callout, show_demo_next_action
+from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.reviewer import get_reviewer_name
 from datasure.utils.settings_utils import (
     load_check_settings,
@@ -2117,12 +2117,12 @@ def _render_comparison_scope(scope: ComparisonScope) -> None:
         if records.error:
             st.error(
                 f"The {records.label} Records to Include filter on the "
-                f"Duplicates tab could not be applied, so no {records.label} "
+                f"Duplicates check could not be applied, so no {records.label} "
                 f"records are compared: {records.error}"
             )
     lines = scope_captions(scope)
     if lines:
-        hint = "Change Records to Include in the Duplicates tab settings."
+        hint = "Change Records to Include in the Duplicates check settings."
         # Two trailing spaces make a Markdown line break.
         st.caption("  \n".join([*lines, hint]))
 
@@ -2169,7 +2169,7 @@ def backchecks_report(
 
     demo_callout(
         """
-        This tab compares original survey responses against back check responses to
+        This check compares original survey responses against back check responses to
         identify discrepancies.
 
         It has five sections:
@@ -2361,16 +2361,9 @@ def backchecks_report(
 
     st.write("---")
     demo_callout(
-        "You have now explored all the data quality check tabs — Summary, Descriptive Statistics, "
-        "Progress Tracking, Missing Values, Duplicates, Outliers & Constraints, GPS Checks, "
-        "Enumerator Statistics, and Backcheck Analysis.\n\n"
-        "The next step is the **Correct Data** page, where you will learn how to apply targeted "
-        "corrections to your survey data based on the quality findings from these checks.\n\n"
-        "To get there, click **Correct Data** in the sidebar or use the **Proceed to Correct Data** "
-        "button below.",
-        type="success",
+        "**Next**: :material/arrow_upward: Scroll up and select "
+        "**Exploration → Descriptive Stats**."
     )
-    show_demo_next_action(5, "st_corr_page", "Proceed to Correct Data")
 
 
 def backchecks_status(
