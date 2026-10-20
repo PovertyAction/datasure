@@ -26,6 +26,7 @@ from datasure.checks.gpschecks.compute import (
     detect_outliers_with_clusters,
     detect_outliers_with_lof,
     find_gps_columns,
+    has_usable_gps_config,
 )
 from datasure.checks.gpschecks.models import MAPBOX_STYLE
 from datasure.checks.gpschecks.review import (
@@ -2064,13 +2065,18 @@ def gpschecks_status(
 ) -> StatusResult:
     """Return the GPS check's status for the check page navigation.
 
-    Not applicable when no column looks like GPS data; not set up until a GPS
-    column configuration is added.
+    Ready when a saved GPS column configuration uses columns in the data,
+    whatever they are named. Otherwise not applicable when no column looks
+    like GPS data (``find_gps_columns``), and not set up until a GPS column
+    configuration is added. The settings stay reachable in every state.
     """
+    gps_config = _get_gps_column_settings(project_id, page_name_id)
+    if has_usable_gps_config(gps_config, data.columns):
+        return READY
     if not find_gps_columns(data):
         return StatusResult(
             CheckStatus.NOT_APPLICABLE, "No GPS column found in this dataset."
         )
-    if _get_gps_column_settings(project_id, page_name_id).is_empty():
+    if gps_config.is_empty():
         return StatusResult(CheckStatus.NOT_SET_UP, "No GPS columns are set up yet.")
     return READY

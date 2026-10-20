@@ -107,6 +107,21 @@ def _get_gps_column_settings(project_id: str, page_name_id: str) -> pl.DataFrame
     )
 
 
+def has_usable_gps_config(gps_config: pl.DataFrame, columns: list[str]) -> bool:
+    """Return whether a saved GPS column configuration fits the data.
+
+    A configuration fits when its single GPS column, or both its latitude
+    and longitude columns, are in ``columns``.
+    """
+    present = set(columns)
+    for row in gps_config.to_dicts():
+        if row.get("gps_column") in present:
+            return True
+        if {row.get("latitude_column"), row.get("longitude_column")} <= present:
+            return True
+    return False
+
+
 def _save_gps_column_settings(
     project_id: str, page_name_id: str, settings: pl.DataFrame
 ) -> None:

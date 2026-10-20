@@ -205,6 +205,39 @@ class TestGpsChecksStatus:
 
         assert gpschecks_status(PROJECT_ID, PAGE, data) == (READY, "")
 
+    @pytest.mark.parametrize(
+        "config",
+        [
+            {"alias": ["home"], "latitude_column": ["y"], "longitude_column": ["x"]},
+            {"alias": ["home"], "gps_column": ["where"]},
+        ],
+    )
+    def test_ready_when_configured_columns_exist_whatever_their_names(self, config):
+        """A configured project is never locked out by the name heuristic."""
+        data = SURVEY.with_columns(
+            pl.lit(1.0).alias("y"), pl.lit(2.0).alias("x"), pl.lit("n/a").alias("where")
+        )
+        assert not find_gps_columns(data)
+        duckdb_save_table(
+            PROJECT_ID, pl.DataFrame(config), f"gps_columns_{PAGE}", "logs"
+        )
+
+        assert gpschecks_status(PROJECT_ID, PAGE, data) == (READY, "")
+
+    def test_configured_columns_missing_from_the_data_do_not_count(self):
+        duckdb_save_table(
+            PROJECT_ID,
+            pl.DataFrame(
+                {"alias": ["home"], "latitude_column": ["y"], "longitude_column": ["x"]}
+            ),
+            f"gps_columns_{PAGE}",
+            "logs",
+        )
+
+        status, _ = gpschecks_status(PROJECT_ID, PAGE, SURVEY)
+
+        assert status is NOT_APPLICABLE
+
 
 class TestEnumeratorStatus:
     def test_ready_with_enumerator_and_date(self, settings_file):
