@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Before opening a new issue, [search existing issues](https://github.com/PovertyAction/datasure/issues?q=is%3Aissue%20sort%3Aupdated-desc).
+        Before opening a new issue, check the [known issues](https://github.com/PovertyAction/datasure/blob/main/KNOWN_ISSUES.md) list, which includes workarounds, and [search existing issues](https://github.com/PovertyAction/datasure/issues?q=is%3Aissue%20sort%3Aupdated-desc).
         If you find the same problem, upvote it with a 👍 instead of commenting "+1".
         If you are unsure whether it is the same, open a new issue and link the possible duplicate.
 
