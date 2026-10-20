@@ -89,8 +89,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`dataset_status`); a status that raises marks only that dataset
     (`guarded_status`), and `render_dataset` takes the dataset's nav item
     instead of computing its status again
-  - A "Reset filters" action above the selected dataset clears that
-    dataset's view state
   - The `dataset` URL query parameter reflects and drives the selection,
     which is saved in the `view_state` of `prep_view_settings.json`
   - `prep_add_step` and `prep_remove_step` take the dataset and its step
@@ -122,6 +120,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `checks/missing.py`). An older settings file still loads: the values move
   from the check's settings into view state on first use
   (`ViewState.adopt_legacy`, `view_factory(..., legacy=...)`)
+- **The other checks' view choices are view state too** (#375): The
+  Descriptive Stats histogram and value counts choices, the enumerator
+  periods, columns and statistics, the backcheck productivity period and
+  staff statistics view, the outliers inspected column and the extra report
+  columns of duplicates and outliers were still saved with the check's
+  settings. They now bind to the check's `view_state` scope and move there
+  from older settings files on first use. The enumerator productivity period
+  is now restored (it was saved under a different key than it was read
+  from), and the two enumerator week start pickers no longer overwrite each
+  other
+- **GPS detection choices are remembered** (#375): The GPS outlier
+  detection method and clustering column and the comparison distance
+  threshold reset whenever the user switched checks. They are now view state
+- **A stale GPS configuration is not set up** (#374): GPS Checks counted as
+  ready when its saved configuration's columns were missing from the data,
+  as long as another column looked like GPS data. It is now not set up, with
+  the reason (`gpschecks_status`)
+- **Corrections empty state** (#377): A dimmed check page shows the shared
+  not-set-up or error state (`nav_ui.render_empty_state`) instead of its own
+  message
+- **No Reset filters on Prepare Data** (#377): The action could never clear
+  anything, because a dataset's only inputs are in dialogs, which are not
+  saved. It is removed
 - **Not-applicable checks keep their settings** (#373): A not-applicable
   check shows its settings section under the empty state
   (`CheckEntry.settings`, `render_selected(settings=...)`;

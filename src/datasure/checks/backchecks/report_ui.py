@@ -71,11 +71,6 @@ from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.reviewer import get_reviewer_name
-from datasure.utils.settings_utils import (
-    load_check_settings,
-    save_check_settings,
-    trigger_save,
-)
 from datasure.utils.ui_utils import (
     metric_row,
     queue_notice,
@@ -86,9 +81,25 @@ from datasure.utils.view_state import ViewState, bind_widget, view_factory
 
 logger = logging.getLogger(__name__)
 
-# Saved view state scope: the check's catalogue slug.
+# Saved view state scope: the check's catalogue slug. The productivity period
+# and week start and the staff statistics view are personal view state; older
+# versions saved them in the check's settings and they move on first load.
 VIEW_SCOPE = "backchecks"
-check_view = view_factory(VIEW_SCOPE)
+check_view = view_factory(
+    VIEW_SCOPE,
+    legacy=(
+        TAB_NAME,
+        {
+            "time_period_backchecker_productivity_key": (
+                "time_period_backchecker_productivity"
+            ),
+            "week_start_day_backchecker_productivity_key": (
+                "weekstartday_backchecker_productivity"
+            ),
+            "enum_bcer_stats_view_key": "enum_bcer_stats_view",
+        },
+    ),
+)
 
 # ==============================================================================
 # COLUMN CONFIGURATION FUNCTIONS
@@ -988,27 +999,18 @@ def _render_time_period_selector_backchecks(
         "Month": ":material/calendar_month: Monthly",
     }
 
-    saved_settings = load_check_settings(settings_file, TAB_NAME) or {}
-    default_time_period = saved_settings.get(
-        "time_period_backchecker_productivity", "Day"
-    )
-
     with st.container(horizontal_alignment="left"):
         time_period = st.pills(
             label="Time Period",
             options=options_map.keys(),
             format_func=lambda x: options_map[x],
-            key="time_period_backchecker_productivity_key",
-            default=default_time_period,
             help="Select time period for aggregating backchecker productivity",
             selection_mode="single",
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_time_period_backchecker"},
-        )
-        save_check_settings(
-            settings_file,
-            TAB_NAME,
-            {"time_period_backchecker_productivity": time_period},
+            **check_view(settings_file).bind(
+                "time_period_backchecker_productivity_key",
+                options=list(options_map),
+                default="Day",
+            ),
         )
 
     return time_period or "Day"
@@ -1032,28 +1034,18 @@ def _render_weekday_selector_backchecks(
     str
         Weekday offset code (e.g., "SUN", "MON") for calculations.
     """
-    saved_settings = load_check_settings(settings_file, TAB_NAME) or {}
-    default_weekstartday_sel = saved_settings.get(
-        "weekstartday_backchecker_productivity", "Monday"
-    )
-    default_weekstartday_sel_index = WEEKDAY_NAMES.index(default_weekstartday_sel)
-
     cl1, _ = st.columns([1, 3])
     with cl1:
         weekstartday_sel = st.selectbox(
             label="Select the first day of the week",
             options=WEEKDAY_NAMES,
-            index=default_weekstartday_sel_index,
-            key="week_start_day_backchecker_productivity_key",
             help="Select the first day of the week",
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_weekstartday_backchecker"},
+            **check_view(settings_file).bind(
+                "week_start_day_backchecker_productivity_key",
+                options=WEEKDAY_NAMES,
+                index=WEEKDAY_NAMES.index("Monday"),
+            ),
         )
-    save_check_settings(
-        settings_file,
-        TAB_NAME,
-        {"weekstartday_backchecker_productivity": weekstartday_sel},
-    )
 
     return WEEKDAY_OFFSET_MAP[weekstartday_sel]
 
@@ -1172,21 +1164,14 @@ def _render_enum_bcer_stats_table(
     options = ["Enumerator", "Backchecker"]
 
     # Pills selector
-    saved_settings = load_check_settings(settings_file, TAB_NAME) or {}
-    default_view = saved_settings.get("enum_bcer_stats_view", options[0])
-
     view_selection = st.pills(
         label="View Statistics",
         options=options,
-        default=default_view,
-        key="enum_bcer_stats_view_key",
         help="Select which statistics to view",
         selection_mode="single",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_enum_bcer_stats_view"},
-    )
-    save_check_settings(
-        settings_file, TAB_NAME, {"enum_bcer_stats_view": view_selection}
+        **check_view(settings_file).bind(
+            "enum_bcer_stats_view_key", options=options, default=options[0]
+        ),
     )
 
     # Compute and display statistics

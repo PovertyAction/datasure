@@ -69,11 +69,6 @@ from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import is_demo_project
-from datasure.utils.settings_utils import (
-    load_check_settings,
-    save_check_settings,
-    trigger_save,
-)
 from datasure.utils.ui_utils import (
     queue_notice,
     row_styler,
@@ -84,9 +79,20 @@ from datasure.utils.view_state import view_factory
 
 logger = logging.getLogger(__name__)
 
-# Saved view state scope: the check's catalogue slug.
+# Saved view state scope: the check's catalogue slug. The inspected column and
+# the extra constraint violation columns are personal view state; older
+# versions saved them in the check's settings and they move on first load.
 VIEW_SCOPE = "outliers"
-check_view = view_factory(VIEW_SCOPE)
+check_view = view_factory(
+    VIEW_SCOPE,
+    legacy=(
+        TAB_NAME,
+        {
+            "outlier_inspect_col": "selected_col",
+            "constraint_violation_display_cols": "constraint_display_cols",
+        },
+    ),
+)
 
 # =============================================================================
 # Streamlit UI - Metrics Display
@@ -476,7 +482,6 @@ def _show_saved_toast() -> None:
 
 def _render_display_columns_expander(
     setting_file: str,
-    settings_key: str,
     widget_key: str,
     display_options: list[str],
     info_message: str,
@@ -484,16 +489,12 @@ def _render_display_columns_expander(
     """Render the "Show more columns" expander and return the selected columns.
 
     Used by ``_render_constraint_violations_table`` to let users add extra
-    context columns to the results table, persisting the selection to the
-    settings file under ``settings_key``.
+    context columns to the results table. The selection is saved view state.
 
     Parameters
     ----------
     setting_file : str
-        Path to settings file.
-    settings_key : str
-        Key under which the selected columns are persisted in settings, and
-        used as the suffix for the ``trigger_save`` state name.
+        Path to the page settings file holding the view state.
     widget_key : str
         Streamlit widget key for the multiselect.
     display_options : list[str]
@@ -506,21 +507,15 @@ def _render_display_columns_expander(
     list[str]
         Columns selected by the user.
     """
-    saved_settings = load_check_settings(setting_file, TAB_NAME)
-    cols = saved_settings.get(settings_key, [])
-    default_display_cols = [col for col in cols if col in display_options]
-
     with st.expander(":material/clarify: Show more columns in report", expanded=False):
         st.info(info_message)
         display_cols = st.multiselect(
             label="Select columns to display",
             options=display_options,
-            default=default_display_cols,
-            key=widget_key,
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_" + settings_key},
+            **check_view(setting_file).bind(
+                widget_key, options=display_options, multi=True, default=[]
+            ),
         )
-        save_check_settings(setting_file, TAB_NAME, {settings_key: display_cols})
 
     return display_cols
 
@@ -572,7 +567,6 @@ def _render_constraint_violations_table(
 
     constraint_display_cols = _render_display_columns_expander(
         setting_file,
-        "constraint_display_cols",
         "constraint_violation_display_cols",
         display_options,
         "Select additional columns to include in the constraint violations report.",
@@ -661,25 +655,15 @@ def _render_outlier_column_inspection(
     ic1, _ = st.columns([0.2, 0.8])
 
     with ic1:
-        # get saved settings
-        saved_settings = load_check_settings(setting_file, TAB_NAME)
-        default_selected_col = saved_settings.get("selected_col", None)
-        default_selected_col_index = (
-            columns_checked_list.index(default_selected_col)
-            if default_selected_col and default_selected_col in columns_checked_list
-            else None
-        )
         selected_col = st.selectbox(
             label="Select outlier columns to inspect",
             options=columns_checked_list,
-            index=default_selected_col_index,
-            key="outlier_inspect_col",
             help="Select the outlier columns to inspect. "
             "You can only select one column at a time.",
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_selected_col"},
+            **check_view(setting_file).bind(
+                "outlier_inspect_col", options=columns_checked_list, index=None
+            ),
         )
-        save_check_settings(setting_file, TAB_NAME, {"selected_col": selected_col})
 
         if not selected_col:
             st.info("Select an outlier column to inspect.")

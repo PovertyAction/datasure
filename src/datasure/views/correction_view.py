@@ -43,6 +43,7 @@ from datasure.utils.nav_ui import (
     PROJECT_VIEW_FILE,
     draw_nav,
     guarded_status,
+    render_empty_state,
     resolve_selection,
     run_guarded,
     select_nav_item,
@@ -1085,10 +1086,8 @@ def render_selected_check_page(
     save_selection(settings_file, state.selected)
     item = state.selected_item
     if item.dimmed:
-        st.info(
-            f"**{item.label}** has nothing to correct. {item.reason}",
-            icon=":material/info:",
-        )
+        # Each reason names the page where the setup happens.
+        render_empty_state(item, setup_hint="")
     else:
         view = ViewState(settings_file, state.selected)
         reset_filters_button(view, key=CORRECTIONS_NAV_KEY)

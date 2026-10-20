@@ -45,11 +45,6 @@ from datasure.checks.id_duplicates import (
     sort_cards,
 )
 from datasure.processing.corrections import CorrectionEntry, CorrectionProcessor
-from datasure.utils.settings_utils import (
-    load_check_settings,
-    save_check_settings,
-    trigger_save,
-)
 from datasure.utils.ui_utils import (
     confirm_dialog,
     metric_row,
@@ -88,7 +83,8 @@ class IdView:
     staff_col, team_col : str | None
         The enumerator (or backchecker) and team columns.
     display_cols_setting : str
-        Settings key under which the extra columns to show are saved.
+        Settings key under which older versions saved the extra columns to
+        show; a choice found there moves into the view state.
     survey_data : pl.DataFrame | None
         Survey data to match backcheck IDs against. When set, the view also
         shows unmatched ID cards.
@@ -197,20 +193,15 @@ def render_dataset_switcher(
 def _render_display_cols(view: IdView, settings_file: str) -> list[str]:
     """Render the "Show more columns in report" picker and return its choice."""
     with st.expander(":material/clarify: Show more columns in report", expanded=False):
-        saved = load_check_settings(settings_file, TAB_NAME)
         options = [c for c in view.data.columns if c not in (view.id_col, view.key_col)]
-        default = [c for c in saved.get(view.display_cols_setting, []) if c in options]
+        widget_key = f"iddup_{view.name}_display_cols"
+        saved_view = check_view(settings_file)
+        saved_view.adopt_legacy(TAB_NAME, {widget_key: view.display_cols_setting})
         chosen = st.multiselect(
             label="Select additional columns to display",
             options=options,
-            default=default,
             help="Columns to show on every card and in the CSV download.",
-            key=f"iddup_{view.name}_display_cols",
-            on_change=trigger_save,
-            kwargs={"state_name": f"{TAB_NAME}_{view.display_cols_setting}"},
-        )
-        save_check_settings(
-            settings_file, TAB_NAME, {view.display_cols_setting: chosen}
+            **saved_view.bind(widget_key, options=options, multi=True, default=[]),
         )
     return chosen
 

@@ -195,15 +195,40 @@ class TestGpsChecksStatus:
         assert "GPS" in reason
 
     def test_ready_with_a_gps_configuration(self):
-        data = SURVEY.with_columns(pl.lit(1.0).alias("gps_latitude"))
+        data = SURVEY.with_columns(
+            pl.lit(1.0).alias("gps_latitude"), pl.lit(2.0).alias("gps_longitude")
+        )
         duckdb_save_table(
             PROJECT_ID,
-            pl.DataFrame({"alias": ["household"], "latitude_column": ["gps_latitude"]}),
+            pl.DataFrame(
+                {
+                    "alias": ["household"],
+                    "latitude_column": ["gps_latitude"],
+                    "longitude_column": ["gps_longitude"],
+                }
+            ),
             f"gps_columns_{PAGE}",
             "logs",
         )
 
         assert gpschecks_status(PROJECT_ID, PAGE, data) == (READY, "")
+
+    def test_not_set_up_when_the_saved_configuration_no_longer_fits(self):
+        """A configuration whose columns were removed must be updated."""
+        data = SURVEY.with_columns(pl.lit(1.0).alias("gps_latitude"))
+        duckdb_save_table(
+            PROJECT_ID,
+            pl.DataFrame(
+                {"alias": ["old"], "latitude_column": ["y"], "longitude_column": ["x"]}
+            ),
+            f"gps_columns_{PAGE}",
+            "logs",
+        )
+
+        status, reason = gpschecks_status(PROJECT_ID, PAGE, data)
+
+        assert status is NOT_SET_UP
+        assert "not in this dataset" in reason
 
     @pytest.mark.parametrize(
         "config",

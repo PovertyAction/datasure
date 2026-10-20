@@ -54,11 +54,6 @@ def patched_bc():
     mock_st = make_mock_st()
     with (
         patch("datasure.checks.backchecks.report_ui.st", mock_st),
-        patch("datasure.checks.backchecks.report_ui.save_check_settings"),
-        patch(
-            "datasure.checks.backchecks.report_ui.load_check_settings", return_value={}
-        ),
-        patch("datasure.checks.backchecks.report_ui.trigger_save"),
         patch(
             "datasure.checks.backchecks.report_ui.duckdb_get_table",
             return_value=pl.DataFrame(),
@@ -95,9 +90,6 @@ def bc():
         settings_ui_module.save_check_settings = MagicMock()
         settings_ui_module.trigger_save = MagicMock()
 
-        report_ui_module.load_check_settings = MagicMock(return_value={})
-        report_ui_module.save_check_settings = MagicMock()
-        report_ui_module.trigger_save = MagicMock()
         report_ui_module.duckdb_get_table = MagicMock(return_value=pl.DataFrame())
         report_ui_module.duckdb_save_table = MagicMock()
         report_ui_module.demo_callout = MagicMock()

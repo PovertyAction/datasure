@@ -31,16 +31,29 @@ from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
-from datasure.utils.settings_utils import (
-    load_check_settings,
-    save_check_settings,
-    trigger_save,
-)
+from datasure.utils.settings_utils import load_check_settings
 from datasure.utils.view_state import ViewState, bind_widget, view_factory
 
-# Saved view state scope: the check's catalogue slug.
+# Saved view state scope: the check's catalogue slug. The report's periods,
+# columns and statistics are personal view state; older versions saved them in
+# the check's settings and they move on first load. Both week start pickers
+# saved under "weekstartday"; the statistics over time one was saved last.
 VIEW_SCOPE = "enumerator"
-check_view = view_factory(VIEW_SCOPE)
+check_view = view_factory(
+    VIEW_SCOPE,
+    legacy=(
+        TAB_NAME,
+        {
+            "time_period_enumerator_productivity_key": "time_period",
+            "selected_columns_enumerator": "statscols",
+            "statistics_options_enumerator": "stats",
+            "project_enumerator_statistics_overtime_period_pills": "period_overtime",
+            "project_week_start_day_enumerator_overtime": "weekstartday",
+            "enumerator_statistics_overtime_stat": "stat",
+            "enumerator_statistics_overtime_column": "statscol",
+        },
+    ),
+)
 
 # =============================================================================
 # Display Functions - Overview
@@ -400,9 +413,9 @@ def _render_enumerator_productivity_table(
     settings_file : str
         Path to settings file for saving/loading configurations.
     """
-    time_period = _render_time_period_selector(settings_file, tab_name=TAB_NAME)
+    time_period = _render_time_period_selector(settings_file)
     if time_period == "Week":
-        weekstartday = _render_weekday_selector(settings_file, tab_name=TAB_NAME)
+        weekstartday = _render_weekday_selector(settings_file)
     else:
         weekstartday = "MON"  # Default value, not used for non-weekly periods
 
@@ -437,19 +450,17 @@ def _render_enumerator_productivity_table(
 
 def _render_time_period_selector(
     settings_file: str,
-    tab_name: str = TAB_NAME,
 ) -> Literal["Day", "Week", "Month"]:
     """Render time period selector widget using pills interface.
 
     Displays a pills widget allowing users to choose the time aggregation period
-    for productivity analysis (Day, Week, or Month).
+    for productivity analysis (Day, Week, or Month). The choice is saved view
+    state.
 
     Parameters
     ----------
     settings_file : str
-        Path to settings file for saving/loading configurations.
-    tab_name : str
-        Name of the tab for settings storage (default: TAB_NAME).
+        Path to the page settings file holding the view state.
 
     Returns
     -------
@@ -462,67 +473,51 @@ def _render_time_period_selector(
         "Month": ":material/calendar_month: Monthly",
     }
 
-    saved_settings = load_check_settings(settings_file, tab_name) or {}
-    default_time_period = saved_settings.get(
-        "time_period_enumerator_productivity", "Day"
-    )
-
     with st.container(horizontal_alignment="left"):
         time_period = st.pills(
             label="Time Period",
             options=options_map.keys(),
             format_func=lambda x: options_map[x],
-            key="time_period_enumerator_productivity_key",
-            default=default_time_period,
             help="Select time period for aggregating productivity",
             selection_mode="single",
-            on_change=trigger_save,
-            kwargs={"state_name": tab_name + "_time_period"},
+            **check_view(settings_file).bind(
+                "time_period_enumerator_productivity_key",
+                options=list(options_map),
+                default="Day",
+            ),
         )
-        save_check_settings(settings_file, tab_name, {"time_period": time_period})
 
     return time_period or "Day"
 
 
-def _render_weekday_selector(
-    settings_file: str,
-    tab_name: str = TAB_NAME,
-) -> str:
+def _render_weekday_selector(settings_file: str) -> str:
     """Render weekday selector widget for productivity analysis.
 
     Displays a selectbox allowing users to choose the first day of the week
-    for weekly productivity calculations.
+    for weekly productivity calculations. The choice is saved view state.
 
     Parameters
     ----------
     settings_file : str
-        Path to settings file for saving/loading configurations.
-    tab_name : str
-        Name of the tab for settings storage (default: TAB_NAME).
+        Path to the page settings file holding the view state.
 
     Returns
     -------
     str
         Weekday offset code (e.g., "SUN", "MON") for calculations.
     """
-    saved_settings = load_check_settings(settings_file, tab_name) or {}
-    default_weekstartday_sel = saved_settings.get(
-        "weekstartday_enumerator_productivity", "Monday"
-    )
-    default_weekstartday_sel_index = WEEKDAY_NAMES.index(default_weekstartday_sel)
-
     cl1, _ = st.columns([1, 3])
     with cl1:
         weekstartday_sel = st.selectbox(
             label="Select the first day of the week",
             options=WEEKDAY_NAMES,
-            index=default_weekstartday_sel_index,
-            key="week_start_day_enumerator_productivity_key",
             help="Select the first day of the week",
-            on_change=trigger_save,
-            kwargs={"state_name": tab_name + "_weekstartday"},
+            **check_view(settings_file).bind(
+                "week_start_day_enumerator_productivity_key",
+                options=WEEKDAY_NAMES,
+                index=WEEKDAY_NAMES.index("Monday"),
+            ),
         )
-    save_check_settings(settings_file, tab_name, {"weekstartday": weekstartday_sel})
 
     return WEEKDAY_OFFSET_MAP[weekstartday_sel]
 
@@ -530,27 +525,6 @@ def _render_weekday_selector(
 # =============================================================================
 # Display Functions - Statistics
 # =============================================================================
-
-
-def _load_statistics_settings(settings_file: str) -> StatisticsSettings:
-    """Load and validate statistics settings from file.
-
-    Parameters
-    ----------
-    settings_file : str
-        Path to settings file.
-
-    Returns
-    -------
-    StatisticsSettings
-        Validated statistics settings.
-    """
-    saved_settings = load_check_settings(settings_file, TAB_NAME) or {}
-    try:
-        return StatisticsSettings(**saved_settings)
-    except ValueError:
-        # Return default settings if validation fails
-        return StatisticsSettings()
 
 
 def _get_numeric_columns(
@@ -592,7 +566,7 @@ def _render_column_selector(
     default_cols : list[str] | None
         Default selected columns.
     settings_file : str
-        Path to settings file.
+        Path to the page settings file holding the view state.
 
     Returns
     -------
@@ -602,13 +576,14 @@ def _render_column_selector(
     selected_cols = st.multiselect(
         label="Select columns:",
         options=numeric_cols,
-        default=default_cols,
         help="Select columns to include in statistics",
-        key="selected_columns_enumerator",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_statscols"},
+        **check_view(settings_file).bind(
+            "selected_columns_enumerator",
+            options=numeric_cols,
+            multi=True,
+            default=default_cols,
+        ),
     )
-    save_check_settings(settings_file, TAB_NAME, {"statscols": selected_cols})
     return selected_cols
 
 
@@ -623,7 +598,7 @@ def _render_statistics_selector(
     default_stats : list[str]
         Default selected statistics.
     settings_file : str
-        Path to settings file.
+        Path to the page settings file holding the view state.
 
     Returns
     -------
@@ -633,13 +608,14 @@ def _render_statistics_selector(
     selected_stats = st.multiselect(
         "Select statistics:",
         options=ALLOWED_STATISTICS,
-        default=default_stats,
         help="Select statistics to calculate",
-        key="statistics_options_enumerator",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_stats"},
+        **check_view(settings_file).bind(
+            "statistics_options_enumerator",
+            options=ALLOWED_STATISTICS,
+            multi=True,
+            default=default_stats,
+        ),
     )
-    save_check_settings(settings_file, TAB_NAME, {"stats": selected_stats})
     return selected_stats
 
 
@@ -674,8 +650,8 @@ def _render_enumerator_statistics_table(
         )
         return
 
-    # Load and validate settings using Pydantic
-    settings = _load_statistics_settings(settings_file)
+    # Widget defaults; the user's choices are saved view state
+    settings = StatisticsSettings()
 
     # Build exclusion list for numeric columns
     exclude_cols = [enumerator, "consent_granted_agg_col", "completed_survey_agg_col"]
@@ -760,29 +736,6 @@ def _render_enumerator_statistics(
     )
 
 
-def _load_statistics_overtime_settings(
-    settings_file: str,
-) -> StatisticsOvertimeSettings:
-    """Load and validate statistics overtime settings from file.
-
-    Parameters
-    ----------
-    settings_file : str
-        Path to settings file.
-
-    Returns
-    -------
-    StatisticsOvertimeSettings
-        Validated statistics overtime settings.
-    """
-    saved_settings = load_check_settings(settings_file, TAB_NAME) or {}
-    try:
-        return StatisticsOvertimeSettings(**saved_settings)
-    except ValueError:
-        # Return default settings if validation fails
-        return StatisticsOvertimeSettings()
-
-
 def _render_period_selector_overtime(
     settings_file: str,
     default_period: str = "Week",
@@ -794,7 +747,7 @@ def _render_period_selector_overtime(
     default_period : str
         Default selected period.
     settings_file : str
-        Path to settings file.
+        Path to the page settings file holding the view state.
 
     Returns
     -------
@@ -810,14 +763,14 @@ def _render_period_selector_overtime(
         label="Select Time Period:",
         options=options_map.keys(),
         format_func=lambda x: options_map[x],
-        default=default_period,
-        key="project_enumerator_statistics_overtime_period_pills",
         help="Select time period for aggregating statistics",
         selection_mode="single",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_period_overtime"},
+        **check_view(settings_file).bind(
+            "project_enumerator_statistics_overtime_period_pills",
+            options=list(options_map),
+            default=default_period,
+        ),
     )
-    save_check_settings(settings_file, TAB_NAME, {"period_overtime": period})
     return period or "Day"
 
 
@@ -832,25 +785,23 @@ def _render_weekday_selector_overtime(
     default_weekday : str
         Default selected weekday.
     settings_file : str
-        Path to settings file.
+        Path to the page settings file holding the view state.
 
     Returns
     -------
     str
         Selected weekday offset code (e.g., "SUN", "MON").
     """
-    default_weekday_index = WEEKDAY_NAMES.index(default_weekday)
-
     weekday_sel = st.selectbox(
         label="Select the first day of the week",
         options=WEEKDAY_NAMES,
-        index=default_weekday_index,
         help="Select the first day of the week",
-        key="project_week_start_day_enumerator_overtime",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_weekstartday_overtime"},
+        **check_view(settings_file).bind(
+            "project_week_start_day_enumerator_overtime",
+            options=WEEKDAY_NAMES,
+            index=WEEKDAY_NAMES.index(default_weekday),
+        ),
     )
-    save_check_settings(settings_file, TAB_NAME, {"weekstartday": weekday_sel})
 
     return WEEKDAY_OFFSET_MAP[weekday_sel]
 
@@ -866,25 +817,23 @@ def _render_statistic_selector(
     default_stat : str
         Default selected statistic.
     settings_file : str
-        Path to settings file.
+        Path to the page settings file holding the view state.
 
     Returns
     -------
     str
         Selected statistic.
     """
-    default_stat_index = ALLOWED_STATISTICS_OVERTIME.index(default_stat)
-
     stat = st.selectbox(
         label="Select statistic:",
         options=ALLOWED_STATISTICS_OVERTIME,
-        index=default_stat_index,
         help="Select statistic to calculate over time",
-        key="enumerator_statistics_overtime_stat",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_stat_overtime"},
+        **check_view(settings_file).bind(
+            "enumerator_statistics_overtime_stat",
+            options=ALLOWED_STATISTICS_OVERTIME,
+            index=ALLOWED_STATISTICS_OVERTIME.index(default_stat),
+        ),
     )
-    save_check_settings(settings_file, TAB_NAME, {"stat": stat})
     return stat
 
 
@@ -902,7 +851,7 @@ def _render_column_selector_single(
     default_col : str | None
         Default selected column.
     settings_file : str
-        Path to settings file.
+        Path to the page settings file holding the view state.
 
     Returns
     -------
@@ -918,13 +867,13 @@ def _render_column_selector_single(
     statscol = st.selectbox(
         label="Select column:",
         options=numeric_cols,
-        index=default_col_index,
         help="Select column to include in statistics",
-        key="enumerator_statistics_overtime_column",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_statscol_overtime"},
+        **check_view(settings_file).bind(
+            "enumerator_statistics_overtime_column",
+            options=numeric_cols,
+            index=default_col_index,
+        ),
     )
-    save_check_settings(settings_file, TAB_NAME, {"statscol": statscol})
     return statscol
 
 
@@ -958,8 +907,8 @@ def _render_enumerator_statistics_overtime_table(
     if not (enumerator and date):
         return
 
-    # Load and validate settings using Pydantic
-    settings = _load_statistics_overtime_settings(settings_file)
+    # Widget defaults; the user's choices are saved view state
+    settings = StatisticsOvertimeSettings()
 
     # Build exclusion list for numeric columns
     exclude_cols = [enumerator, "consent_granted_agg_col", "completed_survey_agg_col"]

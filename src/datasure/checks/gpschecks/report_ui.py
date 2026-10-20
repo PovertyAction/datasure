@@ -661,6 +661,7 @@ def _run_cluster_detection(
     df_pd,
     string_columns: list[str],
     go3_column,
+    view: ViewState | None = None,
 ) -> tuple[object | None, str | None]:
     """Render cluster detection UI controls and run detection.
 
@@ -672,6 +673,8 @@ def _run_cluster_detection(
         Available categorical columns for clustering.
     go3_column
         Streamlit column context for the clustering column selector.
+    view : ViewState | None
+        Where the clustering column choice is saved, if anywhere.
 
     Returns
     -------
@@ -682,8 +685,8 @@ def _run_cluster_detection(
         clustering_col = st.selectbox(
             label="Clustering Column",
             options=[None] + string_columns,
-            key="outlier_clustering_col",
             help="Select a column to group GPS coordinates for outlier detection.",
+            **bind_widget(view, "outlier_clustering_col", options=string_columns),
         )
 
     if not clustering_col:
@@ -1329,12 +1332,14 @@ def _render_gps_outliers_checks(
     df_columns: ColumnByType = get_df_columns(parsed_data)
     string_columns = df_columns.categorical_columns
 
+    view = _page_view(project_id, page_name_id)
+    methods = [item.value for item in GPSOutlierMethod]
     with go2:
         detection_method = st.selectbox(
             label="Detection Method",
-            options=[item.value for item in GPSOutlierMethod],
-            key="outlier_detection_method",
+            options=methods,
             help="Choose how to detect outliers: automatic or based on a grouping column.",
+            **view.bind("outlier_detection_method", options=methods),
         )
 
     # Run selected detection method
@@ -1342,7 +1347,9 @@ def _render_gps_outliers_checks(
     if detection_method == GPSOutlierMethod.auto_lof.value:
         outlier_df = _run_lof_detection(df_pd, len(df_pd), go3)
     else:
-        outlier_df, clustering_col = _run_cluster_detection(df_pd, string_columns, go3)
+        outlier_df, clustering_col = _run_cluster_detection(
+            df_pd, string_columns, go3, view
+        )
 
     if outlier_df is None:
         return
@@ -1407,7 +1414,7 @@ def _render_gps_outliers_checks(
         detection_method,
         clustering_col,
         review,
-        view=_page_view(project_id, page_name_id),
+        view=view,
     )
 
 
@@ -1451,8 +1458,8 @@ def _render_comparison_selectors(
 ) -> tuple[str, str, int] | None:
     """Render GPS comparison selection UI widgets.
 
-    The two configurations chosen are saved to `view`; the threshold is an
-    analysis parameter and is not.
+    The two configurations chosen and the distance threshold are saved to
+    `view`.
 
     Returns
     -------
@@ -1486,11 +1493,10 @@ def _render_comparison_selectors(
             label="Distance Threshold (meters)",
             min_value=1,
             max_value=100000,
-            value=100,
             step=10,
-            key="comparison_distance_threshold",
             help="Flag GPS points where the distance between the two configurations "
             "exceeds this threshold.",
+            **bind_widget(view, "comparison_distance_threshold", value=100),
         )
 
     return gps_config_1, gps_config_2, distance_threshold
@@ -2090,7 +2096,8 @@ def gpschecks_status(
     Ready when a saved GPS column configuration uses columns in the data,
     whatever they are named. Otherwise not applicable when no column looks
     like GPS data (``find_gps_columns``), and not set up until a GPS column
-    configuration is added. The settings stay reachable in every state.
+    configuration that fits the data is added. The settings stay reachable in
+    every state.
     """
     gps_config = _get_gps_column_settings(project_id, page_name_id)
     if has_usable_gps_config(gps_config, data.columns):
@@ -2101,4 +2108,7 @@ def gpschecks_status(
         )
     if gps_config.is_empty():
         return StatusResult(CheckStatus.NOT_SET_UP, "No GPS columns are set up yet.")
-    return READY
+    return StatusResult(
+        CheckStatus.NOT_SET_UP,
+        "The saved GPS configuration uses columns that are not in this dataset.",
+    )

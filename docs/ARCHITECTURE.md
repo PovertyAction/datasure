@@ -242,22 +242,29 @@ On a check page this is the page settings file
   check module). "Reset filters" (`reset_filters_button`, drawn by
   `render_checks` above the selected check) calls `ViewState.reset_widgets`,
   which clears only that scope's saved values and their session state. It
-  does not touch the check's own settings. Prepare Data (scope: the
-  dataset) and Corrections (scope: the check page) draw the same action
-  above the selected item.
+  does not touch the check's own settings. Corrections (scope: the check
+  page) draws the same action above the selected page. Prepare Data has
+  none: a dataset's only inputs are in dialogs, which are never saved.
 - **Not saved.** Pagination, search boxes and inputs inside dialogs or
   popovers are never bound, so they start fresh. Bound today: Summary's
   "Progress by" column and time period; the Progress time period and extra
   attempted-interview columns; the Missing Values threshold, date column,
   group-by and compare columns, all-columns toggle and correlation columns;
-  the duplicates
-  dataset switcher, card sort and column selector; the outliers table toggles
-  and inspection columns; the GPS map colour, filter and category values,
-  configuration choices and Show reviewed toggle; the enumerator summary
-  information pills; and the backcheck comparison filters. Descriptive Stats
-  saves its column selection to DuckDB instead.
-- **Legacy values.** Older versions saved the Summary, Progress and
-  Missing Values filters above with the check's settings. Their
+  the duplicates dataset switcher, card sort, column selector and extra
+  report columns; the outliers table toggles, inspected column and extra
+  constraint violation columns; the GPS map colour, filter and category
+  values, configuration choices, detection method, clustering column,
+  distance threshold and Show reviewed toggle; the enumerator summary
+  information pills, productivity period and week start, and the statistics
+  columns, statistics, period and week start; the backcheck comparison
+  filters, productivity period and week start, and staff statistics view;
+  and the Descriptive Stats histogram and value counts choices. Descriptive
+  Stats saves its column selection to DuckDB, and the GPS outlier detection
+  sliders (neighbours, expected proportion) are analysis parameters with
+  data-dependent bounds, so neither is view state.
+- **Legacy values.** Older versions saved the Summary, Progress, Missing
+  Values, Descriptive Stats, enumerator, backcheck and outliers view values
+  above, and the duplicates extra report columns, with the check's settings. Their
   `check_view` (`view_factory(..., legacy=(section, keys))`) runs
   `ViewState.adopt_legacy` when opened: a legacy value moves into the
   check's scope (unless one is already there) and leaves the settings
@@ -306,7 +313,7 @@ no group) and render only the selected item through `nav_ui.run_guarded`.
   dims a page with no survey KEY column or no survey data in the corrected,
   prep or raw database (it only checks the table exists). Precedence: a valid
   `?page=` value, then the check page last viewed (see
-  [Session state](#session-state)), then the selection made earlier in this
+  [View state](#view-state)), then the selection made earlier in this
   session or saved, then the first page.
 
 ## Cache and data locations

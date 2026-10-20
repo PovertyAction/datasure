@@ -2530,20 +2530,12 @@ class TestDatasetNavigation:
         ]
         assert "AttributeError" in items[0].reason
 
-    def test_reset_filters_clears_only_the_selected_datasets_view_state(self, tmp_path):
-        from datasure.utils.view_state import ViewState
-
+    def test_no_reset_filters_action_when_nothing_is_remembered(self, tmp_path):
+        """Dataset inputs live in dialogs, which are never saved."""
         tables = {("alpha", "prep"): _rows("alpha"), ("beta", "prep"): _rows("beta")}
-        settings = tmp_path / "test_project" / "settings" / pv.PREP_SETTINGS_FILE
-        ViewState(settings, "beta").save("some_filter", "x")
-        ViewState(settings, "alpha").save("some_filter", "y")
 
         _render_prep_page(tables, ["alpha", "beta"], tmp_path, {"dataset": "beta"})
 
-        reset = next(
-            c for c in _st.button.call_args_list if c.args[0] == "Reset filters"
-        )
-        reset.kwargs["on_click"](*reset.kwargs.get("args", ()))
-
-        assert ViewState(settings, "beta").values() == {}
-        assert ViewState(settings, "alpha").values() == {"some_filter": "y"}
+        assert not [
+            c for c in _st.button.call_args_list if c.args[:1] == ("Reset filters",)
+        ]

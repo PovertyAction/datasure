@@ -197,8 +197,6 @@ preparation steps, Change Log and preview load, so the page responds quickly.
   Selecting it explains what to import on the Import Data page.
 - The selected dataset is part of the page address, for example
   `...?dataset=demo_survey`, and the page reopens on it next time.
-- **Reset filters**, above the selected dataset, clears anything remembered
-  for that dataset's view, as on the check pages.
 - Every dataset stays available on Configure Checks, including datasets you
   never opened here.
 
@@ -413,9 +411,13 @@ Each check remembers its filters, selections and sort order, such as
 Summary's "Progress by" column and time period, the Progress time period and
 extra attempted-interview columns, the Missing Values threshold, date,
 grouping, comparison and correlation choices, the duplicates sort order, the
-outlier table toggles, the GPS map colour and filter, the enumerator summary
-information and the backcheck comparison filters. They stay set when you switch to another check and back, and when you
-reopen the app.
+outlier table toggles and inspected column, the extra columns shown in the
+duplicates and outliers reports, the GPS map colour and filter, detection
+method, clustering column and distance threshold, the enumerator summary
+information, periods, columns and statistics, the backcheck comparison filters,
+productivity period and staff statistics view, and the Descriptive Stats
+histogram and value counts choices. They stay set when you switch to another
+check and back, and when you reopen the app.
 
 - Pagination, search boxes and the inputs in dialogs always start fresh.
 - A remembered value that no longer matches your data, for example an

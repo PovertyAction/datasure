@@ -77,12 +77,7 @@ from datasure.utils.ui_utils import (
     section_header,
     show_queued_notices,
 )
-from datasure.utils.view_state import (
-    ViewState,
-    reset_filters_button,
-    save_selection,
-    saved_selection,
-)
+from datasure.utils.view_state import save_selection, saved_selection
 
 logger = logging.getLogger(__name__)
 
@@ -1323,10 +1318,8 @@ if show_prep_page_info:
     )
     save_selection(prep_settings_file, nav_state.selected)
     selected_alias = nav_state.selected
-    # The scope is the dataset, so Reset filters clears only its view state.
-    reset_filters_button(
-        ViewState(prep_settings_file, selected_alias), key=PREP_NAV_KEY
-    )
+    # No "Reset filters" here: a dataset's only inputs are in the add and
+    # remove step dialogs, and dialog inputs are never saved as view state.
     run_guarded(
         PREP_NAV_KEY,
         nav_state.selected_item,

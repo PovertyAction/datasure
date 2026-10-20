@@ -430,11 +430,6 @@ class TestRenderConstraintViolationsTable:
         )
         with (
             patch("datasure.checks.outliers.report_ui.st") as st_mock,
-            patch(
-                "datasure.checks.outliers.report_ui.load_check_settings",
-                return_value={},
-            ),
-            patch("datasure.checks.outliers.report_ui.save_check_settings"),
         ):
             st_mock.columns.side_effect = _columns_side_effect
             st_mock.multiselect.return_value = []
@@ -457,11 +452,6 @@ class TestRenderConstraintViolationsTable:
         )
         with (
             patch("datasure.checks.outliers.report_ui.st") as st_mock,
-            patch(
-                "datasure.checks.outliers.report_ui.load_check_settings",
-                return_value={},
-            ),
-            patch("datasure.checks.outliers.report_ui.save_check_settings"),
         ):
             st_mock.columns.side_effect = _columns_side_effect
             st_mock.multiselect.return_value = []
@@ -495,11 +485,6 @@ class TestRenderOutlierColumnInspection:
         )
         with (
             patch("datasure.checks.outliers.report_ui.st") as st_mock,
-            patch(
-                "datasure.checks.outliers.report_ui.load_check_settings",
-                return_value={},
-            ),
-            patch("datasure.checks.outliers.report_ui.save_check_settings"),
         ):
             st_mock.columns.side_effect = _columns_side_effect
             st_mock.selectbox.return_value = None
@@ -514,11 +499,6 @@ class TestRenderOutlierColumnInspection:
         )
         with (
             patch("datasure.checks.outliers.report_ui.st") as st_mock,
-            patch(
-                "datasure.checks.outliers.report_ui.load_check_settings",
-                return_value={},
-            ),
-            patch("datasure.checks.outliers.report_ui.save_check_settings"),
         ):
             st_mock.columns.side_effect = _columns_side_effect
             st_mock.selectbox.return_value = "nonexistent_col"
@@ -550,11 +530,6 @@ class TestRenderOutlierColumnInspection:
         )
         with (
             patch("datasure.checks.outliers.report_ui.st") as st_mock,
-            patch(
-                "datasure.checks.outliers.report_ui.load_check_settings",
-                return_value={},
-            ),
-            patch("datasure.checks.outliers.report_ui.save_check_settings"),
             patch(
                 "datasure.checks.outliers.report_ui._create_descriptive_stats"
             ) as mock_desc,

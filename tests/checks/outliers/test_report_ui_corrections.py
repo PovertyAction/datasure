@@ -166,8 +166,6 @@ class TestConstraintTableReviewButton:
     def _render(self, data, violations, settings, st_mock, review):
         with (
             patch(f"{MODULE}.st", st_mock),
-            patch(f"{MODULE}.load_check_settings", return_value={}),
-            patch(f"{MODULE}.save_check_settings"),
             patch(f"{MODULE}._flag_correction_dialog") as dialog,
             # styled_dataframe imports streamlit itself; forward to the mock.
             patch(
@@ -498,8 +496,6 @@ class TestOutlierTableReviewButton:
     def _render(self, data, outliers, settings, st_mock, review):
         with (
             patch(f"{MODULE}.st", st_mock),
-            patch(f"{MODULE}.load_check_settings", return_value={}),
-            patch(f"{MODULE}.save_check_settings"),
             patch(f"{MODULE}._create_descriptive_stats", return_value=pl.DataFrame()),
             patch(f"{MODULE}._create_box_plot"),
             patch(f"{MODULE}._flag_correction_dialog") as dialog,

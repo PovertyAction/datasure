@@ -1762,10 +1762,6 @@ def _render_other_duplicates_table(
     )
 
     with st.expander(":material/clarify: Show more columns in report", expanded=False):
-        saved_settings = load_check_settings(settings_file, TAB_NAME)
-        default_var_table_display_cols = saved_settings.get(
-            f"{col_checked}_display_cols", []
-        )
         display_options = [
             col
             for col in data.columns
@@ -1777,20 +1773,17 @@ def _render_other_duplicates_table(
                 col_checked,
             ]
         ]
+        # Each checked column keeps its own extra columns.
+        widget_key = f"other_dup_{col_checked}_display_cols"
+        saved_view = check_view(settings_file)
+        saved_view.adopt_legacy(TAB_NAME, {widget_key: f"{col_checked}_display_cols"})
         var_table_display_cols = st.multiselect(
             label="Select additional columns to display",
             options=display_options,
             help="Select additional columns to include in the duplicates report.",
-            default=default_var_table_display_cols,
-            key="other_duplicates_table_display_cols_key",
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + f"_{col_checked}_display_cols"},
-        )
-
-        save_check_settings(
-            settings_file,
-            TAB_NAME,
-            {f"{col_checked}_display_cols": var_table_display_cols},
+            **saved_view.bind(
+                widget_key, options=display_options, multi=True, default=[]
+            ),
         )
 
         if var_table_display_cols:
