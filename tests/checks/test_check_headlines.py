@@ -7,13 +7,14 @@ number the check shows.
 
 import json
 from datetime import date, timedelta
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
 
 from datasure.checks.backchecks.report_ui import backchecks_headline
 from datasure.checks.duplicates import duplicates_headline
+from datasure.checks.enumerator import report_ui as enumerator_ui
 from datasure.checks.enumerator.report_ui import enumerator_headline
 from datasure.checks.missing import missing_headline
 from datasure.checks.outliers.report_ui import outliers_headline
@@ -248,6 +249,63 @@ class TestEnumeratorHeadline:
         assert enumerator_headline(PROJECT_ID, data, setting_file, self.CONFIG) == (
             "1 of 3 enumerators active in the past 7 days"
         )
+
+    @staticmethod
+    def _report_overview(data: pl.DataFrame, setting_file: str, config: dict):
+        """Run the Enumerator report; return its overview metrics by label.
+
+        Streamlit and the sections after the overview are mocked; the
+        settings panel returns the page configuration as its settings.
+        """
+        metrics: dict[str, str] = {}
+
+        def column(*_args, **_kwargs):
+            col = MagicMock()
+            col.metric.side_effect = lambda label, value, **_: metrics.update(
+                {label: value}
+            )
+            return col
+
+        st = MagicMock()
+        st.columns.side_effect = lambda spec, **_: [
+            column() for _ in range(spec if isinstance(spec, int) else len(spec))
+        ]
+        with patch.multiple(
+            enumerator_ui,
+            st=st,
+            demo_callout=MagicMock(),
+            enumerator_report_settings=MagicMock(
+                return_value=enumerator_ui.EnumeratorSettings(**config)
+            ),
+            _render_enumerator_summary_table=MagicMock(),
+            _render_enumerator_productivity=MagicMock(),
+            _render_enumerator_statistics=MagicMock(),
+            _render_enumerator_statistics_overtime=MagicMock(),
+        ):
+            enumerator_ui.enumerator_report(
+                PROJECT_ID, data, setting_file, config, get_df_columns(data)
+            )
+        return metrics
+
+    @pytest.mark.parametrize("with_outcome_data", [False, True])
+    def test_matches_the_enumerator_report_overview(
+        self, setting_file, with_outcome_data
+    ):
+        data = self._data(["e1", "e1", "e2", "e3", "e4"], [1, 20, 2, 30, 3])
+        if with_outcome_data:
+            duckdb_save_table(
+                PROJECT_ID,
+                self._data(["e1", "e2", "e3"], [1, 20, 30]),
+                "enumerator_data_with_consent_outcome",
+                "intermediate",
+            )
+
+        headline = enumerator_headline(PROJECT_ID, data, setting_file, self.CONFIG)
+        shown = self._report_overview(data, setting_file, self.CONFIG)
+
+        active = shown[r"\# of Active enumerators (past 7 days)"]
+        total = shown[r"\# of enumerators"]
+        assert headline == f"{active} of {total} enumerators active in the past 7 days"
 
 
 class TestBackchecksHeadline:
