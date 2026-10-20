@@ -13,6 +13,7 @@ from functools import partial
 from datasure.checks.backchecks.report_ui import (
     backchecks_headline,
     backchecks_report,
+    backchecks_settings_section,
     backchecks_status,
     overall_error_rate_percent,
 )
@@ -28,19 +29,29 @@ from datasure.checks.enumerator.report_ui import (
     enumerator_report,
     enumerator_status,
 )
-from datasure.checks.gpschecks.report_ui import gpschecks_report, gpschecks_status
+from datasure.checks.gpschecks.report_ui import (
+    gpschecks_report,
+    gpschecks_settings_section,
+    gpschecks_status,
+)
 from datasure.checks.health import health_cards, render_health_grid
 from datasure.checks.missing import missing_headline, missing_report
 from datasure.checks.outliers.report_ui import (
     flagged_outlier_percent,
     outliers_headline,
     outliers_report,
+    outliers_settings_section,
     outliers_status,
 )
 from datasure.checks.progress import progress_headline, progress_report
 from datasure.checks.summary import CheckRates, summary_report
 from datasure.utils.dataframe_utils import TableState, get_df_columns
-from datasure.utils.nav_ui import guarded_status, render_errors, select_nav_item
+from datasure.utils.nav_ui import (
+    SET_UP_BELOW,
+    guarded_status,
+    render_errors,
+    select_nav_item,
+)
 from datasure.utils.navigation import (
     READY,
     NavItem,
@@ -92,6 +103,12 @@ class CheckEntry:
         The number Summary's health grid shows for the check when it is
         ready, such as "14 duplicate IDs". It must match what the check
         reports. None for checks with no single triage number.
+    settings : Callable[[CheckContext], None] | None
+        Draws the check's settings section alone, under the empty state when
+        the check is not applicable, so its settings stay reachable. None for
+        checks that cannot be not applicable or have no settings section.
+    setup_hint : str
+        Ends the not-set-up message; it must say where the setup happens.
     """
 
     slug: str
@@ -102,6 +119,8 @@ class CheckEntry:
     status: Callable[[CheckContext], StatusResult] = lambda _ctx: READY
     setup: Callable[[CheckContext], None] | None = None
     headline: Callable[[CheckContext], str | None] | None = None
+    settings: Callable[[CheckContext], None] | None = None
+    setup_hint: str = SET_UP_BELOW
 
 
 def _outliers_config(ctx: CheckContext) -> dict:
@@ -270,13 +289,7 @@ def _render_gps(ctx: CheckContext) -> None:
         config.page_name_id,
         ctx.data.page_data,
         config.setting_file,
-        {
-            "survey_key": config.survey_key,
-            "survey_id": config.survey_id,
-            "survey_date": config.survey_date,
-            "enumerator": config.enumerator,
-            "team": config.team,
-        },
+        _gps_config(ctx),
         ctx.survey_columns,
         alias=config.survey_data_name,
     )
@@ -311,6 +324,52 @@ def _render_backchecks(ctx: CheckContext) -> None:
     backchecks_report(
         ctx.project_id,
         ctx.config.page_name_id,
+        data.page_data,
+        data.backcheck_data,
+        ctx.config.setting_file,
+        _backcheck_config(ctx),
+        ctx.survey_columns,
+        get_df_columns(data.backcheck_data),
+    )
+
+
+def _outliers_settings(ctx: CheckContext) -> None:
+    outliers_settings_section(
+        ctx.config.setting_file, _outliers_config(ctx), ctx.survey_columns
+    )
+
+
+def _gps_config(ctx: CheckContext) -> dict:
+    config = ctx.config
+    return {
+        "survey_key": config.survey_key,
+        "survey_id": config.survey_id,
+        "survey_date": config.survey_date,
+        "enumerator": config.enumerator,
+        "team": config.team,
+    }
+
+
+def _gps_settings(ctx: CheckContext) -> None:
+    config = ctx.config
+    gpschecks_settings_section(
+        ctx.project_id,
+        config.page_name_id,
+        ctx.data.page_data,
+        config.setting_file,
+        _gps_config(ctx),
+        ctx.survey_columns,
+    )
+
+
+def _backchecks_settings(ctx: CheckContext) -> None:
+    # Not applicable means the backcheck data was loaded but has no rows; its
+    # columns still fill the settings.
+    data = ctx.data
+    if data.backcheck_data is None:
+        return
+    backchecks_settings_section(
+        ctx.project_id,
         data.page_data,
         data.backcheck_data,
         ctx.config.setting_file,
@@ -466,6 +525,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         _render_outliers,
         _outliers_status,
         headline=_outliers_headline,
+        settings=_outliers_settings,
     ),
     CheckEntry(
         "gps",
@@ -474,6 +534,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         DATA_INTEGRITY,
         _render_gps,
         _gps_status,
+        settings=_gps_settings,
     ),
     CheckEntry(
         "enumerator",
@@ -493,6 +554,9 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         _backchecks_status,
         setup=_setup_backchecks,
         headline=_backchecks_headline,
+        settings=_backchecks_settings,
+        # The backcheck dataset is chosen and imported on other pages.
+        setup_hint="Fix it on the page linked below.",
     ),
     CheckEntry(
         "descriptive",

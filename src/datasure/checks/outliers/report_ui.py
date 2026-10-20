@@ -1645,6 +1645,22 @@ def _delete_outlier_column(
 # =============================================================================
 
 
+def outliers_settings_section(
+    setting_file: str, config: dict, survey_columns: ColumnByType
+) -> OutlierSettings:
+    """Draw the check's settings panel and return the settings.
+
+    The report starts with it; the check page also shows it alone under the
+    empty state when the check does not apply, so it stays reachable.
+    """
+    return outliers_report_settings(
+        setting_file,
+        OutlierSettings(**config),
+        survey_columns.categorical_columns,
+        survey_columns.datetime_columns,
+    )
+
+
 def outliers_report(
     project_id: str,
     page_name_id: str,
@@ -1677,7 +1693,6 @@ def outliers_report(
     """
     # get column info
     categorical_columns = survey_columns.categorical_columns
-    datetime_columns = survey_columns.datetime_columns
     numeric_columns = survey_columns.numeric_columns
 
     st.title("Outliers and Constraints Report")
@@ -1695,11 +1710,7 @@ def outliers_report(
             "which columns to check."
         )
 
-    # Load settings
-    config_settings = OutlierSettings(**config)
-    outliers_settings = outliers_report_settings(
-        setting_file, config_settings, categorical_columns, datetime_columns
-    )
+    outliers_settings = outliers_settings_section(setting_file, config, survey_columns)
     review = _review_context(project_id, alias, outliers_settings.survey_key)
     if alias and review is None:
         st.warning(

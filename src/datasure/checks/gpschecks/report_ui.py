@@ -1871,6 +1871,55 @@ def plot_clusters_on_map(
     _render_scatterplot_map(df, tooltip_fields, fill_color="color", zoom=7)
 
 
+def gpschecks_settings_section(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+    survey_columns: ColumnByType,
+) -> GPSSettings:
+    """Draw the settings panel and the GPS column configuration.
+
+    The report starts with them; the check page also shows them alone under
+    the empty state when no column looks like GPS data, so GPS columns with
+    other names can still be configured.
+
+    Returns
+    -------
+    GPSSettings
+        The settings chosen in the panel.
+    """
+    gps_settings = gpschecks_report_settings(
+        setting_file,
+        GPSSettings(**config),
+        survey_columns.categorical_columns,
+        survey_columns.datetime_columns,
+    )
+
+    st.subheader("GPS Columns Configuration")
+
+    if is_demo_project():
+        demo_callout(
+            "Click **Add GPS Column Configuration** to tell DataSure which columns "
+            "contain your GPS data. In the dialog that opens:\n\n"
+            "1. Under **GPS Data Format**, select **Separate Columns**.\n"
+            "2. Set **Latitude Column** to **household_latitude**.\n"
+            "3. Set **Longitude Column** to **household_longitude**.\n"
+            "4. Set **Accuracy Column** to **household_gps_accuracy**.\n"
+            "5. Enter a short **Configuration Alias** such as **household_gps**.\n"
+            "6. Click **Add GPS Configuration** to save.\n\n"
+            "If your GPS data is stored as a single delimited column "
+            "(e.g., '-1.20 36.77 0.0 15.8'), choose **Single Column** instead and "
+            "select the delimiter and column."
+        )
+
+    all_columns = list(data.columns)
+    _render_gps_column_actions(project_id, page_name_id, all_columns)
+
+    return gps_settings
+
+
 def gpschecks_report(
     project_id: str,
     page_name_id: str,
@@ -1921,9 +1970,6 @@ def gpschecks_report(
             "your GPS columns below."
         )
 
-    categorical_columns = survey_columns.categorical_columns
-    datetime_columns = survey_columns.datetime_columns
-
     if data.is_empty():
         st.info(
             "No data available for the gps checks report. "
@@ -1932,33 +1978,9 @@ def gpschecks_report(
         return
 
     config_settings = GPSSettings(**config)
-
-    _gpschecks_settings = gpschecks_report_settings(
-        setting_file,
-        config_settings,
-        categorical_columns,
-        datetime_columns,
+    _gpschecks_settings = gpschecks_settings_section(
+        project_id, page_name_id, data, setting_file, config, survey_columns
     )
-
-    st.subheader("GPS Columns Configuration")
-
-    if is_demo_project():
-        demo_callout(
-            "Click **Add GPS Column Configuration** to tell DataSure which columns "
-            "contain your GPS data. In the dialog that opens:\n\n"
-            "1. Under **GPS Data Format**, select **Separate Columns**.\n"
-            "2. Set **Latitude Column** to **household_latitude**.\n"
-            "3. Set **Longitude Column** to **household_longitude**.\n"
-            "4. Set **Accuracy Column** to **household_gps_accuracy**.\n"
-            "5. Enter a short **Configuration Alias** such as **household_gps**.\n"
-            "6. Click **Add GPS Configuration** to save.\n\n"
-            "If your GPS data is stored as a single delimited column "
-            "(e.g., '-1.20 36.77 0.0 15.8'), choose **Single Column** instead and "
-            "select the delimiter and column."
-        )
-
-    all_columns = list(data.columns)
-    _render_gps_column_actions(project_id, page_name_id, all_columns)
 
     st.write("---")
 

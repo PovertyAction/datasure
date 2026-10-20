@@ -228,13 +228,21 @@ def guarded_status(slug: str, status: Callable[[], StatusResult]) -> StatusResul
         return StatusResult(CheckStatus.ERROR, f"{type(exc).__name__}: {exc}")
 
 
-def render_empty_state(item: NavItem) -> None:
-    """Explain why an item that is not ready shows no results."""
+# What a not-set-up item's empty state tells the user to do by default.
+SET_UP_BELOW = "Set it up below."
+
+
+def render_empty_state(item: NavItem, setup_hint: str = SET_UP_BELOW) -> None:
+    """Explain why an item that is not ready shows no results.
+
+    ``setup_hint`` ends a not-set-up message; it must say truthfully where
+    the setup happens.
+    """
     import streamlit as st
 
     if item.status is CheckStatus.NOT_SET_UP:
         st.info(
-            f"**{item.label}** is not set up. {item.reason} Set it up below.",
+            f"**{item.label}** is not set up. {item.reason} {setup_hint}",
             icon=":material/build:",
         )
     elif item.status is CheckStatus.NOT_APPLICABLE:
@@ -287,22 +295,29 @@ def render_selected(
     item: NavItem,
     render: Callable[[], None],
     setup: Callable[[], None] | None = None,
+    settings: Callable[[], None] | None = None,
+    setup_hint: str = SET_UP_BELOW,
 ) -> None:
     """Draw the selected item according to its status.
 
     - ready: ``render``.
-    - not set up: the empty state, then ``setup`` (default: ``render``, for
-      items whose content starts with their settings).
-    - not applicable: the empty state only.
+    - not set up: the empty state ending with ``setup_hint``, then ``setup``
+      (default: ``render``, for items whose content starts with their
+      settings).
+    - not applicable: the empty state, then ``settings`` when the item has a
+      settings section, so it stays reachable.
     - error (its status raised): the error, then ``render`` anyway.
 
-    ``render`` and ``setup`` run through ``run_guarded``.
+    ``render``, ``setup`` and ``settings`` run through ``run_guarded``.
     """
     if item.status is CheckStatus.READY:
         run_guarded(key, item, render)
         return
-    render_empty_state(item)
+    render_empty_state(item, setup_hint)
     if item.status is CheckStatus.NOT_SET_UP:
         run_guarded(key, item, setup or render)
+    elif item.status is CheckStatus.NOT_APPLICABLE:
+        if settings is not None:
+            run_guarded(key, item, settings)
     elif item.status is CheckStatus.ERROR:
         run_guarded(key, item, render)

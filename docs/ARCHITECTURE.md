@@ -161,8 +161,9 @@ edit the template instead.
 
 A check page draws its checks from the catalogue in `checks/catalogue.py`.
 Each `CheckEntry` has a slug, short label, icon, group, a `render` function
-and a `status` function, plus an optional `setup` function. Adding an entry is
-the only change needed for a check to appear.
+and a `status` function, plus optional `setup`, `settings`, `setup_hint`
+and `headline` fields. Adding an entry is the only change needed for a check
+to appear.
 
 - **Status.** Each check module exposes a cheap `<check>_status(...)` that
   returns a `StatusResult` (`CheckStatus` ready, not set up, not applicable or
@@ -177,7 +178,11 @@ the only change needed for a check to appear.
 - **Lazy rendering.** `render_checks` in the template runs only the selected
   check. A check that is not ready shows a standard empty state with its
   reason; a not-set-up check then shows its settings (`setup`, or its report,
-  which starts with its settings). Summary computes the outlier and backcheck
+  which starts with its settings), and a not-applicable check shows its
+  settings section alone (`settings`; Outliers, GPS and Backchecks expose
+  `<check>_settings_section`, which their reports also start with). The
+  not-set-up message ends with the entry's `setup_hint`, "Set it up below."
+  by default; Backchecks points to the page linked below instead. Summary computes the outlier and backcheck
   rates inside its own render, so they only run when Summary is shown.
 - **Health grid.** Summary ends with a card per other check
   (`checks/health.py`). A catalogue entry's optional `headline` function

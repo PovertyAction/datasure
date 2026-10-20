@@ -2198,6 +2198,33 @@ def _render_id_problem_warning(
         st.warning(warning, icon=":material/content_copy:")
 
 
+def backchecks_settings_section(
+    project_id: str,
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+    survey_columns: ColumnByType,
+    backcheck_columns: ColumnByType,
+) -> BackcheckSettings:
+    """Draw the check's settings panel and return the settings.
+
+    The report starts with it; the check page also shows it alone under the
+    empty state when the backcheck data has no rows, so it stays reachable.
+    """
+    return backchecks_report_settings(
+        project_id,
+        setting_file,
+        survey_data,
+        backcheck_data,
+        settings_from_page_config(config),
+        survey_columns.categorical_columns,
+        survey_columns.datetime_columns,
+        backcheck_columns.categorical_columns,
+        backcheck_columns.datetime_columns,
+    )
+
+
 def backchecks_report(
     project_id: str,
     page_name_id: str,
@@ -2249,25 +2276,14 @@ def backchecks_report(
         """
     )
 
-    # Get column information for settings UI
-    survey_categorical_columns = survey_columns.categorical_columns
-    survey_datetime_columns = survey_columns.datetime_columns
-
-    backcheck_categorical_columns = backcheck_columns.categorical_columns
-    backcheck_datetime_columns = backcheck_columns.datetime_columns
-
-    # Configure settings
-    config_settings = settings_from_page_config(config)
-    backcheck_settings = backchecks_report_settings(
+    backcheck_settings = backchecks_settings_section(
         project_id,
-        setting_file,
         survey_data,
         backcheck_data,
-        config_settings,
-        survey_categorical_columns,
-        survey_datetime_columns,
-        backcheck_categorical_columns,
-        backcheck_datetime_columns,
+        setting_file,
+        config,
+        survey_columns,
+        backcheck_columns,
     )
 
     # The comparison and coverage use the records the Duplicates tab's
@@ -2307,7 +2323,9 @@ def backchecks_report(
     )
 
     common_columns = list(
-        set(survey_categorical_columns).intersection(set(backcheck_categorical_columns))
+        set(survey_columns.categorical_columns).intersection(
+            set(backcheck_columns.categorical_columns)
+        )
     )
     _render_backchecks_column_actions(
         project_id, page_name_id, all_survey_data, backcheck_data, common_columns

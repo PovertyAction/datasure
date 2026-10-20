@@ -431,10 +431,15 @@ and a text marker:
 - **not set up**: something you can configure is missing, for example
   Backchecks with no backcheck dataset or Outliers & Constraints with no
   columns added. Opening the check explains what is missing and shows its
-  settings below the message ("Set it up below"). Backchecks links to
-  Configure Checks or Import Data, where its dataset is chosen and imported.
+  settings below the message ("Set it up below"). Backchecks instead says
+  to fix it on the page linked below, and links to Configure Checks or
+  Import Data, where its dataset is chosen and imported.
 - **not applicable**: your data cannot support the check, for example GPS
-  Checks when no column looks like GPS data. Opening the check explains why.
+  Checks when no column looks like GPS data, or Backchecks when the
+  backcheck dataset has no rows. Opening the check explains why and still
+  shows the check's settings, so you can, for example, add a GPS column
+  configuration for columns with other names. GPS Checks is ready as soon as
+  a saved GPS column configuration uses columns in the data.
 - **error**: the check failed. It shows the error and an **Error details**
   section to include in a bug report. The other checks keep working.
 

@@ -177,6 +177,13 @@ REPORTS = (
     "backchecks_report",
 )
 
+# Settings sections shown alone under a not-applicable check's empty state.
+SETTINGS_SECTIONS = (
+    "outliers_settings_section",
+    "gpschecks_settings_section",
+    "backchecks_settings_section",
+)
+
 # Headlines the mocked checks report on their Summary health cards.
 HEADLINES = {
     "progress_headline": "2 submitted interviews",
@@ -236,16 +243,19 @@ class CheckPage:
             name: MagicMock(name=name, return_value=value)
             for name, value in HEADLINES.items()
         }
+        self.settings = {name: MagicMock(name=name) for name in SETTINGS_SECTIONS}
 
     def render(self, data: template.CheckData) -> list[str]:
         """Render the page once; return the reports that ran."""
-        for report in self.reports.values():
+        for report in (*self.reports.values(), *self.settings.values()):
             report.reset_mock()
         self.st.reset_mock()
         with (
             self.monkeypatch.context() as m,
             patch.object(template, "st", self.st),
-            patch.multiple(catalogue, **self.reports, **self.headlines),
+            patch.multiple(
+                catalogue, **self.reports, **self.headlines, **self.settings
+            ),
         ):
             m.setitem(sys.modules, "streamlit", self.st)
             template.render_checks(PROJECT_ID, self.config, data)
@@ -514,12 +524,23 @@ class TestNavigation:
 
 
 class TestNotReadyChecks:
-    def test_not_applicable_check_shows_why_without_running(self, page):
+    def test_not_applicable_check_shows_why_then_its_settings(self, page):
         check_page = page(url="gps")
 
         assert check_page.render(SURVEY) == []
         assert "No GPS column found in this dataset." in check_page.messages("info")
         assert "not applicable" in check_page.label("gps")
+        # The settings stay reachable, e.g. to configure GPS columns the
+        # name heuristic missed.
+        check_page.settings["gpschecks_settings_section"].assert_called_once()
+
+    def test_backchecks_with_no_rows_shows_why_then_its_settings(self, page):
+        check_page = page(url="backchecks")
+        no_rows = template.CheckData(page_data=_rows(2), backcheck_data=_rows(0))
+
+        assert check_page.render(no_rows) == []
+        assert "does not apply" in check_page.messages("info")
+        check_page.settings["backchecks_settings_section"].assert_called_once()
 
     def test_not_set_up_check_shows_the_reason_and_its_settings(self, page):
         check_page = page(url="outliers")
@@ -535,7 +556,11 @@ class TestNotReadyChecks:
         check_page = page(url="backchecks", backcheck_data_name=None)
 
         assert check_page.render(template.CheckData(page_data=_rows(2))) == []
-        assert "Configure Checks" in check_page.messages("info")
+        info = check_page.messages("info")
+        assert "Configure Checks" in info
+        # Its fix is on another page, linked below, not settings below.
+        assert "Set it up below" not in info
+        assert "linked below" in info
         check_page.st.page_link.assert_called_once()
         assert check_page.st.page_link.call_args.args[0] == "config_page"
 

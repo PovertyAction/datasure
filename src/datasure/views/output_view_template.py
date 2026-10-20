@@ -308,6 +308,8 @@ def render_checks(project_id: str, config: PageConfig, data: CheckData) -> None:
         state.selected_item,
         render=lambda: entry.render(ctx),
         setup=None if entry.setup is None else lambda: entry.setup(ctx),
+        settings=None if entry.settings is None else lambda: entry.settings(ctx),
+        setup_hint=entry.setup_hint,
     )
     with nav_slot:
         draw_nav(state, key=nav_key, param=CHECK_PARAM, label="Check")

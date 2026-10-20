@@ -108,6 +108,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Not-applicable checks keep their settings** (#373): A not-applicable
+  check shows its settings section under the empty state
+  (`CheckEntry.settings`, `render_selected(settings=...)`;
+  `outliers_settings_section`, `gpschecks_settings_section`,
+  `backchecks_settings_section`). Backchecks' not-set-up message now points
+  to the linked page instead of "Set it up below" (`CheckEntry.setup_hint`)
+- **GPS Checks lockout** (#373): A saved GPS column configuration whose
+  columns are in the data makes GPS Checks ready, whatever the columns are
+  named, so the name heuristic no longer hides a configured check
+  (`has_usable_gps_config`, `checks/gpschecks/compute.py`)
 - **Check settings** (#374): The progress, duplicates, GPS and enumerator
   settings loaders no longer cache for 60 seconds, so a check opened again
   shows the settings saved a moment ago (`load_default_settings`,
