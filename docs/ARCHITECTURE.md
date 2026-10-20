@@ -246,12 +246,24 @@ On a check page this is the page settings file
   dataset) and Corrections (scope: the check page) draw the same action
   above the selected item.
 - **Not saved.** Pagination, search boxes and inputs inside dialogs or
-  popovers are never bound, so they start fresh. Bound today: the duplicates
+  popovers are never bound, so they start fresh. Bound today: Summary's
+  "Progress by" column and time period; the Progress time period and extra
+  attempted-interview columns; the Missing Values threshold, date column,
+  group-by and compare columns, all-columns toggle and correlation columns;
+  the duplicates
   dataset switcher, card sort and column selector; the outliers table toggles
   and inspection columns; the GPS map colour, filter and category values,
   configuration choices and Show reviewed toggle; the enumerator summary
   information pills; and the backcheck comparison filters. Descriptive Stats
   saves its column selection to DuckDB instead.
+- **Legacy values.** Older versions saved the Summary, Progress and
+  Missing Values filters above with the check's settings. Their
+  `check_view` (`view_factory(..., legacy=(section, keys))`) runs
+  `ViewState.adopt_legacy` when opened: a legacy value moves into the
+  check's scope (unless one is already there) and leaves the settings
+  section, so old files still load and the value then behaves as view
+  state. Configuration (Progress and Summary columns and targets, Progress
+  consent and outcome) stays with the check's settings.
 - **Not shared.** View state is personal. `without_view_state` drops it from
   project configuration exports, and applying a configuration (a project
   template) keeps the local `view_state` and ignores any in the bundle

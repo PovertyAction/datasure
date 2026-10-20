@@ -6,13 +6,16 @@ check's slug, so a check saving under any other name could not be reset.
 
 import pytest
 
-from datasure.checks import catalogue, id_duplicates_ui
+from datasure.checks import catalogue, id_duplicates_ui, missing, progress, summary
 from datasure.checks.backchecks import report_ui as backchecks
 from datasure.checks.enumerator import report_ui as enumerator
 from datasure.checks.gpschecks import report_ui as gps
 from datasure.checks.outliers import report_ui as outliers
 
 MODULES = [
+    (summary, "summary"),
+    (progress, "progress"),
+    (missing, "missing"),
     (id_duplicates_ui, "duplicates"),
     (outliers, "outliers"),
     (gps, "gps"),

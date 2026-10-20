@@ -26,13 +26,29 @@ from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.settings_utils import (
-    load_check_settings,
     save_check_settings,
     trigger_save,
 )
 from datasure.utils.ui_utils import ensure_styler_limit
+from datasure.utils.view_state import view_factory
 
 TAB_NAME: str = "summary"
+
+# Saved view state scope: the check's catalogue slug. The "Progress by"
+# column and time period are personal view state; older versions saved them
+# in the check's settings and they move on first load. The survey ID, date
+# and target settings are configuration.
+VIEW_SCOPE = "summary"
+check_view = view_factory(
+    VIEW_SCOPE,
+    legacy=(
+        TAB_NAME,
+        {
+            "progress_by_col_key": "progress_by_col",
+            "summary_progress_time_period_pill": "progress_time_period",
+        },
+    ),
+)
 
 
 # =============================================================================
@@ -1276,30 +1292,17 @@ def _render_progress_by_column(
     setting_file : str
         Path to the settings file.
     """
-    # Load default settings
-    default_settings = load_check_settings(setting_file, "summary") or {}
+    view = check_view(setting_file)
 
     # Progress by column selection
     pc1, _ = st.columns([0.3, 0.7])
     with pc1:
-        progress_by_col = default_settings.get("progress_by_col", None)
         progress_options = [col for col in data.columns if col != date]
-        progress_col_index = (
-            progress_options.index(progress_by_col)
-            if progress_by_col and progress_by_col in progress_options
-            else None
-        )
         progress_by_col = st.selectbox(
             label="Progress by",
             options=progress_options,
-            index=progress_col_index,
-            key="progress_by_col_key",
             help="Select a column to compute progress by",
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_progress_by_col"},
-        )
-        save_check_settings(
-            setting_file, TAB_NAME, {"progress_by_col": progress_by_col}
+            **view.bind("progress_by_col_key", options=progress_options, index=None),
         )
 
     if not progress_by_col:
@@ -1307,23 +1310,17 @@ def _render_progress_by_column(
 
     # Time period selection
     with st.container(horizontal_alignment="right"):
-        progress_time_period = default_settings.get("progress_time_period", "Auto")
+        time_periods = ["Auto", "Daily", "Weekly", "Monthly"]
         progress_time_period = st.pills(
             label="Progress time period",
-            options=["Auto", "Daily", "Weekly", "Monthly"],
-            default=progress_time_period,
+            options=time_periods,
             help="Select a time period to compute progress by",
-            key="summary_progress_time_period_pill",
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_progress_time_period"},
+            **view.bind(
+                "summary_progress_time_period_pill",
+                options=time_periods,
+                default="Auto",
+            ),
         )
-
-        if progress_time_period:
-            save_check_settings(
-                setting_file,
-                TAB_NAME,
-                {"progress_time_period": progress_time_period},
-            )
 
     # Compute and display progress data
     progress_data, vmin_val, vmax_val, format_cols = compute_summary_progress_by_col(

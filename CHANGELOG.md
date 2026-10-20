@@ -114,6 +114,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Summary, Progress and Missing Values filters are view state** (#373):
+  Their filters, selections and time periods were saved with the check's
+  settings, so they were exported, copied by templates and not cleared by
+  Reset filters. They now bind to the check's `view_state` scope
+  (`check_view` in `checks/summary.py`, `checks/progress.py`,
+  `checks/missing.py`). An older settings file still loads: the values move
+  from the check's settings into view state on first use
+  (`ViewState.adopt_legacy`, `view_factory(..., legacy=...)`)
 - **Not-applicable checks keep their settings** (#373): A not-applicable
   check shows its settings section under the empty state
   (`CheckEntry.settings`, `render_selected(settings=...)`;

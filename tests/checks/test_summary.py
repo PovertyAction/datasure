@@ -1130,7 +1130,6 @@ class TestUIComponents:
 
             with (
                 patch("datasure.checks.summary.st") as mock_st,
-                patch("datasure.checks.summary.load_check_settings") as mock_load,
                 patch("datasure.checks.summary.save_check_settings"),
                 patch("datasure.checks.summary.trigger_save"),
                 patch(
@@ -1139,12 +1138,6 @@ class TestUIComponents:
                 patch("datasure.checks.summary.sns") as mock_sns,
                 patch("datasure.checks.summary.pd"),
             ):
-                # Mock settings
-                mock_load.return_value = {
-                    "progress_by_col": "region",
-                    "progress_time_period": "Auto",
-                }
-
                 # Mock columns
                 col_mock1 = Mock()
                 col_mock1.__enter__ = Mock(return_value=col_mock1)
@@ -1200,11 +1193,7 @@ class TestUIComponents:
 
             with (
                 patch("datasure.checks.summary.st") as mock_st,
-                patch("datasure.checks.summary.load_check_settings") as mock_load,
             ):
-                # Mock settings
-                mock_load.return_value = {}
-
                 # Mock columns
                 col_mock1 = Mock()
                 col_mock1.__enter__ = Mock(return_value=col_mock1)

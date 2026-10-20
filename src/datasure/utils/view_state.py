@@ -23,7 +23,7 @@ inputs are never bound, so they start fresh.
 
 import json
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -142,6 +142,41 @@ class ViewState:
             return
         for key in keys:
             saved.pop(key, None)
+        write_settings(self.settings_file, settings)
+
+    def adopt_legacy(self, section: str, keys: Mapping[str, str]) -> None:
+        """Move view values an older version saved with check settings.
+
+        Older versions saved some filters and selections under the check's
+        own settings section. Each legacy value found there moves into this
+        scope (unless the scope already has one) and is removed from the
+        section, so it loads as before but is now personal view state: left
+        out of exports and cleared by "Reset filters". The file is only
+        written when something moves.
+
+        Parameters
+        ----------
+        section : str
+            The check's settings section, such as ``"missing"``.
+        keys : Mapping[str, str]
+            Legacy settings key by widget key.
+        """
+        settings = read_settings(self.settings_file)
+        legacy = settings.get(section)
+        if not isinstance(legacy, dict) or not any(
+            legacy_key in legacy for legacy_key in keys.values()
+        ):
+            return
+        view_state = settings.get(VIEW_STATE_KEY)
+        if not isinstance(view_state, dict):
+            view_state = settings[VIEW_STATE_KEY] = {}
+        saved = view_state.setdefault("scopes", {}).setdefault(self.scope, {})
+        for widget_key, legacy_key in keys.items():
+            if legacy_key not in legacy:
+                continue
+            value = legacy.pop(legacy_key)
+            if value is not None:
+                saved.setdefault(widget_key, value)
         write_settings(self.settings_file, settings)
 
     def reset(self) -> list[str]:
@@ -274,17 +309,31 @@ class ViewState:
             st.session_state.pop(key, None)
 
 
-def view_factory(scope: str) -> Callable[[str | Path], ViewState]:
+def view_factory(
+    scope: str, legacy: tuple[str, Mapping[str, str]] | None = None
+) -> Callable[[str | Path], ViewState]:
     """Return a function that opens ``scope``'s view state in a settings file.
 
     Each check module builds its own once, from its catalogue slug::
 
         check_view = view_factory(VIEW_SCOPE)
         st.selectbox("Sort by", options, **check_view(settings_file).bind(...))
+
+    Parameters
+    ----------
+    scope : str
+        The check's catalogue slug.
+    legacy : tuple[str, Mapping[str, str]] | None
+        For a check whose view values an older version saved with its
+        settings: the settings section and the legacy key by widget key.
+        Opening the view moves any found there (``ViewState.adopt_legacy``).
     """
 
     def open_view(settings_file: str | Path) -> ViewState:
-        return ViewState(settings_file, scope)
+        view = ViewState(settings_file, scope)
+        if legacy is not None:
+            view.adopt_legacy(*legacy)
+        return view
 
     return open_view
 

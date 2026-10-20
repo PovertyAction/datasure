@@ -409,10 +409,12 @@ opens the last viewed check or Summary.
 
 #### Remembered Filters
 
-Each check remembers its filters, selections and sort order, such as the
-duplicates sort order, the outlier table toggles, the GPS map colour and
-filter, the enumerator summary information and the backcheck comparison
-filters. They stay set when you switch to another check and back, and when you
+Each check remembers its filters, selections and sort order, such as
+Summary's "Progress by" column and time period, the Progress time period and
+extra attempted-interview columns, the Missing Values threshold, date,
+grouping, comparison and correlation choices, the duplicates sort order, the
+outlier table toggles, the GPS map colour and filter, the enumerator summary
+information and the backcheck comparison filters. They stay set when you switch to another check and back, and when you
 reopen the app.
 
 - Pagination, search boxes and the inputs in dialogs always start fresh.

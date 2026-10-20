@@ -85,6 +85,43 @@ class TestRemembered:
         assert settings_file.stat().st_mtime_ns == written
 
 
+class TestAdoptLegacy:
+    """View values an older version saved with check settings move over."""
+
+    def test_legacy_values_move_into_the_scope(self, settings_file):
+        settings_file.write_text(
+            json.dumps({"duplicates": {"survey_id": "hhid", "old_sort": "ID"}})
+        )
+
+        ViewState(settings_file, "duplicates").adopt_legacy(
+            "duplicates", {"sort_widget": "old_sort"}
+        )
+
+        assert ViewState(settings_file, "duplicates").values() == {"sort_widget": "ID"}
+        assert _file(settings_file)["duplicates"] == {"survey_id": "hhid"}
+
+    def test_a_value_already_in_the_scope_wins(self, settings_file):
+        view = ViewState(settings_file, "duplicates")
+        view.save("sort_widget", "KEY")
+        settings = _file(settings_file)
+        settings["duplicates"]["old_sort"] = "ID"
+        settings_file.write_text(json.dumps(settings))
+
+        view.adopt_legacy("duplicates", {"sort_widget": "old_sort"})
+
+        assert view.values() == {"sort_widget": "KEY"}
+        assert "old_sort" not in _file(settings_file)["duplicates"]
+
+    def test_nothing_to_move_leaves_the_file_alone(self, settings_file):
+        before = settings_file.read_text()
+
+        ViewState(settings_file, "duplicates").adopt_legacy(
+            "duplicates", {"sort_widget": "old_sort"}
+        )
+
+        assert settings_file.read_text() == before
+
+
 class TestWithoutViewState:
     def test_drops_only_the_view_state_section(self, settings_file):
         save_selection(settings_file, "gps")

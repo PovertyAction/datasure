@@ -26,8 +26,25 @@ from datasure.utils.settings_utils import (
     trigger_save,
 )
 from datasure.utils.ui_utils import ensure_styler_limit
+from datasure.utils.view_state import view_factory
 
 TAB_NAME = "progress"
+
+# Saved view state scope: the check's catalogue slug. The time period and the
+# extra attempted-interview columns are personal view state; older versions
+# saved them in the check's settings and they move on first load. The other
+# progress settings (columns, targets, consent and outcome) are configuration.
+VIEW_SCOPE = "progress"
+check_view = view_factory(
+    VIEW_SCOPE,
+    legacy=(
+        TAB_NAME,
+        {
+            "time_period_progress_overtime": "time_period",
+            "attempted_interviews_display_cols": "display_cols",
+        },
+    ),
+)
 
 # Allow styling large dataframes (the limit is shared and only raised)
 ensure_styler_limit(1_000_000)
@@ -549,22 +566,18 @@ def render_time_period_selector(
             "Month": ":material/calendar_month: Monthly",
         }
 
-        saved_settings = load_check_settings(settings_file, tab_name) or {}
-        default_time_period = saved_settings.get("time_period", "Day")
-
         time_period = st.pills(
             label="Time Period",
             options=options_map.keys(),
             format_func=lambda x: options_map[x],
-            key="time_period_progress_overtime",
-            default=default_time_period,
             help="Select time period for aggregating progress data",
             selection_mode="single",
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_time_period"},
+            **check_view(settings_file).bind(
+                "time_period_progress_overtime",
+                options=list(options_map),
+                default="Day",
+            ),
         )
-
-        save_check_settings(settings_file, TAB_NAME, {"time_period": time_period})
 
     return time_period
 
@@ -1176,11 +1189,6 @@ def display_attempted_interviews(
         )
         return
 
-    default_settings = load_check_settings(
-        settings_file=setting_file, check_name="progress"
-    )
-    display_cols = default_settings.get("display_cols") if default_settings else None
-
     with st.expander(":material/clarify: Show more columns in report", expanded=False):
         st.info(
             "Select additional columns to include in the table displaying attempted interviews. "
@@ -1190,16 +1198,12 @@ def display_attempted_interviews(
             label_visibility="collapsed",
             options=data.columns,
             help="Columns to display in the attempted interviews report",
-            key="attempted_interviews_display_cols",
-            default=display_cols,
-            on_change=trigger_save,
-            kwargs=({"state_name": TAB_NAME + "_display_cols"}),
-        )
-
-        save_check_settings(
-            setting_file,
-            TAB_NAME,
-            {"display_cols": display_cols},
+            **check_view(setting_file).bind(
+                "attempted_interviews_display_cols",
+                options=data.columns,
+                multi=True,
+                default=None,
+            ),
         )
 
     # Compute attempted interviews using Polars
