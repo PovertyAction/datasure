@@ -1,8 +1,9 @@
 """The check catalogue: every check shown on a check page.
 
-Each entry gives a check's slug, label, icon, group and render function. The
-check page builds its navigation from this catalogue, so adding an entry here
-is the only change needed for a new check to appear.
+Each entry gives a check's slug, short label, icon, group, render function and
+status function, in display order. The check page builds its navigation from
+this catalogue, so adding an entry here is the only change needed for a new
+check to appear.
 """
 
 from collections.abc import Callable
@@ -10,21 +11,33 @@ from dataclasses import dataclass
 
 from datasure.checks.backchecks.report_ui import (
     backchecks_report,
+    backchecks_status,
     overall_error_rate_percent,
 )
 from datasure.checks.context import CheckContext
-from datasure.checks.descriptive import descriptive_report
-from datasure.checks.duplicates import duplicates_report
-from datasure.checks.enumerator.report_ui import enumerator_report
-from datasure.checks.gpschecks.report_ui import gpschecks_report
-from datasure.checks.missing import missing_report
+from datasure.checks.descriptive import descriptive_report, descriptive_status
+from datasure.checks.duplicates import duplicates_report, duplicates_status
+from datasure.checks.enumerator.report_ui import enumerator_report, enumerator_status
+from datasure.checks.gpschecks.report_ui import gpschecks_report, gpschecks_status
+from datasure.checks.missing import missing_report, missing_status
 from datasure.checks.outliers.report_ui import (
     flagged_outlier_percent,
     outliers_report,
+    outliers_status,
 )
-from datasure.checks.progress import progress_report
-from datasure.checks.summary import CheckRates, summary_report
-from datasure.utils.dataframe_utils import TableState, get_df_columns, no_rows_message
+from datasure.checks.progress import progress_report, progress_status
+from datasure.checks.summary import CheckRates, summary_report, summary_status
+from datasure.utils.dataframe_utils import TableState, get_df_columns
+from datasure.utils.nav_ui import guarded_status
+from datasure.utils.navigation import READY, NavItem, StatusResult
+
+OVERVIEW = "Overview"
+DATA_INTEGRITY = "Data integrity"
+FIELD_TEAM = "Field team"
+EXPLORATION = "Exploration"
+
+# The check a page opens on when the URL and remembered selection give none.
+DEFAULT_CHECK = "summary"
 
 
 @dataclass(frozen=True)
@@ -43,6 +56,12 @@ class CheckEntry:
         The navigation group the check belongs to.
     render : Callable[[CheckContext], None]
         Draws the check's report.
+    status : Callable[[CheckContext], StatusResult]
+        Cheap status from configuration and data shape only; never computes
+        results. Default: always ready.
+    setup : Callable[[CheckContext], None] | None
+        Draws what the user needs to set the check up when it is not set up.
+        Default: ``render``, for reports that start with their settings.
     """
 
     slug: str
@@ -50,6 +69,8 @@ class CheckEntry:
     icon: str
     group: str
     render: Callable[[CheckContext], None]
+    status: Callable[[CheckContext], StatusResult] = lambda _ctx: READY
+    setup: Callable[[CheckContext], None] | None = None
 
 
 def _outliers_config(ctx: CheckContext) -> dict:
@@ -227,81 +248,177 @@ def _render_enumerator(ctx: CheckContext) -> None:
 
 
 def _render_backchecks(ctx: CheckContext) -> None:
+    # Only called when the status is ready, so the backcheck data has rows.
+    data = ctx.data
+    backchecks_report(
+        ctx.project_id,
+        ctx.config.page_name_id,
+        data.page_data,
+        data.backcheck_data,
+        ctx.config.setting_file,
+        _backcheck_config(ctx),
+        ctx.survey_columns,
+        get_df_columns(data.backcheck_data),
+    )
+
+
+def _setup_backchecks(ctx: CheckContext) -> None:
     import streamlit as st
 
-    data = ctx.data
-    backcheck_state = data.backcheck_state
-    if backcheck_state is TableState.HAS_ROWS:
-        backchecks_report(
-            ctx.project_id,
-            ctx.config.page_name_id,
-            data.page_data,
-            data.backcheck_data,
-            ctx.config.setting_file,
-            _backcheck_config(ctx),
-            ctx.survey_columns,
-            get_df_columns(data.backcheck_data),
-        )
-    elif backcheck_state is TableState.NO_ROWS:
-        st.info(no_rows_message(ctx.config.backcheck_data_name, "analyze"))
+    # The backcheck dataset is chosen on Configure Checks and imported on
+    # Import Data, so link to the page that fixes it.
+    if ctx.config.backcheck_data_name:
+        page, label = st.session_state.get("st_import_data_page"), "Import Data"
     else:
-        st.info("No backcheck data available for analysis.")
+        page = st.session_state.get("st_config_checks_page")
+        label = "Configure Checks"
+    if page is not None:
+        st.page_link(page, label=f"Open {label}", icon=":material/arrow_forward:")
+
+
+# Status adapters look the module-level status functions up on each call.
+def _summary_status(ctx: CheckContext) -> StatusResult:
+    return summary_status(ctx.data.page_data)
+
+
+def _progress_status(ctx: CheckContext) -> StatusResult:
+    return progress_status(ctx.data.page_data)
+
+
+def _missing_status(ctx: CheckContext) -> StatusResult:
+    return missing_status(ctx.data.page_data)
+
+
+def _duplicates_status(ctx: CheckContext) -> StatusResult:
+    return duplicates_status(
+        ctx.config.setting_file, {"survey_id": ctx.config.survey_id}
+    )
+
+
+def _outliers_status(ctx: CheckContext) -> StatusResult:
+    return outliers_status(ctx.project_id, ctx.config.page_name_id, ctx.survey_columns)
+
+
+def _gps_status(ctx: CheckContext) -> StatusResult:
+    return gpschecks_status(ctx.project_id, ctx.config.page_name_id, ctx.data.page_data)
+
+
+def _enumerator_status(ctx: CheckContext) -> StatusResult:
+    config = ctx.config
+    return enumerator_status(
+        config.setting_file,
+        {"enumerator": config.enumerator, "survey_date": config.survey_date},
+    )
+
+
+def _backchecks_status(ctx: CheckContext) -> StatusResult:
+    return backchecks_status(ctx.config.backcheck_data_name, ctx.data.backcheck_data)
+
+
+def _descriptive_status(ctx: CheckContext) -> StatusResult:
+    return descriptive_status(ctx.data.page_data)
 
 
 CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
     CheckEntry(
-        "summary", "Summary", ":material/dashboard:", "Overview", _render_summary
-    ),
-    CheckEntry(
-        "descriptive",
-        "Descriptive Statistics",
-        ":material/bar_chart:",
-        "Exploration",
-        _render_descriptive,
+        "summary",
+        "Summary",
+        ":material/dashboard:",
+        OVERVIEW,
+        _render_summary,
+        _summary_status,
     ),
     CheckEntry(
         "progress",
-        "Progress Tracking",
+        "Progress",
         ":material/trending_up:",
-        "Overview",
+        OVERVIEW,
         _render_progress,
+        _progress_status,
     ),
     CheckEntry(
         "missing",
         "Missing Values",
-        ":material/block:",
-        "Data integrity",
+        ":material/check_box_outline_blank:",
+        DATA_INTEGRITY,
         _render_missing,
+        _missing_status,
     ),
     CheckEntry(
         "duplicates",
         "Duplicates",
         ":material/content_copy:",
-        "Data integrity",
+        DATA_INTEGRITY,
         _render_duplicates,
+        _duplicates_status,
     ),
     CheckEntry(
         "outliers",
         "Outliers & Constraints",
         ":material/warning:",
-        "Data integrity",
+        DATA_INTEGRITY,
         _render_outliers,
+        _outliers_status,
     ),
     CheckEntry(
-        "gps", "GPS Checks", ":material/location_on:", "Data integrity", _render_gps
+        "gps",
+        "GPS Checks",
+        ":material/location_on:",
+        DATA_INTEGRITY,
+        _render_gps,
+        _gps_status,
     ),
     CheckEntry(
         "enumerator",
-        "Enumerator Statistics",
+        "Enumerator Stats",
         ":material/groups:",
-        "Field team",
+        FIELD_TEAM,
         _render_enumerator,
+        _enumerator_status,
     ),
     CheckEntry(
         "backchecks",
-        "Backcheck Analysis",
+        "Backchecks",
         ":material/fact_check:",
-        "Field team",
+        FIELD_TEAM,
         _render_backchecks,
+        _backchecks_status,
+        setup=_setup_backchecks,
+    ),
+    CheckEntry(
+        "descriptive",
+        "Descriptive Stats",
+        ":material/bar_chart:",
+        EXPLORATION,
+        _render_descriptive,
+        _descriptive_status,
     ),
 )
+
+
+def get_check(slug: str) -> CheckEntry:
+    """Return the catalogue entry with the given slug.
+
+    Raises
+    ------
+    KeyError
+        If no check has the slug.
+    """
+    for entry in CHECK_CATALOGUE:
+        if entry.slug == slug:
+            return entry
+    raise KeyError(slug)
+
+
+def nav_items(ctx: CheckContext) -> tuple[NavItem, ...]:
+    """Return a navigation item, with its status, for every catalogue check.
+
+    A status function that raises gives that check the error status.
+    """
+    items = []
+    for entry in CHECK_CATALOGUE:
+        status, reason = guarded_status(entry.slug, lambda e=entry: e.status(ctx))
+        items.append(
+            NavItem(entry.slug, entry.label, entry.icon, entry.group, status, reason)
+        )
+    return tuple(items)

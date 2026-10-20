@@ -25,6 +25,7 @@ from datasure.utils.duckdb_utils import (
     duckdb_get_table,
     duckdb_table_exists,
 )
+from datasure.utils.nav_ui import draw_nav, render_selected, resolve_selection
 from datasure.utils.navigations_utils import (
     add_demo_navigation,
     demo_sidebar_help,
@@ -35,6 +36,14 @@ from datasure.utils.settings_utils import (
 from datasure.utils.ui_utils import page_header
 
 __all__ = ["CheckData", "PageConfig", "no_rows_message"]
+
+# URL query parameter holding the selected check, e.g. ?check=duplicates.
+CHECK_PARAM = "check"
+
+
+def check_nav_key(page_name_id: str) -> str:
+    """Return the session state key prefix for a check page's navigation."""
+    return f"check_nav_{page_name_id}"
 
 
 def extract_page_number(file_path: str) -> int | None:
@@ -245,9 +254,13 @@ def stop_if_no_survey_data(page_data: pl.DataFrame, data_name: str) -> None:
     st.stop()
 
 
-def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> None:
+def render_checks(project_id: str, config: PageConfig, data: CheckData) -> None:
     """
-    Render a tab for each check in the check catalogue.
+    Render the check navigation and the selected check.
+
+    Groups and checks come from the check catalogue. Only the selected
+    check's report runs. The selection follows the ``check`` URL query
+    parameter, then the check last opened on this page, then Summary.
 
     Parameters
     ----------
@@ -258,17 +271,32 @@ def render_check_tabs(project_id: str, config: PageConfig, data: CheckData) -> N
     data : CheckData
         Loaded data for checks.
     """
-    entries = catalogue.CHECK_CATALOGUE
     ctx = CheckContext(
         project_id=project_id,
         config=config,
         data=data,
         survey_columns=get_df_columns(data.page_data),
     )
-    tabs = st.tabs([entry.label for entry in entries])
-    for tab, entry in zip(tabs, entries, strict=True):
-        with tab:
-            entry.render(ctx)
+    nav_key = check_nav_key(config.page_name_id)
+
+    # The navigation sits above the check but is drawn after it, so a check
+    # that fails while rendering is already marked in it.
+    nav_slot = st.container()
+    state = resolve_selection(
+        catalogue.nav_items(ctx),
+        key=nav_key,
+        param=CHECK_PARAM,
+        default=catalogue.DEFAULT_CHECK,
+    )
+    entry = catalogue.get_check(state.selected)
+    render_selected(
+        nav_key,
+        state.selected_item,
+        render=lambda: entry.render(ctx),
+        setup=None if entry.setup is None else lambda: entry.setup(ctx),
+    )
+    with nav_slot:
+        draw_nav(state, key=nav_key, param=CHECK_PARAM, label="Check")
 
 
 def validate_prerequisites(project_id: str | None) -> pl.DataFrame:
@@ -353,8 +381,8 @@ def main() -> None:
     data = load_check_data(project_id, config)
     stop_if_no_survey_data(data.page_data, config.survey_data_name)
 
-    # Render check tabs
-    render_check_tabs(project_id, config, data)
+    # Render the check navigation and the selected check
+    render_checks(project_id, config, data)
 
 
 # Execute main function when run as a Streamlit page
