@@ -86,7 +86,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`seed_prep_from_raw`), so Configure Checks and the replication package
     see datasets never opened on Prepare Data
   - Datasets with no imported rows are muted with a reason
-    (`dataset_status`)
+    (`dataset_status`); a status that raises marks only that dataset
+    (`guarded_status`), and `render_dataset` takes the dataset's nav item
+    instead of computing its status again
+  - A "Reset filters" action above the selected dataset clears that
+    dataset's view state
   - The `dataset` URL query parameter reflects and drives the selection,
     which is saved in the `view_state` of `prep_view_settings.json`
   - `prep_add_step` and `prep_remove_step` take the dataset and its step

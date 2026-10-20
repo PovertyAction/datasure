@@ -197,6 +197,8 @@ preparation steps, Change Log and preview load, so the page responds quickly.
   Selecting it explains what to import on the Import Data page.
 - The selected dataset is part of the page address, for example
   `...?dataset=demo_survey`, and the page reopens on it next time.
+- **Reset filters**, above the selected dataset, clears anything remembered
+  for that dataset's view, as on the check pages.
 - Every dataset stays available on Configure Checks, including datasets you
   never opened here.
 

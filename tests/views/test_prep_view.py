@@ -2514,3 +2514,36 @@ class TestDatasetNavigation:
 
         format_func = _st.pills.call_args.kwargs["format_func"]
         assert "not set up" not in format_func("alpha")
+
+    def test_a_status_that_raises_marks_only_that_dataset(self):
+        from datasure.utils.dataframe_utils import TableState
+        from datasure.utils.navigation import CheckStatus
+
+        broken = pv.PrepTables(pl.DataFrame(), None, TableState.NO_ROWS)
+        fine = pv.PrepTables(_rows("beta"), pl.DataFrame(), TableState.HAS_ROWS)
+
+        items = pv.dataset_nav_items(["alpha", "beta"], {"alpha": broken, "beta": fine})
+
+        assert [item.status for item in items] == [
+            CheckStatus.ERROR,
+            CheckStatus.READY,
+        ]
+        assert "AttributeError" in items[0].reason
+
+    def test_reset_filters_clears_only_the_selected_datasets_view_state(self, tmp_path):
+        from datasure.utils.view_state import ViewState
+
+        tables = {("alpha", "prep"): _rows("alpha"), ("beta", "prep"): _rows("beta")}
+        settings = tmp_path / "test_project" / "settings" / pv.PREP_SETTINGS_FILE
+        ViewState(settings, "beta").save("some_filter", "x")
+        ViewState(settings, "alpha").save("some_filter", "y")
+
+        _render_prep_page(tables, ["alpha", "beta"], tmp_path, {"dataset": "beta"})
+
+        reset = next(
+            c for c in _st.button.call_args_list if c.args[0] == "Reset filters"
+        )
+        reset.kwargs["on_click"](*reset.kwargs.get("args", ()))
+
+        assert ViewState(settings, "beta").values() == {}
+        assert ViewState(settings, "alpha").values() == {"some_filter": "y"}

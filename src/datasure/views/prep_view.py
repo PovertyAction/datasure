@@ -36,7 +36,12 @@ from datasure.utils.duckdb_utils import (
     duckdb_get_table,
     duckdb_save_table,
 )
-from datasure.utils.nav_ui import draw_nav, resolve_selection, run_guarded
+from datasure.utils.nav_ui import (
+    draw_nav,
+    guarded_status,
+    resolve_selection,
+    run_guarded,
+)
 from datasure.utils.navigation import (
     READY,
     CheckStatus,
@@ -72,7 +77,12 @@ from datasure.utils.ui_utils import (
     section_header,
     show_queued_notices,
 )
-from datasure.utils.view_state import save_selection, saved_selection
+from datasure.utils.view_state import (
+    ViewState,
+    reset_filters_button,
+    save_selection,
+    saved_selection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1150,31 +1160,50 @@ def dataset_status(tables: PrepTables) -> StatusResult:
     return READY
 
 
-def dataset_nav_items(datasets: list[str], tables: dict[str, PrepTables]):
-    """Return one navigation item per dataset, dimmed when it has no rows."""
-    return [
-        NavItem(
-            slug=alias,
-            label=alias,
-            icon=":material/table_chart:",
-            status=(status := dataset_status(tables[alias])).status,
-            reason=status.reason,
+def dataset_nav_items(
+    datasets: list[str], tables: dict[str, PrepTables]
+) -> list[NavItem]:
+    """Return one navigation item per dataset, dimmed when it has no rows.
+
+    A status that raises gives that dataset the error status.
+    """
+    items = []
+    for alias in datasets:
+        status, reason = guarded_status(
+            alias, lambda alias=alias: dataset_status(tables[alias])
         )
-        for alias in datasets
-    ]
+        items.append(
+            NavItem(
+                slug=alias,
+                label=alias,
+                icon=":material/table_chart:",
+                status=status,
+                reason=reason,
+            )
+        )
+    return items
 
 
-def render_dataset(alias: str, step_index: int, tables: PrepTables) -> None:
-    """Render the preparation UI of one dataset."""
+def render_dataset(item: NavItem, step_index: int, tables: PrepTables) -> None:
+    """Render the preparation UI of one dataset.
+
+    ``item`` is the dataset's navigation item, whose status was computed
+    once for the navigation.
+    """
+    alias = item.slug
     prep_data, prep_log, prep_state = tables
 
     # Before the empty check: a step that removes every row still
     # queued messages for this run.
     show_queued_notices(_notice_scope(alias))
 
-    status = dataset_status(tables)
-    if status.status is not CheckStatus.READY:
-        st.warning(status.reason)
+    if item.status is CheckStatus.ERROR:
+        st.error(
+            f"Could not check whether **{alias}** is ready. {item.reason}",
+            icon=":material/error:",
+        )
+    elif item.dimmed:
+        st.warning(item.reason)
     # A table with no rows had every row removed by a step, which must
     # stay removable, so only a missing table skips the controls.
     if prep_state is TableState.MISSING:
@@ -1294,11 +1323,15 @@ if show_prep_page_info:
     )
     save_selection(prep_settings_file, nav_state.selected)
     selected_alias = nav_state.selected
+    # The scope is the dataset, so Reset filters clears only its view state.
+    reset_filters_button(
+        ViewState(prep_settings_file, selected_alias), key=PREP_NAV_KEY
+    )
     run_guarded(
         PREP_NAV_KEY,
         nav_state.selected_item,
         lambda: render_dataset(
-            selected_alias,
+            nav_state.selected_item,
             datasets.index(selected_alias),
             prep_tables[selected_alias],
         ),

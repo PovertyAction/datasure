@@ -242,7 +242,9 @@ On a check page this is the page settings file
   check module). "Reset filters" (`reset_filters_button`, drawn by
   `render_checks` above the selected check) calls `ViewState.reset_widgets`,
   which clears only that scope's saved values and their session state. It
-  does not touch the check's own settings.
+  does not touch the check's own settings. Prepare Data (scope: the
+  dataset) and Corrections (scope: the check page) draw the same action
+  above the selected item.
 - **Not saved.** Pagination, search boxes and inputs inside dialogs or
   popovers are never bound, so they start fresh. Bound today: the duplicates
   dataset switcher, card sort and column selector; the outliers table toggles
