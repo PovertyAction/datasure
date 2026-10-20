@@ -654,6 +654,13 @@ def test_render_backcheck_comparison_results_with_data(patched_bc):
         )
 
     patched_bc.dataframe.assert_called()
+    # The column filter gets its options; binding it must not swallow them.
+    filter_call = next(
+        c
+        for c in patched_bc.multiselect.call_args_list
+        if c.args[0] == "Filter by Columns"
+    )
+    assert filter_call.args[1] == ["age", "income"]
 
 
 def test_render_backchecks_column_actions_empty(patched_bc):

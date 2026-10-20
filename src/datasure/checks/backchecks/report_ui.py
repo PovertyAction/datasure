@@ -1849,6 +1849,7 @@ def _render_backcheck_comparison_results(
     # Render filter controls
     selected_columns = st.multiselect(
         "Filter by Columns",
+        available_columns,
         help="Select which columns to show comparison results for",
         **bind_widget(
             view,
