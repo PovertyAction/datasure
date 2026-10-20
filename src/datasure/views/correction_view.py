@@ -39,7 +39,8 @@ from datasure.utils.duckdb_utils import (
     name_id,
 )
 from datasure.utils.nav_ui import (
-    LAST_CHECK_PAGE_KEY,
+    LAST_CHECK_PAGE,
+    PROJECT_VIEW_FILE,
     draw_nav,
     guarded_status,
     resolve_selection,
@@ -69,6 +70,8 @@ from datasure.utils.ui_utils import (
 from datasure.utils.view_state import (
     ViewState,
     bind_widget,
+    forget_remembered,
+    remembered,
     reset_filters_button,
     save_selection,
     saved_selection,
@@ -1032,15 +1035,23 @@ def check_page_items(
     return items
 
 
-def open_last_viewed_check_page(slugs: Sequence[str]) -> None:
+def open_last_viewed_check_page(project_id: str, slugs: Sequence[str]) -> None:
     """Select the check page the user last viewed, once.
 
-    The check page records itself each time it renders; using the record
-    here clears it, so a page chosen on Corrections is kept until another
-    check page is viewed. A ``page`` URL value still wins.
+    The check page records itself in the project-level view state file when
+    it renders, so the record survives a new session. Using the record here
+    clears it, so a page chosen on Corrections is kept until another check
+    page is viewed. A ``page`` URL value wins, and the record is then kept
+    for the next visit without one.
     """
-    last = st.session_state.pop(LAST_CHECK_PAGE_KEY, None)
-    if last in slugs and PAGE_PARAM not in st.query_params:
+    if PAGE_PARAM in st.query_params:
+        return
+    project_view_file = get_cache_path(project_id, "settings", PROJECT_VIEW_FILE)
+    last = remembered(project_view_file, LAST_CHECK_PAGE)
+    if last is None:
+        return
+    forget_remembered(project_view_file, LAST_CHECK_PAGE)
+    if last in slugs:
         select_nav_item(CORRECTIONS_NAV_KEY, PAGE_PARAM, last)
 
 
@@ -1060,7 +1071,7 @@ def render_selected_check_page(
     items = check_page_items(project_id, hfc_config_logs, hfc_pages)
     slugs = [item.slug for item in items]
     settings_file = get_cache_path(project_id, "settings", CORRECTIONS_SETTINGS_FILE)
-    open_last_viewed_check_page(slugs)
+    open_last_viewed_check_page(project_id, slugs)
 
     # The pills sit above the page but are drawn after it, so a page that
     # fails while rendering is already marked in them.

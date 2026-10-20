@@ -27,7 +27,8 @@ from datasure.utils.duckdb_utils import (
     name_id,
 )
 from datasure.utils.nav_ui import (
-    LAST_CHECK_PAGE_KEY,
+    LAST_CHECK_PAGE,
+    PROJECT_VIEW_FILE,
     draw_nav,
     render_selected,
     resolve_selection,
@@ -42,6 +43,7 @@ from datasure.utils.settings_utils import (
 from datasure.utils.ui_utils import page_header
 from datasure.utils.view_state import (
     ViewState,
+    remember,
     reset_filters_button,
     save_selection,
     saved_selection,
@@ -288,7 +290,12 @@ def render_checks(project_id: str, config: PageConfig, data: CheckData) -> None:
         survey_columns=get_df_columns(data.page_data),
     )
     nav_key = check_nav_key(config.page_name_id)
-    st.session_state[LAST_CHECK_PAGE_KEY] = config.page_name_id
+    # Corrections opens on the check page viewed last; written on change only.
+    remember(
+        get_cache_path(project_id, "settings", PROJECT_VIEW_FILE),
+        LAST_CHECK_PAGE,
+        config.page_name_id,
+    )
 
     # The navigation sits above the check but is drawn after it, so a check
     # that fails while rendering is already marked in it.

@@ -13,7 +13,7 @@ from datasure.checks.catalogue import CheckEntry
 from datasure.utils import nav_ui
 from datasure.utils.dataframe_utils import TableState
 from datasure.utils.duckdb_utils import duckdb_save_table
-from datasure.utils.view_state import ViewState, save_selection
+from datasure.utils.view_state import ViewState, remembered, save_selection
 from datasure.views import output_view_template as template
 
 PROJECT_ID = "zero_row_project"
@@ -235,6 +235,7 @@ class CheckPage:
         self.st = MagicMock()
         self.st.session_state = {"st_config_checks_page": "config_page"}
         self.st.query_params = {} if url is None else {"check": url}
+        self.tmp_path = tmp_path
         self.config = _config(tmp_path, **config)
         self.reports = {name: MagicMock(name=name) for name in REPORTS}
         self.reports["flagged_outlier_percent"] = MagicMock(return_value=12.5)
@@ -253,6 +254,7 @@ class CheckPage:
         with (
             self.monkeypatch.context() as m,
             patch.object(template, "st", self.st),
+            patch.object(template, "get_cache_path", self.cache_path),
             patch.multiple(
                 catalogue, **self.reports, **self.headlines, **self.settings
             ),
@@ -260,6 +262,13 @@ class CheckPage:
             m.setitem(sys.modules, "streamlit", self.st)
             template.render_checks(PROJECT_ID, self.config, data)
         return [name for name in REPORTS if self.reports[name].called]
+
+    def cache_path(self, *parts) -> Path:
+        return self.tmp_path.joinpath(*map(str, parts))
+
+    @property
+    def project_view_file(self) -> Path:
+        return self.cache_path(PROJECT_ID, "settings", nav_ui.PROJECT_VIEW_FILE)
 
     def _widget(self, name: str):
         return getattr(self.st, name).call_args
@@ -659,10 +668,22 @@ class TestLastViewedCheckPage:
 
         check_page.render(SURVEY)
 
+        # Saved to a project-level file, so it survives a new session.
         assert (
-            check_page.st.session_state[nav_ui.LAST_CHECK_PAGE_KEY]
+            remembered(check_page.project_view_file, nav_ui.LAST_CHECK_PAGE)
             == "household_survey"
         )
+
+    def test_the_record_is_only_written_when_it_changes(self, page):
+        check_page = page(page_name_id="household_survey")
+        check_page.render(SURVEY)
+        written = check_page.project_view_file.stat().st_mtime_ns
+
+        with patch("datasure.utils.view_state.write_settings") as write:
+            check_page.render(SURVEY)
+
+        write.assert_not_called()
+        assert check_page.project_view_file.stat().st_mtime_ns == written
 
 
 class TestResetFilters:

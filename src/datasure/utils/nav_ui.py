@@ -35,9 +35,12 @@ from datasure.utils.navigation import (
 
 logger = logging.getLogger(__name__)
 
-# Session state key holding the page_name_id of the check page last viewed,
-# so Corrections opens on the check page the user was reviewing.
-LAST_CHECK_PAGE_KEY = "st_last_check_page"
+# Project-level view state file (under the project's settings folder) and
+# the name it records the page_name_id of the check page last viewed under,
+# so Corrections opens on the check page the user was reviewing, also in a
+# new session.
+PROJECT_VIEW_FILE = "project_view_settings.json"
+LAST_CHECK_PAGE = "last_check_page"
 
 
 def _selected_key(key: str) -> str:

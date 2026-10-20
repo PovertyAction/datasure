@@ -22,7 +22,8 @@ from datasure.utils.correction_form import (
     validate_numeric_input,
 )
 from datasure.utils.dataframe_utils import TableState
-from datasure.utils.nav_ui import LAST_CHECK_PAGE_KEY
+from datasure.utils.nav_ui import LAST_CHECK_PAGE, PROJECT_VIEW_FILE
+from datasure.utils.view_state import remember, remembered
 from datasure.views import correction_view
 from datasure.views.correction_view import (
     _build_correction_log_display,
@@ -1546,6 +1547,14 @@ class CorrectionsPage:
     def label(self, slug: str) -> str:
         return self.st.pills.call_args.kwargs["format_func"](slug)
 
+    @property
+    def project_view_file(self):
+        return self.settings_dir / "proj1" / "settings" / PROJECT_VIEW_FILE
+
+    def view_check_page(self, slug: str) -> None:
+        """The user views a check page, which records itself."""
+        remember(self.project_view_file, LAST_CHECK_PAGE, slug)
+
     def new_session(self, url=None) -> "CorrectionsPage":
         return CorrectionsPage(
             self.monkeypatch, self.settings_dir, self.check_config, url=url
@@ -1601,28 +1610,34 @@ class TestMain:
 
     def test_opens_on_the_last_viewed_check_page(self, corrections):
         page = corrections()
-        page.st.session_state[LAST_CHECK_PAGE_KEY] = "farm"
+        page.view_check_page("farm")
 
         assert page.run() == [2]
 
     def test_a_url_page_wins_over_the_last_viewed_check_page(self, corrections):
         page = corrections(url="market")
-        page.st.session_state[LAST_CHECK_PAGE_KEY] = "farm"
+        page.view_check_page("farm")
 
         assert page.run() == [1]
+        # The record is kept for the next visit without a URL page.
+        assert remembered(page.project_view_file, LAST_CHECK_PAGE) == "farm"
+        assert page.new_session().run() == [2]
 
     def test_a_chosen_page_is_kept_until_another_check_page_is_viewed(
         self, corrections
     ):
         page = corrections()
-        page.st.session_state[LAST_CHECK_PAGE_KEY] = "farm"
+        page.view_check_page("farm")
         page.run()
         page.click("household")
+        assert page.run() == [0]
+        # Coming back without viewing a check page keeps the choice
+        page.st.query_params.clear()
         assert page.run() == [0]
 
         # The user views the Market check page, then comes back
         page.st.query_params.clear()
-        page.st.session_state[LAST_CHECK_PAGE_KEY] = "market"
+        page.view_check_page("market")
         assert page.run() == [1]
 
     def test_a_new_session_reopens_the_saved_check_page(self, corrections):
@@ -1638,9 +1653,15 @@ class TestMain:
         page.run()
 
         new_session = page.new_session()
-        new_session.st.session_state[LAST_CHECK_PAGE_KEY] = "market"
+        new_session.view_check_page("market")
 
         assert new_session.run() == [1]
+
+    def test_the_last_viewed_check_page_survives_a_new_session(self, corrections):
+        # Viewed in an earlier session, before the app was reopened
+        corrections().view_check_page("market")
+
+        assert corrections().run() == [1]
 
     def test_a_page_without_a_survey_key_is_dimmed_and_explains_why(self, corrections):
         page = corrections(

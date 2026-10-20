@@ -500,8 +500,8 @@ The buttons at the top of the Correct Data page list your check pages, one per
 check configuration. They wrap onto more lines on projects with many forms.
 Only the selected check page's corrections load.
 
-- The page opens on the check page you last reviewed, so you can fix what you
-  found straight away. Otherwise it opens on the check page you last chose
+- The page opens on the check page you last reviewed, also after you reopen
+  the app, so you can fix what you found straight away. Otherwise it opens on the check page you last chose
   here, also after you reopen the app, or on the first one.
 - The selected check page is part of the page address, for example
   `...?page=household_hfcs`. A link always opens the check page it points to.

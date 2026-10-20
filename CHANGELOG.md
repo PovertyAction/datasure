@@ -100,9 +100,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   render. Configuration is still loaded by the page's position in
   `check_config` (`render_selected_check_page`, `views/correction_view.py`)
   - The selection follows the `page` URL query parameter (the page's
-    `page_name_id`), then the check page last viewed in this session
-    (`st_last_check_page`, set by `render_checks`), then the selection saved
-    in `correction_view_settings.json`, then the first page
+    `page_name_id`), then the check page last viewed, also in an earlier
+    session (`last_check_page` in `project_view_settings.json`, written by
+    `render_checks` only when it changes; a URL value leaves it in place),
+    then the selection saved in `correction_view_settings.json`, then the
+    first page
   - Check pages with no survey KEY column or no imported survey data are
     muted with a reason (`check_page_status`)
   - The Survey data / Backcheck data selector (`choose_dataset`) and the

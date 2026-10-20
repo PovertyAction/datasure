@@ -9,6 +9,9 @@ import pytest
 from datasure.utils.view_state import (
     ViewState,
     bind_widget,
+    forget_remembered,
+    remember,
+    remembered,
     save_selection,
     saved_selection,
     without_view_state,
@@ -56,6 +59,30 @@ class TestSelection:
 
     def test_no_saved_selection(self, tmp_path):
         assert saved_selection(tmp_path / "missing.json") is None
+
+
+class TestRemembered:
+    def test_a_remembered_value_round_trips_and_can_be_forgotten(self, tmp_path):
+        path = tmp_path / "project_view_settings.json"
+
+        remember(path, "last_check_page", "hfcs")
+        assert remembered(path, "last_check_page") == "hfcs"
+
+        forget_remembered(path, "last_check_page")
+        assert remembered(path, "last_check_page") is None
+
+    def test_the_file_is_only_written_when_the_value_changes(self, settings_file):
+        remember(settings_file, "last_check_page", "hfcs")
+        written = settings_file.stat().st_mtime_ns
+        settings_file.chmod(0o444)
+        try:
+            # Read-only: a write here would raise.
+            remember(settings_file, "last_check_page", "hfcs")
+            forget_remembered(settings_file, "other")
+        finally:
+            settings_file.chmod(0o644)
+
+        assert settings_file.stat().st_mtime_ns == written
 
 
 class TestWithoutViewState:

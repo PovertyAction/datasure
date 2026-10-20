@@ -67,10 +67,35 @@ def without_view_state(settings: dict) -> dict:
     return {key: value for key, value in settings.items() if key != VIEW_STATE_KEY}
 
 
+def remembered(settings_file: str | Path, name: str) -> str | None:
+    """Return a value remembered under ``name`` in the view state, if any."""
+    value = _view_state(read_settings(settings_file)).get(name)
+    return value if isinstance(value, str) else None
+
+
+def remember(settings_file: str | Path, name: str, value: str) -> None:
+    """Remember a value under ``name``; the file is only written on change."""
+    settings = read_settings(settings_file)
+    view_state = settings.setdefault(VIEW_STATE_KEY, {})
+    if view_state.get(name) == value:
+        return
+    view_state[name] = value
+    write_settings(settings_file, settings)
+
+
+def forget_remembered(settings_file: str | Path, name: str) -> None:
+    """Forget the value remembered under ``name``, if there is one."""
+    settings = read_settings(settings_file)
+    view_state = _view_state(settings)
+    if name not in view_state:
+        return
+    del view_state[name]
+    write_settings(settings_file, settings)
+
+
 def saved_selection(settings_file: str | Path) -> str | None:
     """Return the last selected item (check, dataset or page), if any."""
-    selected = _view_state(read_settings(settings_file)).get("selected")
-    return selected if isinstance(selected, str) else None
+    return remembered(settings_file, "selected")
 
 
 def save_selection(settings_file: str | Path, slug: str) -> None:
@@ -78,12 +103,7 @@ def save_selection(settings_file: str | Path, slug: str) -> None:
 
     Validation is the resolver's job: a stale saved slug is ignored there.
     """
-    settings = read_settings(settings_file)
-    view_state = settings.setdefault(VIEW_STATE_KEY, {})
-    if view_state.get("selected") == slug:
-        return
-    view_state["selected"] = slug
-    write_settings(settings_file, settings)
+    remember(settings_file, "selected", slug)
 
 
 class ViewState:

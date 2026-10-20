@@ -263,6 +263,16 @@ On a check page this is the page settings file
   page in `settings/correction_view_settings.json`, with one scope per check
   page (its `page_name_id`) holding the Survey data / Backcheck data choice
   and the Correction Log filters.
+- **Last viewed check page.** `render_checks` records the `page_name_id` of
+  the check page being viewed as `view_state.last_check_page` in the
+  project-level `settings/project_view_settings.json`
+  (`nav_ui.PROJECT_VIEW_FILE`, `nav_ui.LAST_CHECK_PAGE`), writing only when
+  it changes (`view_state.remember`). With no `page` URL value, Corrections
+  reads the record, forgets it (`forget_remembered`) and selects that check
+  page, so it opens on the page the user was reviewing, also in a new
+  session; forgetting it keeps a page chosen on Corrections until another
+  check page is viewed. With a `page` URL value the URL wins and the record
+  is kept for the next visit without one.
 
 ### Prepare Data and Corrections navigation
 
@@ -322,12 +332,8 @@ The `cache/` directory is gitignored.
 on every rerun and guard on `st_project_id`, calling `st.stop()` when no
 project is selected. If cross-page state looks corrupted, check `app.py` first.
 
-`st_last_check_page` (`nav_ui.LAST_CHECK_PAGE_KEY`) is set by
-`render_checks` to the `page_name_id` of the check page being viewed.
-Corrections pops it on load and selects that check page, so it opens on the
-page the user was reviewing; popping it keeps a page chosen on Corrections
-until another check page is viewed. It is session-only; a new session falls
-back to the saved Corrections selection.
+The check page last viewed is not session state: see
+[View state](#view-state) ("Last viewed check page").
 
 ### URL state
 
