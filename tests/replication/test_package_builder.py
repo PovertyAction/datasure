@@ -239,6 +239,13 @@ class TestBuildReplicationPackage:
         assert any("correction_log.csv" in n for n in names)
         assert any("prep_log.csv" in n for n in names)
 
+    def test_zip_leaves_out_personal_view_state(self, zip_bytes):
+        """Saved filters and selections are not part of the data processing."""
+        with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
+            for name in zf.namelist():
+                assert "settings" not in name.lower()
+                assert b"view_state" not in zf.read(name)
+
     def test_master_script_has_correct_pkg_path(self, zip_bytes):
         with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
             main_do = zf.read(

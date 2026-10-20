@@ -37,6 +37,7 @@ from datasure.utils.config_utils import ConfigurationService
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.reapply_utils import ReapplyFailure, warn_reapply_failures
 from datasure.utils.secure_credentials import list_stored_credentials
+from datasure.utils.view_state import VIEW_STATE_KEY, without_view_state
 
 # ============================================================================
 # EXPORT
@@ -123,8 +124,9 @@ def export_project_config(project_id: str, project_name: str) -> ProjectConfigBu
         pages.append(
             ProjectPageBundle(
                 config=page_row,
-                settings=_read_json(
-                    settings_dir / f"page_{page_name_id}_settings.json"
+                # View state is personal (saved filters, last check).
+                settings=without_view_state(
+                    _read_json(settings_dir / f"page_{page_name_id}_settings.json")
                 ),
                 missing_settings=_read_json(
                     settings_dir / f"page_{page_name_id}_missing_settings.json"
@@ -280,12 +282,21 @@ def _apply_corrections(
 def _write_page_settings(
     project_id: str, page_name: str, settings: dict, missing_settings: dict
 ) -> None:
-    """Write a page's check settings JSON files."""
+    """Write a page's check settings JSON files.
+
+    The local ``view_state`` is kept and any in the bundle is ignored, since
+    view state is personal and never part of a configuration.
+    """
     page_name_id = page_name.lower().replace(" ", "_").replace("-", "_")
     settings_dir = get_cache_path(project_id, "settings")
     settings_dir.mkdir(parents=True, exist_ok=True)
+    settings = without_view_state(settings)
     if settings:
-        with open(settings_dir / f"page_{page_name_id}_settings.json", "w") as f:
+        settings_file = settings_dir / f"page_{page_name_id}_settings.json"
+        local_view_state = _read_json(settings_file).get(VIEW_STATE_KEY)
+        if local_view_state is not None:
+            settings[VIEW_STATE_KEY] = local_view_state
+        with open(settings_file, "w") as f:
             json.dump(settings, f)
     if missing_settings:
         with open(
