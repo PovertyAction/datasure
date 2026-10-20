@@ -34,6 +34,12 @@ from datasure.utils.settings_utils import (
     get_check_config_settings,
 )
 from datasure.utils.ui_utils import page_header
+from datasure.utils.view_state import (
+    ViewState,
+    reset_filters_button,
+    save_selection,
+    saved_selection,
+)
 
 __all__ = ["CheckData", "PageConfig", "no_rows_message"]
 
@@ -287,7 +293,10 @@ def render_checks(project_id: str, config: PageConfig, data: CheckData) -> None:
         key=nav_key,
         param=CHECK_PARAM,
         default=catalogue.DEFAULT_CHECK,
+        saved=saved_selection(config.setting_file),
     )
+    save_selection(config.setting_file, state.selected)
+    reset_filters_button(ViewState(config.setting_file, state.selected), key=nav_key)
     entry = catalogue.get_check(state.selected)
     render_selected(
         nav_key,

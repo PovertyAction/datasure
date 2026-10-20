@@ -12,6 +12,7 @@ from datasure.checks import catalogue
 from datasure.checks.catalogue import CheckEntry
 from datasure.utils.dataframe_utils import TableState
 from datasure.utils.duckdb_utils import duckdb_save_table
+from datasure.utils.view_state import ViewState, save_selection
 from datasure.views import output_view_template as template
 
 PROJECT_ID = "zero_row_project"
@@ -454,3 +455,51 @@ class TestCatalogueDrivesTheChecks:
         assert ctx.project_id == PROJECT_ID
         assert ctx.config is check_page.config
         assert ctx.survey_columns.all_columns == ["key", "age"]
+
+
+class TestSavedSelection:
+    """The page returns to the last check in a new session; a URL wins."""
+
+    def test_a_new_session_reopens_the_last_check(self, page):
+        first = page()
+        first.render(SURVEY)
+        first.click("segmented_control", "Field team")
+        first.render(SURVEY)
+
+        new_session = page()
+
+        assert new_session.render(SURVEY) == ["enumerator_report"]
+        assert new_session.st.query_params == {"check": "enumerator"}
+
+    def test_a_url_check_wins_over_the_saved_one(self, page):
+        page(url="enumerator").render(SURVEY)
+
+        assert page(url="duplicates").render(SURVEY) == ["duplicates_report"]
+
+    def test_a_stale_saved_check_falls_back_to_summary(self, page):
+        check_page = page()
+        save_selection(check_page.config.setting_file, "removed_check")
+
+        assert check_page.render(SURVEY) == ["summary_report"]
+
+
+class TestResetFilters:
+    def test_reset_clears_only_the_shown_checks_view_state(self, page):
+        check_page = page(url="duplicates")
+        settings = check_page.config.setting_file
+        ViewState(settings, "duplicates").save("iddup_survey_sort", "KEY")
+        ViewState(settings, "gps").save("gps_color_by", "team")
+        check_page.st.session_state["iddup_survey_sort"] = "KEY"
+        check_page.render(SURVEY)
+
+        reset = next(
+            call
+            for call in check_page.st.button.call_args_list
+            if call.args[0] == "Reset filters"
+        )
+        with patch.dict(sys.modules, {"streamlit": check_page.st}):
+            reset.kwargs["on_click"](*reset.kwargs.get("args", ()))
+
+        assert ViewState(settings, "duplicates").values() == {}
+        assert "iddup_survey_sort" not in check_page.st.session_state
+        assert ViewState(settings, "gps").values() == {"gps_color_by": "team"}

@@ -234,3 +234,25 @@ class ViewState:
 
         for key in self.reset():
             st.session_state.pop(key, None)
+
+
+def reset_filters_button(view: ViewState, *, key: str) -> None:
+    """Draw a small "Reset filters" action that clears one scope's view state.
+
+    Parameters
+    ----------
+    view : ViewState
+        The scope to clear.
+    key : str
+        A widget key prefix unique to the page.
+    """
+    import streamlit as st
+
+    st.button(
+        "Reset filters",
+        key=f"{key}__reset_{view.scope}",
+        type="tertiary",
+        icon=":material/restart_alt:",
+        help="Clear the filters, selections and sort order remembered here.",
+        on_click=view.reset_widgets,
+    )
