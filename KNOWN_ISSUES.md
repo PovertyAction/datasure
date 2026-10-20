@@ -152,11 +152,11 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ### KI-011: A prep step that removes every row brings back the raw data
 
-- **Status:** 🟡 Planned for 1.2.0
+- **Status:** 🟡 Planned. Fix merged; ships in 1.2.0 (not in any release yet)
 - **Affected versions:** 1.0.0 – 1.2.0a1
 - **Symptom:** If a "remove rows" step removes every row, check pages show the original raw data instead of an empty dataset. The Prep page then says "No data available to prepare" and hides the controls you would use to remove that step.
 - **Workaround:** None in the app. Before you add a "remove rows" step, check that its condition does not match every row.
-- **Issue:** [#315](https://github.com/PovertyAction/datasure/issues/315)
+- **Issue:** [#315](https://github.com/PovertyAction/datasure/issues/315) · [Changelog](CHANGELOG.md#unreleased)
 
 ### KI-010: Duplicates "Records to Include" filters leak between pages or disappear
 
