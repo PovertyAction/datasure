@@ -35,6 +35,15 @@ class StatusResult(NamedTuple):
 READY = StatusResult(CheckStatus.READY)
 
 
+def rows_status(row_count: int) -> StatusResult:
+    """Status for a check that works on any survey data with rows."""
+    if row_count:
+        return READY
+    return StatusResult(
+        CheckStatus.NOT_APPLICABLE, "The survey data has no rows to check."
+    )
+
+
 @dataclass(frozen=True)
 class NavItem:
     """One selectable item in the navigation.

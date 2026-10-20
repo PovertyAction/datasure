@@ -41,6 +41,7 @@ from datasure.models.schemas import (
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding, is_demo_project
 from datasure.utils.settings_utils import (
@@ -2389,3 +2390,25 @@ def duplicates_report(
     demo_callout(
         "**Next**: :material/arrow_upward: Scroll up and select the **Outliers & Constraints** tab."
     )
+
+
+def duplicates_status(setting_file: str, config: dict) -> StatusResult:
+    """Return the duplicates check's status for the check page navigation.
+
+    The check is not set up without a survey ID column, saved in the
+    duplicates settings or set on the Configure Checks page.
+
+    Parameters
+    ----------
+    setting_file : str
+        Path to the page's settings file.
+    config : dict
+        The page's configuration, with a ``survey_id`` key.
+    """
+    settings = {**config, **load_check_settings(setting_file, TAB_NAME)}
+    if not settings.get("survey_id"):
+        return StatusResult(
+            CheckStatus.NOT_SET_UP,
+            "Select a survey ID column in the settings below to find duplicate IDs.",
+        )
+    return READY

@@ -25,6 +25,7 @@ from datasure.checks.gpschecks.compute import (
     _save_gps_column_settings,
     detect_outliers_with_clusters,
     detect_outliers_with_lof,
+    find_gps_columns,
 )
 from datasure.checks.gpschecks.models import MAPBOX_STYLE
 from datasure.checks.gpschecks.review import (
@@ -57,6 +58,7 @@ from datasure.models.schemas import GPSColumnConfig, GPSSettings
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.utils.correction_form import apply_correction_entries, get_current_value
 from datasure.utils.dataframe_utils import ColumnByType, get_df_columns
+from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import is_demo_project
 from datasure.utils.ui_utils import (
@@ -2019,3 +2021,20 @@ def gpschecks_report(
     demo_callout(
         "**Next**: :material/arrow_upward: Scroll up and select the **Enumerator Statistics** tab."
     )
+
+
+def gpschecks_status(
+    project_id: str, page_name_id: str, data: pl.DataFrame
+) -> StatusResult:
+    """Return the GPS check's status for the check page navigation.
+
+    Not applicable when no column looks like GPS data; not set up until a GPS
+    column configuration is added.
+    """
+    if not find_gps_columns(data):
+        return StatusResult(
+            CheckStatus.NOT_APPLICABLE, "No GPS column found in this dataset."
+        )
+    if _get_gps_column_settings(project_id, page_name_id).is_empty():
+        return StatusResult(CheckStatus.NOT_SET_UP, "No GPS columns are set up yet.")
+    return READY

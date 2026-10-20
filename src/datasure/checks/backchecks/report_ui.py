@@ -61,8 +61,14 @@ from datasure.checks.backchecks.scope import (
     scope_captions,
 )
 from datasure.checks.backchecks.settings_ui import backchecks_report_settings
-from datasure.utils.dataframe_utils import ColumnByType
+from datasure.utils.dataframe_utils import (
+    ColumnByType,
+    TableState,
+    get_table_state,
+    no_rows_message,
+)
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout, show_demo_next_action
 from datasure.utils.reviewer import get_reviewer_name
 from datasure.utils.settings_utils import (
@@ -2365,3 +2371,40 @@ def backchecks_report(
         type="success",
     )
     show_demo_next_action(5, "st_corr_page", "Proceed to Correct Data")
+
+
+def backchecks_status(
+    backcheck_data_name: str | None, backcheck_data: pl.DataFrame | None
+) -> StatusResult:
+    """Return the backchecks check's status for the check page navigation.
+
+    Parameters
+    ----------
+    backcheck_data_name : str | None
+        The page's backcheck dataset, if one is selected.
+    backcheck_data : pl.DataFrame | None
+        The backcheck data as loaded, or None.
+    """
+    if not backcheck_data_name:
+        return StatusResult(
+            CheckStatus.NOT_SET_UP,
+            "No backcheck dataset is selected for this page. Choose one on the "
+            "Configure Checks page.",
+        )
+    state = (
+        TableState.MISSING
+        if backcheck_data is None
+        else get_table_state(backcheck_data)
+    )
+    if state is TableState.MISSING:
+        return StatusResult(
+            CheckStatus.NOT_SET_UP,
+            f"No data found for **{backcheck_data_name}**. Import it on the "
+            "Import Data page.",
+        )
+    if state is TableState.NO_ROWS:
+        return StatusResult(
+            CheckStatus.NOT_APPLICABLE,
+            no_rows_message(backcheck_data_name, "analyze"),
+        )
+    return READY

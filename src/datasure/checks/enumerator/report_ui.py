@@ -26,6 +26,7 @@ from datasure.checks.enumerator.models import (
 from datasure.checks.enumerator.settings_ui import enumerator_report_settings
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table
+from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.settings_utils import (
     load_check_settings,
@@ -1255,3 +1256,26 @@ def enumerator_report(
     demo_callout(
         "**Next**: :material/arrow_upward: Scroll up and select the **Backcheck Analysis** tab."
     )
+
+
+def enumerator_status(setting_file: str, config: dict) -> StatusResult:
+    """Return the enumerator check's status for the check page navigation.
+
+    The check is not set up without an enumerator column and a survey date
+    column, saved in its settings or set on the Configure Checks page.
+    """
+    settings = {**config, **load_check_settings(setting_file, TAB_NAME)}
+    missing = [
+        label
+        for key, label in (
+            ("enumerator", "an enumerator column"),
+            ("survey_date", "a survey date column"),
+        )
+        if not settings.get(key)
+    ]
+    if missing:
+        return StatusResult(
+            CheckStatus.NOT_SET_UP,
+            f"Select {' and '.join(missing)} in the settings below.",
+        )
+    return READY

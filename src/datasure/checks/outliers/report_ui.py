@@ -66,6 +66,7 @@ from datasure.utils.correction_form import (
 )
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import is_demo_project
 from datasure.utils.settings_utils import (
@@ -1754,3 +1755,23 @@ def outliers_report(
     demo_callout(
         "**Next**: :material/arrow_upward: Scroll up and select the **GPS Checks** tab."
     )
+
+
+def outliers_status(
+    project_id: str, page_name_id: str, survey_columns: ColumnByType
+) -> StatusResult:
+    """Return the outliers check's status for the check page navigation.
+
+    Not applicable without numeric columns; not set up until an outlier or
+    constraint column is added.
+    """
+    if not survey_columns.numeric_columns:
+        return StatusResult(
+            CheckStatus.NOT_APPLICABLE, "No numeric columns found in this dataset."
+        )
+    if _load_outlier_settings(project_id, page_name_id).is_empty():
+        return StatusResult(
+            CheckStatus.NOT_SET_UP,
+            "No outlier or constraint columns are set up yet.",
+        )
+    return READY

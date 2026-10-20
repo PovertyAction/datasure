@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import polars as pl
 import pydeck
@@ -535,3 +537,49 @@ def calculate_gps_accuracy_statistics(
                     break
 
     return gps_accuracy_stats
+
+
+# Words in a column name that suggest GPS data, as in "gps_lat" or "hh_lon".
+_GPS_NAME_WORDS = {"lat", "lon", "lng", "gps", "geo", "geopoint", "coords"}
+_GPS_NAME_PREFIXES = ("latitude", "longitude", "geopoint", "coordinate")
+# A SurveyCTO geopoint value: "latitude longitude [altitude [accuracy]]".
+_GEOPOINT_VALUE = r"^-?\d+(\.\d+)?( -?\d+(\.\d+)?){1,3}$"
+
+
+def _looks_like_gps_name(name: str) -> bool:
+    # Split snake_case, kebab-case and camelCase names into lower-case words.
+    words = [word.lower() for word in re.findall(r"[a-z]+|[A-Z][a-z]*", name)]
+    return any(
+        word in _GPS_NAME_WORDS or word.startswith(_GPS_NAME_PREFIXES) for word in words
+    )
+
+
+def find_gps_columns(data: pl.DataFrame, sample_size: int = 20) -> list[str]:
+    """Return columns that look like GPS data.
+
+    A column counts when its name suggests GPS data (for example
+    ``gps_lat`` or ``household_longitude``), or when it is a text column
+    whose first non-empty values are SurveyCTO geopoints
+    ("latitude longitude altitude accuracy").
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        The survey data.
+    sample_size : int
+        How many non-empty values of each text column to check.
+
+    Returns
+    -------
+    list[str]
+        The matching column names, in data order.
+    """
+    found = []
+    for name, dtype in data.schema.items():
+        if _looks_like_gps_name(name):
+            found.append(name)
+        elif dtype == pl.String:
+            sample = data[name].drop_nulls().head(sample_size).str.strip_chars()
+            if len(sample) and sample.str.contains(_GEOPOINT_VALUE).all():
+                found.append(name)
+    return found
