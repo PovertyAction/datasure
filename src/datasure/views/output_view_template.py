@@ -37,13 +37,11 @@ from datasure.utils.ui_utils import page_header
 
 __all__ = ["CheckData", "PageConfig", "no_rows_message"]
 
-# URL query parameter holding the selected check, e.g. ?check=duplicates.
-CHECK_PARAM = "check"
-
-
-def check_nav_key(page_name_id: str) -> str:
-    """Return the session state key prefix for a check page's navigation."""
-    return f"check_nav_{page_name_id}"
+# URL query parameter holding the selected check, e.g. ?check=duplicates, and
+# the navigation's session state key. Summary's health grid selects checks
+# with them too, so they live in the catalogue.
+CHECK_PARAM = catalogue.CHECK_PARAM
+check_nav_key = catalogue.check_nav_key
 
 
 def extract_page_number(file_path: str) -> int | None:

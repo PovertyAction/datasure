@@ -1,35 +1,47 @@
 """The check catalogue: every check shown on a check page.
 
-Each entry gives a check's slug, short label, icon, group, render function and
-status function, in display order. The check page builds its navigation from
-this catalogue, so adding an entry here is the only change needed for a new
-check to appear.
+Each entry gives a check's slug, short label, icon, group, render function,
+status function and optional headline function, in display order. The check
+page builds its navigation and Summary's health grid from this catalogue, so
+adding an entry here is the only change needed for a new check to appear.
 """
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 
 from datasure.checks.backchecks.report_ui import (
+    backchecks_headline,
     backchecks_report,
     backchecks_status,
     overall_error_rate_percent,
 )
 from datasure.checks.context import CheckContext
 from datasure.checks.descriptive import descriptive_report, descriptive_status
-from datasure.checks.duplicates import duplicates_report, duplicates_status
-from datasure.checks.enumerator.report_ui import enumerator_report, enumerator_status
+from datasure.checks.duplicates import (
+    duplicates_headline,
+    duplicates_report,
+    duplicates_status,
+)
+from datasure.checks.enumerator.report_ui import (
+    enumerator_headline,
+    enumerator_report,
+    enumerator_status,
+)
 from datasure.checks.gpschecks.report_ui import gpschecks_report, gpschecks_status
-from datasure.checks.missing import missing_report, missing_status
+from datasure.checks.health import health_cards, render_health_grid
+from datasure.checks.missing import missing_headline, missing_report, missing_status
 from datasure.checks.outliers.report_ui import (
     flagged_outlier_percent,
+    outliers_headline,
     outliers_report,
     outliers_status,
 )
-from datasure.checks.progress import progress_report, progress_status
+from datasure.checks.progress import progress_headline, progress_report, progress_status
 from datasure.checks.summary import CheckRates, summary_report, summary_status
 from datasure.utils.dataframe_utils import TableState, get_df_columns
-from datasure.utils.nav_ui import guarded_status
-from datasure.utils.navigation import READY, NavItem, StatusResult
+from datasure.utils.nav_ui import guarded_status, render_errors, select_nav_item
+from datasure.utils.navigation import READY, NavItem, StatusResult, with_errors
 
 OVERVIEW = "Overview"
 DATA_INTEGRITY = "Data integrity"
@@ -38,6 +50,14 @@ EXPLORATION = "Exploration"
 
 # The check a page opens on when the URL and remembered selection give none.
 DEFAULT_CHECK = "summary"
+
+# URL query parameter holding the selected check, e.g. ?check=duplicates.
+CHECK_PARAM = "check"
+
+
+def check_nav_key(page_name_id: str) -> str:
+    """Return the session state key prefix for a check page's navigation."""
+    return f"check_nav_{page_name_id}"
 
 
 @dataclass(frozen=True)
@@ -62,6 +82,10 @@ class CheckEntry:
     setup : Callable[[CheckContext], None] | None
         Draws what the user needs to set the check up when it is not set up.
         Default: ``render``, for reports that start with their settings.
+    headline : Callable[[CheckContext], str | None] | None
+        The number Summary's health grid shows for the check when it is
+        ready, such as "14 duplicate IDs". It must match what the check
+        reports. None for checks with no single triage number.
     """
 
     slug: str
@@ -71,6 +95,7 @@ class CheckEntry:
     render: Callable[[CheckContext], None]
     status: Callable[[CheckContext], StatusResult] = lambda _ctx: READY
     setup: Callable[[CheckContext], None] | None = None
+    headline: Callable[[CheckContext], str | None] | None = None
 
 
 def _outliers_config(ctx: CheckContext) -> dict:
@@ -137,6 +162,20 @@ def _render_summary(ctx: CheckContext) -> None:
         ctx.survey_columns,
         check_rates=check_rates,
     )
+    _render_health_grid(ctx)
+
+
+def _render_health_grid(ctx: CheckContext) -> None:
+    """Draw a health card for every check but Summary, under its tiles."""
+    nav_key = check_nav_key(ctx.config.page_name_id)
+    items = with_errors(nav_items(ctx), render_errors(nav_key))
+    entries = {entry.slug: entry for entry in CHECK_CATALOGUE}
+    cards = health_cards(
+        ctx,
+        [item for item in items if item.slug != "summary"],
+        {slug: entry.headline for slug, entry in entries.items() if entry.headline},
+    )
+    render_health_grid(cards, on_select=partial(select_nav_item, nav_key, CHECK_PARAM))
 
 
 def _render_descriptive(ctx: CheckContext) -> None:
@@ -148,18 +187,22 @@ def _render_descriptive(ctx: CheckContext) -> None:
     )
 
 
-def _render_progress(ctx: CheckContext) -> None:
+def _progress_config(ctx: CheckContext) -> dict:
     config = ctx.config
+    return {
+        "survey_key": config.survey_key,
+        "survey_id": config.survey_id,
+        "enumerator": config.enumerator,
+        "survey_date": config.survey_date,
+        "survey_target": config.survey_target,
+    }
+
+
+def _render_progress(ctx: CheckContext) -> None:
     progress_report(
         ctx.data.page_data,
-        config.setting_file,
-        {
-            "survey_key": config.survey_key,
-            "survey_id": config.survey_id,
-            "enumerator": config.enumerator,
-            "survey_date": config.survey_date,
-            "survey_target": config.survey_target,
-        },
+        ctx.config.setting_file,
+        _progress_config(ctx),
         ctx.survey_columns,
     )
 
@@ -173,6 +216,21 @@ def _render_missing(ctx: CheckContext) -> None:
     )
 
 
+def _duplicates_config(ctx: CheckContext) -> dict:
+    config = ctx.config
+    return {
+        "survey_key": config.survey_key,
+        "survey_id": config.survey_id,
+        "enumerator": config.enumerator,
+        "team": config.team,
+        "survey_date": config.survey_date,
+        "backcheck_data_name": config.backcheck_data_name,
+        "backcheck_date": config.backcheck_date,
+        "backchecker": config.backchecker,
+        "backchecker_team": config.backchecker_team,
+    }
+
+
 def _render_duplicates(ctx: CheckContext) -> None:
     config = ctx.config
     duplicates_report(
@@ -180,17 +238,7 @@ def _render_duplicates(ctx: CheckContext) -> None:
         config.page_name_id,
         ctx.data.page_data,
         config.setting_file,
-        {
-            "survey_key": config.survey_key,
-            "survey_id": config.survey_id,
-            "enumerator": config.enumerator,
-            "team": config.team,
-            "survey_date": config.survey_date,
-            "backcheck_data_name": config.backcheck_data_name,
-            "backcheck_date": config.backcheck_date,
-            "backchecker": config.backchecker,
-            "backchecker_team": config.backchecker_team,
-        },
+        _duplicates_config(ctx),
         ctx.survey_columns,
         ctx.data.backcheck_data_with_rows,
         alias=config.survey_data_name,
@@ -228,21 +276,25 @@ def _render_gps(ctx: CheckContext) -> None:
     )
 
 
-def _render_enumerator(ctx: CheckContext) -> None:
+def _enumerator_config(ctx: CheckContext) -> dict:
     config = ctx.config
+    return {
+        "survey_key": config.survey_key,
+        "survey_id": config.survey_id,
+        "survey_date": config.survey_date,
+        "enumerator": config.enumerator,
+        "formversion": config.formversion,
+        "duration": config.duration,
+        "team": config.team,
+    }
+
+
+def _render_enumerator(ctx: CheckContext) -> None:
     enumerator_report(
         ctx.project_id,
         ctx.data.page_data,
-        config.setting_file,
-        {
-            "survey_key": config.survey_key,
-            "survey_id": config.survey_id,
-            "survey_date": config.survey_date,
-            "enumerator": config.enumerator,
-            "formversion": config.formversion,
-            "duration": config.duration,
-            "team": config.team,
-        },
+        ctx.config.setting_file,
+        _enumerator_config(ctx),
         ctx.survey_columns,
     )
 
@@ -319,6 +371,57 @@ def _descriptive_status(ctx: CheckContext) -> StatusResult:
     return descriptive_status(ctx.data.page_data)
 
 
+# Headline adapters also look the module-level functions up on each call.
+def _progress_headline(ctx: CheckContext) -> str | None:
+    return progress_headline(
+        ctx.data.page_data, ctx.config.setting_file, _progress_config(ctx)
+    )
+
+
+def _missing_headline(ctx: CheckContext) -> str | None:
+    return missing_headline(ctx.project_id, ctx.data.page_data)
+
+
+def _duplicates_headline(ctx: CheckContext) -> str | None:
+    return duplicates_headline(
+        ctx.data.page_data, ctx.config.setting_file, _duplicates_config(ctx)
+    )
+
+
+def _outliers_headline(ctx: CheckContext) -> str | None:
+    config = ctx.config
+    return outliers_headline(
+        ctx.project_id,
+        config.page_name_id,
+        ctx.data.page_data,
+        ctx.survey_columns,
+        config.setting_file,
+        _outliers_config(ctx),
+        config.survey_data_name,
+    )
+
+
+def _enumerator_headline(ctx: CheckContext) -> str | None:
+    return enumerator_headline(
+        ctx.project_id,
+        ctx.data.page_data,
+        ctx.config.setting_file,
+        _enumerator_config(ctx),
+    )
+
+
+def _backchecks_headline(ctx: CheckContext) -> str | None:
+    # Only called when the status is ready, so the backcheck data has rows.
+    return backchecks_headline(
+        ctx.project_id,
+        ctx.config.page_name_id,
+        ctx.data.page_data,
+        ctx.data.backcheck_data,
+        ctx.config.setting_file,
+        _backcheck_config(ctx),
+    )
+
+
 CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
     CheckEntry(
         "summary",
@@ -335,6 +438,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         OVERVIEW,
         _render_progress,
         _progress_status,
+        headline=_progress_headline,
     ),
     CheckEntry(
         "missing",
@@ -343,6 +447,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         DATA_INTEGRITY,
         _render_missing,
         _missing_status,
+        headline=_missing_headline,
     ),
     CheckEntry(
         "duplicates",
@@ -351,6 +456,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         DATA_INTEGRITY,
         _render_duplicates,
         _duplicates_status,
+        headline=_duplicates_headline,
     ),
     CheckEntry(
         "outliers",
@@ -359,6 +465,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         DATA_INTEGRITY,
         _render_outliers,
         _outliers_status,
+        headline=_outliers_headline,
     ),
     CheckEntry(
         "gps",
@@ -375,6 +482,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         FIELD_TEAM,
         _render_enumerator,
         _enumerator_status,
+        headline=_enumerator_headline,
     ),
     CheckEntry(
         "backchecks",
@@ -384,6 +492,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         _render_backchecks,
         _backchecks_status,
         setup=_setup_backchecks,
+        headline=_backchecks_headline,
     ),
     CheckEntry(
         "descriptive",
