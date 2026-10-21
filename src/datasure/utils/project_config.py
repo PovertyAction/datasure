@@ -221,7 +221,7 @@ def _export_pages(
 def export_project_config(
     project_id: str,
     project_name: str,
-    exclude_table_prefixes: Collection[str] = (),
+    include_record_level: bool = True,
 ) -> ProjectConfigBundle:
     """Build a portable configuration bundle for the given project.
 
@@ -231,9 +231,10 @@ def export_project_config(
         The project to export.
     project_name : str
         The project's display name, recorded for reference only.
-    exclude_table_prefixes : collection of str, optional
-        Check table prefixes (from ``CHECK_TABLE_PREFIXES``) to leave out,
-        e.g. ``RECORD_LEVEL_TABLE_PREFIXES``.
+    include_record_level : bool, optional
+        Include decisions about individual records: corrections and the
+        ``RECORD_LEVEL_TABLE_PREFIXES`` check tables (backcheck attribution).
+        Defaults to True.
 
     Returns
     -------
@@ -269,6 +270,8 @@ def export_project_config(
                 _decode_prep_args_cell(v) for v in prep_log["prep_args"].to_list()
             ]
 
+        if not include_record_level:
+            continue
         corr_log = duckdb_get_table(
             project_id, alias=f"corr_log_{alias}", db_name="logs"
         )
@@ -278,6 +281,9 @@ def export_project_config(
                 for r in corr_log.to_dicts()
             ]
 
+    exclude_table_prefixes = (
+        frozenset() if include_record_level else RECORD_LEVEL_TABLE_PREFIXES
+    )
     pages = _export_pages(project_id, exclude_table_prefixes)
     missing_codes, _ = _table_to_rows(
         duckdb_get_table(

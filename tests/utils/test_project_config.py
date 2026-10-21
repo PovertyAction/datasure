@@ -17,7 +17,6 @@ from datasure.utils.config_utils import ConfigurationService
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.project_config import (
     BUNDLE_VERSION,
-    RECORD_LEVEL_TABLE_PREFIXES,
     _render_config_summary,
     _stored_username_for_server,
     apply_project_config,
@@ -718,6 +717,25 @@ def _seed_source_project():
     )
 
 
+def _seed_corrections():
+    duckdb_save_table(
+        SRC_PROJECT,
+        pl.DataFrame(
+            {
+                "date": [datetime(2026, 8, 28, 9, 0, 0)],
+                "KEY": ["1"],
+                "action": ["modify value"],
+                "column": ["age"],
+                "current_value": ["30"],
+                "new_value": ["31"],
+                "reason": ["typo"],
+            }
+        ),
+        "corr_log_household",
+        "logs",
+    )
+
+
 @patch("datasure.utils.project_config.CorrectionProcessor")
 @patch("datasure.utils.project_config.load_local_data")
 @patch("datasure.utils.project_config.ConfigurationService")
@@ -810,19 +828,49 @@ class TestCheckTablesAndMissingCodes:
                 DST_PROJECT, f"{prefix}_{PAGE_ID}", "logs"
             ).is_empty()
 
-    def test_export_can_leave_out_record_level_tables(
+    def test_export_includes_record_level_decisions_by_default(
         self, mock_service_cls, mock_load_local, mock_correction_cls
     ):
-        """Excluded prefixes (e.g. backcheck attribution) are not exported."""
+        """By default corrections and backcheck attribution travel too."""
         mock_service_cls.return_value = _page_config_service()
         _seed_source_project()
+        _seed_corrections()
 
-        bundle = self._export_and_parse(
-            exclude_table_prefixes=RECORD_LEVEL_TABLE_PREFIXES
+        bundle = self._export_and_parse()
+        result = apply_project_config(DST_PROJECT, bundle, self.local_paths)
+
+        assert bundle.corrections["household"][0]["KEY"] == "1"
+        assert "bc_attribution" in bundle.pages[0].check_tables
+        assert result.pages_created == [PAGE_NAME]
+        assert_frame_equal(
+            duckdb_get_table(DST_PROJECT, f"bc_attribution_{PAGE_ID}", "logs"),
+            CHECK_TABLES["bc_attribution"],
         )
 
+    def test_export_without_record_level_decisions_imports_cleanly(
+        self, mock_service_cls, mock_load_local, mock_correction_cls
+    ):
+        """Unticked: no corrections or attribution, and the bundle still applies."""
+        mock_service_cls.return_value = _page_config_service()
+        _seed_source_project()
+        _seed_corrections()
+
+        bundle = self._export_and_parse(include_record_level=False)
+        result = apply_project_config(DST_PROJECT, bundle, self.local_paths)
+
+        assert bundle.corrections == {}
         assert "bc_attribution" not in bundle.pages[0].check_tables
         assert "duplicates" in bundle.pages[0].check_tables
+        assert result.pages_created == [PAGE_NAME]
+        assert result.correction_failures == []
+        assert duckdb_get_table(
+            DST_PROJECT, f"bc_attribution_{PAGE_ID}", "logs"
+        ).is_empty()
+        assert duckdb_get_table(DST_PROJECT, "corr_log_household", "logs").is_empty()
+        assert_frame_equal(
+            duckdb_get_table(DST_PROJECT, f"duplicates_{PAGE_ID}", "logs"),
+            CHECK_TABLES["duplicates"],
+        )
 
     def test_export_no_longer_includes_missing_settings(
         self, mock_service_cls, mock_load_local, mock_correction_cls, real_duckdb
