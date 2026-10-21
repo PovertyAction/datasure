@@ -984,6 +984,44 @@ class TestSurveyCTOClient:
         assert saved["consent"].to_list() == [1, 0]
 
     @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_import_regular_form_appends_booleans_to_cached_integers(
+        self, mock_save_table
+    ):
+        """New boolean values append to a cached 0/1 integer column."""
+        client = SurveyCTOClient("test1234")
+        client.cache_manager = Mock()
+        client.cache_manager.get_existing_data.return_value = (
+            pl.DataFrame({"name": ["Ama"], "consent": [1]}),
+            datetime(2024, 1, 1, tzinfo=UTC),
+        )
+        client._scto_client = Mock()
+        client._scto_client.download_form_data_json.return_value = [
+            {"name": "John", "consent": True},
+            {"name": "Jane", "consent": False},
+        ]
+        client._scto_client.download_form_definition.return_value = {
+            "fieldsRowsAndColumns": [
+                ["name", "type", "disabled"],
+                ["name", "text", "no"],
+                ["consent", "text", "no"],
+            ],
+            "choicesRowsAndColumns": [["list name", "name", "label"]],
+        }
+        form_config = FormConfig(
+            alias="test_form",
+            form_id="form123",
+            server="testserver",
+            refresh=True,
+            save_to="test_form",
+        )
+
+        client._import_regular_form(form_config)
+
+        saved = mock_save_table.call_args[0][1]
+        assert saved.schema["consent"] == pl.Int64
+        assert saved["consent"].to_list() == [1, 1, 0]
+
+    @patch("datasure.connectors.scto.duckdb_save_table")
     def test_import_regular_form_no_refresh(self, mock_save_table):
         """Test importing regular form with refresh=False."""
         client = SurveyCTOClient("test1234")

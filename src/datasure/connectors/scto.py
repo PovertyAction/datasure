@@ -704,9 +704,13 @@ class SurveyCTOClient:
         new_data = pl.DataFrame(new_data_json)
         new_count = len(new_data)
 
-        # Combine data
+        # Combine data; cached booleans are saved as Int64, so cast incoming
+        # booleans first or the diagonal concat fails on mismatched dtypes
         if not existing_data.is_empty():
-            combined_data = pl.concat([existing_data, new_data], how="diagonal")
+            combined_data = pl.concat(
+                [booleans_to_integers(existing_data), booleans_to_integers(new_data)],
+                how="diagonal",
+            )
         else:
             combined_data = new_data
 
