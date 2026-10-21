@@ -96,8 +96,8 @@ class TestPrepFunctions:
     """Tests for the PrepFunctions enum."""
 
     def test_member_count(self):
-        """Verify PrepFunctions has exactly 19 members."""
-        assert len(PrepFunctions) == 19
+        """Verify PrepFunctions has exactly 20 members."""
+        assert len(PrepFunctions) == 20
 
     @pytest.mark.parametrize(
         ("member_name", "expected_value"),
@@ -117,6 +117,7 @@ class TestPrepFunctions:
             ("nunique", "nunique"),
             ("product", "product"),
             ("quotient", "quotient"),
+            ("concat", "concat"),
             ("index", "index"),
             ("uuid", "uuid"),
             ("random", "random"),
@@ -141,8 +142,8 @@ class TestPrepOperations:
     """Tests for the PrepOperations enum."""
 
     def test_member_count(self):
-        """Verify PrepOperations has exactly 30 members."""
-        assert len(PrepOperations) == 30
+        """Verify PrepOperations has exactly 31 members."""
+        assert len(PrepOperations) == 31
 
     @pytest.mark.parametrize(
         ("member_name", "expected_value"),
@@ -171,6 +172,7 @@ class TestPrepOperations:
             ("string_to_number", "string to number"),
             ("string_to_date", "string to date"),
             ("string_to_datetime", "string to datetime"),
+            ("to_string", "to string"),
             ("extract_pattern", "extract pattern"),
             ("get_dummies", "get dummies"),
             ("add", "add"),
@@ -322,8 +324,8 @@ class TestColFuncWithValues:
         assert isinstance(COL_FUNC_WITH_VALUES, tuple)
 
     def test_length(self):
-        """Verify COL_FUNC_WITH_VALUES contains 15 items."""
-        assert len(COL_FUNC_WITH_VALUES) == 15
+        """Verify COL_FUNC_WITH_VALUES contains 16 items."""
+        assert len(COL_FUNC_WITH_VALUES) == 16
 
     def test_contains_expected_values(self):
         """Verify COL_FUNC_WITH_VALUES includes all aggregate function values."""
@@ -343,6 +345,7 @@ class TestColFuncWithValues:
             "nunique",
             "product",
             "quotient",
+            "concat",
         }
         assert set(COL_FUNC_WITH_VALUES) == expected
 

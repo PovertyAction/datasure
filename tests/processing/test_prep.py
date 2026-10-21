@@ -1,6 +1,7 @@
 """Comprehensive tests for the prep module."""
 
 import json
+from datetime import date, datetime
 from unittest.mock import patch
 
 import polars as pl
@@ -1517,6 +1518,146 @@ class TestPrepProcessor:
         assert outcomes[0].prep_args.source_columns == ["a", "b"]
 
 
+def _run_step(data: pl.DataFrame, **args) -> pl.DataFrame:
+    """Run one prep step, built the way the form builds it, through the processor."""
+    action = PrepAction.from_args(PrepActionResult(**args))
+    result, _ = PrepProcessor().execute_single_action(data, action)
+    return result
+
+
+def _concat(data: pl.DataFrame, columns: list[str], separator: str | None):
+    """Add a "joined" column concatenating ``columns`` with ``separator``."""
+    return _run_step(
+        data,
+        action="add new column",
+        column_names="joined",
+        method="concat",
+        source_columns=columns,
+        value=separator,
+    )["joined"].to_list()
+
+
+class TestConcatColumns:
+    """Add Column's concat method, run through the prep processor."""
+
+    @pytest.fixture
+    def ids(self) -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                "region": ["R01", "R02"],
+                "district": ["D05", "D07"],
+                "hhid": ["123", "456"],
+            }
+        )
+
+    def test_joins_with_underscore(self, ids):
+        assert _concat(ids, ["region", "district", "hhid"], "_") == [
+            "R01_D05_123",
+            "R02_D07_456",
+        ]
+
+    @pytest.mark.parametrize(
+        ("separator", "expected"),
+        [
+            ("", "R01D05123"),
+            (" ", "R01 D05 123"),
+            (",", "R01,D05,123"),
+            ("-", "R01-D05-123"),
+            (" | ", "R01 | D05 | 123"),
+            ("::", "R01::D05::123"),
+            # A saved "" separator can come back from the log as null.
+            (None, "R01D05123"),
+        ],
+    )
+    def test_joins_with_separator(self, ids, separator, expected):
+        assert _concat(ids, ["region", "district", "hhid"], separator)[0] == expected
+
+    def test_joins_in_selection_order(self, ids):
+        assert _concat(ids, ["hhid", "region"], "-") == ["123-R01", "456-R02"]
+
+    def test_missing_value_counts_as_empty(self):
+        names = pl.DataFrame({"first": ["Ama", None], "last": [None, "Mensah"]})
+        assert _concat(names, ["first", "last"], " ") == ["Ama", "Mensah"]
+
+    def test_all_missing_gives_missing(self):
+        names = pl.DataFrame(
+            {"first": ["Ama", None], "last": ["Owusu", None]},
+            schema={"first": pl.String, "last": pl.String},
+        )
+        assert _concat(names, ["first", "last"], "_") == ["Ama_Owusu", None]
+
+    def test_rejects_non_text_columns(self):
+        data = pl.DataFrame({"region": ["R01"], "hhid": [123], "score": [1.5]})
+        with pytest.raises(ValidationError, match=r"not text.*hhid.*score"):
+            _concat(data, ["region", "hhid", "score"], "_")
+
+    def test_rejects_missing_columns(self, ids):
+        with pytest.raises(ValidationError, match="village"):
+            _concat(ids, ["region", "village"], "_")
+
+    def test_reapply_skips_concat_when_source_is_no_longer_text(self):
+        """A re-import that made a source numeric skips only the concat step."""
+        reimported = pl.DataFrame({"region": ["R01"], "hhid": [123], "x": [1]})
+        steps = [
+            PrepActionResult(
+                action="add new column",
+                column_names="uid",
+                method="concat",
+                source_columns=["region", "hhid"],
+                value="_",
+            ),
+            PrepActionResult(action="remove column(s)", source_columns=["x"]),
+        ]
+        result, outcomes = PrepProcessor().execute_all_actions(
+            reimported, [PrepAction.from_args(s) for s in steps]
+        )
+        assert [o.status for o in outcomes] == ["Failed", "Successful"]
+        assert "hhid" in outcomes[0].error
+        assert result.columns == ["region", "hhid"]
+
+
+def _to_string(values: pl.Series) -> pl.Series:
+    """Run "to string" on a one-column frame and return the converted column."""
+    data = pl.DataFrame({"col": values})
+    return _run_step(
+        data,
+        action="transform column(s)",
+        method="to string",
+        source_columns=["col"],
+        value=[],
+    )["col"]
+
+
+class TestToString:
+    """Transform Column's to string operation, run through the prep processor."""
+
+    def test_floats_drop_trailing_zero_only_when_whole(self):
+        result = _to_string(pl.Series([12.0, 12.5, None, -3.0]))
+        assert result.dtype == pl.String
+        assert result.to_list() == ["12", "12.5", None, "-3"]
+
+    @pytest.mark.parametrize(
+        ("values", "expected"),
+        [
+            (pl.Series([12, None, -4]), ["12", None, "-4"]),
+            (
+                pl.Series([date(2025, 8, 18), None]),
+                ["2025-08-18", None],
+            ),
+            (
+                pl.Series([datetime(2025, 8, 18, 19, 49), None]),
+                ["2025-08-18 19:49:00.000000", None],
+            ),
+            (pl.Series([True, False, None]), ["true", "false", None]),
+        ],
+        ids=["integer", "date", "datetime", "boolean"],
+    )
+    def test_converts_to_text_keeping_missing(self, values, expected):
+        result = _to_string(values)
+        assert result.dtype == pl.String
+        assert result.to_list() == expected
+
+
 # === LOG MANAGEMENT TESTS === #
 
 
@@ -1813,6 +1954,34 @@ class TestLogManagement:
         prep_args = PrepActionResult(action="remove column(s)", source_columns=["b"])
         _apply_single_action("proj", "alias", prep_args, empty_log, processor)
         assert mock_save.call_count == 2  # log and data
+
+    @patch("datasure.processing.prep.duckdb_get_table")
+    @patch("datasure.processing.prep.duckdb_save_table")
+    def test_concat_without_separator_reapplies_the_same(self, mock_save, mock_get):
+        """A saved concat step with no separator rebuilds the same IDs."""
+        raw = pl.DataFrame({"region": ["R01", "R02"], "hhid": ["123", None]})
+        mock_get.return_value = raw
+        empty_log = pl.DataFrame(
+            {"action": [], "description": [], "prep_args": [], "action_index": []}
+        )
+        step = PrepActionResult(
+            action="add new column",
+            column_names="uid",
+            method="concat",
+            source_columns=["region", "hhid"],
+            value="",
+        )
+        _apply_single_action("proj", "alias", step, empty_log, PrepProcessor())
+        saved_log = _convert_prep_args_to_string(mock_save.call_args_list[0][0][1])
+        first_result = mock_save.call_args_list[1][0][1]
+
+        mock_save.reset_mock()
+        failures = _reapply_all_actions("proj", "alias", saved_log, PrepProcessor())
+
+        reapplied = mock_save.call_args_list[0][0][1]
+        assert failures == []
+        assert reapplied["uid"].to_list() == ["R01123", "R02"]
+        assert reapplied.equals(first_result)
 
 
 # === PUBLIC API TESTS === #

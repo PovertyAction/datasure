@@ -28,6 +28,13 @@ class PrepActionResult:
     additional_info: str | None = None
 
 
+TO_STRING_DESCRIPTION = (
+    "Convert values to text so they can be used in text operations such as "
+    'concat. Whole numbers drop a trailing ".0", dates use YYYY-MM-DD, '
+    'datetimes YYYY-MM-DD HH:MM:SS.ffffff and booleans become "true"/"false"'
+)
+
+
 class PrepDescriptions:
     """Class containing user-friendly descriptions for all data prep functions."""
 
@@ -56,6 +63,7 @@ class PrepDescriptions:
         PrepFunctions.product.value: "Add a column containing the product (multiplication) of values from selected columns",
         PrepFunctions.diff.value: "Add a column containing the difference between two selected columns",
         PrepFunctions.quotient.value: "Add a column containing the division result between two selected columns",
+        PrepFunctions.concat.value: "Add a text column joining two or more text columns, in the order selected, with an optional separator (e.g. region_district_hhid)",
         PrepFunctions.index.value: "Add a column containing row index numbers or custom indexing",
         PrepFunctions.uuid.value: "Add a column containing unique identifiers for each row",
         PrepFunctions.random.value: "Add a column containing randomly generated values",
@@ -99,6 +107,7 @@ class PrepDescriptions:
         PrepOperations.floor.value: "Round numbers down to the nearest integer",
         PrepOperations.ceil.value: "Round numbers up to the nearest integer",
         PrepOperations.abs.value: "Convert negative numbers to positive (absolute value)",
+        PrepOperations.to_string.value: TO_STRING_DESCRIPTION,
     }
 
     # DateTime Functions
@@ -114,6 +123,12 @@ class PrepDescriptions:
         PrepOperations.month_of_year.value: "Extract the month number from dates (1-12)",
         PrepOperations.quarter_of_year.value: "Extract the quarter from dates (Q1, Q2, Q3, Q4)",
         PrepOperations.year.value: "Extract the year component from dates",
+        PrepOperations.to_string.value: TO_STRING_DESCRIPTION,
+    }
+
+    # Functions for date-only and boolean columns
+    CONVERSION_FUNCTIONS: ClassVar[dict[str, str]] = {
+        PrepOperations.to_string.value: TO_STRING_DESCRIPTION,
     }
 
     # Row Condition Filters
@@ -158,6 +173,7 @@ class PrepDescriptions:
             "string": cls.STRING_FUNCTIONS,
             "numeric": cls.NUMERIC_FUNCTIONS,
             "datetime": cls.DATETIME_FUNCTIONS,
+            "conversion": cls.CONVERSION_FUNCTIONS,
             "row_conditions": cls.ROW_CONDITIONS,
         }
 
@@ -184,6 +200,7 @@ class PrepDescriptions:
             "string": cls.STRING_FUNCTIONS,
             "numeric": cls.NUMERIC_FUNCTIONS,
             "datetime": cls.DATETIME_FUNCTIONS,
+            "conversion": cls.CONVERSION_FUNCTIONS,
             "row_conditions": cls.ROW_CONDITIONS,
         }
 
@@ -307,6 +324,8 @@ class PrepConfirmationMessages:
     @classmethod
     def add_new_column(cls, result: PrepActionResult) -> str:
         """Generate message for adding new column."""
+        if result.method == PrepFunctions.concat.value:
+            return cls._with_remaining(cls.add_column_concat(result), result)
         source_display = (
             cls._format_column_names(result.source_columns)
             if result.source_columns
@@ -377,6 +396,21 @@ class PrepConfirmationMessages:
         )
 
     @classmethod
+    def add_column_concat(cls, result: PrepActionResult) -> str:
+        """Generate message for a column joining text columns."""
+        sources = result.source_columns or []
+        if isinstance(sources, str):
+            sources = [sources]
+        # Every source is listed, in join order, so the log shows how the
+        # column was built.
+        source_display = ", ".join(f'"{name}"' for name in sources)
+        separator = f'separator "{result.value}"' if result.value else "no separator"
+        return (
+            f"✓ Concat column added. {cls._format_column_names(result.column_names)} "
+            f"created by joining {source_display} with {separator}."
+        )
+
+    @classmethod
     def add_column_index(cls, result: PrepActionResult) -> str:
         """Generate message for adding index column."""
         row_text = cls._pluralize(result.affected_count, "row")
@@ -427,6 +461,7 @@ class PrepConfirmationMessages:
             "string to number": "Text converted to numbers. Now numeric format",
             "string to date": "Text converted to dates. Now date format",
             "string to datetime": "Text converted to datetime. Now datetime format",
+            "to string": "Values converted to text. Now text format",
         }
         action_text = conversion_names.get(result.method, f"{result.method} applied")
         value_text = cls._pluralize(result.affected_count, "value")
@@ -536,6 +571,7 @@ class PrepConfirmationMessages:
     # Add column method dispatch
     _ADD_COLUMN_HANDLERS: ClassVar[dict] = {
         PrepFunctions.constant.value: "add_column_constant",
+        PrepFunctions.concat.value: "add_column_concat",
         PrepFunctions.index.value: "add_column_index",
         PrepFunctions.uuid.value: "add_column_uuid",
         PrepFunctions.random.value: "add_column_random",
@@ -552,6 +588,7 @@ class PrepConfirmationMessages:
         PrepOperations.string_to_number.value: "string_function_conversion",
         PrepOperations.string_to_date.value: "string_function_conversion",
         PrepOperations.string_to_datetime.value: "string_function_conversion",
+        PrepOperations.to_string.value: "string_function_conversion",
         PrepOperations.extract_pattern.value: "string_function_extract",
         PrepOperations.get_dummies.value: "string_function_dummies",
         # Numeric

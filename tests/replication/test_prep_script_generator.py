@@ -287,6 +287,12 @@ class TestStataTransformColumn:
         )
         assert "destring" in lines[0]
 
+    def test_to_string(self):
+        lines = _stata_transform_column(
+            {"source_columns": ["hhid"], "method": "to string"}, ""
+        )
+        assert lines[0].startswith("tostring hhid, replace")
+
     def test_floor(self):
         lines = _stata_transform_column(
             {"source_columns": ["col"], "method": "floor"}, ""
@@ -316,6 +322,35 @@ class TestStataAddColumn:
     def test_index(self):
         lines = _stata_add_column({"column_names": "idx", "method": "index"}, "")
         assert "gen idx = _n" in lines[0]
+
+    def test_concat_joins_columns_skipping_empty_values(self):
+        lines = _stata_add_column(
+            {
+                "column_names": "uid",
+                "method": "concat",
+                "source_columns": ["region", "hhid"],
+                "value": "_",
+            },
+            "",
+        )
+        assert lines == [
+            'gen uid = ""',
+            "foreach v in region hhid {",
+            '    replace uid = uid + cond(uid == "" | `v\' == "", "", `"_"\') + `v\'',
+            "}",
+        ]
+
+    def test_concat_without_separator(self):
+        lines = _stata_add_column(
+            {
+                "column_names": "uid",
+                "method": "concat",
+                "source_columns": ["a", "b"],
+                "value": None,
+            },
+            "",
+        )
+        assert '`""\'' in lines[2]
 
     def test_uuid_note(self):
         lines = _stata_add_column({"column_names": "uid", "method": "uuid"}, "")

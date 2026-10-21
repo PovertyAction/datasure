@@ -219,6 +219,13 @@ Convert or modify existing column data:
   - Example: Extract phone numbers, IDs, codes
 - **Mathematical Operations**: Add, subtract, multiply, divide numeric values
   - Example: Calculate age from birth year
+- **To String**: Convert a number, date, datetime or true/false column to
+  text, keeping its name, so you can use it in **concat**
+  - Whole numbers lose a trailing `.0` (`12.0` becomes `"12"`); other
+    decimals are kept (`12.5` becomes `"12.5"`)
+  - Dates become `YYYY-MM-DD`, datetimes `YYYY-MM-DD HH:MM:SS.ffffff`, and
+    true/false becomes `"true"`/`"false"`
+  - Missing values stay missing
 
 **Steps**:
 
@@ -241,6 +248,7 @@ Create new calculated or derived columns:
 - Calculate fields (total income, household density)
 - Generate summary statistics
 - Create categorical groupings
+- Build a composite ID or full name by joining text columns (**concat**)
 
 **Steps**:
 
@@ -249,6 +257,22 @@ Create new calculated or derived columns:
 3. Enter new column name
 4. Define calculation or value
 5. Click "Add"
+
+**Joining text columns (concat)**:
+
+1. Choose the **concat** method.
+2. Select two or more text columns in the order they should appear. Only text
+   columns are listed: convert numbers or dates with the **To String**
+   transform first.
+3. Choose a separator: **None**, **Space**, **Comma**, **Underscore**,
+   **Hyphen**, or **Specify** to type your own. A typed separator is used
+   exactly as entered, including spaces.
+
+For example, `region`, `district` and `hhid` joined with **Underscore** give
+`R01_D05_123`. A missing value counts as empty, so the other values still
+join. The new column is missing only when every selected value is missing.
+If a re-import makes a selected column missing or no longer text, the step
+is skipped and the rest of your steps still run.
 
 ##### Remove Column/Row
 

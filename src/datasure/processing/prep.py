@@ -626,6 +626,13 @@ class TransformColumnsOperation(PrepOperation):
                 self._parse_flexible_datetime(data, column_name).alias(column_name)
             )
 
+        if func_name == PrepOperations.to_string.value:
+            return data.with_columns(
+                self._to_string(pl.col(column_name), data.schema[column_name]).alias(
+                    column_name
+                )
+            )
+
         # Get dummies (one-hot encoding)
         if func_name == "get dummies":
             return data.to_dummies(columns=[column_name])
@@ -643,6 +650,17 @@ class TransformColumnsOperation(PrepOperation):
             return self._apply_pattern_extract(data, column_name, value)
 
         raise ValidationError(f"Unknown transformation function: {func_name}")
+
+    @staticmethod
+    def _to_string(col: pl.Expr, dtype: pl.DataType) -> pl.Expr:
+        """Convert a column to text, keeping missing values missing.
+
+        Whole-number floats drop the trailing ".0" (12.0 -> "12").
+        """
+        as_text = col.cast(pl.String)
+        if dtype.is_float():
+            return as_text.str.replace(r"\.0$", "")
+        return as_text
 
     def _apply_arithmetic(
         self,
@@ -732,6 +750,10 @@ class AddNewColumnOperation(PrepOperation):
                 PrepFunctions.random.value,
             ]:
                 results = self._add_special_column(data, method, new_col_name)
+            elif method == PrepFunctions.concat.value:
+                results = self._add_concat_column(
+                    data, new_col_name, source_columns, value_spec
+                )
             else:
                 results = self._add_computed_column(
                     data, new_col_name, method, source_columns
@@ -806,6 +828,41 @@ class AddNewColumnOperation(PrepOperation):
             return data.with_columns(pl.Series(random_values).alias(col_name))
 
         return data
+
+    def _add_concat_column(
+        self,
+        data: pl.DataFrame,
+        col_name: str,
+        source_columns: list[str],
+        separator: str | None,
+    ) -> pl.DataFrame:
+        """Join text columns row by row, in the order they were selected.
+
+        A missing value counts as an empty string, so the other values still
+        join; the result is missing only when every value is. A missing
+        separator means none: an empty one can come back from the saved log
+        as null.
+        """
+        missing = [c for c in source_columns if c not in data.columns]
+        if missing:
+            raise ValidationError(f"Columns not found: {missing}")
+        not_text = [c for c in source_columns if data.schema[c] != pl.String]
+        if not_text:
+            raise ValidationError(
+                f"Concat needs text columns, but these are not text: {not_text}. "
+                "Convert them with the 'to string' transform first."
+            )
+
+        joined = pl.concat_str(
+            source_columns, separator=separator or "", ignore_nulls=True
+        )
+        all_missing = pl.all_horizontal(pl.col(source_columns).is_null())
+        return data.with_columns(
+            pl.when(all_missing)
+            .then(pl.lit(None, dtype=pl.String))
+            .otherwise(joined)
+            .alias(col_name)
+        )
 
     def _add_computed_column(
         self, data: pl.DataFrame, col_name: str, method: str, source_columns: str

@@ -155,6 +155,9 @@ class PrepViewConfig:
         # Get datetime functions from prep_utils
         self.DP_DATETIME_FUNCS = tuple(self.descriptions.DATETIME_FUNCTIONS.keys())
 
+        # Functions for date-only and boolean columns
+        self.DP_CONVERSION_FUNCS = tuple(self.descriptions.CONVERSION_FUNCTIONS.keys())
+
         # Get row conditions from prep_utils
         self.DP_ROW_CONDITIONS = tuple(self.descriptions.ROW_CONDITIONS.keys())
 
@@ -189,6 +192,30 @@ class RemoveRowsInputs:
 # Initialize configuration
 config = PrepViewConfig()
 
+# Concat's separator choices and the separator each one stores. "Specify"
+# stores the text the user typed instead.
+CONCAT_SEPARATORS = {
+    "None": "",
+    "Space": " ",
+    "Comma": ",",
+    "Underscore": "_",
+    "Hyphen": "-",
+}
+CONCAT_SPECIFY = "Specify"
+
+
+def _concat_separator(choice: str, custom: str) -> str | None:
+    """Return the separator a concat step stores for the user's choice.
+
+    "Specify" keeps the typed text exactly, spaces included. An empty box
+    gives None, which marks the form incomplete rather than silently
+    meaning no separator.
+    """
+    if choice == CONCAT_SPECIFY:
+        return custom or None
+    return CONCAT_SEPARATORS[choice]
+
+
 # === FORM VALIDATION HELPERS === #
 
 
@@ -202,6 +229,11 @@ def _is_add_column_incomplete(prep_args: dict) -> bool:
     if not prep_args.get("column_names"):
         return True
     method = prep_args.get("method")
+    if method == PrepFunctions.concat.value:
+        return (
+            len(prep_args.get("source_columns") or []) < 2
+            or prep_args.get("value") is None
+        )
     if method == PrepFunctions.quotient.value:
         return (
             method in COL_FUNC_WITH_VALUES
@@ -402,6 +434,27 @@ def _render_datetime_function_inputs(
     inputs.func = st.selectbox(
         label="Select Function",
         options=config.DP_DATETIME_FUNCS,
+        key=f"st_sb_trf_func{step_index}",
+    )
+    return inputs
+
+
+def _render_conversion_function_inputs(
+    step_index: int, inputs: TransformInputs
+) -> TransformInputs:
+    """Render UI inputs for date-only and boolean columns.
+
+    Args:
+        step_index: Current step index for unique widget keys
+        inputs: TransformInputs object to populate
+
+    Returns
+    -------
+        Updated TransformInputs with user selections
+    """
+    inputs.func = st.selectbox(
+        label="Select Function",
+        options=config.DP_CONVERSION_FUNCS,
         key=f"st_sb_trf_func{step_index}",
     )
     return inputs
@@ -723,6 +776,9 @@ class PrepStepHandler:
                     key=f"st_sb_add_val{self.step_index}",
                 )
 
+            elif dp_prep_add_col_med == PrepFunctions.concat.value:
+                dp_prep_add_col_select, dp_prep_add_val = self._concat_inputs()
+
             elif dp_prep_add_col_med in COL_FUNC_WITH_VALUES:
                 if dp_prep_add_col_med in [
                     PrepFunctions.quotient.value,
@@ -742,7 +798,8 @@ class PrepStepHandler:
             # define custom message values
             value = (
                 dp_prep_add_val
-                if dp_prep_add_col_med == PrepFunctions.constant.value
+                if dp_prep_add_col_med
+                in (PrepFunctions.constant.value, PrepFunctions.concat.value)
                 else None
             )
             source_columns = (
@@ -765,6 +822,40 @@ class PrepStepHandler:
             }
 
         return None
+
+    def _concat_inputs(self) -> tuple[list[str], str | None]:
+        """Render concat's column picker and separator choice.
+
+        Only text columns are offered: other columns are converted with the
+        "to string" transform first. The selection order is the join order.
+
+        Returns
+        -------
+            The selected columns and the separator to store, or None when
+            "Specify" is chosen with an empty box.
+        """
+        columns = st.multiselect(
+            label="Select columns to join",
+            options=self.string_cols,
+            key=f"st_sb_add_col_concat_select{self.step_index}",
+            help="Columns are joined in the order you select them. Only text "
+            "columns are listed: convert other columns with the 'to string' "
+            "transform first.",
+        )
+        choice = st.selectbox(
+            label="Separator",
+            options=(*CONCAT_SEPARATORS, CONCAT_SPECIFY),
+            key=f"st_sb_add_col_concat_sep{self.step_index}",
+            help="Text placed between joined values",
+        )
+        custom = ""
+        if choice == CONCAT_SPECIFY:
+            custom = st.text_input(
+                label="Enter separator",
+                help="Used exactly as typed, including spaces",
+                key=f"st_sb_add_col_concat_custom{self.step_index}",
+            )
+        return columns, _concat_separator(choice, custom)
 
     def transform_column_handler(self) -> dict | None:
         """Handle transform column UI and logic.
@@ -812,6 +903,8 @@ class PrepStepHandler:
             return _render_datetime_function_inputs(self.step_index, inputs)
         elif hasattr(col_type, "is_numeric") and col_type.is_numeric():
             return _render_numeric_function_inputs(self.step_index, inputs)
+        elif col_type in (pl.Date, pl.Boolean):
+            return _render_conversion_function_inputs(self.step_index, inputs)
         return inputs
 
     def remove_column_handler(self) -> dict | None:

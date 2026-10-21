@@ -170,6 +170,10 @@ def _stata_transform_column(args: dict, _desc: str) -> list[str]:
         "ceil": f"replace {col} = ceil({col})",
         "round": f"replace {col} = round({col})",
         "string to number": f"destring {col}, replace",
+        "to string": (
+            f"tostring {col}, replace format(%17.0g)  "
+            f'// dates: gen s = string({col}, "%tdCCYY-NN-DD")'
+        ),
         "string to date": (f'gen {col}_date = date({col}, "DMY")  // adjust format'),
         "string to datetime": (
             f'gen {col}_dt = clock({col}, "DMYhms")  // adjust format'
@@ -235,6 +239,24 @@ _ADD_COL_EXPRS: dict[str, tuple[int, Callable[[list[str]], str]]] = {
 }
 
 
+def _stata_concat(new_col: str, src_cols: list[str], separator: str) -> list[str]:
+    """Join string columns, skipping empty values like DataSure's concat.
+
+    ``egen concat()`` would keep a separator for every empty value, so the
+    columns are joined one at a time instead. Stata has no string missing
+    value apart from "", so a value that was an empty string (not missing)
+    in DataSure is skipped here too. Compound quotes keep a separator that
+    contains double quotes intact.
+    """
+    return [
+        f'gen {new_col} = ""',
+        f"foreach v in {_col_list(src_cols)} {{",
+        f"    replace {new_col} = {new_col} + "
+        f'cond({new_col} == "" | `v\' == "", "", `"{separator}"\') + `v\'',
+        "}",
+    ]
+
+
 def _stata_add_column(args: dict, _desc: str) -> list[str]:
     new_col = args.get("column_names") or ""
     method = (args.get("method") or "").lower()
@@ -244,6 +266,9 @@ def _stata_add_column(args: dict, _desc: str) -> list[str]:
     if method == "constant":
         raw = values[0] if values else (args.get("value") or "")
         return [f"gen {new_col} = {_fmt_val(raw)}"]
+
+    if method == "concat" and len(src_cols) >= 2:
+        return _stata_concat(new_col, src_cols, args.get("value") or "")
 
     if method == "uuid":
         return [f"{_C} NOTE: uuid column '{new_col}' — no direct Stata equivalent"]

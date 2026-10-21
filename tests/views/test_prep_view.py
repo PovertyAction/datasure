@@ -13,6 +13,7 @@ from datasure.models.enums import (
     PrepActions,
     PrepFunctions,
     PrepMethods,
+    PrepOperations,
     PrepRowConditions,
 )
 from datasure.utils.reapply_utils import ReapplyFailure
@@ -56,6 +57,7 @@ _build_remove_rows_result = pv._build_remove_rows_result
 _build_remove_rows_value = pv._build_remove_rows_value
 _build_transform_result = pv._build_transform_result
 _build_transform_value = pv._build_transform_value
+_concat_separator = pv._concat_separator
 _get_column_options_for_condition = pv._get_column_options_for_condition
 _get_unique_values_from_columns = pv._get_unique_values_from_columns
 _has_none_values = pv._has_none_values
@@ -251,6 +253,54 @@ class TestIsAddColumnIncomplete:
         assert _is_add_column_incomplete({}) is True
 
 
+def _concat_args(columns: list[str], choice: str, custom: str = "") -> dict:
+    """Build concat step args the way the Add Column form does."""
+    return {
+        "column_names": "uid",
+        "method": PrepFunctions.concat.value,
+        "source_columns": columns,
+        "value": _concat_separator(choice, custom),
+    }
+
+
+class TestConcatForm:
+    """Concat's separator choice and when its Add Column form is complete."""
+
+    @pytest.mark.parametrize(
+        ("choice", "expected"),
+        [
+            ("None", ""),
+            ("Space", " "),
+            ("Comma", ","),
+            ("Underscore", "_"),
+            ("Hyphen", "-"),
+        ],
+    )
+    def test_named_separators(self, choice, expected):
+        assert _concat_separator(choice, "") == expected
+
+    def test_specify_keeps_text_exactly(self):
+        assert _concat_separator("Specify", " | ") == " | "
+
+    def test_specify_with_empty_box_has_no_separator(self):
+        assert _concat_separator("Specify", "") is None
+
+    @pytest.mark.parametrize("columns", [[], ["region"]])
+    def test_incomplete_with_fewer_than_two_columns(self, columns):
+        assert _is_add_column_incomplete(_concat_args(columns, "Underscore")) is True
+
+    def test_incomplete_with_specify_and_empty_box(self):
+        args = _concat_args(["region", "hhid"], "Specify", "")
+        assert _is_add_column_incomplete(args) is True
+
+    @pytest.mark.parametrize(
+        ("choice", "custom"), [("None", ""), ("Hyphen", ""), ("Specify", "::")]
+    )
+    def test_complete_with_two_columns_and_a_separator(self, choice, custom):
+        args = _concat_args(["region", "district", "hhid"], choice, custom)
+        assert _is_add_column_incomplete(args) is False
+
+
 class TestIsTransformColumnIncomplete:
     """Test _is_transform_column_incomplete."""
 
@@ -296,6 +346,12 @@ class TestIsTransformColumnIncomplete:
 
     def test_missing_source_columns_key(self):
         assert _is_transform_column_incomplete({"method": "trim"}) is True
+
+    def test_to_string_needs_no_input(self):
+        inputs = TransformInputs()
+        inputs.func = PrepOperations.to_string.value
+        args = _build_transform_result("hhid", inputs)
+        assert _is_transform_column_incomplete(args) is False
 
 
 class TestIsRemoveRowIncomplete:
@@ -1258,8 +1314,16 @@ class TestPrepStepHandler:
     def test_render_transform_inputs_unknown_type(self, sample_polars_df):
         handler = PrepStepHandler(sample_polars_df, 0)
         inputs = TransformInputs()
-        result = handler._render_transform_inputs_by_type(pl.Boolean, inputs)
+        result = handler._render_transform_inputs_by_type(pl.Binary, inputs)
         assert result.func is None
+
+    @pytest.mark.parametrize("col_type", [pl.Date, pl.Boolean])
+    def test_render_transform_inputs_offers_to_string(self, sample_polars_df, col_type):
+        _st.selectbox = MagicMock(return_value="to string")
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler._render_transform_inputs_by_type(col_type, TransformInputs())
+        assert result.func == "to string"
+        assert _st.selectbox.call_args.kwargs["options"] == ("to string",)
 
     def test_render_transform_inputs_float_col(self, sample_polars_df):
         _st.selectbox = MagicMock(side_effect=["score", "round"])
