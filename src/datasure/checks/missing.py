@@ -7,6 +7,7 @@ This module provides comprehensive missing data analysis functionality with:
 - DuckDB storage for missing code configurations
 """
 
+import logging
 from typing import Any
 
 import numpy as np
@@ -26,6 +27,8 @@ from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding, is_demo_project
 from datasure.utils.ui_utils import ensure_styler_limit
 from datasure.utils.view_state import reset_filters_beside, view_factory
+
+logger = logging.getLogger(__name__)
 
 TAB_NAME = "missing"
 
@@ -289,7 +292,7 @@ def _numeric_missing_codes(missing_codes_df: pl.DataFrame) -> list[float]:
         try:
             codes.append(float(code))
         except ValueError:
-            continue
+            logger.debug("Missing code %r is not a number; not masked", code)
     return codes
 
 
