@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0a3] - 2026-10-21
+
 ### Added
 
 - **Check status** (#374): Every check has a cheap status that returns a
