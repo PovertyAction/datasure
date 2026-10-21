@@ -265,7 +265,7 @@ def compute_enumerator_missing_table(
         DataFrame with missing data statistics per enumerator.
     """
     # define columns to exclude from missing data stats
-    columns_to_exclude = ["consent_granted_agg_col", "completed_survey_agg_col"]
+    columns_to_exclude = [CONSENT_FLAG, COMPLETED_FLAG]
 
     data_for_missing = data.select(
         [col for col in data.columns if col not in columns_to_exclude]
@@ -541,16 +541,16 @@ def compute_enumerator_summary(
         )
 
     # Add consent statistics if available
-    if "consent_granted_agg_col" in df.columns:
+    if CONSENT_FLAG in df.columns:
         consent_df = df.group_by(group_by_cols, maintain_order=True).agg(
-            pl.col("consent_granted_agg_col").mean().alias("% consent")
+            pl.col(CONSENT_FLAG).mean().alias("% consent")
         )
         summary_df = summary_df.join(consent_df, on=group_by_cols, how="left")
 
     # Add outcome statistics if available
-    if "completed_survey_agg_col" in df.columns:
+    if COMPLETED_FLAG in df.columns:
         outcome_df = df.group_by(group_by_cols, maintain_order=True).agg(
-            pl.col("completed_survey_agg_col").mean().alias("% completed survey")
+            pl.col(COMPLETED_FLAG).mean().alias("% completed survey")
         )
         summary_df = summary_df.join(outcome_df, on=group_by_cols, how="left")
 

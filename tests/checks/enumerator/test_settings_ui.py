@@ -115,9 +115,11 @@ def test_unsaved_consent_column_is_not_preselected(enum_bc, sample_enumerator_da
     """
     enum_bc.st.selectbox.return_value = None
     categorical_cols = list(sample_enumerator_data.columns)
-    enum_bc._render_consent_outcome_settings(
+    settings = enum_bc._render_consent_outcome_settings(
         sample_enumerator_data, categorical_cols, "settings.json"
     )
+    assert settings.consent is None
+    assert settings.outcome is None
     for call in enum_bc.st.selectbox.call_args_list:
         assert call.kwargs["index"] is None
     for call in enum_bc.st.multiselect.call_args_list:
