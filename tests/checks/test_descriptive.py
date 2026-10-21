@@ -19,14 +19,15 @@ from datasure.checks.descriptive import (
     _empty_col_stats,
     _get_column_type_label,
     _missing_pct,
-    _modify_column_selection_df,
     compute_histogram_data,
     compute_summary_stats,
     compute_value_counts,
     get_column_selection_df,
+    save_column_selection,
 )
 from datasure.models.schemas import ColumnByType
 from datasure.utils.dataframe_utils import get_df_columns
+from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.view_state import ViewState
 
 # =============================================================================
@@ -625,118 +626,156 @@ class TestCreateNewColumnSelectionDf:
 
 
 # =============================================================================
-# _modify_column_selection_df
+# Column selection: saved per page in the logs database
 # =============================================================================
 
+PROJECT_ID = "descproj01"
 
-class TestModifyColumnSelectionDf:
-    """Tests for _modify_column_selection_df helper."""
 
-    def test_returns_dataframe_when_no_changes_needed(self, sample_df, sample_columns):
-        df_sel = _create_new_column_selection_df(sample_df, sample_columns)
-        current_cols = set(sample_df.columns)
-        result = _modify_column_selection_df(df_sel.clone(), current_cols)
-        assert isinstance(result, pl.DataFrame)
+@pytest.fixture
+def cache_dir(tmp_path):
+    """Point every DuckDB database at a temporary cache directory."""
 
-    def test_unchanged_when_cols_match(self, sample_df, sample_columns):
-        df_sel = _create_new_column_selection_df(sample_df, sample_columns)
-        current_cols = set(sample_df.columns)
-        result = _modify_column_selection_df(df_sel.clone(), current_cols)
-        assert set(result["column"].to_list()) == set(sample_df.columns)
+    def fake_cache_path(*parts):
+        path = tmp_path.joinpath(*map(str, parts))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
 
-    def test_remove_drops_columns_not_in_current(self):
-        """Columns absent from current_cols are removed from the selection df."""
-        df_sel = pl.DataFrame(
-            {
-                "Selected": [False],
-                "column": ["old_col"],
-                "type": ["other"],
-            }
+    with patch("datasure.utils.duckdb_utils.get_cache_path", fake_cache_path):
+        yield tmp_path
+
+
+def _selected(selection: pl.DataFrame) -> set[str]:
+    return set(selection.filter(pl.col("Selected").cast(pl.Boolean))["column"])
+
+
+def _with_selected(selection: pl.DataFrame, columns: set[str]) -> pl.DataFrame:
+    return selection.with_columns(
+        pl.col("column").is_in(list(columns)).alias("Selected")
+    )
+
+
+@pytest.mark.usefixtures("cache_dir")
+class TestColumnSelectionPerPage:
+    """The descriptive column selection is saved per page."""
+
+    def test_new_page_starts_with_nothing_selected(self, sample_df, sample_columns):
+        selection = get_column_selection_df(
+            PROJECT_ID, "page_a", sample_df, sample_columns
         )
-        result = _modify_column_selection_df(df_sel, set())
-        assert len(result) == 0
 
-    def test_remove_keeps_columns_in_current(self):
-        """Columns present in current_cols are retained."""
-        df_sel = pl.DataFrame(
-            {
-                "Selected": [False, False],
-                "column": ["keep_col", "remove_col"],
-                "type": ["numeric", "other"],
-            }
+        assert selection["column"].to_list() == sample_df.columns
+        assert _selected(selection) == set()
+
+    def test_saved_selection_is_returned_for_the_page(self, sample_df, sample_columns):
+        selection = get_column_selection_df(
+            PROJECT_ID, "page_a", sample_df, sample_columns
         )
-        result = _modify_column_selection_df(df_sel, {"keep_col"})
-        assert set(result["column"].to_list()) == {"keep_col"}
-
-    def test_cols_to_add_branch_raises_on_buggy_api(self):
-        """cols_to_add branch raises because Polars DataFrame.append doesn't
-        accept a dict — known bug in the implementation.
-        """
-        df_sel = pl.DataFrame(
-            {
-                "Selected": [False],
-                "column": ["age"],
-                "type": ["numeric"],
-            }
+        save_column_selection(
+            PROJECT_ID, "page_a", _with_selected(selection, {"age", "region"})
         )
-        # cols_to_add = {"new_col"}, cols_to_remove = {} → add branch executed
-        with pytest.raises(AttributeError):
-            _modify_column_selection_df(df_sel, {"age", "new_col"})
 
-
-# =============================================================================
-# get_column_selection_df
-# =============================================================================
-
-
-class TestGetColumnSelectionDf:
-    """Tests for get_column_selection_df helper."""
-
-    def test_creates_new_when_table_not_found(self, sample_df, sample_columns):
-        with patch(
-            "datasure.checks.descriptive.duckdb_get_table",
-            side_effect=Exception("table not found"),
-        ):
-            result = get_column_selection_df("proj123", sample_df, sample_columns)
-        assert isinstance(result, pl.DataFrame)
-        assert set(result.columns) == {"Selected", "column", "type"}
-
-    def test_returns_existing_when_columns_subset(self, sample_df, sample_columns):
-        existing_df = pl.DataFrame(
-            {
-                "Selected": [False] * 4,
-                "column": sample_df.columns,
-                "type": ["numeric", "numeric", "categorical", "categorical"],
-            }
+        reloaded = get_column_selection_df(
+            PROJECT_ID, "page_a", sample_df, sample_columns
         )
-        with patch(
-            "datasure.checks.descriptive.duckdb_get_table", return_value=existing_df
-        ):
-            result = get_column_selection_df("proj123", sample_df, sample_columns)
-        assert result.equals(existing_df)
 
-    def test_calls_modify_when_columns_mismatch(self, sample_df, sample_columns):
-        """Modify is called when saved columns are not a subset of current df."""
-        existing_df = pl.DataFrame(
-            {
-                "Selected": [False, False],
-                "column": ["age", "nonexistent_col"],
-                "type": ["numeric", "other"],
-            }
+        assert _selected(reloaded) == {"age", "region"}
+
+    def test_two_pages_keep_independent_selections(self, sample_df, sample_columns):
+        base = get_column_selection_df(PROJECT_ID, "page_a", sample_df, sample_columns)
+        save_column_selection(PROJECT_ID, "page_a", _with_selected(base, {"age"}))
+        save_column_selection(PROJECT_ID, "page_b", _with_selected(base, {"gender"}))
+
+        page_a = get_column_selection_df(
+            PROJECT_ID, "page_a", sample_df, sample_columns
         )
-        sentinel = _create_new_column_selection_df(sample_df, sample_columns)
-        with (
-            patch(
-                "datasure.checks.descriptive.duckdb_get_table", return_value=existing_df
-            ),
-            patch(
-                "datasure.checks.descriptive._modify_column_selection_df",
-                return_value=sentinel,
-            ) as mock_modify,
-        ):
-            result = get_column_selection_df("proj123", sample_df, sample_columns)
-            mock_modify.assert_called_once()
-        assert result.equals(sentinel)
+        page_b = get_column_selection_df(
+            PROJECT_ID, "page_b", sample_df, sample_columns
+        )
+
+        assert _selected(page_a) == {"age"}
+        assert _selected(page_b) == {"gender"}
+
+
+@pytest.mark.usefixtures("cache_dir")
+class TestColumnSelectionMigration:
+    """Projects saved before per-page selections seed each page once."""
+
+    LEGACY = pl.DataFrame(
+        {
+            "Selected": [True, True, False, True],
+            "column": ["age", "region", "income", "other_page_col"],
+            "type": ["numeric", "categorical", "numeric", "numeric"],
+        }
+    )
+
+    def _save_legacy(self, selection: pl.DataFrame | None = None) -> None:
+        duckdb_save_table(
+            PROJECT_ID,
+            self.LEGACY if selection is None else selection,
+            "selected_columns_df",
+            "intermediate",
+        )
+
+    def test_page_without_a_selection_carries_over_the_legacy_selection(
+        self, sample_df, sample_columns
+    ):
+        self._save_legacy()
+
+        selection = get_column_selection_df(
+            PROJECT_ID, "page_a", sample_df, sample_columns
+        )
+
+        assert selection["column"].to_list() == sample_df.columns
+        assert _selected(selection) == {"age", "region"}
+
+    def test_each_page_keeps_only_its_own_columns(self, sample_columns, sample_df):
+        self._save_legacy()
+        other_data = pl.DataFrame({"other_page_col": [1, 2], "gender": ["M", "F"]})
+
+        page_a = get_column_selection_df(
+            PROJECT_ID, "page_a", sample_df, sample_columns
+        )
+        page_b = get_column_selection_df(
+            PROJECT_ID, "page_b", other_data, get_df_columns(other_data)
+        )
+
+        assert _selected(page_a) == {"age", "region"}
+        assert _selected(page_b) == {"other_page_col"}
+
+    def test_seeded_selection_is_saved_for_the_page(self, sample_df, sample_columns):
+        self._save_legacy()
+        get_column_selection_df(PROJECT_ID, "page_a", sample_df, sample_columns)
+        # The legacy table changing later does not reseed the page.
+        self._save_legacy(self.LEGACY.with_columns(pl.lit(False).alias("Selected")))
+
+        selection = get_column_selection_df(
+            PROJECT_ID, "page_a", sample_df, sample_columns
+        )
+
+        assert _selected(selection) == {"age", "region"}
+
+    def test_page_with_its_own_selection_ignores_the_legacy_selection(
+        self, sample_df, sample_columns
+    ):
+        self._save_legacy()
+        cleared = _create_new_column_selection_df(sample_df, sample_columns)
+        save_column_selection(PROJECT_ID, "page_a", cleared)
+
+        selection = get_column_selection_df(
+            PROJECT_ID, "page_a", sample_df, sample_columns
+        )
+
+        assert _selected(selection) == set()
+
+    def test_legacy_table_is_left_in_place(self, sample_df, sample_columns):
+        self._save_legacy()
+
+        get_column_selection_df(PROJECT_ID, "page_a", sample_df, sample_columns)
+
+        assert duckdb_get_table(
+            PROJECT_ID, "selected_columns_df", "intermediate"
+        ).equals(self.LEGACY)
 
 
 # =============================================================================
@@ -849,7 +888,7 @@ class TestRenderColumnSelector:
         mod.st.reset_mock()
         mod.st.pills.return_value = None
         mod.st.button.return_value = False
-        result = mod._render_column_selector("proj1", sel_df)
+        result = mod._render_column_selector("proj1", "page1", sel_df)
         assert isinstance(result, mod.ColumnByType)
 
     def test_select_all_marks_all_selected(
@@ -868,7 +907,7 @@ class TestRenderColumnSelector:
             return df
 
         mod.st.data_editor.side_effect = capture_editor
-        mod._render_column_selector("proj1", sel_df)
+        mod._render_column_selector("proj1", "page1", sel_df)
         assert received["df"]["Selected"].to_list() == [True] * len(sample_df.columns)
 
     def test_clear_all_marks_none_selected(
@@ -886,7 +925,7 @@ class TestRenderColumnSelector:
             return df.with_columns(pl.col("Selected").cast(pl.Boolean))
 
         mod.st.data_editor.side_effect = capture_editor
-        mod._render_column_selector("proj1", sel_df)
+        mod._render_column_selector("proj1", "page1", sel_df)
         # all Selected should be False
         assert all(not v for v in received["df"]["Selected"].to_list())
 
@@ -904,7 +943,7 @@ class TestRenderColumnSelector:
             return df
 
         mod.st.data_editor.side_effect = capture_editor
-        mod._render_column_selector("proj1", sel_df)
+        mod._render_column_selector("proj1", "page1", sel_df)
         # Only numeric columns should be selected
         for row in received["df"].iter_rows(named=True):
             if row["type"] == "numeric":
@@ -927,11 +966,11 @@ class TestRenderColumnSelector:
             return df
 
         mod.st.data_editor.side_effect = capture_editor
-        mod._render_column_selector("proj1", sel_df)
+        mod._render_column_selector("proj1", "page1", sel_df)
         # No columns should be selected since no types were chosen
         assert all(not v for v in received["df"]["Selected"].to_list())
 
-    def test_apply_button_calls_duckdb_save(
+    def test_apply_button_saves_the_page_selection(
         self, descriptive_mod, sample_df, sample_columns, sel_df
     ):
         mod = descriptive_mod
@@ -940,9 +979,12 @@ class TestRenderColumnSelector:
         mod.st.pills.return_value = None
         mod.st.button.return_value = True  # Apply clicked
         mod.st.data_editor.side_effect = lambda *a, **kw: a[0]
-        with patch.object(mod, "duckdb_save_table") as mock_save:
-            mod._render_column_selector("proj1", sel_df)
+        with patch.object(mod, "save_column_selection") as mock_save:
+            mod._render_column_selector("proj1", "page1", sel_df)
             mock_save.assert_called_once()
+        project_id, page_name_id, saved = mock_save.call_args.args
+        assert (project_id, page_name_id) == ("proj1", "page1")
+        assert saved.equals(sel_df)
 
 
 @pytest.mark.usefixtures("fake_session")
@@ -1196,7 +1238,7 @@ class TestDescriptiveReport:
         mod.st.reset_mock()
         empty = pl.DataFrame()
         cols = ColumnByType(all_columns=[])
-        mod.descriptive_report("proj1", empty, "settings.json", cols)
+        mod.descriptive_report("proj1", "page1", empty, "settings.json", cols)
         mod.st.warning.assert_called_once()
 
     def test_no_columns_selected_calls_info(
@@ -1220,7 +1262,9 @@ class TestDescriptiveReport:
             ),
             patch.object(mod, "_render_column_selector", return_value=empty_cols),
         ):
-            mod.descriptive_report("proj1", sample_df, "settings.json", sample_columns)
+            mod.descriptive_report(
+                "proj1", "page1", sample_df, "settings.json", sample_columns
+            )
         mod.st.info.assert_called()
 
     def test_full_report_rendered_with_selections(
@@ -1242,6 +1286,8 @@ class TestDescriptiveReport:
             patch.object(mod, "_render_histogram"),
             patch.object(mod, "_render_value_counts"),
         ):
-            mod.descriptive_report("proj1", sample_df, "settings.json", sample_columns)
+            mod.descriptive_report(
+                "proj1", "page1", sample_df, "settings.json", sample_columns
+            )
         mod.st.title.assert_called_once()
         mod.st.subheader.assert_called()

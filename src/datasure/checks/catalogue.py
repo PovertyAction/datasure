@@ -188,6 +188,7 @@ def summary_check_health(ctx: CheckContext) -> None:
 def _render_descriptive(ctx: CheckContext) -> None:
     descriptive_report(
         ctx.project_id,
+        ctx.config.page_name_id,
         ctx.data.page_data,
         ctx.config.setting_file,
         ctx.survey_columns,
