@@ -10,6 +10,7 @@ import pytest
 from datasure.utils.dataframe_utils import (
     ColumnByType,
     TableState,
+    booleans_to_integers,
     convert_dataframe_column_to_numeric,
     convert_series_to_numeric,
     get_df_columns,
@@ -924,3 +925,23 @@ class TestGetTableState:
 
     def test_rows_is_has_rows(self):
         assert get_table_state(pl.DataFrame({"key": ["k1"]})) is TableState.HAS_ROWS
+
+
+class TestBooleansToIntegers:
+    """Boolean columns are cast to 0/1 integers before raw data is saved."""
+
+    def test_boolean_column_becomes_int64_zero_one(self):
+        df = pl.DataFrame({"consent": [True, False, None]})
+        result = booleans_to_integers(df)
+        assert result.schema["consent"] == pl.Int64
+        assert result["consent"].to_list() == [1, 0, None]
+
+    def test_other_columns_are_unchanged(self):
+        df = pl.DataFrame({"flag": [True, False], "age": [25, 30], "name": ["a", "b"]})
+        result = booleans_to_integers(df)
+        assert result.schema == {"flag": pl.Int64, "age": pl.Int64, "name": pl.String}
+        assert result.select("age", "name").equals(df.select("age", "name"))
+
+    def test_data_without_booleans_is_unchanged(self):
+        df = pl.DataFrame({"age": [25, 30], "score": [1.5, 2.0]})
+        assert booleans_to_integers(df).equals(df)

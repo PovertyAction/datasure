@@ -523,9 +523,11 @@ class TestLoadLocalData:
 
         # Verify functions were called correctly
         mock_load_data.assert_called_once_with("/path/to/file.csv", None)
-        mock_save_table.assert_called_once_with(
-            "test_project", mock_df, alias="test_alias", db_name="raw"
-        )
+        mock_save_table.assert_called_once()
+        args, kwargs = mock_save_table.call_args
+        assert args[0] == "test_project"
+        assert args[1].equals(mock_df)
+        assert kwargs == {"alias": "test_alias", "db_name": "raw"}
         mock_st.success.assert_called_once()
         assert "Shape: (3, 2)" in mock_st.success.call_args[0][0]
 
@@ -541,6 +543,21 @@ class TestLoadLocalData:
 
         mock_load_data.assert_called_once_with("/path/to/file.xlsx", "Sheet2")
         mock_save_table.assert_called_once()
+
+    @patch("datasure.connectors.local.duckdb_save_table")
+    @patch("datasure.connectors.local.st")
+    def test_load_local_data_saves_booleans_as_integers(
+        self, mock_st, mock_save_table, tmp_path
+    ):
+        """A true/false CSV column is saved to raw data as 0/1 integers."""
+        csv_file = tmp_path / "survey.csv"
+        csv_file.write_text("id,consent\n1,true\n2,false\n3,\n")
+
+        load_local_data("test_project", "test_alias", str(csv_file))
+
+        saved = mock_save_table.call_args[0][1]
+        assert saved.schema["consent"] == pl.Int64
+        assert saved["consent"].to_list() == [1, 0, None]
 
     @patch("datasure.connectors.local.load_data_efficiently")
     @patch("datasure.connectors.local.st")

@@ -11,7 +11,10 @@ import polars as pl
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
 
-from datasure.utils.dataframe_utils import standardize_missing_values
+from datasure.utils.dataframe_utils import (
+    booleans_to_integers,
+    standardize_missing_values,
+)
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.scto_api import (
     SurveyCTOAPIClient,
@@ -655,6 +658,7 @@ class SurveyCTOClient:
         data = standardize_missing_values(data)
 
         # Save to DuckDB
+        data = booleans_to_integers(data)
         duckdb_save_table(self.project_id, data, alias=form_config.alias, db_name="raw")
 
         return len(data)
@@ -720,6 +724,7 @@ class SurveyCTOClient:
             self._download_attachments(questions, new_data, form_config, private_key)
 
         # Save to DuckDB
+        combined_data = booleans_to_integers(combined_data)
         duckdb_save_table(
             self.project_id, combined_data, alias=form_config.alias, db_name="raw"
         )

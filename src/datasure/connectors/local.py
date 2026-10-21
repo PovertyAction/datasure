@@ -11,6 +11,7 @@ from openpyxl.utils.exceptions import InvalidFileException
 from polars_readstat import scan_readstat
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from datasure.utils.dataframe_utils import booleans_to_integers
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 
 logger = logging.getLogger(__name__)
@@ -339,6 +340,7 @@ def load_local_data(
             return
 
         # Save to DuckDB
+        data = booleans_to_integers(data)
         duckdb_save_table(project_id, data, alias=alias, db_name="raw")
 
         st.success(f"Data loaded successfully! Shape: {data.shape}")

@@ -87,6 +87,25 @@ def get_df_columns(df: pl.DataFrame | pd.DataFrame) -> ColumnByType:
     )
 
 
+def booleans_to_integers(data: pl.DataFrame) -> pl.DataFrame:
+    """Cast boolean columns to 0/1 integers before raw data is saved.
+
+    Survey data holds yes/no answers as 0/1, so a boolean column in raw data
+    (from ``true``/``false`` text, Excel ``TRUE``/``FALSE`` cells, or typed
+    sources such as Parquet or SurveyCTO JSON) is cast to ``Int64`` to match
+    how a 0/1 CSV column is inferred. Nulls stay null.
+
+    PARAMS:
+    -------
+    data: pl.DataFrame : Data about to be saved as a raw table
+
+    Returns
+    -------
+    pl.DataFrame: The data with every boolean column cast to Int64
+    """
+    return data.with_columns(cs.boolean().cast(pl.Int64))
+
+
 def standardize_missing_values(data: pd.DataFrame | pl.DataFrame) -> pl.DataFrame:
     """Convert data to polars dataframe and standardize missing values"""
     # if pandas dataframe, convert to polars

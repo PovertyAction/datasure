@@ -11,6 +11,7 @@ import polars as pl
 import streamlit as st
 
 from datasure.utils.cache_utils import get_cache_path
+from datasure.utils.dataframe_utils import booleans_to_integers
 from datasure.utils.duckdb_utils import duckdb_remove_table, duckdb_save_table
 
 logger = logging.getLogger(__name__)
@@ -1282,6 +1283,7 @@ def load_demo_data() -> bool:
     survey_df = DemoDataGenerator(survey_df).add_demo_fields()
 
     # Save to raw database (for import system)
+    survey_df = booleans_to_integers(survey_df)
     duckdb_save_table(DEMO_PROJECT_ID, survey_df, "demo_survey", "raw")
 
     # clean prep/corrected entries
@@ -1296,6 +1298,7 @@ def load_demo_data() -> bool:
     backcheck_df = DemoDataGenerator(backcheck_df).add_demo_fields("backcheck")
 
     # Save to raw database (for import system)
+    backcheck_df = booleans_to_integers(backcheck_df)
     duckdb_save_table(DEMO_PROJECT_ID, backcheck_df, "demo_backcheck", "raw")
 
     # clean prep/corrected entries

@@ -16,6 +16,14 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ## Open issues
 
+### KI-028: Yes/no columns import as true/false instead of 1/0
+
+- **Status:** 🟡 Planned for 1.2.0
+- **Affected versions:** 1.2.0a3 and earlier
+- **Symptom:** After you import a dataset, some yes/no columns show `true` and `false` instead of `1` and `0`.
+- **Workaround:** None in the app yet. Once the fix is released, import or refresh the dataset again to get 1/0 values.
+- **Issue:** [#386](https://github.com/PovertyAction/datasure/issues/386)
+
 ### KI-027: Outliers & Constraints and GPS Checks tabs crash with `unable to find column "action"`
 
 - **Status:** 🔴 Open

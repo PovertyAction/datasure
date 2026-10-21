@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Boolean columns in raw data** (#386): Imported columns that came in as
+  booleans (`true`/`false` text, Excel `TRUE`/`FALSE` cells, or typed
+  booleans from Parquet, JSON, Stata or SurveyCTO) are now saved as `Int64`
+  0/1, with nulls kept, matching how a 0/1 CSV column is read
+  - Root cause: no import path normalized boolean columns, so they reached
+    the raw table as `Boolean`
+  - Solution: `booleans_to_integers` (`utils/dataframe_utils.py`) runs
+    before every raw save: local files, SurveyCTO server datasets, SurveyCTO
+    form imports and the demo project. Data imported before this fix keeps
+    its boolean columns until the next import or refresh
+
 ## [1.2.0a3] - 2026-10-21
 
 ### Added
