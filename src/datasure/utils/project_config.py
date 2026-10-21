@@ -36,7 +36,16 @@ from datasure.processing.corrections import CorrectionProcessor
 from datasure.processing.prep import prep_apply_action
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table, name_id
+from datasure.utils.duckdb_utils import (
+    BC_ATTRIBUTION_TABLE,
+    CHECK_TABLE_PREFIXES,
+    OUTLIERS_TABLE,
+    check_table_name,
+    duckdb_get_table,
+    duckdb_save_table,
+    missing_codes_table_name,
+    name_id,
+)
 from datasure.utils.reapply_utils import ReapplyFailure, warn_reapply_failures
 from datasure.utils.secure_credentials import list_stored_credentials
 from datasure.utils.view_state import (
@@ -52,33 +61,11 @@ logger = logging.getLogger(__name__)
 # predate check tables and missing codes (issue #354).
 BUNDLE_VERSION = 2
 
-# Per-page check tables in the ``logs`` database, saved as
-# ``{prefix}_{page_name_id}``. Add a check's prefix here to make its table
-# travel with exported configurations.
-CHECK_TABLE_PREFIXES: tuple[str, ...] = (
-    "duplicates",
-    "outliers",
-    "gps_columns",
-    "backchecks",
-    "descriptive_columns",
-    "bc_attribution",
-)
-
 # Tables holding decisions about individual records rather than settings.
-RECORD_LEVEL_TABLE_PREFIXES: frozenset[str] = frozenset({"bc_attribution"})
+RECORD_LEVEL_TABLE_PREFIXES: frozenset[str] = frozenset({BC_ATTRIBUTION_TABLE})
 
 # Columns older versions saved that are not part of a table's settings.
-_LEGACY_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {"outliers": ("index",)}
-
-
-def check_table_name(prefix: str, page_name: str) -> str:
-    """Return the ``logs`` table name of a page's check table."""
-    return f"{prefix}_{name_id(page_name)}"
-
-
-def missing_codes_table_name(project_id: str) -> str:
-    """Return the ``logs`` table name of a project's missing codes."""
-    return f"missing_codes_{project_id}"
+_LEGACY_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {OUTLIERS_TABLE: ("index",)}
 
 
 # ============================================================================

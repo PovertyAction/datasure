@@ -389,8 +389,11 @@ travel.
   `{prefix}_{page_name_id}` from `logs.duckdb` into
   `ProjectPageBundle.check_tables` (rows keyed by prefix) and
   `check_table_schemas` (each column's dtype encoded as JSON), skipping empty
-  tables, so list and date columns are restored exactly. A check whose
-  settings live in a new per-page table adds its prefix to the registry.
+  tables, so list and date columns are restored exactly. The prefixes, the
+  registry and the `check_table_name()` / `missing_codes_table_name()`
+  helpers live in `utils/duckdb_utils.py`; checks name their tables through
+  them so a rename can't drop a table from exports. A check whose settings
+  live in a new per-page table adds its prefix to the registry.
   `RECORD_LEVEL_TABLE_PREFIXES` names the ones holding decisions about
   individual records.
 - **Record-level decisions.** `export_project_config(...,
@@ -410,8 +413,8 @@ travel.
   without it predates check tables and missing codes; it still applies, and
   the import dialog warns that those aren't included
   (`bundle_version_warning`). New fields default to empty, so older bundles
-  parse. The retired per-page `missing_settings` is accepted but no longer
-  exported.
+  parse. The retired per-page `missing_settings` is accepted when parsing
+  but is neither exported nor written on apply.
 
 ## Session state
 

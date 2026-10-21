@@ -7,13 +7,16 @@ import polars as pl
 import pytest
 
 from datasure.utils.duckdb_utils import (
+    CHECK_TABLE_PREFIXES,
     _validate_column_name,
     _validate_table_name,
+    check_table_name,
     duckdb_delete_rows,
     duckdb_get_aliases,
     duckdb_get_imported_datasets,
     duckdb_get_table,
     duckdb_save_table,
+    missing_codes_table_name,
     name_id,
 )
 
@@ -37,6 +40,27 @@ class TestNameId:
 
         path = page_settings_file("abcd1234", "Follow-up 2")
         assert path.name == f"page_{name_id('Follow-up 2')}_settings.json"
+
+
+class TestCheckTableNames:
+    """Check table names are built in one place for checks and exports."""
+
+    @pytest.mark.parametrize("page", ["Follow-up 2", "follow_up_2"])
+    def test_check_table_name_accepts_page_name_or_id(self, page):
+        assert check_table_name("duplicates", page) == "duplicates_follow_up_2"
+
+    def test_registered_prefixes(self):
+        assert set(CHECK_TABLE_PREFIXES) == {
+            "duplicates",
+            "outliers",
+            "gps_columns",
+            "backchecks",
+            "descriptive_columns",
+            "bc_attribution",
+        }
+
+    def test_missing_codes_table_name(self):
+        assert missing_codes_table_name("abcd1234") == "missing_codes_abcd1234"
 
 
 class TestValidateTableName:

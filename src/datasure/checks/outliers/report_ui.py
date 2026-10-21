@@ -67,6 +67,8 @@ from datasure.utils.correction_form import (
 )
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import (
+    OUTLIERS_TABLE,
+    check_table_name,
     duckdb_get_table,
     duckdb_save_table,
     load_missing_codes_from_db,
@@ -1354,7 +1356,7 @@ def _update_outlier_column_config(
     duckdb_save_table(
         project_id,
         updated_config,
-        f"outliers_{page_name_id}",
+        check_table_name(OUTLIERS_TABLE, page_name_id),
         db_name="logs",
     )
 
@@ -1433,9 +1435,9 @@ def _load_outlier_settings(project_id: str, page_name_id: str) -> pl.DataFrame:
     The report saves the settings back on every render, which removes it from
     the stored table too.
     """
-    return duckdb_get_table(project_id, f"outliers_{page_name_id}", "logs").drop(
-        "index", strict=False
-    )
+    return duckdb_get_table(
+        project_id, check_table_name(OUTLIERS_TABLE, page_name_id), "logs"
+    ).drop("index", strict=False)
 
 
 def _review_context(
@@ -1640,7 +1642,7 @@ def _delete_outlier_column(
                 duckdb_save_table(
                     project_id,
                     updated_settings,
-                    f"outliers_{page_name_id}",
+                    check_table_name(OUTLIERS_TABLE, page_name_id),
                     "logs",
                 )
 
@@ -1765,7 +1767,7 @@ def outliers_report(
     duckdb_save_table(
         project_id,
         outliers_column_config,
-        f"outliers_{page_name_id}",
+        check_table_name(OUTLIERS_TABLE, page_name_id),
         db_name="logs",
     )
 

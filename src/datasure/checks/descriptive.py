@@ -18,6 +18,8 @@ import streamlit as st
 from datasure.checks.missing import mask_missing_codes
 from datasure.models.schemas import ColumnByType
 from datasure.utils.duckdb_utils import (
+    DESCRIPTIVE_COLUMNS_TABLE,
+    check_table_name,
     duckdb_get_table,
     duckdb_save_table,
     duckdb_table_exists,
@@ -242,7 +244,7 @@ _LEGACY_SELECTION_TABLE = "selected_columns_df"
 
 def _selection_table(page_name_id: str) -> str:
     """Return the logs table holding a page's descriptive column selection."""
-    return f"descriptive_columns_{page_name_id}"
+    return check_table_name(DESCRIPTIVE_COLUMNS_TABLE, page_name_id)
 
 
 def _apply_saved_selection(

@@ -42,7 +42,12 @@ from datasure.models.schemas import (
 )
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.utils.dataframe_utils import ColumnByType
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.duckdb_utils import (
+    DUPLICATES_TABLE,
+    check_table_name,
+    duckdb_get_table,
+    duckdb_save_table,
+)
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding, is_demo_project
@@ -386,7 +391,7 @@ def _render_duplicates_column_actions(
     """
     duplicates_settings = duckdb_get_table(
         project_id,
-        f"duplicates_{page_name_id}",
+        check_table_name(DUPLICATES_TABLE, page_name_id),
         "logs",
     )
 
@@ -1465,7 +1470,7 @@ def _update_duplicates_column_config(
     """
     existing_config = duckdb_get_table(
         project_id=project_id,
-        alias=f"duplicates_{page_name_id}",
+        alias=check_table_name(DUPLICATES_TABLE, page_name_id),
         db_name="logs",
     )
 
@@ -1495,7 +1500,7 @@ def _update_duplicates_column_config(
     duckdb_save_table(
         project_id,
         updated_config,
-        f"duplicates_{page_name_id}",
+        check_table_name(DUPLICATES_TABLE, page_name_id),
         db_name="logs",
     )
 
@@ -1613,7 +1618,7 @@ def _delete_duplicates_column(
                     duckdb_save_table(
                         project_id,
                         updated_settings,
-                        f"duplicates_{page_name_id}",
+                        check_table_name(DUPLICATES_TABLE, page_name_id),
                         "logs",
                     )
 
@@ -2352,7 +2357,7 @@ def duplicates_report(
 
     duplicates_column_config = duckdb_get_table(
         project_id,
-        f"duplicates_{page_name_id}",
+        check_table_name(DUPLICATES_TABLE, page_name_id),
         "logs",
     )
 
@@ -2367,7 +2372,7 @@ def duplicates_report(
     duckdb_save_table(
         project_id,
         duplicates_column_config,
-        f"duplicates_{page_name_id}",
+        check_table_name(DUPLICATES_TABLE, page_name_id),
         db_name="logs",
     )
 

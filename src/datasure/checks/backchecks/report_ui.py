@@ -67,7 +67,12 @@ from datasure.utils.dataframe_utils import (
     get_table_state,
     no_rows_message,
 )
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.duckdb_utils import (
+    BACKCHECKS_TABLE,
+    check_table_name,
+    duckdb_get_table,
+    duckdb_save_table,
+)
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.reviewer import get_reviewer_name
@@ -171,7 +176,7 @@ def _render_backchecks_column_actions(
     """
     backcheck_settings = duckdb_get_table(
         project_id,
-        f"backchecks_{page_name_id}",
+        check_table_name(BACKCHECKS_TABLE, page_name_id),
         "logs",
     )
 
@@ -317,7 +322,7 @@ def _update_backcheck_column_config(
     # Get existing config
     existing_config = duckdb_get_table(
         project_id=project_id,
-        alias=f"backchecks_{page_name_id}",
+        alias=check_table_name(BACKCHECKS_TABLE, page_name_id),
         db_name="logs",
     )
 
@@ -361,7 +366,7 @@ def _update_backcheck_column_config(
     duckdb_save_table(
         project_id,
         updated_config,
-        f"backchecks_{page_name_id}",
+        check_table_name(BACKCHECKS_TABLE, page_name_id),
         db_name="logs",
     )
 
@@ -428,7 +433,7 @@ def _delete_backcheck_column(
                 duckdb_save_table(
                     project_id,
                     updated_settings,
-                    f"backchecks_{page_name_id}",
+                    check_table_name(BACKCHECKS_TABLE, page_name_id),
                     "logs",
                 )
 
@@ -724,7 +729,9 @@ def _scoped_backcheck_analysis(
     Shared by the Backchecks tab and the Summary tab's error rate, so the
     two compare the same values.
     """
-    column_settings = duckdb_get_table(project_id, f"backchecks_{page_name_id}", "logs")
+    column_settings = duckdb_get_table(
+        project_id, check_table_name(BACKCHECKS_TABLE, page_name_id), "logs"
+    )
     return compute_backcheck_analysis(
         scope.survey.data, scope.backcheck.data, settings, column_settings
     )
