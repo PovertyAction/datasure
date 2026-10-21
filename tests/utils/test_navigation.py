@@ -58,8 +58,10 @@ class TestSelectionPrecedence:
             ("", "progress", "summary", "progress"),
             # Without either, the default is used.
             (None, None, "summary", "summary"),
+            # An invalid URL value falls back to the default, not the saved
+            # selection.
+            ("debrief", "progress", "summary", "summary"),
             # Invalid or stale values are ignored without an error.
-            ("debrief", "progress", "summary", "progress"),
             ("debrief", "removed_check", "summary", "summary"),
             (None, "removed_check", "missing", "missing"),
             # Not-ready checks can still be selected.

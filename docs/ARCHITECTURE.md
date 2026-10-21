@@ -172,8 +172,9 @@ to appear.
   a status function that raises gives that check the error status.
 - **Selection.** `utils/navigation.py` is the pure resolver (no Streamlit):
   `resolve_nav` picks a valid URL value, then the saved selection, then the
-  default (Summary), and `group_selection` picks the remembered or first
-  check when the group changes. `utils/nav_ui.py` wraps it for Streamlit and
+  default (Summary); an invalid URL value goes straight to the default. And
+  `group_selection` picks the remembered or first check when the group
+  changes. `utils/nav_ui.py` wraps it for Streamlit and
   is meant to be shared by every page that picks one item from many.
 - **Lazy rendering.** `render_checks` in the template runs only the selected
   check. A check that is not ready shows a standard empty state with its
@@ -226,8 +227,9 @@ On a check page this is the page settings file
 - **Selection.** `saved_selection` / `save_selection` hold the last selected
   item. `render_checks` passes it to `nav_ui.resolve_selection` as `saved`,
   so precedence is a valid `?check=` URL value, then the selection made
-  earlier in this session, then the saved selection, then Summary. A saved
-  slug that is no longer in the catalogue is ignored.
+  earlier in this session, then the saved selection, then Summary. An
+  invalid `?check=` value opens Summary. A saved slug that is no longer in
+  the catalogue is ignored.
 - **Widget values.** `ViewState(settings_file, scope).bind(key, options=...,
   multi=..., on_change=..., **initial)` returns the widget's `key` and
   `on_change` keyword arguments. Before the widget is drawn, it copies a
@@ -378,7 +380,8 @@ The check page's selected check is the `check` URL query parameter, for
 example `?check=duplicates`. Each generated check page is its own page, so the
 parameter is per page. `nav_ui.resolve_selection` reads it on every run; a
 valid value wins over the remembered and saved selections (see
-[View state](#view-state)), and an invalid one is ignored.
+[View state](#view-state)), and an invalid one opens the default
+(Summary).
 Changing the selection writes the parameter, so links and bookmarks open the
 same check. To select a check from code (for example a button), call
 `nav_ui.select_nav_item(key, "check", slug)`, ideally in an `on_click`

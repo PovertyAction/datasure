@@ -181,6 +181,10 @@ class TestFindGpsColumns:
             ({"gps_lat": [1.0]}, 1),
             ({"gpsLatitude": [1.0]}, 1),
             ({"geopoint": ["1 2 3 4"]}, 1),
+            ({"LATITUDE": [1.0], "LONGITUDE": [2.0]}, 2),
+            ({"GPS_LAT": [1.0], "GPS_LON": [2.0]}, 2),
+            ({"GPSLat": [1.0]}, 1),
+            ({"RELATIONSHIP": ["x"], "LONG_ANSWER": ["y"]}, 0),
             ({"relationship": ["x"], "long_answer": ["y"], "age": [3]}, 0),
         ],
     )

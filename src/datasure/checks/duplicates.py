@@ -2441,6 +2441,11 @@ def duplicates_headline(data: pl.DataFrame, setting_file: str, config: dict) -> 
         Path to the page's settings file.
     config : dict
         The page configuration the check starts from.
+
+    Raises
+    ------
+    ValueError
+        If the saved Records to Include filter cannot be applied.
     """
     settings = load_default_duplicates_settings(
         setting_file, DuplicatesSettings(**config)
@@ -2448,6 +2453,12 @@ def duplicates_headline(data: pl.DataFrame, setting_file: str, config: dict) -> 
     records = filter_records_to_include(
         data, saved_records_to_include(setting_file), "survey"
     )
+    if records.error:
+        # An invalid filter checks no records, so a count would read as zero.
+        raise ValueError(
+            f"The survey Records to Include filter could not be applied: "
+            f"{records.error}"
+        )
     count = count_duplicate_ids(
         IdView(
             name="survey",

@@ -113,8 +113,9 @@ def resolve_selection(
     """Decide which item is selected on this run.
 
     Precedence: a valid URL value, then the selection remembered in this
-    session (or ``saved`` when there is none), then ``default``. The URL is
-    updated to show the selected item.
+    session (or ``saved`` when there is none), then ``default``. An invalid
+    URL value goes straight to ``default``. The URL is updated to show the
+    selected item.
 
     Parameters
     ----------

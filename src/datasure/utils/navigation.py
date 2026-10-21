@@ -123,7 +123,8 @@ def resolve_nav(
     """Decide which item is selected.
 
     Precedence: a valid URL value, then a valid saved selection, then the
-    default, then the first item. Invalid or stale values are ignored.
+    default, then the first item. An invalid URL value skips the saved
+    selection and goes to the default; a stale saved value is ignored.
 
     Parameters
     ----------
@@ -149,8 +150,9 @@ def resolve_nav(
     if not items:
         raise ValueError("Navigation needs at least one item.")
     slugs = {item.slug for item in items}
+    candidates = (default,) if url and url not in slugs else (url, saved, default)
     selected = next(
-        (value for value in (url, saved, default) if value in slugs),
+        (value for value in candidates if value in slugs),
         items[0].slug,
     )
     return NavState(selected=selected, items=tuple(items))

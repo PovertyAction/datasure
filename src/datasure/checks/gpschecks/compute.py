@@ -564,8 +564,9 @@ _SCAN_CHUNK_ROWS = 1_000
 
 
 def _looks_like_gps_name(name: str) -> bool:
-    # Split snake_case, kebab-case and camelCase names into lower-case words.
-    words = [word.lower() for word in re.findall(r"[a-z]+|[A-Z][a-z]*", name)]
+    # Split snake_case, kebab-case, camelCase and UPPER_CASE names into
+    # lower-case words; an upper-case run is one word ("GPSLat": gps, lat).
+    words = [word.lower() for word in re.findall(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+", name)]
     return any(
         word in _GPS_NAME_WORDS or word.startswith(_GPS_NAME_PREFIXES) for word in words
     )

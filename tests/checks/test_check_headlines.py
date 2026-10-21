@@ -130,6 +130,21 @@ class TestDuplicatesHeadline:
             "1 duplicate ID"
         )
 
+    def test_invalid_records_to_include_filter_raises(self, setting_file):
+        # The check shows the filter error; the card must not show zero.
+        _save_settings(
+            setting_file,
+            "duplicates",
+            {
+                "condition_col": "removed_col",
+                "condition_type": "Value is greater than",
+                "condition_value": 31,
+            },
+        )
+
+        with pytest.raises(ValueError, match="Records to Include"):
+            duplicates_headline(SURVEY, setting_file, self.CONFIG)
+
     def test_uses_the_saved_survey_id(self, setting_file):
         _save_settings(setting_file, "duplicates", {"survey_id": "key"})
 
