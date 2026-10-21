@@ -1,16 +1,19 @@
 """Report-rendering UI for the enumerator performance report."""
 
+from datetime import date as dt_date
 from typing import Literal
 
 import polars as pl
 import streamlit as st
 
 from datasure.checks.enumerator.compute import (
+    DISPLAY_DATE_FORMAT,
     compute_enumerator_overview,
     compute_enumerator_productivity,
     compute_enumerator_statistics,
     compute_enumerator_statistics_overtime,
     compute_enumerator_summary,
+    compute_latest_submission_date,
 )
 from datasure.checks.enumerator.models import (
     ALLOWED_STATISTICS,
@@ -203,6 +206,7 @@ def _render_enumerator_summary_table(
         )
         return
 
+    today = dt_date.today()
     summary_df = compute_enumerator_summary(
         project_id,
         data,
@@ -211,6 +215,7 @@ def _render_enumerator_summary_table(
         team,
         formversion,
         duration,
+        today=today,
     )
 
     options_map = {
@@ -355,6 +360,14 @@ def _render_enumerator_summary_table(
         width="stretch",
         column_config=column_config,
     )
+
+    latest_submission = compute_latest_submission_date(data, date)
+    if latest_submission is not None:
+        st.caption(
+            f"Data as of {latest_submission.strftime(DISPLAY_DATE_FORMAT)}. "
+            "Today, this week and this month are counted from today's date "
+            f"({today.strftime(DISPLAY_DATE_FORMAT)})."
+        )
 
 
 # =============================================================================
