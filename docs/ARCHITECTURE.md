@@ -353,8 +353,9 @@ Per project (UUID-keyed):
 - `cache/{project_id}/settings/` — `logs.duckdb` (import/prep logs, the
   correction logs `corr_log_{alias}`, the backcheck attribution logs
   `bc_attribution_{page_name_id}`, see [Correction log](#correction-log),
-  and each check page's check tables, such as the Descriptive Stats column
-  selection `descriptive_columns_{page_name_id}`), JSON settings (including
+  each check page's check tables, such as the Descriptive Stats column
+  selection `descriptive_columns_{page_name_id}`, and the project's missing
+  codes `missing_codes_{project_id}`), JSON settings (including
   each check page's, Prepare Data's and Corrections'
   [view state](#view-state)), and credential metadata
 - `cache/projects.json` — the project registry
@@ -372,6 +373,39 @@ with no selection of its own is seeded from it once, filtered to the page's
 columns, and the old table is left in place.
 
 The `cache/` directory is gitignored.
+
+## Project configuration bundle
+
+`utils/project_config.py` exports a project's setup to one JSON file
+(`ProjectConfigBundle` in `models/schemas.py`) and applies it to a new or
+existing project. The bundle holds import sources, prep steps, one
+`ProjectPageBundle` per check page, the missing codes and the corrections.
+Credentials, file paths, survey data and [view state](#view-state) never
+travel.
+
+- **Check tables.** `CHECK_TABLE_PREFIXES` lists the per-page tables that
+  travel: `duplicates`, `outliers`, `gps_columns`, `backchecks`,
+  `descriptive_columns` and `bc_attribution`. Export reads
+  `{prefix}_{page_name_id}` from `logs.duckdb` into
+  `ProjectPageBundle.check_tables` (rows keyed by prefix) and
+  `check_table_schemas` (each column's dtype encoded as JSON), skipping empty
+  tables, so list and date columns are restored exactly. A check whose
+  settings live in a new per-page table adds its prefix to the registry.
+  `export_project_config(..., exclude_table_prefixes=...)` leaves prefixes
+  out; `RECORD_LEVEL_TABLE_PREFIXES` names the ones holding decisions about
+  individual records.
+- **Pages.** Apply creates a page only when no page has its name and its
+  survey dataset was imported. Only then are its settings file and check
+  tables written, so an existing page keeps its own.
+- **Missing codes.** Export reads `missing_codes_{project_id}`. Apply merges
+  them into the target project's table by `label`: a bundled label replaces
+  the local one, other local labels are kept.
+- **Versions.** Export sets `bundle_version` (`BUNDLE_VERSION`). A bundle
+  without it predates check tables and missing codes; it still applies, and
+  the import dialog warns that those aren't included
+  (`bundle_version_warning`). New fields default to empty, so older bundles
+  parse. The retired per-page `missing_settings` is accepted but no longer
+  exported.
 
 ## Session state
 

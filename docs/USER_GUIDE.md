@@ -106,6 +106,37 @@ You're working with household survey data from rural communities in India, inclu
 - **Select Existing Project**: Choose from previously created projects
 - **Start Demo**: Launch the interactive tutorial with sample data
 
+#### Copying a Project's Setup
+
+To reuse a project's setup, open **More** on its project card and choose
+**Export configuration**. This downloads a configuration file. To use it,
+choose **From a configuration file** when you create a new project, or choose **Update from
+configuration** under **More** on an existing project.
+
+The configuration file includes:
+
+- Your import sources, without passwords or file paths. You sign in to
+  SurveyCTO again and pick the local files on the computer doing the import.
+- Prep steps.
+- Check pages, with their settings and check tables: duplicate, outlier, GPS
+  and back check columns, Descriptive Stats column selections, and back check
+  mismatch attributions.
+- Missing codes.
+- Corrections.
+
+It does not include survey data or remembered filters.
+
+When you import a configuration file:
+
+- A check page is only created when the project has no page with that name
+  and the page's dataset was imported. A skipped page is listed after the
+  import, and an existing page keeps its own settings and check tables.
+- Missing codes are merged with the project's own. A code with the same label
+  as one in the project replaces it; the project's other codes are kept.
+- A configuration file exported by an older version of DataSure has no check
+  tables or missing codes. It still imports, with a warning, and you set
+  those up again by hand.
+
 ---
 
 ### Step 2: Import Data
