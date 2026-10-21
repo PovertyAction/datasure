@@ -77,7 +77,12 @@ from datasure.utils.ui_utils import (
     section_header,
     show_queued_notices,
 )
-from datasure.utils.view_state import save_selection, saved_selection
+from datasure.utils.view_state import (
+    ViewState,
+    reset_filters_beside,
+    save_selection,
+    saved_selection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1262,7 +1267,12 @@ def render_dataset(item: NavItem, step_index: int, tables: PrepTables) -> None:
 
     # display preview of peppered data
     with st.container(border=True):
-        section_header("Preview Prepared Data")
+        # The preview's column choice is the dataset's only saved view state.
+        view = ViewState(
+            get_cache_path(project_id, "settings", PREP_SETTINGS_FILE), alias
+        )
+        with reset_filters_beside(view, vertical_alignment="center"):
+            section_header("Preview Prepared Data")
 
         # Demo guidance for data preview
         if is_demo_project():
@@ -1282,7 +1292,21 @@ def render_dataset(item: NavItem, step_index: int, tables: PrepTables) -> None:
             ]
         )
 
-        st.dataframe(prep_data, width="stretch", hide_index=False)
+        shown_columns = st.multiselect(
+            "Columns to show",
+            options=prep_data.columns,
+            placeholder="All columns",
+            **view.bind(
+                f"prep_preview_columns_{step_index}",
+                options=prep_data.columns,
+                multi=True,
+            ),
+        )
+        st.dataframe(
+            prep_data.select(shown_columns) if shown_columns else prep_data,
+            width="stretch",
+            hide_index=False,
+        )
 
 
 # === PAGE LAYOUT === #
@@ -1318,8 +1342,6 @@ if show_prep_page_info:
     )
     save_selection(prep_settings_file, nav_state.selected)
     selected_alias = nav_state.selected
-    # No "Reset filters" here: a dataset's only inputs are in the add and
-    # remove step dialogs, and dialog inputs are never saved as view state.
     run_guarded(
         PREP_NAV_KEY,
         nav_state.selected_item,

@@ -23,9 +23,10 @@ inputs are never bound, so they start fresh.
 
 import json
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -371,3 +372,30 @@ def reset_filters_button(view: ViewState, *, key: str) -> None:
         help="Clear the filters, selections and sort order remembered here.",
         on_click=view.reset_widgets,
     )
+
+
+@contextmanager
+def reset_filters_beside(
+    view: ViewState, *, vertical_alignment: Literal["top", "center"] = "top"
+) -> Iterator[None]:
+    """Draw the block's elements with a "Reset filters" action beside them.
+
+    Wrap a check's settings section (or its title, when it has none) so the
+    action sits on the same row::
+
+        with reset_filters_beside(check_view(setting_file)):
+            settings = progress_report_settings(...)
+
+    Parameters
+    ----------
+    view : ViewState
+        The scope the action clears.
+    vertical_alignment : {"top", "center"}
+        Use "top" beside an expander, so the action stays level with its
+        header when it opens, and "center" beside a title.
+    """
+    import streamlit as st
+
+    with st.container(horizontal=True, vertical_alignment=vertical_alignment):
+        yield
+        reset_filters_button(view, key=view.settings_file.stem)

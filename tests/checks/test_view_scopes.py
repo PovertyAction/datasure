@@ -1,7 +1,7 @@
 """Each check saves its view state under its catalogue slug.
 
-"Reset filters" on the check page clears the scope named after the selected
-check's slug, so a check saving under any other name could not be reset.
+"Reset filters" beside each check's settings clears the scope named after
+the check's slug, so a check saving under any other name could not be reset.
 """
 
 import json

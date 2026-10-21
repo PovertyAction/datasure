@@ -1171,7 +1171,8 @@ class TestOutliersHeadlineSavedSettings:
         "team": "team",
         "survey_date": "survey_date",
     }
-    FLAGGED = "1 outlier, 1 constraint violation"
+    # numeric_col1 is [1, 2, 3, 100, 5]: 1 of the 5 checked values is flagged.
+    FLAGGED = "1 outlier (20.0% of values), 1 constraint violation"
 
     def _headline(self, data, column_config, tmp_path, alias="s"):
         from datasure.processing.correction_log import empty_correction_log

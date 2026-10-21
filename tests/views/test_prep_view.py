@@ -2340,6 +2340,7 @@ def _render_prep_page(
     aliases: list[str],
     settings_dir,
     query_params: dict | None = None,
+    shown_columns: list[str] | None = None,
 ):
     """Load Prepare Data with fake tables keyed by (alias, database).
 
@@ -2366,7 +2367,7 @@ def _render_prep_page(
     _st.popover = MagicMock(return_value=_context_mock())
     _st.button = MagicMock(return_value=False)
     _st.selectbox = MagicMock(return_value=None)
-    _st.multiselect = MagicMock(return_value=[])
+    _st.multiselect = MagicMock(return_value=shown_columns or [])
     _st.dataframe = MagicMock()
     _st.pills = MagicMock()
 
@@ -2530,12 +2531,29 @@ class TestDatasetNavigation:
         ]
         assert "AttributeError" in items[0].reason
 
-    def test_no_reset_filters_action_when_nothing_is_remembered(self, tmp_path):
-        """Dataset inputs live in dialogs, which are never saved."""
+    def test_the_preview_shows_only_the_chosen_columns(self, tmp_path):
+        wide = pl.DataFrame({"dataset": ["alpha"], "extra": [1]})
+        _, previews = _render_prep_page(
+            {("alpha", "prep"): wide}, ["alpha"], tmp_path, shown_columns=["extra"]
+        )
+
+        assert [p.columns for p in previews] == [["extra"]]
+
+    def test_reset_filters_clears_only_the_shown_datasets_view_state(self, tmp_path):
+        from datasure.utils.view_state import ViewState
+
         tables = {("alpha", "prep"): _rows("alpha"), ("beta", "prep"): _rows("beta")}
+        settings = tmp_path / "test_project" / "settings" / pv.PREP_SETTINGS_FILE
+        ViewState(settings, "beta").save("prep_preview_columns_1", ["dataset"])
+        ViewState(settings, "alpha").save("prep_preview_columns_0", ["dataset"])
 
         _render_prep_page(tables, ["alpha", "beta"], tmp_path, {"dataset": "beta"})
-
-        assert not [
+        reset = next(
             c for c in _st.button.call_args_list if c.args[:1] == ("Reset filters",)
-        ]
+        )
+        reset.kwargs["on_click"]()
+
+        assert ViewState(settings, "beta").values() == {}
+        assert ViewState(settings, "alpha").values() == {
+            "prep_preview_columns_0": ["dataset"]
+        }

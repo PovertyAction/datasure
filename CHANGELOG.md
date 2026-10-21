@@ -29,7 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `view_state` section of the page settings file (`ViewState.bind`,
   `bind_widget`, `saved_selection`, `save_selection`). Saved values that no
   longer match the data are dropped. Each check gets a "Reset filters" action
-  (`reset_filters_button`) that clears only its own view state. `ViewState`
+  (`reset_filters_button`) that clears only its own view state, beside its
+  settings section (`reset_filters_beside`), or beside its title on Missing
+  Values and Descriptive Stats. `ViewState`
   takes any settings file, for reuse by Prepare Data and Corrections
 - **Summary check health grid** (#376): After Progress, Summary shows a card
   for every other catalogue check with its group, status (text and icon) and
@@ -41,9 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `CheckEntry.headline`: `progress_headline` (share of target, or
     submissions), `missing_headline` (mean % of values missing),
     `duplicates_headline` (unresolved duplicate IDs after Records to
-    Include), `outliers_headline` (total outliers and constraint violations,
-    accepted flags left out), `enumerator_headline` (enumerators active in
-    the past 7 days out of all) and `backchecks_headline` (total error rate).
+    Include), `outliers_headline` (total outliers with the share of checked
+    values flagged, and constraint violations, accepted flags left out),
+    `enumerator_headline` (enumerators active in the past 7 days out of all)
+    and `backchecks_headline` (total error rate).
     Descriptive Stats shows status only
   - Headlines run only for ready checks and are cached on the page's data,
     settings files, the logs and intermediate databases and the date; a
@@ -108,6 +111,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The Survey data / Backcheck data selector (`choose_dataset`) and the
     Correction Log filters are saved in `view_state` per check page, with a
     Reset filters action
+  - Prepare Data's preview has a "Columns to show" filter, saved in
+    `view_state` per dataset, with a Reset filters action beside the
+    "Preview Prepared Data" header
   - Onboarding text and the user guide describe both pages' pills
 
 ### Removed
@@ -124,9 +130,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `SummarySettings` has no `survey_id`
   - Removed `summary_data_quality`, `calculate_data_quality_metrics`,
     `compute_summary_data_quality`, `DataQualityMetrics` and `CheckRates`
-    (`checks/summary.py`), `summary_report(check_rates=...)`,
-    `flagged_outlier_percent` (`checks/outliers/report_ui.py`) and
-    `flagged_value_percent` (`checks/outliers/compute.py`)
+    (`checks/summary.py`), `summary_report(check_rates=...)` and
+    `flagged_outlier_percent` (`checks/outliers/report_ui.py`)
+  - The outlier rate and backcheck error rate stay on Summary, in the
+    Outliers & Constraints and Backchecks card headlines
   - The demo guidance moves to the health grid (`summary_check_health` in
     `checks/catalogue.py`)
 
@@ -160,9 +167,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Corrections empty state** (#377): A dimmed check page shows the shared
   not-set-up or error state (`nav_ui.render_empty_state`) instead of its own
   message
-- **No Reset filters on Prepare Data** (#377): The action could never clear
-  anything, because a dataset's only inputs are in dialogs, which are not
-  saved. It is removed
 - **Not-applicable checks keep their settings** (#373): A not-applicable
   check shows its settings section under the empty state
   (`CheckEntry.settings`, `render_selected(settings=...)`;

@@ -31,6 +31,7 @@ from datasure.checks.outliers.compute import (
     compute_outlier_output,
     compute_outlier_stats_polars,
     expand_col_names,
+    flagged_value_percent,
     get_outlier_cols,
     load_default_settings,
     stack_outlier_columns,
@@ -2036,3 +2037,39 @@ class TestCreateDescriptiveStats:
         stat_names = result["statistic"].to_list()
         assert "Mean" in stat_names
         assert "Median (Q2)" in stat_names
+
+
+class TestFlaggedValuePercent:
+    """The share of checked values flagged, for the Outliers health card."""
+
+    def test_share_of_non_null_values_flagged(self):
+        flags = pl.DataFrame(
+            {
+                "column name": ["a", "a", "a", "a", "b", "b"],
+                "column value": [1.0, 2.0, 100.0, None, 5.0, 900.0],
+                "outlier reason": [
+                    "no outlier",
+                    "no outlier",
+                    "Value is above upper bound 9.50",
+                    "no outlier",
+                    "no outlier",
+                    "Value is above upper bound 9.50",
+                ],
+            }
+        )
+        # 2 of the 5 values checked; the missing value is not checked.
+        assert flagged_value_percent(flags) == 40.0
+
+    def test_none_without_results(self):
+        assert flagged_value_percent(pl.DataFrame()) is None
+
+    def test_none_when_every_value_is_missing(self):
+        flags = pl.DataFrame(
+            {
+                "column name": ["a"],
+                "column value": [None],
+                "outlier reason": ["no outlier"],
+            },
+            schema_overrides={"column value": pl.Float64},
+        )
+        assert flagged_value_percent(flags) is None

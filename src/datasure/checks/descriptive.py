@@ -19,7 +19,7 @@ from datasure.models.schemas import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.navigations_utils import demo_callout, show_demo_next_action
 from datasure.utils.onboarding_utils import demo_output_onboarding
-from datasure.utils.view_state import view_factory
+from datasure.utils.view_state import reset_filters_beside, view_factory
 
 TAB_NAME: str = "descriptive_stats"
 
@@ -688,7 +688,9 @@ def descriptive_report(
     columns : ColumnByType
         Column type metadata for the dataset.
     """
-    st.title("Descriptive Statistics")
+    # No settings section here, so the action sits beside the title.
+    with reset_filters_beside(check_view(setting_file), vertical_alignment="center"):
+        st.title("Descriptive Statistics")
 
     # check if DataFrame is empty before proceeding with any computations or rendering
     if data.is_empty():

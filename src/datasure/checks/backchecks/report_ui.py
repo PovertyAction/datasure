@@ -77,7 +77,12 @@ from datasure.utils.ui_utils import (
     show_queued_notices,
     styled_dataframe,
 )
-from datasure.utils.view_state import ViewState, bind_widget, view_factory
+from datasure.utils.view_state import (
+    ViewState,
+    bind_widget,
+    reset_filters_beside,
+    view_factory,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -2198,17 +2203,18 @@ def backchecks_settings_section(
     The report starts with it; the check page also shows it alone under the
     empty state when the backcheck data has no rows, so it stays reachable.
     """
-    return backchecks_report_settings(
-        project_id,
-        setting_file,
-        survey_data,
-        backcheck_data,
-        settings_from_page_config(config),
-        survey_columns.categorical_columns,
-        survey_columns.datetime_columns,
-        backcheck_columns.categorical_columns,
-        backcheck_columns.datetime_columns,
-    )
+    with reset_filters_beside(check_view(setting_file)):
+        return backchecks_report_settings(
+            project_id,
+            setting_file,
+            survey_data,
+            backcheck_data,
+            settings_from_page_config(config),
+            survey_columns.categorical_columns,
+            survey_columns.datetime_columns,
+            backcheck_columns.categorical_columns,
+            backcheck_columns.datetime_columns,
+        )
 
 
 def backchecks_report(

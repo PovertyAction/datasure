@@ -25,7 +25,7 @@ from datasure.utils.duckdb_utils import (
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding, is_demo_project
 from datasure.utils.ui_utils import ensure_styler_limit
-from datasure.utils.view_state import view_factory
+from datasure.utils.view_state import reset_filters_beside, view_factory
 
 TAB_NAME = "missing"
 
@@ -1182,7 +1182,9 @@ def missing_report(
         [1.0, "#da3b46"],
     ]
 
-    st.title("Missing data")
+    # No settings section here, so the action sits beside the title.
+    with reset_filters_beside(check_view(setting_file), vertical_alignment="center"):
+        st.title("Missing data")
 
     # Missing codes configuration
     render_missing_codes_table(project_id)

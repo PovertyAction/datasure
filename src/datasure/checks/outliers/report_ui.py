@@ -21,6 +21,7 @@ from datasure.checks.outliers.compute import (
     compute_constraint_violations,
     compute_outlier_output,
     expand_col_names,
+    flagged_value_percent,
     load_default_settings,
 )
 from datasure.checks.outliers.models import (
@@ -74,7 +75,7 @@ from datasure.utils.ui_utils import (
     show_queued_notices,
     styled_dataframe,
 )
-from datasure.utils.view_state import view_factory
+from datasure.utils.view_state import reset_filters_beside, view_factory
 
 logger = logging.getLogger(__name__)
 
@@ -1478,8 +1479,9 @@ def outliers_headline(
 ) -> str | None:
     """Return the outliers headline for the Summary health grid.
 
-    The check's "Total Outliers" and "Total Violations", leaving out
-    accepted flags. Computed without rendering the tab.
+    The check's "Total Outliers", with the share of checked values flagged,
+    and "Total Violations", leaving out accepted flags. Computed without
+    rendering the tab.
 
     Parameters
     ----------
@@ -1502,7 +1504,8 @@ def outliers_headline(
     Returns
     -------
     str | None
-        For example "3 outliers, 1 constraint violation", or None when no
+        For example "3 outliers (1.4% of values), 1 constraint violation".
+        The share is left out when no values were checked. None when no
         outlier columns are configured or the saved settings no longer fit
         the data.
     """
@@ -1521,8 +1524,11 @@ def outliers_headline(
         if flags.violations.is_empty()
         else _compute_constraint_metrics(flags.violations).total_violations
     )
+    percent = flagged_value_percent(flags.outliers)
+    rate = "" if percent is None else f" ({percent:.1f}% of values)"
     return (
-        f"{_plural(outliers, 'outlier')}, {_plural(violations, 'constraint violation')}"
+        f"{_plural(outliers, 'outlier')}{rate}, "
+        f"{_plural(violations, 'constraint violation')}"
     )
 
 
@@ -1609,12 +1615,13 @@ def outliers_settings_section(
     The report starts with it; the check page also shows it alone under the
     empty state when the check does not apply, so it stays reachable.
     """
-    return outliers_report_settings(
-        setting_file,
-        OutlierSettings(**config),
-        survey_columns.categorical_columns,
-        survey_columns.datetime_columns,
-    )
+    with reset_filters_beside(check_view(setting_file)):
+        return outliers_report_settings(
+            setting_file,
+            OutlierSettings(**config),
+            survey_columns.categorical_columns,
+            survey_columns.datetime_columns,
+        )
 
 
 def outliers_report(

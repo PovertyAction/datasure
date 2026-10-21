@@ -180,7 +180,10 @@ class TestOutliersHeadline:
         duckdb_save_table(PROJECT_ID, self.COLUMNS, f"outliers_{PAGE}", "logs")
 
         # 100 is an IQR outlier and above the soft maximum of 50.
-        assert self._headline(setting_file) == "1 outlier, 1 constraint violation"
+        assert (
+            self._headline(setting_file)
+            == "1 outlier (20.0% of values), 1 constraint violation"
+        )
 
     def test_accepted_flags_are_left_out(self, setting_file):
         from datasure.processing.correction_log import empty_correction_log
@@ -205,7 +208,7 @@ class TestOutliersHeadline:
             )
             headline = self._headline(setting_file, alias="survey")
 
-        assert headline == "0 outliers, 0 constraint violations"
+        assert headline == "0 outliers (0.0% of values), 0 constraint violations"
 
     def test_none_without_outlier_columns(self, setting_file):
         assert self._headline(setting_file) is None

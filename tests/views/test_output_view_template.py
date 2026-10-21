@@ -13,7 +13,7 @@ from datasure.checks.catalogue import CheckEntry
 from datasure.utils import nav_ui
 from datasure.utils.dataframe_utils import TableState
 from datasure.utils.duckdb_utils import duckdb_save_table
-from datasure.utils.view_state import ViewState, remembered, save_selection
+from datasure.utils.view_state import remembered, save_selection
 from datasure.views import output_view_template as template
 
 PROJECT_ID = "zero_row_project"
@@ -646,25 +646,3 @@ class TestLastViewedCheckPage:
 
         write.assert_not_called()
         assert check_page.project_view_file.stat().st_mtime_ns == written
-
-
-class TestResetFilters:
-    def test_reset_clears_only_the_shown_checks_view_state(self, page):
-        check_page = page(url="duplicates")
-        settings = check_page.config.setting_file
-        ViewState(settings, "duplicates").save("iddup_survey_sort", "KEY")
-        ViewState(settings, "gps").save("gps_color_by", "team")
-        check_page.st.session_state["iddup_survey_sort"] = "KEY"
-        check_page.render(SURVEY)
-
-        reset = next(
-            call
-            for call in check_page.st.button.call_args_list
-            if call.args[0] == "Reset filters"
-        )
-        with patch.dict(sys.modules, {"streamlit": check_page.st}):
-            reset.kwargs["on_click"](*reset.kwargs.get("args", ()))
-
-        assert ViewState(settings, "duplicates").values() == {}
-        assert "iddup_survey_sort" not in check_page.st.session_state
-        assert ViewState(settings, "gps").values() == {"gps_color_by": "team"}

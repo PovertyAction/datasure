@@ -66,10 +66,16 @@ from datasure.utils.settings_utils import page_settings_file
 from datasure.utils.ui_utils import (
     queue_notice,
     row_styler,
+    section_header,
     show_queued_notices,
     styled_dataframe,
 )
-from datasure.utils.view_state import ViewState, bind_widget, view_factory
+from datasure.utils.view_state import (
+    ViewState,
+    bind_widget,
+    reset_filters_beside,
+    view_factory,
+)
 
 # =============================================================================
 # GPS Column Configuration Functions
@@ -1216,7 +1222,7 @@ def _render_gps_coordinates(
     team : str | None
         Team column name.
     """
-    st.subheader("GPS Coordinates Visualization")
+    section_header("GPS Coordinates Visualization")
 
     gp1, gp2, gp3 = st.columns([0.4, 0.3, 0.3])
 
@@ -1315,7 +1321,7 @@ def _render_gps_outliers_checks(
     survey_id : str | None
         Survey ID column name, recorded with each correction.
     """
-    st.subheader("GPS Outliers Detection")
+    section_header("GPS Outliers Detection")
 
     go1, go2, go3 = st.columns([0.4, 0.3, 0.3])
 
@@ -1392,7 +1398,7 @@ def _render_gps_outliers_checks(
         st.metric("Outlier Percentage", f"{outlier_pct:.2f}%")
 
     # Display map with outliers
-    st.subheader("Outliers Map")
+    section_header("Outliers Map")
     plot_clusters_on_map(
         outlier_df,
         "latitude",
@@ -1615,7 +1621,7 @@ def _render_comparison_map(
     enumerator: str | None,
 ) -> None:
     """Render the comparison scatterplot map."""
-    st.subheader("Comparison Map")
+    section_header("Comparison Map")
 
     map_df = comparison_df.copy()
     map_df["lat"] = map_df["lat_1"]
@@ -1707,7 +1713,7 @@ def _render_gps_comparison_checks(
     enumerator : str | None
         Enumerator column name.
     """
-    st.subheader("GPS Coordinates Comparison")
+    section_header("GPS Coordinates Comparison")
     st.caption(
         "Compare GPS coordinates from two different sources and flag discrepancies "
         "that exceed a specified distance threshold."
@@ -1896,14 +1902,15 @@ def gpschecks_settings_section(
     GPSSettings
         The settings chosen in the panel.
     """
-    gps_settings = gpschecks_report_settings(
-        setting_file,
-        GPSSettings(**config),
-        survey_columns.categorical_columns,
-        survey_columns.datetime_columns,
-    )
+    with reset_filters_beside(check_view(setting_file)):
+        gps_settings = gpschecks_report_settings(
+            setting_file,
+            GPSSettings(**config),
+            survey_columns.categorical_columns,
+            survey_columns.datetime_columns,
+        )
 
-    st.subheader("GPS Columns Configuration")
+    section_header("GPS Columns Configuration")
 
     if is_demo_project():
         demo_callout(

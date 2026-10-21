@@ -239,12 +239,15 @@ On a check page this is the page settings file
   state holds a value. `bind_widget(view, key, ...)` does the same for
   helpers that may have no view.
 - **Scopes.** A check's scope is its catalogue slug (`VIEW_SCOPE` in each
-  check module). "Reset filters" (`reset_filters_button`, drawn by
-  `render_checks` above the selected check) calls `ViewState.reset_widgets`,
-  which clears only that scope's saved values and their session state. It
-  does not touch the check's own settings. Corrections (scope: the check
-  page) draws the same action above the selected page. Prepare Data has
-  none: a dataset's only inputs are in dialogs, which are never saved.
+  check module). "Reset filters" (`reset_filters_button`) calls
+  `ViewState.reset_widgets`, which clears only that scope's saved values and
+  their session state. It does not touch the check's own settings. Each
+  check draws it beside its settings expander by wrapping the settings call
+  in `reset_filters_beside(check_view(setting_file))`; Missing Values and
+  Descriptive Stats, which have no settings section, wrap their title.
+  Corrections (scope: the check page) draws the action above the selected
+  page, and Prepare Data (scope: the dataset) beside the "Preview Prepared
+  Data" header.
 - **Not saved.** Pagination, search boxes and inputs inside dialogs or
   popovers are never bound, so they start fresh. Bound today: Summary's
   "Progress by" column and time period; the Progress time period and extra
@@ -258,7 +261,8 @@ On a check page this is the page settings file
   information pills, productivity period and week start, and the statistics
   columns, statistics, period and week start; the backcheck comparison
   filters, productivity period and week start, and staff statistics view;
-  and the Descriptive Stats histogram and value counts choices. Descriptive
+  the Descriptive Stats histogram and value counts choices; and the Prepare
+  Data preview's "Columns to show". Descriptive
   Stats saves its column selection to DuckDB, and the GPS outlier detection
   sliders (neighbours, expected proportion) are analysis parameters with
   data-dependent bounds, so neither is view state.

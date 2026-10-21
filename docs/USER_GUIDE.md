@@ -199,6 +199,9 @@ preparation steps, Change Log and preview load, so the page responds quickly.
   `...?dataset=demo_survey`, and the page reopens on it next time.
 - Every dataset stays available on Configure Checks, including datasets you
   never opened here.
+- **Columns to show**, under **Preview Prepared Data**, limits the preview to
+  the columns you pick. Your choice is remembered for each dataset, and
+  **Reset filters** beside the preview header clears it.
 
 #### Data Preparation Actions
 
@@ -423,8 +426,9 @@ check and back, and when you reopen the app.
 - A remembered value that no longer matches your data, for example an
   enumerator, column or dataset that was removed, is dropped quietly and the
   filter goes back to its default.
-- **Reset filters**, above each check, clears that check's remembered filters
-  only. Its settings and the other checks' filters stay.
+- **Reset filters**, beside each check's settings (or its title, on Missing
+  Values and Descriptive Stats), clears that check's remembered filters only.
+  Its settings and the other checks' filters stay.
 - Remembered filters are personal. They are not included when you export a
   project configuration, apply one to a project, or build a replication
   package.
@@ -796,7 +800,7 @@ where to start triage. Each card shows:
 | Progress | Share of the target reached, for example "62.00% of target (310 of 500)", or the submissions when no target is set |
 | Missing Values | Mean percentage of values missing, counting missing codes |
 | Duplicates | Duplicate survey IDs not yet resolved, for example "14 duplicate IDs" |
-| Outliers & Constraints | Outliers and constraint violations, leaving out accepted flags |
+| Outliers & Constraints | Outliers, with the share of checked values flagged, and constraint violations, leaving out accepted flags, for example "3 outliers (1.4% of values), 1 constraint violation" |
 | Enumerator Stats | Enumerators active in the past 7 days, out of all enumerators |
 | Backchecks | Total error rate |
 | Descriptive Stats, GPS Checks | Status only |

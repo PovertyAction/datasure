@@ -26,7 +26,7 @@ from datasure.utils.settings_utils import (
     trigger_save,
 )
 from datasure.utils.ui_utils import ensure_styler_limit
-from datasure.utils.view_state import view_factory
+from datasure.utils.view_state import reset_filters_beside, view_factory
 
 TAB_NAME: str = "summary"
 
@@ -1271,9 +1271,10 @@ def summary_report(
     """
     # Get settings
     config_settings = SummarySettings(**config)
-    survey_date, survey_target = summary_settings(
-        data, setting_file, config_settings, survey_columns
-    )
+    with reset_filters_beside(check_view(setting_file)):
+        survey_date, survey_target = summary_settings(
+            data, setting_file, config_settings, survey_columns
+        )
 
     # Render sections
     st.write("---")

@@ -32,7 +32,12 @@ from datasure.utils.duckdb_utils import duckdb_get_table
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.settings_utils import load_check_settings
-from datasure.utils.view_state import ViewState, bind_widget, view_factory
+from datasure.utils.view_state import (
+    ViewState,
+    bind_widget,
+    reset_filters_beside,
+    view_factory,
+)
 
 # Saved view state scope: the check's catalogue slug. The report's periods,
 # columns and statistics are personal view state; older versions saved them in
@@ -1081,14 +1086,15 @@ def enumerator_report(
 
     config_settings = EnumeratorSettings(**config)
 
-    enumerator_settings = enumerator_report_settings(
-        project_id,
-        setting_file,
-        data,
-        config_settings,
-        categorical_columns,
-        datetime_columns,
-    )
+    with reset_filters_beside(check_view(setting_file)):
+        enumerator_settings = enumerator_report_settings(
+            project_id,
+            setting_file,
+            data,
+            config_settings,
+            categorical_columns,
+            datetime_columns,
+        )
 
     # get data for enumerator report
     data_enum_report = _enumerator_data(project_id, data)

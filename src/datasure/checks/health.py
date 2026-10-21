@@ -113,7 +113,11 @@ def _frame_fingerprint(data: pl.DataFrame | None) -> Hashable | None:
 def _file_stamp(path: Path) -> Hashable | None:
     try:
         stat = path.stat()
+    except FileNotFoundError:
+        # Normal before a database or its WAL file exists.
+        return None
     except OSError:
+        logger.warning("Could not stat %s", path, exc_info=True)
         return None
     return (stat.st_mtime_ns, stat.st_size)
 
@@ -121,7 +125,11 @@ def _file_stamp(path: Path) -> Hashable | None:
 def _content_hash(path: Path) -> Hashable | None:
     try:
         return hashlib.sha256(path.read_bytes()).hexdigest()
+    except FileNotFoundError:
+        # Normal before the settings file is first saved.
+        return None
     except OSError:
+        logger.warning("Could not read %s", path, exc_info=True)
         return None
 
 
@@ -133,7 +141,11 @@ def _settings_hash(path: Path) -> Hashable | None:
     """
     try:
         settings = json.loads(path.read_text())
+    except FileNotFoundError:
+        # Normal before the settings file is first saved.
+        return None
     except (OSError, ValueError):
+        logger.warning("Could not parse settings %s", path, exc_info=True)
         return _content_hash(path)
     if not isinstance(settings, dict):
         return _content_hash(path)

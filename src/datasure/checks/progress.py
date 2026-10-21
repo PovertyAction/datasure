@@ -26,7 +26,7 @@ from datasure.utils.settings_utils import (
     trigger_save,
 )
 from datasure.utils.ui_utils import ensure_styler_limit
-from datasure.utils.view_state import view_factory
+from datasure.utils.view_state import reset_filters_beside, view_factory
 
 TAB_NAME = "progress"
 
@@ -1403,9 +1403,10 @@ def progress_report(
 
     # Load settings
     config_settings = ProgressSettings(**config)
-    progress_settings = progress_report_settings(
-        setting_file, config_settings, categorical_columns, datetime_columns
-    )
+    with reset_filters_beside(check_view(setting_file)):
+        progress_settings = progress_report_settings(
+            setting_file, config_settings, categorical_columns, datetime_columns
+        )
 
     st.write("---")
     st.subheader("Progress Summary")

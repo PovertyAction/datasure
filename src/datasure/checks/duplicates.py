@@ -50,6 +50,7 @@ from datasure.utils.settings_utils import (
     save_check_settings,
     trigger_save,
 )
+from datasure.utils.view_state import reset_filters_beside
 
 logger = logging.getLogger(__name__)
 
@@ -2240,15 +2241,16 @@ def duplicates_report(
         )
 
     config_settings = DuplicatesSettings(**config)
-    duplicates_settings = duplicates_report_settings(
-        project_id,
-        setting_file,
-        data,
-        config_settings,
-        categorical_columns,
-        datetime_columns,
-        backcheck_data,
-    )
+    with reset_filters_beside(check_view(setting_file)):
+        duplicates_settings = duplicates_report_settings(
+            project_id,
+            setting_file,
+            data,
+            config_settings,
+            categorical_columns,
+            datetime_columns,
+            backcheck_data,
+        )
 
     # ---- ID Duplicates --- #
     st.divider()

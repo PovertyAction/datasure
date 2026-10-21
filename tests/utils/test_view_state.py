@@ -3,6 +3,7 @@
 import json
 import sys
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -12,6 +13,7 @@ from datasure.utils.view_state import (
     forget_remembered,
     remember,
     remembered,
+    reset_filters_beside,
     save_selection,
     saved_selection,
     without_view_state,
@@ -143,6 +145,44 @@ class TestReset:
         assert ViewState(settings_file, "gps").values() == {"color_by": "team"}
         # Check settings are not view state and stay.
         assert _file(settings_file)["duplicates"] == {"survey_id": "hhid"}
+
+
+class TestResetFiltersBeside:
+    @pytest.fixture
+    def st(self, monkeypatch):
+        st = MagicMock(session_state={})
+        monkeypatch.setitem(sys.modules, "streamlit", st)
+        return st
+
+    def test_the_action_follows_the_block_in_one_row(self, settings_file, st):
+        with reset_filters_beside(ViewState(settings_file, "duplicates")):
+            st.expander("settings")
+
+        st.container.assert_called_once_with(horizontal=True, vertical_alignment="top")
+        names = [name for name, *_ in st.mock_calls if name in ("expander", "button")]
+        assert names == ["expander", "button"]
+        assert st.button.call_args.args == ("Reset filters",)
+
+    def test_the_action_clears_only_its_own_scope(self, settings_file, st):
+        ViewState(settings_file, "duplicates").save("iddup_survey_sort", "KEY")
+        ViewState(settings_file, "gps").save("gps_color_by", "team")
+        st.session_state["iddup_survey_sort"] = "KEY"
+
+        with reset_filters_beside(ViewState(settings_file, "duplicates")):
+            pass
+        st.button.call_args.kwargs["on_click"]()
+
+        assert ViewState(settings_file, "duplicates").values() == {}
+        assert "iddup_survey_sort" not in st.session_state
+        assert ViewState(settings_file, "gps").values() == {"gps_color_by": "team"}
+
+    def test_keys_differ_between_check_pages(self, tmp_path, st):
+        for page in ("page_a", "page_b"):
+            with reset_filters_beside(ViewState(tmp_path / f"{page}.json", "gps")):
+                pass
+
+        keys = [call.kwargs["key"] for call in st.button.call_args_list]
+        assert len(set(keys)) == 2
 
 
 @pytest.fixture
