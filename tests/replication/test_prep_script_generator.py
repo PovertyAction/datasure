@@ -12,6 +12,7 @@ from datasure.replication.prep_script_generator import (
     _stata_add_column,
     _stata_remove_columns,
     _stata_remove_rows,
+    _stata_str_literal,
     _stata_transform_column,
     _val,
     _val_list,
@@ -287,11 +288,41 @@ class TestStataTransformColumn:
         )
         assert "destring" in lines[0]
 
-    def test_to_string(self):
+    def test_to_string_destrings_text_columns_first(self):
+        # The CSV import keeps "12.0" as text; DataSure would show "12".
         lines = _stata_transform_column(
             {"source_columns": ["hhid"], "method": "to string"}, ""
         )
-        assert lines[0].startswith("tostring hhid, replace")
+        assert lines[:2] == [
+            "capture confirm string variable hhid",
+            "if !_rc quietly destring hhid, replace",
+        ]
+
+    def test_to_string_formats_dates_like_datasure(self):
+        # SurveyCTO dates are datetimes in DataSure, not day counts.
+        text = "\n".join(
+            _stata_transform_column(
+                {"source_columns": ["d"], "method": "to string"}, ""
+            )
+        )
+        assert '"%tdCCYY-NN-DD") + " 00:00:00.000000"' in text
+        assert '"%tcCCYY-NN-DD_HH:MM:SS.sss") + "000"' in text
+
+    def test_to_string_keeps_missing_values_empty(self):
+        # tostring would turn missing into ".", which concat then joins.
+        text = "\n".join(
+            _stata_transform_column(
+                {"source_columns": ["n"], "method": "to string"}, ""
+            )
+        )
+        assert "tostring" not in text
+        assert 'string(n, "%17.0g") if !missing(n)' in text
+
+    def test_to_string_keeps_column_position(self):
+        lines = _stata_transform_column(
+            {"source_columns": ["n"], "method": "to string"}, ""
+        )
+        assert "    order `s', after(n)" in lines
 
     def test_floor(self):
         lines = _stata_transform_column(
@@ -304,6 +335,23 @@ class TestStataTransformColumn:
             {"source_columns": ["dob"], "method": "year"}, ""
         )
         assert "year(" in lines[0]
+
+
+class TestStataStrLiteral:
+    def test_plain_text(self):
+        assert _stata_str_literal("_") == '"_"'
+
+    def test_empty(self):
+        assert _stata_str_literal("") == '""'
+
+    def test_local_macro_syntax(self):
+        assert _stata_str_literal("`v'") == 'char(96) + "v\'"'
+
+    def test_global_macro_syntax(self):
+        assert _stata_str_literal("$raw") == 'char(36) + "raw"'
+
+    def test_quotes(self):
+        assert _stata_str_literal("a\"'b") == '"a" + char(34) + "\'b"'
 
 
 class TestStataAddColumn:
@@ -336,7 +384,7 @@ class TestStataAddColumn:
         assert lines == [
             'gen uid = ""',
             "foreach v in region hhid {",
-            '    replace uid = uid + cond(uid == "" | `v\' == "", "", `"_"\') + `v\'',
+            '    replace uid = uid + cond(uid == "" | `v\' == "", "", "_") + `v\'',
             "}",
         ]
 
@@ -350,7 +398,19 @@ class TestStataAddColumn:
             },
             "",
         )
-        assert '`""\'' in lines[2]
+        assert 'cond(uid == "" | `v\' == "", "", "")' in lines[2]
+
+    def test_concat_separator_is_not_expanded_as_a_macro(self):
+        lines = _stata_add_column(
+            {
+                "column_names": "uid",
+                "method": "concat",
+                "source_columns": ["a", "b"],
+                "value": "`v'",
+            },
+            "",
+        )
+        assert 'cond(uid == "" | `v\' == "", "", char(96) + "v\'")' in lines[2]
 
     def test_uuid_note(self):
         lines = _stata_add_column({"column_names": "uid", "method": "uuid"}, "")

@@ -155,6 +155,44 @@ def _stata_remove_rows(args: dict, _desc: str) -> list[str]:
     return _drop_by_condition(cols[0], condition, values)
 
 
+def _stata_to_string(col: str) -> list[str]:
+    """Convert a column to text the way DataSure's ``to string`` does.
+
+    The CSV import keeps every column as text, where DataSure would have
+    read numbers as numbers, so a text column is destrung first ("12.0"
+    becomes 12, then "12"); destring leaves non-numeric columns alone.
+    SurveyCTO dates and datetimes are both datetimes in DataSure, so they
+    get its full timestamp text. Missing values become "" instead of ".",
+    and Stata's ".5" gets DataSure's leading zero.
+    """
+    return [
+        f"capture confirm string variable {col}",
+        f"if !_rc quietly destring {col}, replace",
+        f"capture confirm numeric variable {col}",
+        "if !_rc {",
+        "    tempvar s",
+        f"    local fmt : format {col}",
+        '    if strpos("`fmt\'", "%td") {',
+        f'        gen `s\' = string({col}, "%tdCCYY-NN-DD") '
+        f'+ " 00:00:00.000000" if !missing({col})',
+        "    }",
+        '    else if strpos("`fmt\'", "%tc") {',
+        f'        gen `s\' = string({col}, "%tcCCYY-NN-DD_HH:MM:SS.sss") '
+        f'+ "000" if !missing({col})',
+        "    }",
+        "    else {",
+        f'        gen `s\' = string({col}, "%17.0g") if !missing({col})',
+        '        replace `s\' = "0" + `s\' if substr(`s\', 1, 1) == "."',
+        "        replace `s' = \"-0\" + substr(`s', 2, .) "
+        'if substr(`s\', 1, 2) == "-."',
+        "    }",
+        f"    order `s', after({col})",
+        f"    drop {col}",
+        f"    rename `s' {col}",
+        "}",
+    ]
+
+
 def _stata_transform_column(args: dict, _desc: str) -> list[str]:
     cols = _cols(args)
     method = (args.get("method") or "").lower()
@@ -170,10 +208,6 @@ def _stata_transform_column(args: dict, _desc: str) -> list[str]:
         "ceil": f"replace {col} = ceil({col})",
         "round": f"replace {col} = round({col})",
         "string to number": f"destring {col}, replace",
-        "to string": (
-            f"tostring {col}, replace format(%17.0g)  "
-            f'// dates: gen s = string({col}, "%tdCCYY-NN-DD")'
-        ),
         "string to date": (f'gen {col}_date = date({col}, "DMY")  // adjust format'),
         "string to datetime": (
             f'gen {col}_dt = clock({col}, "DMYhms")  // adjust format'
@@ -199,6 +233,9 @@ def _stata_transform_column(args: dict, _desc: str) -> list[str]:
 
     if method in simple_stata:
         return [simple_stata[method]]
+
+    if method == "to string":
+        return _stata_to_string(col)
 
     if method in arith_ops and values:
         op = arith_ops[method]
@@ -239,20 +276,46 @@ _ADD_COL_EXPRS: dict[str, tuple[int, Callable[[list[str]], str]]] = {
 }
 
 
+# Characters Stata would read as macro syntax or a quote delimiter, even
+# inside compound quotes.
+_STATA_UNSAFE_CHARS = frozenset('`$"')
+
+
+def _stata_str_literal(text: str) -> str:
+    """Stata string expression that evaluates to exactly ``text``.
+
+    Runs of unsafe characters become ``char()`` calls so a separator like
+    ``"`v'"`` or ``"$raw"`` is not expanded as a macro.
+    """
+    parts: list[str] = []
+    run = ""
+    for ch in text:
+        if ch in _STATA_UNSAFE_CHARS:
+            if run:
+                parts.append(f'"{run}"')
+                run = ""
+            parts.append(f"char({ord(ch)})")
+        else:
+            run += ch
+    if run or not parts:
+        parts.append(f'"{run}"')
+    return " + ".join(parts)
+
+
 def _stata_concat(new_col: str, src_cols: list[str], separator: str) -> list[str]:
     """Join string columns, skipping empty values like DataSure's concat.
 
     ``egen concat()`` would keep a separator for every empty value, so the
     columns are joined one at a time instead. Stata has no string missing
     value apart from "", so a value that was an empty string (not missing)
-    in DataSure is skipped here too. Compound quotes keep a separator that
-    contains double quotes intact.
+    in DataSure is skipped here too.
     """
+    sep = _stata_str_literal(separator)
     return [
         f'gen {new_col} = ""',
         f"foreach v in {_col_list(src_cols)} {{",
         f"    replace {new_col} = {new_col} + "
-        f'cond({new_col} == "" | `v\' == "", "", `"{separator}"\') + `v\'',
+        f'cond({new_col} == "" | `v\' == "", "", {sep}) + `v\'',
         "}",
     ]
 
