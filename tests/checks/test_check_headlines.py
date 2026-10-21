@@ -255,19 +255,6 @@ class TestEnumeratorHeadline:
             "2 of 3 enumerators active in the past 7 days"
         )
 
-    def test_uses_the_consent_and_outcome_data_when_saved(self, setting_file):
-        data = self._data(["e1", "e2"], [1, 2])
-        duckdb_save_table(
-            PROJECT_ID,
-            self._data(["e1", "e2", "e3"], [1, 20, 30]),
-            "enumerator_data_with_consent_outcome",
-            "intermediate",
-        )
-
-        assert enumerator_headline(PROJECT_ID, data, setting_file, self.CONFIG) == (
-            "1 of 3 enumerators active in the past 7 days"
-        )
-
     @staticmethod
     def _report_overview(data: pl.DataFrame, setting_file: str, config: dict):
         """Run the Enumerator report; return its overview metrics by label.
@@ -305,18 +292,8 @@ class TestEnumeratorHeadline:
             )
         return metrics
 
-    @pytest.mark.parametrize("with_outcome_data", [False, True])
-    def test_matches_the_enumerator_report_overview(
-        self, setting_file, with_outcome_data
-    ):
+    def test_matches_the_enumerator_report_overview(self, setting_file):
         data = self._data(["e1", "e1", "e2", "e3", "e4"], [1, 20, 2, 30, 3])
-        if with_outcome_data:
-            duckdb_save_table(
-                PROJECT_ID,
-                self._data(["e1", "e2", "e3"], [1, 20, 30]),
-                "enumerator_data_with_consent_outcome",
-                "intermediate",
-            )
 
         headline = enumerator_headline(PROJECT_ID, data, setting_file, self.CONFIG)
         shown = self._report_overview(data, setting_file, self.CONFIG)

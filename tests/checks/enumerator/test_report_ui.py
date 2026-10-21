@@ -23,6 +23,7 @@ from datasure.checks.enumerator.report_ui import (
     _render_time_period_selector,
     _render_weekday_selector,
     _render_weekday_selector_overtime,
+    enumerator_report_data,
 )
 from datasure.models.schemas import ColumnByType
 from datasure.utils.view_state import ViewState
@@ -41,10 +42,6 @@ def patched_enum():
         patch("datasure.checks.enumerator.report_ui.st", mock_st),
         patch(
             "datasure.checks.enumerator.report_ui.load_check_settings", return_value={}
-        ),
-        patch(
-            "datasure.checks.enumerator.report_ui.duckdb_get_table",
-            return_value=pl.DataFrame(),
         ),
         patch("datasure.checks.enumerator.report_ui.demo_callout"),
         patch("datasure.utils.onboarding_utils.is_demo_project", return_value=False),
@@ -87,7 +84,6 @@ def enum_bc():
         report_ui_module.load_check_settings = MagicMock(return_value={})
         report_ui_module.save_check_settings = MagicMock()
         report_ui_module.trigger_save = MagicMock()
-        report_ui_module.duckdb_get_table = MagicMock(return_value=pl.DataFrame())
         report_ui_module.load_missing_codes_from_db = MagicMock(
             return_value=pl.DataFrame()
         )
@@ -586,3 +582,103 @@ def test_render_enumerator_statistics_overtime_table_early_return(
         sample_enumerator_data, "submission_date", None, None, "settings.json"
     )
     enum_bc.st.dataframe.assert_not_called()
+
+
+# ============================================
+# REPORT DATA: consent and outcome flags from the page's saved settings
+# ============================================
+
+
+def _page_settings(tmp_path, name: str, consent_outcome: dict | None = None) -> str:
+    """Write a page settings file with the given consent/outcome settings."""
+    path = tmp_path / f"page_{name}_settings.json"
+    path.write_text(json.dumps({"enumerators": consent_outcome or {}}))
+    return str(path)
+
+
+CONSENT_DATA = pl.DataFrame(
+    {
+        "enumerator": ["E1", "E1", "E2", "E2"],
+        "consent": ["yes", "no", "yes", "yes"],
+        "outcome": ["done", "done", "partial", "done"],
+    }
+)
+CONSENT_YES_DONE = {
+    "consent": "consent",
+    "consent_vals": ["yes"],
+    "outcome": "outcome",
+    "outcome_vals": ["done"],
+}
+
+
+class TestEnumeratorReportData:
+    """The report flags consent and completion from the page's saved settings."""
+
+    def test_flags_consent_and_completion_from_saved_settings(self, tmp_path):
+        settings = _page_settings(tmp_path, "a", CONSENT_YES_DONE)
+
+        report_data = enumerator_report_data(CONSENT_DATA, settings)
+
+        assert report_data["consent_granted_agg_col"].to_list() == [1, 0, 1, 1]
+        assert report_data["completed_survey_agg_col"].to_list() == [1, 1, 0, 1]
+
+    def test_without_consent_or_outcome_settings_adds_no_flags(self, tmp_path):
+        settings = _page_settings(tmp_path, "a")
+
+        report_data = enumerator_report_data(CONSENT_DATA, settings)
+
+        assert report_data.columns == CONSENT_DATA.columns
+
+    def test_column_without_values_adds_no_flag(self, tmp_path):
+        settings = _page_settings(
+            tmp_path, "a", {"consent": "consent", "consent_vals": []}
+        )
+
+        report_data = enumerator_report_data(CONSENT_DATA, settings)
+
+        assert "consent_granted_agg_col" not in report_data.columns
+
+    def test_column_missing_from_the_data_adds_no_flag(self, tmp_path):
+        settings = _page_settings(tmp_path, "a", CONSENT_YES_DONE)
+
+        report_data = enumerator_report_data(CONSENT_DATA.drop("outcome"), settings)
+
+        assert "consent_granted_agg_col" in report_data.columns
+        assert "completed_survey_agg_col" not in report_data.columns
+
+    def test_reflects_settings_changed_since_the_last_report(self, tmp_path):
+        settings = _page_settings(tmp_path, "a", CONSENT_YES_DONE)
+        enumerator_report_data(CONSENT_DATA, settings)
+
+        _page_settings(tmp_path, "a", {**CONSENT_YES_DONE, "consent_vals": ["no"]})
+        report_data = enumerator_report_data(CONSENT_DATA, settings)
+
+        assert report_data["consent_granted_agg_col"].to_list() == [0, 1, 0, 0]
+
+    def test_reflects_refreshed_data(self, tmp_path):
+        settings = _page_settings(tmp_path, "a", CONSENT_YES_DONE)
+        enumerator_report_data(CONSENT_DATA, settings)
+
+        refreshed = pl.concat(
+            [
+                CONSENT_DATA,
+                pl.DataFrame(
+                    {"enumerator": ["E3"], "consent": ["no"], "outcome": ["done"]}
+                ),
+            ]
+        )
+        report_data = enumerator_report_data(refreshed, settings)
+
+        assert report_data["consent_granted_agg_col"].to_list() == [1, 0, 1, 1, 0]
+
+    def test_pages_with_different_settings_report_independently(self, tmp_path):
+        page_a = _page_settings(tmp_path, "a", CONSENT_YES_DONE)
+        page_b = _page_settings(
+            tmp_path, "b", {**CONSENT_YES_DONE, "consent_vals": ["no"]}
+        )
+
+        data_a = enumerator_report_data(CONSENT_DATA, page_a)
+        data_b = enumerator_report_data(CONSENT_DATA, page_b)
+
+        assert data_a["consent_granted_agg_col"].to_list() == [1, 0, 1, 1]
+        assert data_b["consent_granted_agg_col"].to_list() == [0, 1, 0, 0]

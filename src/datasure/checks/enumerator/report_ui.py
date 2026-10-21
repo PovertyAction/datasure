@@ -7,7 +7,10 @@ import polars as pl
 import streamlit as st
 
 from datasure.checks.enumerator.compute import (
+    COMPLETED_FLAG,
+    CONSENT_FLAG,
     DISPLAY_DATE_FORMAT,
+    add_consent_outcome_flags,
     compute_enumerator_overview,
     compute_enumerator_productivity,
     compute_enumerator_statistics,
@@ -21,6 +24,7 @@ from datasure.checks.enumerator.models import (
     TAB_NAME,
     WEEKDAY_NAMES,
     WEEKDAY_OFFSET_MAP,
+    ConsentOutcomeSettings,
     EnumeratorOverviewMetrics,
     EnumeratorSettings,
     StatisticsOvertimeSettings,
@@ -31,7 +35,7 @@ from datasure.checks.enumerator.settings_ui import (
     load_default_enumerator_settings,
 )
 from datasure.utils.dataframe_utils import ColumnByType
-from datasure.utils.duckdb_utils import duckdb_get_table, load_missing_codes_from_db
+from datasure.utils.duckdb_utils import load_missing_codes_from_db
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.settings_utils import load_check_settings
@@ -675,7 +679,7 @@ def _render_enumerator_statistics_table(
     settings = StatisticsSettings()
 
     # Build exclusion list for numeric columns
-    exclude_cols = [enumerator, "consent_granted_agg_col", "completed_survey_agg_col"]
+    exclude_cols = [enumerator, CONSENT_FLAG, COMPLETED_FLAG]
     if team:
         exclude_cols.append(team)
 
@@ -943,7 +947,7 @@ def _render_enumerator_statistics_overtime_table(
     settings = StatisticsOvertimeSettings()
 
     # Build exclusion list for numeric columns
-    exclude_cols = [enumerator, "consent_granted_agg_col", "completed_survey_agg_col"]
+    exclude_cols = [enumerator, CONSENT_FLAG, COMPLETED_FLAG]
     if team:
         exclude_cols.append(team)
 
@@ -1105,7 +1109,7 @@ def enumerator_report(
         - **Enumerator Statistics Over Time**: Time-series chart of a selected statistic.
 
         **Start here**: Open the :material/settings: settings panel above to confirm your column
-        selections and apply consent and outcome settings.
+        selections and set the consent and outcome settings.
         """
     )
 
@@ -1120,7 +1124,6 @@ def enumerator_report(
 
     with reset_filters_beside(check_view(setting_file)):
         enumerator_settings = enumerator_report_settings(
-            project_id,
             setting_file,
             data,
             config_settings,
@@ -1129,7 +1132,7 @@ def enumerator_report(
         )
 
     # get data for enumerator report
-    data_enum_report = _enumerator_data(project_id, data)
+    data_enum_report = enumerator_report_data(data, setting_file)
 
     demo_callout(
         """
@@ -1280,12 +1283,39 @@ def enumerator_status(setting_file: str, config: dict) -> StatusResult:
     return READY
 
 
-def _enumerator_data(project_id: str, data: pl.DataFrame) -> pl.DataFrame:
-    """Return the data the report uses: with consent and outcome, if saved."""
-    with_outcome = duckdb_get_table(
-        project_id, "enumerator_data_with_consent_outcome", "intermediate"
+def enumerator_report_data(data: pl.DataFrame, setting_file: str) -> pl.DataFrame:
+    """Return the data the report uses, with the page's consent and outcome flags.
+
+    The flags come from the consent and outcome settings saved in the page's
+    settings file, so the report reflects them as soon as they change and
+    after every data refresh.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        The page's survey data.
+    setting_file : str
+        Path to the page's settings file.
+
+    Returns
+    -------
+    pl.DataFrame
+        ``data`` with the consent and completed-survey flags that are set up.
+    """
+    settings = ConsentOutcomeSettings(
+        **{
+            key: value
+            for key, value in load_check_settings(setting_file, TAB_NAME).items()
+            if key in ConsentOutcomeSettings.model_fields
+        }
     )
-    return data if with_outcome.is_empty() else with_outcome
+    return add_consent_outcome_flags(
+        data,
+        settings.consent,
+        tuple(settings.consent_vals or ()),
+        settings.outcome,
+        tuple(settings.outcome_vals or ()),
+    )
 
 
 def enumerator_headline(
@@ -1318,11 +1348,10 @@ def enumerator_headline(
     settings = load_default_enumerator_settings(
         setting_file, EnumeratorSettings(**config)
     )
-    report_data = _enumerator_data(project_id, data)
-    if not (settings.enumerator and settings.survey_date) or report_data.is_empty():
+    if not (settings.enumerator and settings.survey_date) or data.is_empty():
         return None
     metrics = compute_enumerator_overview(
-        report_data, settings.survey_date, settings.enumerator, settings.team
+        data, settings.survey_date, settings.enumerator, settings.team
     )
     return (
         f"{metrics.num_active_enumerators:,} of {metrics.num_enumerators:,} "

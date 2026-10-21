@@ -14,6 +14,56 @@ from datasure.checks.enumerator.models import (
 from datasure.utils.duckdb_utils import load_missing_codes_from_db
 
 # =============================================================================
+# Consent and Outcome Flags
+# =============================================================================
+
+CONSENT_FLAG = "consent_granted_agg_col"
+COMPLETED_FLAG = "completed_survey_agg_col"
+
+
+@st.cache_data(ttl=300)
+def add_consent_outcome_flags(
+    data: pl.DataFrame,
+    consent: str | None,
+    consent_vals: tuple | None,
+    outcome: str | None,
+    outcome_vals: tuple | None,
+) -> pl.DataFrame:
+    """Add 0/1 consent and completed-survey flag columns to the data.
+
+    A flag is 1 where the column's value is one of the given values. A flag
+    is added only when its column is in the data and values are given, so
+    the Enumerator Summary leaves out a rate that is not set up.
+
+    Cached on the data and the settings, so a change to either recomputes.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        Survey data.
+    consent, outcome : str | None
+        Consent and outcome columns.
+    consent_vals, outcome_vals : tuple | None
+        Values meaning consent was given and the survey was completed.
+
+    Returns
+    -------
+    pl.DataFrame
+        ``data`` with ``consent_granted_agg_col`` and
+        ``completed_survey_agg_col`` where set up.
+    """
+    flags = [
+        pl.col(column).is_in(list(values)).cast(pl.Int32).alias(flag)
+        for column, values, flag in (
+            (consent, consent_vals, CONSENT_FLAG),
+            (outcome, outcome_vals, COMPLETED_FLAG),
+        )
+        if column and values and column in data.columns
+    ]
+    return data.with_columns(flags) if flags else data
+
+
+# =============================================================================
 # Shared Time-Period Helpers
 # =============================================================================
 
