@@ -92,11 +92,7 @@ def duckdb_save_table(
     alias: str : alias for the data
     db_name: str : name of the DuckDB database
     """
-    db_path = (
-        get_cache_path(project_id, "settings", "logs.duckdb")
-        if db_name == "logs"
-        else get_cache_path(project_id, "data", f"{db_name}.duckdb")
-    )
+    db_path = database_path(project_id, db_name)
 
     # convert alias to table name format and validate
     table_id = _validate_table_name(name_id(alias))
@@ -137,11 +133,7 @@ def duckdb_get_table(
         raise ValueError(
             "Invalid type specified. Use 'pl' for Polars or 'pd' for Pandas."
         )
-    db_path = (
-        get_cache_path(project_id, "settings", "logs.duckdb")
-        if db_name == "logs"
-        else get_cache_path(project_id, "data", f"{db_name}.duckdb")
-    )
+    db_path = database_path(project_id, db_name)
 
     table_id = _validate_table_name(name_id(alias))
 
@@ -179,11 +171,7 @@ def duckdb_remove_table(project_id: str, alias: str, db_name: str) -> None:
     -------
     None
     """
-    db_path = (
-        get_cache_path(project_id, "settings", "logs.duckdb")
-        if db_name == "logs"
-        else get_cache_path(project_id, "data", f"{db_name}.duckdb")
-    )
+    db_path = database_path(project_id, db_name)
     table_id = _validate_table_name(name_id(alias))
     with duckdb.connect(db_path) as conn:
         # Check if the table exists
@@ -241,11 +229,7 @@ def duckdb_delete_rows(
     -------
     None
     """
-    db_path = (
-        get_cache_path(project_id, "settings", "logs.duckdb")
-        if db_name == "logs"
-        else get_cache_path(project_id, "data", f"{db_name}.duckdb")
-    )
+    db_path = database_path(project_id, db_name)
     table_id = _validate_table_name(name_id(alias))
     column_id = _validate_column_name(column)
     with duckdb.connect(db_path) as conn:
@@ -266,7 +250,7 @@ def duckdb_get_aliases(project_id: str, to_load: bool = True) -> list[str]:
     -------
     list[str] : list of aliases (table names)
     """
-    db_path = get_cache_path(project_id, "settings", "logs.duckdb")
+    db_path = database_path(project_id, "logs")
 
     with duckdb.connect(db_path) as conn:
         # create the import_log table if it doesn't exist
@@ -339,11 +323,7 @@ def duckdb_table_exists(project_id: str, alias: str, db_name: str) -> bool:
     -------
     bool : True if table exists, False otherwise
     """
-    db_path = (
-        get_cache_path(project_id, "settings", "logs.duckdb")
-        if db_name == "logs"
-        else get_cache_path(project_id, "data", f"{db_name}.duckdb")
-    )
+    db_path = database_path(project_id, db_name)
 
     table_id = _validate_table_name(name_id(alias))
 

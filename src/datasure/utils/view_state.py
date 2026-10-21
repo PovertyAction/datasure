@@ -367,7 +367,8 @@ def show_session_value(key: str) -> None:
     import streamlit as st
 
     if key in st.session_state:
-        st.session_state[key] = st.session_state[key]
+        value = st.session_state[key]
+        st.session_state[key] = value
 
 
 def view_factory(
