@@ -17,6 +17,9 @@ from datasure.utils.duckdb_utils import load_missing_codes_from_db
 # Shared Time-Period Helpers
 # =============================================================================
 
+# Display format for single dates, e.g. "Jan 01, 2025".
+DISPLAY_DATE_FORMAT = "%b %d, %Y"
+
 _LEGACY_PERIOD_ALIASES = {"Day": "Daily", "Week": "Weekly", "Month": "Monthly"}
 
 
@@ -51,7 +54,7 @@ def _add_time_period_column(
     if period_normalized == "Daily":
         # Format as "Jan 1, 2025"
         return df.with_columns(
-            pl.col(date).dt.strftime("%b %d, %Y").alias("TIME PERIOD")
+            pl.col(date).dt.strftime(DISPLAY_DATE_FORMAT).alias("TIME PERIOD")
         )
 
     if period_normalized == "Weekly":
@@ -86,9 +89,9 @@ def _add_time_period_column(
         # Format as "Jan 1, 2025 to Jan 7, 2025"
         return df.with_columns(
             (
-                pl.col("_week_start").dt.strftime("%b %d, %Y")
+                pl.col("_week_start").dt.strftime(DISPLAY_DATE_FORMAT)
                 + " to "
-                + pl.col("_week_end").dt.strftime("%b %d, %Y")
+                + pl.col("_week_end").dt.strftime(DISPLAY_DATE_FORMAT)
             ).alias("TIME PERIOD")
         )
 
@@ -105,7 +108,11 @@ def _add_time_period_column(
 
 
 def compute_enumerator_overview(
-    data: pl.DataFrame, date: str, enumerator: str, team: str | None
+    data: pl.DataFrame,
+    date: str,
+    enumerator: str,
+    team: str | None,
+    today: dt_date | None = None,
 ) -> EnumeratorOverviewMetrics:
     """Compute enumerator overview metrics.
 
@@ -124,6 +131,9 @@ def compute_enumerator_overview(
         Enumerator column name.
     team : str | None
         Team column name (optional).
+    today : date | None
+        Reference date for the "active in the past 7 days" count. Defaults
+        to the system clock.
 
     Returns
     -------
@@ -145,13 +155,13 @@ def compute_enumerator_overview(
     )
 
     # Calculate active enumerators (past 7 days)
-    from datetime import date as dt_date
-    from datetime import timedelta
+    if today is None:
+        today = dt_date.today()
+    active_date_cut_off = today - timedelta(weeks=1)
 
-    active_date_cut_off = dt_date.today() - timedelta(weeks=1)
-
+    # Cut to the local day, as compute_enumerator_summary does.
     daily_submissions_sum = daily_submissions_sum.with_columns(
-        (pl.col(date).cast(pl.Date) > active_date_cut_off).alias("active")
+        (pl.col(date).dt.date() > active_date_cut_off).alias("active")
     )
 
     num_active_enumerators = (
@@ -347,6 +357,7 @@ def compute_enumerator_summary(
     team: str | None,
     formversion: str | None,
     duration: str | None,
+    today: dt_date | None = None,
 ) -> pl.DataFrame:
     """Compute comprehensive enumerator summary statistics.
 
@@ -378,6 +389,9 @@ def compute_enumerator_summary(
         Outcome column name (optional).
     outcome_vals : list[str] | None
         List of values indicating completed surveys (optional).
+    today : date | None
+        Reference date for the today/this week/this month counts. Defaults
+        to the system clock.
 
     Returns
     -------
@@ -385,8 +399,8 @@ def compute_enumerator_summary(
         Comprehensive summary DataFrame with enumerator statistics.
     """
     group_by_cols = [enumerator, team] if team else [enumerator]
-    # Format date column
-    df = data.with_columns(pl.col(date).dt.strftime("%b %d, %Y").alias(date))
+    # Compare as dates (cut to the local day); format as text only for display.
+    df = data.with_columns(pl.col(date).dt.date())
 
     # Basic summary aggregations
     summary_df = df.group_by(group_by_cols, maintain_order=True).agg(
@@ -399,19 +413,16 @@ def compute_enumerator_summary(
     )
 
     # Calculate time-based submissions
-    today = dt_date.today()
+    if today is None:
+        today = dt_date.today()
     start_of_week = today - timedelta(days=today.weekday())
     start_of_month = today.replace(day=1)
 
-    today_str = today.strftime("%b %d, %Y")
-    week_str = start_of_week.strftime("%b %d, %Y")
-    month_str = start_of_month.strftime("%b %d, %Y")
-
     df = df.with_columns(
         [
-            (pl.col(date) == today_str).alias("submitted_today"),
-            (pl.col(date) >= week_str).alias("submitted_this_week"),
-            (pl.col(date) >= month_str).alias("submitted_this_month"),
+            (pl.col(date) == today).alias("submitted_today"),
+            (pl.col(date) >= start_of_week).alias("submitted_this_week"),
+            (pl.col(date) >= start_of_month).alias("submitted_this_month"),
         ]
     )
 
@@ -493,7 +504,28 @@ def compute_enumerator_summary(
         )
         summary_df = summary_df.join(outcome_df, on=group_by_cols, how="left")
 
-    return summary_df
+    return summary_df.with_columns(
+        pl.col("first submission", "last submission").dt.strftime(DISPLAY_DATE_FORMAT)
+    )
+
+
+def compute_latest_submission_date(data: pl.DataFrame, date: str) -> dt_date | None:
+    """Return the latest submission date, or None if there are no submissions.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        DataFrame containing survey data.
+    date : str
+        Date column name.
+
+    Returns
+    -------
+    date | None
+        Latest submission date, cut to the local day as in
+        compute_enumerator_summary.
+    """
+    return data[date].dt.date().max()
 
 
 # =============================================================================

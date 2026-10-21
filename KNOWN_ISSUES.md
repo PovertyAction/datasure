@@ -16,6 +16,14 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ## Open issues
 
+### KI-028: Enumerator summary shows wrong first and last submission dates and this week/month counts
+
+- **Status:** 🟡 Planned for 1.2.0
+- **Affected versions:** 1.0.0 and later
+- **Symptom:** On the Enumerator tab, when your data covers more than one month, the summary table can show the wrong **first submission** and **last submission** dates, and **# submissions this week** and **# submissions this month** can include submissions from earlier months. For example, 30 Sep can be counted in October's "this month", and an enumerator who started in January can show April as their first submission.
+- **Workaround:** Check first and last submission dates and recent counts in the data itself, for example by filtering the data by enumerator and date. Don't rely on the summary table for these numbers.
+- **Issue:** [#380](https://github.com/PovertyAction/datasure/issues/380)
+
 ### KI-027: Outliers & Constraints and GPS Checks tabs crash with `unable to find column "action"`
 
 - **Status:** 🔴 Open

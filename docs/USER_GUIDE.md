@@ -1236,6 +1236,12 @@ Detailed performance by enumerator:
 - % consent rate
 - % completion rate
 
+Today, this week and this month are counted from your computer's date, not the
+latest submission in the data, and so is "active in the past 7 days" in the
+Enumerator Overview. Weeks start on Monday. If fieldwork has paused or the data
+hasn't been refreshed, these counts can be 0. The note under the table shows
+the latest submission date ("Data as of").
+
 ##### Enumerator Productivity
 
 Visualize productivity over time:
