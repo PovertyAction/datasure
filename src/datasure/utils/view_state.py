@@ -18,7 +18,8 @@ item. Any settings file works, so other pages can keep their own.
 
 View state is personal: it is left out of project configuration exports and
 templates (``without_view_state``). Pagination, search boxes and dialog
-inputs are never bound, so they start fresh.
+inputs are never bound, so they start fresh in a new session; search boxes
+use ``ViewState.keep`` to survive switching checks within a session.
 """
 
 import json
@@ -238,7 +239,8 @@ class ViewState:
         the values that still exist are kept.
 
         Bind only filter, selection and sort widgets. Pagination, search
-        boxes and dialog inputs must start fresh, so never bind them.
+        boxes and dialog inputs must start fresh in a new session, so never
+        bind them; keep search boxes for the session with ``keep``.
 
         Parameters
         ----------
@@ -266,6 +268,7 @@ class ViewState:
         """
         import streamlit as st
 
+        show_session_value(key)
         saved_values = self.values()
         if key not in st.session_state and key in saved_values:
             value = self._restore(key, saved_values[key], options, multi)
@@ -281,6 +284,48 @@ class ViewState:
 
         kwargs = {} if key in st.session_state else dict(initial)
         return {**kwargs, "key": key, "on_change": _save}
+
+    def keep(
+        self,
+        key: str,
+        *,
+        on_change: Callable[..., None] | None = None,
+        args: tuple = (),
+    ) -> dict[str, Any]:
+        """Keep a widget's value for this session only, without saving it.
+
+        For search boxes: the search survives switching to another check and
+        back, but a new session starts with an empty box. The value is kept
+        per page and scope, so another check page does not inherit it.
+        Spread the result into the widget call, like ``bind``.
+
+        Parameters
+        ----------
+        key : str
+            The widget key.
+        on_change : Callable | None
+            The widget's own callback, run after keeping the value.
+        args : tuple
+            Arguments for ``on_change``.
+
+        Returns
+        -------
+        dict
+            ``key`` and ``on_change`` keyword arguments for the widget.
+        """
+        import streamlit as st
+
+        kept = f"_kept__{self.settings_file}__{self.scope}__{key}"
+        if key not in st.session_state and kept in st.session_state:
+            st.session_state[key] = st.session_state[kept]
+        show_session_value(key)
+
+        def _keep() -> None:
+            st.session_state[kept] = st.session_state.get(key)
+            if on_change is not None:
+                on_change(*args)
+
+        return {"key": key, "on_change": _keep}
 
     def _save_widget(self, key: str) -> None:
         import streamlit as st
@@ -308,6 +353,21 @@ class ViewState:
 
         for key in self.reset():
             st.session_state.pop(key, None)
+
+
+def show_session_value(key: str) -> None:
+    """Make a widget display the value session state still holds for it.
+
+    Switching to another check and straight back can interrupt the run that
+    would have cleared the widget's value, so the value survives in session
+    state and still filters the output. The redrawn widget would show its
+    default, because Streamlit only sends a value to the browser when code
+    sets it. Setting it again here, before the widget is drawn, shows it.
+    """
+    import streamlit as st
+
+    if key in st.session_state:
+        st.session_state[key] = st.session_state[key]
 
 
 def view_factory(

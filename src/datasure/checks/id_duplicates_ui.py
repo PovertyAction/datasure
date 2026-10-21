@@ -602,10 +602,10 @@ def render_id_duplicates(view: IdView, settings_file: str) -> None:
     with sc1:
         query = st.text_input(
             "Search by ID or KEY",
-            key=f"iddup_{view.name}_search",
             placeholder="Search by ID or KEY",
-            on_change=_reset_page,
-            args=(page_key,),
+            **check_view(settings_file).keep(
+                f"iddup_{view.name}_search", on_change=_reset_page, args=(page_key,)
+            ),
         )
     with sc2:
         sort_by = st.selectbox(

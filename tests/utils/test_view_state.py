@@ -297,3 +297,117 @@ class TestBind:
         assert "gps_color_by" not in fake_st.session_state
         assert fake_st.session_state["gps_page"] == 3
         assert view.values() == {}
+
+
+def _search_app(show: bool) -> None:
+    import streamlit as st
+
+    from datasure.utils.view_state import show_session_value
+
+    if show:
+        show_session_value("iddup_survey_search")
+    st.text_input("Search by ID or KEY", key="iddup_survey_search")
+
+
+class TestShowSessionValue:
+    """A value left in session state is sent to the browser to display.
+
+    Switching checks quickly can interrupt the run that clears a widget's
+    value; the value still filters the output, so the redrawn widget must
+    show it rather than its empty default.
+    """
+
+    @pytest.mark.parametrize("show", [False, True])
+    def test_the_widget_displays_the_value_in_use(self, show):
+        from streamlit.testing.v1 import AppTest
+
+        at = AppTest.from_function(_search_app, args=(show,)).run()
+        # The value an interrupted run left behind.
+        at.session_state["iddup_survey_search"] = "GJ021"
+        at.run()
+
+        box = at.text_input(key="iddup_survey_search")
+        assert box.value == "GJ021"  # what filters the output
+        displayed = box.proto.value if box.proto.set_value else ""
+        assert (displayed == "GJ021") is show
+
+    def test_a_widget_without_a_value_is_left_alone(self, fake_st):
+        from datasure.utils.view_state import show_session_value
+
+        show_session_value("iddup_survey_search")
+
+        assert "iddup_survey_search" not in fake_st.session_state
+
+
+def _kept_search_app(settings_file: str) -> None:
+    import streamlit as st
+
+    from datasure.utils.view_state import ViewState
+
+    if st.session_state.get("show_duplicates", True):
+        st.text_input(
+            "Search by ID or KEY",
+            **ViewState(settings_file, "duplicates").keep("iddup_survey_search"),
+        )
+
+
+class TestKeep:
+    """A search box keeps its value when you switch checks and come back."""
+
+    def _search(self, settings_file, value):
+        from streamlit.testing.v1 import AppTest
+
+        at = AppTest.from_function(_kept_search_app, args=(str(settings_file),))
+        at.run()
+        at.text_input(key="iddup_survey_search").input(value).run()
+        return at
+
+    def _switch_away_and_back(self, at):
+        at.session_state["show_duplicates"] = False
+        at.run()
+        assert "iddup_survey_search" not in at.session_state  # Streamlit forgot
+        at.session_state["show_duplicates"] = True
+        return at.run()
+
+    def test_the_search_survives_switching_checks(self, settings_file):
+        at = self._switch_away_and_back(self._search(settings_file, "GJ021"))
+
+        box = at.text_input(key="iddup_survey_search")
+        assert box.value == "GJ021"
+        assert box.proto.set_value and box.proto.value == "GJ021"  # displayed
+
+    def test_a_cleared_search_stays_cleared(self, settings_file):
+        at = self._search(settings_file, "GJ021")
+        at.text_input(key="iddup_survey_search").input("").run()
+
+        at = self._switch_away_and_back(at)
+
+        assert at.text_input(key="iddup_survey_search").value == ""
+
+    def test_the_search_is_not_saved_to_disk(self, settings_file):
+        self._search(settings_file, "GJ021")
+
+        assert ViewState(settings_file, "duplicates").values() == {}
+
+    def test_another_check_page_does_not_inherit_it(self, tmp_path, fake_st):
+        first = ViewState(tmp_path / "page_a.json", "duplicates")
+        second = ViewState(tmp_path / "page_b.json", "duplicates")
+        widget = first.keep("iddup_survey_search")
+        fake_st.session_state["iddup_survey_search"] = "GJ021"
+        widget["on_change"]()
+        del fake_st.session_state["iddup_survey_search"]  # switched away
+
+        second.keep("iddup_survey_search")
+
+        assert "iddup_survey_search" not in fake_st.session_state
+
+    def test_the_widgets_own_on_change_still_runs(self, settings_file, fake_st):
+        calls = []
+        widget = ViewState(settings_file, "duplicates").keep(
+            "iddup_survey_search", on_change=calls.append, args=("page",)
+        )
+        fake_st.session_state["iddup_survey_search"] = "GJ021"
+
+        widget["on_change"]()
+
+        assert calls == ["page"]

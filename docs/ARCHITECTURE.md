@@ -238,6 +238,17 @@ On a check page this is the page settings file
   `default`, `value`) goes through `initial`, so it is left out once session
   state holds a value. `bind_widget(view, key, ...)` does the same for
   helpers that may have no view.
+- **Displayed value.** Switching to another check and straight back can
+  interrupt the run that would clear a widget's value, so the value survives
+  in session state and still filters the output, but the redrawn widget
+  shows its default: Streamlit only sends a value to the browser when code
+  sets it. `show_session_value(key)` sets it again before the widget is
+  drawn. `bind` and `keep` call it.
+- **Kept for the session.** `ViewState.keep(key, ...)` keeps a search box's
+  value when the user switches to another check and back, without saving
+  it: a new session starts with an empty box. The value is kept per settings
+  file and scope, so another check page does not inherit it. Used by the
+  duplicates "Search by ID or KEY" box.
 - **Scopes.** A check's scope is its catalogue slug (`VIEW_SCOPE` in each
   check module). "Reset filters" (`reset_filters_button`) calls
   `ViewState.reset_widgets`, which clears only that scope's saved values and
@@ -249,10 +260,11 @@ On a check page this is the page settings file
   page, and Prepare Data (scope: the dataset) beside the "Preview Prepared
   Data" header.
 - **Not saved.** Pagination, search boxes and inputs inside dialogs or
-  popovers are never bound, so they start fresh. Bound today: Summary's
-  "Progress by" column and time period; the Progress time period and extra
-  attempted-interview columns; the Missing Values threshold, date column,
-  group-by and compare columns, all-columns toggle and correlation columns;
+  popovers are never bound, so they start fresh in a new session. Bound
+  today: Summary's "Progress by" column and time period; the Progress time
+  period and extra attempted-interview columns; the Missing Values
+  threshold, date column, group-by and compare columns, all-columns toggle
+  and correlation columns;
   the duplicates dataset switcher, card sort, column selector and extra
   report columns; the outliers table toggles, inspected column and extra
   constraint violation columns; the GPS map colour, filter and category
