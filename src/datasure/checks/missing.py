@@ -159,31 +159,11 @@ def _try_convert_code_to_column_type(
         A tuple of (converted_value, success). If conversion fails,
         returns (None, False).
     """
-    # Handle numeric types
-    if col_dtype in (
-        pl.Int8,
-        pl.Int16,
-        pl.Int32,
-        pl.Int64,
-        pl.UInt8,
-        pl.UInt16,
-        pl.UInt32,
-        pl.UInt64,
-    ):
-        try:
-            # Try to convert to integer
-            converted = int(float(code))  # Handle cases like "-999.0"
-            return converted, True  # noqa: TRY300
-        except (ValueError, TypeError):
-            return None, False
-
-    if col_dtype in (pl.Float32, pl.Float64):
-        try:
-            # Try to convert to float
-            converted = float(code)
-            return converted, True  # noqa: TRY300
-        except (ValueError, TypeError):
-            return None, False
+    # Handle numeric types with the same parser as `mask_missing_codes`, so the
+    # Missing Data tab and the numeric checks always agree on a code
+    if col_dtype.is_numeric():
+        parsed = _codes_as_dtype([str(code)], col_dtype)
+        return (parsed[0], True) if parsed else (None, False)
 
     # Handle string types - always successful
     if col_dtype in (pl.Utf8, pl.Categorical, pl.String):
@@ -298,13 +278,33 @@ def _numeric_missing_codes(missing_codes_df: pl.DataFrame) -> list[str]:
     return codes
 
 
+def _whole_number_code(code: str) -> str | None:
+    """Return `code` as an integer string, or None if it is not a whole number.
+
+    `-999.0` becomes `-999`, so it still matches an integer column. Decimal
+    codes such as `.999` are kept for float columns but cannot occur in an
+    integer one; truncating them to `0` would flag every real zero as missing.
+    """
+    try:
+        return str(int(code))  # exact for large integers
+    except ValueError:
+        pass
+    try:
+        value = float(code)
+    except ValueError:
+        return None
+    return str(int(value)) if value.is_integer() else None
+
+
 def _codes_as_dtype(codes: list[str], dtype: pl.DataType) -> list:
     """Parse the codes straight into `dtype`, so matching keeps its precision.
 
     Going through Float64 would widen a Float32 `-99.9` past the code and round
     large integers together. Codes the type cannot hold, such as `-99.9` in an
-    integer column, are dropped.
+    integer column or `-99` in an unsigned one, are dropped.
     """
+    if dtype.is_integer():
+        codes = [w for c in codes if (w := _whole_number_code(c)) is not None]
     parsed = pl.Series(codes, dtype=pl.String).cast(dtype, strict=False)
     return parsed.drop_nulls().to_list()
 

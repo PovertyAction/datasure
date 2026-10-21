@@ -448,6 +448,63 @@ def test_mask_missing_codes_matches_in_the_column_type():
     assert result.schema == data.schema
 
 
+@pytest.fixture
+def decimal_codes():
+    """Codes from a survey that used `.999`, `-999` and `999` for refusals."""
+    return pl.DataFrame({"label": ["Refused"], "codes": [".999, -99.9, -999.0, 999"]})
+
+
+@pytest.fixture
+def mixed_code_data():
+    """An integer column with real zeros and -99s, and a float column."""
+    return pl.DataFrame(
+        {
+            "children": pl.Series([0, -99, -999, 999, 3], dtype=pl.Int64),
+            "plot_ha": pl.Series([0.999, -99.9, -999.0, 0.0, 1.5], dtype=pl.Float64),
+        }
+    )
+
+
+def test_decimal_codes_do_not_truncate_in_integer_columns(
+    mixed_code_data, decimal_codes
+):
+    """`.999` must not flag a real 0, nor `-99.9` a real -99, in an integer column."""
+    masked = mask_missing_codes(mixed_code_data, ["children"], decimal_codes)
+    paired = _compute_missing_data_paired(
+        mixed_code_data.select("children"), decimal_codes
+    )
+
+    assert masked["children"].to_list() == [0, -99, None, None, 3]
+    assert paired["children"].to_list() == [0, 0, 2, 2, 0]
+
+
+def test_decimal_codes_still_match_float_columns(mixed_code_data, decimal_codes):
+    """Decimal codes stay supported: they match float columns on both tabs."""
+    masked = mask_missing_codes(mixed_code_data, ["plot_ha"], decimal_codes)
+    paired = _compute_missing_data_paired(
+        mixed_code_data.select("plot_ha"), decimal_codes
+    )
+
+    assert masked["plot_ha"].to_list() == [None, None, None, 0.0, 1.5]
+    assert paired["plot_ha"].to_list() == [2, 2, 2, 0, 0]
+
+
+@pytest.mark.parametrize(
+    ("code", "dtype", "expected"),
+    [
+        ("-999.0", pl.Int64, (-999, True)),
+        (".999", pl.Int64, (None, False)),
+        ("-99.9", pl.Int32, (None, False)),
+        ("-99", pl.UInt8, (None, False)),
+        (str(2**53 + 1), pl.Int64, (2**53 + 1, True)),
+        (".999", pl.Float64, (0.999, True)),
+    ],
+)
+def test_try_convert_code_matches_mask_parsing(code, dtype, expected):
+    """The Missing Data tab parses a code exactly as `mask_missing_codes` does."""
+    assert _try_convert_code_to_column_type(code, dtype, "col") == expected
+
+
 def test_mask_missing_codes_leaves_text_columns_alone(land_area_missing_codes):
     """Codes are only masked in numeric columns."""
     data = pl.DataFrame({"name": ["-99", "Ama"]})

@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     keeps the raw codes.
     Back checks are unchanged: they have their own `no_differences_values`
     and `exclude_values` settings
+  - Missing Values and the masked checks now parse codes with the same
+    `_codes_as_dtype`. Before, Missing Values truncated decimal codes on
+    integer columns, so a `.999` code flagged every real `0` as missing and
+    `-99.9` flagged every `-99`. Decimal codes still match float columns, and
+    `-999.0` still matches `-999` in an integer column
 - **Enumerator summary dates** (#380): First and last submission and the
   today, this week and this month counts were wrong when the data spanned
   more than one month
