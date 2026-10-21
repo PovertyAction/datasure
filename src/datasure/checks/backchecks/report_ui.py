@@ -61,23 +61,50 @@ from datasure.checks.backchecks.scope import (
     scope_captions,
 )
 from datasure.checks.backchecks.settings_ui import backchecks_report_settings
-from datasure.utils.dataframe_utils import ColumnByType
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
-from datasure.utils.navigations_utils import demo_callout, show_demo_next_action
-from datasure.utils.reviewer import get_reviewer_name
-from datasure.utils.settings_utils import (
-    load_check_settings,
-    save_check_settings,
-    trigger_save,
+from datasure.utils.dataframe_utils import (
+    ColumnByType,
+    TableState,
+    get_table_state,
+    no_rows_message,
 )
+from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.navigation import READY, CheckStatus, StatusResult
+from datasure.utils.navigations_utils import demo_callout
+from datasure.utils.reviewer import get_reviewer_name
 from datasure.utils.ui_utils import (
     metric_row,
     queue_notice,
     show_queued_notices,
     styled_dataframe,
 )
+from datasure.utils.view_state import (
+    ViewState,
+    bind_widget,
+    reset_filters_beside,
+    view_factory,
+)
 
 logger = logging.getLogger(__name__)
+
+# Saved view state scope: the check's catalogue slug. The productivity period
+# and week start and the staff statistics view are personal view state; older
+# versions saved them in the check's settings and they move on first load.
+VIEW_SCOPE = "backchecks"
+check_view = view_factory(
+    VIEW_SCOPE,
+    legacy=(
+        TAB_NAME,
+        {
+            "time_period_backchecker_productivity_key": (
+                "time_period_backchecker_productivity"
+            ),
+            "week_start_day_backchecker_productivity_key": (
+                "weekstartday_backchecker_productivity"
+            ),
+            "enum_bcer_stats_view_key": "enum_bcer_stats_view",
+        },
+    ),
+)
 
 # ==============================================================================
 # COLUMN CONFIGURATION FUNCTIONS
@@ -759,6 +786,30 @@ def overall_error_rate_percent(
     return rates[0].error_rate if rates else None
 
 
+def backchecks_headline(
+    project_id: str,
+    page_name_id: str,
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+) -> str | None:
+    """Return the backchecks headline for the Summary health grid.
+
+    The check's total error rate, from `overall_error_rate_percent`, which
+    takes the same parameters.
+
+    Returns
+    -------
+    str | None
+        For example "4.25% error rate", or None when no values were compared.
+    """
+    rate = overall_error_rate_percent(
+        project_id, page_name_id, survey_data, backcheck_data, setting_file, config
+    )
+    return None if rate is None else f"{rate:.2f}% error rate"
+
+
 def _render_overall_error_rates(backcheck_analysis: pl.DataFrame) -> None:
     """Render one card per error rate, total then by category.
 
@@ -953,27 +1004,18 @@ def _render_time_period_selector_backchecks(
         "Month": ":material/calendar_month: Monthly",
     }
 
-    saved_settings = load_check_settings(settings_file, TAB_NAME) or {}
-    default_time_period = saved_settings.get(
-        "time_period_backchecker_productivity", "Day"
-    )
-
     with st.container(horizontal_alignment="left"):
         time_period = st.pills(
             label="Time Period",
             options=options_map.keys(),
             format_func=lambda x: options_map[x],
-            key="time_period_backchecker_productivity_key",
-            default=default_time_period,
             help="Select time period for aggregating backchecker productivity",
             selection_mode="single",
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_time_period_backchecker"},
-        )
-        save_check_settings(
-            settings_file,
-            TAB_NAME,
-            {"time_period_backchecker_productivity": time_period},
+            **check_view(settings_file).bind(
+                "time_period_backchecker_productivity_key",
+                options=list(options_map),
+                default="Day",
+            ),
         )
 
     return time_period or "Day"
@@ -997,28 +1039,18 @@ def _render_weekday_selector_backchecks(
     str
         Weekday offset code (e.g., "SUN", "MON") for calculations.
     """
-    saved_settings = load_check_settings(settings_file, TAB_NAME) or {}
-    default_weekstartday_sel = saved_settings.get(
-        "weekstartday_backchecker_productivity", "Monday"
-    )
-    default_weekstartday_sel_index = WEEKDAY_NAMES.index(default_weekstartday_sel)
-
     cl1, _ = st.columns([1, 3])
     with cl1:
         weekstartday_sel = st.selectbox(
             label="Select the first day of the week",
             options=WEEKDAY_NAMES,
-            index=default_weekstartday_sel_index,
-            key="week_start_day_backchecker_productivity_key",
             help="Select the first day of the week",
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_weekstartday_backchecker"},
+            **check_view(settings_file).bind(
+                "week_start_day_backchecker_productivity_key",
+                options=WEEKDAY_NAMES,
+                index=WEEKDAY_NAMES.index("Monday"),
+            ),
         )
-    save_check_settings(
-        settings_file,
-        TAB_NAME,
-        {"weekstartday_backchecker_productivity": weekstartday_sel},
-    )
 
     return WEEKDAY_OFFSET_MAP[weekstartday_sel]
 
@@ -1137,21 +1169,14 @@ def _render_enum_bcer_stats_table(
     options = ["Enumerator", "Backchecker"]
 
     # Pills selector
-    saved_settings = load_check_settings(settings_file, TAB_NAME) or {}
-    default_view = saved_settings.get("enum_bcer_stats_view", options[0])
-
     view_selection = st.pills(
         label="View Statistics",
         options=options,
-        default=default_view,
-        key="enum_bcer_stats_view_key",
         help="Select which statistics to view",
         selection_mode="single",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_enum_bcer_stats_view"},
-    )
-    save_check_settings(
-        settings_file, TAB_NAME, {"enum_bcer_stats_view": view_selection}
+        **check_view(settings_file).bind(
+            "enum_bcer_stats_view_key", options=options, default=options[0]
+        ),
     )
 
     # Compute and display statistics
@@ -1388,8 +1413,11 @@ def _render_additional_columns_selector(
     survey_key: str,
     survey_id: str,
     backcheck_analysis: pl.DataFrame,
+    view: ViewState | None = None,
 ) -> tuple[list[str], list[str]]:
     """Render additional columns selector UI.
+
+    The columns chosen are saved to ``view``.
 
     Parameters
     ----------
@@ -1424,6 +1452,12 @@ def _render_additional_columns_selector(
                 "Additional Survey Columns",
                 options=survey_additional_cols,
                 help="Select additional columns from survey data to display",
+                **bind_widget(
+                    view,
+                    "bc_survey_extra_cols",
+                    options=survey_additional_cols,
+                    multi=True,
+                ),
             )
 
         with col2:
@@ -1431,6 +1465,12 @@ def _render_additional_columns_selector(
                 "Additional Backcheck Columns",
                 options=backcheck_additional_cols,
                 help="Select additional columns from backcheck data to display",
+                **bind_widget(
+                    view,
+                    "bc_backcheck_extra_cols",
+                    options=backcheck_additional_cols,
+                    multi=True,
+                ),
             )
 
     return survey_extra_cols, backcheck_extra_cols
@@ -1743,6 +1783,7 @@ def _render_comparison_results_section(
     backcheck_analysis: pl.DataFrame,
     backcheck_settings: BackcheckSettings,
     review: "AttributionContext | None",
+    view: ViewState | None = None,
 ) -> None:
     """Render Comparison Results Details as a fragment.
 
@@ -1751,7 +1792,12 @@ def _render_comparison_results_section(
     so the rates elsewhere on the page are refreshed.
     """
     _render_backcheck_comparison_results(
-        survey_data, backcheck_data, backcheck_analysis, backcheck_settings, review
+        survey_data,
+        backcheck_data,
+        backcheck_analysis,
+        backcheck_settings,
+        review,
+        view=view,
     )
 
 
@@ -1761,8 +1807,12 @@ def _render_backcheck_comparison_results(
     backcheck_analysis: pl.DataFrame,
     backcheck_settings: BackcheckSettings,
     review: "AttributionContext | None" = None,
+    *,
+    view: ViewState | None = None,
 ) -> None:
     """Render detailed backcheck comparison results with filtering options.
+
+    The column, extra column and match status filters are saved to ``view``.
 
     Displays a table showing each individual comparison with options to filter
     by match status, select specific columns, and add additional data columns.
@@ -1804,20 +1854,29 @@ def _render_backcheck_comparison_results(
     # Render filter controls
     selected_columns = st.multiselect(
         "Filter by Columns",
-        options=available_columns,
-        default=available_columns,
+        available_columns,
         help="Select which columns to show comparison results for",
+        **bind_widget(
+            view,
+            "bc_filter_columns",
+            options=available_columns,
+            multi=True,
+            default=available_columns,
+        ),
     )
 
     survey_extra_cols, backcheck_extra_cols = _render_additional_columns_selector(
-        survey_data, backcheck_data, survey_key, survey_id, backcheck_analysis
+        survey_data, backcheck_data, survey_key, survey_id, backcheck_analysis, view
     )
 
+    match_options = ["All Results", "Mismatches Only"]
     match_filter = st.pills(
         "Filter by Match Status",
-        options=["All Results", "Mismatches Only"],
-        default="All Results",
+        options=match_options,
         selection_mode="single",
+        **bind_widget(
+            view, "bc_match_filter", options=match_options, default="All Results"
+        ),
     )
 
     # Apply filters and add extra columns
@@ -2111,12 +2170,12 @@ def _render_comparison_scope(scope: ComparisonScope) -> None:
         if records.error:
             st.error(
                 f"The {records.label} Records to Include filter on the "
-                f"Duplicates tab could not be applied, so no {records.label} "
+                f"Duplicates check could not be applied, so no {records.label} "
                 f"records are compared: {records.error}"
             )
     lines = scope_captions(scope)
     if lines:
-        hint = "Change Records to Include in the Duplicates tab settings."
+        hint = "Change Records to Include in the Duplicates check settings."
         # Two trailing spaces make a Markdown line break.
         st.caption("  \n".join([*lines, hint]))
 
@@ -2128,6 +2187,34 @@ def _render_id_problem_warning(
     warning = id_problem_warning(id_problem_counts(scope, survey_data, survey_id))
     if warning:
         st.warning(warning, icon=":material/content_copy:")
+
+
+def backchecks_settings_section(
+    project_id: str,
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+    survey_columns: ColumnByType,
+    backcheck_columns: ColumnByType,
+) -> BackcheckSettings:
+    """Draw the check's settings panel and return the settings.
+
+    The report starts with it; the check page also shows it alone under the
+    empty state when the backcheck data has no rows, so it stays reachable.
+    """
+    with reset_filters_beside(check_view(setting_file)):
+        return backchecks_report_settings(
+            project_id,
+            setting_file,
+            survey_data,
+            backcheck_data,
+            settings_from_page_config(config),
+            survey_columns.categorical_columns,
+            survey_columns.datetime_columns,
+            backcheck_columns.categorical_columns,
+            backcheck_columns.datetime_columns,
+        )
 
 
 def backchecks_report(
@@ -2163,7 +2250,7 @@ def backchecks_report(
 
     demo_callout(
         """
-        This tab compares original survey responses against back check responses to
+        This check compares original survey responses against back check responses to
         identify discrepancies.
 
         It has five sections:
@@ -2181,25 +2268,14 @@ def backchecks_report(
         """
     )
 
-    # Get column information for settings UI
-    survey_categorical_columns = survey_columns.categorical_columns
-    survey_datetime_columns = survey_columns.datetime_columns
-
-    backcheck_categorical_columns = backcheck_columns.categorical_columns
-    backcheck_datetime_columns = backcheck_columns.datetime_columns
-
-    # Configure settings
-    config_settings = settings_from_page_config(config)
-    backcheck_settings = backchecks_report_settings(
+    backcheck_settings = backchecks_settings_section(
         project_id,
-        setting_file,
         survey_data,
         backcheck_data,
-        config_settings,
-        survey_categorical_columns,
-        survey_datetime_columns,
-        backcheck_categorical_columns,
-        backcheck_datetime_columns,
+        setting_file,
+        config,
+        survey_columns,
+        backcheck_columns,
     )
 
     # The comparison and coverage use the records the Duplicates tab's
@@ -2239,7 +2315,9 @@ def backchecks_report(
     )
 
     common_columns = list(
-        set(survey_categorical_columns).intersection(set(backcheck_categorical_columns))
+        set(survey_columns.categorical_columns).intersection(
+            set(backcheck_columns.categorical_columns)
+        )
     )
     _render_backchecks_column_actions(
         project_id, page_name_id, all_survey_data, backcheck_data, common_columns
@@ -2350,18 +2428,49 @@ def backchecks_report(
         _backcheck_analysis,
         backcheck_settings,
         review,
+        check_view(setting_file),
     )
     _render_attribution_log(review.log)
 
     st.write("---")
     demo_callout(
-        "You have now explored all the data quality check tabs — Summary, Descriptive Statistics, "
-        "Progress Tracking, Missing Values, Duplicates, Outliers & Constraints, GPS Checks, "
-        "Enumerator Statistics, and Backcheck Analysis.\n\n"
-        "The next step is the **Correct Data** page, where you will learn how to apply targeted "
-        "corrections to your survey data based on the quality findings from these checks.\n\n"
-        "To get there, click **Correct Data** in the sidebar or use the **Proceed to Correct Data** "
-        "button below.",
-        type="success",
+        "**Next**: :material/arrow_upward: Scroll up and select "
+        "**Exploration → Descriptive Stats**."
     )
-    show_demo_next_action(5, "st_corr_page", "Proceed to Correct Data")
+
+
+def backchecks_status(
+    backcheck_data_name: str | None, backcheck_data: pl.DataFrame | None
+) -> StatusResult:
+    """Return the backchecks check's status for the check page navigation.
+
+    Parameters
+    ----------
+    backcheck_data_name : str | None
+        The page's backcheck dataset, if one is selected.
+    backcheck_data : pl.DataFrame | None
+        The backcheck data as loaded, or None.
+    """
+    if not backcheck_data_name:
+        return StatusResult(
+            CheckStatus.NOT_SET_UP,
+            "No backcheck dataset is selected for this page. Choose one on the "
+            "Configure Checks page.",
+        )
+    state = (
+        TableState.MISSING
+        if backcheck_data is None
+        else get_table_state(backcheck_data)
+    )
+    if state is TableState.MISSING:
+        return StatusResult(
+            CheckStatus.NOT_SET_UP,
+            f"No data found for **{backcheck_data_name}**. Import it on the "
+            "Import Data page.",
+        )
+    if state is TableState.NO_ROWS:
+        return StatusResult(
+            CheckStatus.NOT_APPLICABLE,
+            no_rows_message(backcheck_data_name, "analyze"),
+        )
+    return READY

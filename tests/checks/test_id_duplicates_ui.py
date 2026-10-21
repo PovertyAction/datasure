@@ -25,12 +25,14 @@ def _cards_app(data, settings_file, survey_data=None, date_col="date"):
     render_id_duplicates(view, settings_file)
 
 
-def _switcher_app(survey_count, backcheck_count):
+def _switcher_app(survey_count, backcheck_count, settings_file=None):
     import streamlit as st
 
     from datasure.checks.id_duplicates_ui import render_dataset_switcher
 
-    st.session_state["chosen"] = render_dataset_switcher(survey_count, backcheck_count)
+    st.session_state["chosen"] = render_dataset_switcher(
+        survey_count, backcheck_count, settings_file
+    )
 
 
 @pytest.fixture
@@ -136,6 +138,20 @@ def test_search_resets_to_the_first_page(settings_file):
     assert len(at.dataframe) == 10
 
 
+def test_sort_is_restored_in_a_new_session_but_search_and_page_are_not(
+    survey, settings_file
+):
+    at = _run(survey, settings_file)
+    at.selectbox(key="iddup_survey_sort").set_value("Latest date").run()
+    at.text_input(key="iddup_survey_search").input("k3").run()
+
+    new_session = _run(survey, settings_file)
+
+    assert new_session.selectbox(key="iddup_survey_sort").value == "Latest date"
+    assert new_session.text_input(key="iddup_survey_search").value == ""
+    assert len(new_session.dataframe) == 2
+
+
 def test_without_date_column_sort_by_group_size_only(survey, settings_file):
     at = _run(survey.drop("date"), settings_file, date_col=None)
 
@@ -211,6 +227,16 @@ def test_switcher_chooses_backcheck_data():
     at.button_group[0].set_value("Backcheck data").run()
 
     assert at.session_state["chosen"] == "Backcheck data"
+
+
+def test_switcher_choice_is_restored_in_a_new_session(settings_file):
+    at = AppTest.from_function(_switcher_app, args=(3, 0, settings_file)).run()
+    at.button_group[0].set_value("Backcheck data").run()
+
+    new_session = AppTest.from_function(_switcher_app, args=(3, 0, settings_file)).run()
+
+    assert not new_session.exception
+    assert new_session.session_state["chosen"] == "Backcheck data"
 
 
 def test_switcher_without_backcheck_shows_na_and_keeps_survey_data():

@@ -201,9 +201,6 @@ def patched_missing():
         ),
         patch("datasure.checks.missing.add_missing_code"),
         patch("datasure.checks.missing.duckdb_save_table"),
-        patch("datasure.checks.missing.load_check_settings", return_value={}),
-        patch("datasure.checks.missing.save_check_settings"),
-        patch("datasure.checks.missing.trigger_save"),
         patch("datasure.checks.missing.demo_callout"),
         patch("datasure.utils.onboarding_utils.is_demo_project", return_value=False),
     ):

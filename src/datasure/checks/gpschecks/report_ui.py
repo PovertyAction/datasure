@@ -25,6 +25,8 @@ from datasure.checks.gpschecks.compute import (
     _save_gps_column_settings,
     detect_outliers_with_clusters,
     detect_outliers_with_lof,
+    find_gps_columns,
+    has_usable_gps_config,
 )
 from datasure.checks.gpschecks.models import MAPBOX_STYLE
 from datasure.checks.gpschecks.review import (
@@ -57,18 +59,37 @@ from datasure.models.schemas import GPSColumnConfig, GPSSettings
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.utils.correction_form import apply_correction_entries, get_current_value
 from datasure.utils.dataframe_utils import ColumnByType, get_df_columns
+from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import is_demo_project
+from datasure.utils.settings_utils import page_settings_file
 from datasure.utils.ui_utils import (
     queue_notice,
     row_styler,
+    section_header,
     show_queued_notices,
     styled_dataframe,
+)
+from datasure.utils.view_state import (
+    ViewState,
+    bind_widget,
+    reset_filters_beside,
+    view_factory,
 )
 
 # =============================================================================
 # GPS Column Configuration Functions
 # =============================================================================
+
+
+# Saved view state scope: the check's catalogue slug.
+VIEW_SCOPE = "gps"
+check_view = view_factory(VIEW_SCOPE)
+
+
+def _page_view(project_id: str, page_name_id: str) -> ViewState:
+    """Return the GPS check's saved view state on a check page."""
+    return check_view(page_settings_file(project_id, page_name_id))
 
 
 def _render_gps_column_actions(
@@ -407,7 +428,9 @@ def _delete_gps_column(
 # =============================================================================
 
 
-def _apply_category_filter(data: pl.DataFrame, filter_by: str | None) -> pl.DataFrame:
+def _apply_category_filter(
+    data: pl.DataFrame, filter_by: str | None, view: ViewState | None = None
+) -> pl.DataFrame:
     """Apply category-based filtering with a multiselect UI.
 
     Parameters
@@ -416,6 +439,9 @@ def _apply_category_filter(data: pl.DataFrame, filter_by: str | None) -> pl.Data
         Data to filter.
     filter_by : str | None
         Column name to filter by, or None to skip filtering.
+    view : ViewState | None
+        Where the chosen values are saved; values no longer in the data are
+        dropped.
 
     Returns
     -------
@@ -429,8 +455,14 @@ def _apply_category_filter(data: pl.DataFrame, filter_by: str | None) -> pl.Data
     filter_values = st.multiselect(
         label=f"Select {filter_by} values to display",
         options=unique_values,
-        default=unique_values,
         help=f"Choose which {filter_by} values to show on the map.",
+        **bind_widget(
+            view,
+            f"gps_filter_values_{filter_by}",
+            options=unique_values,
+            multi=True,
+            default=unique_values,
+        ),
     )
 
     if filter_values:
@@ -533,14 +565,13 @@ def _load_and_parse_gps_data(
 
     aliases = gps_settings["alias"].to_list()
 
-    selectbox_kwargs = {
-        "label": "Select GPS Configuration",
-        "options": aliases,
-    }
-    if alias_select_key:
-        selectbox_kwargs["key"] = alias_select_key
-
-    selected_alias = st.selectbox(**selectbox_kwargs)
+    selected_alias = st.selectbox(
+        "Select GPS Configuration",
+        aliases,
+        **_page_view(project_id, page_name_id).bind(
+            alias_select_key or "gps_config", options=aliases
+        ),
+    )
 
     if not selected_alias:
         return gps_settings, None, None
@@ -636,6 +667,7 @@ def _run_cluster_detection(
     df_pd,
     string_columns: list[str],
     go3_column,
+    view: ViewState | None = None,
 ) -> tuple[object | None, str | None]:
     """Render cluster detection UI controls and run detection.
 
@@ -647,6 +679,8 @@ def _run_cluster_detection(
         Available categorical columns for clustering.
     go3_column
         Streamlit column context for the clustering column selector.
+    view : ViewState | None
+        Where the clustering column choice is saved, if anywhere.
 
     Returns
     -------
@@ -657,8 +691,8 @@ def _run_cluster_detection(
         clustering_col = st.selectbox(
             label="Clustering Column",
             options=[None] + string_columns,
-            key="outlier_clustering_col",
             help="Select a column to group GPS coordinates for outlier detection.",
+            **bind_widget(view, "outlier_clustering_col", options=string_columns),
         )
 
     if not clustering_col:
@@ -735,6 +769,8 @@ def _render_outliers_data_table(
     detection_method: str,
     clustering_col: str | None,
     review: GPSReview | None = None,
+    *,
+    view: ViewState | None = None,
 ) -> None:
     """Render the outliers data table with download button.
 
@@ -757,13 +793,15 @@ def _render_outliers_data_table(
     review : GPSReview | None
         If given, accepted outliers are hidden (unless "Show reviewed" is
         on) and each row has a Review button that opens the correction form.
+    view : ViewState | None
+        Where the "Show reviewed" toggle is saved.
     """
     with st.expander("View Outliers Data", expanded=review is not None):
         show_reviewed = review is not None and st.toggle(
             "Show reviewed",
-            key=f"gps_show_reviewed_{selected_alias}",
             help="Also show outliers accepted as valid, highlighted green, "
             "with the reason.",
+            **bind_widget(view, f"gps_show_reviewed_{selected_alias}"),
         )
         outliers_only = outliers_table(
             outlier_df, marked=review is not None, show_reviewed=show_reviewed
@@ -1184,7 +1222,7 @@ def _render_gps_coordinates(
     team : str | None
         Team column name.
     """
-    st.subheader("GPS Coordinates Visualization")
+    section_header("GPS Coordinates Visualization")
 
     gp1, gp2, gp3 = st.columns([0.4, 0.3, 0.3])
 
@@ -1201,12 +1239,14 @@ def _render_gps_coordinates(
     categorical_cols = df_columns.categorical_columns
 
     # UI controls
+    view = _page_view(project_id, page_name_id)
     with gp2:
         color_by = st.selectbox(
             label="Color Points By",
             options=categorical_cols,
             index=None,
             help="Select a categorical column to color the GPS points.",
+            **view.bind("gps_color_by", options=categorical_cols),
         )
 
     with gp3:
@@ -1215,10 +1255,11 @@ def _render_gps_coordinates(
             options=categorical_cols,
             index=None,
             help="Select a categorical column to filter the GPS points.",
+            **view.bind("gps_filter_by", options=categorical_cols),
         )
 
     # Apply filter if selected
-    filtered_data = _apply_category_filter(parsed_data, filter_by)
+    filtered_data = _apply_category_filter(parsed_data, filter_by, view)
 
     if filtered_data is None or filtered_data.is_empty():
         st.warning("No data matches the selected filters.")
@@ -1280,7 +1321,7 @@ def _render_gps_outliers_checks(
     survey_id : str | None
         Survey ID column name, recorded with each correction.
     """
-    st.subheader("GPS Outliers Detection")
+    section_header("GPS Outliers Detection")
 
     go1, go2, go3 = st.columns([0.4, 0.3, 0.3])
 
@@ -1297,12 +1338,14 @@ def _render_gps_outliers_checks(
     df_columns: ColumnByType = get_df_columns(parsed_data)
     string_columns = df_columns.categorical_columns
 
+    view = _page_view(project_id, page_name_id)
+    methods = [item.value for item in GPSOutlierMethod]
     with go2:
         detection_method = st.selectbox(
             label="Detection Method",
-            options=[item.value for item in GPSOutlierMethod],
-            key="outlier_detection_method",
+            options=methods,
             help="Choose how to detect outliers: automatic or based on a grouping column.",
+            **view.bind("outlier_detection_method", options=methods),
         )
 
     # Run selected detection method
@@ -1310,7 +1353,9 @@ def _render_gps_outliers_checks(
     if detection_method == GPSOutlierMethod.auto_lof.value:
         outlier_df = _run_lof_detection(df_pd, len(df_pd), go3)
     else:
-        outlier_df, clustering_col = _run_cluster_detection(df_pd, string_columns, go3)
+        outlier_df, clustering_col = _run_cluster_detection(
+            df_pd, string_columns, go3, view
+        )
 
     if outlier_df is None:
         return
@@ -1353,7 +1398,7 @@ def _render_gps_outliers_checks(
         st.metric("Outlier Percentage", f"{outlier_pct:.2f}%")
 
     # Display map with outliers
-    st.subheader("Outliers Map")
+    section_header("Outliers Map")
     plot_clusters_on_map(
         outlier_df,
         "latitude",
@@ -1375,6 +1420,7 @@ def _render_gps_outliers_checks(
         detection_method,
         clustering_col,
         review,
+        view=view,
     )
 
 
@@ -1414,8 +1460,12 @@ def _load_comparison_aliases(
 
 def _render_comparison_selectors(
     aliases: list[str],
+    view: ViewState | None = None,
 ) -> tuple[str, str, int] | None:
     """Render GPS comparison selection UI widgets.
+
+    The two configurations chosen and the distance threshold are saved to
+    `view`.
 
     Returns
     -------
@@ -1428,8 +1478,8 @@ def _render_comparison_selectors(
         gps_config_1 = st.selectbox(
             label="First GPS Configuration",
             options=aliases,
-            key="comparison_gps_config_1",
             help="Select the first GPS configuration to compare.",
+            **bind_widget(view, "comparison_gps_config_1", options=aliases),
         )
 
     with gc2:
@@ -1437,8 +1487,8 @@ def _render_comparison_selectors(
         gps_config_2 = st.selectbox(
             label="Second GPS Configuration",
             options=remaining_aliases,
-            key="comparison_gps_config_2",
             help="Select the second GPS configuration to compare.",
+            **bind_widget(view, "comparison_gps_config_2", options=remaining_aliases),
         )
 
     if not gps_config_1 or not gps_config_2:
@@ -1449,11 +1499,10 @@ def _render_comparison_selectors(
             label="Distance Threshold (meters)",
             min_value=1,
             max_value=100000,
-            value=100,
             step=10,
-            key="comparison_distance_threshold",
             help="Flag GPS points where the distance between the two configurations "
             "exceeds this threshold.",
+            **bind_widget(view, "comparison_distance_threshold", value=100),
         )
 
     return gps_config_1, gps_config_2, distance_threshold
@@ -1572,7 +1621,7 @@ def _render_comparison_map(
     enumerator: str | None,
 ) -> None:
     """Render the comparison scatterplot map."""
-    st.subheader("Comparison Map")
+    section_header("Comparison Map")
 
     map_df = comparison_df.copy()
     map_df["lat"] = map_df["lat_1"]
@@ -1664,7 +1713,7 @@ def _render_gps_comparison_checks(
     enumerator : str | None
         Enumerator column name.
     """
-    st.subheader("GPS Coordinates Comparison")
+    section_header("GPS Coordinates Comparison")
     st.caption(
         "Compare GPS coordinates from two different sources and flag discrepancies "
         "that exceed a specified distance threshold."
@@ -1674,7 +1723,9 @@ def _render_gps_comparison_checks(
     if aliases is None:
         return
 
-    selections = _render_comparison_selectors(aliases)
+    selections = _render_comparison_selectors(
+        aliases, _page_view(project_id, page_name_id)
+    )
     if selections is None:
         return
 
@@ -1832,6 +1883,56 @@ def plot_clusters_on_map(
     _render_scatterplot_map(df, tooltip_fields, fill_color="color", zoom=7)
 
 
+def gpschecks_settings_section(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+    survey_columns: ColumnByType,
+) -> GPSSettings:
+    """Draw the settings panel and the GPS column configuration.
+
+    The report starts with them; the check page also shows them alone under
+    the empty state when no column looks like GPS data, so GPS columns with
+    other names can still be configured.
+
+    Returns
+    -------
+    GPSSettings
+        The settings chosen in the panel.
+    """
+    with reset_filters_beside(check_view(setting_file)):
+        gps_settings = gpschecks_report_settings(
+            setting_file,
+            GPSSettings(**config),
+            survey_columns.categorical_columns,
+            survey_columns.datetime_columns,
+        )
+
+    section_header("GPS Columns Configuration")
+
+    if is_demo_project():
+        demo_callout(
+            "Click **Add GPS Column Configuration** to tell DataSure which columns "
+            "contain your GPS data. In the dialog that opens:\n\n"
+            "1. Under **GPS Data Format**, select **Separate Columns**.\n"
+            "2. Set **Latitude Column** to **household_latitude**.\n"
+            "3. Set **Longitude Column** to **household_longitude**.\n"
+            "4. Set **Accuracy Column** to **household_gps_accuracy**.\n"
+            "5. Enter a short **Configuration Alias** such as **household_gps**.\n"
+            "6. Click **Add GPS Configuration** to save.\n\n"
+            "If your GPS data is stored as a single delimited column "
+            "(e.g., '-1.20 36.77 0.0 15.8'), choose **Single Column** instead and "
+            "select the delimiter and column."
+        )
+
+    all_columns = list(data.columns)
+    _render_gps_column_actions(project_id, page_name_id, all_columns)
+
+    return gps_settings
+
+
 def gpschecks_report(
     project_id: str,
     page_name_id: str,
@@ -1869,7 +1970,7 @@ def gpschecks_report(
 
     if is_demo_project():
         demo_callout(
-            "This tab visualises your GPS data and checks coordinate quality. "
+            "This check visualises your GPS data and checks coordinate quality. "
             "It has three sections:\n\n"
             "- **GPS Coordinates Visualization**: Plot all survey GPS points on an "
             "interactive map, colour-coded by enumerator, team, or any categorical column.\n"
@@ -1882,9 +1983,6 @@ def gpschecks_report(
             "your GPS columns below."
         )
 
-    categorical_columns = survey_columns.categorical_columns
-    datetime_columns = survey_columns.datetime_columns
-
     if data.is_empty():
         st.info(
             "No data available for the gps checks report. "
@@ -1893,33 +1991,9 @@ def gpschecks_report(
         return
 
     config_settings = GPSSettings(**config)
-
-    _gpschecks_settings = gpschecks_report_settings(
-        setting_file,
-        config_settings,
-        categorical_columns,
-        datetime_columns,
+    _gpschecks_settings = gpschecks_settings_section(
+        project_id, page_name_id, data, setting_file, config, survey_columns
     )
-
-    st.subheader("GPS Columns Configuration")
-
-    if is_demo_project():
-        demo_callout(
-            "Click **Add GPS Column Configuration** to tell DataSure which columns "
-            "contain your GPS data. In the dialog that opens:\n\n"
-            "1. Under **GPS Data Format**, select **Separate Columns**.\n"
-            "2. Set **Latitude Column** to **household_latitude**.\n"
-            "3. Set **Longitude Column** to **household_longitude**.\n"
-            "4. Set **Accuracy Column** to **household_gps_accuracy**.\n"
-            "5. Enter a short **Configuration Alias** such as **household_gps**.\n"
-            "6. Click **Add GPS Configuration** to save.\n\n"
-            "If your GPS data is stored as a single delimited column "
-            "(e.g., '-1.20 36.77 0.0 15.8'), choose **Single Column** instead and "
-            "select the delimiter and column."
-        )
-
-    all_columns = list(data.columns)
-    _render_gps_column_actions(project_id, page_name_id, all_columns)
 
     st.write("---")
 
@@ -2017,5 +2091,31 @@ def gpschecks_report(
     )
 
     demo_callout(
-        "**Next**: :material/arrow_upward: Scroll up and select the **Enumerator Statistics** tab."
+        "**Next**: :material/arrow_upward: Scroll up and select **Field team → Enumerator Stats**."
+    )
+
+
+def gpschecks_status(
+    project_id: str, page_name_id: str, data: pl.DataFrame
+) -> StatusResult:
+    """Return the GPS check's status for the check page navigation.
+
+    Ready when a saved GPS column configuration uses columns in the data,
+    whatever they are named. Otherwise not applicable when no column looks
+    like GPS data (``find_gps_columns``), and not set up until a GPS column
+    configuration that fits the data is added. The settings stay reachable in
+    every state.
+    """
+    gps_config = _get_gps_column_settings(project_id, page_name_id)
+    if has_usable_gps_config(gps_config, data.columns):
+        return READY
+    if not find_gps_columns(data):
+        return StatusResult(
+            CheckStatus.NOT_APPLICABLE, "No GPS column found in this dataset."
+        )
+    if gps_config.is_empty():
+        return StatusResult(CheckStatus.NOT_SET_UP, "No GPS columns are set up yet.")
+    return StatusResult(
+        CheckStatus.NOT_SET_UP,
+        "The saved GPS configuration uses columns that are not in this dataset.",
     )

@@ -17,7 +17,6 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 
 import polars as pl
 from pydantic import ValidationError
@@ -34,21 +33,19 @@ from datasure.processing.corrections import CorrectionProcessor
 from datasure.processing.prep import prep_apply_action
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table, name_id
 from datasure.utils.reapply_utils import ReapplyFailure, warn_reapply_failures
 from datasure.utils.secure_credentials import list_stored_credentials
+from datasure.utils.view_state import (
+    VIEW_STATE_KEY,
+    read_settings,
+    without_view_state,
+    write_settings,
+)
 
 # ============================================================================
 # EXPORT
 # ============================================================================
-
-
-def _read_json(path: Path) -> dict:
-    """Read a JSON settings file, returning {} if it doesn't exist."""
-    if not path.exists():
-        return {}
-    with open(path) as f:
-        return json.load(f)
 
 
 def _decode_prep_args_cell(value: str | dict) -> dict:
@@ -119,14 +116,15 @@ def export_project_config(project_id: str, project_name: str) -> ProjectConfigBu
     check_config = config_service.get_all_configurations()
     settings_dir = get_cache_path(project_id, "settings")
     for page_row in check_config.to_dicts() if not check_config.is_empty() else []:
-        page_name_id = page_row["page_name"].lower().replace(" ", "_").replace("-", "_")
+        page_name_id = name_id(page_row["page_name"])
         pages.append(
             ProjectPageBundle(
                 config=page_row,
-                settings=_read_json(
-                    settings_dir / f"page_{page_name_id}_settings.json"
+                # View state is personal (saved filters, last check).
+                settings=without_view_state(
+                    read_settings(settings_dir / f"page_{page_name_id}_settings.json")
                 ),
-                missing_settings=_read_json(
+                missing_settings=read_settings(
                     settings_dir / f"page_{page_name_id}_missing_settings.json"
                 ),
             )
@@ -280,18 +278,26 @@ def _apply_corrections(
 def _write_page_settings(
     project_id: str, page_name: str, settings: dict, missing_settings: dict
 ) -> None:
-    """Write a page's check settings JSON files."""
-    page_name_id = page_name.lower().replace(" ", "_").replace("-", "_")
+    """Write a page's check settings JSON files.
+
+    The local ``view_state`` is kept and any in the bundle is ignored, since
+    view state is personal and never part of a configuration.
+    """
+    page_name_id = name_id(page_name)
     settings_dir = get_cache_path(project_id, "settings")
     settings_dir.mkdir(parents=True, exist_ok=True)
+    settings = without_view_state(settings)
     if settings:
-        with open(settings_dir / f"page_{page_name_id}_settings.json", "w") as f:
-            json.dump(settings, f)
+        settings_file = settings_dir / f"page_{page_name_id}_settings.json"
+        local_view_state = read_settings(settings_file).get(VIEW_STATE_KEY)
+        if local_view_state is not None:
+            settings[VIEW_STATE_KEY] = local_view_state
+        write_settings(settings_file, settings)
     if missing_settings:
-        with open(
-            settings_dir / f"page_{page_name_id}_missing_settings.json", "w"
-        ) as f:
-            json.dump(missing_settings, f)
+        write_settings(
+            settings_dir / f"page_{page_name_id}_missing_settings.json",
+            missing_settings,
+        )
 
 
 def _import_dataset(

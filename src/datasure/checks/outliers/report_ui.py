@@ -66,21 +66,33 @@ from datasure.utils.correction_form import (
 )
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import is_demo_project
-from datasure.utils.settings_utils import (
-    load_check_settings,
-    save_check_settings,
-    trigger_save,
-)
 from datasure.utils.ui_utils import (
     queue_notice,
     row_styler,
     show_queued_notices,
     styled_dataframe,
 )
+from datasure.utils.view_state import reset_filters_beside, view_factory
 
 logger = logging.getLogger(__name__)
+
+# Saved view state scope: the check's catalogue slug. The inspected column and
+# the extra constraint violation columns are personal view state; older
+# versions saved them in the check's settings and they move on first load.
+VIEW_SCOPE = "outliers"
+check_view = view_factory(
+    VIEW_SCOPE,
+    legacy=(
+        TAB_NAME,
+        {
+            "outlier_inspect_col": "selected_col",
+            "constraint_violation_display_cols": "constraint_display_cols",
+        },
+    ),
+)
 
 # =============================================================================
 # Streamlit UI - Metrics Display
@@ -229,15 +241,19 @@ def _with_review_status(
 
 
 def _render_table_toggles(
-    check: FlagCheck, review: ReviewContext | None
+    check: FlagCheck, review: ReviewContext | None, setting_file: str
 ) -> TableFilters:
     """Render the toggles above a results table and return their values.
 
     "Show reviewed" and "Show only reviewed" are only offered with
     `review`. While "Show only reviewed" is on, the other two toggles are
-    disabled, since it overrides them.
+    disabled, since it overrides them. The toggles are saved view state.
     """
+    view = check_view(setting_file)
+    flagged_only = view.bind(f"{check.check_type}_flagged_only", value=True)
     reviewed_only_key = f"{check.check_type}_reviewed_only"
+    show_reviewed_widget = view.bind(f"{check.check_type}_show_reviewed")
+    reviewed_only_widget = view.bind(reviewed_only_key)
     # Read before rendering so the toggles to its left can be disabled.
     reviewed_only_on = review is not None and bool(
         st.session_state.get(reviewed_only_key, False)
@@ -247,10 +263,9 @@ def _render_table_toggles(
     with tc1:
         flagged_only_on = st.toggle(
             "Show only flagged values",
-            key=f"{check.check_type}_flagged_only",
-            value=True,
             disabled=reviewed_only_on,
             help="Turn off to show every checked value, flagged or not.",
+            **flagged_only,
         )
     if review is None:
         return TableFilters(flagged_only=flagged_only_on)
@@ -258,16 +273,16 @@ def _render_table_toggles(
     with tc2:
         show_reviewed = st.toggle(
             "Show reviewed",
-            key=f"{check.check_type}_show_reviewed",
             disabled=reviewed_only_on,
             help="Also show flags accepted as valid and corrected values, "
             "highlighted green, with the reason.",
+            **show_reviewed_widget,
         )
     with tc3:
         reviewed_only = st.toggle(
             "Show only reviewed",
-            key=reviewed_only_key,
             help="Show only flags accepted as valid and corrected values.",
+            **reviewed_only_widget,
         )
     return TableFilters(
         flagged_only=flagged_only_on,
@@ -467,7 +482,6 @@ def _show_saved_toast() -> None:
 
 def _render_display_columns_expander(
     setting_file: str,
-    settings_key: str,
     widget_key: str,
     display_options: list[str],
     info_message: str,
@@ -475,16 +489,12 @@ def _render_display_columns_expander(
     """Render the "Show more columns" expander and return the selected columns.
 
     Used by ``_render_constraint_violations_table`` to let users add extra
-    context columns to the results table, persisting the selection to the
-    settings file under ``settings_key``.
+    context columns to the results table. The selection is saved view state.
 
     Parameters
     ----------
     setting_file : str
-        Path to settings file.
-    settings_key : str
-        Key under which the selected columns are persisted in settings, and
-        used as the suffix for the ``trigger_save`` state name.
+        Path to the page settings file holding the view state.
     widget_key : str
         Streamlit widget key for the multiselect.
     display_options : list[str]
@@ -497,21 +507,15 @@ def _render_display_columns_expander(
     list[str]
         Columns selected by the user.
     """
-    saved_settings = load_check_settings(setting_file, TAB_NAME)
-    cols = saved_settings.get(settings_key, [])
-    default_display_cols = [col for col in cols if col in display_options]
-
     with st.expander(":material/clarify: Show more columns in report", expanded=False):
         st.info(info_message)
         display_cols = st.multiselect(
             label="Select columns to display",
             options=display_options,
-            default=default_display_cols,
-            key=widget_key,
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_" + settings_key},
+            **check_view(setting_file).bind(
+                widget_key, options=display_options, multi=True, default=[]
+            ),
         )
-        save_check_settings(setting_file, TAB_NAME, {settings_key: display_cols})
 
     return display_cols
 
@@ -545,7 +549,7 @@ def _render_constraint_violations_table(
 
     violation_data = filter_table(
         _with_review_status(violation_data, settings, CONSTRAINTS, review),
-        _render_table_toggles(CONSTRAINTS, review),
+        _render_table_toggles(CONSTRAINTS, review, setting_file),
         CONSTRAINTS,
     )
 
@@ -563,7 +567,6 @@ def _render_constraint_violations_table(
 
     constraint_display_cols = _render_display_columns_expander(
         setting_file,
-        "constraint_display_cols",
         "constraint_violation_display_cols",
         display_options,
         "Select additional columns to include in the constraint violations report.",
@@ -652,25 +655,15 @@ def _render_outlier_column_inspection(
     ic1, _ = st.columns([0.2, 0.8])
 
     with ic1:
-        # get saved settings
-        saved_settings = load_check_settings(setting_file, TAB_NAME)
-        default_selected_col = saved_settings.get("selected_col", None)
-        default_selected_col_index = (
-            columns_checked_list.index(default_selected_col)
-            if default_selected_col and default_selected_col in columns_checked_list
-            else None
-        )
         selected_col = st.selectbox(
             label="Select outlier columns to inspect",
             options=columns_checked_list,
-            index=default_selected_col_index,
-            key="outlier_inspect_col",
             help="Select the outlier columns to inspect. "
             "You can only select one column at a time.",
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_selected_col"},
+            **check_view(setting_file).bind(
+                "outlier_inspect_col", options=columns_checked_list, index=None
+            ),
         )
-        save_check_settings(setting_file, TAB_NAME, {"selected_col": selected_col})
 
         if not selected_col:
             st.info("Select an outlier column to inspect.")
@@ -712,9 +705,11 @@ def _render_outlier_column_inspection(
         inspect_display_cols = st.multiselect(
             label="Select columns to display",
             options=display_options,
-            default=None,
             help="Select the columns to display in the inspection table.",
             disabled=not selected_col,
+            **check_view(setting_file).bind(
+                "outlier_inspect_display_cols", options=display_options, multi=True
+            ),
         )
 
         if inspect_display_cols:
@@ -722,7 +717,7 @@ def _render_outlier_column_inspection(
 
     outliers_data = filter_table(
         _with_review_status(outliers_data, settings, OUTLIERS, review),
-        _render_table_toggles(OUTLIERS, review),
+        _render_table_toggles(OUTLIERS, review, setting_file),
         OUTLIERS,
     )
 
@@ -1416,7 +1411,15 @@ def _review_context(
     return ReviewContext(CorrectionProcessor(project_id), alias)
 
 
-def flagged_outlier_percent(
+@dataclass(frozen=True)
+class _ReviewedFlags:
+    """Outlier and constraint results with accepted flags cleared."""
+
+    outliers: pl.DataFrame
+    violations: pl.DataFrame
+
+
+def _reviewed_flags(
     project_id: str,
     page_name_id: str,
     data: pl.DataFrame,
@@ -1424,12 +1427,61 @@ def flagged_outlier_percent(
     setting_file: str,
     config: dict,
     alias: str | None,
-) -> float | None:
-    """Return the percentage of checked values flagged as outliers.
+) -> _ReviewedFlags | None:
+    """Compute the check's results without rendering it, for the health grid.
 
-    Uses the saved settings and outlier columns, and leaves out accepted
-    flags, so it matches the counts on the Outliers tab. Computed without
-    rendering the tab, for the Summary tab.
+    Uses the saved settings and outlier columns, and clears accepted flags,
+    as the Outliers tab does. None when no outlier columns are configured or
+    the saved settings no longer fit the data.
+    """
+    column_config = _load_outlier_settings(project_id, page_name_id)
+    if column_config.is_empty():
+        return None
+    try:
+        settings = clear_unavailable_columns(
+            load_default_settings(setting_file, OutlierSettings(**config)),
+            survey_columns.categorical_columns,
+            survey_columns.datetime_columns,
+        )
+        outlier_data = compute_outlier_output(data, settings, column_config)
+        violations = compute_constraint_violations(data, settings, column_config)
+    except (pl.exceptions.PolarsError, ValidationError, ValueError):
+        logger.warning(
+            "Could not compute the outlier results for page %s",
+            page_name_id,
+            exc_info=True,
+        )
+        return None
+    review = _review_context(project_id, alias, settings.survey_key)
+    outlier_data = clear_reviewed_flags(
+        _with_review_status(outlier_data, settings, OUTLIERS, review), OUTLIERS
+    )
+    if not violations.is_empty():
+        violations = clear_reviewed_flags(
+            _with_review_status(violations, settings, CONSTRAINTS, review),
+            CONSTRAINTS,
+        )
+    return _ReviewedFlags(outlier_data, violations)
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count:,} {noun}{'' if count == 1 else 's'}"
+
+
+def outliers_headline(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    survey_columns: ColumnByType,
+    setting_file: str,
+    config: dict,
+    alias: str | None,
+) -> str | None:
+    """Return the outliers headline for the Summary health grid.
+
+    The check's "Total Outliers", with the share of checked values flagged,
+    and "Total Violations", leaving out accepted flags. Computed without
+    rendering the tab.
 
     Parameters
     ----------
@@ -1451,30 +1503,33 @@ def flagged_outlier_percent(
 
     Returns
     -------
-    float | None
-        The percentage, or None when no outlier columns are configured, no
-        values were checked, or the saved settings no longer fit the data.
+    str | None
+        For example "3 outliers (1.4% of values), 1 constraint violation".
+        The share is left out when no values were checked. None when no
+        outlier columns are configured or the saved settings no longer fit
+        the data.
     """
-    column_config = _load_outlier_settings(project_id, page_name_id)
-    if column_config.is_empty():
-        return None
-    try:
-        settings = clear_unavailable_columns(
-            load_default_settings(setting_file, OutlierSettings(**config)),
-            survey_columns.categorical_columns,
-            survey_columns.datetime_columns,
-        )
-        outlier_data = compute_outlier_output(data, settings, column_config)
-    except (pl.exceptions.PolarsError, ValidationError, ValueError):
-        logger.warning(
-            "Could not compute the outlier %% for page %s", page_name_id, exc_info=True
-        )
-        return None
-    review = _review_context(project_id, alias, settings.survey_key)
-    outlier_data = clear_reviewed_flags(
-        _with_review_status(outlier_data, settings, OUTLIERS, review), OUTLIERS
+    flags = _reviewed_flags(
+        project_id, page_name_id, data, survey_columns, setting_file, config, alias
     )
-    return flagged_value_percent(outlier_data)
+    if flags is None:
+        return None
+    outliers = (
+        0
+        if flags.outliers.is_empty()
+        else _compute_outlier_metrics(flags.outliers, None).total_outliers
+    )
+    violations = (
+        0
+        if flags.violations.is_empty()
+        else _compute_constraint_metrics(flags.violations).total_violations
+    )
+    percent = flagged_value_percent(flags.outliers)
+    rate = "" if percent is None else f" ({percent:.1f}% of values)"
+    return (
+        f"{_plural(outliers, 'outlier')}{rate}, "
+        f"{_plural(violations, 'constraint violation')}"
+    )
 
 
 def _delete_outlier_column(
@@ -1552,6 +1607,23 @@ def _delete_outlier_column(
 # =============================================================================
 
 
+def outliers_settings_section(
+    setting_file: str, config: dict, survey_columns: ColumnByType
+) -> OutlierSettings:
+    """Draw the check's settings panel and return the settings.
+
+    The report starts with it; the check page also shows it alone under the
+    empty state when the check does not apply, so it stays reachable.
+    """
+    with reset_filters_beside(check_view(setting_file)):
+        return outliers_report_settings(
+            setting_file,
+            OutlierSettings(**config),
+            survey_columns.categorical_columns,
+            survey_columns.datetime_columns,
+        )
+
+
 def outliers_report(
     project_id: str,
     page_name_id: str,
@@ -1584,7 +1656,6 @@ def outliers_report(
     """
     # get column info
     categorical_columns = survey_columns.categorical_columns
-    datetime_columns = survey_columns.datetime_columns
     numeric_columns = survey_columns.numeric_columns
 
     st.title("Outliers and Constraints Report")
@@ -1592,7 +1663,7 @@ def outliers_report(
 
     if is_demo_project():
         demo_callout(
-            "This tab checks your survey data against two types of rules:\n\n"
+            "This check tests your survey data against two types of rules:\n\n"
             "- **Constraint Violations**: Records that breach hard or soft numeric bounds "
             "you define (e.g., age below 0 or above 120).\n"
             "- **Outliers**: Records flagged by a statistical method (IQR or Standard "
@@ -1602,11 +1673,7 @@ def outliers_report(
             "which columns to check."
         )
 
-    # Load settings
-    config_settings = OutlierSettings(**config)
-    outliers_settings = outliers_report_settings(
-        setting_file, config_settings, categorical_columns, datetime_columns
-    )
+    outliers_settings = outliers_settings_section(setting_file, config, survey_columns)
     review = _review_context(project_id, alias, outliers_settings.survey_key)
     if alias and review is None:
         st.warning(
@@ -1752,5 +1819,25 @@ def outliers_report(
         )
 
     demo_callout(
-        "**Next**: :material/arrow_upward: Scroll up and select the **GPS Checks** tab."
+        "**Next**: :material/arrow_upward: Scroll up and select **Data integrity → GPS Checks**."
     )
+
+
+def outliers_status(
+    project_id: str, page_name_id: str, survey_columns: ColumnByType
+) -> StatusResult:
+    """Return the outliers check's status for the check page navigation.
+
+    Not applicable without numeric columns; not set up until an outlier or
+    constraint column is added.
+    """
+    if not survey_columns.numeric_columns:
+        return StatusResult(
+            CheckStatus.NOT_APPLICABLE, "No numeric columns found in this dataset."
+        )
+    if _load_outlier_settings(project_id, page_name_id).is_empty():
+        return StatusResult(
+            CheckStatus.NOT_SET_UP,
+            "No outlier or constraint columns are set up yet.",
+        )
+    return READY

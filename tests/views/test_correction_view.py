@@ -22,6 +22,9 @@ from datasure.utils.correction_form import (
     validate_numeric_input,
 )
 from datasure.utils.dataframe_utils import TableState
+from datasure.utils.nav_ui import LAST_CHECK_PAGE, PROJECT_VIEW_FILE
+from datasure.utils.view_state import remember, remembered
+from datasure.views import correction_view
 from datasure.views.correction_view import (
     _build_correction_log_display,
     _display_correction_details,
@@ -1467,47 +1470,290 @@ class TestRenderPageHeaderAndNavigation:
         assert mock_nav.call_args[1]["next"] is not None
 
 
-class TestMain:
-    """Test the main() entry point orchestration."""
+def _check_config(*pages: tuple[str, str | None]) -> pl.DataFrame:
+    """A check_config table: one row per (page name, survey KEY) pair."""
+    return pl.DataFrame(
+        {
+            "page_name": [name for name, _ in pages],
+            "survey_data_name": [f"{name.lower()}_data" for name, _ in pages],
+            "survey_key": [key for _, key in pages],
+        },
+        schema={
+            "page_name": pl.String,
+            "survey_data_name": pl.String,
+            "survey_key": pl.String,
+        },
+    )
 
-    @patch("datasure.views.correction_view.render_page_navigation")
-    @patch("datasure.views.correction_view.render_correction_tab")
-    @patch("datasure.views.correction_view.CorrectionProcessor")
-    @patch("datasure.views.correction_view.validate_prerequisites")
-    @patch("datasure.views.correction_view.render_page_header")
-    @patch("datasure.views.correction_view.add_demo_navigation")
-    @patch("datasure.views.correction_view.demo_sidebar_help")
-    def test_renders_a_tab_per_hfc_page(
-        self,
-        mock_demo_sidebar,
-        mock_add_demo_nav,
-        mock_page_header,
-        mock_validate,
-        mock_processor_cls,
-        mock_render_tab,
-        mock_page_nav,
-    ):
-        mock_validate.return_value = (pl.DataFrame({"x": [1]}), ["Page A", "Page B"])
-        mock_processor_instance = MagicMock()
-        mock_processor_cls.return_value = mock_processor_instance
 
-        with _patched_st(
-            session_state={"st_project_id": "proj1"},
-            tabs=MagicMock(
-                return_value=[_mock_context_widget(), _mock_context_widget()]
+class CorrectionsPage:
+    """Runs the Corrections page's main() with Streamlit mocked.
+
+    Session state and the URL persist between runs, like one browser
+    session; the settings directory persists between sessions.
+    """
+
+    def __init__(self, monkeypatch, settings_dir, check_config, url=None):
+        self.monkeypatch = monkeypatch
+        self.settings_dir = settings_dir
+        self.check_config = check_config
+        self.st = MagicMock()
+        self.st.session_state = {"st_project_id": "proj1"}
+        self.st.query_params = {} if url is None else {"page": url}
+        self.imported: set[str] | None = None
+        self.render_tab = MagicMock(name="render_correction_tab")
+
+    def run(self) -> list[int]:
+        """Run the page once; return the check page indexes rendered."""
+        self.st.reset_mock()
+        self.render_tab.reset_mock()
+        pages = self.check_config["page_name"].to_list()
+
+        def table_exists(project_id, alias, db_name):
+            return self.imported is None or alias in self.imported
+
+        with (
+            self.monkeypatch.context() as m,
+            patch.object(correction_view, "st", self.st),
+            patch.multiple(
+                correction_view,
+                render_correction_tab=self.render_tab,
+                CorrectionProcessor=MagicMock(),
+                validate_prerequisites=MagicMock(
+                    return_value=(self.check_config, pages)
+                ),
+                duckdb_table_exists=MagicMock(side_effect=table_exists),
+                get_cache_path=MagicMock(
+                    side_effect=lambda *p: self.settings_dir.joinpath(*map(str, p))
+                ),
+                render_page_header=MagicMock(),
+                render_page_navigation=MagicMock(),
+                add_demo_navigation=MagicMock(),
+                demo_sidebar_help=MagicMock(),
             ),
         ):
+            m.setitem(sys.modules, "streamlit", self.st)
             main()
+        return [c.args[2] for c in self.render_tab.call_args_list]
 
-        mock_demo_sidebar.assert_called_once()
-        mock_add_demo_nav.assert_called_once_with("correction_view", step=6)
-        mock_page_header.assert_called_once()
-        mock_validate.assert_called_once_with("proj1")
-        mock_processor_cls.assert_called_once_with("proj1")
-        assert mock_render_tab.call_count == 2
-        mock_render_tab.assert_any_call(mock_processor_instance, "proj1", 0)
-        mock_render_tab.assert_any_call(mock_processor_instance, "proj1", 1)
-        mock_page_nav.assert_called_once()
+    def click(self, slug: str) -> None:
+        """Choose a check page in the pills."""
+        call = self.st.pills.call_args
+        self.st.session_state[call.kwargs["key"]] = slug
+        with self.monkeypatch.context() as m:
+            m.setitem(sys.modules, "streamlit", self.st)
+            call.kwargs["on_change"](*call.kwargs.get("args", ()))
+
+    def label(self, slug: str) -> str:
+        return self.st.pills.call_args.kwargs["format_func"](slug)
+
+    @property
+    def project_view_file(self):
+        return self.settings_dir / "proj1" / "settings" / PROJECT_VIEW_FILE
+
+    def view_check_page(self, slug: str) -> None:
+        """The user views a check page, which records itself."""
+        remember(self.project_view_file, LAST_CHECK_PAGE, slug)
+
+    def new_session(self, url=None) -> "CorrectionsPage":
+        return CorrectionsPage(
+            self.monkeypatch, self.settings_dir, self.check_config, url=url
+        )
+
+
+THREE_PAGES = _check_config(("Household", "KEY"), ("Market", "KEY"), ("Farm", "KEY"))
+
+
+@pytest.fixture
+def corrections(monkeypatch, tmp_path):
+    def make(check_config=THREE_PAGES, url=None) -> CorrectionsPage:
+        return CorrectionsPage(monkeypatch, tmp_path, check_config, url=url)
+
+    return make
+
+
+class TestMain:
+    """Corrections shows check pages as pills and renders only the selected one."""
+
+    def test_opens_on_the_first_check_page_and_renders_only_it(self, corrections):
+        page = corrections()
+
+        assert page.run() == [0]
+        assert page.st.query_params == {"page": "household"}
+
+    def test_check_pages_show_as_wrapping_pills(self, corrections):
+        page = corrections()
+        page.run()
+
+        call = page.st.pills.call_args
+        assert call.args[1] == ["household", "market", "farm"]
+        assert call.kwargs["wrap"] is True
+        assert "Market" in page.label("market")
+
+    def test_url_page_selects_by_position_in_the_check_config(self, corrections):
+        assert corrections(url="farm").run() == [2]
+
+    def test_unknown_url_page_falls_back_to_the_first(self, corrections):
+        page = corrections(url="gone")
+
+        assert page.run() == [0]
+        assert page.st.query_params == {"page": "household"}
+
+    def test_choosing_a_check_page_renders_it_and_updates_the_url(self, corrections):
+        page = corrections()
+        page.run()
+
+        page.click("market")
+
+        assert page.run() == [1]
+        assert page.st.query_params == {"page": "market"}
+
+    def test_opens_on_the_last_viewed_check_page(self, corrections):
+        page = corrections()
+        page.view_check_page("farm")
+
+        assert page.run() == [2]
+
+    def test_a_url_page_wins_over_the_last_viewed_check_page(self, corrections):
+        page = corrections(url="market")
+        page.view_check_page("farm")
+
+        assert page.run() == [1]
+        # The record is kept for the next visit without a URL page.
+        assert remembered(page.project_view_file, LAST_CHECK_PAGE) == "farm"
+        assert page.new_session().run() == [2]
+
+    def test_a_chosen_page_is_kept_until_another_check_page_is_viewed(
+        self, corrections
+    ):
+        page = corrections()
+        page.view_check_page("farm")
+        page.run()
+        page.click("household")
+        assert page.run() == [0]
+        # Coming back without viewing a check page keeps the choice
+        page.st.query_params.clear()
+        assert page.run() == [0]
+
+        # The user views the Market check page, then comes back
+        page.st.query_params.clear()
+        page.view_check_page("market")
+        assert page.run() == [1]
+
+    def test_a_new_session_reopens_the_saved_check_page(self, corrections):
+        page = corrections()
+        page.run()
+        page.click("farm")
+        page.run()
+
+        assert page.new_session().run() == [2]
+
+    def test_the_last_viewed_check_page_wins_over_the_saved_one(self, corrections):
+        page = corrections(url="farm")
+        page.run()
+
+        new_session = page.new_session()
+        new_session.view_check_page("market")
+
+        assert new_session.run() == [1]
+
+    def test_the_last_viewed_check_page_survives_a_new_session(self, corrections):
+        # Viewed in an earlier session, before the app was reopened
+        corrections().view_check_page("market")
+
+        assert corrections().run() == [1]
+
+    def test_a_page_without_a_survey_key_is_dimmed_and_explains_why(self, corrections):
+        page = corrections(
+            check_config=_check_config(("Household", "KEY"), ("Market", None)),
+            url="market",
+        )
+
+        assert page.run() == []
+        assert "not set up" in page.label("market")
+        assert "not set up" not in page.label("household")
+        assert "KEY" in page.st.info.call_args.args[0]
+
+    def test_a_page_whose_survey_data_was_not_imported_is_dimmed(self, corrections):
+        page = corrections(url="market")
+        page.imported = {"household_data", "farm_data"}
+
+        assert page.run() == []
+        assert "not set up" in page.label("market")
+        assert "Import Data" in page.st.info.call_args.args[0]
+
+
+def _widget_returning_its_state(st):
+    """A widget mock that returns its session value, else its default."""
+
+    def widget(*args, **kwargs):
+        return st.session_state.get(kwargs["key"], kwargs.get("default"))
+
+    return MagicMock(side_effect=widget)
+
+
+class TestRememberedSelections:
+    """The dataset choice and log filters survive page switches and sessions."""
+
+    def _datasets(self):
+        from datasure.views.correction_view import TabConfig, correction_datasets
+
+        config = TabConfig(
+            page_name="HH",
+            survey_data_name="survey",
+            survey_key="KEY",
+            survey_id="hhid",
+            backcheck_data_name="bc",
+            backcheck_key="KEY",
+            backcheck_id="hhid",
+        )
+        return correction_datasets(config, tab_index=0)
+
+    def _choose(self, monkeypatch, st, view):
+        from datasure.views.correction_view import choose_dataset
+
+        with monkeypatch.context() as m, patch.object(correction_view, "st", st):
+            m.setitem(sys.modules, "streamlit", st)
+            return choose_dataset(self._datasets(), 0, view)
+
+    def test_the_dataset_choice_is_remembered_in_a_new_session(
+        self, monkeypatch, tmp_path
+    ):
+        from datasure.utils.view_state import ViewState
+        from datasure.views.correction_view import BACKCHECK_DATA, SURVEY_DATA
+
+        view = ViewState(tmp_path / "corrections.json", "hh")
+        st = MagicMock(session_state={})
+        st.segmented_control = _widget_returning_its_state(st)
+        assert self._choose(monkeypatch, st, view).label == SURVEY_DATA
+
+        # The user picks backcheck data
+        call = st.segmented_control.call_args
+        st.session_state[call.kwargs["key"]] = BACKCHECK_DATA
+        with monkeypatch.context() as m:
+            m.setitem(sys.modules, "streamlit", st)
+            call.kwargs["on_change"]()
+
+        new_session = MagicMock(session_state={})
+        new_session.segmented_control = _widget_returning_its_state(new_session)
+        assert self._choose(monkeypatch, new_session, view).label == BACKCHECK_DATA
+
+    def test_log_filters_are_remembered_and_stale_values_dropped(
+        self, monkeypatch, tmp_path
+    ):
+        from datasure.utils.view_state import ViewState
+
+        view = ViewState(tmp_path / "corrections.json", "hh")
+        view.save("correction_log_action_filter_0", ["accept", "gone"])
+        st = MagicMock(session_state={})
+        st.columns = MagicMock(return_value=[MagicMock(), MagicMock()])
+        st.pills = _widget_returning_its_state(st)
+
+        with monkeypatch.context() as m, patch.object(correction_view, "st", st):
+            m.setitem(sys.modules, "streamlit", st)
+            sources, actions = _render_log_filters(_sample_display_log(), 0, view)
+
+        assert (sources, actions) == ([], ["accept"])
 
 
 class TestCorrectionDatasets:

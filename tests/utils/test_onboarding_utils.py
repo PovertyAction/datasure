@@ -12,7 +12,6 @@ from datasure.utils.onboarding_utils import (
     DEMO_OUTPUT_FUNCTIONS,
     DEMO_PROJECT_ID,
     DEMO_PROJECT_NAME,
-    CheckPage,
     DemoDataGenerator,
     ImportDemoInfo,
     OnboardingSteps,
@@ -44,26 +43,6 @@ class TestConstants:
         assert DEMO_PROJECT_NAME == "DataSure Demo"
         assert isinstance(DEMO_PROJECT_ID, str)
         assert isinstance(DEMO_PROJECT_NAME, str)
-
-
-class TestCheckPage:
-    """Test the CheckPage enum."""
-
-    def test_check_page_values(self):
-        """Test that CheckPage enum has correct values."""
-        assert CheckPage.SUMMARY.value == "Summary"
-        assert CheckPage.SURVEY_PROGRESS.value == "Survey Progress"
-        assert CheckPage.DUPLICATES.value == "Duplicates"
-        assert CheckPage.MISSING_DATA.value == "Missing Data"
-        assert CheckPage.OUTLIERS.value == "Outliers"
-        assert CheckPage.ENUMERATOR_STATS.value == "Enumerator Stats"
-        assert CheckPage.DESCRIPTIVE_STATS.value == "Descriptive Stats"
-        assert CheckPage.BACK_CHECKS.value == "Back Checks"
-        assert CheckPage.GPS_CHECKS.value == "GPS Checks"
-
-    def test_check_page_member_count(self):
-        """Test that CheckPage enum has correct number of members."""
-        assert len(CheckPage) == 9
 
 
 class TestDemoContainer:
@@ -257,7 +236,7 @@ class TestOutputOnboardingInfo:
         message = OutputOnboardingInfo.get_onboarding_message(
             "missing", "missing_summary"
         )
-        assert message["title"] == "Missing Values Tab"
+        assert message["title"] == "Missing Values"
         assert "missing data" in message["content"].lower()
 
     def test_get_onboarding_message_outliers(self):
@@ -316,13 +295,19 @@ class TestOutputOnboardingInfo:
         assert message["title"] == "Progress"
         assert "Submission Progress" in message["content"]
 
-    def test_get_onboarding_message_summary_data_quality(self):
-        """Test summary_data_quality entry."""
+    def test_get_onboarding_message_summary_check_health(self):
+        """Test summary_check_health entry, which replaced Data Quality."""
         message = OutputOnboardingInfo.get_onboarding_message(
-            "summary", "summary_data_quality"
+            "summary", "summary_check_health"
         )
-        assert message["title"] == "Data Quality"
-        assert "duplicate" in message["content"].lower()
+        assert message["title"] == "Check health"
+        assert "Open →" in message["content"]
+        assert (
+            OutputOnboardingInfo.get_onboarding_message(
+                "summary", "summary_data_quality"
+            )
+            is None
+        )
 
     def test_get_onboarding_message_progress_display_summary(self):
         """Test display_progress_summary entry."""

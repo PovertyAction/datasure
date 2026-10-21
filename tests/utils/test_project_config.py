@@ -164,6 +164,34 @@ class TestExportProjectConfig:
         assert bundle.pages[0].settings == {"missing": {"threshold": 5}}
         assert bundle.pages[0].missing_settings == {}
 
+    @patch("datasure.utils.project_config.get_cache_path")
+    @patch("datasure.utils.project_config.ConfigurationService")
+    @patch("datasure.utils.project_config.duckdb_get_table")
+    def test_export_leaves_out_personal_view_state(
+        self, mock_get_table, mock_config_service_cls, mock_get_cache_path, tmp_path
+    ):
+        """Saved filters and the last selected check are not shared."""
+        mock_get_table.return_value = pl.DataFrame()
+        mock_config_service_cls.return_value.get_all_configurations.return_value = (
+            pl.DataFrame(
+                {"page_name": ["Household HFC"], "survey_data_name": ["household"]}
+            )
+        )
+        mock_get_cache_path.return_value = tmp_path
+        (tmp_path / "page_household_hfc_settings.json").write_text(
+            json.dumps(
+                {
+                    "missing": {"threshold": 5},
+                    "view_state": {"selected": "gps", "scopes": {"gps": {"a": 1}}},
+                }
+            )
+        )
+
+        bundle = export_project_config(PROJECT_ID, "ACME Endline 2026")
+
+        assert bundle.pages[0].settings == {"missing": {"threshold": 5}}
+        assert "view_state" not in bundle.model_dump_json()
+
 
 # === RESOLUTION HELPERS === #
 
@@ -438,6 +466,57 @@ class TestApplyProjectConfig:
 
         assert result.pages_created == []
         assert result.pages_skipped[0].reason == "A page with this name already exists"
+
+    @patch("datasure.utils.project_config.get_cache_path")
+    @patch("datasure.utils.project_config.CorrectionProcessor")
+    @patch("datasure.utils.project_config.ConfigurationService")
+    @patch("datasure.utils.project_config.load_local_data")
+    @patch("datasure.utils.project_config.duckdb_save_table")
+    @patch("datasure.utils.project_config.duckdb_get_table")
+    def test_applied_settings_keep_local_view_state_and_drop_incoming(
+        self,
+        mock_get_table,
+        mock_save_table,
+        mock_load_local,
+        mock_config_service_cls,
+        mock_correction_cls,
+        mock_get_cache_path,
+        tmp_path,
+    ):
+        """Applying a configuration (template) never carries view state."""
+        mock_get_table.return_value = pl.DataFrame()
+        mock_config_service_cls.return_value = self._config_service_mock()
+        mock_get_cache_path.return_value = tmp_path
+        settings_file = tmp_path / "page_household_hfc_settings.json"
+        settings_file.write_text(json.dumps({"view_state": {"selected": "duplicates"}}))
+        data_file = tmp_path / "household.csv"
+        data_file.write_text("id,age\n1,30\n")
+        bundle = ProjectConfigBundle(
+            exported_from_project="p",
+            exported_at="t",
+            datasets=[ImportSourceEntry(alias="household", source="local storage")],
+            pages=[
+                ProjectPageBundle(
+                    config={
+                        "page_name": "Household HFC",
+                        "survey_data_name": "household",
+                    },
+                    settings={
+                        "missing": {"threshold": 5},
+                        "view_state": {"selected": "gps"},
+                    },
+                )
+            ],
+        )
+
+        apply_project_config(
+            PROJECT_ID, bundle, local_file_paths={"household": str(data_file)}
+        )
+
+        assert json.loads(settings_file.read_text()) == {
+            "missing": {"threshold": 5},
+            "view_state": {"selected": "duplicates"},
+        }
 
 
 class TestAddConfigurationRerun:

@@ -24,14 +24,24 @@ from datasure.utils.duckdb_utils import (
 )
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding, is_demo_project
-from datasure.utils.settings_utils import (
-    load_check_settings,
-    save_check_settings,
-    trigger_save,
-)
 from datasure.utils.ui_utils import ensure_styler_limit
+from datasure.utils.view_state import reset_filters_beside, view_factory
 
 TAB_NAME = "missing"
+
+# Saved view state scope: the check's catalogue slug. The filters and
+# selections below are personal view state; older versions saved them in
+# the check's settings under the same names, and they move on first load.
+VIEW_SCOPE = "missing"
+_VIEW_KEYS = (
+    "mv_threshold",
+    "select_date_col",
+    "group_by_col",
+    "compare_col",
+    "all_cols",
+    "null_cols_sel",
+)
+check_view = view_factory(VIEW_SCOPE, legacy=(TAB_NAME, {k: k for k in _VIEW_KEYS}))
 
 
 # =============================================================================
@@ -897,29 +907,14 @@ def missing_columns(
     """
     _, _, _, slider_col = st.columns(4)
 
-    default_settings = (
-        load_check_settings(settings_file=setting_file, check_name="missing") or {}
-    )
-    mv_threshold = default_settings.get("mv_threshold", 0)
-
     with slider_col:
         mv_threshold = st.slider(
             label="Filter by % missing:",
             help="Filter columns by minimum percentage of missing values",
             min_value=0,
             max_value=100,
-            value=mv_threshold,
-            key="mv_threshold",
-            on_change=trigger_save,
-            kwargs={"state_name": "mv_threshold_save"},
+            **check_view(setting_file).bind("mv_threshold", value=0),
         )
-        if st.session_state.get("mv_threshold_save"):
-            save_check_settings(
-                settings_file=setting_file,
-                check_name="missing",
-                check_settings={"mv_threshold": mv_threshold},
-            )
-            st.session_state["mv_threshold_save"] = False
 
     mv_data = compute_missing_columns(
         missing_data=missing_data, missing_codes_df=missing_codes_df
@@ -975,35 +970,16 @@ def missing_over_time(
         st.info("No datetime columns available for time series analysis")
         return
 
-    default_settings = (
-        load_check_settings(settings_file=setting_file, check_name="missing") or {}
-    )
-    select_date_col = default_settings.get("select_date_col")
-
     dc1, _ = st.columns([0.3, 0.7])
     with dc1:
-        select_date_col_index = (
-            date_cols.index(select_date_col)
-            if select_date_col and select_date_col in date_cols
-            else 0
-        )
-
         select_date_col = st.selectbox(
             "Select date column",
             options=date_cols,
-            index=select_date_col_index,
-            key="select_date_col",
             help="Select the date column to compute missingness over time",
-            on_change=trigger_save,
-            kwargs={"state_name": "select_date_col_save"},
+            **check_view(setting_file).bind(
+                "select_date_col", options=date_cols, index=0
+            ),
         )
-        if st.session_state.get("select_date_col_save"):
-            save_check_settings(
-                settings_file=setting_file,
-                check_name="missing",
-                check_settings={"select_date_col": select_date_col},
-            )
-            st.session_state["select_date_col_save"] = False
 
     missingness_over_time = compute_missing_over_time(
         missing_data=missing_data, data=data, select_date_col=select_date_col
@@ -1053,51 +1029,21 @@ def missing_compare(
             st.warning("No categorical columns available for grouping")
             return
 
-        default_settings = (
-            load_check_settings(settings_file=setting_file, check_name="missing") or {}
-        )
-        group_by_col = default_settings.get("group_by_col")
-        group_by_col_index = (
-            allowed_cols.index(group_by_col)
-            if group_by_col and group_by_col in allowed_cols
-            else 0
-        )
-
+        view = check_view(setting_file)
         group_by_col = st.selectbox(
             label="Group by column",
             options=allowed_cols,
-            index=group_by_col_index,
-            key="group_by_col",
-            on_change=trigger_save,
-            kwargs={"state_name": "group_by_col_save"},
+            **view.bind("group_by_col", options=allowed_cols, index=0),
         )
-        if st.session_state.get("group_by_col_save"):
-            save_check_settings(
-                settings_file=setting_file,
-                check_name="missing",
-                check_settings={"group_by_col": group_by_col},
-            )
-            st.session_state["group_by_col_save"] = False
 
         allowed_cols = [col for col in data.columns if col != group_by_col]
 
     with mc_2:
-        compare_col = default_settings.get("compare_col", [])
         compare_col = st.multiselect(
             label="Compare columns",
             options=allowed_cols,
-            default=compare_col if isinstance(compare_col, list) else [],
-            key="compare_col",
-            on_change=trigger_save,
-            kwargs={"state_name": "compare_col_save"},
+            **view.bind("compare_col", options=allowed_cols, multi=True, default=[]),
         )
-        if st.session_state.get("compare_col_save"):
-            save_check_settings(
-                settings_file=setting_file,
-                check_name="missing",
-                check_settings={"compare_col": compare_col},
-            )
-            st.session_state["compare_col_save"] = False
 
     if not group_by_col:
         st.warning("Please select a column to group by")
@@ -1150,46 +1096,21 @@ def missing_correlation(
     mc1, mc2 = st.columns([0.1, 0.9])
 
     with mc1:
-        default_settings = (
-            load_check_settings(settings_file=setting_file, check_name="missing") or {}
-        )
-        all_cols = default_settings.get("all_cols", False)
-
+        view = check_view(setting_file)
         all_cols = st.toggle(
             label="All columns",
-            value=all_cols,
             help="Include all columns (default: only columns with partial missingness)",
-            key="all_cols",
-            on_change=trigger_save,
-            kwargs={"state_name": "all_cols_save"},
+            **view.bind("all_cols", value=False),
         )
-        if st.session_state.get("all_cols_save"):
-            save_check_settings(
-                settings_file=setting_file,
-                check_name="missing",
-                check_settings={"all_cols": all_cols},
-            )
-            st.session_state["all_cols_save"] = False
 
         col_options = get_null_list(missing_data=missing_data, all_cols=all_cols)
 
     with mc2:
-        null_cols_sel = default_settings.get("null_cols_sel", [])
         null_cols_sel = st.multiselect(
             label="Select columns for correlation",
             options=col_options,
-            default=null_cols_sel if isinstance(null_cols_sel, list) else [],
-            key="null_cols_sel",
-            on_change=trigger_save,
-            kwargs={"state_name": "null_cols_sel_save"},
+            **view.bind("null_cols_sel", options=col_options, multi=True, default=[]),
         )
-        if st.session_state.get("null_cols_sel_save"):
-            save_check_settings(
-                settings_file=setting_file,
-                check_name="missing",
-                check_settings={"null_cols_sel": null_cols_sel},
-            )
-            st.session_state["null_cols_sel_save"] = False
 
     if null_cols_sel and len(null_cols_sel) > 1:
         nullity_corr = compute_missing_correlation(
@@ -1222,7 +1143,7 @@ def missing_matrix(missing_data: pl.DataFrame, color_map: list) -> None:
     st.plotly_chart(fig, width="stretch")
 
     demo_callout(
-        "**Next**: :material/arrow_upward: Scroll up and select the **Duplicates** tab."
+        "**Next**: :material/arrow_upward: Scroll up and select **Data integrity → Duplicates**."
     )
 
 
@@ -1261,7 +1182,9 @@ def missing_report(
         [1.0, "#da3b46"],
     ]
 
-    st.title("Missing data")
+    # No settings section here, so the action sits beside the title.
+    with reset_filters_beside(check_view(setting_file), vertical_alignment="center"):
+        st.title("Missing data")
 
     # Missing codes configuration
     render_missing_codes_table(project_id)
@@ -1298,3 +1221,17 @@ def missing_report(
     st.write("---")
     st.subheader("Nullity matrix")
     missing_matrix(missing_data=missing_data, color_map=sns_colormap)
+
+
+def missing_headline(project_id: str, data: pl.DataFrame) -> str:
+    """Return the missing values headline for the Summary health grid.
+
+    The check's "Percentage of missing values": the mean share of missing
+    values across columns, with the project's missing codes counted as
+    missing.
+    """
+    missing_data = _compute_missing_data_paired(
+        data, load_missing_codes_from_db(project_id)
+    )
+    summary = compute_missing_summary(missing_data)
+    return f"{summary.mean_missing_pct:.2f}% of values missing"

@@ -287,3 +287,26 @@ def safe_to_numeric(
         return convert_dataframe_column_to_numeric(data, column)
 
     raise TypeError("Input data must be a Polars DataFrame or Series.")
+
+
+def no_rows_message(data_name: str, task: str) -> str:
+    """
+    Explain that a dataset has no rows because a step or correction emptied it.
+
+    Parameters
+    ----------
+    data_name : str
+        The alias of the dataset.
+    task : str
+        What the page would do with the data, such as "check" or "analyze".
+
+    Returns
+    -------
+    str
+        The message to show.
+    """
+    return (
+        f"**{data_name}** has no rows, so there is nothing to {task}. A step on "
+        "the Prepare Data page or a correction on the Correct Data page removed "
+        "every record. Remove that step or correction to restore the data."
+    )

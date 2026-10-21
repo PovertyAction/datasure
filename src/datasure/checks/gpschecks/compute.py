@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import polars as pl
 import pydeck
@@ -51,7 +53,6 @@ def _build_tooltip_config(fields: list[str]) -> dict:
     }
 
 
-@st.cache_data(ttl=60)
 def load_default_gpschecks_settings(
     settings_file: str, config: GPSSettings
 ) -> GPSSettings:
@@ -61,7 +62,8 @@ def load_default_gpschecks_settings(
     and merges them with the provided default configuration. Saved settings
     take precedence over defaults.
 
-    Cached for 60 seconds to reduce file I/O operations.
+    Not cached: the check page rebuilds a check's widgets from these
+    settings whenever the check is opened, so they must be current.
 
     Parameters
     ----------
@@ -103,6 +105,21 @@ def _get_gps_column_settings(project_id: str, page_name_id: str) -> pl.DataFrame
         f"gps_columns_{page_name_id}",
         "logs",
     )
+
+
+def has_usable_gps_config(gps_config: pl.DataFrame, columns: list[str]) -> bool:
+    """Return whether a saved GPS column configuration fits the data.
+
+    A configuration fits when its single GPS column, or both its latitude
+    and longitude columns, are in ``columns``.
+    """
+    present = set(columns)
+    for row in gps_config.to_dicts():
+        if row.get("gps_column") in present:
+            return True
+        if {row.get("latitude_column"), row.get("longitude_column")} <= present:
+            return True
+    return False
 
 
 def _save_gps_column_settings(
@@ -535,3 +552,69 @@ def calculate_gps_accuracy_statistics(
                     break
 
     return gps_accuracy_stats
+
+
+# Words in a column name that suggest GPS data, as in "gps_lat" or "hh_lon".
+_GPS_NAME_WORDS = {"lat", "lon", "lng", "gps", "geo", "geopoint", "coords"}
+_GPS_NAME_PREFIXES = ("latitude", "longitude", "geopoint", "coordinate")
+# A SurveyCTO geopoint value: "latitude longitude [altitude [accuracy]]".
+_GEOPOINT_VALUE = r"^-?\d+(\.\d+)?( -?\d+(\.\d+)?){1,3}$"
+# Rows read at a time while looking for a text column's first values.
+_SCAN_CHUNK_ROWS = 1_000
+
+
+def _looks_like_gps_name(name: str) -> bool:
+    # Split snake_case, kebab-case, camelCase and UPPER_CASE names into
+    # lower-case words; an upper-case run is one word ("GPSLat": gps, lat).
+    words = [word.lower() for word in re.findall(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+", name)]
+    return any(
+        word in _GPS_NAME_WORDS or word.startswith(_GPS_NAME_PREFIXES) for word in words
+    )
+
+
+def _first_values(column: pl.Series, count: int) -> pl.Series:
+    """Return up to ``count`` of ``column``'s first non-null values.
+
+    Reads the column a chunk at a time and stops once enough are found, so
+    a large column is not copied whole. The null count is stored with the
+    column, so an all-null column returns at once.
+    """
+    if column.null_count() == column.len():
+        return column.clear()
+    found = column.clear()
+    for offset in range(0, column.len(), _SCAN_CHUNK_ROWS):
+        found = found.append(column.slice(offset, _SCAN_CHUNK_ROWS).drop_nulls())
+        if found.len() >= count:
+            break
+    return found.head(count)
+
+
+def find_gps_columns(data: pl.DataFrame, sample_size: int = 20) -> list[str]:
+    """Return columns that look like GPS data.
+
+    A column counts when its name suggests GPS data (for example
+    ``gps_lat`` or ``household_longitude``), or when it is a text column
+    whose first non-empty values are SurveyCTO geopoints
+    ("latitude longitude altitude accuracy").
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        The survey data.
+    sample_size : int
+        How many non-empty values of each text column to check.
+
+    Returns
+    -------
+    list[str]
+        The matching column names, in data order.
+    """
+    found = []
+    for name, dtype in data.schema.items():
+        if _looks_like_gps_name(name):
+            found.append(name)
+        elif dtype == pl.String:
+            sample = _first_values(data[name], sample_size).str.strip_chars()
+            if len(sample) and sample.str.contains(_GEOPOINT_VALUE).all():
+                found.append(name)
+    return found

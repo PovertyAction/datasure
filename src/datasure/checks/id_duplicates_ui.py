@@ -45,11 +45,6 @@ from datasure.checks.id_duplicates import (
     sort_cards,
 )
 from datasure.processing.corrections import CorrectionEntry, CorrectionProcessor
-from datasure.utils.settings_utils import (
-    load_check_settings,
-    save_check_settings,
-    trigger_save,
-)
 from datasure.utils.ui_utils import (
     confirm_dialog,
     metric_row,
@@ -58,10 +53,14 @@ from datasure.utils.ui_utils import (
     show_queued_notices,
     styled_dataframe,
 )
+from datasure.utils.view_state import view_factory
 
 logger = logging.getLogger(__name__)
 
 TAB_NAME = "duplicates"
+# Saved view state scope: the check's catalogue slug.
+VIEW_SCOPE = "duplicates"
+check_view = view_factory(VIEW_SCOPE)
 
 SURVEY_DATA = "Survey data"
 BACKCHECK_DATA = "Backcheck data"
@@ -84,7 +83,8 @@ class IdView:
     staff_col, team_col : str | None
         The enumerator (or backchecker) and team columns.
     display_cols_setting : str
-        Settings key under which the extra columns to show are saved.
+        Settings key under which older versions saved the extra columns to
+        show; a choice found there moves into the view state.
     survey_data : pl.DataFrame | None
         Survey data to match backcheck IDs against. When set, the view also
         shows unmatched ID cards.
@@ -145,15 +145,26 @@ def _keep_survey_data() -> None:
     st.session_state[_SWITCHER_KEY] = SURVEY_DATA
 
 
-def render_dataset_switcher(survey_count: int, backcheck_count: int | None) -> str:
+def render_dataset_switcher(
+    survey_count: int, backcheck_count: int | None, settings_file: str | None = None
+) -> str:
     """Render the Survey data / Backcheck data switcher and return the choice.
 
     Each option shows its number of unresolved duplicate IDs, for example
     "Survey data (3)". When `backcheck_count` is None the page has no
     backchecks: the option shows "Backcheck data (N/A)", cannot be chosen,
-    and the survey data is always returned.
+    and the survey data is always returned. With a `settings_file`, the
+    choice is saved view state.
     """
     has_backcheck = backcheck_count is not None
+    on_change = None if has_backcheck else _keep_survey_data
+    options = [SURVEY_DATA, BACKCHECK_DATA]
+    if settings_file is None:
+        widget = {"key": _SWITCHER_KEY, "on_change": on_change, "default": SURVEY_DATA}
+    else:
+        widget = check_view(settings_file).bind(
+            _SWITCHER_KEY, options=options, on_change=on_change, default=SURVEY_DATA
+        )
     labels = {
         SURVEY_DATA: f"{SURVEY_DATA} ({survey_count})",
         BACKCHECK_DATA: (
@@ -167,12 +178,10 @@ def render_dataset_switcher(survey_count: int, backcheck_count: int | None) -> s
 
     chosen = st.segmented_control(
         "Dataset",
-        options=[SURVEY_DATA, BACKCHECK_DATA],
+        options=options,
         format_func=labels.get,
-        default=SURVEY_DATA,
         required=True,
-        key=_SWITCHER_KEY,
-        on_change=None if has_backcheck else _keep_survey_data,
+        **widget,
         help=(
             "Find ID problems in the survey data or in the backcheck data. "
             "The number is the count of unresolved duplicate IDs."
@@ -184,20 +193,15 @@ def render_dataset_switcher(survey_count: int, backcheck_count: int | None) -> s
 def _render_display_cols(view: IdView, settings_file: str) -> list[str]:
     """Render the "Show more columns in report" picker and return its choice."""
     with st.expander(":material/clarify: Show more columns in report", expanded=False):
-        saved = load_check_settings(settings_file, TAB_NAME)
         options = [c for c in view.data.columns if c not in (view.id_col, view.key_col)]
-        default = [c for c in saved.get(view.display_cols_setting, []) if c in options]
+        widget_key = f"iddup_{view.name}_display_cols"
+        saved_view = check_view(settings_file)
+        saved_view.adopt_legacy(TAB_NAME, {widget_key: view.display_cols_setting})
         chosen = st.multiselect(
             label="Select additional columns to display",
             options=options,
-            default=default,
             help="Columns to show on every card and in the CSV download.",
-            key=f"iddup_{view.name}_display_cols",
-            on_change=trigger_save,
-            kwargs={"state_name": f"{TAB_NAME}_{view.display_cols_setting}"},
-        )
-        save_check_settings(
-            settings_file, TAB_NAME, {view.display_cols_setting: chosen}
+            **saved_view.bind(widget_key, options=options, multi=True, default=[]),
         )
     return chosen
 
@@ -598,18 +602,21 @@ def render_id_duplicates(view: IdView, settings_file: str) -> None:
     with sc1:
         query = st.text_input(
             "Search by ID or KEY",
-            key=f"iddup_{view.name}_search",
             placeholder="Search by ID or KEY",
-            on_change=_reset_page,
-            args=(page_key,),
+            **check_view(settings_file).keep(
+                f"iddup_{view.name}_search", on_change=_reset_page, args=(page_key,)
+            ),
         )
     with sc2:
         sort_by = st.selectbox(
             "Sort by",
             options=sort_options,
-            key=f"iddup_{view.name}_sort",
-            on_change=_reset_page,
-            args=(page_key,),
+            **check_view(settings_file).bind(
+                f"iddup_{view.name}_sort",
+                options=sort_options,
+                on_change=_reset_page,
+                args=(page_key,),
+            ),
         )
 
     found = sort_cards(search_cards(cards, query), SortBy(sort_by))

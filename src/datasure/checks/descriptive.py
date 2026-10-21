@@ -17,15 +17,31 @@ import streamlit as st
 
 from datasure.models.schemas import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
-from datasure.utils.navigations_utils import demo_callout
+from datasure.utils.navigations_utils import demo_callout, show_demo_next_action
 from datasure.utils.onboarding_utils import demo_output_onboarding
-from datasure.utils.settings_utils import (
-    load_check_settings,
-    save_check_settings,
-    trigger_save,
-)
+from datasure.utils.view_state import reset_filters_beside, view_factory
 
 TAB_NAME: str = "descriptive_stats"
+
+# Saved view state scope: the check's catalogue slug. The histogram and value
+# counts choices are personal view state; older versions saved them in the
+# check's settings and they move on first load. The selected columns and the
+# quick-select pills are the check's setup.
+VIEW_SCOPE = "descriptive"
+check_view = view_factory(
+    VIEW_SCOPE,
+    legacy=(
+        TAB_NAME,
+        {
+            "desc_hist_col": "col_to_plot",
+            "desc_hist_bins": "n_bins",
+            "desc_vc_col": "col_to_analyse",
+            "desc_vc_topn": "top_n",
+            "desc_vc_view_pills": "view",
+            "desc_vc_agg_pills": "agg_option",
+        },
+    ),
+)
 
 # Colour constants
 _ORANGE_HEX = "#f26529"
@@ -479,38 +495,20 @@ def _render_histogram(
         return
 
     col_sel, _, bins_sel = st.columns([3, 1, 2])
-
-    saved_settings = load_check_settings(setting_file, TAB_NAME) or {}
-    default_col_to_plot = saved_settings.get("col_to_plot", None)
-
-    default_col_to_plot_index = (
-        numeric_cols.index(default_col_to_plot)
-        if default_col_to_plot in numeric_cols
-        else 0
-    )
+    saved_view = check_view(setting_file)
 
     col_to_plot = col_sel.selectbox(
         "Column",
         numeric_cols,
-        index=default_col_to_plot_index,
-        key="desc_hist_col",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_col_to_plot"},
+        **saved_view.bind("desc_hist_col", options=numeric_cols, index=0),
     )
-    save_check_settings(setting_file, TAB_NAME, {"col_to_plot": col_to_plot})
-
-    default_n_bins = saved_settings.get("n_bins", 20)
 
     n_bins = bins_sel.slider(
         "Bins",
         min_value=5,
         max_value=100,
-        value=default_n_bins,
-        key="desc_hist_bins",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_n_bins"},
+        **saved_view.bind("desc_hist_bins", options=range(5, 101), value=20),
     )
-    save_check_settings(setting_file, TAB_NAME, {"n_bins": n_bins})
 
     hist_data = compute_histogram_data(df, col_to_plot, n_bins=n_bins)
     if hist_data.empty:
@@ -546,37 +544,20 @@ def _render_value_counts(
         return
 
     col_sel, _, topn_sel = st.columns([3, 1, 2])
-
-    saved_settings = load_check_settings(setting_file, TAB_NAME) or {}
-    default_col_to_analyse = saved_settings.get("col_to_analyse", None)
-    default_col_to_analyse_index = (
-        all_selected_cols.index(default_col_to_analyse)
-        if default_col_to_analyse in all_selected_cols
-        else 0
-    )
+    saved_view = check_view(setting_file)
 
     col_to_analyse = col_sel.selectbox(
         "Column",
         all_selected_cols,
-        index=default_col_to_analyse_index,
-        key="desc_vc_col",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_col_to_analyse"},
+        **saved_view.bind("desc_vc_col", options=all_selected_cols, index=0),
     )
-    save_check_settings(setting_file, TAB_NAME, {"col_to_analyse": col_to_analyse})
-
-    default_top_n = saved_settings.get("top_n", 20)
 
     top_n = topn_sel.slider(
         "Top N categories",
         5,
         50,
-        value=default_top_n,
-        key="desc_vc_topn",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_top_n"},
+        **saved_view.bind("desc_vc_topn", options=range(5, 51), value=20),
     )
-    save_check_settings(setting_file, TAB_NAME, {"top_n": top_n})
 
     vc = compute_value_counts(df, col_to_analyse, top_n=top_n)
     if vc.empty:
@@ -588,19 +569,15 @@ def _render_value_counts(
         "chart": ":material/bar_chart: Chart View",
     }
 
-    default_view = saved_settings.get("view", "table")
-
     view = st.pills(
         "Select view",
-        default=default_view,
         options=options_map.keys(),
         format_func=lambda x: options_map[x],
-        key="desc_vc_view_pills",
         help="Toggle between table and chart view for value counts",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_view"},
+        **saved_view.bind(
+            "desc_vc_view_pills", options=list(options_map), default="table"
+        ),
     )
-    save_check_settings(setting_file, TAB_NAME, {"view": view})
 
     if view == "table":
         st.dataframe(
@@ -620,7 +597,6 @@ def _render_value_counts(
             },
         )
     else:
-        default_agg_option = saved_settings.get("agg_option", "count")
         agg_options_map = {
             "count": ":material/123: Count",
             "pct": ":material/percent: Percentage",
@@ -630,13 +606,11 @@ def _render_value_counts(
             "Aggregate by",
             options=agg_options_map.keys(),
             format_func=lambda x: agg_options_map[x],
-            key="desc_vc_agg_pills",
             help="Choose whether to size bars by count or percentage",
-            default=default_agg_option,
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_agg_option"},
+            **saved_view.bind(
+                "desc_vc_agg_pills", options=list(agg_options_map), default="count"
+            ),
         )
-        save_check_settings(setting_file, TAB_NAME, {"agg_option": agg_options})
 
         # Create the figure
         fig = go.Figure()
@@ -714,7 +688,9 @@ def descriptive_report(
     columns : ColumnByType
         Column type metadata for the dataset.
     """
-    st.title("Descriptive Statistics")
+    # No settings section here, so the action sits beside the title.
+    with reset_filters_beside(check_view(setting_file), vertical_alignment="center"):
+        st.title("Descriptive Statistics")
 
     # check if DataFrame is empty before proceeding with any computations or rendering
     if data.is_empty():
@@ -745,5 +721,15 @@ def descriptive_report(
     _render_value_counts(data, selected_columns.all_columns, setting_file)
 
     demo_callout(
-        "**Next**: :material/arrow_upward: Scroll up and select the **Progress Tracking** tab."
+        "You have now explored every data quality check: **Overview** (Summary, "
+        "Progress), **Data integrity** (Missing Values, Duplicates, Outliers & "
+        "Constraints, GPS Checks), **Field team** (Enumerator Stats, Backchecks) "
+        "and **Exploration** (Descriptive Stats).\n\n"
+        "The next step is the **Correct Data** page, where you will learn how to "
+        "apply targeted corrections to your survey data based on the quality "
+        "findings from these checks.\n\n"
+        "To get there, click **Correct Data** in the sidebar or use the "
+        "**Proceed to Correct Data** button below.",
+        type="success",
     )
+    show_demo_next_action(5, "st_corr_page", "Proceed to Correct Data")

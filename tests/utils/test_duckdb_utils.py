@@ -14,7 +14,29 @@ from datasure.utils.duckdb_utils import (
     duckdb_get_imported_datasets,
     duckdb_get_table,
     duckdb_save_table,
+    name_id,
 )
+
+
+class TestNameId:
+    """name_id gives the shared identifier of a page or dataset name."""
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            ("Household Survey", "household_survey"),
+            ("Follow-up 2", "follow_up_2"),
+            ("already_an_id", "already_an_id"),
+        ],
+    )
+    def test_lowercases_and_replaces_spaces_and_hyphens(self, name, expected):
+        assert name_id(name) == expected
+
+    def test_settings_file_uses_the_same_id(self):
+        from datasure.utils.settings_utils import page_settings_file
+
+        path = page_settings_file("abcd1234", "Follow-up 2")
+        assert path.name == f"page_{name_id('Follow-up 2')}_settings.json"
 
 
 class TestValidateTableName:

@@ -12,6 +12,7 @@ This module provides comprehensive duplicate detection functionality with:
 import datetime
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import polars as pl
@@ -23,6 +24,7 @@ from datasure.checks.id_duplicates import count_resolved_ids
 from datasure.checks.id_duplicates_ui import (
     BACKCHECK_DATA,
     IdView,
+    check_view,
     count_duplicate_ids,
     render_dataset_switcher,
     render_id_duplicates,
@@ -41,6 +43,7 @@ from datasure.models.schemas import (
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding, is_demo_project
 from datasure.utils.settings_utils import (
@@ -48,6 +51,7 @@ from datasure.utils.settings_utils import (
     save_check_settings,
     trigger_save,
 )
+from datasure.utils.view_state import reset_filters_beside
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +63,6 @@ BACKCHECK_PREFIX = "backcheck_"
 # =============================================================================
 
 
-@st.cache_data(ttl=60)
 def load_default_duplicates_settings(
     settings_file: str, config: DuplicatesSettings
 ) -> DuplicatesSettings:
@@ -69,7 +72,8 @@ def load_default_duplicates_settings(
     and merges them with the provided default configuration. Saved settings
     take precedence over defaults.
 
-    Cached for 60 seconds to reduce file I/O operations.
+    Not cached: the check page rebuilds a check's widgets from these
+    settings whenever the check is opened, so they must be current.
 
     Parameters
     ----------
@@ -1747,7 +1751,9 @@ def _render_other_duplicates_table(
         col_checked = st.selectbox(
             label="Select column to check for duplicates",
             options=dup_cols,
-            key="other_dup_col_selectbox",
+            **check_view(settings_file).bind(
+                "other_dup_col_selectbox", options=dup_cols
+            ),
         )
 
     col_dups_data = compute_column_duplicates(
@@ -1758,10 +1764,6 @@ def _render_other_duplicates_table(
     )
 
     with st.expander(":material/clarify: Show more columns in report", expanded=False):
-        saved_settings = load_check_settings(settings_file, TAB_NAME)
-        default_var_table_display_cols = saved_settings.get(
-            f"{col_checked}_display_cols", []
-        )
         display_options = [
             col
             for col in data.columns
@@ -1773,20 +1775,17 @@ def _render_other_duplicates_table(
                 col_checked,
             ]
         ]
+        # Each checked column keeps its own extra columns.
+        widget_key = f"other_dup_{col_checked}_display_cols"
+        saved_view = check_view(settings_file)
+        saved_view.adopt_legacy(TAB_NAME, {widget_key: f"{col_checked}_display_cols"})
         var_table_display_cols = st.multiselect(
             label="Select additional columns to display",
             options=display_options,
             help="Select additional columns to include in the duplicates report.",
-            default=default_var_table_display_cols,
-            key="other_duplicates_table_display_cols_key",
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + f"_{col_checked}_display_cols"},
-        )
-
-        save_check_settings(
-            settings_file,
-            TAB_NAME,
-            {f"{col_checked}_display_cols": var_table_display_cols},
+            **saved_view.bind(
+                widget_key, options=display_options, multi=True, default=[]
+            ),
         )
 
         if var_table_display_cols:
@@ -2234,7 +2233,7 @@ def duplicates_report(
 
     if is_demo_project():
         demo_callout(
-            "This tab identifies duplicate records in your survey data. It has two sections:\n\n"
+            "This check identifies duplicate records in your survey data. It has two sections:\n\n"
             "- **ID Duplicates**: Records sharing the same Survey ID (e.g., two submissions "
             "with the same household ID).\n"
             "- **Other Duplicates**: Duplicates in any additional columns you configure.\n\n"
@@ -2243,15 +2242,16 @@ def duplicates_report(
         )
 
     config_settings = DuplicatesSettings(**config)
-    duplicates_settings = duplicates_report_settings(
-        project_id,
-        setting_file,
-        data,
-        config_settings,
-        categorical_columns,
-        datetime_columns,
-        backcheck_data,
-    )
+    with reset_filters_beside(check_view(setting_file)):
+        duplicates_settings = duplicates_report_settings(
+            project_id,
+            setting_file,
+            data,
+            config_settings,
+            categorical_columns,
+            datetime_columns,
+            backcheck_data,
+        )
 
     # ---- ID Duplicates --- #
     st.divider()
@@ -2306,6 +2306,7 @@ def duplicates_report(
     dataset = render_dataset_switcher(
         count_duplicate_ids(survey_view),
         None if backcheck is None else count_duplicate_ids(backcheck[0]),
+        setting_file,
     )
     if dataset == BACKCHECK_DATA and backcheck is not None:
         backcheck_view, backcheck_records = backcheck
@@ -2387,5 +2388,87 @@ def duplicates_report(
     )
 
     demo_callout(
-        "**Next**: :material/arrow_upward: Scroll up and select the **Outliers & Constraints** tab."
+        "**Next**: :material/arrow_upward: Scroll up and select **Data integrity → Outliers & Constraints**."
     )
+
+
+def duplicates_status(
+    setting_file: str, config: dict, columns: Sequence[str]
+) -> StatusResult:
+    """Return the duplicates check's status for the check page navigation.
+
+    The check is not set up without a survey ID column, saved in the
+    duplicates settings or set on the Configure Checks page, or when that
+    column is not in the data.
+
+    Parameters
+    ----------
+    setting_file : str
+        Path to the page's settings file.
+    config : dict
+        The page's configuration, with a ``survey_id`` key.
+    columns : Sequence[str]
+        The survey data's columns.
+    """
+    settings = {**config, **load_check_settings(setting_file, TAB_NAME)}
+    survey_id = settings.get("survey_id")
+    if not survey_id:
+        return StatusResult(
+            CheckStatus.NOT_SET_UP,
+            "Select a survey ID column in the settings below to find duplicate IDs.",
+        )
+    if survey_id not in columns:
+        return StatusResult(
+            CheckStatus.NOT_SET_UP,
+            f"The survey ID column '{survey_id}' is not in this dataset. "
+            "Select another in the settings below.",
+        )
+    return READY
+
+
+def duplicates_headline(data: pl.DataFrame, setting_file: str, config: dict) -> str:
+    """Return the duplicates headline for the Summary health grid.
+
+    The number of unresolved duplicate survey IDs among the records the saved
+    Records to Include filter keeps: the count the check's Survey data
+    switcher shows.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        The survey data.
+    setting_file : str
+        Path to the page's settings file.
+    config : dict
+        The page configuration the check starts from.
+
+    Raises
+    ------
+    ValueError
+        If the saved Records to Include filter cannot be applied.
+    """
+    settings = load_default_duplicates_settings(
+        setting_file, DuplicatesSettings(**config)
+    )
+    records = filter_records_to_include(
+        data, saved_records_to_include(setting_file), "survey"
+    )
+    if records.error:
+        # An invalid filter checks no records, so a count would read as zero.
+        raise ValueError(
+            f"The survey Records to Include filter could not be applied: "
+            f"{records.error}"
+        )
+    count = count_duplicate_ids(
+        IdView(
+            name="survey",
+            data=records.data,
+            id_col=settings.survey_id,
+            key_col=settings.survey_key,
+            date_col=settings.survey_date,
+            staff_col=settings.enumerator,
+            team_col=settings.team,
+            display_cols_setting="id_table_display_cols",
+        )
+    )
+    return f"{count:,} duplicate ID{'' if count == 1 else 's'}"

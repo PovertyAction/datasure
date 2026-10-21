@@ -2040,7 +2040,7 @@ class TestCreateDescriptiveStats:
 
 
 class TestFlaggedValuePercent:
-    """The share of checked values flagged as outliers, for the Summary tab."""
+    """The share of checked values flagged, for the Outliers health card."""
 
     def test_share_of_non_null_values_flagged(self):
         flags = pl.DataFrame(

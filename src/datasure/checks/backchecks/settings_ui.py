@@ -492,7 +492,7 @@ def _render_additional_options(
         st.caption(
             "Records whose survey ID is duplicated, in the survey or the "
             "backcheck data, are left out of the comparison until the "
-            "duplicate is resolved on the Duplicates tab."
+            "duplicate is resolved in the Duplicates check."
         )
 
         # No differences settings

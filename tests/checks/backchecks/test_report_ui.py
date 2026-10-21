@@ -54,11 +54,6 @@ def patched_bc():
     mock_st = make_mock_st()
     with (
         patch("datasure.checks.backchecks.report_ui.st", mock_st),
-        patch("datasure.checks.backchecks.report_ui.save_check_settings"),
-        patch(
-            "datasure.checks.backchecks.report_ui.load_check_settings", return_value={}
-        ),
-        patch("datasure.checks.backchecks.report_ui.trigger_save"),
         patch(
             "datasure.checks.backchecks.report_ui.duckdb_get_table",
             return_value=pl.DataFrame(),
@@ -95,9 +90,6 @@ def bc():
         settings_ui_module.save_check_settings = MagicMock()
         settings_ui_module.trigger_save = MagicMock()
 
-        report_ui_module.load_check_settings = MagicMock(return_value={})
-        report_ui_module.save_check_settings = MagicMock()
-        report_ui_module.trigger_save = MagicMock()
         report_ui_module.duckdb_get_table = MagicMock(return_value=pl.DataFrame())
         report_ui_module.duckdb_save_table = MagicMock()
         report_ui_module.demo_callout = MagicMock()
@@ -662,6 +654,13 @@ def test_render_backcheck_comparison_results_with_data(patched_bc):
         )
 
     patched_bc.dataframe.assert_called()
+    # The column filter gets its options; binding it must not swallow them.
+    filter_call = next(
+        c
+        for c in patched_bc.multiselect.call_args_list
+        if c.args[0] == "Filter by Columns"
+    )
+    assert filter_call.args[1] == ["age", "income"]
 
 
 def test_render_backchecks_column_actions_empty(patched_bc):

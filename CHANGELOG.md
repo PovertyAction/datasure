@@ -7,7 +7,185 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0a3] - 2026-10-21
+
+### Added
+
+- **Check status** (#374): Every check has a cheap status that returns a
+  `StatusResult` (ready, not set up, not applicable or error, with a reason)
+  from page configuration and data shape only. Checks with their own
+  conditions expose a status function (`duplicates_status`,
+  `outliers_status`, `gpschecks_status`, `enumerator_status`,
+  `backchecks_status`); Summary, Progress, Missing Values and Descriptive
+  Stats share one row-count status in the catalogue (`rows_status`). GPS Checks is not applicable
+  when no column looks like GPS data (`find_gps_columns`,
+  `checks/gpschecks/compute.py`); Backchecks is not set up without a
+  backcheck dataset
+- **Shared navigation** (#374): `utils/navigation.py` is a pure resolver
+  (`resolve_nav`, `group_selection`, `with_errors`, `nav_label`) and
+  `utils/nav_ui.py` the Streamlit helper (`resolve_selection`, `draw_nav`,
+  `select_nav_item`, `render_selected`, `run_guarded`, `guarded_status`),
+  for reuse by Prepare Data and Corrections
+- **Saved view state** (#375): `utils/view_state.py` keeps the last selected
+  check and each check's filter, selection and sort widget values in a
+  `view_state` section of the page settings file (`ViewState.bind`,
+  `bind_widget`, `saved_selection`, `save_selection`). Saved values that no
+  longer match the data are dropped. Each check gets a "Reset filters" action
+  (`reset_filters_button`) that clears only its own view state, beside its
+  settings section (`reset_filters_beside`), or beside its title on Missing
+  Values and Descriptive Stats. `ViewState`
+  takes any settings file, for reuse by Prepare Data and Corrections
+- **Summary check health grid** (#376): After Progress, Summary shows a card
+  for every other catalogue check with its group, status (text and icon) and
+  either a headline or the reason it is not ready. "Open →" (ready or error)
+  and "Set up →" (not set up) select the check through `select_nav_item`, so
+  `?check=` follows (`checks/health.py`: `health_cards`,
+  `render_health_grid`)
+  - Six checks expose a headline function, registered as
+    `CheckEntry.headline`: `progress_headline` (share of target, or
+    submissions), `missing_headline` (mean % of values missing),
+    `duplicates_headline` (unresolved duplicate IDs after Records to
+    Include), `outliers_headline` (total outliers with the share of checked
+    values flagged, and constraint violations, accepted flags left out),
+    `enumerator_headline` (enumerators active in the past 7 days out of all)
+    and `backchecks_headline` (total error rate).
+    Descriptive Stats shows status only
+  - Headlines run only for ready checks and are cached on the page's data,
+    settings files, the logs and intermediate databases and the date; a
+    headline that raises is shown on its card and not cached
+  - `outliers_headline` computes the check's results without rendering it
+    (`_reviewed_flags`); `database_path` (`utils/duckdb_utils.py`) returns a
+    project database's file path; `CHECK_PARAM` and `check_nav_key` move to
+    `checks/catalogue.py`
+
+### Changed
+
+- **Check page opens on the last viewed check** (#375): With no `?check=`
+  URL parameter, a check page opens on the check last viewed on it, also in
+  a new session. A valid URL parameter still wins
+- **View state stays local** (#375): Project configuration exports leave out
+  `view_state` (`without_view_state`), and the filters older versions saved
+  with check settings even before the check is opened (`LEGACY_VIEW_KEYS`,
+  `utils/view_state.py`). Applying a configuration keeps
+  the local `view_state` and ignores any in the bundle
+  (`utils/project_config.py`)
+- **Check page navigation** (#374): The nine check tabs are replaced by a
+  segmented control for the group (Overview, Data integrity, Field team,
+  Exploration) and pills for that group's checks, with short labels
+  (Progress, Enumerator Stats, Backchecks, Descriptive Stats). Only the
+  selected check's report runs. The `check` URL query parameter reflects and
+  drives the selection; Summary is the default
+  (`render_checks`, `views/output_view_template.py`)
+  - One catalogue lists every check (`CHECK_CATALOGUE`,
+    `checks/catalogue.py`); `PageConfig` and `CheckData` move to
+    `checks/context.py`
+  - Checks that are not ready are muted with a text and icon marker and open
+    to an empty state with the reason; not-set-up checks then show their
+    settings
+  - A check that raises shows an error state with the traceback and is marked
+    in the navigation; the rest of the page keeps working
+  - Onboarding and demo guidance describe the new navigation; the unused
+    `CheckPage` enum is removed
+- **Prepare Data navigation** (#377): The per-dataset tabs are replaced by one
+  wrapping row of pills, and only the selected dataset's preparation UI
+  renders (`render_dataset`, `views/prep_view.py`)
+  - Every dataset's prep table is still seeded from raw on each page load
+    (`seed_prep_from_raw`), so Configure Checks and the replication package
+    see datasets never opened on Prepare Data
+  - Datasets with no imported rows are muted with a reason
+    (`dataset_status`); a status that raises marks only that dataset
+    (`guarded_status`), and `render_dataset` takes the dataset's nav item
+    instead of computing its status again
+  - The `dataset` URL query parameter reflects and drives the selection,
+    which is saved in the `view_state` of `prep_view_settings.json`
+  - `prep_add_step` and `prep_remove_step` take the dataset and its step
+    index as arguments instead of reading the page's loop variables
+- **Corrections navigation** (#377): The per-check-page tabs are replaced by
+  one wrapping row of pills, and only the selected check page's corrections
+  render. Configuration is still loaded by the page's position in
+  `check_config` (`render_selected_check_page`, `views/correction_view.py`)
+  - The selection follows the `page` URL query parameter (the page's
+    `page_name_id`), then the check page last viewed, also in an earlier
+    session (`last_check_page` in `project_view_settings.json`, written by
+    `render_checks` only when it changes; a URL value leaves it in place),
+    then the selection saved in `correction_view_settings.json`, then the
+    first page
+  - Check pages with no survey KEY column or no imported survey data are
+    muted with a reason (`check_page_status`)
+  - The Survey data / Backcheck data selector (`choose_dataset`) and the
+    Correction Log filters are saved in `view_state` per check page, with a
+    Reset filters action
+  - Prepare Data's preview has a "Columns to show" filter, saved in
+    `view_state` per dataset, with a Reset filters action beside the
+    "Preview Prepared Data" header
+  - Onboarding text and the user guide describe both pages' pills
+
+### Removed
+
+- **Summary's Data Quality section** (#378): Removed in favor of the check
+  health grid, which now follows Progress. Its four donuts duplicated the
+  Duplicates, Missing Values, Outliers & Constraints and Backchecks health
+  cards but were computed differently (duplicates on Summary's own ID column
+  and the raw data, missing values without missing codes), so Summary could
+  show two different numbers for one check. The health cards use each
+  check's own settings and corrections
+  - Summary's Survey ID setting, which only fed the duplicates donut, is
+    removed; `summary_settings` returns `(date, target)` and
+    `SummarySettings` has no `survey_id`
+  - Removed `summary_data_quality`, `calculate_data_quality_metrics`,
+    `compute_summary_data_quality`, `DataQualityMetrics` and `CheckRates`
+    (`checks/summary.py`), `summary_report(check_rates=...)` and
+    `flagged_outlier_percent` (`checks/outliers/report_ui.py`)
+  - The outlier rate and backcheck error rate stay on Summary, in the
+    Outliers & Constraints and Backchecks card headlines
+  - The demo guidance moves to the health grid (`summary_check_health` in
+    `checks/catalogue.py`)
+
 ### Fixed
+
+- **Summary, Progress and Missing Values filters are view state** (#373):
+  Their filters, selections and time periods were saved with the check's
+  settings, so they were exported, copied by templates and not cleared by
+  Reset filters. They now bind to the check's `view_state` scope
+  (`check_view` in `checks/summary.py`, `checks/progress.py`,
+  `checks/missing.py`). An older settings file still loads: the values move
+  from the check's settings into view state on first use
+  (`ViewState.adopt_legacy`, `view_factory(..., legacy=...)`)
+- **The other checks' view choices are view state too** (#375): The
+  Descriptive Stats histogram and value counts choices, the enumerator
+  periods, columns and statistics, the backcheck productivity period and
+  staff statistics view, the outliers inspected column and the extra report
+  columns of duplicates and outliers were still saved with the check's
+  settings. They now bind to the check's `view_state` scope and move there
+  from older settings files on first use. The enumerator productivity period
+  is now restored (it was saved under a different key than it was read
+  from), and the two enumerator week start pickers no longer overwrite each
+  other
+- **GPS detection choices are remembered** (#375): The GPS outlier
+  detection method and clustering column and the comparison distance
+  threshold reset whenever the user switched checks. They are now view state
+- **A stale GPS configuration is not set up** (#374): GPS Checks counted as
+  ready when its saved configuration's columns were missing from the data,
+  as long as another column looked like GPS data. It is now not set up, with
+  the reason (`gpschecks_status`)
+- **Corrections empty state** (#377): A dimmed check page shows the shared
+  not-set-up or error state (`nav_ui.render_empty_state`) instead of its own
+  message
+- **Not-applicable checks keep their settings** (#373): A not-applicable
+  check shows its settings section under the empty state
+  (`CheckEntry.settings`, `render_selected(settings=...)`;
+  `outliers_settings_section`, `gpschecks_settings_section`,
+  `backchecks_settings_section`). Backchecks' not-set-up message now points
+  to the linked page instead of "Set it up below" (`CheckEntry.setup_hint`)
+- **GPS Checks lockout** (#373): A saved GPS column configuration whose
+  columns are in the data makes GPS Checks ready, whatever the columns are
+  named, so the name heuristic no longer hides a configured check
+  (`has_usable_gps_config`, `checks/gpschecks/compute.py`)
+- **Check settings** (#374): The progress, duplicates, GPS and enumerator
+  settings loaders no longer cache for 60 seconds, so a check opened again
+  shows the settings saved a moment ago (`load_default_settings`,
+  `load_default_duplicates_settings`, `load_default_gpschecks_settings`,
+  `load_default_enumerator_settings`)
 
 - **Summary tab data quality** (#358): The outlier % and back check error
   rate tiles show the values from the Outliers & Constraints and Backcheck

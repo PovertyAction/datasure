@@ -160,7 +160,7 @@ class TestIdProblems:
         assert warning == (
             "2 duplicate survey IDs, 1 duplicate backcheck ID and 3 unmatched "
             "backcheck IDs are left out of the comparison. Resolve them on the "
-            "Duplicates tab to include them."
+            "Duplicates check to include them."
         )
 
     def test_no_warning_without_problems(self):

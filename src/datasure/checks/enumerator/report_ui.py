@@ -23,14 +23,41 @@ from datasure.checks.enumerator.models import (
     StatisticsOvertimeSettings,
     StatisticsSettings,
 )
-from datasure.checks.enumerator.settings_ui import enumerator_report_settings
+from datasure.checks.enumerator.settings_ui import (
+    enumerator_report_settings,
+    load_default_enumerator_settings,
+)
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import duckdb_get_table
+from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
-from datasure.utils.settings_utils import (
-    load_check_settings,
-    save_check_settings,
-    trigger_save,
+from datasure.utils.settings_utils import load_check_settings
+from datasure.utils.view_state import (
+    ViewState,
+    bind_widget,
+    reset_filters_beside,
+    view_factory,
+)
+
+# Saved view state scope: the check's catalogue slug. The report's periods,
+# columns and statistics are personal view state; older versions saved them in
+# the check's settings and they move on first load. Both week start pickers
+# saved under "weekstartday"; the statistics over time one was saved last.
+VIEW_SCOPE = "enumerator"
+check_view = view_factory(
+    VIEW_SCOPE,
+    legacy=(
+        TAB_NAME,
+        {
+            "time_period_enumerator_productivity_key": "time_period",
+            "selected_columns_enumerator": "statscols",
+            "statistics_options_enumerator": "stats",
+            "project_enumerator_statistics_overtime_period_pills": "period_overtime",
+            "project_week_start_day_enumerator_overtime": "weekstartday",
+            "enumerator_statistics_overtime_stat": "stat",
+            "enumerator_statistics_overtime_column": "statscol",
+        },
+    ),
 )
 
 # =============================================================================
@@ -136,8 +163,11 @@ def _render_enumerator_summary_table(
     team: str | None,
     formversion: str | None,
     duration: str | None,
+    view: ViewState | None = None,
 ) -> None:
     """Display enumerator summary table.
+
+    The summary information chosen is saved to ``view``.
 
     Shows comprehensive enumerator statistics including submission counts,
     duration, missing data, consent rates, and outcome rates with styled
@@ -195,9 +225,11 @@ def _render_enumerator_summary_table(
             "Select Summary Information to Display",
             options=options_map.keys(),
             format_func=lambda x: options_map[x],
-            key="show_info_enumerator",
             help="Select which summary information to display in the table",
             selection_mode="multi",
+            **bind_widget(
+                view, "show_info_enumerator", options=list(options_map), multi=True
+            ),
         )
 
     # Define column groups
@@ -386,9 +418,9 @@ def _render_enumerator_productivity_table(
     settings_file : str
         Path to settings file for saving/loading configurations.
     """
-    time_period = _render_time_period_selector(settings_file, tab_name=TAB_NAME)
+    time_period = _render_time_period_selector(settings_file)
     if time_period == "Week":
-        weekstartday = _render_weekday_selector(settings_file, tab_name=TAB_NAME)
+        weekstartday = _render_weekday_selector(settings_file)
     else:
         weekstartday = "MON"  # Default value, not used for non-weekly periods
 
@@ -423,19 +455,17 @@ def _render_enumerator_productivity_table(
 
 def _render_time_period_selector(
     settings_file: str,
-    tab_name: str = TAB_NAME,
 ) -> Literal["Day", "Week", "Month"]:
     """Render time period selector widget using pills interface.
 
     Displays a pills widget allowing users to choose the time aggregation period
-    for productivity analysis (Day, Week, or Month).
+    for productivity analysis (Day, Week, or Month). The choice is saved view
+    state.
 
     Parameters
     ----------
     settings_file : str
-        Path to settings file for saving/loading configurations.
-    tab_name : str
-        Name of the tab for settings storage (default: TAB_NAME).
+        Path to the page settings file holding the view state.
 
     Returns
     -------
@@ -448,67 +478,51 @@ def _render_time_period_selector(
         "Month": ":material/calendar_month: Monthly",
     }
 
-    saved_settings = load_check_settings(settings_file, tab_name) or {}
-    default_time_period = saved_settings.get(
-        "time_period_enumerator_productivity", "Day"
-    )
-
     with st.container(horizontal_alignment="left"):
         time_period = st.pills(
             label="Time Period",
             options=options_map.keys(),
             format_func=lambda x: options_map[x],
-            key="time_period_enumerator_productivity_key",
-            default=default_time_period,
             help="Select time period for aggregating productivity",
             selection_mode="single",
-            on_change=trigger_save,
-            kwargs={"state_name": tab_name + "_time_period"},
+            **check_view(settings_file).bind(
+                "time_period_enumerator_productivity_key",
+                options=list(options_map),
+                default="Day",
+            ),
         )
-        save_check_settings(settings_file, tab_name, {"time_period": time_period})
 
     return time_period or "Day"
 
 
-def _render_weekday_selector(
-    settings_file: str,
-    tab_name: str = TAB_NAME,
-) -> str:
+def _render_weekday_selector(settings_file: str) -> str:
     """Render weekday selector widget for productivity analysis.
 
     Displays a selectbox allowing users to choose the first day of the week
-    for weekly productivity calculations.
+    for weekly productivity calculations. The choice is saved view state.
 
     Parameters
     ----------
     settings_file : str
-        Path to settings file for saving/loading configurations.
-    tab_name : str
-        Name of the tab for settings storage (default: TAB_NAME).
+        Path to the page settings file holding the view state.
 
     Returns
     -------
     str
         Weekday offset code (e.g., "SUN", "MON") for calculations.
     """
-    saved_settings = load_check_settings(settings_file, tab_name) or {}
-    default_weekstartday_sel = saved_settings.get(
-        "weekstartday_enumerator_productivity", "Monday"
-    )
-    default_weekstartday_sel_index = WEEKDAY_NAMES.index(default_weekstartday_sel)
-
     cl1, _ = st.columns([1, 3])
     with cl1:
         weekstartday_sel = st.selectbox(
             label="Select the first day of the week",
             options=WEEKDAY_NAMES,
-            index=default_weekstartday_sel_index,
-            key="week_start_day_enumerator_productivity_key",
             help="Select the first day of the week",
-            on_change=trigger_save,
-            kwargs={"state_name": tab_name + "_weekstartday"},
+            **check_view(settings_file).bind(
+                "week_start_day_enumerator_productivity_key",
+                options=WEEKDAY_NAMES,
+                index=WEEKDAY_NAMES.index("Monday"),
+            ),
         )
-    save_check_settings(settings_file, tab_name, {"weekstartday": weekstartday_sel})
 
     return WEEKDAY_OFFSET_MAP[weekstartday_sel]
 
@@ -516,27 +530,6 @@ def _render_weekday_selector(
 # =============================================================================
 # Display Functions - Statistics
 # =============================================================================
-
-
-def _load_statistics_settings(settings_file: str) -> StatisticsSettings:
-    """Load and validate statistics settings from file.
-
-    Parameters
-    ----------
-    settings_file : str
-        Path to settings file.
-
-    Returns
-    -------
-    StatisticsSettings
-        Validated statistics settings.
-    """
-    saved_settings = load_check_settings(settings_file, TAB_NAME) or {}
-    try:
-        return StatisticsSettings(**saved_settings)
-    except ValueError:
-        # Return default settings if validation fails
-        return StatisticsSettings()
 
 
 def _get_numeric_columns(
@@ -578,7 +571,7 @@ def _render_column_selector(
     default_cols : list[str] | None
         Default selected columns.
     settings_file : str
-        Path to settings file.
+        Path to the page settings file holding the view state.
 
     Returns
     -------
@@ -588,13 +581,14 @@ def _render_column_selector(
     selected_cols = st.multiselect(
         label="Select columns:",
         options=numeric_cols,
-        default=default_cols,
         help="Select columns to include in statistics",
-        key="selected_columns_enumerator",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_statscols"},
+        **check_view(settings_file).bind(
+            "selected_columns_enumerator",
+            options=numeric_cols,
+            multi=True,
+            default=default_cols,
+        ),
     )
-    save_check_settings(settings_file, TAB_NAME, {"statscols": selected_cols})
     return selected_cols
 
 
@@ -609,7 +603,7 @@ def _render_statistics_selector(
     default_stats : list[str]
         Default selected statistics.
     settings_file : str
-        Path to settings file.
+        Path to the page settings file holding the view state.
 
     Returns
     -------
@@ -619,13 +613,14 @@ def _render_statistics_selector(
     selected_stats = st.multiselect(
         "Select statistics:",
         options=ALLOWED_STATISTICS,
-        default=default_stats,
         help="Select statistics to calculate",
-        key="statistics_options_enumerator",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_stats"},
+        **check_view(settings_file).bind(
+            "statistics_options_enumerator",
+            options=ALLOWED_STATISTICS,
+            multi=True,
+            default=default_stats,
+        ),
     )
-    save_check_settings(settings_file, TAB_NAME, {"stats": selected_stats})
     return selected_stats
 
 
@@ -660,8 +655,8 @@ def _render_enumerator_statistics_table(
         )
         return
 
-    # Load and validate settings using Pydantic
-    settings = _load_statistics_settings(settings_file)
+    # Widget defaults; the user's choices are saved view state
+    settings = StatisticsSettings()
 
     # Build exclusion list for numeric columns
     exclude_cols = [enumerator, "consent_granted_agg_col", "completed_survey_agg_col"]
@@ -746,29 +741,6 @@ def _render_enumerator_statistics(
     )
 
 
-def _load_statistics_overtime_settings(
-    settings_file: str,
-) -> StatisticsOvertimeSettings:
-    """Load and validate statistics overtime settings from file.
-
-    Parameters
-    ----------
-    settings_file : str
-        Path to settings file.
-
-    Returns
-    -------
-    StatisticsOvertimeSettings
-        Validated statistics overtime settings.
-    """
-    saved_settings = load_check_settings(settings_file, TAB_NAME) or {}
-    try:
-        return StatisticsOvertimeSettings(**saved_settings)
-    except ValueError:
-        # Return default settings if validation fails
-        return StatisticsOvertimeSettings()
-
-
 def _render_period_selector_overtime(
     settings_file: str,
     default_period: str = "Week",
@@ -780,7 +752,7 @@ def _render_period_selector_overtime(
     default_period : str
         Default selected period.
     settings_file : str
-        Path to settings file.
+        Path to the page settings file holding the view state.
 
     Returns
     -------
@@ -796,14 +768,14 @@ def _render_period_selector_overtime(
         label="Select Time Period:",
         options=options_map.keys(),
         format_func=lambda x: options_map[x],
-        default=default_period,
-        key="project_enumerator_statistics_overtime_period_pills",
         help="Select time period for aggregating statistics",
         selection_mode="single",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_period_overtime"},
+        **check_view(settings_file).bind(
+            "project_enumerator_statistics_overtime_period_pills",
+            options=list(options_map),
+            default=default_period,
+        ),
     )
-    save_check_settings(settings_file, TAB_NAME, {"period_overtime": period})
     return period or "Day"
 
 
@@ -818,25 +790,23 @@ def _render_weekday_selector_overtime(
     default_weekday : str
         Default selected weekday.
     settings_file : str
-        Path to settings file.
+        Path to the page settings file holding the view state.
 
     Returns
     -------
     str
         Selected weekday offset code (e.g., "SUN", "MON").
     """
-    default_weekday_index = WEEKDAY_NAMES.index(default_weekday)
-
     weekday_sel = st.selectbox(
         label="Select the first day of the week",
         options=WEEKDAY_NAMES,
-        index=default_weekday_index,
         help="Select the first day of the week",
-        key="project_week_start_day_enumerator_overtime",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_weekstartday_overtime"},
+        **check_view(settings_file).bind(
+            "project_week_start_day_enumerator_overtime",
+            options=WEEKDAY_NAMES,
+            index=WEEKDAY_NAMES.index(default_weekday),
+        ),
     )
-    save_check_settings(settings_file, TAB_NAME, {"weekstartday": weekday_sel})
 
     return WEEKDAY_OFFSET_MAP[weekday_sel]
 
@@ -852,25 +822,23 @@ def _render_statistic_selector(
     default_stat : str
         Default selected statistic.
     settings_file : str
-        Path to settings file.
+        Path to the page settings file holding the view state.
 
     Returns
     -------
     str
         Selected statistic.
     """
-    default_stat_index = ALLOWED_STATISTICS_OVERTIME.index(default_stat)
-
     stat = st.selectbox(
         label="Select statistic:",
         options=ALLOWED_STATISTICS_OVERTIME,
-        index=default_stat_index,
         help="Select statistic to calculate over time",
-        key="enumerator_statistics_overtime_stat",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_stat_overtime"},
+        **check_view(settings_file).bind(
+            "enumerator_statistics_overtime_stat",
+            options=ALLOWED_STATISTICS_OVERTIME,
+            index=ALLOWED_STATISTICS_OVERTIME.index(default_stat),
+        ),
     )
-    save_check_settings(settings_file, TAB_NAME, {"stat": stat})
     return stat
 
 
@@ -888,7 +856,7 @@ def _render_column_selector_single(
     default_col : str | None
         Default selected column.
     settings_file : str
-        Path to settings file.
+        Path to the page settings file holding the view state.
 
     Returns
     -------
@@ -904,13 +872,13 @@ def _render_column_selector_single(
     statscol = st.selectbox(
         label="Select column:",
         options=numeric_cols,
-        index=default_col_index,
         help="Select column to include in statistics",
-        key="enumerator_statistics_overtime_column",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_statscol_overtime"},
+        **check_view(settings_file).bind(
+            "enumerator_statistics_overtime_column",
+            options=numeric_cols,
+            index=default_col_index,
+        ),
     )
-    save_check_settings(settings_file, TAB_NAME, {"statscol": statscol})
     return statscol
 
 
@@ -944,8 +912,8 @@ def _render_enumerator_statistics_overtime_table(
     if not (enumerator and date):
         return
 
-    # Load and validate settings using Pydantic
-    settings = _load_statistics_overtime_settings(settings_file)
+    # Widget defaults; the user's choices are saved view state
+    settings = StatisticsOvertimeSettings()
 
     # Build exclusion list for numeric columns
     exclude_cols = [enumerator, "consent_granted_agg_col", "completed_survey_agg_col"]
@@ -1095,7 +1063,7 @@ def enumerator_report(
 
     demo_callout(
         """
-        This tab tracks enumerator performance across your survey dataset.
+        This check tracks enumerator performance across your survey dataset.
 
         It has four sections:
         - **Enumerator Overview**: 8 summary metrics at the top.
@@ -1118,24 +1086,18 @@ def enumerator_report(
 
     config_settings = EnumeratorSettings(**config)
 
-    enumerator_settings = enumerator_report_settings(
-        project_id,
-        setting_file,
-        data,
-        config_settings,
-        categorical_columns,
-        datetime_columns,
-    )
+    with reset_filters_beside(check_view(setting_file)):
+        enumerator_settings = enumerator_report_settings(
+            project_id,
+            setting_file,
+            data,
+            config_settings,
+            categorical_columns,
+            datetime_columns,
+        )
 
     # get data for enumerator report
-    data_enum_report = duckdb_get_table(
-        project_id,
-        "enumerator_data_with_consent_outcome",
-        "intermediate",
-    )
-
-    if data_enum_report.is_empty():
-        data_enum_report = data
+    data_enum_report = _enumerator_data(project_id, data)
 
     demo_callout(
         """
@@ -1182,6 +1144,7 @@ def enumerator_report(
         enumerator_settings.team,
         enumerator_settings.formversion,
         enumerator_settings.duration,
+        check_view(setting_file),
     )
 
     st.write("---")
@@ -1253,5 +1216,78 @@ def enumerator_report(
     )
 
     demo_callout(
-        "**Next**: :material/arrow_upward: Scroll up and select the **Backcheck Analysis** tab."
+        "**Next**: :material/arrow_upward: Scroll up and select **Field team → Backchecks**."
+    )
+
+
+def enumerator_status(setting_file: str, config: dict) -> StatusResult:
+    """Return the enumerator check's status for the check page navigation.
+
+    The check is not set up without an enumerator column and a survey date
+    column, saved in its settings or set on the Configure Checks page.
+    """
+    settings = {**config, **load_check_settings(setting_file, TAB_NAME)}
+    missing = [
+        label
+        for key, label in (
+            ("enumerator", "an enumerator column"),
+            ("survey_date", "a survey date column"),
+        )
+        if not settings.get(key)
+    ]
+    if missing:
+        return StatusResult(
+            CheckStatus.NOT_SET_UP,
+            f"Select {' and '.join(missing)} in the settings below.",
+        )
+    return READY
+
+
+def _enumerator_data(project_id: str, data: pl.DataFrame) -> pl.DataFrame:
+    """Return the data the report uses: with consent and outcome, if saved."""
+    with_outcome = duckdb_get_table(
+        project_id, "enumerator_data_with_consent_outcome", "intermediate"
+    )
+    return data if with_outcome.is_empty() else with_outcome
+
+
+def enumerator_headline(
+    project_id: str, data: pl.DataFrame, setting_file: str, config: dict
+) -> str | None:
+    """Return the enumerator headline for the Summary health grid.
+
+    The active enumerators (past 7 days) out of all enumerators, as the
+    check's overview shows them. The check has no flagged-enumerator count,
+    so the headline does not invent one.
+
+    Parameters
+    ----------
+    project_id : str
+        The project identifier.
+    data : pl.DataFrame
+        The survey data.
+    setting_file : str
+        Path to the page's settings file.
+    config : dict
+        The page configuration the check starts from.
+
+    Returns
+    -------
+    str | None
+        For example "4 of 12 enumerators active in the past 7 days", or None
+        when the enumerator or survey date column is not set or there is no
+        data.
+    """
+    settings = load_default_enumerator_settings(
+        setting_file, EnumeratorSettings(**config)
+    )
+    report_data = _enumerator_data(project_id, data)
+    if not (settings.enumerator and settings.survey_date) or report_data.is_empty():
+        return None
+    metrics = compute_enumerator_overview(
+        report_data, settings.survey_date, settings.enumerator, settings.team
+    )
+    return (
+        f"{metrics.num_active_enumerators:,} of {metrics.num_enumerators:,} "
+        "enumerators active in the past 7 days"
     )

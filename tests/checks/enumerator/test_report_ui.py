@@ -1,7 +1,9 @@
 """Tests for datasure.checks.enumerator.report_ui."""
 
 import importlib
+import json
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import polars as pl
@@ -9,8 +11,6 @@ import pytest
 
 from datasure.checks.enumerator.report_ui import (
     _get_numeric_columns,
-    _load_statistics_overtime_settings,
-    _load_statistics_settings,
     _render_column_selector,
     _render_column_selector_single,
     _render_enumerator_overview_metrics,
@@ -25,6 +25,7 @@ from datasure.checks.enumerator.report_ui import (
     _render_weekday_selector_overtime,
 )
 from datasure.models.schemas import ColumnByType
+from datasure.utils.view_state import ViewState
 from tests.checks.enumerator.conftest import make_mock_st
 
 # ============================================
@@ -38,11 +39,9 @@ def patched_enum():
     mock_st = make_mock_st()
     with (
         patch("datasure.checks.enumerator.report_ui.st", mock_st),
-        patch("datasure.checks.enumerator.report_ui.save_check_settings"),
         patch(
             "datasure.checks.enumerator.report_ui.load_check_settings", return_value={}
         ),
-        patch("datasure.checks.enumerator.report_ui.trigger_save"),
         patch(
             "datasure.checks.enumerator.report_ui.duckdb_get_table",
             return_value=pl.DataFrame(),
@@ -211,12 +210,6 @@ def test_render_weekday_selector(patched_enum):
     assert result == "SUN"
 
 
-def test_load_statistics_settings_default(patched_enum):
-    """_load_statistics_settings returns default StatisticsSettings."""
-    result = _load_statistics_settings("settings.json")
-    assert result.stats == ["count", "mean"]
-
-
 def test_render_column_selector(patched_enum):
     """_render_column_selector returns list from multiselect."""
     result = _render_column_selector(["age", "income"], None, "settings.json")
@@ -235,12 +228,6 @@ def test_render_enumerator_statistics_no_enum(patched_enum):
     """_render_enumerator_statistics shows info when enumerator is None."""
     _render_enumerator_statistics(pl.DataFrame(), None, None, "settings.json")
     patched_enum.info.assert_called()
-
-
-def test_load_statistics_overtime_settings_default(patched_enum):
-    """_load_statistics_overtime_settings returns default settings."""
-    result = _load_statistics_overtime_settings("settings.json")
-    assert result.stat == "count"
 
 
 def test_render_period_selector_overtime_default(patched_enum):
@@ -299,24 +286,63 @@ def test_render_enumerator_statistics_overtime_no_enum(patched_enum):
     patched_enum.info.assert_called()
 
 
-def test_load_statistics_settings_fallback(patched_enum):
-    """_load_statistics_settings returns defaults when saved settings invalid."""
-    with patch(
-        "datasure.checks.enumerator.report_ui.load_check_settings",
-        return_value={"stats": ["not_a_real_stat"]},
-    ):
-        result = _load_statistics_settings("settings.json")
-    assert result.stats == ["count", "mean"]
+# ============================================
+# SAVED VIEW STATE
+# ============================================
 
 
-def test_load_statistics_overtime_settings_fallback(patched_enum):
-    """_load_statistics_overtime_settings returns defaults when settings invalid."""
-    with patch(
-        "datasure.checks.enumerator.report_ui.load_check_settings",
-        return_value={"period_overtime": "bad_period"},
-    ):
-        result = _load_statistics_overtime_settings("settings.json")
-    assert result.stat == "count"
+@pytest.fixture
+def fake_session(monkeypatch):
+    """A fresh Streamlit session for widgets bound to saved view state."""
+    fake_st = SimpleNamespace(session_state={})
+    monkeypatch.setitem(sys.modules, "streamlit", fake_st)
+    return fake_st.session_state
+
+
+def test_report_choices_come_back_from_view_state(patched_enum, fake_session, tmp_path):
+    """Saved periods, columns and statistics are restored in a new session."""
+    settings_file = tmp_path / "page_hfcs_settings.json"
+    view = ViewState(settings_file, "enumerator")
+    view.save("time_period_enumerator_productivity_key", "Month")
+    view.save("statistics_options_enumerator", ["median", "not_a_stat"])
+    view.save("enumerator_statistics_overtime_stat", "max")
+
+    _render_time_period_selector(str(settings_file))
+    _render_statistics_selector(["count", "mean"], str(settings_file))
+    _render_statistic_selector("count", str(settings_file))
+
+    assert fake_session["time_period_enumerator_productivity_key"] == "Month"
+    assert fake_session["statistics_options_enumerator"] == ["median"]
+    assert fake_session["enumerator_statistics_overtime_stat"] == "max"
+
+
+def test_report_choices_saved_by_older_versions_move_to_view_state(
+    patched_enum, fake_session, tmp_path
+):
+    """Old saves load as before but leave the exported check settings."""
+    settings_file = tmp_path / "page_hfcs_settings.json"
+    settings_file.write_text(
+        json.dumps(
+            {
+                "enumerators": {
+                    "enumerator": "enum",
+                    "statscol": "age",
+                    "period_overtime": "Month",
+                }
+            }
+        )
+    )
+
+    _render_column_selector_single(["age", "income"], None, str(settings_file))
+
+    assert fake_session["enumerator_statistics_overtime_column"] == "age"
+    assert json.loads(settings_file.read_text())["enumerators"] == {
+        "enumerator": "enum"
+    }
+    assert ViewState(settings_file, "enumerator").values() == {
+        "enumerator_statistics_overtime_column": "age",
+        "project_enumerator_statistics_overtime_period_pills": "Month",
+    }
 
 
 # ============================================

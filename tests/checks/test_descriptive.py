@@ -1,7 +1,9 @@
 """Tests for descriptive statistics computation functions."""
 
 import importlib
+import json
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -25,6 +27,7 @@ from datasure.checks.descriptive import (
 )
 from datasure.models.schemas import ColumnByType
 from datasure.utils.dataframe_utils import get_df_columns
+from datasure.utils.view_state import ViewState
 
 # =============================================================================
 # Fixtures
@@ -110,6 +113,19 @@ def mixed_columns() -> ColumnByType:
         categorical_columns=["cat_col"],
         string_columns=["str_col"],
     )
+
+
+@pytest.fixture
+def fake_session(monkeypatch):
+    """A fresh Streamlit session for widgets bound to saved view state."""
+    fake_st = SimpleNamespace(session_state={})
+    monkeypatch.setitem(sys.modules, "streamlit", fake_st)
+    return fake_st.session_state
+
+
+@pytest.fixture
+def settings_file(tmp_path):
+    return tmp_path / "page_hfcs_settings.json"
 
 
 @pytest.fixture(scope="module")
@@ -906,17 +922,14 @@ class TestRenderColumnSelector:
             mock_save.assert_called_once()
 
 
+@pytest.mark.usefixtures("fake_session")
 class TestRenderHistogram:
     """Tests for _render_histogram via mocked streamlit module."""
 
     def test_no_numeric_cols_calls_info(self, descriptive_mod, sample_df):
         mod = descriptive_mod
         mod.st.reset_mock()
-        with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_histogram(sample_df, [], "settings.json")
+        mod._render_histogram(sample_df, [], "settings.json")
         mod.st.info.assert_called_once()
 
     def test_valid_cols_calls_plotly_chart(self, descriptive_mod, sample_df):
@@ -926,30 +939,47 @@ class TestRenderHistogram:
         col_mock.selectbox.return_value = "age"
         bins_mock.slider.return_value = 10
         mod.st.columns.return_value = [col_mock, mid_mock, bins_mock]
-        with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_histogram(sample_df, ["age", "income"], "settings.json")
+        mod._render_histogram(sample_df, ["age", "income"], "settings.json")
         mod.st.plotly_chart.assert_called_once()
 
-    def test_saved_settings_restore_defaults(self, descriptive_mod, sample_df):
-        """Saved col_to_plot and n_bins are used as widget defaults."""
+    def test_saved_view_state_restores_the_choices(
+        self, descriptive_mod, sample_df, settings_file, fake_session
+    ):
+        """Saved column and bins come back in a new session."""
         mod = descriptive_mod
         mod.st.reset_mock()
         col_mock, mid_mock, bins_mock = MagicMock(), MagicMock(), MagicMock()
         col_mock.selectbox.return_value = "income"
         bins_mock.slider.return_value = 15
         mod.st.columns.return_value = [col_mock, mid_mock, bins_mock]
-        saved = {"col_to_plot": "income", "n_bins": 15}
-        with (
-            patch.object(mod, "load_check_settings", return_value=saved),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_histogram(sample_df, ["age", "income"], "settings.json")
-        # selectbox called with index=1 (income is at index 1)
-        call_kwargs = col_mock.selectbox.call_args
-        assert call_kwargs.kwargs.get("index") == 1
+        view = ViewState(settings_file, "descriptive")
+        view.save("desc_hist_col", "income")
+        view.save("desc_hist_bins", 15)
+
+        mod._render_histogram(sample_df, ["age", "income"], str(settings_file))
+
+        assert fake_session["desc_hist_col"] == "income"
+        assert fake_session["desc_hist_bins"] == 15
+        assert "index" not in col_mock.selectbox.call_args.kwargs
+
+    def test_choices_saved_by_older_versions_move_to_view_state(
+        self, descriptive_mod, sample_df, settings_file, fake_session
+    ):
+        """Old saves load as before but leave the check's exported settings."""
+        mod = descriptive_mod
+        mod.st.reset_mock()
+        col_mock, mid_mock, bins_mock = MagicMock(), MagicMock(), MagicMock()
+        col_mock.selectbox.return_value = "income"
+        bins_mock.slider.return_value = 15
+        mod.st.columns.return_value = [col_mock, mid_mock, bins_mock]
+        settings_file.write_text(
+            json.dumps({"descriptive_stats": {"col_to_plot": "income", "n_bins": 15}})
+        )
+
+        mod._render_histogram(sample_df, ["age", "income"], str(settings_file))
+
+        assert fake_session["desc_hist_col"] == "income"
+        assert json.loads(settings_file.read_text())["descriptive_stats"] == {}
 
     def test_all_null_column_calls_info(self, descriptive_mod, all_null_df):
         mod = descriptive_mod
@@ -959,11 +989,7 @@ class TestRenderHistogram:
         bins_mock.slider.return_value = 10
         mod.st.columns.return_value = [col_mock, mid_mock, bins_mock]
         null_df = pl.DataFrame({"x": pl.Series([None, None], dtype=pl.Float64)})
-        with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_histogram(null_df, ["x"], "settings.json")
+        mod._render_histogram(null_df, ["x"], "settings.json")
         mod.st.info.assert_called()
 
     def test_caption_shown_for_large_series(self, descriptive_mod, sample_df):
@@ -973,11 +999,7 @@ class TestRenderHistogram:
         col_mock.selectbox.return_value = "age"
         bins_mock.slider.return_value = 10
         mod.st.columns.return_value = [col_mock, mid_mock, bins_mock]
-        with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_histogram(sample_df, ["age"], "settings.json")
+        mod._render_histogram(sample_df, ["age"], "settings.json")
         mod.st.caption.assert_called_once()
 
     def test_no_vlines_when_series_empty_after_histogram(self, descriptive_mod):
@@ -991,8 +1013,6 @@ class TestRenderHistogram:
         fake_hist = pd.DataFrame({"bin_start": [0.0], "bin_end": [1.0], "count": [1]})
         null_df = pl.DataFrame({"age": pl.Series([None, None], dtype=pl.Float64)})
         with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
             patch.object(mod, "compute_histogram_data", return_value=fake_hist),
         ):
             mod._render_histogram(null_df, ["age"], "settings.json")
@@ -1009,44 +1029,35 @@ class TestRenderHistogram:
         bins_mock.slider.return_value = 5
         mod.st.columns.return_value = [col_mock, mid_mock, bins_mock]
         two_val_df = pl.DataFrame({"num": [1.0, 2.0, None, None, None]})
-        with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_histogram(two_val_df, ["num"], "settings.json")
+        mod._render_histogram(two_val_df, ["num"], "settings.json")
         mod.st.caption.assert_not_called()
 
     def test_saved_col_not_in_list_defaults_to_index_0(
-        self, descriptive_mod, sample_df
+        self, descriptive_mod, sample_df, settings_file
     ):
-        """When saved col_to_plot is not in numeric_cols, index defaults to 0."""
+        """A saved column that is gone falls back to the first and is removed."""
         mod = descriptive_mod
         mod.st.reset_mock()
         col_mock, mid_mock, bins_mock = MagicMock(), MagicMock(), MagicMock()
         col_mock.selectbox.return_value = "age"
         bins_mock.slider.return_value = 20
         mod.st.columns.return_value = [col_mock, mid_mock, bins_mock]
-        saved = {"col_to_plot": "nonexistent_col", "n_bins": 20}
-        with (
-            patch.object(mod, "load_check_settings", return_value=saved),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_histogram(sample_df, ["age", "income"], "settings.json")
-        call_kwargs = col_mock.selectbox.call_args
-        assert call_kwargs.kwargs.get("index") == 0
+        ViewState(settings_file, "descriptive").save("desc_hist_col", "removed")
+
+        mod._render_histogram(sample_df, ["age", "income"], str(settings_file))
+
+        assert col_mock.selectbox.call_args.kwargs.get("index") == 0
+        assert ViewState(settings_file, "descriptive").values() == {}
 
 
+@pytest.mark.usefixtures("fake_session")
 class TestRenderValueCounts:
     """Tests for _render_value_counts via mocked streamlit module."""
 
     def test_no_columns_calls_info(self, descriptive_mod, sample_df):
         mod = descriptive_mod
         mod.st.reset_mock()
-        with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_value_counts(sample_df, [], "settings.json")
+        mod._render_value_counts(sample_df, [], "settings.json")
         mod.st.info.assert_called_once()
 
     def test_table_view_calls_dataframe(self, descriptive_mod, sample_df):
@@ -1058,11 +1069,7 @@ class TestRenderValueCounts:
         topn_mock.slider.return_value = 10
         mod.st.columns.return_value = [col_mock, mid_mock, topn_mock]
         mod.st.pills.return_value = "table"
-        with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_value_counts(sample_df, ["region", "gender"], "settings.json")
+        mod._render_value_counts(sample_df, ["region", "gender"], "settings.json")
         mod.st.dataframe.assert_called_once()
 
     def test_chart_view_count_agg_calls_plotly_chart(self, descriptive_mod, sample_df):
@@ -1076,11 +1083,7 @@ class TestRenderValueCounts:
         mod.st.columns.return_value = [col_mock, mid_mock, topn_mock]
         # First pills = view selector → "chart", second pills = agg → "count"
         mod.st.pills.side_effect = ["chart", "count"]
-        with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_value_counts(sample_df, ["region", "gender"], "settings.json")
+        mod._render_value_counts(sample_df, ["region", "gender"], "settings.json")
         mod.st.plotly_chart.assert_called_once()
 
     def test_chart_view_pct_agg_calls_plotly_chart(self, descriptive_mod, sample_df):
@@ -1093,11 +1096,7 @@ class TestRenderValueCounts:
         mod.st.columns.return_value = [col_mock, mid_mock, topn_mock]
         # First pills = "chart", second pills = "pct"
         mod.st.pills.side_effect = ["chart", "pct"]
-        with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_value_counts(sample_df, ["region", "gender"], "settings.json")
+        mod._render_value_counts(sample_df, ["region", "gender"], "settings.json")
         mod.st.plotly_chart.assert_called_once()
 
     def test_empty_value_counts_calls_info(self, descriptive_mod, sample_df):
@@ -1108,33 +1107,35 @@ class TestRenderValueCounts:
         topn_mock.slider.return_value = 10
         mod.st.columns.return_value = [col_mock, mid_mock, topn_mock]
         with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
             patch.object(mod, "compute_value_counts", return_value=pd.DataFrame()),
         ):
             mod._render_value_counts(sample_df, ["region"], "settings.json")
         mod.st.info.assert_called()
 
-    def test_saved_settings_restore_col(self, descriptive_mod, sample_df):
+    def test_saved_view_state_restores_the_choices(
+        self, descriptive_mod, sample_df, settings_file, fake_session
+    ):
         mod = descriptive_mod
         mod.st.reset_mock()
         mod.st.pills.side_effect = None
         col_mock, mid_mock, topn_mock = MagicMock(), MagicMock(), MagicMock()
         col_mock.selectbox.return_value = "gender"
-        topn_mock.slider.return_value = 20
+        topn_mock.slider.return_value = 30
         mod.st.columns.return_value = [col_mock, mid_mock, topn_mock]
         mod.st.pills.return_value = "table"
-        saved = {"col_to_analyse": "gender", "top_n": 20}
-        with (
-            patch.object(mod, "load_check_settings", return_value=saved),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_value_counts(sample_df, ["region", "gender"], "settings.json")
-        call_kwargs = col_mock.selectbox.call_args
-        assert call_kwargs.kwargs.get("index") == 1
+        view = ViewState(settings_file, "descriptive")
+        view.save("desc_vc_col", "gender")
+        view.save("desc_vc_topn", 30)
+        view.save("desc_vc_view_pills", "chart")
+
+        mod._render_value_counts(sample_df, ["region", "gender"], str(settings_file))
+
+        assert fake_session["desc_vc_col"] == "gender"
+        assert fake_session["desc_vc_topn"] == 30
+        assert fake_session["desc_vc_view_pills"] == "chart"
 
     def test_saved_col_not_in_list_defaults_to_index_0(
-        self, descriptive_mod, sample_df
+        self, descriptive_mod, sample_df, settings_file
     ):
         """Saved col_to_analyse not in list → index defaults to 0."""
         mod = descriptive_mod
@@ -1145,14 +1146,12 @@ class TestRenderValueCounts:
         topn_mock.slider.return_value = 20
         mod.st.columns.return_value = [col_mock, mid_mock, topn_mock]
         mod.st.pills.return_value = "table"
-        saved = {"col_to_analyse": "nonexistent", "top_n": 20}
-        with (
-            patch.object(mod, "load_check_settings", return_value=saved),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_value_counts(sample_df, ["region", "gender"], "settings.json")
-        call_kwargs = col_mock.selectbox.call_args
-        assert call_kwargs.kwargs.get("index") == 0
+        ViewState(settings_file, "descriptive").save("desc_vc_col", "removed")
+
+        mod._render_value_counts(sample_df, ["region", "gender"], str(settings_file))
+
+        assert col_mock.selectbox.call_args.kwargs.get("index") == 0
+        assert ViewState(settings_file, "descriptive").values() == {}
 
 
 class TestDescriptiveReport:

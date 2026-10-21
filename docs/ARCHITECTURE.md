@@ -21,7 +21,11 @@ src/datasure/
 ├── cli.py                  # argparse CLI; launches Streamlit (localhost:8501)
 ├── assets/                 # Logos and demo CSV data bundled with the package
 ├── checks/                 # Data quality check modules (one per check type)
-│   ├── summary.py          #   Overall data quality summary
+│   ├── catalogue.py        #   Every check on a check page: slug, label,
+│                           #   icon, group, status, render and headline
+│   ├── context.py          #   PageConfig, CheckData, CheckContext
+│   ├── health.py           #   Summary's check health grid, cached headlines
+│   ├── summary.py          #   Data, submission and progress summary
 │   ├── missing.py          #   Missing data analysis
 │   ├── duplicates.py       #   Duplicate detection
 │   ├── id_duplicates.py    #   ID duplicate/unmatched cards logic (no Streamlit)
@@ -30,12 +34,12 @@ src/datasure/
 │   ├── gpschecks/          #   GPS validation and outlier mapping; review.py
 │                           #   turns outlier corrections and acceptances
 │                           #   into log entries (no Streamlit)
-│   ├── outliers.py         #   Statistical outlier detection
-│   ├── enumerator.py       #   Enumerator performance
+│   ├── outliers/           #   Statistical outlier detection
+│   ├── enumerator/         #   Enumerator performance
 │   ├── progress.py         #   Survey progress tracking
 │   ├── descriptive.py      #   Descriptive statistics
 │   └── backchecks/         #   Back-check comparison workflows; scope.py
-│                           #   applies the Duplicates tab's Records to
+│                           #   applies the Duplicates check's Records to
 │                           #   Include filters to the comparison
 ├── connectors/
 │   ├── scto.py             # SurveyCTO download/UI (uses utils/scto_api.py)
@@ -50,7 +54,9 @@ src/datasure/
 │   └── enums.py            # Prep action/method enums
 ├── utils/                  # Shared utilities (DuckDB, cache, config, charts,
 │                           # credentials, SurveyCTO API, UI helpers, ...)
-│   └── correction_form.py  #   Shared correction form used across pages
+│   ├── correction_form.py  #   Shared correction form used across pages
+│   ├── navigation.py       #   Navigation resolver and status types (no Streamlit)
+│   └── nav_ui.py           #   Shared navigation controls and render wrapper
 └── views/                  # Streamlit pages (top-level page scripts)
     ├── start_view.py       # Project selection/creation
     ├── import_view.py      # Credentials + data import
@@ -151,6 +157,185 @@ registers them in `st.navigation`. The numbered files match the gitignore
 pattern `output_view_?.py` — never commit them and never edit them directly;
 edit the template instead.
 
+### Check navigation
+
+A check page draws its checks from the catalogue in `checks/catalogue.py`.
+Each `CheckEntry` has a slug, short label, icon, group, a `render` function
+and a `status` function, plus optional `setup`, `settings`, `setup_hint`
+and `headline` fields. Adding an entry is the only change needed for a check
+to appear.
+
+- **Status.** Each check module exposes a cheap `<check>_status(...)` that
+  returns a `StatusResult` (`CheckStatus` ready, not set up, not applicable or
+  error, plus a reason) from page configuration and data shape only. It never
+  computes results. `catalogue.nav_items` turns the statuses into `NavItem`s;
+  a status function that raises gives that check the error status.
+- **Selection.** `utils/navigation.py` is the pure resolver (no Streamlit):
+  `resolve_nav` picks a valid URL value, then the saved selection, then the
+  default (Summary); an invalid URL value goes straight to the default. And
+  `group_selection` picks the remembered or first check when the group
+  changes. `utils/nav_ui.py` wraps it for Streamlit and
+  is meant to be shared by every page that picks one item from many.
+- **Lazy rendering.** `render_checks` in the template runs only the selected
+  check. A check that is not ready shows a standard empty state with its
+  reason; a not-set-up check then shows its settings (`setup`, or its report,
+  which starts with its settings), and a not-applicable check shows its
+  settings section alone (`settings`; Outliers, GPS and Backchecks expose
+  `<check>_settings_section`, which their reports also start with). The
+  not-set-up message ends with the entry's `setup_hint`, "Set it up below."
+  by default; Backchecks points to the page linked below instead. Summary computes the outlier and backcheck
+  rates inside its own render, so they only run when Summary is shown.
+- **Health grid.** Summary ends with a card per other check
+  (`checks/health.py`). A catalogue entry's optional `headline` function
+  returns the number its card shows, computed the way the check computes it
+  but without rendering it. Headlines run only for ready checks and are
+  cached in a small in-process LRU keyed on the page's data (row hashes),
+  settings files (content hash, leaving out
+  [view state](#view-state)), the logs and intermediate databases
+  (modification time and size) and today's date. The card buttons call
+  `select_nav_item`, so they select the check exactly as the navigation
+  does. The navigation itself never shows counts.
+- **Render wrapper.** Every check renders through `nav_ui.run_guarded`. An
+  exception becomes an error state with the traceback in an expander, is
+  logged, and is remembered so the navigation marks the check until it
+  renders cleanly. `st.stop()` and `st.rerun()` raise `BaseException`
+  subclasses, so they pass through. The navigation is drawn after the check,
+  into a container placed above it, so the mark appears on the same run.
+- **Widget state.** Streamlit drops the state of widgets that are not drawn,
+  so a check's widgets are rebuilt from its saved settings each time it is
+  opened. Settings loaders must therefore read the settings file directly,
+  not through `st.cache_data`. Filter, selection and sort widgets that are
+  not check settings are kept as [view state](#view-state).
+
+### View state
+
+`utils/view_state.py` keeps personal view settings in a `view_state` section
+of a settings JSON file, so they survive switching checks and new sessions.
+On a check page this is the page settings file
+(`page_{page_name_id}_settings.json`):
+
+```json
+{
+  "duplicates": {"survey_id": "hhid"},
+  "view_state": {
+    "selected": "duplicates",
+    "scopes": {"duplicates": {"iddup_survey_sort": "Latest date"}}
+  }
+}
+```
+
+- **Selection.** `saved_selection` / `save_selection` hold the last selected
+  item. `render_checks` passes it to `nav_ui.resolve_selection` as `saved`,
+  so precedence is a valid `?check=` URL value, then the selection made
+  earlier in this session, then the saved selection, then Summary. An
+  invalid `?check=` value opens Summary. A saved slug that is no longer in
+  the catalogue is ignored.
+- **Widget values.** `ViewState(settings_file, scope).bind(key, options=...,
+  multi=..., on_change=..., **initial)` returns the widget's `key` and
+  `on_change` keyword arguments. Before the widget is drawn, it copies a
+  saved value into `st.session_state` when this session has none, and it
+  saves the value when the user changes it. A saved value that is not in
+  `options` is removed and the widget shows its default; a multiselect keeps
+  only the values that still exist. The widget's own default (`index`,
+  `default`, `value`) goes through `initial`, so it is left out once session
+  state holds a value. `bind_widget(view, key, ...)` does the same for
+  helpers that may have no view.
+- **Displayed value.** Switching to another check and straight back can
+  interrupt the run that would clear a widget's value, so the value survives
+  in session state and still filters the output, but the redrawn widget
+  shows its default: Streamlit only sends a value to the browser when code
+  sets it. `show_session_value(key)` sets it again before the widget is
+  drawn. `bind` and `keep` call it.
+- **Kept for the session.** `ViewState.keep(key, ...)` keeps a search box's
+  value when the user switches to another check and back, without saving
+  it: a new session starts with an empty box. The value is kept per settings
+  file and scope, so another check page does not inherit it. Used by the
+  duplicates "Search by ID or KEY" box.
+- **Scopes.** A check's scope is its catalogue slug (`VIEW_SCOPE` in each
+  check module). "Reset filters" (`reset_filters_button`) calls
+  `ViewState.reset_widgets`, which clears only that scope's saved values and
+  their session state. It does not touch the check's own settings. Each
+  check draws it beside its settings expander by wrapping the settings call
+  in `reset_filters_beside(check_view(setting_file))`; Missing Values and
+  Descriptive Stats, which have no settings section, wrap their title.
+  Corrections (scope: the check page) draws the action above the selected
+  page, and Prepare Data (scope: the dataset) beside the "Preview Prepared
+  Data" header.
+- **Not saved.** Pagination, search boxes and inputs inside dialogs or
+  popovers are never bound, so they start fresh in a new session. Bound
+  today: Summary's "Progress by" column and time period; the Progress time
+  period and extra attempted-interview columns; the Missing Values
+  threshold, date column, group-by and compare columns, all-columns toggle
+  and correlation columns;
+  the duplicates dataset switcher, card sort, column selector and extra
+  report columns; the outliers table toggles, inspected column and extra
+  constraint violation columns; the GPS map colour, filter and category
+  values, configuration choices, detection method, clustering column,
+  distance threshold and Show reviewed toggle; the enumerator summary
+  information pills, productivity period and week start, and the statistics
+  columns, statistics, period and week start; the backcheck comparison
+  filters, productivity period and week start, and staff statistics view;
+  the Descriptive Stats histogram and value counts choices; and the Prepare
+  Data preview's "Columns to show". Descriptive
+  Stats saves its column selection to DuckDB, and the GPS outlier detection
+  sliders (neighbours, expected proportion) are analysis parameters with
+  data-dependent bounds, so neither is view state.
+- **Legacy values.** Older versions saved the Summary, Progress, Missing
+  Values, Descriptive Stats, enumerator, backcheck and outliers view values
+  above, and the duplicates extra report columns, with the check's settings. Their
+  `check_view` (`view_factory(..., legacy=(section, keys))`) runs
+  `ViewState.adopt_legacy` when opened: a legacy value moves into the
+  check's scope (unless one is already there) and leaves the settings
+  section, so old files still load and the value then behaves as view
+  state. Configuration (Progress and Summary columns and targets, Progress
+  consent and outcome) stays with the check's settings.
+- **Not shared.** View state is personal. `without_view_state` drops it from
+  project configuration exports, together with legacy values not yet moved
+  (`LEGACY_VIEW_KEYS`, which `view_factory` checks each check's legacy keys
+  against), and applying a configuration (a project
+  template) keeps the local `view_state` and ignores any in the bundle
+  (`utils/project_config.py`). The replication package never reads settings
+  files.
+- **Other pages.** `ViewState` and the selection functions take any settings
+  file. Prepare Data keeps the selected dataset in
+  `settings/prep_view_settings.json`. Corrections keeps the selected check
+  page in `settings/correction_view_settings.json`, with one scope per check
+  page (its `page_name_id`) holding the Survey data / Backcheck data choice
+  and the Correction Log filters.
+- **Last viewed check page.** `render_checks` records the `page_name_id` of
+  the check page being viewed as `view_state.last_check_page` in the
+  project-level `settings/project_view_settings.json`
+  (`nav_ui.PROJECT_VIEW_FILE`, `nav_ui.LAST_CHECK_PAGE`), writing only when
+  it changes (`view_state.remember`). With no `page` URL value, Corrections
+  reads the record, forgets it (`forget_remembered`) and selects that check
+  page, so it opens on the page the user was reviewing, also in a new
+  session; forgetting it keeps a page chosen on Corrections until another
+  check page is viewed. With a `page` URL value the URL wins and the record
+  is kept for the next visit without one.
+
+### Prepare Data and Corrections navigation
+
+Both pages draw one wrapping row of pills with `nav_ui.draw_nav` (items with
+no group) and render only the selected item through `nav_ui.run_guarded`.
+
+- **Prepare Data** (`views/prep_view.py`). Before anything is drawn,
+  `seed_prep_from_raw` runs for **every** dataset: with no prep steps logged,
+  raw data is copied into the prep table. This must not move into the
+  selected dataset's render, because Configure Checks and the replication
+  package read columns only from prep. `dataset_status` dims a dataset with
+  no imported rows (missing, or zero rows and no steps); a dataset whose
+  steps removed every row stays ready so the step can be removed. The
+  dataset's position in the sorted list (`step_index`) still namespaces its
+  widget keys and is passed to `prep_add_step` / `prep_remove_step`.
+- **Corrections** (`views/correction_view.py`). Item slugs are page
+  `page_name_id`s; the selected page's position in `check_config` is the
+  index `render_correction_tab` and `load_tab_config` use. `check_page_status`
+  dims a page with no survey KEY column or no survey data in the corrected,
+  prep or raw database (it only checks the table exists). Precedence: a valid
+  `?page=` value, then the check page last viewed (see
+  [View state](#view-state)), then the selection made earlier in this
+  session or saved, then the first page.
+
 ## Cache and data locations
 
 Resolved by `utils/cache_utils.py`:
@@ -168,7 +353,8 @@ Per project (UUID-keyed):
 - `cache/{project_id}/settings/` — `logs.duckdb` (import/prep logs, the
   correction logs `corr_log_{alias}`, and the backcheck attribution logs
   `bc_attribution_{page_name_id}`; see [Correction log](#correction-log)),
-  JSON settings, and credential metadata
+  JSON settings (including each check page's, Prepare Data's and
+  Corrections' [view state](#view-state)), and credential metadata
 - `cache/projects.json` — the project registry
 - `cache/user_settings.json` — per-user preferences, currently the
   "Reviewer name" recorded as `user` in correction logs
@@ -184,6 +370,33 @@ The `cache/` directory is gitignored.
 `st_output_pages`, ...). View modules are page scripts: they run top to bottom
 on every rerun and guard on `st_project_id`, calling `st.stop()` when no
 project is selected. If cross-page state looks corrupted, check `app.py` first.
+
+The check page last viewed is not session state: see
+[View state](#view-state) ("Last viewed check page").
+
+### URL state
+
+The check page's selected check is the `check` URL query parameter, for
+example `?check=duplicates`. Each generated check page is its own page, so the
+parameter is per page. `nav_ui.resolve_selection` reads it on every run; a
+valid value wins over the remembered and saved selections (see
+[View state](#view-state)), and an invalid one opens the default
+(Summary).
+Changing the selection writes the parameter, so links and bookmarks open the
+same check. To select a check from code (for example a button), call
+`nav_ui.select_nav_item(key, "check", slug)`, ideally in an `on_click`
+callback.
+
+Navigation state lives under keys prefixed with the page's navigation key
+(`check_nav_{page_name_id}__{project_id}` on check pages): `__selected`,
+`__group`, `__item`, `__last_by_group` and `__errors`. Opening another project
+keeps session state, so every navigation key includes the project ID
+(`nav_ui.project_nav_key`). A remembered selection the items no longer offer
+gives way to the saved one.
+
+Prepare Data uses `?dataset=<alias>` (navigation key `prep_nav__{project_id}`)
+and Corrections uses `?page=<page_name_id>` (navigation key
+`corrections_nav__{project_id}`) in the same way. No other page uses query parameters.
 
 ## Credentials
 

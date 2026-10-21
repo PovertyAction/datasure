@@ -1,8 +1,9 @@
 """Comprehensive tests for the summary module with 100% code coverage."""
 
 # Standard library imports
+import json
 from datetime import date, datetime, timedelta
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 # Third-party imports
 import pandas as pd
@@ -14,8 +15,6 @@ from pydantic import ValidationError
 # Local application imports
 from datasure.checks.summary import (
     # Pydantic Models
-    CheckRates,
-    DataQualityMetrics,
     DataSummaryMetrics,
     DateRangeCalculator,
     ProgressMetrics,
@@ -25,14 +24,12 @@ from datasure.checks.summary import (
     _create_empty_progress_metrics,
     _create_empty_submission_metrics,
     # Calculation functions
-    calculate_data_quality_metrics,
     calculate_data_summary_metrics,
     calculate_percentage_change,
     calculate_progress_metrics,
     calculate_submission_count,
     calculate_submission_metrics,
     # Backward compatibility wrappers
-    compute_summary_data_quality,
     compute_summary_data_summary,
     compute_summary_progress,
     compute_summary_progress_by_col,
@@ -43,8 +40,8 @@ from datasure.checks.summary import (
     polars_to_pandas,
     prepare_date_data,
     # UI components
-    summary_data_quality,
     summary_data_summary,
+    summary_defaults,
     summary_progress,
     summary_settings,
     summary_submissions,
@@ -124,19 +121,15 @@ class TestSummarySettings:
 
     def test_valid_settings_all_fields(self):
         """Test creating valid settings with all fields."""
-        settings = SummarySettings(
-            survey_date="date_col", survey_target=100, survey_id="id_col"
-        )
+        settings = SummarySettings(survey_date="date_col", survey_target=100)
         assert settings.survey_date == "date_col"
         assert settings.survey_target == 100
-        assert settings.survey_id == "id_col"
 
     def test_valid_settings_minimal(self):
         """Test creating valid settings with minimal fields."""
         settings = SummarySettings()
         assert settings.survey_date is None
         assert settings.survey_target is None
-        assert settings.survey_id is None
 
     def test_valid_target_zero(self):
         """Test that zero target is valid."""
@@ -244,52 +237,6 @@ class TestDataSummaryMetrics:
             total_columns_count=15,  # Matches sum
         )
         assert metrics.total_columns_count == 15
-
-
-class TestDataQualityMetrics:
-    """Test DataQualityMetrics Pydantic model."""
-
-    def test_valid_quality_metrics(self):
-        """Test creating valid data quality metrics."""
-        metrics = DataQualityMetrics(
-            duplicates_pct=2.5,
-            outliers_pct=1.0,
-            missing_pct=0.5,
-            backcheck_error_pct=0.1,
-        )
-        assert metrics.duplicates_pct == 2.5
-        assert metrics.outliers_pct == 1.0
-
-    def test_percentage_boundaries(self):
-        """Test percentage validation at boundaries."""
-        metrics = DataQualityMetrics(
-            duplicates_pct=0.0,
-            outliers_pct=100.0,
-            missing_pct=50.0,
-            backcheck_error_pct=25.0,
-        )
-        assert metrics.duplicates_pct == 0.0
-        assert metrics.outliers_pct == 100.0
-
-    def test_invalid_percentage_over_100(self):
-        """Test that percentages over 100 are invalid."""
-        with pytest.raises(ValidationError):
-            DataQualityMetrics(
-                duplicates_pct=101.0,
-                outliers_pct=0.0,
-                missing_pct=0.0,
-                backcheck_error_pct=0.0,
-            )
-
-    def test_none_duplicates_pct(self):
-        """Test that duplicates_pct can be None."""
-        metrics = DataQualityMetrics(
-            duplicates_pct=None,
-            outliers_pct=0.0,
-            missing_pct=0.0,
-            backcheck_error_pct=0.0,
-        )
-        assert metrics.duplicates_pct is None
 
 
 # ============================================================================
@@ -728,77 +675,33 @@ class TestDataSummary:
 
 
 # ============================================================================
-# DATA QUALITY TESTS
-# ============================================================================
-
-
-class TestDataQuality:
-    """Test data quality calculation functions."""
-
-    def test_calculate_data_quality_with_survey_id(self, sample_polars_df):
-        """Test data quality calculation with survey ID."""
-        result = calculate_data_quality_metrics(sample_polars_df, "id")
-        assert isinstance(result, DataQualityMetrics)
-        assert result.duplicates_pct is not None
-        assert result.missing_pct >= 0
-
-    def test_calculate_data_quality_without_survey_id(self, sample_polars_df):
-        """Test data quality calculation without survey ID."""
-        result = calculate_data_quality_metrics(sample_polars_df, None)
-        assert result.duplicates_pct is None
-        assert result.missing_pct >= 0
-
-    def test_calculate_data_quality_invalid_survey_id(self, sample_polars_df):
-        """Test data quality with invalid survey ID column."""
-        result = calculate_data_quality_metrics(sample_polars_df, "nonexistent")
-        assert result.duplicates_pct is None
-
-    def test_calculate_data_quality_with_duplicates(self):
-        """Test data quality with duplicate IDs."""
-        df = pl.DataFrame({"id": [1, 1, 2, 2, 3], "value": [10, 20, 30, 40, 50]})
-        result = calculate_data_quality_metrics(df, "id")
-        assert result.duplicates_pct > 0
-
-    def test_calculate_data_quality_with_missing_values(self):
-        """Test data quality with missing values."""
-        df = pl.DataFrame(
-            {"id": [1, 2, 3], "value": [10, None, 30], "text": [None, "b", "c"]}
-        )
-        result = calculate_data_quality_metrics(df, "id")
-        assert result.missing_pct > 0
-
-    def test_calculate_data_quality_empty(self, empty_polars_df):
-        """Test data quality with empty dataframe."""
-        result = calculate_data_quality_metrics(empty_polars_df, None)
-        assert result.missing_pct == 0.0
-        assert result.outliers_pct is None
-
-    def test_calculate_data_quality_passes_check_rates_through(self, sample_polars_df):
-        """The outlier % and error rate come from the Outliers and Backchecks tabs."""
-        result = calculate_data_quality_metrics(
-            sample_polars_df,
-            "id",
-            CheckRates(outliers_pct=12.5, backcheck_error_pct=4.25),
-        )
-        assert result.outliers_pct == 12.5
-        assert result.backcheck_error_pct == 4.25
-
-    def test_calculate_data_quality_check_rates_default_to_none(self, sample_polars_df):
-        """Without results from those tabs, there is no value to show, not 0."""
-        result = calculate_data_quality_metrics(sample_polars_df, "id")
-        assert result.outliers_pct is None
-        assert result.backcheck_error_pct is None
-
-    def test_compute_summary_data_quality_backward_compat(self, sample_polars_df):
-        """Test backward compatibility wrapper for data quality."""
-        result = compute_summary_data_quality(sample_polars_df, "id")
-        assert isinstance(result, tuple)
-        assert len(result) == 4
-
-
-# ============================================================================
 # UI COMPONENT TESTS
 # ============================================================================
+
+
+class TestSummaryDefaults:
+    """The saved date and target win over the page configuration."""
+
+    CONFIG = SummarySettings(survey_date="starttime", survey_target=100)
+
+    def test_page_configuration_without_saved_settings(self, tmp_path):
+        setting_file = str(tmp_path / "settings.json")
+
+        assert summary_defaults(setting_file, self.CONFIG) == ("starttime", 100)
+
+    def test_saved_settings_win(self, tmp_path):
+        setting_file = tmp_path / "settings.json"
+        setting_file.write_text(
+            json.dumps({"summary": {"date": "endtime", "target": 250}})
+        )
+
+        assert summary_defaults(setting_file, self.CONFIG) == ("endtime", 250)
+
+    def test_a_saved_zero_target_is_kept(self, tmp_path):
+        setting_file = tmp_path / "settings.json"
+        setting_file.write_text(json.dumps({"summary": {"date": None, "target": 0}}))
+
+        assert summary_defaults(setting_file, self.CONFIG) == ("starttime", 0)
 
 
 class TestUIComponents:
@@ -850,17 +753,14 @@ class TestUIComponents:
         mock_st.columns.return_value = [col_mock1, col_mock2, col_mock3]
 
         # Mock selectbox and number_input
-        mock_st.selectbox.side_effect = ["id", "date_col"]
+        mock_st.selectbox.return_value = "date_col"
         mock_st.number_input.return_value = 100
 
         df = pl.DataFrame({"id": [1], "date_col": [date(2024, 1, 1)]})
-        config = SummarySettings(
-            survey_id="id", survey_date="date_col", survey_target=100
-        )
+        config = SummarySettings(survey_date="date_col", survey_target=100)
         result = summary_settings(df, "settings.json", config, survey_columns)
 
-        assert isinstance(result, tuple)
-        assert len(result) == 3
+        assert result == ("date_col", 100)
 
     @patch("datasure.checks.summary.st")
     @patch("datasure.checks.summary.pandas_to_polars")
@@ -987,130 +887,6 @@ class TestUIComponents:
 
         assert mock_st.columns.called
 
-    @patch("datasure.checks.summary.st")
-    @patch("datasure.checks.summary.pandas_to_polars")
-    @patch("datasure.checks.summary.calculate_data_quality_metrics")
-    @patch("datasure.checks.summary.donut_chart")
-    @patch("datasure.checks.summary.plt")
-    def test_summary_data_quality(
-        self, mock_plt, mock_chart, mock_calc, mock_convert, mock_st
-    ):
-        """Test summary data quality UI component."""
-        mock_convert.return_value = pl.DataFrame()
-        mock_calc.return_value = DataQualityMetrics(
-            duplicates_pct=2.5,
-            outliers_pct=1.0,
-            missing_pct=0.5,
-            backcheck_error_pct=0.1,
-        )
-        mock_chart.return_value = Mock()
-
-        # Mock columns with context manager support
-        col_mock1 = Mock()
-        col_mock1.__enter__ = Mock(return_value=col_mock1)
-        col_mock1.__exit__ = Mock(return_value=False)
-        col_mock2 = Mock()
-        col_mock2.__enter__ = Mock(return_value=col_mock2)
-        col_mock2.__exit__ = Mock(return_value=False)
-        col_mock3 = Mock()
-        col_mock3.__enter__ = Mock(return_value=col_mock3)
-        col_mock3.__exit__ = Mock(return_value=False)
-        col_mock4 = Mock()
-        col_mock4.__enter__ = Mock(return_value=col_mock4)
-        col_mock4.__exit__ = Mock(return_value=False)
-
-        mock_st.columns.return_value = [col_mock1, col_mock2, col_mock3, col_mock4]
-
-        df = pd.DataFrame({"id": [1, 2, 3]})
-        summary_data_quality(df, "id")
-
-        assert mock_st.columns.called
-        assert mock_chart.called
-
-    @patch("datasure.checks.summary.st")
-    @patch("datasure.checks.summary.pandas_to_polars")
-    @patch("datasure.checks.summary.calculate_data_quality_metrics")
-    @patch("datasure.checks.summary.donut_chart")
-    @patch("datasure.checks.summary.plt")
-    def test_summary_data_quality_no_survey_id(
-        self, mock_plt, mock_chart, mock_calc, mock_convert, mock_st
-    ):
-        """Test summary data quality UI component without survey ID."""
-        from datasure.checks.summary import summary_data_quality
-
-        mock_convert.return_value = pl.DataFrame()
-        mock_calc.return_value = DataQualityMetrics(
-            duplicates_pct=None,
-            outliers_pct=1.0,
-            missing_pct=0.5,
-            backcheck_error_pct=0.1,
-        )
-        mock_chart.return_value = Mock()
-
-        # Mock columns with context manager support
-        col_mock1 = Mock()
-        col_mock1.__enter__ = Mock(return_value=col_mock1)
-        col_mock1.__exit__ = Mock(return_value=False)
-        col_mock2 = Mock()
-        col_mock2.__enter__ = Mock(return_value=col_mock2)
-        col_mock2.__exit__ = Mock(return_value=False)
-        col_mock3 = Mock()
-        col_mock3.__enter__ = Mock(return_value=col_mock3)
-        col_mock3.__exit__ = Mock(return_value=False)
-        col_mock4 = Mock()
-        col_mock4.__enter__ = Mock(return_value=col_mock4)
-        col_mock4.__exit__ = Mock(return_value=False)
-
-        mock_st.columns.return_value = [col_mock1, col_mock2, col_mock3, col_mock4]
-
-        df = pd.DataFrame({"id": [1, 2, 3]})
-        summary_data_quality(df, None)
-
-        assert mock_st.columns.called
-
-    @staticmethod
-    def _quality_columns(mock_st) -> list[MagicMock]:
-        cols = [MagicMock() for _ in range(4)]
-        mock_st.columns.return_value = cols
-        return cols
-
-    @patch("datasure.checks.summary.st")
-    @patch("datasure.checks.summary.donut_chart")
-    @patch("datasure.checks.summary.plt")
-    def test_summary_data_quality_shows_check_rates(
-        self, mock_plt, mock_chart, mock_st
-    ):
-        """The outlier and error rate tiles chart the values they are given."""
-        self._quality_columns(mock_st)
-        df = pl.DataFrame({"id": [1, 2, 3]})
-
-        summary_data_quality(
-            df, "id", CheckRates(outliers_pct=12.5, backcheck_error_pct=4.25)
-        )
-
-        charted = [c.kwargs["actual_value"] for c in mock_chart.call_args_list]
-        assert 12.5 in charted
-        assert 4.25 in charted
-        mock_st.info.assert_not_called()
-
-    @patch("datasure.checks.summary.st")
-    @patch("datasure.checks.summary.donut_chart")
-    @patch("datasure.checks.summary.plt")
-    def test_summary_data_quality_without_check_rates(
-        self, mock_plt, mock_chart, mock_st
-    ):
-        """Without values, the tiles say where to configure them, not 0."""
-        self._quality_columns(mock_st)
-        df = pl.DataFrame({"id": [1, 2, 3]})
-
-        summary_data_quality(df, "id")
-
-        # Only the duplicates and missing tiles have charts.
-        assert mock_chart.call_count == 2
-        messages = " ".join(c.args[0] for c in mock_st.info.call_args_list)
-        assert "Outliers & Constraints" in messages
-        assert "Backcheck Analysis" in messages
-
     def test_render_progress_by_column(self):
         """Test _render_progress_by_column UI component."""
 
@@ -1130,7 +906,6 @@ class TestUIComponents:
 
             with (
                 patch("datasure.checks.summary.st") as mock_st,
-                patch("datasure.checks.summary.load_check_settings") as mock_load,
                 patch("datasure.checks.summary.save_check_settings"),
                 patch("datasure.checks.summary.trigger_save"),
                 patch(
@@ -1139,12 +914,6 @@ class TestUIComponents:
                 patch("datasure.checks.summary.sns") as mock_sns,
                 patch("datasure.checks.summary.pd"),
             ):
-                # Mock settings
-                mock_load.return_value = {
-                    "progress_by_col": "region",
-                    "progress_time_period": "Auto",
-                }
-
                 # Mock columns
                 col_mock1 = Mock()
                 col_mock1.__enter__ = Mock(return_value=col_mock1)
@@ -1200,11 +969,7 @@ class TestUIComponents:
 
             with (
                 patch("datasure.checks.summary.st") as mock_st,
-                patch("datasure.checks.summary.load_check_settings") as mock_load,
             ):
-                # Mock settings
-                mock_load.return_value = {}
-
                 # Mock columns
                 col_mock1 = Mock()
                 col_mock1.__enter__ = Mock(return_value=col_mock1)
@@ -1234,10 +999,8 @@ class TestUIComponents:
     @patch("datasure.checks.summary.summary_data_summary")
     @patch("datasure.checks.summary.summary_submissions")
     @patch("datasure.checks.summary.summary_progress")
-    @patch("datasure.checks.summary.summary_data_quality")
     def test_summary_report(
         self,
-        mock_quality,
         mock_progress,
         mock_submissions,
         mock_data_summary,
@@ -1250,13 +1013,12 @@ class TestUIComponents:
         from datasure.checks.summary import summary_report
         from datasure.utils.dataframe_utils import ColumnByType
 
-        mock_settings.return_value = ("date_col", 100, "id_col")
+        mock_settings.return_value = ("date_col", 100)
 
         df = pd.DataFrame({"id": [1, 2, 3], "date_col": [date(2024, 1, 1)] * 3})
         # Convert to Polars as expected by the function
         pl_df = pl.from_pandas(df)
         config = {
-            "survey_id": "id_col",
             "survey_date": "date_col",
             "survey_target": 100,
         }
@@ -1269,22 +1031,9 @@ class TestUIComponents:
             datetime_columns=["date_col"],
             categorical_columns=["id"],
         )
-        rates = CheckRates(outliers_pct=12.5, backcheck_error_pct=4.25)
-        # Updated signature with survey_columns parameter
-        summary_report(
-            pl_df,
-            "settings.json",
-            config,
-            survey_columns,
-            check_rates=rates,
-        )
+        summary_report(pl_df, "settings.json", config, survey_columns)
 
         mock_settings.assert_called_once()
         mock_data_summary.assert_called_once()
         mock_submissions.assert_called_once()
         mock_progress.assert_called_once()
-        mock_quality.assert_called_once_with(
-            data=pl_df,
-            survey_id="id_col",
-            check_rates=rates,
-        )
