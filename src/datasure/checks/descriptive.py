@@ -19,6 +19,7 @@ from datasure.checks.missing import mask_missing_codes
 from datasure.models.schemas import ColumnByType
 from datasure.utils.duckdb_utils import (
     DESCRIPTIVE_COLUMNS_TABLE,
+    LEGACY_DESCRIPTIVE_SELECTION_TABLE,
     check_table_name,
     duckdb_get_table,
     duckdb_save_table,
@@ -238,10 +239,6 @@ def _create_new_column_selection_df(
     return pl.DataFrame({"Selected": selected, "column": all_cols, "type": col_types})
 
 
-# Older versions saved one selection for the whole project here.
-_LEGACY_SELECTION_TABLE = "selected_columns_df"
-
-
 def _selection_table(page_name_id: str) -> str:
     """Return the logs table holding a page's descriptive column selection."""
     return check_table_name(DESCRIPTIVE_COLUMNS_TABLE, page_name_id)
@@ -277,7 +274,9 @@ def get_column_selection_df(
         saved = duckdb_get_table(project_id, table, "logs")
         return _apply_saved_selection(selection, saved)
 
-    legacy = duckdb_get_table(project_id, _LEGACY_SELECTION_TABLE, "intermediate")
+    legacy = duckdb_get_table(
+        project_id, LEGACY_DESCRIPTIVE_SELECTION_TABLE, "intermediate"
+    )
     if legacy.is_empty():
         return selection
     seeded = _apply_saved_selection(selection, legacy)

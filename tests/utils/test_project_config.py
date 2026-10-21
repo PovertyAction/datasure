@@ -695,7 +695,7 @@ def _page_config_service(page_exists=False):
     return service
 
 
-def _seed_source_project():
+def _seed_source_project(skip_prefixes=()):
     duckdb_save_table(
         SRC_PROJECT,
         pl.DataFrame(
@@ -709,7 +709,8 @@ def _seed_source_project():
         "logs",
     )
     for prefix, df in CHECK_TABLES.items():
-        duckdb_save_table(SRC_PROJECT, df, f"{prefix}_{PAGE_ID}", "logs")
+        if prefix not in skip_prefixes:
+            duckdb_save_table(SRC_PROJECT, df, f"{prefix}_{PAGE_ID}", "logs")
     duckdb_save_table(
         SRC_PROJECT,
         pl.DataFrame({"label": ["Don't know", "Refused"], "codes": ["-99", "-88"]}),
@@ -911,6 +912,54 @@ class TestCheckTablesAndMissingCodes:
         assert result.pages_created == [PAGE_NAME]
         settings_dir = real_duckdb / DST_PROJECT / "settings"
         assert not (settings_dir / f"page_{PAGE_ID}_missing_settings.json").exists()
+
+    def _seed_legacy_descriptive_selection(self):
+        duckdb_save_table(
+            SRC_PROJECT,
+            pl.DataFrame(
+                {
+                    "Selected": [True, False, True],
+                    "column": ["age", "sex", "other_page_col"],
+                    "type": ["numeric", "categorical", "numeric"],
+                }
+            ),
+            "selected_columns_df",
+            "intermediate",
+        )
+
+    def test_export_before_page_visit_keeps_legacy_descriptive_selection(
+        self, mock_service_cls, mock_load_local, mock_correction_cls
+    ):
+        """A page not opened since the upgrade exports the old selection."""
+        mock_service_cls.return_value = _page_config_service()
+        _seed_source_project(skip_prefixes={"descriptive_columns"})
+        self._seed_legacy_descriptive_selection()
+
+        bundle = self._export_and_parse()
+        apply_project_config(DST_PROJECT, bundle, self.local_paths)
+
+        imported = duckdb_get_table(
+            DST_PROJECT, f"descriptive_columns_{PAGE_ID}", "logs"
+        )
+        assert imported.filter(pl.col("Selected"))["column"].to_list() == [
+            "age",
+            "other_page_col",
+        ]
+
+    def test_export_prefers_page_descriptive_selection_over_legacy(
+        self, mock_service_cls, mock_load_local, mock_correction_cls
+    ):
+        """A page's own selection is exported, not the old project-wide one."""
+        mock_service_cls.return_value = _page_config_service()
+        _seed_source_project()
+        self._seed_legacy_descriptive_selection()
+
+        bundle = self._export_and_parse()
+
+        assert (
+            bundle.pages[0].check_tables["descriptive_columns"]
+            == CHECK_TABLES["descriptive_columns"].to_dicts()
+        )
 
     def test_round_trip_preserves_date_columns(
         self, mock_service_cls, mock_load_local, mock_correction_cls

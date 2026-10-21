@@ -32,6 +32,10 @@ BACKCHECKS_TABLE = "backchecks"
 DESCRIPTIVE_COLUMNS_TABLE = "descriptive_columns"
 BC_ATTRIBUTION_TABLE = "bc_attribution"
 
+# Older versions saved one descriptive selection for the whole project in
+# this ``intermediate`` table instead of one per page.
+LEGACY_DESCRIPTIVE_SELECTION_TABLE = "selected_columns_df"
+
 CHECK_TABLE_PREFIXES: tuple[str, ...] = (
     DUPLICATES_TABLE,
     OUTLIERS_TABLE,

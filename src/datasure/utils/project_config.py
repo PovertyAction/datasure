@@ -39,6 +39,8 @@ from datasure.utils.config_utils import ConfigurationService
 from datasure.utils.duckdb_utils import (
     BC_ATTRIBUTION_TABLE,
     CHECK_TABLE_PREFIXES,
+    DESCRIPTIVE_COLUMNS_TABLE,
+    LEGACY_DESCRIPTIVE_SELECTION_TABLE,
     OUTLIERS_TABLE,
     check_table_name,
     duckdb_get_table,
@@ -164,6 +166,27 @@ def _decode_prep_args_cell(value: str | dict) -> dict:
         return ast.literal_eval(value)
 
 
+def _read_check_table(project_id: str, prefix: str, page_name: str) -> pl.DataFrame:
+    """Read a page's check table.
+
+    A page whose descriptive stats have not been opened since the upgrade
+    has no column selection of its own yet. It gets the selected rows of
+    the old project-wide one, which is what the page starts from when
+    opened; columns not in the page's data are dropped then.
+    """
+    df = duckdb_get_table(
+        project_id, alias=check_table_name(prefix, page_name), db_name="logs"
+    )
+    if prefix != DESCRIPTIVE_COLUMNS_TABLE or not df.is_empty():
+        return df
+    legacy = duckdb_get_table(
+        project_id, LEGACY_DESCRIPTIVE_SELECTION_TABLE, "intermediate"
+    )
+    if legacy.is_empty():
+        return legacy
+    return legacy.filter(pl.col("Selected").cast(pl.Boolean))
+
+
 def _export_check_tables(
     project_id: str, page_name: str, exclude_prefixes: Collection[str]
 ) -> tuple[dict[str, list[dict]], dict[str, dict]]:
@@ -173,9 +196,7 @@ def _export_check_tables(
     for prefix in CHECK_TABLE_PREFIXES:
         if prefix in exclude_prefixes:
             continue
-        df = duckdb_get_table(
-            project_id, alias=check_table_name(prefix, page_name), db_name="logs"
-        )
+        df = _read_check_table(project_id, prefix, page_name)
         legacy = [c for c in _LEGACY_TABLE_COLUMNS.get(prefix, ()) if c in df.columns]
         df = df.drop(legacy)
         if df.is_empty():
