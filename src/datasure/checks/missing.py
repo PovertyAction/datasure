@@ -282,6 +282,52 @@ def _get_all_missing_codes(missing_codes_df: pl.DataFrame) -> list[str]:
     return all_codes
 
 
+def _numeric_missing_codes(missing_codes_df: pl.DataFrame) -> list[float]:
+    """Return the missing codes that are numbers, skipping text codes like `.d`."""
+    codes = []
+    for code in _get_all_missing_codes(missing_codes_df):
+        try:
+            codes.append(float(code))
+        except ValueError:
+            continue
+    return codes
+
+
+def mask_missing_codes(
+    df: pl.DataFrame, cols: list[str], missing_codes_df: pl.DataFrame
+) -> pl.DataFrame:
+    """Set the project's missing codes to null in numeric columns.
+
+    Numeric checks call this so a code such as -99 is not counted as a value.
+    Missing Data keeps the raw codes, since it counts them by category.
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        The dataset.
+    cols : list[str]
+        Columns to mask. Non-numeric columns are left unchanged.
+    missing_codes_df : pl.DataFrame
+        The missing codes configuration.
+
+    Returns
+    -------
+    pl.DataFrame
+        `df` with the numeric missing codes in `cols` set to null.
+    """
+    codes = _numeric_missing_codes(missing_codes_df)
+    numeric_cols = [c for c in cols if df.schema[c].is_numeric()]
+    if not codes or not numeric_cols:
+        return df
+    return df.with_columns(
+        pl.when(pl.col(c).cast(pl.Float64).is_in(codes))
+        .then(None)
+        .otherwise(pl.col(c))
+        .alias(c)
+        for c in numeric_cols
+    )
+
+
 def _get_missing_code_pairs(missing_codes_df: pl.DataFrame) -> dict[str, list[str]]:
     """Get missing code label to codes mapping.
 

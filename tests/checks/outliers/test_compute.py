@@ -2073,3 +2073,56 @@ class TestFlaggedValuePercent:
             schema_overrides={"column value": pl.Float64},
         )
         assert flagged_value_percent(flags) is None
+
+
+class TestMissingCodesAreNotValues:
+    """Issue #379: missing codes are neither outliers nor constraint breaches."""
+
+    @staticmethod
+    def _column_config(**bounds) -> pl.DataFrame:
+        return pl.DataFrame(
+            [
+                {
+                    "column_name": ["land_area"],
+                    "grouped_columns": False,
+                    "outlier_enabled": True,
+                    "outlier_method": OutlierMethod.IQR.value,
+                    "outlier_multiplier": 1.5,
+                    "outlier_threshold": 3,
+                    "hard_min": None,
+                    "soft_min": None,
+                    "soft_max": None,
+                    "hard_max": None,
+                    **bounds,
+                }
+            ]
+        )
+
+    def test_only_the_real_outlier_is_flagged(
+        self, land_area_data, land_area_missing_codes
+    ):
+        result = compute_outlier_output(
+            land_area_data,
+            OutlierSettings(survey_key="key"),
+            self._column_config(),
+            missing_codes=land_area_missing_codes,
+        )
+
+        flagged = result.filter(pl.col("outlier reason") != "no outlier")
+        assert flagged["column value"].to_list() == [60.0]
+        assert result["lower_bound"][0] == pytest.approx(-0.25)
+        assert result["upper_bound"][0] == pytest.approx(9.75)
+        assert flagged_value_percent(result) == pytest.approx(100 / 9)
+
+    def test_codes_do_not_breach_constraints(
+        self, land_area_data, land_area_missing_codes
+    ):
+        result = compute_constraint_violations(
+            land_area_data,
+            OutlierSettings(survey_key="key"),
+            self._column_config(hard_min=0.0),
+            missing_codes=land_area_missing_codes,
+        )
+
+        breaches = result.filter(pl.col("violation reason") != "no violation")
+        assert breaches.is_empty()

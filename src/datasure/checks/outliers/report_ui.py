@@ -10,6 +10,7 @@ import polars as pl
 import streamlit as st
 from pydantic import BaseModel, ValidationError
 
+from datasure.checks.missing import mask_missing_codes
 from datasure.checks.outliers.compute import (
     _build_include_cols,
     _compute_constraint_metrics,
@@ -65,7 +66,11 @@ from datasure.utils.correction_form import (
     should_enable_apply_button,
 )
 from datasure.utils.dataframe_utils import ColumnByType
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.duckdb_utils import (
+    duckdb_get_table,
+    duckdb_save_table,
+    load_missing_codes_from_db,
+)
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import is_demo_project
@@ -614,6 +619,7 @@ def _render_outlier_column_inspection(
     settings: OutlierSettings,
     setting_file: str,
     review: ReviewContext | None = None,
+    missing_codes: pl.DataFrame | None = None,
 ) -> None:
     """Inspect outlier columns in the DataFrame.
 
@@ -630,6 +636,9 @@ def _render_outlier_column_inspection(
     review : ReviewContext | None
         If given, accepted outliers are hidden (unless "Show reviewed" is
         on) and selecting a row opens the correction form.
+    missing_codes : pl.DataFrame | None
+        The project's missing codes, left out of the statistics and box plot.
+        The record table still shows the values as entered.
     """
     if outliers_data.is_empty():
         st.info(
@@ -679,6 +688,8 @@ def _render_outlier_column_inspection(
 
     # create a subset of the data
     column_data = data.select([selected_col])
+    if missing_codes is not None:
+        column_data = mask_missing_codes(column_data, [selected_col], missing_codes)
 
     st.subheader(f"Details/Distribution for {selected_col} values")
     dc1, _, dc3 = st.columns([0.3, 0.1, 0.6])
@@ -1443,8 +1454,13 @@ def _reviewed_flags(
             survey_columns.categorical_columns,
             survey_columns.datetime_columns,
         )
-        outlier_data = compute_outlier_output(data, settings, column_config)
-        violations = compute_constraint_violations(data, settings, column_config)
+        missing_codes = load_missing_codes_from_db(project_id)
+        outlier_data = compute_outlier_output(
+            data, settings, column_config, missing_codes=missing_codes
+        )
+        violations = compute_constraint_violations(
+            data, settings, column_config, missing_codes=missing_codes
+        )
     except (pl.exceptions.PolarsError, ValidationError, ValueError):
         logger.warning(
             "Could not compute the outlier results for page %s",
@@ -1741,11 +1757,15 @@ def outliers_report(
             "columns such as **enum_name** or **state** to the violations table."
         )
 
+    # Missing codes such as -99 are neither breaches nor outliers
+    missing_codes = load_missing_codes_from_db(project_id)
+
     # compute constraint violations
     constraint_violations = compute_constraint_violations(
         data,
         outliers_settings,
         outliers_column_config,
+        missing_codes=missing_codes,
     )
 
     if constraint_violations.is_empty():
@@ -1793,6 +1813,7 @@ def outliers_report(
         data,
         outliers_settings,
         outliers_column_config,
+        missing_codes=missing_codes,
     )
 
     if outlier_data.is_empty():
@@ -1816,6 +1837,7 @@ def outliers_report(
             outliers_settings,
             setting_file,
             review=review,
+            missing_codes=missing_codes,
         )
 
     demo_callout(

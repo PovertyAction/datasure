@@ -24,6 +24,7 @@ from datasure.checks.missing import (
     compute_missing_over_time,
     compute_missing_summary,
     get_null_list,
+    mask_missing_codes,
     missing_columns,
     missing_compare,
     missing_correlation,
@@ -406,6 +407,46 @@ def test_get_all_missing_codes_empty_df():
     result = _get_all_missing_codes(missing_codes_df)
 
     assert result == []
+
+
+def test_mask_missing_codes_nulls_numeric_codes(
+    land_area_data, land_area_missing_codes
+):
+    """Numeric codes become null; the text code `.d` is skipped, not an error."""
+    result = mask_missing_codes(land_area_data, ["land_area"], land_area_missing_codes)
+
+    assert result["land_area"].to_list() == [
+        2, 3, 3.5, 4, 4, 5, 6, 7, None, None, None, 60,
+    ]  # fmt: skip
+
+
+def test_missing_data_still_counts_each_code_under_its_label(
+    land_area_data, land_area_missing_codes
+):
+    """Missing Data reads the raw codes: 2 is Don't know, 3 is Refused."""
+    result = _compute_missing_data_paired(
+        land_area_data.select("land_area"), land_area_missing_codes
+    )
+
+    assert result["land_area"].to_list() == [0] * 8 + [2, 2, 3, 0]
+
+
+def test_mask_missing_codes_leaves_text_columns_alone(land_area_missing_codes):
+    """Codes are only masked in numeric columns."""
+    data = pl.DataFrame({"name": ["-99", "Ama"]})
+
+    result = mask_missing_codes(data, ["name"], land_area_missing_codes)
+
+    assert result["name"].to_list() == ["-99", "Ama"]
+
+
+def test_mask_missing_codes_without_codes(land_area_data):
+    """No configured codes leaves the data unchanged."""
+    no_codes = pl.DataFrame(schema={"label": pl.Utf8, "codes": pl.Utf8})
+
+    result = mask_missing_codes(land_area_data, ["land_area"], no_codes)
+
+    assert result.equals(land_area_data)
 
 
 def test_get_missing_code_pairs():

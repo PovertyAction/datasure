@@ -595,13 +595,15 @@ def compute_enumerator_statistics(
     group_by_cols: list[str],
     statscols: list[str],
     stats: list[str],
+    missing_codes: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """Compute enumerator statistics across specified columns.
 
     Calculates summary statistics (mean, median, std, etc.) for numeric
     columns grouped by enumerator (and optionally team).
 
-    Cached for 5 minutes to improve performance for repeated calls.
+    Cached for 5 minutes to improve performance for repeated calls. The
+    missing codes are an argument so that editing them changes the cache key.
 
     Parameters
     ----------
@@ -613,12 +615,17 @@ def compute_enumerator_statistics(
         List of columns to compute statistics on.
     stats : list[str]
         List of statistics to compute (e.g., ["mean", "median", "std"]).
+    missing_codes : pl.DataFrame | None
+        The project's missing codes. Values matching them count as missing.
 
     Returns
     -------
     pl.DataFrame
         DataFrame with enumerators (and teams) and computed statistics.
     """
+    if missing_codes is not None:
+        data = missing.mask_missing_codes(data, statscols, missing_codes)
+
     # Map stat names to Polars expressions
     stat_mapping = {
         "count": "count",
@@ -655,6 +662,7 @@ def compute_enumerator_statistics_overtime(
     stat: str,
     period: str,
     weekstartday: str,
+    missing_codes: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """Compute enumerator statistics over time for a specific column.
 
@@ -679,6 +687,8 @@ def compute_enumerator_statistics_overtime(
         Time period: "Daily", "Weekly", "Monthly", "Day", "Week", or "Month".
     weekstartday : str
         Start day of the week for weekly analysis.
+    missing_codes : pl.DataFrame | None
+        The project's missing codes. Values matching them count as missing.
 
     Returns
     -------
@@ -687,6 +697,10 @@ def compute_enumerator_statistics_overtime(
         periods as columns.
     """
     stats_overtime_df = data.select([date] + group_by_cols + [statscol]).clone()
+    if missing_codes is not None:
+        stats_overtime_df = missing.mask_missing_codes(
+            stats_overtime_df, [statscol], missing_codes
+        )
     stats_overtime_df = _add_time_period_column(
         stats_overtime_df, date, period, weekstartday
     )

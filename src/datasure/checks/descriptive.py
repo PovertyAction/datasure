@@ -15,8 +15,13 @@ import plotly.graph_objects as go
 import polars as pl
 import streamlit as st
 
+from datasure.checks.missing import mask_missing_codes
 from datasure.models.schemas import ColumnByType
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.duckdb_utils import (
+    duckdb_get_table,
+    duckdb_save_table,
+    load_missing_codes_from_db,
+)
 from datasure.utils.navigations_utils import demo_callout, show_demo_next_action
 from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.view_state import reset_filters_beside, view_factory
@@ -99,7 +104,11 @@ def _col_stats(col: str, s: pl.Series, n_missing: int, n_total: int) -> dict:
     }
 
 
-def compute_summary_stats(df: pl.DataFrame, numeric_cols: list[str]) -> pd.DataFrame:
+def compute_summary_stats(
+    df: pl.DataFrame,
+    numeric_cols: list[str],
+    missing_codes: pl.DataFrame | None = None,
+) -> pd.DataFrame:
     """Compute per-column summary statistics for numeric columns.
 
     Parameters
@@ -108,6 +117,8 @@ def compute_summary_stats(df: pl.DataFrame, numeric_cols: list[str]) -> pd.DataF
         Input data.
     numeric_cols : list[str]
         Numeric column names to analyse.
+    missing_codes : pl.DataFrame | None
+        The project's missing codes. Values matching them count as missing.
 
     Returns
     -------
@@ -118,6 +129,8 @@ def compute_summary_stats(df: pl.DataFrame, numeric_cols: list[str]) -> pd.DataF
     if not numeric_cols or df.is_empty():
         return pd.DataFrame()
 
+    if missing_codes is not None:
+        df = mask_missing_codes(df, numeric_cols, missing_codes)
     n_total = len(df)
     rows = []
     for col in numeric_cols:
@@ -132,7 +145,10 @@ def compute_summary_stats(df: pl.DataFrame, numeric_cols: list[str]) -> pd.DataF
 
 
 def compute_histogram_data(
-    df: pl.DataFrame, column: str, n_bins: int = 20
+    df: pl.DataFrame,
+    column: str,
+    n_bins: int = 20,
+    missing_codes: pl.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Compute histogram bin counts for a numeric column.
 
@@ -144,6 +160,8 @@ def compute_histogram_data(
         Column to compute histogram for.
     n_bins : int
         Number of histogram bins.
+    missing_codes : pl.DataFrame | None
+        The project's missing codes. Values matching them are left out.
 
     Returns
     -------
@@ -153,6 +171,8 @@ def compute_histogram_data(
     if df.is_empty() or column not in df.columns:
         return pd.DataFrame()
 
+    if missing_codes is not None:
+        df = mask_missing_codes(df, [column], missing_codes)
     values = df[column].cast(pl.Float64, strict=False).drop_nulls().to_numpy()
     if len(values) == 0:
         return pd.DataFrame()
@@ -412,13 +432,17 @@ def _render_column_selector(
     )
 
 
-def _render_summary_stats(df: pl.DataFrame, numeric_cols: list[str]) -> None:
+def _render_summary_stats(
+    df: pl.DataFrame,
+    numeric_cols: list[str],
+    missing_codes: pl.DataFrame | None = None,
+) -> None:
     """Render the Summary Stats tab."""
     if not numeric_cols:
         st.info("No numeric columns selected.")
         return
 
-    stats = compute_summary_stats(df, numeric_cols)
+    stats = compute_summary_stats(df, numeric_cols, missing_codes=missing_codes)
     if stats.empty:
         st.info("No data to display.")
         return
@@ -487,7 +511,10 @@ def _build_shape_caption(s: pl.Series) -> str:
 
 @st.fragment
 def _render_histogram(
-    df: pl.DataFrame, numeric_cols: list[str], setting_file: str
+    df: pl.DataFrame,
+    numeric_cols: list[str],
+    setting_file: str,
+    missing_codes: pl.DataFrame | None = None,
 ) -> None:
     """Render the Histogram section."""
     if not numeric_cols:
@@ -510,6 +537,8 @@ def _render_histogram(
         **saved_view.bind("desc_hist_bins", options=range(5, 101), value=20),
     )
 
+    if missing_codes is not None:
+        df = mask_missing_codes(df, [col_to_plot], missing_codes)
     hist_data = compute_histogram_data(df, col_to_plot, n_bins=n_bins)
     if hist_data.empty:
         st.info("No data to plot.")
@@ -708,13 +737,18 @@ def descriptive_report(
 
     st.write("---")
 
+    # Missing codes such as -99 are missing, not values, in the numeric views
+    missing_codes = load_missing_codes_from_db(project_id)
+
     # Stacked sections
     st.subheader("Summary Stats")
-    _render_summary_stats(data, selected_columns.numeric_columns)
+    _render_summary_stats(data, selected_columns.numeric_columns, missing_codes)
 
     st.write("---")
     st.subheader("Histogram")
-    _render_histogram(data, selected_columns.numeric_columns, setting_file)
+    _render_histogram(
+        data, selected_columns.numeric_columns, setting_file, missing_codes
+    )
 
     st.write("---")
     st.subheader("Value Counts")

@@ -984,6 +984,11 @@ Configure missing codes:
 - **Missing Codes**: Numeric codes (-99, -88, -77)
   - Multiple codes separated by commas
 
+Numeric codes count as missing, not as values, on the other checks: Outliers &
+Constraints don't flag them, and Descriptive Stats and the enumerator
+statistics leave them out of the mean, minimum and other statistics. Back
+checks use their own settings for values to exclude.
+
 ##### Missing Data Statistics
 
 Overview metrics:

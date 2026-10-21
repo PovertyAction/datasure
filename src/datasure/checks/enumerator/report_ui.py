@@ -31,7 +31,7 @@ from datasure.checks.enumerator.settings_ui import (
     load_default_enumerator_settings,
 )
 from datasure.utils.dataframe_utils import ColumnByType
-from datasure.utils.duckdb_utils import duckdb_get_table
+from datasure.utils.duckdb_utils import duckdb_get_table, load_missing_codes_from_db
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.settings_utils import load_check_settings
@@ -643,6 +643,7 @@ def _render_enumerator_statistics_table(
     enumerator: str,
     team: str | None,
     settings_file: str,
+    missing_codes: pl.DataFrame | None = None,
 ) -> None:
     """Display enumerator statistics table with team support.
 
@@ -659,6 +660,8 @@ def _render_enumerator_statistics_table(
         Team column name (optional).
     settings_file : str
         Path to settings file for saving/loading configurations.
+    missing_codes : pl.DataFrame | None
+        The project's missing codes, counted as missing in the statistics.
     """
     # Validate inputs
     if not enumerator:
@@ -697,6 +700,7 @@ def _render_enumerator_statistics_table(
             group_by_cols=group_by_cols,
             statscols=statscols,
             stats=stats,
+            missing_codes=missing_codes,
         )
 
         # Build column configuration dynamically with pinning
@@ -724,6 +728,7 @@ def _render_enumerator_statistics(
     enumerator: str,
     team: str | None,
     settings_file: str,
+    missing_codes: pl.DataFrame | None = None,
 ) -> None:
     """Display enumerator statistics table with team support.
 
@@ -740,6 +745,8 @@ def _render_enumerator_statistics(
         Team column name (optional).
     settings_file : str
         Path to settings file for saving/loading configurations.
+    missing_codes : pl.DataFrame | None
+        The project's missing codes, counted as missing in the statistics.
     """
     # Validate inputs
     if not enumerator:
@@ -750,7 +757,11 @@ def _render_enumerator_statistics(
         return
 
     _render_enumerator_statistics_table(
-        data=data, enumerator=enumerator, team=team, settings_file=settings_file
+        data=data,
+        enumerator=enumerator,
+        team=team,
+        settings_file=settings_file,
+        missing_codes=missing_codes,
     )
 
 
@@ -902,6 +913,7 @@ def _render_enumerator_statistics_overtime_table(
     enumerator: str,
     team: str | None,
     settings_file: str,
+    missing_codes: pl.DataFrame | None = None,
 ) -> None:
     """Display enumerator statistics over time table with team support.
 
@@ -920,6 +932,8 @@ def _render_enumerator_statistics_overtime_table(
         Team column name (optional).
     settings_file : str
         Path to settings file for saving/loading configurations.
+    missing_codes : pl.DataFrame | None
+        The project's missing codes, counted as missing in the statistics.
     """
     # Validate inputs
     if not (enumerator and date):
@@ -968,6 +982,7 @@ def _render_enumerator_statistics_overtime_table(
             stat=stat,
             period=period,
             weekstartday=weekstartday,
+            missing_codes=missing_codes,
         )
 
         # Build column configuration dynamically with pinning
@@ -999,6 +1014,7 @@ def _render_enumerator_statistics_overtime(
     enumerator: str,
     team: str | None,
     settings_file: str,
+    missing_codes: pl.DataFrame | None = None,
 ) -> None:
     """Display enumerator statistics over time table with team support.
 
@@ -1017,6 +1033,8 @@ def _render_enumerator_statistics_overtime(
         Team column name (optional).
     settings_file : str
         Path to settings file for saving/loading configurations.
+    missing_codes : pl.DataFrame | None
+        The project's missing codes, counted as missing in the statistics.
     """
     # Validate inputs
     if not (enumerator and date):
@@ -1032,6 +1050,7 @@ def _render_enumerator_statistics_overtime(
         enumerator=enumerator,
         team=team,
         settings_file=settings_file,
+        missing_codes=missing_codes,
     )
 
 
@@ -1195,11 +1214,15 @@ def enumerator_report(
         """
     )
 
+    # Missing codes such as -99 are missing, not values, in the statistics
+    missing_codes = load_missing_codes_from_db(project_id)
+
     _render_enumerator_statistics(
         data_enum_report,
         enumerator_settings.enumerator,
         enumerator_settings.team,
         setting_file,
+        missing_codes,
     )
 
     st.write("---")
@@ -1226,6 +1249,7 @@ def enumerator_report(
         enumerator_settings.enumerator,
         enumerator_settings.team,
         setting_file,
+        missing_codes,
     )
 
     demo_callout(

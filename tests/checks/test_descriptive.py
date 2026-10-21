@@ -370,6 +370,19 @@ class TestComputeSummaryStats:
         assert row["min"] == pytest.approx(1.0)
         assert row["max"] == pytest.approx(5.0)
 
+    def test_missing_codes_are_not_values(
+        self, land_area_data, land_area_missing_codes
+    ):
+        """Issue #379: -99 and -88 count as missing, not in the mean or minimum."""
+        result = compute_summary_stats(
+            land_area_data, ["land_area"], missing_codes=land_area_missing_codes
+        )
+        row = result.iloc[0]
+        assert row["count"] == 9
+        assert row["missing"] == 3
+        assert row["mean"] == pytest.approx(10.5)
+        assert row["min"] == pytest.approx(2.0)
+
 
 # =============================================================================
 # compute_histogram_data
@@ -411,6 +424,16 @@ class TestComputeHistogramData:
     def test_default_n_bins_is_20(self, sample_df):
         result = compute_histogram_data(sample_df, "age")
         assert len(result) == 20
+
+    def test_missing_codes_are_not_binned(
+        self, land_area_data, land_area_missing_codes
+    ):
+        """Issue #379: the histogram starts at 2, not at the -99 code."""
+        result = compute_histogram_data(
+            land_area_data, "land_area", missing_codes=land_area_missing_codes
+        )
+        assert result["count"].sum() == 9
+        assert result["bin_start"].min() == pytest.approx(2.0)
 
 
 # =============================================================================
@@ -1212,6 +1235,9 @@ class TestDescriptiveReport:
         with (
             patch.object(mod, "get_column_selection_df", return_value=sel_df),
             patch.object(mod, "_render_column_selector", return_value=selected_cols),
+            patch.object(
+                mod, "load_missing_codes_from_db", return_value=pl.DataFrame()
+            ),
             patch.object(mod, "_render_summary_stats"),
             patch.object(mod, "_render_histogram"),
             patch.object(mod, "_render_value_counts"),

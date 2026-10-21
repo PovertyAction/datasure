@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Missing codes counted as values** (#379): The codes set on the Missing
+  Data tab (for example `-99` for Don't know) entered the mean, the minimum
+  and the outlier bounds in Outliers, Descriptive Statistics and Enumerator
+  Statistics, so each code was reported as missing and as an outlier
+  - Root cause: only `checks/missing.py` and the enumerator missing counts
+    read the missing codes; every other numeric check used raw values
+  - Solution: new `mask_missing_codes` (`checks/missing.py`) sets the numeric
+    missing codes to null in the given numeric columns, skipping codes that
+    are not numbers (such as `.d`). `compute_outlier_output`,
+    `compute_constraint_violations`, `compute_summary_stats`,
+    `compute_histogram_data`, `compute_enumerator_statistics` and
+    `compute_enumerator_statistics_overtime` take an optional
+    `missing_codes` DataFrame and mask the checked columns first. The codes
+    are an argument, not loaded inside, so they are part of the
+    `st.cache_data` key. The report pages pass
+    `load_missing_codes_from_db(project_id)`, as does the outlier column
+    inspection's statistics and box plot. Missing Data keeps the raw codes.
+    Back checks are unchanged: they have their own `no_differences_values`
+    and `exclude_values` settings
 - **Enumerator summary dates** (#380): First and last submission and the
   today, this week and this month counts were wrong when the data spanned
   more than one month

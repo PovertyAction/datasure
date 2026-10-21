@@ -56,6 +56,15 @@ def mock_database_functions(monkeypatch):
     pass
 
 
+@pytest.fixture(autouse=True)
+def no_missing_codes(monkeypatch):
+    """Report tests run without a project database, so no missing codes."""
+    monkeypatch.setattr(
+        "datasure.checks.outliers.report_ui.load_missing_codes_from_db",
+        lambda _project_id: pl.DataFrame(),
+    )
+
+
 @pytest.fixture
 def sample_polars_df():
     """Create a sample Polars DataFrame for testing."""
