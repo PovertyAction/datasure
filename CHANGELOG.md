@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Enumerator summary dates** (#380): First and last submission and the
+  today, this week and this month counts were wrong when the data spanned
+  more than one month
+  - Root cause: `compute_enumerator_summary` formatted the date column as
+    `"%b %d, %Y"` text before taking `min`/`max` and comparing with `>=`
+  - Solution: `compute_enumerator_summary` (`checks/enumerator/compute.py`)
+    cuts the column to its local day (`dt.date()`) for every calculation and
+    formats only the first and last submission columns for display, so the
+    form-version check still groups per day. "Today" is still the system
+    clock, now injectable through a new `today: date | None = None`
+    parameter. `compute_enumerator_overview` takes the same `today`
+    parameter and cuts dates to the local day the same way, so "active in the
+    past 7 days" agrees with the summary. The summary table
+    (`checks/enumerator/report_ui.py`) shows a "Data as of" note with the
+    latest submission date from the new `compute_latest_submission_date`
+
 ## [1.2.0a3] - 2026-10-21
 
 ### Added
