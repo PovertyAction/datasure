@@ -1226,6 +1226,12 @@ Configure parameters:
 - **Consent**: Consent column and value
 - **Outcome**: Completion column and value
 
+The report uses the consent and outcome settings as soon as you change them,
+and again after every data refresh; there is nothing to apply. Each check
+page keeps its own consent and outcome settings. The % consent and %
+completed columns appear in the Enumerator Summary only once you choose both
+a column and its values.
+
 ##### Enumerator Overview
 
 High-level metrics:
@@ -1295,8 +1301,12 @@ Temporal performance trends:
 
 Configure analysis:
 
-- Select columns to analyze
+- Select columns to analyze, then click **Apply Selection**
 - Separate report per column
+
+Each check page keeps its own column selection. After upgrading from a
+version that shared one selection across pages, each page starts from that
+shared selection, keeping only the columns in the page's dataset.
 
 ##### For Each Selected Column
 

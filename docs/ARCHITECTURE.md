@@ -351,14 +351,25 @@ Per project (UUID-keyed):
 - `cache/{project_id}/data/` — the DuckDB databases `raw.duckdb`,
   `prep.duckdb`, `corrected.duckdb`
 - `cache/{project_id}/settings/` — `logs.duckdb` (import/prep logs, the
-  correction logs `corr_log_{alias}`, and the backcheck attribution logs
-  `bc_attribution_{page_name_id}`; see [Correction log](#correction-log)),
-  JSON settings (including each check page's, Prepare Data's and
-  Corrections' [view state](#view-state)), and credential metadata
+  correction logs `corr_log_{alias}`, the backcheck attribution logs
+  `bc_attribution_{page_name_id}`, see [Correction log](#correction-log),
+  and each check page's check tables, such as the Descriptive Stats column
+  selection `descriptive_columns_{page_name_id}`), JSON settings (including
+  each check page's, Prepare Data's and Corrections'
+  [view state](#view-state)), and credential metadata
 - `cache/projects.json` — the project registry
 - `cache/user_settings.json` — per-user preferences, currently the
   "Reviewer name" recorded as `user` in correction logs
   (`utils/reviewer.py`). Display names only, never credentials.
+
+Check settings are per page: a page's JSON settings file and its
+`{prefix}_{page_name_id}` tables in `logs.duckdb`. Data a check derives from
+its settings is computed when the report runs, cached on the data and the
+settings, and not stored; the Enumerator report's consent and completion
+flags work this way. Older versions kept the Descriptive Stats selection
+project-wide in `selected_columns_df` in `data/intermediate.duckdb`; a page
+with no selection of its own is seeded from it once, filtered to the page's
+columns, and the old table is left in place.
 
 The `cache/` directory is gitignored.
 
