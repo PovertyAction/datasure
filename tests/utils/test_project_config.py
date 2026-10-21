@@ -1,10 +1,12 @@
 """Tests for project configuration export/import (issue #251)."""
 
 import json
+from datetime import datetime
 from unittest.mock import Mock, patch
 
 import polars as pl
 import pytest
+from polars.testing import assert_frame_equal
 
 from datasure.models.schemas import (
     ImportSourceEntry,
@@ -12,9 +14,14 @@ from datasure.models.schemas import (
     ProjectPageBundle,
 )
 from datasure.utils.config_utils import ConfigurationService
+from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.project_config import (
+    BUNDLE_VERSION,
+    RECORD_LEVEL_TABLE_PREFIXES,
+    _render_config_summary,
     _stored_username_for_server,
     apply_project_config,
+    bundle_version_warning,
     export_project_config,
     missing_credentials,
     missing_local_files,
@@ -517,6 +524,386 @@ class TestApplyProjectConfig:
             "missing": {"threshold": 5},
             "view_state": {"selected": "duplicates"},
         }
+
+
+# === CHECK TABLES AND MISSING CODES (issue #354) === #
+
+SRC_PROJECT = "src00001"
+DST_PROJECT = "dst00001"
+PAGE_NAME = "Household HFC"
+PAGE_ID = "household_hfc"
+
+# One table per registered check prefix, using the dtypes each check saves.
+CHECK_TABLES = {
+    "duplicates": pl.DataFrame(
+        {
+            "search_type": ["exact", "pattern"],
+            "pattern": [None, "hh_*"],
+            "column_name": [["hhid"], ["hh_a", "hh_b"]],
+            "locked": [True, False],
+        },
+        schema={
+            "search_type": pl.Utf8,
+            "pattern": pl.Utf8,
+            "column_name": pl.List(pl.Utf8),
+            "locked": pl.Boolean,
+        },
+    ),
+    "outliers": pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": [None],
+            "column_name": [["age"]],
+            "grouped_columns": [False],
+            "locked": [False],
+            "outlier_enabled": [True],
+            "outlier_method": ["iqr"],
+            "outlier_multiplier": [1.5],
+            "outlier_threshold": [None],
+            "hard_min": [0.0],
+            "soft_min": [None],
+            "soft_max": [None],
+            "hard_max": [120.0],
+        },
+        schema={
+            "search_type": pl.Utf8,
+            "pattern": pl.Utf8,
+            "column_name": pl.List(pl.Utf8),
+            "grouped_columns": pl.Boolean,
+            "locked": pl.Boolean,
+            "outlier_enabled": pl.Boolean,
+            "outlier_method": pl.Utf8,
+            "outlier_multiplier": pl.Float64,
+            "outlier_threshold": pl.Int64,
+            "hard_min": pl.Float64,
+            "soft_min": pl.Float64,
+            "soft_max": pl.Float64,
+            "hard_max": pl.Float64,
+        },
+    ),
+    "gps_columns": pl.DataFrame(
+        {
+            "alias": ["home"],
+            "format_type": ["single"],
+            "delimiter": [" "],
+            "gps_column": ["gps"],
+            "latitude_column": [None],
+            "longitude_column": [None],
+            "altitude_column": [None],
+            "accuracy_column": [None],
+        },
+        schema={
+            c: pl.Utf8
+            for c in (
+                "alias",
+                "format_type",
+                "delimiter",
+                "gps_column",
+                "latitude_column",
+                "longitude_column",
+                "altitude_column",
+                "accuracy_column",
+            )
+        },
+    ),
+    "backchecks": pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": [None],
+            "column_name": [["age", "sex"]],
+            "category": [1],
+            "ok_range_type": ["absolute"],
+            "ok_range_values": [[-2, 2]],
+            "ttest": [True],
+            "prtest": [False],
+            "signrank": [False],
+            "reliability": [True],
+        },
+        schema={
+            "search_type": pl.Utf8,
+            "pattern": pl.Utf8,
+            "column_name": pl.List(pl.Utf8),
+            "category": pl.Int64,
+            "ok_range_type": pl.Utf8,
+            "ok_range_values": pl.List(pl.Float64),
+            "ttest": pl.Boolean,
+            "prtest": pl.Boolean,
+            "signrank": pl.Boolean,
+            "reliability": pl.Boolean,
+        },
+    ),
+    "descriptive_columns": pl.DataFrame(
+        {
+            "Selected": [True, False],
+            "column": ["age", "sex"],
+            "type": ["numeric", "categorical"],
+        }
+    ),
+    "bc_attribution": pl.DataFrame(
+        {
+            "survey_key": ["k1"],
+            "backcheck_key": ["b1"],
+            "column_name": ["age"],
+            "survey_value": ["30"],
+            "backcheck_value": ["31"],
+            "source": ["enumerator"],
+            "note": [None],
+            "user": ["reviewer"],
+            "date": [datetime(2026, 8, 28, 10, 15, 0, 123456)],
+        },
+        schema={
+            "survey_key": pl.String,
+            "backcheck_key": pl.String,
+            "column_name": pl.String,
+            "survey_value": pl.String,
+            "backcheck_value": pl.String,
+            "source": pl.String,
+            "note": pl.String,
+            "user": pl.String,
+            "date": pl.Datetime("us"),
+        },
+    ),
+}
+
+
+@pytest.fixture
+def real_duckdb(tmp_path):
+    """Point every DuckDB database and settings file at a temporary cache."""
+
+    def fake_cache_path(*parts):
+        path = tmp_path.joinpath(*map(str, parts))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    with (
+        patch("datasure.utils.duckdb_utils.get_cache_path", fake_cache_path),
+        patch("datasure.utils.project_config.get_cache_path", fake_cache_path),
+    ):
+        yield tmp_path
+
+
+def _page_config_service(page_exists=False):
+    service = Mock()
+    service.get_all_configurations.return_value = pl.DataFrame(
+        {
+            "page_name": [PAGE_NAME],
+            "survey_data_name": ["household"],
+            "survey_key": ["KEY"],
+        }
+    )
+    service.page_name_exists.return_value = page_exists
+    return service
+
+
+def _seed_source_project():
+    duckdb_save_table(
+        SRC_PROJECT,
+        pl.DataFrame(
+            {
+                "alias": ["household"],
+                "source": ["local storage"],
+                "filename": ["household.csv"],
+            }
+        ),
+        "import_log",
+        "logs",
+    )
+    for prefix, df in CHECK_TABLES.items():
+        duckdb_save_table(SRC_PROJECT, df, f"{prefix}_{PAGE_ID}", "logs")
+    duckdb_save_table(
+        SRC_PROJECT,
+        pl.DataFrame({"label": ["Don't know", "Refused"], "codes": ["-99", "-88"]}),
+        f"missing_codes_{SRC_PROJECT}",
+        "logs",
+    )
+
+
+@patch("datasure.utils.project_config.CorrectionProcessor")
+@patch("datasure.utils.project_config.load_local_data")
+@patch("datasure.utils.project_config.ConfigurationService")
+class TestCheckTablesAndMissingCodes:
+    """Check tables and missing codes travel with the bundle."""
+
+    @pytest.fixture(autouse=True)
+    def _data_file(self, real_duckdb):
+        data_file = real_duckdb / "household.csv"
+        data_file.write_text("KEY,age\n1,30\n")
+        self.local_paths = {"household": str(data_file)}
+
+    def _export_and_parse(self, **export_kwargs):
+        bundle = export_project_config(SRC_PROJECT, "Source", **export_kwargs)
+        return parse_project_config(bundle.model_dump_json())
+
+    def test_round_trip_preserves_check_tables_and_missing_codes(
+        self, mock_service_cls, mock_load_local, mock_correction_cls
+    ):
+        """Every registered table and the missing codes arrive with their dtypes."""
+        mock_service_cls.return_value = _page_config_service()
+        _seed_source_project()
+
+        bundle = self._export_and_parse()
+        result = apply_project_config(
+            DST_PROJECT, bundle, local_file_paths=self.local_paths
+        )
+
+        assert result.pages_created == [PAGE_NAME]
+        for prefix, expected in CHECK_TABLES.items():
+            actual = duckdb_get_table(DST_PROJECT, f"{prefix}_{PAGE_ID}", "logs")
+            assert_frame_equal(actual, expected)
+        assert_frame_equal(
+            duckdb_get_table(DST_PROJECT, f"missing_codes_{DST_PROJECT}", "logs"),
+            pl.DataFrame({"label": ["Don't know", "Refused"], "codes": ["-99", "-88"]}),
+        )
+
+    def test_update_merges_missing_codes_with_bundle_winning_on_label(
+        self, mock_service_cls, mock_load_local, mock_correction_cls
+    ):
+        """Existing labels are kept; a label in the bundle replaces the local one."""
+        mock_service_cls.return_value = _page_config_service()
+        _seed_source_project()
+        duckdb_save_table(
+            DST_PROJECT,
+            pl.DataFrame({"label": ["Refused", "N/A"], "codes": ["-77", "-66"]}),
+            f"missing_codes_{DST_PROJECT}",
+            "logs",
+        )
+
+        apply_project_config(DST_PROJECT, self._export_and_parse(), self.local_paths)
+
+        merged = duckdb_get_table(DST_PROJECT, f"missing_codes_{DST_PROJECT}", "logs")
+        assert sorted(merged.rows()) == [
+            ("Don't know", "-99"),
+            ("N/A", "-66"),
+            ("Refused", "-88"),
+        ]
+
+    def test_page_with_existing_name_writes_no_check_tables(
+        self, mock_service_cls, mock_load_local, mock_correction_cls
+    ):
+        """An existing page keeps its own check tables untouched."""
+        mock_service_cls.return_value = _page_config_service()
+        _seed_source_project()
+        bundle = self._export_and_parse()
+        mock_service_cls.return_value = _page_config_service(page_exists=True)
+
+        apply_project_config(DST_PROJECT, bundle, self.local_paths)
+
+        for prefix in CHECK_TABLES:
+            assert duckdb_get_table(
+                DST_PROJECT, f"{prefix}_{PAGE_ID}", "logs"
+            ).is_empty()
+
+    def test_page_with_unimported_dataset_writes_no_check_tables(
+        self, mock_service_cls, mock_load_local, mock_correction_cls
+    ):
+        """A page skipped because its dataset wasn't imported writes no tables."""
+        mock_service_cls.return_value = _page_config_service()
+        _seed_source_project()
+
+        result = apply_project_config(
+            DST_PROJECT, self._export_and_parse(), local_file_paths={}
+        )
+
+        assert result.pages_created == []
+        for prefix in CHECK_TABLES:
+            assert duckdb_get_table(
+                DST_PROJECT, f"{prefix}_{PAGE_ID}", "logs"
+            ).is_empty()
+
+    def test_export_can_leave_out_record_level_tables(
+        self, mock_service_cls, mock_load_local, mock_correction_cls
+    ):
+        """Excluded prefixes (e.g. backcheck attribution) are not exported."""
+        mock_service_cls.return_value = _page_config_service()
+        _seed_source_project()
+
+        bundle = self._export_and_parse(
+            exclude_table_prefixes=RECORD_LEVEL_TABLE_PREFIXES
+        )
+
+        assert "bc_attribution" not in bundle.pages[0].check_tables
+        assert "duplicates" in bundle.pages[0].check_tables
+
+    def test_export_no_longer_includes_missing_settings(
+        self, mock_service_cls, mock_load_local, mock_correction_cls, real_duckdb
+    ):
+        """The retired per-page missing settings file is not exported."""
+        mock_service_cls.return_value = _page_config_service()
+        _seed_source_project()
+        settings_dir = real_duckdb / SRC_PROJECT / "settings"
+        (settings_dir / f"page_{PAGE_ID}_missing_settings.json").write_text(
+            json.dumps({"threshold": 5})
+        )
+
+        bundle = self._export_and_parse()
+
+        assert bundle.pages[0].missing_settings == {}
+        assert bundle.bundle_version == BUNDLE_VERSION
+
+
+class TestBundleVersionWarning:
+    """Bundles from before check tables and missing codes are flagged."""
+
+    def test_old_bundle_parses_and_is_warned_about(self):
+        """A bundle with no bundle_version parses and produces a warning."""
+        bundle = parse_project_config(
+            json.dumps(
+                {
+                    "datasure_config_version": 1,
+                    "exported_from_project": "Old Project",
+                    "exported_at": "2026-01-01T00:00:00",
+                    "pages": [
+                        {
+                            "config": {"page_name": "HFC"},
+                            "missing_settings": {"threshold": 5},
+                        }
+                    ],
+                }
+            )
+        )
+
+        assert bundle.missing_codes == []
+        assert bundle.pages[0].check_tables == {}
+        assert bundle.pages[0].missing_settings == {"threshold": 5}
+        warning = bundle_version_warning(bundle)
+        assert warning is not None
+        assert "check tables" in warning
+        assert "missing codes" in warning
+
+    def test_current_bundle_has_no_warning(self):
+        """A bundle written by this version is not flagged."""
+        bundle = ProjectConfigBundle(
+            bundle_version=BUNDLE_VERSION,
+            exported_from_project="p",
+            exported_at="t",
+        )
+        assert bundle_version_warning(bundle) is None
+
+
+class TestConfigSummary:
+    """The import summary checklist lists check tables and missing codes."""
+
+    @patch("streamlit.markdown")
+    def test_summary_lists_check_tables_and_missing_codes(self, mock_markdown):
+        """Counts of check tables and missing codes appear in the checklist."""
+        bundle = ProjectConfigBundle(
+            bundle_version=BUNDLE_VERSION,
+            exported_from_project="p",
+            exported_at="t",
+            pages=[
+                ProjectPageBundle(
+                    config={"page_name": "HFC"},
+                    check_tables={"duplicates": [{"a": 1}], "outliers": [{"a": 1}]},
+                )
+            ],
+            missing_codes=[{"label": "Refused", "codes": "-88"}],
+        )
+
+        _render_config_summary(bundle)
+
+        lines = " ".join(c.args[0] for c in mock_markdown.call_args_list)
+        assert "2 check tables" in lines
+        assert "1 missing code" in lines
 
 
 class TestAddConfigurationRerun:
