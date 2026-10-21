@@ -74,10 +74,10 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ### KI-022: Check pages share Descriptive Statistics columns and enumerator consent results
 
-- **Status:** 🟡 Planned. Fix merged; ships in 1.3.0 (not in any release yet)
+- **Status:** 🟡 Planned for 1.3.0
 - **Affected versions:** 1.0.0 and later
 - **Symptom:** Choosing Descriptive Statistics columns on one check page changes them on every other page in the project. The Enumerator report keeps showing old consent and outcome results after a data refresh, or after you change the settings on another page.
-- **Workaround:** Click **Apply Consent and Outcome Settings** on the Enumerator tab after every data refresh. Re-select Descriptive Statistics columns when you switch pages. From 1.3.0 each page keeps its own columns, and the Enumerator report uses the consent and outcome settings as soon as you change them; the Apply button is gone.
+- **Workaround:** Click **Apply Consent and Outcome Settings** on the Enumerator tab after every data refresh. Re-select Descriptive Statistics columns when you switch pages.
 - **Issue:** [#353](https://github.com/PovertyAction/datasure/issues/353)
 
 ### KI-021: Exporting a project setup leaves out some check settings
