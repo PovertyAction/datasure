@@ -2126,3 +2126,56 @@ class TestMissingCodesAreNotValues:
 
         breaches = result.filter(pl.col("violation reason") != "no violation")
         assert breaches.is_empty()
+
+    def test_one_valid_value_left_for_sd(self, land_area_missing_codes):
+        """Masking `[5, -99, -88]` leaves one value, which has no SD spread."""
+        data = pl.DataFrame({"key": [1, 2, 3], "land_area": [5.0, -99.0, -88.0]})
+
+        result = compute_outlier_output(
+            data,
+            OutlierSettings(survey_key="key"),
+            self._column_config(
+                outlier_method=OutlierMethod.SD.value,
+                outlier_multiplier=3.0,
+                outlier_threshold=1,
+            ),
+            missing_codes=land_area_missing_codes,
+        )
+
+        assert result["lower_bound"][0] == pytest.approx(5.0)
+        assert result["upper_bound"][0] == pytest.approx(5.0)
+        assert (result["outlier reason"] == "no outlier").all()
+
+    def test_float32_code_does_not_breach_constraints(self):
+        """A Float32 -99.9 is masked before the constraint check widens it."""
+        data = pl.DataFrame(
+            {
+                "key": [1, 2],
+                "land_area": pl.Series([-99.9, 4.0], dtype=pl.Float32),
+            }
+        )
+        codes = pl.DataFrame({"label": ["Don't know"], "codes": ["-99.9"]})
+
+        result = compute_constraint_violations(
+            data,
+            OutlierSettings(survey_key="key"),
+            self._column_config(hard_min=0.0),
+            missing_codes=codes,
+        )
+
+        breaches = result.filter(pl.col("violation reason") != "no violation")
+        assert breaches.is_empty()
+
+    def test_text_column_codes_do_not_breach_constraints(self, land_area_missing_codes):
+        """Codes in a text column are masked once it is converted to numbers."""
+        data = pl.DataFrame({"key": [1, 2], "land_area": ["-99", "4"]})
+
+        result = compute_constraint_violations(
+            data,
+            OutlierSettings(survey_key="key"),
+            self._column_config(hard_min=0.0),
+            missing_codes=land_area_missing_codes,
+        )
+
+        breaches = result.filter(pl.col("violation reason") != "no violation")
+        assert breaches.is_empty()

@@ -341,7 +341,8 @@ def _compute_sd_bounds(series: pl.Series, multiplier: float) -> OutlierBounds:
         Lower and upper bounds.
     """
     mean = series.mean()
-    std = series.std()
+    # A single value has no spread; polars returns None rather than 0
+    std = series.std() or 0.0
     lower_bound = mean - (multiplier * std)
     upper_bound = mean + (multiplier * std)
     return OutlierBounds(lower_bound=lower_bound, upper_bound=upper_bound)
@@ -1020,9 +1021,14 @@ def compute_constraint_violations(
                 col, hard_min, soft_min, soft_max, hard_max
             )
 
-            col_df = safe_to_numeric(col_df, col)
             if missing_codes is not None:
+                # Mask in the source type first, since conversion widens to
+                # Float64; mask again for text columns that only become numeric
                 col_df = mask_missing_codes(col_df, [col], missing_codes)
+                col_df = safe_to_numeric(col_df, col)
+                col_df = mask_missing_codes(col_df, [col], missing_codes)
+            else:
+                col_df = safe_to_numeric(col_df, col)
 
             col_df = col_df.with_columns(violation_expr.alias(VIOLATION_REASON_COL))
 

@@ -285,15 +285,28 @@ def _get_all_missing_codes(missing_codes_df: pl.DataFrame) -> list[str]:
     return all_codes
 
 
-def _numeric_missing_codes(missing_codes_df: pl.DataFrame) -> list[float]:
+def _numeric_missing_codes(missing_codes_df: pl.DataFrame) -> list[str]:
     """Return the missing codes that are numbers, skipping text codes like `.d`."""
     codes = []
     for code in _get_all_missing_codes(missing_codes_df):
         try:
-            codes.append(float(code))
+            float(code)
         except ValueError:
             logger.debug("Missing code %r is not a number; not masked", code)
+        else:
+            codes.append(code)
     return codes
+
+
+def _codes_as_dtype(codes: list[str], dtype: pl.DataType) -> list:
+    """Parse the codes straight into `dtype`, so matching keeps its precision.
+
+    Going through Float64 would widen a Float32 `-99.9` past the code and round
+    large integers together. Codes the type cannot hold, such as `-99.9` in an
+    integer column, are dropped.
+    """
+    parsed = pl.Series(codes, dtype=pl.String).cast(dtype, strict=False)
+    return parsed.drop_nulls().to_list()
 
 
 def mask_missing_codes(
@@ -323,7 +336,7 @@ def mask_missing_codes(
     if not codes or not numeric_cols:
         return df
     return df.with_columns(
-        pl.when(pl.col(c).cast(pl.Float64).is_in(codes))
+        pl.when(pl.col(c).is_in(_codes_as_dtype(codes, df.schema[c])))
         .then(None)
         .otherwise(pl.col(c))
         .alias(c)

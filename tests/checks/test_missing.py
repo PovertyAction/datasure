@@ -431,6 +431,23 @@ def test_missing_data_still_counts_each_code_under_its_label(
     assert result["land_area"].to_list() == [0] * 8 + [2, 2, 3, 0]
 
 
+def test_mask_missing_codes_matches_in_the_column_type():
+    """A Float32 -99.9 is masked; integers next to a code are kept."""
+    data = pl.DataFrame(
+        {
+            "f32": pl.Series([-99.9, 1.5, 2.5], dtype=pl.Float32),
+            "big": pl.Series([2**53, 2**53 + 1, 7], dtype=pl.Int64),
+        }
+    )
+    codes = pl.DataFrame({"label": ["Don't know"], "codes": [f"-99.9, {2**53}"]})
+
+    result = mask_missing_codes(data, ["f32", "big"], codes)
+
+    assert result["f32"].to_list() == [None, 1.5, 2.5]
+    assert result["big"].to_list() == [None, 2**53 + 1, 7]
+    assert result.schema == data.schema
+
+
 def test_mask_missing_codes_leaves_text_columns_alone(land_area_missing_codes):
     """Codes are only masked in numeric columns."""
     data = pl.DataFrame({"name": ["-99", "Ama"]})
