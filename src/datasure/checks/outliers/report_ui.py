@@ -10,13 +10,13 @@ import polars as pl
 import streamlit as st
 from pydantic import BaseModel, ValidationError
 
-from datasure.checks.missing import mask_missing_codes
 from datasure.checks.outliers.compute import (
     _build_include_cols,
     _compute_constraint_metrics,
     _compute_outlier_metrics,
     _create_box_plot,
     _create_descriptive_stats,
+    _mask_inspection_column,
     _update_unlocked_cols,
     clear_unavailable_columns,
     compute_constraint_violations,
@@ -613,6 +613,30 @@ def _render_constraint_violations_table(
     _render_flags_table(violations_df, data, settings, CONSTRAINTS, review)
 
 
+def _excluded_codes_message(excluded_codes: pl.DataFrame) -> str:
+    """Describe the missing codes left out of the inspection statistics.
+
+    For example: "11 values were excluded because they are specified as
+    missing values: -77 (6), -99 (5)".
+    """
+
+    def _fmt(value: Any) -> str:
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        return str(value)
+
+    total = excluded_codes["count"].sum()
+    codes = ", ".join(
+        f"{_fmt(value)} ({count})" for value, count in excluded_codes.iter_rows()
+    )
+    if total == 1:
+        return f"1 value was excluded because it is specified as missing: {codes}"
+    return (
+        f"{total} values were excluded because they are specified as "
+        f"missing values: {codes}"
+    )
+
+
 def _render_outlier_column_inspection(
     data: pl.DataFrame,
     outliers_data: pl.DataFrame,
@@ -688,10 +712,15 @@ def _render_outlier_column_inspection(
 
     # create a subset of the data
     column_data = data.select([selected_col])
+    excluded_codes = None
     if missing_codes is not None:
-        column_data = mask_missing_codes(column_data, [selected_col], missing_codes)
+        column_data, excluded_codes = _mask_inspection_column(
+            column_data, selected_col, missing_codes
+        )
 
     st.subheader(f"Details/Distribution for {selected_col} values")
+    if excluded_codes is not None and not excluded_codes.is_empty():
+        st.warning(_excluded_codes_message(excluded_codes))
     dc1, _, dc3 = st.columns([0.3, 0.1, 0.6])
     with dc1:
         desc_stats = _create_descriptive_stats(column_data)

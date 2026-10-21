@@ -577,6 +577,62 @@ class TestRenderOutlierColumnInspection:
         stats = dict(desc_stats.iter_rows())
         assert stats["Number of Values"] == 9
         assert stats["Minimum Value"] == 2
+        st_mock.warning.assert_called_once_with(
+            "3 values were excluded because they are specified as missing "
+            "values: -99 (2), -88 (1)"
+        )
+
+    def test_text_column_codes_are_left_out_of_the_statistics(
+        self, land_area_missing_codes
+    ):
+        """Codes in a text column are masked once it is converted to numbers."""
+        data = pl.DataFrame({"key": ["k1", "k2", "k3"], "age": ["30", "-99", "40"]})
+        outliers_data = pl.DataFrame(
+            {"key": ["k1"], "column name": ["age"], "outlier reason": ["x"]}
+        )
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+            patch("datasure.checks.outliers.report_ui.styled_dataframe"),
+        ):
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.selectbox.return_value = "age"
+            st_mock.multiselect.return_value = []
+            _render_outlier_column_inspection(
+                data,
+                outliers_data,
+                OutlierSettings(survey_key="key"),
+                "settings.json",
+                missing_codes=land_area_missing_codes,
+            )
+
+        stats = dict(st_mock.dataframe.call_args_list[0].args[0].iter_rows())
+        assert stats["Number of Values"] == 2
+        assert stats["Minimum Value"] == 30
+        st_mock.warning.assert_called_once_with(
+            "1 value was excluded because it is specified as missing: -99 (1)"
+        )
+
+    def test_no_warning_without_missing_codes_in_column(self, land_area_missing_codes):
+        data = pl.DataFrame({"key": ["k1", "k2"], "age": [30, 40]})
+        outliers_data = pl.DataFrame(
+            {"key": ["k1"], "column name": ["age"], "outlier reason": ["x"]}
+        )
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+            patch("datasure.checks.outliers.report_ui.styled_dataframe"),
+        ):
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.selectbox.return_value = "age"
+            st_mock.multiselect.return_value = []
+            _render_outlier_column_inspection(
+                data,
+                outliers_data,
+                OutlierSettings(survey_key="key"),
+                "settings.json",
+                missing_codes=land_area_missing_codes,
+            )
+
+        st_mock.warning.assert_not_called()
 
 
 # ============================================================================

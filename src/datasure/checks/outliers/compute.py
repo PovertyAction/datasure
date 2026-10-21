@@ -1266,6 +1266,44 @@ def get_outlier_cols(outlier_settings: pd.DataFrame) -> list[str]:
     return cols
 
 
+def _mask_inspection_column(
+    column_data: pl.DataFrame, col: str, missing_codes: pl.DataFrame
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Convert `col` to numeric and null its missing codes, as the checks do.
+
+    Parameters
+    ----------
+    column_data : pl.DataFrame
+        Data holding `col` as entered.
+    col : str
+        The column to inspect.
+    missing_codes : pl.DataFrame
+        The project's missing codes.
+
+    Returns
+    -------
+    tuple[pl.DataFrame, pl.DataFrame]
+        The numeric column with missing codes set to null, and the excluded
+        codes as entered with their counts (columns `value`, `count`), most
+        frequent first.
+    """
+    raw = column_data[col]
+    # Mask in the source type first, since conversion widens to Float64; mask
+    # again for text columns that only become numeric. Text that is not a
+    # number also becomes null on conversion, so only the masks count.
+    source_masked = mask_missing_codes(column_data, [col], missing_codes)
+    numeric = safe_to_numeric(source_masked, col)
+    masked = mask_missing_codes(numeric, [col], missing_codes)
+
+    is_code = (raw.is_not_null() & source_masked[col].is_null()) | (
+        numeric[col].is_not_null() & masked[col].is_null()
+    )
+    excluded = (
+        raw.filter(is_code).value_counts(sort=True, name="count").rename({col: "value"})
+    )
+    return masked, excluded
+
+
 # =============================================================================
 # Visualization Functions
 # =============================================================================

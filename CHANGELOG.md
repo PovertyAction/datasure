@@ -26,7 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `compute_enumerator_statistics` they are part of the `st.cache_data`
     key. The report pages pass
     `load_missing_codes_from_db(project_id)`, as does the outlier column
-    inspection's statistics and box plot. Missing Values keeps the raw codes.
+    inspection's statistics and box plot. The inspection converts text
+    columns to numbers before masking (new `_mask_inspection_column` in
+    `checks/outliers/compute.py`) and shows a warning listing the excluded
+    codes with their counts, for example `-99 (5), -77 (6)`. Missing Values
+    keeps the raw codes.
     Back checks are unchanged: they have their own `no_differences_values`
     and `exclude_values` settings
 - **Enumerator summary dates** (#380): First and last submission and the
