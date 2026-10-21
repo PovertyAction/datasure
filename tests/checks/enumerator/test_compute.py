@@ -1,6 +1,6 @@
 """Tests for datasure.checks.enumerator.compute."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import patch
 
 import polars as pl
@@ -14,6 +14,7 @@ from datasure.checks.enumerator.compute import (
     compute_enumerator_statistics,
     compute_enumerator_statistics_overtime,
     compute_enumerator_summary,
+    compute_latest_submission_date,
 )
 
 # ============================================
@@ -867,6 +868,172 @@ def test_compute_enumerator_missing_table_zero_rows(sample_enumerator_data):
     )
 
     assert result.is_empty()
+
+
+@patch("datasure.checks.enumerator.compute.load_missing_codes_from_db")
+def test_compute_enumerator_summary_dates_across_two_months(mock_load_missing):
+    """Dates compare as dates, not text, when the data spans two months."""
+    mock_load_missing.return_value = pl.DataFrame()
+    data = pl.DataFrame(
+        {
+            "submission_date": [
+                date(2026, 9, 28),
+                date(2026, 9, 30),
+                date(2026, 10, 14),
+            ],
+            "enumerator": ["E1", "E1", "E1"],
+        }
+    )
+
+    result = compute_enumerator_summary(
+        project_id="test_project",
+        data=data,
+        date="submission_date",
+        enumerator="enumerator",
+        team=None,
+        formversion=None,
+        duration=None,
+        today=date(2026, 10, 14),
+    )
+
+    row = result.row(0, named=True)
+    assert row["first submission"] == "Sep 28, 2026"
+    assert row["last submission"] == "Oct 14, 2026"
+    assert row["# submissions today"] == 1
+    # 14 Oct 2026 is a Wednesday, so the week starts on Monday 12 Oct.
+    assert row["# submissions this week"] == 1
+    assert row["# submissions this month"] == 1
+
+
+@patch("datasure.checks.enumerator.compute.load_missing_codes_from_db")
+def test_compute_enumerator_summary_datetimes_across_two_years(mock_load_missing):
+    """Datetimes spanning two years keep date order and day-level grouping."""
+    mock_load_missing.return_value = pl.DataFrame()
+    data = pl.DataFrame(
+        {
+            "submission_date": [
+                datetime(2025, 12, 30, 9, 0),
+                datetime(2026, 1, 15, 8, 0),
+                datetime(2026, 1, 15, 17, 30),
+                datetime(2026, 1, 20, 10, 0),
+            ],
+            "enumerator": ["E1", "E1", "E2", "E2"],
+            "formversion": [1, 1, 2, 2],
+        }
+    )
+
+    result = compute_enumerator_summary(
+        project_id="test_project",
+        data=data,
+        date="submission_date",
+        enumerator="enumerator",
+        team=None,
+        formversion="formversion",
+        duration=None,
+        today=date(2026, 1, 20),
+    ).sort("enumerator")
+
+    e1, e2 = result.rows(named=True)
+    assert e1["first submission"] == "Dec 30, 2025"
+    assert e1["last submission"] == "Jan 15, 2026"
+    assert e1["# submissions this month"] == 1
+    assert e1["# submissions this week"] == 0
+    # E1's 08:00 submission on 15 Jan is outdated against E2's 17:30 one on
+    # the same day, which it would not be if grouped per timestamp.
+    assert e1["# of outdated form versions"] == 1
+    assert e2["first submission"] == "Jan 15, 2026"
+    assert e2["last submission"] == "Jan 20, 2026"
+    assert e2["# submissions today"] == 1
+    assert e2["# submissions this week"] == 1
+    assert e2["# submissions this month"] == 2
+    assert e2["# of outdated form versions"] == 0
+
+
+@patch("datasure.checks.enumerator.compute.load_missing_codes_from_db")
+def test_compute_enumerator_summary_timezone_aware_uses_local_day(mock_load_missing):
+    """Timezone-aware datetimes count on their local day, not the UTC day."""
+    mock_load_missing.return_value = pl.DataFrame()
+    data = pl.DataFrame(
+        {
+            # 23:30 UTC on 14 Oct is 08:30 on 15 Oct in Tokyo.
+            "submission_date": pl.Series([datetime(2026, 10, 14, 23, 30)])
+            .dt.replace_time_zone("UTC")
+            .dt.convert_time_zone("Asia/Tokyo"),
+            "enumerator": ["E1"],
+        }
+    )
+
+    result = compute_enumerator_summary(
+        project_id="test_project",
+        data=data,
+        date="submission_date",
+        enumerator="enumerator",
+        team=None,
+        formversion=None,
+        duration=None,
+        today=date(2026, 10, 15),
+    )
+
+    row = result.row(0, named=True)
+    assert row["first submission"] == "Oct 15, 2026"
+    assert row["# submissions today"] == 1
+
+
+def test_compute_enumerator_overview_active_uses_injected_today():
+    """The active cut-off counts back 7 days from the injected date."""
+    data = pl.DataFrame(
+        {
+            "submission_date": [date(2026, 10, 14), date(2026, 10, 7)],
+            "enumerator": ["E1", "E2"],
+        }
+    )
+
+    result = compute_enumerator_overview(
+        data, "submission_date", "enumerator", None, today=date(2026, 10, 14)
+    )
+
+    # 7 Oct is exactly one week before 14 Oct, so E2 is not active.
+    assert result.num_active_enumerators == 1
+
+
+def test_compute_enumerator_overview_timezone_aware_uses_local_day():
+    """The active cut-off uses the local day, as the summary table does."""
+    data = pl.DataFrame(
+        {
+            # 23:30 UTC on 7 Oct is 08:30 on 8 Oct in Tokyo.
+            "submission_date": pl.Series([datetime(2026, 10, 7, 23, 30)])
+            .dt.replace_time_zone("UTC")
+            .dt.convert_time_zone("Asia/Tokyo"),
+            "enumerator": ["E1"],
+        }
+    )
+
+    result = compute_enumerator_overview(
+        data, "submission_date", "enumerator", None, today=date(2026, 10, 14)
+    )
+
+    assert result.num_active_enumerators == 1
+
+
+def test_compute_latest_submission_date_cuts_datetimes_to_day():
+    """The latest submission is returned as a date, by date order."""
+    data = pl.DataFrame(
+        {
+            "submission_date": [
+                datetime(2026, 9, 30, 18, 0),
+                datetime(2026, 10, 2, 7, 45),
+            ]
+        }
+    )
+
+    assert compute_latest_submission_date(data, "submission_date") == date(2026, 10, 2)
+
+
+def test_compute_latest_submission_date_empty():
+    """No submissions gives None, so the "Data as of" note is skipped."""
+    data = pl.DataFrame({"submission_date": pl.Series([], dtype=pl.Date)})
+
+    assert compute_latest_submission_date(data, "submission_date") is None
 
 
 @patch("datasure.checks.enumerator.compute.load_missing_codes_from_db")
