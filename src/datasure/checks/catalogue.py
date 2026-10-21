@@ -47,6 +47,7 @@ from datasure.utils.dataframe_utils import get_df_columns
 from datasure.utils.nav_ui import (
     SET_UP_BELOW,
     guarded_status,
+    project_nav_key,
     render_errors,
     select_nav_item,
 )
@@ -72,9 +73,9 @@ DEFAULT_CHECK = "summary"
 CHECK_PARAM = "check"
 
 
-def check_nav_key(page_name_id: str) -> str:
+def check_nav_key(project_id: str, page_name_id: str) -> str:
     """Return the session state key prefix for a check page's navigation."""
-    return f"check_nav_{page_name_id}"
+    return project_nav_key(f"check_nav_{page_name_id}", project_id)
 
 
 @dataclass(frozen=True)
@@ -170,7 +171,7 @@ def summary_check_health(ctx: CheckContext) -> None:
     Replaces Summary's former Data Quality section: each card's headline
     comes from its check, with that check's settings and corrections.
     """
-    nav_key = check_nav_key(ctx.config.page_name_id)
+    nav_key = check_nav_key(ctx.project_id, ctx.config.page_name_id)
     items = with_errors(nav_items(ctx), render_errors(nav_key))
     entries = {entry.slug: entry for entry in CHECK_CATALOGUE}
     cards = health_cards(
@@ -387,7 +388,9 @@ def _survey_rows_status(ctx: CheckContext) -> StatusResult:
 
 def _duplicates_status(ctx: CheckContext) -> StatusResult:
     return duplicates_status(
-        ctx.config.setting_file, {"survey_id": ctx.config.survey_id}
+        ctx.config.setting_file,
+        {"survey_id": ctx.config.survey_id},
+        ctx.data.page_data.columns,
     )
 
 

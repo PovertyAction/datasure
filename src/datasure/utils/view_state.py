@@ -17,9 +17,11 @@ A scope is one check (its catalogue slug) or one Prepare Data / Corrections
 item. Any settings file works, so other pages can keep their own.
 
 View state is personal: it is left out of project configuration exports and
-templates (``without_view_state``). Pagination, search boxes and dialog
-inputs are never bound, so they start fresh in a new session; search boxes
-use ``ViewState.keep`` to survive switching checks within a session.
+templates (``without_view_state``), along with the view values older versions
+saved with check settings that have not moved into view state yet.
+Pagination, search boxes and dialog inputs are never bound, so they start
+fresh in a new session; search boxes use ``ViewState.keep`` to survive
+switching checks within a session.
 """
 
 import json
@@ -32,6 +34,56 @@ from typing import Any, Literal
 logger = logging.getLogger(__name__)
 
 VIEW_STATE_KEY = "view_state"
+
+# Settings keys older versions saved view values under, by check settings
+# section. Opening a check moves them into view state (``adopt_legacy``);
+# until then ``without_view_state`` leaves them out as well. ``view_factory``
+# checks each check's legacy keys against this table.
+LEGACY_VIEW_KEYS: dict[str, frozenset[str]] = {
+    "backchecks": frozenset(
+        {
+            "time_period_backchecker_productivity",
+            "weekstartday_backchecker_productivity",
+            "enum_bcer_stats_view",
+        }
+    ),
+    "descriptive_stats": frozenset(
+        {"col_to_plot", "n_bins", "col_to_analyse", "top_n", "view", "agg_option"}
+    ),
+    "enumerators": frozenset(
+        {
+            "time_period",
+            "statscols",
+            "stats",
+            "period_overtime",
+            "weekstartday",
+            "stat",
+            "statscol",
+        }
+    ),
+    "missing": frozenset(
+        {
+            "mv_threshold",
+            "select_date_col",
+            "group_by_col",
+            "compare_col",
+            "all_cols",
+            "null_cols_sel",
+        }
+    ),
+    "outliers": frozenset({"selected_col", "constraint_display_cols"}),
+    "progress": frozenset({"time_period", "display_cols"}),
+    "summary": frozenset({"progress_by_col", "progress_time_period"}),
+}
+# Duplicates saved each table's extra columns as "<table>_display_cols".
+_LEGACY_VIEW_SUFFIXES = {"duplicates": "_display_cols"}
+
+
+def _is_legacy_view_key(section: str, key: str) -> bool:
+    suffix = _LEGACY_VIEW_SUFFIXES.get(section)
+    return key in LEGACY_VIEW_KEYS.get(section, ()) or (
+        suffix is not None and key.endswith(suffix)
+    )
 
 
 def read_settings(settings_file: str | Path) -> dict:
@@ -63,10 +115,26 @@ def _view_state(settings: dict) -> dict:
 def without_view_state(settings: dict) -> dict:
     """Return settings without the personal ``view_state`` section.
 
+    View values an older version saved with check settings
+    (``LEGACY_VIEW_KEYS``) are left out too, so a project exported before
+    each check was opened does not carry them.
+
     Used wherever settings leave the user's machine or arrive from another
     project: configuration exports and applied configurations (templates).
     """
-    return {key: value for key, value in settings.items() if key != VIEW_STATE_KEY}
+    return {
+        section: (
+            {
+                key: value
+                for key, value in values.items()
+                if not _is_legacy_view_key(section, key)
+            }
+            if isinstance(values, dict)
+            else values
+        )
+        for section, values in settings.items()
+        if section != VIEW_STATE_KEY
+    }
 
 
 def remembered(settings_file: str | Path, name: str) -> str | None:
@@ -234,9 +302,9 @@ class ViewState:
             st.selectbox("Color by", cols, **widget)
 
         A value already in session state (set earlier in this session) is
-        kept. A saved value that is no longer in ``options`` falls back to the
-        widget default and is removed; for a multiselect (``multi=True``) only
-        the values that still exist are kept.
+        kept. A saved or session value that is no longer in ``options`` falls
+        back to the widget default and is removed; for a multiselect
+        (``multi=True``) only the values that still exist are kept.
 
         Bind only filter, selection and sort widgets. Pagination, search
         boxes and dialog inputs must start fresh in a new session, so never
@@ -268,6 +336,17 @@ class ViewState:
         """
         import streamlit as st
 
+        if key in st.session_state:
+            # None is a cleared widget, which the widget's default must not
+            # replace.
+            current = st.session_state[key]
+            if current is not None:
+                value = self._restore(key, current, options, multi)
+                if value is None:
+                    self.forget(key)
+                    del st.session_state[key]
+                elif value != current:
+                    st.session_state[key] = value
         show_session_value(key)
         saved_values = self.values()
         if key not in st.session_state and key in saved_values:
@@ -390,6 +469,16 @@ def view_factory(
         settings: the settings section and the legacy key by widget key.
         Opening the view moves any found there (``ViewState.adopt_legacy``).
     """
+    if legacy is not None:
+        section, keys = legacy
+        unlisted = [
+            key for key in keys.values() if not _is_legacy_view_key(section, key)
+        ]
+        if unlisted:
+            raise ValueError(
+                f"Add {unlisted} to LEGACY_VIEW_KEYS[{section!r}] so exports "
+                "leave them out."
+            )
 
     def open_view(settings_file: str | Path) -> ViewState:
         view = ViewState(settings_file, scope)

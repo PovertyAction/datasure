@@ -43,6 +43,7 @@ from datasure.utils.nav_ui import (
     PROJECT_VIEW_FILE,
     draw_nav,
     guarded_status,
+    project_nav_key,
     render_empty_state,
     resolve_selection,
     run_guarded,
@@ -78,7 +79,8 @@ from datasure.utils.view_state import (
     saved_selection,
 )
 
-# The check page navigation's session state key and URL query parameter, and
+# The check page navigation's session state key (before ``project_nav_key``)
+# and URL query parameter, and
 # the settings file holding the remembered page, dataset choice and filters
 # (its view_state section).
 CORRECTIONS_NAV_KEY = "corrections_nav"
@@ -1053,7 +1055,9 @@ def open_last_viewed_check_page(project_id: str, slugs: Sequence[str]) -> None:
         return
     forget_remembered(project_view_file, LAST_CHECK_PAGE)
     if last in slugs:
-        select_nav_item(CORRECTIONS_NAV_KEY, PAGE_PARAM, last)
+        select_nav_item(
+            project_nav_key(CORRECTIONS_NAV_KEY, project_id), PAGE_PARAM, last
+        )
 
 
 def render_selected_check_page(
@@ -1077,9 +1081,10 @@ def render_selected_check_page(
     # The pills sit above the page but are drawn after it, so a page that
     # fails while rendering is already marked in them.
     nav_slot = st.container()
+    nav_key = project_nav_key(CORRECTIONS_NAV_KEY, project_id)
     state = resolve_selection(
         items,
-        key=CORRECTIONS_NAV_KEY,
+        key=nav_key,
         param=PAGE_PARAM,
         saved=saved_selection(settings_file),
     )
@@ -1090,16 +1095,16 @@ def render_selected_check_page(
         render_empty_state(item, setup_hint="")
     else:
         view = ViewState(settings_file, state.selected)
-        reset_filters_button(view, key=CORRECTIONS_NAV_KEY)
+        reset_filters_button(view, key=nav_key)
         run_guarded(
-            CORRECTIONS_NAV_KEY,
+            nav_key,
             item,
             lambda: render_correction_tab(
                 correction_processor, project_id, slugs.index(item.slug), view
             ),
         )
     with nav_slot:
-        draw_nav(state, key=CORRECTIONS_NAV_KEY, param=PAGE_PARAM, label="Check page")
+        draw_nav(state, key=nav_key, param=PAGE_PARAM, label="Check page")
 
 
 def main() -> None:

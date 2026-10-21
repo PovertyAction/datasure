@@ -559,14 +559,34 @@ _GPS_NAME_WORDS = {"lat", "lon", "lng", "gps", "geo", "geopoint", "coords"}
 _GPS_NAME_PREFIXES = ("latitude", "longitude", "geopoint", "coordinate")
 # A SurveyCTO geopoint value: "latitude longitude [altitude [accuracy]]".
 _GEOPOINT_VALUE = r"^-?\d+(\.\d+)?( -?\d+(\.\d+)?){1,3}$"
+# Rows read at a time while looking for a text column's first values.
+_SCAN_CHUNK_ROWS = 1_000
 
 
 def _looks_like_gps_name(name: str) -> bool:
-    # Split snake_case, kebab-case and camelCase names into lower-case words.
-    words = [word.lower() for word in re.findall(r"[a-z]+|[A-Z][a-z]*", name)]
+    # Split snake_case, kebab-case, camelCase and UPPER_CASE names into
+    # lower-case words; an upper-case run is one word ("GPSLat": gps, lat).
+    words = [word.lower() for word in re.findall(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+", name)]
     return any(
         word in _GPS_NAME_WORDS or word.startswith(_GPS_NAME_PREFIXES) for word in words
     )
+
+
+def _first_values(column: pl.Series, count: int) -> pl.Series:
+    """Return up to ``count`` of ``column``'s first non-null values.
+
+    Reads the column a chunk at a time and stops once enough are found, so
+    a large column is not copied whole. The null count is stored with the
+    column, so an all-null column returns at once.
+    """
+    if column.null_count() == column.len():
+        return column.clear()
+    found = column.clear()
+    for offset in range(0, column.len(), _SCAN_CHUNK_ROWS):
+        found = found.append(column.slice(offset, _SCAN_CHUNK_ROWS).drop_nulls())
+        if found.len() >= count:
+            break
+    return found.head(count)
 
 
 def find_gps_columns(data: pl.DataFrame, sample_size: int = 20) -> list[str]:
@@ -594,7 +614,7 @@ def find_gps_columns(data: pl.DataFrame, sample_size: int = 20) -> list[str]:
         if _looks_like_gps_name(name):
             found.append(name)
         elif dtype == pl.String:
-            sample = data[name].drop_nulls().head(sample_size).str.strip_chars()
+            sample = _first_values(data[name], sample_size).str.strip_chars()
             if len(sample) and sample.str.contains(_GEOPOINT_VALUE).all():
                 found.append(name)
     return found

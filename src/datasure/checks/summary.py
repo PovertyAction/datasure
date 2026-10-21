@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field, field_validator
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.settings_utils import (
+    load_check_settings,
     save_check_settings,
     trigger_save,
 )
@@ -927,6 +928,35 @@ def compute_summary_data_summary(data: pl.DataFrame) -> tuple:
 # =============================================================================
 
 
+def summary_defaults(
+    setting_file: str, config: SummarySettings
+) -> tuple[str | None, int | None]:
+    """Return the survey date column and target the settings start from.
+
+    The values saved in Summary's settings win over the page configuration.
+    The widgets are removed while another check is selected, so without the
+    saved values they would come back with the page configuration's.
+
+    Parameters
+    ----------
+    setting_file : str
+        Path to the settings file.
+    config : SummarySettings
+        The page configuration.
+
+    Returns
+    -------
+    tuple
+        The date column and the target.
+    """
+    saved = load_check_settings(setting_file, TAB_NAME) or {}
+    date = saved.get("date") or config.survey_date
+    target = saved.get("target")
+    if target is None:
+        target = config.survey_target
+    return date, target
+
+
 @demo_output_onboarding(TAB_NAME)
 def summary_settings(
     data: pl.DataFrame,
@@ -954,11 +984,7 @@ def summary_settings(
         st.markdown("## Configure settings for summary report")
         st.write("---")
 
-        # Load defaults
-        default_date, default_target = (
-            config.survey_date,
-            config.survey_target,
-        )
+        default_date, default_target = summary_defaults(setting_file, config)
 
         # Get column information
         datetime_columns = survey_columns.datetime_columns

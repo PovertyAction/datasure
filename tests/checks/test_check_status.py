@@ -116,10 +116,14 @@ class TestAlwaysReadyChecks:
 
 class TestDuplicatesStatus:
     def test_ready_with_a_survey_id_in_the_page_config(self, settings_file):
-        assert duplicates_status(settings_file, {"survey_id": "hhid"}) == (READY, "")
+        assert duplicates_status(
+            settings_file, {"survey_id": "hhid"}, SURVEY.columns
+        ) == (READY, "")
 
     def test_not_set_up_without_a_survey_id(self, settings_file):
-        status, reason = duplicates_status(settings_file, {"survey_id": None})
+        status, reason = duplicates_status(
+            settings_file, {"survey_id": None}, SURVEY.columns
+        )
 
         assert status is NOT_SET_UP
         assert "survey ID" in reason
@@ -127,7 +131,17 @@ class TestDuplicatesStatus:
     def test_a_saved_survey_id_counts(self, settings_file):
         settings_file.write_text(json.dumps({"duplicates": {"survey_id": "hhid"}}))
 
-        assert duplicates_status(settings_file, {"survey_id": None}) == (READY, "")
+        assert duplicates_status(
+            settings_file, {"survey_id": None}, SURVEY.columns
+        ) == (READY, "")
+
+    def test_not_set_up_when_the_survey_id_is_not_in_the_data(self, settings_file):
+        status, reason = duplicates_status(
+            settings_file, {"survey_id": "hhid"}, SURVEY.drop("hhid").columns
+        )
+
+        assert status is NOT_SET_UP
+        assert "'hhid' is not in this dataset" in reason
 
 
 class TestOutliersStatus:
@@ -167,6 +181,10 @@ class TestFindGpsColumns:
             ({"gps_lat": [1.0]}, 1),
             ({"gpsLatitude": [1.0]}, 1),
             ({"geopoint": ["1 2 3 4"]}, 1),
+            ({"LATITUDE": [1.0], "LONGITUDE": [2.0]}, 2),
+            ({"GPS_LAT": [1.0], "GPS_LON": [2.0]}, 2),
+            ({"GPSLat": [1.0]}, 1),
+            ({"RELATIONSHIP": ["x"], "LONG_ANSWER": ["y"]}, 0),
             ({"relationship": ["x"], "long_answer": ["y"], "age": [3]}, 0),
         ],
     )
@@ -177,6 +195,16 @@ class TestFindGpsColumns:
         data = pl.DataFrame({"where": ["-1.2921 36.8219 1700.5 5.0", None]})
 
         assert find_gps_columns(data) == ["where"]
+
+    def test_geopoint_values_after_many_empty_rows(self):
+        data = pl.DataFrame({"where": [None] * 2_500 + ["-1.2921 36.8219 1700.5 5.0"]})
+
+        assert find_gps_columns(data) == ["where"]
+
+    def test_an_empty_text_column_is_not_gps(self):
+        data = pl.DataFrame({"where": [None, None]}, schema={"where": pl.String})
+
+        assert not find_gps_columns(data)
 
 
 class TestGpsChecksStatus:

@@ -12,6 +12,7 @@ This module provides comprehensive duplicate detection functionality with:
 import datetime
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import polars as pl
@@ -2391,11 +2392,14 @@ def duplicates_report(
     )
 
 
-def duplicates_status(setting_file: str, config: dict) -> StatusResult:
+def duplicates_status(
+    setting_file: str, config: dict, columns: Sequence[str]
+) -> StatusResult:
     """Return the duplicates check's status for the check page navigation.
 
     The check is not set up without a survey ID column, saved in the
-    duplicates settings or set on the Configure Checks page.
+    duplicates settings or set on the Configure Checks page, or when that
+    column is not in the data.
 
     Parameters
     ----------
@@ -2403,12 +2407,21 @@ def duplicates_status(setting_file: str, config: dict) -> StatusResult:
         Path to the page's settings file.
     config : dict
         The page's configuration, with a ``survey_id`` key.
+    columns : Sequence[str]
+        The survey data's columns.
     """
     settings = {**config, **load_check_settings(setting_file, TAB_NAME)}
-    if not settings.get("survey_id"):
+    survey_id = settings.get("survey_id")
+    if not survey_id:
         return StatusResult(
             CheckStatus.NOT_SET_UP,
             "Select a survey ID column in the settings below to find duplicate IDs.",
+        )
+    if survey_id not in columns:
+        return StatusResult(
+            CheckStatus.NOT_SET_UP,
+            f"The survey ID column '{survey_id}' is not in this dataset. "
+            "Select another in the settings below.",
         )
     return READY
 
@@ -2428,6 +2441,11 @@ def duplicates_headline(data: pl.DataFrame, setting_file: str, config: dict) -> 
         Path to the page's settings file.
     config : dict
         The page configuration the check starts from.
+
+    Raises
+    ------
+    ValueError
+        If the saved Records to Include filter cannot be applied.
     """
     settings = load_default_duplicates_settings(
         setting_file, DuplicatesSettings(**config)
@@ -2435,6 +2453,12 @@ def duplicates_headline(data: pl.DataFrame, setting_file: str, config: dict) -> 
     records = filter_records_to_include(
         data, saved_records_to_include(setting_file), "survey"
     )
+    if records.error:
+        # An invalid filter checks no records, so a count would read as zero.
+        raise ValueError(
+            f"The survey Records to Include filter could not be applied: "
+            f"{records.error}"
+        )
     count = count_duplicate_ids(
         IdView(
             name="survey",

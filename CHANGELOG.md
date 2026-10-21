@@ -82,7 +82,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   URL parameter, a check page opens on the check last viewed on it, also in
   a new session. A valid URL parameter still wins
 - **View state stays local** (#375): Project configuration exports leave out
-  `view_state` (`without_view_state`), and applying a configuration keeps
+  `view_state` (`without_view_state`), and the filters older versions saved
+  with check settings even before the check is opened (`LEGACY_VIEW_KEYS`,
+  `utils/view_state.py`). Applying a configuration keeps
   the local `view_state` and ignores any in the bundle
   (`utils/project_config.py`)
 - **Check page navigation** (#374): The nine check tabs are replaced by a

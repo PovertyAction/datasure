@@ -15,7 +15,9 @@ A page uses it in four steps:
    button's ``on_click``. The controls use it too.
 
 All state lives in ``st.session_state`` under keys built from the page's
-``key``. Streamlit is imported inside each function, as in ``ui_utils``.
+``key``. Opening another project keeps session state, so build ``key`` with
+``project_nav_key``. Streamlit is imported inside each function, as in
+``ui_utils``.
 """
 
 import logging
@@ -41,6 +43,15 @@ logger = logging.getLogger(__name__)
 # new session.
 PROJECT_VIEW_FILE = "project_view_settings.json"
 LAST_CHECK_PAGE = "last_check_page"
+
+
+def project_nav_key(name: str, project_id: str) -> str:
+    """Return a page's navigation key for one project.
+
+    Opening another project keeps session state, so a key without the
+    project would carry one project's selection and errors into another.
+    """
+    return f"{name}__{project_id}"
 
 
 def _selected_key(key: str) -> str:
@@ -102,8 +113,9 @@ def resolve_selection(
     """Decide which item is selected on this run.
 
     Precedence: a valid URL value, then the selection remembered in this
-    session (or ``saved`` when there is none), then ``default``. The URL is
-    updated to show the selected item.
+    session (or ``saved`` when there is none), then ``default``. An invalid
+    URL value goes straight to ``default``. The URL is updated to show the
+    selected item.
 
     Parameters
     ----------
@@ -127,10 +139,13 @@ def resolve_selection(
 
     url = st.query_params.get(param)
     remembered = st.session_state.get(_selected_key(key))
+    # A remembered selection the items no longer offer gives way to the saved
+    # one, rather than to the default.
+    slugs = {item.slug for item in items}
     state = resolve_nav(
         items,
         url=url,
-        saved=remembered if remembered is not None else saved,
+        saved=remembered if remembered in slugs else saved,
         default=default,
     )
     st.session_state[_selected_key(key)] = state.selected

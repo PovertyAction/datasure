@@ -1,6 +1,7 @@
 """Comprehensive tests for the summary module with 100% code coverage."""
 
 # Standard library imports
+import json
 from datetime import date, datetime, timedelta
 from unittest.mock import Mock, patch
 
@@ -40,6 +41,7 @@ from datasure.checks.summary import (
     prepare_date_data,
     # UI components
     summary_data_summary,
+    summary_defaults,
     summary_progress,
     summary_settings,
     summary_submissions,
@@ -675,6 +677,31 @@ class TestDataSummary:
 # ============================================================================
 # UI COMPONENT TESTS
 # ============================================================================
+
+
+class TestSummaryDefaults:
+    """The saved date and target win over the page configuration."""
+
+    CONFIG = SummarySettings(survey_date="starttime", survey_target=100)
+
+    def test_page_configuration_without_saved_settings(self, tmp_path):
+        setting_file = str(tmp_path / "settings.json")
+
+        assert summary_defaults(setting_file, self.CONFIG) == ("starttime", 100)
+
+    def test_saved_settings_win(self, tmp_path):
+        setting_file = tmp_path / "settings.json"
+        setting_file.write_text(
+            json.dumps({"summary": {"date": "endtime", "target": 250}})
+        )
+
+        assert summary_defaults(setting_file, self.CONFIG) == ("endtime", 250)
+
+    def test_a_saved_zero_target_is_kept(self, tmp_path):
+        setting_file = tmp_path / "settings.json"
+        setting_file.write_text(json.dumps({"summary": {"date": None, "target": 0}}))
+
+        assert summary_defaults(setting_file, self.CONFIG) == ("starttime", 0)
 
 
 class TestUIComponents:
