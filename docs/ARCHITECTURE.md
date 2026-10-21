@@ -391,9 +391,15 @@ travel.
   `check_table_schemas` (each column's dtype encoded as JSON), skipping empty
   tables, so list and date columns are restored exactly. A check whose
   settings live in a new per-page table adds its prefix to the registry.
-  `export_project_config(..., exclude_table_prefixes=...)` leaves prefixes
-  out; `RECORD_LEVEL_TABLE_PREFIXES` names the ones holding decisions about
+  `RECORD_LEVEL_TABLE_PREFIXES` names the ones holding decisions about
   individual records.
+- **Record-level decisions.** `export_project_config(...,
+  include_record_level=False)` leaves out the corrections and the
+  `RECORD_LEVEL_TABLE_PREFIXES` tables. The project card's **Export
+  configuration** dialog (`views/start_view.py`) exposes this as a checkbox,
+  ticked by default, and builds the bundle only once the dialog opens. Apply
+  writes whatever the bundle holds; attribution rows for records that don't
+  exist are kept but match nothing.
 - **Pages.** Apply creates a page only when no page has its name and its
   survey dataset was imported. Only then are its settings file and check
   tables written, so an existing page keeps its own.

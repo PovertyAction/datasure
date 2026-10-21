@@ -605,6 +605,20 @@ class TestRenderProjectRow:
         mock_update.assert_called_once_with("My Project", "abcd1234")
         mock_delete.assert_called_once_with("My Project", "abcd1234", {})
 
+    def test_rendering_row_builds_no_export_bundle(self, monkeypatch):
+        """Listing projects must not export each one's configuration."""
+        monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
+
+        with (
+            patch("datasure.views.start_view._project_stats", return_value=(2, 1)),
+            patch("datasure.views.start_view.export_project_config") as mock_export,
+        ):
+            start_view._render_project_row(
+                "abcd1234", {"name": "My Project", "last_used": "today"}, {}
+            )
+
+        mock_export.assert_not_called()
+
 
 class TestShowDeleteProjectOption:
     """Test _show_delete_project_option."""
@@ -634,27 +648,75 @@ class TestShowDeleteProjectOption:
 class TestShowExportConfigOption:
     """Test _show_export_config_option."""
 
-    def test_renders_download_button_with_bundle(self, monkeypatch):
-        mock_bundle = MagicMock()
-        mock_bundle.model_dump_json.return_value = '{"datasure_config_version": 1}'
-        mock_download = MagicMock()
-        monkeypatch.setattr(_st, "download_button", mock_download)
+    def test_no_click_builds_no_bundle(self, monkeypatch):
+        """Rendering the menu must not export anything until the dialog opens."""
+        mock_button = MagicMock(return_value=False)
+        monkeypatch.setattr(_st, "button", mock_button)
 
+        with (
+            patch("datasure.views.start_view.export_project_config") as mock_export,
+            patch("datasure.views.start_view._export_config_dialog") as mock_dialog,
+        ):
+            start_view._show_export_config_option("My Project", "abcd1234")
+
+        mock_export.assert_not_called()
+        mock_dialog.assert_not_called()
+        # Regression: the button needs a project-specific key, or rendering
+        # more than one project's row raises StreamlitDuplicateElementId.
+        assert mock_button.call_args.kwargs["key"] == "export_config_abcd1234"
+
+    def test_click_opens_export_dialog(self, monkeypatch):
+        monkeypatch.setattr(_st, "button", MagicMock(return_value=True))
+
+        with patch("datasure.views.start_view._export_config_dialog") as mock_dialog:
+            start_view._show_export_config_option("My Project", "abcd1234")
+
+        mock_dialog.assert_called_once_with("My Project", "abcd1234")
+
+
+class TestRenderExportConfigForm:
+    """Test _render_export_config_form, the body of the export dialog."""
+
+    def _render(self, monkeypatch, ticked):
+        mock_checkbox = MagicMock(return_value=ticked)
+        mock_download = MagicMock()
+        monkeypatch.setattr(_st, "checkbox", mock_checkbox)
+        monkeypatch.setattr(_st, "download_button", mock_download)
+        mock_bundle = MagicMock()
+        mock_bundle.model_dump_json.return_value = '{"bundle_version": 2}'
         with patch(
             "datasure.views.start_view.export_project_config",
             return_value=mock_bundle,
         ) as mock_export:
-            start_view._show_export_config_option("My Project", "abcd1234")
+            start_view._render_export_config_form("My Project", "abcd1234")
+        return mock_checkbox, mock_download, mock_export
 
-        mock_export.assert_called_once_with("abcd1234", "My Project")
-        mock_download.assert_called_once()
+    def test_record_level_option_is_ticked_by_default(self, monkeypatch):
+        mock_checkbox, _, _ = self._render(monkeypatch, ticked=True)
+
+        assert mock_checkbox.call_args.kwargs["value"] is True
         assert (
-            mock_download.call_args.kwargs["data"] == '{"datasure_config_version": 1}'
+            "corrections and backcheck attribution" in (mock_checkbox.call_args.args[0])
         )
+
+    def test_ticked_exports_record_level_decisions(self, monkeypatch):
+        _, mock_download, mock_export = self._render(monkeypatch, ticked=True)
+
+        mock_export.assert_called_once_with(
+            "abcd1234", "My Project", include_record_level=True
+        )
+        assert mock_download.call_args.kwargs["data"] == '{"bundle_version": 2}'
         assert mock_download.call_args.kwargs["file_name"].startswith("my_project_")
-        # Regression: the button needs a project-specific key, or rendering
-        # more than one project's row raises StreamlitDuplicateElementId.
-        assert mock_download.call_args.kwargs["key"] == "export_config_abcd1234"
+        # A download inside the dialog shouldn't rerun the app.
+        assert mock_download.call_args.kwargs["on_click"] == "ignore"
+
+    def test_unticked_leaves_out_record_level_decisions(self, monkeypatch):
+        _, mock_download, mock_export = self._render(monkeypatch, ticked=False)
+
+        mock_export.assert_called_once_with(
+            "abcd1234", "My Project", include_record_level=False
+        )
+        mock_download.assert_called_once()
 
 
 class TestShowUpdateFromConfigOption:

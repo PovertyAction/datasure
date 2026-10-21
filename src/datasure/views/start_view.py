@@ -441,20 +441,58 @@ def _render_project_row(project_id: str, info: dict, projects: dict) -> None:
 
 
 def _show_export_config_option(project: str, project_id: str) -> None:
-    """Show the option to export this project's configuration to a file."""
-    bundle = export_project_config(project_id, project)
+    """Show the option to export this project's configuration to a file.
+
+    The bundle is built only once the dialog opens, so listing projects
+    doesn't export every one of them on each rerun.
+    """
+    if st.button(
+        ":material/download: Export configuration",
+        width="stretch",
+        key=f"export_config_{project_id}",
+    ):
+        _export_config_dialog(project, project_id)
+
+
+def _render_export_config_form(project: str, project_id: str) -> None:
+    """Render the export dialog: the record-level option and the download.
+
+    Split out from `_export_config_dialog` so it stays testable as a plain
+    function (see `_render_new_project_form`).
+    """
+    include_record_level = st.checkbox(
+        "Include record-level decisions (corrections and backcheck attribution)",
+        value=True,
+        key=f"export_record_level_{project_id}",
+        help=(
+            "Untick to share only the setup: datasets, preparation steps, "
+            "pages, check settings, and missing codes."
+        ),
+    )
+    bundle = export_project_config(
+        project_id, project, include_record_level=include_record_level
+    )
     export_date = datetime.now().strftime("%Y%m%d")
     file_name = (
         f"{project.lower().replace(' ', '_')}_datasure_config_{export_date}.json"
     )
     st.download_button(
-        ":material/download: Export configuration",
+        ":material/download: Download configuration",
         data=bundle.model_dump_json(indent=2),
         file_name=file_name,
         mime="application/json",
+        type="primary",
         width="stretch",
-        key=f"export_config_{project_id}",
+        # Downloading shouldn't rerun the app and close the dialog.
+        on_click="ignore",
+        key=f"download_config_{project_id}",
     )
+
+
+@st.dialog(title="Export configuration", width="small")
+def _export_config_dialog(project: str, project_id: str) -> None:
+    """Open the export configuration dialog for a project."""
+    _render_export_config_form(project, project_id)
 
 
 def _show_update_from_config_option(project: str, project_id: str) -> None:

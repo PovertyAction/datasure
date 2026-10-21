@@ -109,9 +109,10 @@ You're working with household survey data from rural communities in India, inclu
 #### Copying a Project's Setup
 
 To reuse a project's setup, open **More** on its project card and choose
-**Export configuration**. This downloads a configuration file. To use it,
-choose **From a configuration file** when you create a new project, or choose **Update from
-configuration** under **More** on an existing project.
+**Export configuration**. In the dialog that opens, choose what to include and
+click **Download configuration** to save a configuration file. To use it,
+choose **From a configuration file** when you create a new project, or choose
+**Update from configuration** under **More** on an existing project.
 
 The configuration file includes:
 
@@ -126,6 +127,13 @@ The configuration file includes:
 
 It does not include survey data or remembered filters.
 
+Corrections and back check mismatch attributions are record-level decisions:
+they apply to particular submissions rather than to the setup. The **Include
+record-level decisions (corrections and backcheck attribution)** option in the
+export dialog is ticked by default. Untick it to share only the setup, for
+example when starting a new survey round with the same checks. The file then
+has no corrections or attributions, and it imports the same way.
+
 When you import a configuration file:
 
 - A check page is only created when the project has no page with that name
@@ -136,6 +144,8 @@ When you import a configuration file:
 - A configuration file exported by an older version of DataSure has no check
   tables or missing codes. It still imports, with a warning, and you set
   those up again by hand.
+- Whatever the file contains is applied without asking. An attribution for a
+  submission that isn't in the imported data is kept but has no effect.
 
 ---
 
