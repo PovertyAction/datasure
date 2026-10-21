@@ -1,7 +1,8 @@
 """Tests for project configuration export/import (issue #251)."""
 
 import json
-from datetime import datetime
+import logging
+from datetime import date, datetime
 from unittest.mock import Mock, patch
 
 import polars as pl
@@ -887,6 +888,75 @@ class TestCheckTablesAndMissingCodes:
 
         assert bundle.pages[0].missing_settings == {}
         assert bundle.bundle_version == BUNDLE_VERSION
+
+    def test_apply_ignores_bundled_missing_settings(
+        self, mock_service_cls, mock_load_local, mock_correction_cls, real_duckdb
+    ):
+        """An old bundle's missing settings are parsed but never written."""
+        mock_service_cls.return_value = _page_config_service()
+        bundle = ProjectConfigBundle(
+            exported_from_project="Old",
+            exported_at="t",
+            datasets=[ImportSourceEntry(alias="household", source="local storage")],
+            pages=[
+                ProjectPageBundle(
+                    config={"page_name": PAGE_NAME, "survey_data_name": "household"},
+                    missing_settings={"threshold": 5},
+                )
+            ],
+        )
+
+        result = apply_project_config(DST_PROJECT, bundle, self.local_paths)
+
+        assert result.pages_created == [PAGE_NAME]
+        settings_dir = real_duckdb / DST_PROJECT / "settings"
+        assert not (settings_dir / f"page_{PAGE_ID}_missing_settings.json").exists()
+
+    def test_round_trip_preserves_date_columns(
+        self, mock_service_cls, mock_load_local, mock_correction_cls
+    ):
+        """A pl.Date column in a check table arrives as pl.Date, not a string."""
+        mock_service_cls.return_value = _page_config_service()
+        _seed_source_project()
+        with_date = pl.DataFrame(
+            {"survey_key": ["k1", "k2"], "date": [date(2026, 8, 28), None]},
+            schema={"survey_key": pl.String, "date": pl.Date},
+        )
+        duckdb_save_table(SRC_PROJECT, with_date, f"bc_attribution_{PAGE_ID}", "logs")
+
+        apply_project_config(DST_PROJECT, self._export_and_parse(), self.local_paths)
+
+        assert_frame_equal(
+            duckdb_get_table(DST_PROJECT, f"bc_attribution_{PAGE_ID}", "logs"),
+            with_date,
+        )
+
+    def test_unbuildable_dtype_falls_back_to_string_and_is_logged(
+        self, mock_service_cls, mock_load_local, mock_correction_cls, caplog
+    ):
+        """A dtype that can't be rebuilt from its name is logged, then read as text."""
+        mock_service_cls.return_value = _page_config_service()
+        bundle = ProjectConfigBundle(
+            exported_from_project="Edited",
+            exported_at="t",
+            datasets=[ImportSourceEntry(alias="household", source="local storage")],
+            pages=[
+                ProjectPageBundle(
+                    config={"page_name": PAGE_NAME, "survey_data_name": "household"},
+                    check_tables={"duplicates": [{"search_type": "exact"}]},
+                    check_table_schemas={"duplicates": {"search_type": "Array"}},
+                )
+            ],
+        )
+
+        with caplog.at_level(logging.WARNING, logger="datasure.utils.project_config"):
+            apply_project_config(DST_PROJECT, bundle, self.local_paths)
+
+        assert "Array" in caplog.text
+        assert_frame_equal(
+            duckdb_get_table(DST_PROJECT, f"duplicates_{PAGE_ID}", "logs"),
+            pl.DataFrame({"search_type": ["exact"]}, schema={"search_type": pl.String}),
+        )
 
 
 class TestBundleVersionWarning:

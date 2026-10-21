@@ -15,6 +15,7 @@ supplied for every "local storage" dataset.
 
 import ast
 import json
+import logging
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -44,6 +45,8 @@ from datasure.utils.view_state import (
     without_view_state,
     write_settings,
 )
+
+logger = logging.getLogger(__name__)
 
 # The bundle format version written by this release. Bundles without one
 # predate check tables and missing codes (issue #354).
@@ -106,8 +109,12 @@ def _decode_dtype(encoded: Any) -> pl.DataType:
         if isinstance(dtype, type) and issubclass(dtype, pl.DataType):
             try:
                 return dtype()
-            except TypeError:
-                pass
+            except TypeError as e:
+                logger.warning(
+                    "Cannot rebuild dtype %r from its name (%s); reading as String",
+                    encoded,
+                    e,
+                )
     return pl.String()
 
 
@@ -218,6 +225,21 @@ def _export_pages(
     return pages
 
 
+def _export_corrections(project_id: str, aliases: list[str]) -> dict[str, list[dict]]:
+    """Bundle every alias's non-empty correction log, with ISO-format dates."""
+    corrections: dict[str, list[dict]] = {}
+    for alias in aliases:
+        corr_log = duckdb_get_table(
+            project_id, alias=f"corr_log_{alias}", db_name="logs"
+        )
+        if not corr_log.is_empty():
+            corrections[alias] = [
+                {**r, "date": r["date"].isoformat() if r.get("date") else None}
+                for r in corr_log.to_dicts()
+            ]
+    return corrections
+
+
 def export_project_config(
     project_id: str,
     project_name: str,
@@ -245,7 +267,6 @@ def export_project_config(
 
     datasets: list[ImportSourceEntry] = []
     prep_steps: dict[str, list[dict]] = {}
-    corrections: dict[str, list[dict]] = {}
 
     for row in import_log.iter_rows(named=True):
         alias = row["alias"]
@@ -270,20 +291,14 @@ def export_project_config(
                 _decode_prep_args_cell(v) for v in prep_log["prep_args"].to_list()
             ]
 
-        if not include_record_level:
-            continue
-        corr_log = duckdb_get_table(
-            project_id, alias=f"corr_log_{alias}", db_name="logs"
-        )
-        if not corr_log.is_empty():
-            corrections[alias] = [
-                {**r, "date": r["date"].isoformat() if r.get("date") else None}
-                for r in corr_log.to_dicts()
-            ]
-
-    exclude_table_prefixes = (
-        frozenset() if include_record_level else RECORD_LEVEL_TABLE_PREFIXES
-    )
+    # Corrections and record-level check tables are decisions about individual
+    # records, so they are left out when the caller asks for settings only.
+    if include_record_level:
+        corrections = _export_corrections(project_id, [d.alias for d in datasets])
+        exclude_table_prefixes: Collection[str] = frozenset()
+    else:
+        corrections = {}
+        exclude_table_prefixes = RECORD_LEVEL_TABLE_PREFIXES
     pages = _export_pages(project_id, exclude_table_prefixes)
     missing_codes, _ = _table_to_rows(
         duckdb_get_table(
@@ -450,13 +465,12 @@ def _apply_corrections(
     return failures
 
 
-def _write_page_settings(
-    project_id: str, page_name: str, settings: dict, missing_settings: dict
-) -> None:
-    """Write a page's check settings JSON files.
+def _write_page_settings(project_id: str, page_name: str, settings: dict) -> None:
+    """Write a page's check settings JSON file.
 
     The local ``view_state`` is kept and any in the bundle is ignored, since
-    view state is personal and never part of a configuration.
+    view state is personal and never part of a configuration. A bundle's
+    retired ``missing_settings`` are accepted when parsing but never written.
     """
     page_name_id = name_id(page_name)
     settings_dir = get_cache_path(project_id, "settings")
@@ -468,11 +482,6 @@ def _write_page_settings(
         if local_view_state is not None:
             settings[VIEW_STATE_KEY] = local_view_state
         write_settings(settings_file, settings)
-    if missing_settings:
-        write_settings(
-            settings_dir / f"page_{page_name_id}_missing_settings.json",
-            missing_settings,
-        )
 
 
 def _write_check_tables(project_id: str, page: ProjectPageBundle) -> None:
@@ -660,9 +669,7 @@ def apply_project_config(
             result.pages_skipped.append(ReapplyFailure(page_name, str(e)))
             continue
         config_service.add_configuration(check_config, rerun=False)
-        _write_page_settings(
-            project_id, page_name, page.settings, page.missing_settings
-        )
+        _write_page_settings(project_id, page_name, page.settings)
         _write_check_tables(project_id, page)
         result.pages_created.append(page_name)
 
