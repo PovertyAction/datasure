@@ -16,6 +16,7 @@ from datasure.utils.view_state import (
     reset_filters_beside,
     save_selection,
     saved_selection,
+    view_factory,
     without_view_state,
 )
 
@@ -131,6 +132,31 @@ class TestWithoutViewState:
         assert without_view_state(_file(settings_file)) == {
             "duplicates": {"survey_id": "hhid"}
         }
+
+    def test_drops_view_values_not_yet_moved_into_view_state(self):
+        settings = {
+            "missing": {"mv_threshold": 20, "missing_codes": [-99]},
+            "descriptive_stats": {"col_to_plot": "income"},
+            "duplicates": {
+                "survey_id": "hhid",
+                "id_table_display_cols": ["age"],
+                "phone_display_cols": ["name"],
+            },
+            "gpschecks": "not a section",
+        }
+
+        assert without_view_state(settings) == {
+            "missing": {"missing_codes": [-99]},
+            "descriptive_stats": {},
+            "duplicates": {"survey_id": "hhid"},
+            "gpschecks": "not a section",
+        }
+
+
+class TestViewFactory:
+    def test_legacy_keys_must_be_listed_for_exports(self):
+        with pytest.raises(ValueError, match="LEGACY_VIEW_KEYS"):
+            view_factory("missing", legacy=("missing", {"widget": "not_listed"}))
 
 
 class TestReset:
@@ -250,6 +276,38 @@ class TestBind:
 
         assert fake_st.session_state["bc_filter_cols"] == ["age", "income"]
         assert view.values() == {"bc_filter_cols": ["age", "income"]}
+
+    def test_a_stale_session_value_falls_back_to_default_and_is_removed(
+        self, settings_file, fake_st
+    ):
+        view = ViewState(settings_file, "descriptive")
+        _change(fake_st, view.bind("desc_vc_col", options=["age", "income"]), "income")
+
+        widget = view.bind("desc_vc_col", options=["age"], index=0)
+
+        assert "desc_vc_col" not in fake_st.session_state
+        assert widget["index"] == 0
+        assert view.values() == {}
+
+    def test_a_multiselect_session_value_keeps_the_values_that_still_exist(
+        self, settings_file, fake_st
+    ):
+        view = ViewState(settings_file, "backchecks")
+        widget = view.bind("bc_filter_cols", options=["age", "income"], multi=True)
+        _change(fake_st, widget, ["age", "income"])
+
+        view.bind("bc_filter_cols", options=["age"], multi=True)
+
+        assert fake_st.session_state["bc_filter_cols"] == ["age"]
+        assert view.values() == {"bc_filter_cols": ["age"]}
+
+    def test_a_cleared_session_value_is_kept(self, settings_file, fake_st):
+        view = ViewState(settings_file, "gps")
+        fake_st.session_state["gps_color_by"] = None
+
+        view.bind("gps_color_by", options=["team"], index=0)
+
+        assert fake_st.session_state["gps_color_by"] is None
 
     def test_the_widget_default_is_only_used_without_a_state_value(
         self, settings_file, fake_st

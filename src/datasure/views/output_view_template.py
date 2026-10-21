@@ -283,7 +283,7 @@ def render_checks(project_id: str, config: PageConfig, data: CheckData) -> None:
         data=data,
         survey_columns=get_df_columns(data.page_data),
     )
-    nav_key = check_nav_key(config.page_name_id)
+    nav_key = check_nav_key(project_id, config.page_name_id)
     # Corrections opens on the check page viewed last; written on change only.
     remember(
         get_cache_path(project_id, "settings", PROJECT_VIEW_FILE),

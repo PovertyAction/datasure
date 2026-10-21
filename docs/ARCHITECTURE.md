@@ -288,7 +288,9 @@ On a check page this is the page settings file
   state. Configuration (Progress and Summary columns and targets, Progress
   consent and outcome) stays with the check's settings.
 - **Not shared.** View state is personal. `without_view_state` drops it from
-  project configuration exports, and applying a configuration (a project
+  project configuration exports, together with legacy values not yet moved
+  (`LEGACY_VIEW_KEYS`, which `view_factory` checks each check's legacy keys
+  against), and applying a configuration (a project
   template) keeps the local `view_state` and ignores any in the bundle
   (`utils/project_config.py`). The replication package never reads settings
   files.
@@ -383,12 +385,15 @@ same check. To select a check from code (for example a button), call
 callback.
 
 Navigation state lives under keys prefixed with the page's navigation key
-(`check_nav_{page_name_id}` on check pages): `__selected`, `__group`, `__item`,
-`__last_by_group` and `__errors`.
+(`check_nav_{page_name_id}__{project_id}` on check pages): `__selected`,
+`__group`, `__item`, `__last_by_group` and `__errors`. Opening another project
+keeps session state, so every navigation key includes the project ID
+(`nav_ui.project_nav_key`). A remembered selection the items no longer offer
+gives way to the saved one.
 
-Prepare Data uses `?dataset=<alias>` (navigation key `prep_nav`) and
-Corrections uses `?page=<page_name_id>` (navigation key `corrections_nav`) in
-the same way. No other page uses query parameters.
+Prepare Data uses `?dataset=<alias>` (navigation key `prep_nav__{project_id}`)
+and Corrections uses `?page=<page_name_id>` (navigation key
+`corrections_nav__{project_id}`) in the same way. No other page uses query parameters.
 
 ## Credentials
 

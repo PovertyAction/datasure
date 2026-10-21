@@ -39,6 +39,7 @@ from datasure.utils.duckdb_utils import (
 from datasure.utils.nav_ui import (
     draw_nav,
     guarded_status,
+    project_nav_key,
     resolve_selection,
     run_guarded,
 )
@@ -86,7 +87,8 @@ from datasure.utils.view_state import (
 
 logger = logging.getLogger(__name__)
 
-# The dataset navigation's session state key and URL query parameter, and the
+# The dataset navigation's session state key (before ``project_nav_key``) and
+# URL query parameter, and the
 # settings file holding the remembered dataset (its view_state section).
 PREP_NAV_KEY = "prep_nav"
 DATASET_PARAM = "dataset"
@@ -1334,16 +1336,17 @@ if show_prep_page_info:
     # The pills sit above the dataset but are drawn after it, so a dataset
     # that fails while rendering is already marked in them.
     nav_slot = st.container()
+    nav_key = project_nav_key(PREP_NAV_KEY, project_id)
     nav_state = resolve_selection(
         dataset_nav_items(datasets, prep_tables),
-        key=PREP_NAV_KEY,
+        key=nav_key,
         param=DATASET_PARAM,
         saved=saved_selection(prep_settings_file),
     )
     save_selection(prep_settings_file, nav_state.selected)
     selected_alias = nav_state.selected
     run_guarded(
-        PREP_NAV_KEY,
+        nav_key,
         nav_state.selected_item,
         lambda: render_dataset(
             nav_state.selected_item,
@@ -1352,7 +1355,7 @@ if show_prep_page_info:
         ),
     )
     with nav_slot:
-        draw_nav(nav_state, key=PREP_NAV_KEY, param=DATASET_PARAM, label="Dataset")
+        draw_nav(nav_state, key=nav_key, param=DATASET_PARAM, label="Dataset")
 
 
 # Demo next action or regular navigation
