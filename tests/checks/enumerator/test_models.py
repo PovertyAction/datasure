@@ -54,6 +54,15 @@ def test_weekday_constants():
 # ============================================
 
 
+def test_enumerator_settings_ignores_team_that_is_the_enumerator_column():
+    """A team column equal to the enumerator column would group by it twice."""
+    settings = EnumeratorSettings(
+        survey_id="hhid", enumerator="enum_name", team="enum_name"
+    )
+    assert settings.team is None
+    assert settings.enumerator == "enum_name"
+
+
 def test_enumerator_settings_model_valid():
     """Test EnumeratorSettings model with valid data."""
     settings = EnumeratorSettings(

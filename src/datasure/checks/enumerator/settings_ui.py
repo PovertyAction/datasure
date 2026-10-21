@@ -216,6 +216,11 @@ def enumerator_report_settings(
                     default_settings,
                     settings_file,
                 )
+                if team and team == enumerator:
+                    st.caption(
+                        ":material/info: The team is the enumerator column, "
+                        "so the report ignores it."
+                    )
 
         with st.container(border=True):
             st.subheader("Survey Duration")

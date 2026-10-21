@@ -1,6 +1,6 @@
 """Pydantic models and constants for the enumerator performance module."""
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 TAB_NAME: str = "enumerators"
 
@@ -45,6 +45,16 @@ class EnumeratorSettings(BaseModel):
     duration: str | None = Field(None, description="Duration column")
     duration_unit: str = Field("default='seconds'", description="Duration unit")
     team: str | None = Field(None, description="Team identifier column")
+
+    @model_validator(mode="after")
+    def drop_team_same_as_enumerator(self) -> "EnumeratorSettings":
+        """Ignore a team column that is the enumerator column.
+
+        Grouping by the same column twice fails, and such a team adds nothing.
+        """
+        if self.team and self.team == self.enumerator:
+            self.team = None
+        return self
 
 
 class ConsentOutcomeSettings(BaseModel):
