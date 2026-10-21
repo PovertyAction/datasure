@@ -285,6 +285,17 @@ def enumerator_report_settings(
     )
 
 
+def _trigger_category_save(field_key: str) -> None:
+    """Save a changed consent/outcome column and the values shown for it.
+
+    The old values may not exist in the new column, so the values
+    multiselect saves what it now shows instead of leaving them in the
+    settings file for the report to read.
+    """
+    trigger_save(TAB_NAME + f"_{field_key}")
+    trigger_save(TAB_NAME + f"_{field_key}_vals")
+
+
 def _render_category_settings(
     column_label: str,
     field_key: str,
@@ -343,8 +354,8 @@ def _render_category_settings(
             help=column_help,
             key=f"{field_key}_enumerator",
             index=default_index,
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + f"_{field_key}"},
+            on_change=_trigger_category_save,
+            kwargs={"field_key": field_key},
         )
         save_check_settings(settings_file, TAB_NAME, {field_key: selected_col})
 

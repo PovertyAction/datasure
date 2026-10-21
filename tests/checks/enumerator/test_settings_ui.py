@@ -1,6 +1,7 @@
 """Tests for datasure.checks.enumerator.settings_ui."""
 
 import importlib
+import json
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -124,3 +125,43 @@ def test_unsaved_consent_column_is_not_preselected(enum_bc, sample_enumerator_da
         assert call.kwargs["index"] is None
     for call in enum_bc.st.multiselect.call_args_list:
         assert call.kwargs["options"] == []
+
+
+@pytest.mark.parametrize("field_key", ["consent", "outcome"])
+def test_changing_column_saves_the_values_shown_for_it(
+    enum_bc, sample_enumerator_data, tmp_path, field_key
+):
+    """Old values are not left saved for a new column the report would read."""
+    from datasure.utils import settings_utils
+
+    settings_file = tmp_path / "settings.json"
+    settings_file.write_text(
+        json.dumps({enum_bc.TAB_NAME: {field_key: "team", f"{field_key}_vals": ["T1"]}})
+    )
+    enum_bc.load_check_settings = settings_utils.load_check_settings
+    enum_bc.save_check_settings = settings_utils.save_check_settings
+    enum_bc.trigger_save = settings_utils.trigger_save
+    categorical_cols = list(sample_enumerator_data.columns)
+
+    with patch.object(settings_utils.st, "session_state", {}):
+        enum_bc.st.selectbox.return_value = "team"
+        enum_bc._render_consent_outcome_settings(
+            sample_enumerator_data, categorical_cols, str(settings_file)
+        )
+        column_select = next(
+            c
+            for c in enum_bc.st.selectbox.call_args_list
+            if c.kwargs["key"] == f"{field_key}_enumerator"
+        )
+
+        # The user picks a new column; the values picker shows nothing chosen.
+        column_select.kwargs["on_change"](**column_select.kwargs["kwargs"])
+        enum_bc.st.selectbox.return_value = "formversion"
+        enum_bc.st.multiselect.return_value = []
+        enum_bc._render_consent_outcome_settings(
+            sample_enumerator_data, categorical_cols, str(settings_file)
+        )
+
+    saved = json.loads(settings_file.read_text())[enum_bc.TAB_NAME]
+    assert saved[field_key] == "formversion"
+    assert saved[f"{field_key}_vals"] == []
