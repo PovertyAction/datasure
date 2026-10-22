@@ -15,7 +15,11 @@ from datasure.models.schemas import (
     ProjectPageBundle,
 )
 from datasure.utils.config_utils import ConfigurationService
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.duckdb_utils import (
+    duckdb_get_table,
+    duckdb_save_table,
+    duckdb_table_exists,
+)
 from datasure.utils.project_config import (
     BUNDLE_VERSION,
     _render_config_summary,
@@ -90,6 +94,10 @@ class TestExportProjectConfig:
 
     @patch("datasure.utils.project_config.get_cache_path")
     @patch("datasure.utils.project_config.ConfigurationService")
+    @patch(
+        "datasure.utils.project_config.duckdb_table_exists",
+        new=Mock(return_value=True),
+    )
     @patch("datasure.utils.project_config.duckdb_get_table")
     def test_export_assembles_all_layers(
         self, mock_get_table, mock_config_service_cls, mock_get_cache_path, tmp_path
@@ -148,6 +156,10 @@ class TestExportProjectConfig:
 
     @patch("datasure.utils.project_config.get_cache_path")
     @patch("datasure.utils.project_config.ConfigurationService")
+    @patch(
+        "datasure.utils.project_config.duckdb_table_exists",
+        new=Mock(return_value=True),
+    )
     @patch("datasure.utils.project_config.duckdb_get_table")
     def test_export_reads_settings_json_files(
         self, mock_get_table, mock_config_service_cls, mock_get_cache_path, tmp_path
@@ -173,6 +185,10 @@ class TestExportProjectConfig:
 
     @patch("datasure.utils.project_config.get_cache_path")
     @patch("datasure.utils.project_config.ConfigurationService")
+    @patch(
+        "datasure.utils.project_config.duckdb_table_exists",
+        new=Mock(return_value=True),
+    )
     @patch("datasure.utils.project_config.duckdb_get_table")
     def test_export_leaves_out_personal_view_state(
         self, mock_get_table, mock_config_service_cls, mock_get_cache_path, tmp_path
@@ -913,12 +929,14 @@ class TestCheckTablesAndMissingCodes:
         settings_dir = real_duckdb / DST_PROJECT / "settings"
         assert not (settings_dir / f"page_{PAGE_ID}_missing_settings.json").exists()
 
-    def _seed_legacy_descriptive_selection(self):
+    def _seed_legacy_descriptive_selection(
+        self, project_id=SRC_PROJECT, selected=(True, False, True)
+    ):
         duckdb_save_table(
-            SRC_PROJECT,
+            project_id,
             pl.DataFrame(
                 {
-                    "Selected": [True, False, True],
+                    "Selected": list(selected),
                     "column": ["age", "sex", "other_page_col"],
                     "type": ["numeric", "categorical", "numeric"],
                 }
@@ -960,6 +978,28 @@ class TestCheckTablesAndMissingCodes:
             bundle.pages[0].check_tables["descriptive_columns"]
             == CHECK_TABLES["descriptive_columns"].to_dicts()
         )
+
+    def test_import_without_descriptive_selection_ignores_destination_legacy(
+        self, mock_service_cls, mock_load_local, mock_correction_cls
+    ):
+        """A page imported with no selection starts empty, even after re-export.
+
+        The destination's old project-wide selection must not fill it in.
+        """
+        mock_service_cls.return_value = _page_config_service()
+        _seed_source_project(skip_prefixes={"descriptive_columns"})
+        self._seed_legacy_descriptive_selection(selected=(False, False, False))
+        self._seed_legacy_descriptive_selection(project_id=DST_PROJECT)
+
+        bundle = self._export_and_parse()
+        assert "descriptive_columns" not in bundle.pages[0].check_tables
+        apply_project_config(DST_PROJECT, bundle, self.local_paths)
+
+        table = f"descriptive_columns_{PAGE_ID}"
+        assert duckdb_table_exists(DST_PROJECT, table, "logs")
+        assert duckdb_get_table(DST_PROJECT, table, "logs").is_empty()
+        reexported = export_project_config(DST_PROJECT, "Destination")
+        assert "descriptive_columns" not in reexported.pages[0].check_tables
 
     def test_round_trip_preserves_date_columns(
         self, mock_service_cls, mock_load_local, mock_correction_cls

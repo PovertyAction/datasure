@@ -45,6 +45,7 @@ from datasure.utils.duckdb_utils import (
     check_table_name,
     duckdb_get_table,
     duckdb_save_table,
+    duckdb_table_exists,
     missing_codes_table_name,
     name_id,
 )
@@ -68,6 +69,11 @@ RECORD_LEVEL_TABLE_PREFIXES: frozenset[str] = frozenset({BC_ATTRIBUTION_TABLE})
 
 # Columns older versions saved that are not part of a table's settings.
 _LEGACY_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {OUTLIERS_TABLE: ("index",)}
+
+# A descriptive column selection with no columns selected.
+_EMPTY_DESCRIPTIVE_SELECTION = pl.DataFrame(
+    schema={"Selected": pl.Boolean, "column": pl.String, "type": pl.String}
+)
 
 
 # ============================================================================
@@ -170,15 +176,16 @@ def _read_check_table(project_id: str, prefix: str, page_name: str) -> pl.DataFr
     """Read a page's check table.
 
     A page whose descriptive stats have not been opened since the upgrade
-    has no column selection of its own yet. It gets the selected rows of
-    the old project-wide one, which is what the page starts from when
-    opened; columns not in the page's data are dropped then.
+    has no column selection table of its own yet. It gets the selected rows
+    of the old project-wide one, which is what the page starts from when
+    opened; columns not in the page's data are dropped then. A page with an
+    empty selection table of its own keeps that empty selection.
     """
-    df = duckdb_get_table(
-        project_id, alias=check_table_name(prefix, page_name), db_name="logs"
-    )
-    if prefix != DESCRIPTIVE_COLUMNS_TABLE or not df.is_empty():
-        return df
+    table = check_table_name(prefix, page_name)
+    if prefix != DESCRIPTIVE_COLUMNS_TABLE or duckdb_table_exists(
+        project_id, table, "logs"
+    ):
+        return duckdb_get_table(project_id, alias=table, db_name="logs")
     legacy = duckdb_get_table(
         project_id, LEGACY_DESCRIPTIVE_SELECTION_TABLE, "intermediate"
     )
@@ -495,7 +502,9 @@ def _write_page_settings(project_id: str, page_name: str, settings: dict) -> Non
 def _write_check_tables(project_id: str, page: ProjectPageBundle) -> None:
     """Write a newly created page's bundled check tables to ``logs``.
 
-    Only registered prefixes are written; empty tables are skipped.
+    Only registered prefixes are written; empty tables are skipped. A page
+    bundled without a descriptive column selection gets an empty one, so it
+    does not start from this project's old project-wide selection.
     """
     page_name = page.config.get("page_name", "")
     for prefix, rows in page.check_tables.items():
@@ -504,6 +513,13 @@ def _write_check_tables(project_id: str, page: ProjectPageBundle) -> None:
         df = _rows_to_table(rows, page.check_table_schemas.get(prefix))
         duckdb_save_table(
             project_id, df, alias=check_table_name(prefix, page_name), db_name="logs"
+        )
+    if not page.check_tables.get(DESCRIPTIVE_COLUMNS_TABLE):
+        duckdb_save_table(
+            project_id,
+            _EMPTY_DESCRIPTIVE_SELECTION,
+            alias=check_table_name(DESCRIPTIVE_COLUMNS_TABLE, page_name),
+            db_name="logs",
         )
 
 

@@ -370,8 +370,10 @@ settings, and not stored; the Enumerator report's consent and completion
 flags work this way. Older versions kept the Descriptive Stats selection
 project-wide in `selected_columns_df` in `data/intermediate.duckdb`; a page
 with no selection of its own is seeded from it once, filtered to the page's
-columns, and the old table is left in place. Exporting a page that has not
-been seeded yet exports the old selection's selected rows as the page's own.
+columns, and the old table is left in place. Exporting a page that has no
+selection table yet exports the old selection's selected rows as the page's
+own. Importing a page bundled without a selection writes an empty one, so the
+page is not seeded from the destination's old selection.
 
 The `cache/` directory is gitignored.
 
