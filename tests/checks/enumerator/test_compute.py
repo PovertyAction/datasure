@@ -1055,3 +1055,49 @@ def test_compute_enumerator_summary_zero_rows(
 
     assert result.is_empty()
     assert "# submissions" in result.columns
+
+
+# ============================================
+# MISSING CODES (issue #379)
+# ============================================
+
+
+def test_compute_enumerator_statistics_ignores_missing_codes(
+    land_area_data, land_area_missing_codes
+):
+    """E2's -99, -99 and -88 are missing, not values in its statistics."""
+    result = compute_enumerator_statistics(
+        land_area_data,
+        ["enumerator"],
+        ["land_area"],
+        ["count", "mean", "min"],
+        missing_codes=land_area_missing_codes,
+    )
+
+    e2 = result.filter(pl.col("enumerator") == "E2").row(0, named=True)
+    assert e2["land_area_count"] == 3
+    assert e2["land_area_mean"] == pytest.approx(73 / 3)
+    assert e2["land_area_min"] == pytest.approx(6.0)
+
+
+def test_compute_enumerator_statistics_overtime_counts_codes_as_missing(
+    land_area_data, land_area_missing_codes
+):
+    """Over time, E2's codes show in the missing share and not in the mean."""
+
+    def e2_values(stat: str) -> list:
+        result = compute_enumerator_statistics_overtime(
+            land_area_data,
+            "submission_date",
+            ["enumerator"],
+            "land_area",
+            stat,
+            "Daily",
+            "SUN",
+            missing_codes=land_area_missing_codes,
+        )
+        row = result.filter(pl.col("enumerator") == "E2").drop("enumerator")
+        return [v for v in row.row(0) if v is not None]
+
+    assert e2_values("mean") == [pytest.approx(73 / 3)]
+    assert e2_values("missing") == [pytest.approx(0.5)]

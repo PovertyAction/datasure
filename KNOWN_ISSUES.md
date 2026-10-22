@@ -16,6 +16,14 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ## Open issues
 
+### KI-029: Missing codes such as -99 are counted as values in Outliers, Descriptive Stats and Enumerator Stats
+
+- **Status:** 🟡 Planned for 1.2.0
+- **Affected versions:** 1.0.0 and later
+- **Symptom:** Codes you add on the Missing Values tab, such as `-99` for Don't know, are treated as real answers on other tabs. On **Outliers & Constraints**, `-99` answers are flagged as outliers or constraint violations, and they count towards the outlier % on the Summary tab. On **Descriptive Stats** and in **Column Statistics by Enumerator**, they pull down the mean and show as the minimum.
+- **Workaround:** Read the Missing Values tab for how often each code was used, and ignore flags and minimums that are a missing code. To get statistics without the codes, replace the codes with blanks in your data before you import it.
+- **Issue:** [#379](https://github.com/PovertyAction/datasure/issues/379)
+
 ### KI-028: Enumerator summary shows wrong first and last submission dates and this week/month counts
 
 - **Status:** 🟡 Planned for 1.2.0

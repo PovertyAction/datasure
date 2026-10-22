@@ -88,6 +88,9 @@ def enum_bc():
         report_ui_module.save_check_settings = MagicMock()
         report_ui_module.trigger_save = MagicMock()
         report_ui_module.duckdb_get_table = MagicMock(return_value=pl.DataFrame())
+        report_ui_module.load_missing_codes_from_db = MagicMock(
+            return_value=pl.DataFrame()
+        )
         report_ui_module.demo_callout = MagicMock()
 
         with patch(

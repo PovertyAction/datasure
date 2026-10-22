@@ -7,6 +7,7 @@ This module provides comprehensive missing data analysis functionality with:
 - DuckDB storage for missing code configurations
 """
 
+import logging
 from typing import Any
 
 import numpy as np
@@ -26,6 +27,8 @@ from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding, is_demo_project
 from datasure.utils.ui_utils import ensure_styler_limit
 from datasure.utils.view_state import reset_filters_beside, view_factory
+
+logger = logging.getLogger(__name__)
 
 TAB_NAME = "missing"
 
@@ -156,31 +159,11 @@ def _try_convert_code_to_column_type(
         A tuple of (converted_value, success). If conversion fails,
         returns (None, False).
     """
-    # Handle numeric types
-    if col_dtype in (
-        pl.Int8,
-        pl.Int16,
-        pl.Int32,
-        pl.Int64,
-        pl.UInt8,
-        pl.UInt16,
-        pl.UInt32,
-        pl.UInt64,
-    ):
-        try:
-            # Try to convert to integer
-            converted = int(float(code))  # Handle cases like "-999.0"
-            return converted, True  # noqa: TRY300
-        except (ValueError, TypeError):
-            return None, False
-
-    if col_dtype in (pl.Float32, pl.Float64):
-        try:
-            # Try to convert to float
-            converted = float(code)
-            return converted, True  # noqa: TRY300
-        except (ValueError, TypeError):
-            return None, False
+    # Handle numeric types with the same parser as `mask_missing_codes`, so the
+    # Missing Data tab and the numeric checks always agree on a code
+    if col_dtype.is_numeric():
+        parsed = _codes_as_dtype([str(code)], col_dtype)
+        return (parsed[0], True) if parsed else (None, False)
 
     # Handle string types - always successful
     if col_dtype in (pl.Utf8, pl.Categorical, pl.String):
@@ -280,6 +263,85 @@ def _get_all_missing_codes(missing_codes_df: pl.DataFrame) -> list[str]:
             mc = row["codes"].split(",")
             all_codes.extend([code.strip() for code in mc if code.strip()])
     return all_codes
+
+
+def _numeric_missing_codes(missing_codes_df: pl.DataFrame) -> list[str]:
+    """Return the missing codes that are numbers, skipping text codes like `.d`."""
+    codes = []
+    for code in _get_all_missing_codes(missing_codes_df):
+        try:
+            float(code)
+        except ValueError:
+            logger.debug("Missing code %r is not a number; not masked", code)
+        else:
+            codes.append(code)
+    return codes
+
+
+def _whole_number_code(code: str) -> str | None:
+    """Return `code` as an integer string, or None if it is not a whole number.
+
+    `-999.0` becomes `-999`, so it still matches an integer column. Decimal
+    codes such as `.999` are kept for float columns but cannot occur in an
+    integer one; truncating them to `0` would flag every real zero as missing.
+    """
+    try:
+        return str(int(code))  # exact for large integers
+    except ValueError:
+        pass
+    try:
+        value = float(code)
+    except ValueError:
+        return None
+    return str(int(value)) if value.is_integer() else None
+
+
+def _codes_as_dtype(codes: list[str], dtype: pl.DataType) -> list:
+    """Parse the codes straight into `dtype`, so matching keeps its precision.
+
+    Going through Float64 would widen a Float32 `-99.9` past the code and round
+    large integers together. Codes the type cannot hold, such as `-99.9` in an
+    integer column or `-99` in an unsigned one, are dropped.
+    """
+    if dtype.is_integer():
+        codes = [w for c in codes if (w := _whole_number_code(c)) is not None]
+    parsed = pl.Series(codes, dtype=pl.String).cast(dtype, strict=False)
+    return parsed.drop_nulls().to_list()
+
+
+def mask_missing_codes(
+    df: pl.DataFrame, cols: list[str], missing_codes_df: pl.DataFrame
+) -> pl.DataFrame:
+    """Set the project's missing codes to null in numeric columns.
+
+    Numeric checks call this so a code such as -99 is not counted as a value.
+    Missing Data keeps the raw codes, since it counts them by category.
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        The dataset.
+    cols : list[str]
+        Columns to mask. Non-numeric columns are left unchanged.
+    missing_codes_df : pl.DataFrame
+        The missing codes configuration.
+
+    Returns
+    -------
+    pl.DataFrame
+        `df` with the numeric missing codes in `cols` set to null.
+    """
+    codes = _numeric_missing_codes(missing_codes_df)
+    numeric_cols = [c for c in cols if df.schema[c].is_numeric()]
+    if not codes or not numeric_cols:
+        return df
+    return df.with_columns(
+        pl.when(pl.col(c).is_in(_codes_as_dtype(codes, df.schema[c])))
+        .then(None)
+        .otherwise(pl.col(c))
+        .alias(c)
+        for c in numeric_cols
+    )
 
 
 def _get_missing_code_pairs(missing_codes_df: pl.DataFrame) -> dict[str, list[str]]:

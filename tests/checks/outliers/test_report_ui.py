@@ -547,6 +547,93 @@ class TestRenderOutlierColumnInspection:
             )
         st_mock.dataframe.assert_called()
 
+    def test_missing_codes_are_left_out_of_the_statistics(
+        self, land_area_data, land_area_missing_codes
+    ):
+        """Issue #379: the column's minimum is 2, not the -99 code."""
+        outliers_data = pl.DataFrame(
+            {
+                "key": ["k11"],
+                "column name": ["land_area"],
+                "outlier reason": ["Value is above upper bound 9.75"],
+            }
+        )
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+            patch("datasure.checks.outliers.report_ui.styled_dataframe"),
+        ):
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.selectbox.return_value = "land_area"
+            st_mock.multiselect.return_value = []
+            _render_outlier_column_inspection(
+                land_area_data,
+                outliers_data,
+                OutlierSettings(survey_key="key"),
+                "settings.json",
+                missing_codes=land_area_missing_codes,
+            )
+
+        desc_stats = st_mock.dataframe.call_args_list[0].args[0]
+        stats = dict(desc_stats.iter_rows())
+        assert stats["Number of Values"] == 9
+        assert stats["Minimum Value"] == 2
+        st_mock.warning.assert_called_once_with(
+            "3 values were excluded because they are specified as missing "
+            "values: -99 (2), -88 (1)"
+        )
+
+    def test_text_column_codes_are_left_out_of_the_statistics(
+        self, land_area_missing_codes
+    ):
+        """Codes in a text column are masked once it is converted to numbers."""
+        data = pl.DataFrame({"key": ["k1", "k2", "k3"], "age": ["30", "-99", "40"]})
+        outliers_data = pl.DataFrame(
+            {"key": ["k1"], "column name": ["age"], "outlier reason": ["x"]}
+        )
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+            patch("datasure.checks.outliers.report_ui.styled_dataframe"),
+        ):
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.selectbox.return_value = "age"
+            st_mock.multiselect.return_value = []
+            _render_outlier_column_inspection(
+                data,
+                outliers_data,
+                OutlierSettings(survey_key="key"),
+                "settings.json",
+                missing_codes=land_area_missing_codes,
+            )
+
+        stats = dict(st_mock.dataframe.call_args_list[0].args[0].iter_rows())
+        assert stats["Number of Values"] == 2
+        assert stats["Minimum Value"] == 30
+        st_mock.warning.assert_called_once_with(
+            "1 value was excluded because it is specified as missing: -99 (1)"
+        )
+
+    def test_no_warning_without_missing_codes_in_column(self, land_area_missing_codes):
+        data = pl.DataFrame({"key": ["k1", "k2"], "age": [30, 40]})
+        outliers_data = pl.DataFrame(
+            {"key": ["k1"], "column name": ["age"], "outlier reason": ["x"]}
+        )
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+            patch("datasure.checks.outliers.report_ui.styled_dataframe"),
+        ):
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.selectbox.return_value = "age"
+            st_mock.multiselect.return_value = []
+            _render_outlier_column_inspection(
+                data,
+                outliers_data,
+                OutlierSettings(survey_key="key"),
+                "settings.json",
+                missing_codes=land_area_missing_codes,
+            )
+
+        st_mock.warning.assert_not_called()
+
 
 # ============================================================================
 # TESTS: _create_search_type_info
@@ -1233,6 +1320,24 @@ class TestOutliersHeadlineSavedSettings:
     ):
         data = sample_polars_df.drop("numeric_col1")
         assert self._headline(data, outlier_column_config, tmp_path) is None
+
+    def test_missing_codes_are_not_counted(
+        self, sample_polars_df, outlier_column_config, tmp_path, monkeypatch
+    ):
+        # Issue #379: an added -99 "don't know" is below the soft minimum of 0
+        # and far from the rest, but it is missing, not a flagged value.
+        monkeypatch.setattr(
+            "datasure.checks.outliers.report_ui.load_missing_codes_from_db",
+            lambda _project_id: pl.DataFrame(
+                {"label": ["Don't know"], "codes": ["-99"]}
+            ),
+        )
+        extra = sample_polars_df.head(1).with_columns(
+            pl.lit("K006").alias("survey_key"), pl.lit(-99.0).alias("numeric_col1")
+        )
+        data = pl.concat([sample_polars_df, extra])
+
+        assert self._headline(data, outlier_column_config, tmp_path) == self.FLAGGED
 
 
 # ============================================================================

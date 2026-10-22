@@ -1,11 +1,12 @@
 import contextlib
 import json
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import polars as pl
 import pytest
 
 # Save a reference to the real streamlit module before any conftest
@@ -220,6 +221,43 @@ def missing_data():
             "duration": [10, None, 20, -777, 30],
             "value1": [1, None, -999, 4, 0.888],
             "value2": [-777, 2, None, -999, 5],
+        }
+    )
+
+
+@pytest.fixture
+def land_area_data():
+    """The land_area column from issue #379: two don't knows, a refusal, one outlier."""
+    return pl.DataFrame(
+        {
+            "key": [f"k{i}" for i in range(12)],
+            "enumerator": ["E1"] * 6 + ["E2"] * 6,
+            "submission_date": [datetime(2024, 1, 1)] * 6 + [datetime(2024, 1, 2)] * 6,
+            "land_area": [
+                2.0,
+                3.0,
+                3.5,
+                4.0,
+                4.0,
+                5.0,
+                6.0,
+                7.0,
+                -99.0,
+                -99.0,
+                -88.0,
+                60.0,
+            ],
+        }
+    )
+
+
+@pytest.fixture
+def land_area_missing_codes():
+    """Missing codes for `land_area_data`, with a text code that is not a number."""
+    return pl.DataFrame(
+        {
+            "label": ["Don't know", "Refused"],
+            "codes": ["-99, .d", "-88"],
         }
     )
 

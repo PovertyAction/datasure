@@ -10,6 +10,7 @@ import plotly.graph_objects as go  # type: ignore
 import polars as pl
 import streamlit as st
 
+from datasure.checks.missing import mask_missing_codes
 from datasure.checks.outliers.models import (
     TAB_NAME,
     ConstraintMetrics,
@@ -340,7 +341,8 @@ def _compute_sd_bounds(series: pl.Series, multiplier: float) -> OutlierBounds:
         Lower and upper bounds.
     """
     mean = series.mean()
-    std = series.std()
+    # A single value has no spread; polars returns None rather than 0
+    std = series.std() or 0.0
     lower_bound = mean - (multiplier * std)
     upper_bound = mean + (multiplier * std)
     return OutlierBounds(lower_bound=lower_bound, upper_bound=upper_bound)
@@ -873,10 +875,21 @@ def _process_single_config(
     return results
 
 
+def _configured_columns(data: pl.DataFrame, column_config: pl.DataFrame) -> list[str]:
+    """Return the data columns named in the outlier column configuration."""
+    cols = {
+        col
+        for row in column_config.iter_rows(named=True)
+        for col in _ensure_list(row.get("column_name", []))
+    }
+    return [col for col in data.columns if col in cols]
+
+
 def compute_outlier_output(
     data: pl.DataFrame,
     outlier_settings: dict,
     column_config: pl.DataFrame,
+    missing_codes: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """Detect outliers in DataFrame based on settings (Polars-optimized).
 
@@ -888,6 +901,9 @@ def compute_outlier_output(
         Outlier settings configuration.
     column_config : pl.DataFrame
         DataFrame containing the outlier column configurations.
+    missing_codes : pl.DataFrame | None
+        The project's missing codes. Values matching them are left out of the
+        bounds and never flagged.
 
     Returns
     -------
@@ -912,6 +928,11 @@ def compute_outlier_output(
         outlier_settings.team,
     )
     admin_data_polars = data.select(include_cols)
+
+    if missing_codes is not None:
+        data = mask_missing_codes(
+            data, _configured_columns(data, column_config), missing_codes
+        )
 
     # Process outlier settings
     outlier_results_list = _process_outlier_configs(data, column_config, survey_key)
@@ -958,6 +979,7 @@ def compute_constraint_violations(
     data: pl.DataFrame,
     settings: OutlierSettings,
     column_config: pl.DataFrame,
+    missing_codes: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """Compute constraint violations for outlier detection.
 
@@ -969,6 +991,8 @@ def compute_constraint_violations(
         Outlier settings configuration.
     column_config : pl.DataFrame
         DataFrame containing the outlier column configurations.
+    missing_codes : pl.DataFrame | None
+        The project's missing codes. Values matching them never breach a bound.
 
     Returns
     -------
@@ -997,7 +1021,14 @@ def compute_constraint_violations(
                 col, hard_min, soft_min, soft_max, hard_max
             )
 
-            col_df = safe_to_numeric(col_df, col)
+            if missing_codes is not None:
+                # Mask in the source type first, since conversion widens to
+                # Float64; mask again for text columns that only become numeric
+                col_df = mask_missing_codes(col_df, [col], missing_codes)
+                col_df = safe_to_numeric(col_df, col)
+                col_df = mask_missing_codes(col_df, [col], missing_codes)
+            else:
+                col_df = safe_to_numeric(col_df, col)
 
             col_df = col_df.with_columns(violation_expr.alias(VIOLATION_REASON_COL))
 
@@ -1233,6 +1264,44 @@ def get_outlier_cols(outlier_settings: pd.DataFrame) -> list[str]:
             cols.extend(col)
 
     return cols
+
+
+def _mask_inspection_column(
+    column_data: pl.DataFrame, col: str, missing_codes: pl.DataFrame
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Convert `col` to numeric and null its missing codes, as the checks do.
+
+    Parameters
+    ----------
+    column_data : pl.DataFrame
+        Data holding `col` as entered.
+    col : str
+        The column to inspect.
+    missing_codes : pl.DataFrame
+        The project's missing codes.
+
+    Returns
+    -------
+    tuple[pl.DataFrame, pl.DataFrame]
+        The numeric column with missing codes set to null, and the excluded
+        codes as entered with their counts (columns `value`, `count`), most
+        frequent first.
+    """
+    raw = column_data[col]
+    # Mask in the source type first, since conversion widens to Float64; mask
+    # again for text columns that only become numeric. Text that is not a
+    # number also becomes null on conversion, so only the masks count.
+    source_masked = mask_missing_codes(column_data, [col], missing_codes)
+    numeric = safe_to_numeric(source_masked, col)
+    masked = mask_missing_codes(numeric, [col], missing_codes)
+
+    is_code = (raw.is_not_null() & source_masked[col].is_null()) | (
+        numeric[col].is_not_null() & masked[col].is_null()
+    )
+    excluded = (
+        raw.filter(is_code).value_counts(sort=True, name="count").rename({col: "value"})
+    )
+    return masked, excluded
 
 
 # =============================================================================

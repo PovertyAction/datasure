@@ -983,6 +983,14 @@ Configure missing codes:
 - **Missing Labels**: Category names (Don't Know, Refused, N/A)
 - **Missing Codes**: Numeric codes (-99, -88, -77)
   - Multiple codes separated by commas
+  - Decimal codes such as `.999` are supported for surveys that used them.
+    They only match columns that hold decimals, so `.999` never marks a `0`
+    as missing in a whole-number column
+
+Numeric codes count as missing, not as values, on the other checks: Outliers &
+Constraints don't flag them, and Descriptive Stats and the enumerator
+statistics leave them out of the mean, minimum and other statistics. Back
+checks use their own settings for values to exclude.
 
 ##### Missing Data Statistics
 
