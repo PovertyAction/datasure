@@ -1658,6 +1658,23 @@ class TestToString:
         assert result.to_list() == expected
 
 
+class TestToNumber:
+    """Transform Column's to number operation, run through the prep processor."""
+
+    def test_booleans_become_zero_one_keeping_missing(self):
+        data = pl.DataFrame({"consent": [True, False, None]})
+        result = _run_step(
+            data,
+            action="transform column(s)",
+            method="to number",
+            source_columns=["consent"],
+            value=[],
+        )
+        assert result.columns == ["consent"]
+        assert result["consent"].dtype == pl.Int64
+        assert result["consent"].to_list() == [1, 0, None]
+
+
 # === LOG MANAGEMENT TESTS === #
 
 
@@ -1982,6 +1999,30 @@ class TestLogManagement:
         assert failures == []
         assert reapplied["uid"].to_list() == ["R01123", "R02"]
         assert reapplied.equals(first_result)
+
+    @patch("datasure.processing.prep.duckdb_get_table")
+    @patch("datasure.processing.prep.duckdb_save_table")
+    def test_to_number_reapplies_the_same(self, mock_save, mock_get):
+        """A saved to number step converts booleans again after a refresh."""
+        mock_get.return_value = pl.DataFrame({"consent": [True, None, False]})
+        empty_log = pl.DataFrame(
+            {"action": [], "description": [], "prep_args": [], "action_index": []}
+        )
+        step = PrepActionResult(
+            action="transform column(s)",
+            method="to number",
+            source_columns=["consent"],
+            value=[],
+        )
+        _apply_single_action("proj", "alias", step, empty_log, PrepProcessor())
+        saved_log = _convert_prep_args_to_string(mock_save.call_args_list[0][0][1])
+
+        mock_save.reset_mock()
+        failures = _reapply_all_actions("proj", "alias", saved_log, PrepProcessor())
+
+        reapplied = mock_save.call_args_list[0][0][1]
+        assert failures == []
+        assert reapplied["consent"].to_list() == [1, None, 0]
 
 
 # === PUBLIC API TESTS === #

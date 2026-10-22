@@ -226,6 +226,12 @@ Convert or modify existing column data:
   - Dates become `YYYY-MM-DD`, datetimes `YYYY-MM-DD HH:MM:SS.ffffff`, and
     true/false becomes `"true"`/`"false"`
   - Missing values stay missing
+- **To Number**: Convert a true/false column to whole numbers, keeping its
+  name: true becomes `1` and false becomes `0`
+  - Missing values stay missing
+  - DataSure keeps true/false columns as they are when you import data. Use
+    this step when you want them as 0/1, for example to use them in numeric
+    checks
 
 **Steps**:
 

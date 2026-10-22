@@ -77,6 +77,7 @@ class PrepOperations(Enum):
     string_to_date: str = "string to date"
     string_to_datetime: str = "string to datetime"
     to_string: str = "to string"
+    to_number: str = "to number"
     extract_pattern: str = "extract pattern"
     get_dummies: str = "get dummies"
     add: str = "add"

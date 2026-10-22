@@ -193,6 +193,25 @@ def _stata_to_string(col: str) -> list[str]:
     ]
 
 
+def _stata_to_number(col: str) -> list[str]:
+    """Convert a true/false column to 1/0 the way DataSure's ``to number`` does.
+
+    The raw CSV holds booleans as "true"/"false" text. Any other value,
+    including "", becomes missing. A numeric column is left as it is.
+    """
+    return [
+        f"capture confirm string variable {col}",
+        "if !_rc {",
+        "    tempvar n",
+        f'    gen byte `n\' = 1 if {col} == "true"',
+        f'    replace `n\' = 0 if {col} == "false"',
+        f"    order `n', after({col})",
+        f"    drop {col}",
+        f"    rename `n' {col}",
+        "}",
+    ]
+
+
 def _stata_transform_column(args: dict, _desc: str) -> list[str]:
     cols = _cols(args)
     method = (args.get("method") or "").lower()
@@ -236,6 +255,9 @@ def _stata_transform_column(args: dict, _desc: str) -> list[str]:
 
     if method == "to string":
         return _stata_to_string(col)
+
+    if method == "to number":
+        return _stata_to_number(col)
 
     if method in arith_ops and values:
         op = arith_ops[method]

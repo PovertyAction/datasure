@@ -34,6 +34,11 @@ TO_STRING_DESCRIPTION = (
     'datetimes YYYY-MM-DD HH:MM:SS.ffffff and booleans become "true"/"false"'
 )
 
+TO_NUMBER_DESCRIPTION = (
+    "Convert true/false values to whole numbers: true becomes 1 and false "
+    "becomes 0. Missing values stay missing"
+)
+
 
 class PrepDescriptions:
     """Class containing user-friendly descriptions for all data prep functions."""
@@ -126,9 +131,15 @@ class PrepDescriptions:
         PrepOperations.to_string.value: TO_STRING_DESCRIPTION,
     }
 
-    # Functions for date-only and boolean columns
+    # Functions for date-only columns
     CONVERSION_FUNCTIONS: ClassVar[dict[str, str]] = {
         PrepOperations.to_string.value: TO_STRING_DESCRIPTION,
+    }
+
+    # Functions for boolean columns
+    BOOLEAN_FUNCTIONS: ClassVar[dict[str, str]] = {
+        PrepOperations.to_string.value: TO_STRING_DESCRIPTION,
+        PrepOperations.to_number.value: TO_NUMBER_DESCRIPTION,
     }
 
     # Row Condition Filters
@@ -174,6 +185,7 @@ class PrepDescriptions:
             "numeric": cls.NUMERIC_FUNCTIONS,
             "datetime": cls.DATETIME_FUNCTIONS,
             "conversion": cls.CONVERSION_FUNCTIONS,
+            "boolean": cls.BOOLEAN_FUNCTIONS,
             "row_conditions": cls.ROW_CONDITIONS,
         }
 
@@ -201,6 +213,7 @@ class PrepDescriptions:
             "numeric": cls.NUMERIC_FUNCTIONS,
             "datetime": cls.DATETIME_FUNCTIONS,
             "conversion": cls.CONVERSION_FUNCTIONS,
+            "boolean": cls.BOOLEAN_FUNCTIONS,
             "row_conditions": cls.ROW_CONDITIONS,
         }
 
@@ -462,6 +475,7 @@ class PrepConfirmationMessages:
             "string to date": "Text converted to dates. Now date format",
             "string to datetime": "Text converted to datetime. Now datetime format",
             "to string": "Values converted to text. Now text format",
+            "to number": "True/false converted to 1/0. Now numeric format",
         }
         action_text = conversion_names.get(result.method, f"{result.method} applied")
         value_text = cls._pluralize(result.affected_count, "value")
@@ -589,6 +603,7 @@ class PrepConfirmationMessages:
         PrepOperations.string_to_date.value: "string_function_conversion",
         PrepOperations.string_to_datetime.value: "string_function_conversion",
         PrepOperations.to_string.value: "string_function_conversion",
+        PrepOperations.to_number.value: "string_function_conversion",
         PrepOperations.extract_pattern.value: "string_function_extract",
         PrepOperations.get_dummies.value: "string_function_dummies",
         # Numeric

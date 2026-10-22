@@ -324,6 +324,23 @@ class TestStataTransformColumn:
         )
         assert "    order `s', after(n)" in lines
 
+    def test_to_number_maps_true_false_text(self):
+        # The raw CSV holds booleans as "true"/"false" text.
+        lines = _stata_transform_column(
+            {"source_columns": ["consent"], "method": "to number"}, ""
+        )
+        assert lines[0] == "capture confirm string variable consent"
+        assert '    gen byte `n\' = 1 if consent == "true"' in lines
+        assert '    replace `n\' = 0 if consent == "false"' in lines
+
+    def test_to_number_keeps_column_name_and_position(self):
+        lines = _stata_transform_column(
+            {"source_columns": ["consent"], "method": "to number"}, ""
+        )
+        assert "    order `n', after(consent)" in lines
+        assert "    drop consent" in lines
+        assert "    rename `n' consent" in lines
+
     def test_floor(self):
         lines = _stata_transform_column(
             {"source_columns": ["col"], "method": "floor"}, ""

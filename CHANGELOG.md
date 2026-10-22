@@ -27,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   trailing `.0` and nulls stay null. Date and boolean columns get their own
   input path (`PrepDescriptions.CONVERSION_FUNCTIONS`,
   `_render_conversion_function_inputs`)
+- **Prep to number** (#388): Transform Column has a `to number` operation
+  (`PrepOperations.to_number`) for boolean columns. It casts in place to
+  `Int64` (true → 1, false → 0, nulls stay null). Boolean columns get their own
+  menu (`PrepDescriptions.BOOLEAN_FUNCTIONS`) with `to string` and `to number`.
+  Imports keep boolean columns as booleans; this replaces the import-time cast
+  proposed in #386. The Stata prepare-data script maps `"true"`/`"false"` text
+  from the raw CSV to 1/0 and any other value to missing
 
 ### Fixed
 

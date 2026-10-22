@@ -633,6 +633,9 @@ class TransformColumnsOperation(PrepOperation):
                 )
             )
 
+        if func_name == PrepOperations.to_number.value:
+            return data.with_columns(pl.col(column_name).cast(pl.Int64))
+
         # Get dummies (one-hot encoding)
         if func_name == "get dummies":
             return data.to_dummies(columns=[column_name])

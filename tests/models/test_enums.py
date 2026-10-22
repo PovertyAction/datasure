@@ -142,8 +142,8 @@ class TestPrepOperations:
     """Tests for the PrepOperations enum."""
 
     def test_member_count(self):
-        """Verify PrepOperations has exactly 31 members."""
-        assert len(PrepOperations) == 31
+        """Verify PrepOperations has exactly 32 members."""
+        assert len(PrepOperations) == 32
 
     @pytest.mark.parametrize(
         ("member_name", "expected_value"),
@@ -173,6 +173,7 @@ class TestPrepOperations:
             ("string_to_date", "string to date"),
             ("string_to_datetime", "string to datetime"),
             ("to_string", "to string"),
+            ("to_number", "to number"),
             ("extract_pattern", "extract pattern"),
             ("get_dummies", "get dummies"),
             ("add", "add"),

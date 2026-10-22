@@ -155,8 +155,11 @@ class PrepViewConfig:
         # Get datetime functions from prep_utils
         self.DP_DATETIME_FUNCS = tuple(self.descriptions.DATETIME_FUNCTIONS.keys())
 
-        # Functions for date-only and boolean columns
+        # Functions for date-only columns
         self.DP_CONVERSION_FUNCS = tuple(self.descriptions.CONVERSION_FUNCTIONS.keys())
+
+        # Functions for boolean columns
+        self.DP_BOOLEAN_FUNCS = tuple(self.descriptions.BOOLEAN_FUNCTIONS.keys())
 
         # Get row conditions from prep_utils
         self.DP_ROW_CONDITIONS = tuple(self.descriptions.ROW_CONDITIONS.keys())
@@ -440,13 +443,14 @@ def _render_datetime_function_inputs(
 
 
 def _render_conversion_function_inputs(
-    step_index: int, inputs: TransformInputs
+    step_index: int, inputs: TransformInputs, options: tuple[str, ...]
 ) -> TransformInputs:
     """Render UI inputs for date-only and boolean columns.
 
     Args:
         step_index: Current step index for unique widget keys
         inputs: TransformInputs object to populate
+        options: Conversion functions offered for the column type
 
     Returns
     -------
@@ -454,7 +458,7 @@ def _render_conversion_function_inputs(
     """
     inputs.func = st.selectbox(
         label="Select Function",
-        options=config.DP_CONVERSION_FUNCS,
+        options=options,
         key=f"st_sb_trf_func{step_index}",
     )
     return inputs
@@ -903,8 +907,14 @@ class PrepStepHandler:
             return _render_datetime_function_inputs(self.step_index, inputs)
         elif hasattr(col_type, "is_numeric") and col_type.is_numeric():
             return _render_numeric_function_inputs(self.step_index, inputs)
-        elif col_type in (pl.Date, pl.Boolean):
-            return _render_conversion_function_inputs(self.step_index, inputs)
+        elif col_type == pl.Date:
+            return _render_conversion_function_inputs(
+                self.step_index, inputs, config.DP_CONVERSION_FUNCS
+            )
+        elif col_type == pl.Boolean:
+            return _render_conversion_function_inputs(
+                self.step_index, inputs, config.DP_BOOLEAN_FUNCS
+            )
         return inputs
 
     def remove_column_handler(self) -> dict | None:

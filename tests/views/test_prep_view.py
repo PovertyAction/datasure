@@ -347,9 +347,10 @@ class TestIsTransformColumnIncomplete:
     def test_missing_source_columns_key(self):
         assert _is_transform_column_incomplete({"method": "trim"}) is True
 
-    def test_to_string_needs_no_input(self):
+    @pytest.mark.parametrize("op", [PrepOperations.to_string, PrepOperations.to_number])
+    def test_conversion_needs_no_input(self, op):
         inputs = TransformInputs()
-        inputs.func = PrepOperations.to_string.value
+        inputs.func = op.value
         args = _build_transform_result("hhid", inputs)
         assert _is_transform_column_incomplete(args) is False
 
@@ -1317,13 +1318,21 @@ class TestPrepStepHandler:
         result = handler._render_transform_inputs_by_type(pl.Binary, inputs)
         assert result.func is None
 
-    @pytest.mark.parametrize("col_type", [pl.Date, pl.Boolean])
-    def test_render_transform_inputs_offers_to_string(self, sample_polars_df, col_type):
+    @pytest.mark.parametrize(
+        ("col_type", "options"),
+        [
+            (pl.Date, ("to string",)),
+            (pl.Boolean, ("to string", "to number")),
+        ],
+    )
+    def test_render_transform_inputs_offers_conversions(
+        self, sample_polars_df, col_type, options
+    ):
         _st.selectbox = MagicMock(return_value="to string")
         handler = PrepStepHandler(sample_polars_df, 0)
         result = handler._render_transform_inputs_by_type(col_type, TransformInputs())
         assert result.func == "to string"
-        assert _st.selectbox.call_args.kwargs["options"] == ("to string",)
+        assert _st.selectbox.call_args.kwargs["options"] == options
 
     def test_render_transform_inputs_float_col(self, sample_polars_df):
         _st.selectbox = MagicMock(side_effect=["score", "round"])
