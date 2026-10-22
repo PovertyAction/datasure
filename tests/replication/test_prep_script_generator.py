@@ -288,15 +288,49 @@ class TestStataTransformColumn:
         )
         assert "destring" in lines[0]
 
-    def test_to_string_destrings_text_columns_first(self):
+    def test_to_string_drops_whole_float_suffix_in_text_columns(self):
         # The CSV import keeps "12.0" as text; DataSure would show "12".
         lines = _stata_transform_column(
             {"source_columns": ["hhid"], "method": "to string"}, ""
         )
-        assert lines[:2] == [
-            "capture confirm string variable hhid",
-            "if !_rc quietly destring hhid, replace",
-        ]
+        assert lines[0] == "capture confirm string variable hhid"
+        assert "    quietly count if !missing(hhid) & missing(real(hhid))" in lines
+        assert (
+            "        quietly replace hhid = substr(hhid, 1, strlen(hhid) - 2) "
+            'if substr(hhid, -2, 2) == ".0"'
+        ) in lines
+
+    def test_to_string_does_not_destring_text_columns(self):
+        # destring would round IDs above 2^53 through a double.
+        text = "\n".join(
+            _stata_transform_column(
+                {"source_columns": ["hhid"], "method": "to string"}, ""
+            )
+        )
+        assert "destring" not in text
+
+    def test_to_string_formats_csv_datetimes_like_datasure(self):
+        # write_csv gives "2025-08-18T19:49:00.000000"; DataSure uses a space.
+        lines = _stata_transform_column(
+            {"source_columns": ["t"], "method": "to string"}, ""
+        )
+        assert (
+            "    quietly count if !missing(t) & "
+            '!ustrregexm(t, "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]")'
+        ) in lines
+        assert (
+            '        quietly replace t = substr(t, 1, 10) + " " '
+            "+ substr(t, 12, .) if !missing(t)"
+        ) in lines
+
+    def test_to_string_avoids_global_macro_syntax(self):
+        # A do-file would expand "$..." as a global macro.
+        text = "\n".join(
+            _stata_transform_column(
+                {"source_columns": ["t"], "method": "to string"}, ""
+            )
+        )
+        assert "$" not in text
 
     def test_to_string_formats_dates_like_datasure(self):
         # SurveyCTO dates are datetimes in DataSure, not day counts.

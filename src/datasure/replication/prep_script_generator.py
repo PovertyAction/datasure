@@ -158,33 +158,59 @@ def _stata_remove_rows(args: dict, _desc: str) -> list[str]:
 def _stata_to_string(col: str) -> list[str]:
     """Convert a column to text the way DataSure's ``to string`` does.
 
-    The CSV import keeps every column as text, where DataSure would have
-    read numbers as numbers, so a text column is destrung first ("12.0"
-    becomes 12, then "12"); destring leaves non-numeric columns alone.
-    SurveyCTO dates and datetimes are both datetimes in DataSure, so they
-    get its full timestamp text. Missing values become "" instead of ".",
-    and Stata's ".5" gets DataSure's leading zero.
+    The CSV import keeps every column as text, so a text column is fixed up
+    as text rather than destrung, which would round large IDs through a
+    double. A column of numbers drops a whole float's ".0" ("12.0" becomes
+    "12"), and a column of CSV timestamps swaps the "T" for DataSure's
+    space. SurveyCTO dates and datetimes are both datetimes in DataSure, so
+    they get its full timestamp text. Missing values become "" instead of
+    ".", and Stata's ".5" gets DataSure's leading zero. The code avoids "$",
+    which a do-file would expand as a global macro.
     """
     return [
         f"capture confirm string variable {col}",
-        f"if !_rc quietly destring {col}, replace",
+        "if !_rc {",
+        f"    quietly count if !missing({col}) & missing(real({col}))",
+        "    if r(N) == 0 {",
+        (
+            f"        quietly replace {col} = substr({col}, 1, strlen({col}) - 2) "
+            f'if substr({col}, -2, 2) == ".0"'
+        ),
+        "    }",
+        (
+            f"    quietly count if !missing({col}) & "
+            f'!ustrregexm({col}, "^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}T[0-9]")'
+        ),
+        "    if r(N) == 0 {",
+        (
+            f'        quietly replace {col} = substr({col}, 1, 10) + " " '
+            f"+ substr({col}, 12, .) if !missing({col})"
+        ),
+        "    }",
+        "}",
         f"capture confirm numeric variable {col}",
         "if !_rc {",
         "    tempvar s",
         f"    local fmt : format {col}",
         '    if strpos("`fmt\'", "%td") {',
-        f'        gen `s\' = string({col}, "%tdCCYY-NN-DD") '
-        f'+ " 00:00:00.000000" if !missing({col})',
+        (
+            f'        gen `s\' = string({col}, "%tdCCYY-NN-DD") '
+            f'+ " 00:00:00.000000" if !missing({col})'
+        ),
         "    }",
         '    else if strpos("`fmt\'", "%tc") {',
-        f'        gen `s\' = string({col}, "%tcCCYY-NN-DD_HH:MM:SS.sss") '
-        f'+ "000" if !missing({col})',
+        (
+            f'        gen `s\' = string({col}, "%tcCCYY-NN-DD_HH:MM:SS.sss") '
+            f'+ "000" if !missing({col})'
+        ),
         "    }",
         "    else {",
         f'        gen `s\' = string({col}, "%17.0g") if !missing({col})',
         '        replace `s\' = "0" + `s\' if substr(`s\', 1, 1) == "."',
-        "        replace `s' = \"-0\" + substr(`s', 2, .) "
-        'if substr(`s\', 1, 2) == "-."',
+        (
+            "        replace `s' = \"-0\" + substr(`s', 2, .) "
+            'if substr(`s\', 1, 2) == "-."'
+        ),
         "    }",
         f"    order `s', after({col})",
         f"    drop {col}",
