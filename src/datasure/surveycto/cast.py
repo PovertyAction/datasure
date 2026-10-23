@@ -1,16 +1,18 @@
-"""Cast all-string wide JSON rows into a typed Arrow table through the form contract.
+"""Cast all-string wide JSON rows into a typed Arrow table through the contract.
 
 Empty strings and absent keys are null. A select_multiple comes as per-choice
-binaries present only when chosen (one the export leaves as a single column of codes
-is split into them): within one field (and one repeat instance), an
-unchosen binary is 0 when any sibling was chosen, else null; every choice gets its
-column, except where the form filters the list per submission: there only the choices
-someone picked at that instance do, since an unoffered choice is not unchosen. A column that cannot be typed (a value that does not parse, a column the
-form does not define) is kept as text, with the reason in its ``cast_fallback``
-field metadata; the reason never quotes a value. A form with no submissions yet
-has the columns every submission carries (``SUBMISSION_COLUMNS``). A note's or a
-group's column empty in every row is dropped (the export writes field-list groups once per repeat
-instance), and the table's metadata counts them.
+binaries present only when chosen (one the export leaves as a single column of
+codes is split into them): within one field (and one repeat instance), an
+unchosen binary is 0 when any sibling was chosen, else null; every choice gets
+its column, except where the form filters the list per submission: there only
+the choices someone picked at that instance do, since an unoffered choice is not
+unchosen. A column that cannot be typed (a value that does not parse, a column
+the form does not define) is kept as text, with the reason in its
+``cast_fallback`` field metadata; the reason never quotes a value. A form with
+no submissions yet has the columns every submission carries
+(``SUBMISSION_COLUMNS``). A note's or a group's column empty in every row is
+dropped (the export writes field-list groups once per repeat instance), and the
+table's metadata counts them.
 """
 
 import datetime as dt
@@ -20,7 +22,7 @@ from dataclasses import dataclass
 
 import pyarrow as pa
 
-from datasure.vendor.scto_dict.xml_contract import (
+from datasure.surveycto.xml_contract import (
     FormContract,
     Node,
     is_system_column,
@@ -291,7 +293,7 @@ def _split_raw_multiples(rows: list[dict], contract: FormContract) -> list[dict]
 
 
 def cast_wide(rows: list[dict], contract: FormContract) -> pa.Table:
-    """Return the submissions as a typed table, system columns first, then form order."""
+    """Return the submissions as a typed table: system columns, then form order."""
     rows = _split_raw_multiples(rows, contract)
     names = list(dict.fromkeys(name for row in rows for name in row))
     if not rows:

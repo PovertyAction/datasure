@@ -619,11 +619,14 @@ class TestFormXml:
 
     def test_download_form_xml_other_request_error(self, api_client):
         """Test any other requests error is wrapped too."""
-        with patch.object(
-            api_client.session,
-            "get",
-            side_effect=requests.exceptions.ChunkedEncodingError("cut"),
-        ), pytest.raises(SurveyCTOAPIError, match="cut"):
+        with (
+            patch.object(
+                api_client.session,
+                "get",
+                side_effect=requests.exceptions.ChunkedEncodingError("cut"),
+            ),
+            pytest.raises(SurveyCTOAPIError, match="cut"),
+        ):
             api_client.download_form_xml("farm")
 
 

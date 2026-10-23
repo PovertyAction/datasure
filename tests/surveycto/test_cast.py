@@ -5,11 +5,11 @@ import datetime as dt
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
-from tests.vendor.scto_dict.farm_form import ROWS as _ROWS
-from tests.vendor.scto_dict.farm_form import XML as _XML
 
-from datasure.vendor.scto_dict.cast import cast_wide
-from datasure.vendor.scto_dict.xml_contract import parse_contract
+from datasure.surveycto.cast import cast_wide
+from datasure.surveycto.xml_contract import parse_contract
+from tests.surveycto.farm_form import ROWS as _ROWS
+from tests.surveycto.farm_form import XML as _XML
 
 
 @pytest.fixture
@@ -73,7 +73,7 @@ def test_unchosen_binary_is_zero_when_a_sibling_is_chosen(table):
 
 
 def test_binary_columns_for_every_choice_exist(table):
-    """A choice nobody picked still gets its column, 0 where the question was answered."""
+    """A choice nobody picked still gets its column, 0 where it was answered."""
     assert _col(table, "tools_1") == [0, None]
     assert _col(table, "tools_77") == [0, None]
 

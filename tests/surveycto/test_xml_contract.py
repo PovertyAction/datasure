@@ -10,7 +10,7 @@ and unmapped columns).
 
 import pytest
 
-from datasure.vendor.scto_dict.xml_contract import (
+from datasure.surveycto.xml_contract import (
     FormContract,
     _parse_pulldata,
     _parse_search,
@@ -782,13 +782,6 @@ def test_a_body_control_calculate_is_read(tmp_path):
     # the field is never shown.
     assert nodes["seen"].calculation_is_default
     assert not nodes["hh"].calculation_is_default
-    from datasure.vendor.scto_dict.questions import build_questions
-
-    defaults = {
-        q["variable_name"]: q["calculation_is_default"]
-        for q in build_questions(parse_contract(path))
-    }
-    assert defaults == {"hh": False, "village": True, "seen": False}
 
 
 _XML_HINT = """<?xml version="1.0"?>

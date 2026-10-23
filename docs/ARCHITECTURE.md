@@ -55,9 +55,8 @@ src/datasure/
 │   ├── rename_plan.py      # Rename specs -> old/new pairs, collisions (no Streamlit)
 │   └── row_index.py        # Row-index parsing shared by prep and replication (no Streamlit)
 ├── replication/            # Stata/Python replication package export
-├── vendor/
-│   └── scto_dict/          # surveycto_python_dict's form contract and cast.
-│                           # Copied by `just vendor-scto`; see its VENDORED.md
+├── surveycto/              # SurveyCTO form contract (xml_contract, xpath) and typed
+│                           # cast, adapted from surveycto_python_dict; maintained here
 ├── models/
 │   ├── schemas.py          # Pydantic models
 │   └── enums.py            # Prep action/method enums
@@ -84,7 +83,7 @@ The `archived/` directory holds legacy code and is gitignored.
 
 1. **Import** (`views/import_view.py` + `connectors/`): SurveyCTO API or local
    files. A SurveyCTO form is typed from its compiled XML: `connectors/scto.py`
-   downloads it, parses it with the vendored `parse_contract`, casts the wide
+   downloads it, parses it with `surveycto.xml_contract.parse_contract`, casts the wide
    JSON with `cast_wide` and keeps the XML per form version in `logs.duckdb`
    (`form_definitions`), after the raw save. An ID with no form XML (404) that
    is on the server's dataset list imports as a server dataset CSV instead; any
@@ -636,7 +635,7 @@ selecting an encrypted backend with `PYTHON_KEYRING_BACKEND`.
 
 Polars is the primary DataFrame library; pandas appears only at interop
 boundaries (some checks, DuckDB `fetchdf`, matplotlib/seaborn charts). The
-vendored `scto_dict` modules work on pyarrow tables; `pl.from_arrow` converts
+`surveycto` modules work on pyarrow tables; `pl.from_arrow` converts
 at the boundary. DuckDB
 table names pass through `_validate_table_name()`; user-supplied values in SQL
 must be parameterized, never f-string interpolated.

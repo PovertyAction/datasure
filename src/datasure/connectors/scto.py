@@ -12,6 +12,8 @@ import pyarrow as pa
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
 
+from datasure.surveycto.cast import cast_wide
+from datasure.surveycto.xml_contract import parse_contract
 from datasure.utils.dataframe_utils import standardize_missing_values
 from datasure.utils.duckdb_utils import (
     duckdb_get_table,
@@ -31,8 +33,6 @@ from datasure.utils.secure_credentials import (
     retrieve_scto_credentials,
     store_scto_credentials,
 )
-from datasure.vendor.scto_dict.cast import cast_wide
-from datasure.vendor.scto_dict.xml_contract import parse_contract
 
 # --- Constants --- #
 SCTO_KEY_IMPORT_OPTIONS = ("Import from File", "Paste private key text")
