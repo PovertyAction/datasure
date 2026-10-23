@@ -32,7 +32,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from datasure.vendor.scto_dict.xpath import compile_expression
+from datasure.surveycto.xpath import compile_expression
 
 _SELECT_CONTROL = {"select": "select_multiple", "select1": "select_one"}
 
@@ -240,7 +240,10 @@ def _unquote(s: str) -> str:
 
 
 def _dataset_name(arg: str) -> str:
-    """Return a dataset argument without quotes or ``.csv``: ``'roster.csv'`` -> ``roster``."""
+    """Return a dataset argument without quotes or ``.csv``.
+
+    ``'roster.csv'`` -> ``roster``.
+    """
     return _unquote(arg).removesuffix(".csv")
 
 
@@ -248,7 +251,10 @@ _STRING_LITERAL = re.compile(r"""^(?:string\(\s*)?(['"])([^'"]*)\1(?:\s*\))?$"""
 
 
 def _parse_pulldata(calc: str | None) -> dict | None:
-    """``pulldata('ds', 'col', 'key', expr)``: ``match`` is ``expr``, the value of ``key``."""
+    """Parse ``pulldata('ds', 'col', 'key', expr)``.
+
+    ``match`` is ``expr``, the value of ``key``.
+    """
     args = _split_call_args(calc, "pulldata")
     if args is None:
         return None
@@ -326,7 +332,8 @@ class FormContract:
         self.formid = formid
         self.formdef_version = formdef_version
         self.nodes: dict[str, Node] = nodes
-        # The form has a public key: submissions are encrypted except publishable fields.
+        # The form has a public key: submissions are encrypted, publishable
+        # fields aside.
         self.encrypted = encrypted
         # (node path, its choice list) -> {sanitised token: (value, label) | None};
         # see `_universe`.
@@ -517,7 +524,8 @@ class FormContract:
             n = min(depth, len(toks))
             token = None
         idx_toks = toks[:n] if drift else (toks[len(toks) - n :] if n else [])
-        iters = list(zip(node.repeat_path, [int(t) for t in idx_toks]))
+        # Drift can leave fewer indices than repeat levels.
+        iters = list(zip(node.repeat_path, [int(t) for t in idx_toks], strict=False))
 
         choice = label = string_key = None
         ambiguous_choice = False

@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from datasure.vendor.scto_dict.xpath import UnsupportedExpression, compile_expression
+from datasure.surveycto.xpath import UnsupportedExpression, compile_expression
 
 
 class Row:

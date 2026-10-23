@@ -27,12 +27,12 @@ from datasure.connectors.scto import (
 from datasure.connectors.scto import (
     ValidationError as SctoValidationError,
 )
+from datasure.surveycto.cast import cast_wide
+from datasure.surveycto.xml_contract import parse_contract
 from datasure.utils.scto_api import FormNotFoundError, SurveyCTOAPIError
 from datasure.utils.settings_utils import ProjectID
-from datasure.vendor.scto_dict.cast import cast_wide
-from datasure.vendor.scto_dict.xml_contract import parse_contract
-from tests.vendor.scto_dict.farm_form import ROWS as FARM_ROWS
-from tests.vendor.scto_dict.farm_form import XML as FARM_XML
+from tests.surveycto.farm_form import ROWS as FARM_ROWS
+from tests.surveycto.farm_form import XML as FARM_XML
 
 
 @pytest.fixture(autouse=True)

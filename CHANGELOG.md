@@ -20,12 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`utils/duckdb_utils.py`) keep the XML in `form_definitions` in
   `logs.duckdb`, one row per alias and form version. Removing an import
   removes its rows
-- **Vendored surveycto_python_dict**: `src/datasure/vendor/scto_dict/` holds
-  its `xpath`, `xml_contract`, `questions` and `cast` modules at `d6f54f9`, copied by
-  `just vendor-scto <checkout> <ref>` (`scripts/vendor_scto.py`), which also
-  copies upstream's offline tests to `tests/vendor/scto_dict/`. One patch
-  (`parse_contract` accepts bytes) is pending upstream. Excluded from ruff
-  (`force-exclude`) and coverage
+- **`datasure.surveycto`**: the form contract (`xml_contract`, `xpath`) and
+  the typed cast (`cast`), adapted from surveycto_python_dict at `d6f54f9`
+  and maintained in DataSure from now on; `parse_contract` also reads XML
+  bytes. Upstream's offline tests for them are in `tests/surveycto/`
 
 - **Prep concat** (#388): Add Column has a `concat` method
   (`PrepFunctions.concat`) that joins two or more text columns in selection
@@ -109,7 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - **`DataProcessor`** and `SurveyCTOConfig.date_format` (`connectors/scto.py`):
-  replaced by the vendored cast. `get_repeat_columns` is a module function for
+  replaced by `surveycto.cast`. `get_repeat_columns` is a module function for
   the media download
 
 - **Apply Consent and Outcome Settings** (#353): The Enumerator settings

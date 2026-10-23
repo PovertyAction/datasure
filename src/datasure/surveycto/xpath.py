@@ -211,7 +211,7 @@ class _Parser:
         return token
 
     def expect(self, text: str) -> None:
-        kind, value = self.take()
+        _, value = self.take()
         if value != text:
             raise UnsupportedExpression(
                 f"expected {text!r}, found {value!r} in {self.expr!r}"

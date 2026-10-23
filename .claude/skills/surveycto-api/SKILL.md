@@ -1,6 +1,6 @@
 ---
 name: surveycto-api
-description: Use this skill when working with the SurveyCTO API in DataSure — downloading submissions, the compiled form XML, server datasets or attachments, encrypted forms, the typed import, or SurveyCTO credentials. Covers utils/scto_api.py, connectors/scto.py and the vendored scto_dict contract and cast.
+description: Use this skill when working with the SurveyCTO API in DataSure — downloading submissions, the compiled form XML, server datasets or attachments, encrypted forms, the typed import, or SurveyCTO credentials. Covers utils/scto_api.py, connectors/scto.py and the datasure.surveycto contract and cast.
 ---
 
 # SurveyCTO API in DataSure
@@ -11,7 +11,7 @@ description: Use this skill when working with the SurveyCTO API in DataSure — 
 utils/secure_credentials.py   password in the OS keyring, never on disk
   └─ utils/scto_api.py         SurveyCTOAPIClient: HTTP only, raises SurveyCTOAPIError
        └─ connectors/scto.py   SurveyCTOClient.import_data(): routing, typing, storage
-            ├─ vendor/scto_dict/   parse_contract (XML -> FormContract), cast_wide
+            ├─ surveycto/          parse_contract (XML -> FormContract), cast_wide
             └─ utils/duckdb_utils.py   raw.duckdb; form_definitions in logs.duckdb
 ```
 
@@ -59,17 +59,16 @@ for attachments. Typing uses the XML.
   reads the key at import time. Without a key, the API returns only the publishable
   fields.
 
-## Vendored contract
+## Form contract
 
-`src/datasure/vendor/scto_dict/` is copied from surveycto_python_dict by
-`just vendor-scto <checkout> <ref>`; see its `VENDORED.md`. Do not edit it. Change
-the code upstream and re-vendor.
+`src/datasure/surveycto/` was adapted from surveycto_python_dict (`d6f54f9`) and is
+DataSure's own code: change it here. Upstream changes are not copied over.
 
 ## Tests
 
 - `tests/connectors/test_scto.py` mocks `SurveyCTOAPIClient`. `TestTypedImport`
   drives the import with the synthetic farm form,
-  `tests/vendor/scto_dict/farm_form.py` (`XML`, `ROWS`).
+  `tests/surveycto/farm_form.py` (`XML`, `ROWS`).
 - `tests/utils/test_scto_api.py` patches `_make_request` or `session.get`.
-- `tests/vendor/scto_dict/` holds upstream's offline tests, re-synced by the
-  vendor recipe.
+- `tests/surveycto/` holds the contract, xpath and cast tests, adapted from
+  upstream.
