@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import polars as pl
+import pyarrow as pa
 import pytest
 from pydantic_core import ValidationError
 
@@ -2126,9 +2127,10 @@ class TestTypedImport:
     ):
         client._import_regular_form(form_config)
 
-        mock_save_definition.assert_called_once_with(
-            "test1234", "farm", "farm", "3", FARM_XML.encode()
-        )
+        args = mock_save_definition.call_args[0]
+        assert args[:5] == ("test1234", "farm", "farm", "3", FARM_XML.encode())
+        schema = pa.ipc.read_schema(pa.py_buffer(args[5]))
+        assert schema.field("visit").metadata[b"xml_type"] == b"date"
 
     @patch("datasure.connectors.scto.save_form_definition")
     @patch("datasure.connectors.scto.duckdb_save_table")

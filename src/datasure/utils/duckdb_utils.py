@@ -499,9 +499,14 @@ FORM_DEFINITIONS_TABLE = "form_definitions"
 
 
 def save_form_definition(
-    project_id: str, alias: str, form_id: str, formdef_version: str, xml: bytes
+    project_id: str,
+    alias: str,
+    form_id: str,
+    formdef_version: str,
+    xml: bytes,
+    arrow_schema: bytes,
 ) -> None:
-    """Save a SurveyCTO form's compiled XML in the ``logs`` database.
+    """Save a SurveyCTO form's compiled XML and cast schema in ``logs``.
 
     One row per alias and form version; downloading the same version again
     replaces its row.
@@ -518,6 +523,9 @@ def save_form_definition(
         The form version the XML declares.
     xml : bytes
         The compiled XForm XML.
+    arrow_schema : bytes
+        The serialized Arrow schema of the cast submissions, with the field
+        metadata the dictionary reads (Polars drops it on conversion).
     """
     with duckdb.connect(database_path(project_id, "logs")) as conn:
         conn.execute(
@@ -527,6 +535,7 @@ def save_form_definition(
                 form_id VARCHAR,
                 formdef_version VARCHAR,
                 xml BLOB,
+                arrow_schema BLOB,
                 downloaded_at TIMESTAMP,
                 PRIMARY KEY (alias, formdef_version)
             )
@@ -534,13 +543,13 @@ def save_form_definition(
         )
         conn.execute(
             f"INSERT OR REPLACE INTO {FORM_DEFINITIONS_TABLE} "
-            "VALUES (?, ?, ?, ?, current_timestamp)",
-            [alias, form_id, formdef_version, xml],
+            "VALUES (?, ?, ?, ?, ?, current_timestamp)",
+            [alias, form_id, formdef_version, xml, arrow_schema],
         )
 
 
-def load_form_definition(project_id: str, alias: str) -> bytes | None:
-    """Return the compiled XML of an alias's latest downloaded form version.
+def load_form_definition(project_id: str, alias: str) -> tuple[bytes, bytes] | None:
+    """Return the XML and cast schema of an alias's latest downloaded form version.
 
     ``None`` when the alias has no stored form definition (local files,
     server datasets, or SurveyCTO imports from before definitions were kept).
@@ -549,8 +558,8 @@ def load_form_definition(project_id: str, alias: str) -> bytes | None:
         return None
     with duckdb.connect(database_path(project_id, "logs")) as conn:
         rows = conn.execute(
-            f"SELECT xml FROM {FORM_DEFINITIONS_TABLE} WHERE alias = ? "
+            f"SELECT xml, arrow_schema FROM {FORM_DEFINITIONS_TABLE} WHERE alias = ? "
             "ORDER BY downloaded_at DESC, formdef_version DESC LIMIT 1",
             [alias],
         ).fetchall()
-    return rows[0][0] if rows else None
+    return rows[0] if rows else None
