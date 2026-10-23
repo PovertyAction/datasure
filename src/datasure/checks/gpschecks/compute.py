@@ -12,7 +12,12 @@ from sklearn.neighbors import LocalOutlierFactor
 from datasure.checks.gpschecks.models import _CATEGORY_COLORS, TAB_NAME
 from datasure.models.enums import DelimiterType, GPSFormatType
 from datasure.models.schemas import GPSSettings
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.duckdb_utils import (
+    GPS_COLUMNS_TABLE,
+    check_table_name,
+    duckdb_get_table,
+    duckdb_save_table,
+)
 from datasure.utils.settings_utils import load_check_settings
 
 
@@ -102,7 +107,7 @@ def _get_gps_column_settings(project_id: str, page_name_id: str) -> pl.DataFrame
     """
     return duckdb_get_table(
         project_id,
-        f"gps_columns_{page_name_id}",
+        check_table_name(GPS_COLUMNS_TABLE, page_name_id),
         "logs",
     )
 
@@ -139,7 +144,7 @@ def _save_gps_column_settings(
     duckdb_save_table(
         project_id,
         settings,
-        f"gps_columns_{page_name_id}",
+        check_table_name(GPS_COLUMNS_TABLE, page_name_id),
         "logs",
     )
 

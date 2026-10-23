@@ -792,7 +792,7 @@ class OutputOnboardingInfo:
         - **Duration Unit**: Unit of the duration column — seconds, minutes, or hours.
         - **Form Version Column**: Column recording the form version used (e.g., formdef_version).
         - **Consent and Outcome Settings**: Configure which column and value indicate consent
-          and which indicate a completed survey, then click **Apply Consent and Outcome Settings**.
+          and which indicate a completed survey. The report uses them as soon as you change them.
 
         ##### Instructions for Demo:
         Your Survey Key, Survey ID, Survey Date, Enumerator ID, and Form Version are
@@ -803,8 +803,7 @@ class OutputOnboardingInfo:
         - Consent Column: **consent** | Valid Consent Values: **yes**
         - Outcome Column: **completion_status** | Completed Survey Values: **complete**
 
-        Click **Apply Consent and Outcome Settings**, then close the panel and explore
-        the sections below.
+        Then close the panel and explore the sections below.
         """,
         },
     }

@@ -8,6 +8,7 @@ robust data processing and transformation operations.
 """
 
 import datetime
+from typing import Any
 
 import polars as pl
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -374,27 +375,42 @@ class ImportSourceEntry(BaseModel):
 
 
 class ProjectPageBundle(BaseModel):
-    """One HFC report page: its check_config row plus its settings files."""
+    """One HFC report page: its check_config row, settings, and check tables.
+
+    ``check_tables`` holds the rows of each per-page check table, keyed by
+    table prefix (``duplicates``, ``outliers``, ...). ``check_table_schemas``
+    records each table's column dtypes, encoded as JSON, so list and date
+    columns are restored exactly. ``missing_settings`` is no longer exported
+    but is still accepted from older bundles.
+    """
 
     config: dict = Field(default_factory=dict)
     settings: dict = Field(default_factory=dict)
     missing_settings: dict = Field(default_factory=dict)
+    check_tables: dict[str, list[dict]] = Field(default_factory=dict)
+    check_table_schemas: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class ProjectConfigBundle(BaseModel):
     """Portable snapshot of an entire DataSure project setup.
 
-    Bundles the four layers that make up "how this project is configured":
-    import sources, prep steps, HFC (check) configurations, and corrections.
-    Never contains credentials, machine-specific file paths, or survey data.
+    Bundles the layers that make up "how this project is configured": import
+    sources, prep steps, HFC (check) configurations with their check tables,
+    missing codes, and corrections. Never contains credentials,
+    machine-specific file paths, or survey data.
+
+    ``bundle_version`` is absent from bundles exported before check tables
+    and missing codes were included, so those can be detected and flagged.
     """
 
     datasure_config_version: int = 1
+    bundle_version: int | None = None
     exported_from_project: str
     exported_at: str
     datasets: list[ImportSourceEntry] = Field(default_factory=list)
     prep_steps: dict[str, list[dict]] = Field(default_factory=dict)
     pages: list[ProjectPageBundle] = Field(default_factory=list)
+    missing_codes: list[dict] = Field(default_factory=list)
     corrections: dict[str, list[dict]] = Field(default_factory=dict)
 
 

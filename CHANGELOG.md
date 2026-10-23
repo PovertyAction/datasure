@@ -34,6 +34,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Imports keep boolean columns as booleans; this replaces the import-time cast
   proposed in #386. The Stata prepare-data script maps `"true"`/`"false"` text
   from the raw CSV to 1/0 and any other value to missing
+- **Configuration bundle: check tables and missing codes** (#352, #354):
+  `export_project_config` (`utils/project_config.py`) now exports each page's
+  check tables (`CHECK_TABLE_PREFIXES`: duplicates, outliers, gps_columns,
+  backchecks, descriptive_columns, bc_attribution) with a per-table dtype map
+  (`PageConfig.check_table_schemas`), so list, decimal, date and datetime
+  columns round-trip exactly; bundles without the map fall back to inferred
+  types. Check tables are written right after a page's settings, so a page
+  skipped on import writes none. The project's missing codes are exported
+  and merged once per import, keyed by label with the bundle winning
+- **Bundle version** (#354): Bundles carry `bundle_version`
+  (`BUNDLE_VERSION = 2`). Importing a bundle without it shows
+  `bundle_version_warning`: check tables and missing codes are not included
+- **Export without record-level decisions** (#355): `export_project_config`
+  takes `include_record_level` (default `True`). When `False`, the bundle
+  omits corrections and the `RECORD_LEVEL_TABLE_PREFIXES` check tables
+  (`bc_attribution`) and still imports cleanly. The project card's **Export
+  configuration** entry opens `_export_config_dialog` (`views/start_view.py`)
+  with an "Include record-level decisions" checkbox, so the bundle is built
+  only when the dialog opens instead of for every card on every rerun
+
+### Changed
+
+- **Check table names in one place**: `CHECK_TABLE_PREFIXES`, one constant
+  per prefix, `check_table_name()` and `missing_codes_table_name()` live in
+  `utils/duckdb_utils.py`, and every check module and the export registry
+  use them, so a renamed table can't silently drop out of exports
+- **Enumerator consent and outcome flags** (#353):
+  `add_consent_outcome_flags` (`checks/enumerator/compute.py`, cached with
+  `st.cache_data` on the data and the settings) adds the flags from the
+  page's saved consent and outcome settings each time the report runs. A
+  flag is added only when its column and values are set; otherwise the
+  "% consent" and "% completed survey" columns are hidden instead of showing
+  100%. The consent and outcome column pickers no longer preselect a column
+- **Bundle `missing_settings`** (#354): no longer exported, and applying a
+  bundle no longer writes `page_<id>_missing_settings.json`. Bundles that
+  contain the field still parse. `_decode_dtype` logs a warning before
+  falling back to `String`
+
+### Removed
+
+- **Apply Consent and Outcome Settings** (#353): The Enumerator settings
+  button and the project-wide `enumerator_data_with_consent_outcome` table
+  are removed; the flags are computed when the report runs
 
 ### Fixed
 
@@ -81,6 +124,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     past 7 days" agrees with the summary. The summary table
     (`checks/enumerator/report_ui.py`) shows a "Data as of" note with the
     latest submission date from the new `compute_latest_submission_date`
+- **Configuration export left out check settings** (#352): Applying an
+  exported project setup lost missing codes, Descriptive Stats columns and
+  the Duplicates, Outliers, GPS and Backchecks column rules
+  - Root cause: these settings live in DuckDB tables, and the bundle only
+    carried the settings JSON files
+  - Solution: the check tables and missing codes are now in the bundle (see
+    Added)
+- **Descriptive Stats selection shared across pages** (#353): Choosing
+  columns on one page changed them on every page
+  - Root cause: the selection was saved once per project in
+    `selected_columns_df`
+  - Solution: each page saves its own `descriptive_columns_{page}` table in
+    the logs database. A page with none is seeded once from the legacy table,
+    keeping only its own columns; the legacy table is left in place. Export
+    falls back to the legacy selection only when a page has no table, and
+    import writes an empty table for a page bundled without one, so the
+    legacy selection can't come back
+- **Enumerator consent results out of date** (#353): The report read flags
+  that only the Apply button built, so they were empty after an import and
+  stale after a data refresh or a settings change on another page. They are
+  now computed when the report runs (see Changed). Changing the consent or
+  outcome column also saves its values, so old values are not read against
+  the new column
+- **Imported correction logs crashed Outliers & Constraints and GPS Checks**
+  (#352): After applying a bundle whose corrections had no acceptances, these
+  pages failed with `ComputeError: cannot compare string with numeric type
+  (i32)`
+  - Root cause: `_seed_correction_log` (`utils/project_config.py`) built the
+    log with no schema, so the all-null `check_type` and `severity` columns
+    had Polars' `Null` type, which DuckDB saves as `INTEGER`.
+    `get_active_acceptances` then compared the Int32 `check_type` with a
+    string
+  - Solution: `ensure_log_columns` (`processing/correction_log.py`) casts any
+    all-null column to its `CORRECTION_LOG_SCHEMA` type, which repairs logs
+    already saved this way when they are read. `_seed_correction_log` runs
+    the log through it before saving
 - **Remove rows dropped rows with missing values** (#351): A "Remove rows"
   step with a condition also removed rows where the selected column was
   missing, and counted them as matches. With several columns selected, `>`,

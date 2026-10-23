@@ -8,7 +8,6 @@ from datasure.checks.enumerator.models import (
     ConsentOutcomeSettings,
     EnumeratorSettings,
 )
-from datasure.utils.duckdb_utils import duckdb_save_table
 from datasure.utils.onboarding_utils import demo_output_onboarding
 from datasure.utils.settings_utils import (
     load_check_settings,
@@ -109,7 +108,6 @@ def load_default_enumerator_settings(
 
 @demo_output_onboarding(TAB_NAME)
 def enumerator_report_settings(
-    project_id: str,
     settings_file: str,
     data: pl.DataFrame,
     config: EnumeratorSettings,
@@ -130,8 +128,6 @@ def enumerator_report_settings(
 
     Parameters
     ----------
-    project_id : str
-        Unique project identifier for database operations.
     settings_file : str
         Path to settings file for saving/loading configurations.
     data : pl.DataFrame
@@ -271,15 +267,11 @@ def enumerator_report_settings(
         with st.container(border=True):
             st.subheader("Consent and Outcome Settings")
             st.info(
-                "Configure consent and outcome columns along with their valid values."
+                "Configure consent and outcome columns along with their valid "
+                "values. The report uses them as soon as they change."
             )
 
-            _render_consent_outcome_settings(
-                project_id, data, categorical_columns, settings_file
-            )
-            if st.session_state.get("st_apply_consent_outcome_enumerator"):
-                st.success("Consent and outcome settings applied successfully.")
-                st.session_state["st_apply_consent_outcome_enumerator"] = False
+            _render_consent_outcome_settings(data, categorical_columns, settings_file)
 
     return EnumeratorSettings(
         survey_key=survey_key,
@@ -291,6 +283,17 @@ def enumerator_report_settings(
         duration=duration,
         duration_unit=duration_unit,
     )
+
+
+def _trigger_category_save(field_key: str) -> None:
+    """Save a changed consent/outcome column and the values shown for it.
+
+    The old values may not exist in the new column, so the values
+    multiselect saves what it now shows instead of leaving them in the
+    settings file for the report to read.
+    """
+    trigger_save(TAB_NAME + f"_{field_key}")
+    trigger_save(TAB_NAME + f"_{field_key}_vals")
 
 
 def _render_category_settings(
@@ -343,7 +346,7 @@ def _render_category_settings(
         default_index = (
             categorical_columns.index(default_col)
             if default_col and default_col in categorical_columns
-            else 0
+            else None
         )
         selected_col = st.selectbox(
             column_label,
@@ -351,15 +354,23 @@ def _render_category_settings(
             help=column_help,
             key=f"{field_key}_enumerator",
             index=default_index,
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + f"_{field_key}"},
+            on_change=_trigger_category_save,
+            kwargs={"field_key": field_key},
         )
         save_check_settings(settings_file, TAB_NAME, {field_key: selected_col})
 
     with col2:
         vals_key = f"{field_key}_vals"
-        default_vals = default_settings.get(vals_key, [])
-        val_options = data[selected_col].unique().to_list()
+        val_options = (
+            data[selected_col].unique().to_list()
+            if selected_col in data.columns
+            else []
+        )
+        default_vals = [
+            value
+            for value in default_settings.get(vals_key) or []
+            if value in val_options
+        ]
         selected_vals = st.multiselect(
             values_label,
             options=val_options,
@@ -374,16 +385,20 @@ def _render_category_settings(
     return selected_col, selected_vals
 
 
-@st.fragment
 def _render_consent_outcome_settings(
-    project_id: str, data: pl.DataFrame, categorical_columns: list, settings_file: str
+    data: pl.DataFrame, categorical_columns: list, settings_file: str
 ) -> ConsentOutcomeSettings:
     """Render consent and outcome settings UI.
+
+    Not a fragment: a change reruns the whole page so the report below
+    reflects it at once.
 
     Parameters
     ----------
     data : pl.DataFrame
         DataFrame containing survey data.
+    categorical_columns : list
+        Columns to offer for the consent and outcome columns.
     settings_file : str
         Path to settings file for saving/loading configurations.
 
@@ -430,75 +445,4 @@ def _render_consent_outcome_settings(
         }
         config = ConsentOutcomeSettings(**config_dict)
 
-    if st.button(
-        "Apply Consent and Outcome Settings",
-        key="apply_consent_outcome_enumerator",
-        type="primary",
-        width="stretch",
-    ):
-        _create_enum_data_on_settings(project_id, data, config)
-        _trigger_success_message("st_apply_consent_outcome_enumerator")
-        st.rerun()
-
-
-def _trigger_success_message(button_key: str) -> None:
-    """Trigger a success message after button click.
-
-    Parameters
-    ----------
-    button_key : str
-        Unique key of the button to associate the success message with.
-    """
-    st.session_state[f"{button_key}"] = True
-
-
-def _create_enum_data_on_settings(
-    project_id: str,
-    data: pl.DataFrame,
-    config: ConsentOutcomeSettings,
-) -> None:
-    """Create enumerator data based on consent and outcome settings.
-
-    Parameters
-    ----------
-    project_id : str
-        Unique project identifier for database operations.
-    data : pl.DataFrame
-        DataFrame containing survey data.
-    conditions : ConsentOutcomeSettings
-        Consent and outcome configuration settings.
-    """
-    # If consent and consent values are provided, create a dummy column indicating
-    # valid consent else set to 1
-
-    if config.consent and config.consent_vals:
-        enum_data = data.with_columns(
-            pl.col(config.consent)
-            .is_in(config.consent_vals)
-            .cast(pl.Int32)
-            .alias("consent_granted_agg_col")
-        )
-    else:
-        enum_data = data.with_columns(
-            pl.lit(1).cast(pl.Int32).alias("consent_granted_agg_col")
-        )
-
-    if config.outcome and config.outcome_vals:
-        enum_data = enum_data.with_columns(
-            pl.col(config.outcome)
-            .is_in(config.outcome_vals)
-            .cast(pl.Int32)
-            .alias("completed_survey_agg_col")
-        )
-    else:
-        enum_data = enum_data.with_columns(
-            pl.lit(1).cast(pl.Int32).alias("completed_survey_agg_col")
-        )
-
-    # save to database
-    duckdb_save_table(
-        project_id,
-        enum_data,
-        "enumerator_data_with_consent_outcome",
-        "intermediate",
-    )
+    return config

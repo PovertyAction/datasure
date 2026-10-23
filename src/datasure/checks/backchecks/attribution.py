@@ -18,7 +18,12 @@ from enum import StrEnum
 import polars as pl
 
 from datasure.checks.backchecks.models import merged_backcheck_name
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.duckdb_utils import (
+    BC_ATTRIBUTION_TABLE,
+    check_table_name,
+    duckdb_get_table,
+    duckdb_save_table,
+)
 
 
 class ErrorSource(StrEnum):
@@ -66,7 +71,7 @@ _CELL = ["survey_key", "backcheck_key", "column_name"]
 
 def attribution_table(page_name_id: str) -> str:
     """Return the name of a page's attribution log table in the `logs` db."""
-    return f"bc_attribution_{page_name_id}"
+    return check_table_name(BC_ATTRIBUTION_TABLE, page_name_id)
 
 
 def note_required(source: ErrorSource) -> bool:

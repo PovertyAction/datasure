@@ -16,6 +16,14 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ## Open issues
 
+### KI-030: Outliers & Constraints and GPS Checks tabs crash with `cannot compare string with numeric type (i32)` after applying a project setup
+
+- **Status:** 🟡 Planned for 1.2.0 (fixed in 1.2.0a6)
+- **Affected versions:** 1.2.0a2 – 1.2.0a5
+- **Symptom:** After you apply an exported project setup that includes corrections, the **Outliers & Constraints** and **GPS Checks** tabs show `ComputeError: cannot compare string with numeric type (i32)`.
+- **Workaround:** Update to 1.2.0a6 or later. Projects that already show the error load again after the update.
+- **Issue:** [#352](https://github.com/PovertyAction/datasure/issues/352)
+
 ### KI-029: Missing codes such as -99 are counted as values in Outliers, Descriptive Stats and Enumerator Stats
 
 - **Status:** 🟡 Planned for 1.2.0
@@ -74,7 +82,7 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ### KI-022: Check pages share Descriptive Statistics columns and enumerator consent results
 
-- **Status:** 🟡 Planned for 1.3.0
+- **Status:** 🟡 Planned for 1.2.0
 - **Affected versions:** 1.0.0 and later
 - **Symptom:** Choosing Descriptive Statistics columns on one check page changes them on every other page in the project. The Enumerator report keeps showing old consent and outcome results after a data refresh, or after you change the settings on another page.
 - **Workaround:** Click **Apply Consent and Outcome Settings** on the Enumerator tab after every data refresh. Re-select Descriptive Statistics columns when you switch pages.
@@ -82,7 +90,7 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ### KI-021: Exporting a project setup leaves out some check settings
 
-- **Status:** 🟡 Planned for 1.3.0
+- **Status:** 🟡 Planned for 1.2.0
 - **Affected versions:** 1.1.0 and later
 - **Symptom:** After you apply an exported project setup to another project, these settings are missing: missing-value codes, Descriptive Statistics columns, and the column rules for Duplicates, Outliers, GPS and Backchecks.
 - **Workaround:** Set these again in the new project after applying the setup.

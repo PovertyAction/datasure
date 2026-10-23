@@ -21,6 +21,44 @@ def name_id(name: str) -> str:
     return name.lower().replace(" ", "_").replace("-", "_")
 
 
+# Per-page check tables in the ``logs`` database are named
+# ``{prefix}_{page_name_id}``. Checks build their table names from these
+# prefixes with ``check_table_name``, and ``CHECK_TABLE_PREFIXES`` lists the
+# ones exported with project configurations, so a rename stays in sync.
+DUPLICATES_TABLE = "duplicates"
+OUTLIERS_TABLE = "outliers"
+GPS_COLUMNS_TABLE = "gps_columns"
+BACKCHECKS_TABLE = "backchecks"
+DESCRIPTIVE_COLUMNS_TABLE = "descriptive_columns"
+BC_ATTRIBUTION_TABLE = "bc_attribution"
+
+# Older versions saved one descriptive selection for the whole project in
+# this ``intermediate`` table instead of one per page.
+LEGACY_DESCRIPTIVE_SELECTION_TABLE = "selected_columns_df"
+
+CHECK_TABLE_PREFIXES: tuple[str, ...] = (
+    DUPLICATES_TABLE,
+    OUTLIERS_TABLE,
+    GPS_COLUMNS_TABLE,
+    BACKCHECKS_TABLE,
+    DESCRIPTIVE_COLUMNS_TABLE,
+    BC_ATTRIBUTION_TABLE,
+)
+
+
+def check_table_name(prefix: str, page_name: str) -> str:
+    """Return the ``logs`` table name of a page's check table.
+
+    ``page_name`` may be the page's display name or its ``name_id``.
+    """
+    return f"{prefix}_{name_id(page_name)}"
+
+
+def missing_codes_table_name(project_id: str) -> str:
+    """Return the ``logs`` table name of a project's missing codes."""
+    return f"missing_codes_{project_id}"
+
+
 def _validate_table_name(table_name: str) -> str:
     """Validate and sanitize table name to prevent SQL injection.
 
@@ -357,7 +395,7 @@ def load_missing_codes_from_db(project_id: str) -> pl.DataFrame:
     list[MissingCode]
         List of missing code configurations.
     """
-    table_name = f"missing_codes_{project_id}"
+    table_name = missing_codes_table_name(project_id)
 
     return duckdb_get_table(project_id, table_name, "logs")
 
@@ -372,7 +410,7 @@ def save_missing_codes_to_db(project_id: str, new_codes: dict | None = None) -> 
     missing_codes : list[MissingCode]
         List of missing code configurations.
     """
-    table_name = f"missing_codes_{project_id}"
+    table_name = missing_codes_table_name(project_id)
 
     # get current missing codes from db
     existing_missing_codes = load_missing_codes_from_db(project_id)

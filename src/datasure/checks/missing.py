@@ -22,6 +22,7 @@ from datasure.utils.duckdb_utils import (
     add_missing_code,
     duckdb_save_table,
     load_missing_codes_from_db,
+    missing_codes_table_name,
 )
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding, is_demo_project
@@ -780,7 +781,7 @@ def render_missing_codes_table(project_id: str) -> None:
         DataFrame representation of missing codes.
     """
     missing_codes = load_missing_codes_from_db(project_id)
-    table_name = f"missing_codes_{project_id}"
+    table_name = missing_codes_table_name(project_id)
 
     if is_demo_project():
         demo_callout(

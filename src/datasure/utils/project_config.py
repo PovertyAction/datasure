@@ -1,9 +1,10 @@
 """Export and import of full project configurations.
 
-Bundles the four layers that make up a DataSure project's setup - import
-sources, prep steps, HFC (check) configurations, and corrections - into a
-single portable JSON file, and applies that bundle to a new or existing
-project. See issue #251.
+Bundles the layers that make up a DataSure project's setup - import
+sources, prep steps, HFC (check) configurations with their per-page check
+tables, missing codes, and corrections - into a single portable JSON file,
+and applies that bundle to a new or existing project. See issues #251 and
+#354.
 
 Credentials, machine-specific file paths, and survey data never travel in
 the bundle. Applying a bundle assumes any required SurveyCTO credentials
@@ -14,9 +15,11 @@ supplied for every "local storage" dataset.
 
 import ast
 import json
-from collections.abc import Callable
+import logging
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
+from typing import Any
 
 import polars as pl
 from pydantic import ValidationError
@@ -29,11 +32,24 @@ from datasure.models.schemas import (
     ProjectConfigBundle,
     ProjectPageBundle,
 )
+from datasure.processing.correction_log import ensure_log_columns
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.processing.prep import prep_apply_action
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table, name_id
+from datasure.utils.duckdb_utils import (
+    BC_ATTRIBUTION_TABLE,
+    CHECK_TABLE_PREFIXES,
+    DESCRIPTIVE_COLUMNS_TABLE,
+    LEGACY_DESCRIPTIVE_SELECTION_TABLE,
+    OUTLIERS_TABLE,
+    check_table_name,
+    duckdb_get_table,
+    duckdb_save_table,
+    duckdb_table_exists,
+    missing_codes_table_name,
+    name_id,
+)
 from datasure.utils.reapply_utils import ReapplyFailure, warn_reapply_failures
 from datasure.utils.secure_credentials import list_stored_credentials
 from datasure.utils.view_state import (
@@ -42,6 +58,105 @@ from datasure.utils.view_state import (
     without_view_state,
     write_settings,
 )
+
+logger = logging.getLogger(__name__)
+
+# The bundle format version written by this release. Bundles without one
+# predate check tables and missing codes (issue #354).
+BUNDLE_VERSION = 2
+
+# Tables holding decisions about individual records rather than settings.
+RECORD_LEVEL_TABLE_PREFIXES: frozenset[str] = frozenset({BC_ATTRIBUTION_TABLE})
+
+# Columns older versions saved that are not part of a table's settings.
+_LEGACY_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {OUTLIERS_TABLE: ("index",)}
+
+# A descriptive column selection with no columns selected.
+_EMPTY_DESCRIPTIVE_SELECTION = pl.DataFrame(
+    schema={"Selected": pl.Boolean, "column": pl.String, "type": pl.String}
+)
+
+
+# ============================================================================
+# TABLE SERIALIZATION - JSON rows plus a dtype map that restores them exactly
+# ============================================================================
+
+
+def _encode_dtype(dtype: pl.DataType) -> str | dict:
+    """Encode a polars dtype as JSON: a type name, or a dict for nested types."""
+    if isinstance(dtype, pl.List):
+        return {"list": _encode_dtype(dtype.inner)}
+    if isinstance(dtype, pl.Datetime):
+        return {"datetime": dtype.time_unit, "time_zone": dtype.time_zone}
+    return dtype.base_type().__name__
+
+
+def _decode_dtype(encoded: Any) -> pl.DataType:
+    """Decode an ``_encode_dtype`` value; unknown types fall back to String."""
+    if isinstance(encoded, dict):
+        if "list" in encoded:
+            return pl.List(_decode_dtype(encoded["list"]))
+        if "datetime" in encoded:
+            return pl.Datetime(
+                encoded.get("datetime") or "us", encoded.get("time_zone")
+            )
+    if isinstance(encoded, str):
+        dtype = getattr(pl, encoded, None)
+        if isinstance(dtype, type) and issubclass(dtype, pl.DataType):
+            try:
+                return dtype()
+            except TypeError as e:
+                logger.warning(
+                    "Cannot rebuild dtype %r from its name (%s); reading as String",
+                    encoded,
+                    e,
+                )
+    return pl.String()
+
+
+def _json_safe(value: Any) -> Any:
+    """Make a table cell JSON-safe: dates and datetimes become ISO strings."""
+    if isinstance(value, datetime | date):
+        return value.isoformat()
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+def _table_to_rows(df: pl.DataFrame) -> tuple[list[dict], dict[str, str | dict]]:
+    """Serialize a table as JSON-safe rows and an encoded dtype map."""
+    rows = [{k: _json_safe(v) for k, v in row.items()} for row in df.to_dicts()]
+    schema = {col: _encode_dtype(dtype) for col, dtype in df.schema.items()}
+    return rows, schema
+
+
+def _rows_to_table(
+    rows: list[dict], schema: dict[str, Any] | None = None
+) -> pl.DataFrame:
+    """Rebuild a table from ``_table_to_rows`` output.
+
+    Without a dtype map (a hand-edited bundle), dtypes are inferred and
+    all-null columns become String so the table can still be saved.
+    """
+    if not schema:
+        df = pl.DataFrame(rows)
+        return df.with_columns(
+            pl.col(c).cast(pl.String) for c, t in df.schema.items() if t == pl.Null
+        )
+
+    dtypes = {col: _decode_dtype(enc) for col, enc in schema.items()}
+    temporal = {c: t for c, t in dtypes.items() if t.is_temporal()}
+    build = {c: pl.String if c in temporal else t for c, t in dtypes.items()}
+    df = pl.DataFrame(rows, schema=build, strict=False)
+    return df.with_columns(
+        pl.col(c).str.to_datetime(time_unit=t.time_unit, time_zone=t.time_zone)
+        if isinstance(t, pl.Datetime)
+        else pl.col(c).str.to_date()
+        if t == pl.Date
+        else pl.col(c).cast(t)
+        for c, t in temporal.items()
+    )
+
 
 # ============================================================================
 # EXPORT
@@ -58,7 +173,94 @@ def _decode_prep_args_cell(value: str | dict) -> dict:
         return ast.literal_eval(value)
 
 
-def export_project_config(project_id: str, project_name: str) -> ProjectConfigBundle:
+def _read_check_table(project_id: str, prefix: str, page_name: str) -> pl.DataFrame:
+    """Read a page's check table.
+
+    A page whose descriptive stats have not been opened since the upgrade
+    has no column selection table of its own yet. It gets the selected rows
+    of the old project-wide one, which is what the page starts from when
+    opened; columns not in the page's data are dropped then. A page with an
+    empty selection table of its own keeps that empty selection.
+    """
+    table = check_table_name(prefix, page_name)
+    if prefix != DESCRIPTIVE_COLUMNS_TABLE or duckdb_table_exists(
+        project_id, table, "logs"
+    ):
+        return duckdb_get_table(project_id, alias=table, db_name="logs")
+    legacy = duckdb_get_table(
+        project_id, LEGACY_DESCRIPTIVE_SELECTION_TABLE, "intermediate"
+    )
+    if legacy.is_empty():
+        return legacy
+    return legacy.filter(pl.col("Selected").cast(pl.Boolean))
+
+
+def _export_check_tables(
+    project_id: str, page_name: str, exclude_prefixes: Collection[str]
+) -> tuple[dict[str, list[dict]], dict[str, dict]]:
+    """Read a page's non-empty check tables as bundle rows and dtype maps."""
+    tables: dict[str, list[dict]] = {}
+    schemas: dict[str, dict] = {}
+    for prefix in CHECK_TABLE_PREFIXES:
+        if prefix in exclude_prefixes:
+            continue
+        df = _read_check_table(project_id, prefix, page_name)
+        legacy = [c for c in _LEGACY_TABLE_COLUMNS.get(prefix, ()) if c in df.columns]
+        df = df.drop(legacy)
+        if df.is_empty():
+            continue
+        tables[prefix], schemas[prefix] = _table_to_rows(df)
+    return tables, schemas
+
+
+def _export_pages(
+    project_id: str, exclude_table_prefixes: Collection[str]
+) -> list[ProjectPageBundle]:
+    """Bundle every HFC page: its config row, settings, and check tables."""
+    pages: list[ProjectPageBundle] = []
+    check_config = ConfigurationService(project_id).get_all_configurations()
+    settings_dir = get_cache_path(project_id, "settings")
+    for page_row in check_config.to_dicts() if not check_config.is_empty() else []:
+        page_name = page_row["page_name"]
+        check_tables, check_table_schemas = _export_check_tables(
+            project_id, page_name, exclude_table_prefixes
+        )
+        pages.append(
+            ProjectPageBundle(
+                config=page_row,
+                # View state is personal (saved filters, last check).
+                settings=without_view_state(
+                    read_settings(
+                        settings_dir / f"page_{name_id(page_name)}_settings.json"
+                    )
+                ),
+                check_tables=check_tables,
+                check_table_schemas=check_table_schemas,
+            )
+        )
+    return pages
+
+
+def _export_corrections(project_id: str, aliases: list[str]) -> dict[str, list[dict]]:
+    """Bundle every alias's non-empty correction log, with ISO-format dates."""
+    corrections: dict[str, list[dict]] = {}
+    for alias in aliases:
+        corr_log = duckdb_get_table(
+            project_id, alias=f"corr_log_{alias}", db_name="logs"
+        )
+        if not corr_log.is_empty():
+            corrections[alias] = [
+                {**r, "date": r["date"].isoformat() if r.get("date") else None}
+                for r in corr_log.to_dicts()
+            ]
+    return corrections
+
+
+def export_project_config(
+    project_id: str,
+    project_name: str,
+    include_record_level: bool = True,
+) -> ProjectConfigBundle:
     """Build a portable configuration bundle for the given project.
 
     Parameters
@@ -67,6 +269,10 @@ def export_project_config(project_id: str, project_name: str) -> ProjectConfigBu
         The project to export.
     project_name : str
         The project's display name, recorded for reference only.
+    include_record_level : bool, optional
+        Include decisions about individual records: corrections and the
+        ``RECORD_LEVEL_TABLE_PREFIXES`` check tables (backcheck attribution).
+        Defaults to True.
 
     Returns
     -------
@@ -77,7 +283,6 @@ def export_project_config(project_id: str, project_name: str) -> ProjectConfigBu
 
     datasets: list[ImportSourceEntry] = []
     prep_steps: dict[str, list[dict]] = {}
-    corrections: dict[str, list[dict]] = {}
 
     for row in import_log.iter_rows(named=True):
         alias = row["alias"]
@@ -102,40 +307,29 @@ def export_project_config(project_id: str, project_name: str) -> ProjectConfigBu
                 _decode_prep_args_cell(v) for v in prep_log["prep_args"].to_list()
             ]
 
-        corr_log = duckdb_get_table(
-            project_id, alias=f"corr_log_{alias}", db_name="logs"
+    # Corrections and record-level check tables are decisions about individual
+    # records, so they are left out when the caller asks for settings only.
+    if include_record_level:
+        corrections = _export_corrections(project_id, [d.alias for d in datasets])
+        exclude_table_prefixes: Collection[str] = frozenset()
+    else:
+        corrections = {}
+        exclude_table_prefixes = RECORD_LEVEL_TABLE_PREFIXES
+    pages = _export_pages(project_id, exclude_table_prefixes)
+    missing_codes, _ = _table_to_rows(
+        duckdb_get_table(
+            project_id, alias=missing_codes_table_name(project_id), db_name="logs"
         )
-        if not corr_log.is_empty():
-            corrections[alias] = [
-                {**r, "date": r["date"].isoformat() if r.get("date") else None}
-                for r in corr_log.to_dicts()
-            ]
-
-    pages: list[ProjectPageBundle] = []
-    config_service = ConfigurationService(project_id)
-    check_config = config_service.get_all_configurations()
-    settings_dir = get_cache_path(project_id, "settings")
-    for page_row in check_config.to_dicts() if not check_config.is_empty() else []:
-        page_name_id = name_id(page_row["page_name"])
-        pages.append(
-            ProjectPageBundle(
-                config=page_row,
-                # View state is personal (saved filters, last check).
-                settings=without_view_state(
-                    read_settings(settings_dir / f"page_{page_name_id}_settings.json")
-                ),
-                missing_settings=read_settings(
-                    settings_dir / f"page_{page_name_id}_missing_settings.json"
-                ),
-            )
-        )
+    )
 
     return ProjectConfigBundle(
+        bundle_version=BUNDLE_VERSION,
         exported_from_project=project_name,
         exported_at=datetime.now().isoformat(timespec="seconds"),
         datasets=datasets,
         prep_steps=prep_steps,
         pages=pages,
+        missing_codes=missing_codes,
         corrections=corrections,
     )
 
@@ -152,6 +346,18 @@ def parse_project_config(raw: bytes | str) -> ProjectConfigBundle:
     """
     data = json.loads(raw)
     return ProjectConfigBundle(**data)
+
+
+def bundle_version_warning(bundle: ProjectConfigBundle) -> str | None:
+    """Explain what an older bundle leaves out, or None for a current one."""
+    if bundle.bundle_version is not None:
+        return None
+    return (
+        "This configuration file was exported by an older version of DataSure. "
+        "It doesn't include check tables (such as duplicate, outlier, GPS, "
+        "back check, and descriptive column selections) or missing codes, so "
+        "those need to be set up again after importing."
+    )
 
 
 # ============================================================================
@@ -246,6 +452,9 @@ def _seed_correction_log(project_id: str, alias: str, rows: list[dict]) -> None:
     log_df = pl.DataFrame(rows)
     if log_df.schema.get("date") == pl.String:
         log_df = log_df.with_columns(pl.col("date").str.to_datetime(strict=False))
+    # Type all-null columns (e.g. `check_type` with no acceptances) as strings;
+    # DuckDB would otherwise save them as INTEGER
+    log_df = ensure_log_columns(log_df)
     duckdb_save_table(project_id, log_df, alias=f"corr_log_{alias}", db_name="logs")
 
 
@@ -275,13 +484,12 @@ def _apply_corrections(
     return failures
 
 
-def _write_page_settings(
-    project_id: str, page_name: str, settings: dict, missing_settings: dict
-) -> None:
-    """Write a page's check settings JSON files.
+def _write_page_settings(project_id: str, page_name: str, settings: dict) -> None:
+    """Write a page's check settings JSON file.
 
     The local ``view_state`` is kept and any in the bundle is ignored, since
-    view state is personal and never part of a configuration.
+    view state is personal and never part of a configuration. A bundle's
+    retired ``missing_settings`` are accepted when parsing but never written.
     """
     page_name_id = name_id(page_name)
     settings_dir = get_cache_path(project_id, "settings")
@@ -293,11 +501,51 @@ def _write_page_settings(
         if local_view_state is not None:
             settings[VIEW_STATE_KEY] = local_view_state
         write_settings(settings_file, settings)
-    if missing_settings:
-        write_settings(
-            settings_dir / f"page_{page_name_id}_missing_settings.json",
-            missing_settings,
+
+
+def _write_check_tables(project_id: str, page: ProjectPageBundle) -> None:
+    """Write a newly created page's bundled check tables to ``logs``.
+
+    Only registered prefixes are written; empty tables are skipped. A page
+    bundled without a descriptive column selection gets an empty one, so it
+    does not start from this project's old project-wide selection.
+    """
+    page_name = page.config.get("page_name", "")
+    for prefix, rows in page.check_tables.items():
+        if prefix not in CHECK_TABLE_PREFIXES or not rows:
+            continue
+        df = _rows_to_table(rows, page.check_table_schemas.get(prefix))
+        duckdb_save_table(
+            project_id, df, alias=check_table_name(prefix, page_name), db_name="logs"
         )
+    if not page.check_tables.get(DESCRIPTIVE_COLUMNS_TABLE):
+        duckdb_save_table(
+            project_id,
+            _EMPTY_DESCRIPTIVE_SELECTION,
+            alias=check_table_name(DESCRIPTIVE_COLUMNS_TABLE, page_name),
+            db_name="logs",
+        )
+
+
+def _merge_missing_codes(project_id: str, rows: list[dict]) -> None:
+    """Merge bundled missing codes into the project's missing codes.
+
+    Codes are keyed by ``label``: a bundled label replaces the project's
+    entry with the same label, and the project's other labels are kept.
+    """
+    if not rows:
+        return
+    incoming = _rows_to_table(rows).with_columns(pl.all().cast(pl.String))
+    if "label" not in incoming.columns:
+        return
+    table = missing_codes_table_name(project_id)
+    existing = duckdb_get_table(project_id, alias=table, db_name="logs")
+    if existing.is_empty() or "label" not in existing.columns:
+        merged = incoming
+    else:
+        kept = existing.filter(~pl.col("label").is_in(incoming["label"].implode()))
+        merged = pl.concat([kept, incoming], how="diagonal_relaxed")
+    duckdb_save_table(project_id, merged, alias=table, db_name="logs")
 
 
 def _import_dataset(
@@ -449,10 +697,11 @@ def apply_project_config(
             result.pages_skipped.append(ReapplyFailure(page_name, str(e)))
             continue
         config_service.add_configuration(check_config, rerun=False)
-        _write_page_settings(
-            project_id, page_name, page.settings, page.missing_settings
-        )
+        _write_page_settings(project_id, page_name, page.settings)
+        _write_check_tables(project_id, page)
         result.pages_created.append(page_name)
+
+    _merge_missing_codes(project_id, bundle.missing_codes)
 
     result.correction_failures.extend(
         _apply_corrections(project_id, bundle, imported_aliases, prepped_aliases)
@@ -484,6 +733,10 @@ def _render_config_summary(bundle: ProjectConfigBundle) -> None:
 
     prep_count = sum(len(v) for v in bundle.prep_steps.values())
     correction_count = sum(len(v) for v in bundle.corrections.values())
+    check_table_count = sum(
+        1 for page in bundle.pages for rows in page.check_tables.values() if rows
+    )
+    missing_code_count = len(bundle.missing_codes)
 
     st.markdown("**Project loaded.**")
 
@@ -492,6 +745,8 @@ def _render_config_summary(bundle: ProjectConfigBundle) -> None:
         (len(bundle.datasets) > 0, _count_label(len(bundle.datasets), "dataset")),
         (prep_count > 0, _count_label(prep_count, "prep step")),
         (len(bundle.pages) > 0, _count_label(len(bundle.pages), "HFC page")),
+        (check_table_count > 0, _count_label(check_table_count, "check table")),
+        (missing_code_count > 0, _count_label(missing_code_count, "missing code")),
         (correction_count > 0, _count_label(correction_count, "correction")),
     ]
     for available, label in checklist:
@@ -590,6 +845,9 @@ def render_config_resolution_and_apply(
         return
 
     st.caption(f"Exported from **{bundle.exported_from_project}**")
+    version_warning = bundle_version_warning(bundle)
+    if version_warning:
+        st.warning(version_warning, icon=":material/warning:")
     _render_config_summary(bundle)
     st.divider()
 

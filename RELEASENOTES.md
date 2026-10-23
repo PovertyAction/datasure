@@ -30,11 +30,27 @@ Each duplicate ID card now lets you decide, for every record, whether to keep it
 
 Pages with back check data have a **Survey data** / **Backcheck data** switcher on the Correct Data page. Back check data can only have its ID fixed or a record removed, since back check results measure data quality. Back check data you never prepared can now be corrected too.
 
+#### Exported project setups include every check setting
+
+An exported project setup now carries your missing-value codes, Descriptive Statistics columns, and the column rules for Duplicates, Outliers, GPS and Backchecks. Before, these had to be set again after applying the setup. When you apply a setup to an existing project, its missing-value codes are added to the project's, and the setup's code wins where both use the same label. Applying a setup exported by an older version shows a note that these settings are not in it.
+
+**Export configuration** in a project's **More** menu now opens a dialog with one option, **Include record-level decisions (corrections and backcheck attribution)**. Untick it to share a setup without decisions about individual records, for example when reusing it for a new survey round.
+
 ### Changes
+
+#### Each check page keeps its own Descriptive Statistics columns and consent results
+
+Choosing Descriptive Statistics columns on one check page no longer changes them on other pages. The first time you open a page after upgrading, it starts from your previous selection.
+
+The Enumerator report now uses the page's saved consent and outcome settings every time it runs, so it stays current after a data refresh or a settings change. The **Apply Consent and Outcome Settings** button is gone. If consent or outcome is not set up, the **% consent** and **% completed survey** columns are hidden instead of showing 100%, and the consent and outcome columns start empty until you choose them.
 
 #### Back check comparison follows Records to Include and leaves out duplicates
 
 The back check comparison and coverage now use the same records as the Duplicates tab: the **Records to Include** filters apply, and the page says how many surveys and back checks are compared. The **Duplicate Handling** setting is gone. Records whose ID is duplicated are always left out of the comparison until you resolve the duplicate, and a warning above Comparison Results Details counts them. If a page was set to keep the first or last duplicate, it now leaves duplicates out.
+
+### Bug Fixes
+
+- **Fixed**: After you applied a project setup that included corrections, the **Outliers & Constraints** and **GPS Checks** tabs could fail with `cannot compare string with numeric type (i32)`. Projects already affected work again after you update; you don't need to import the setup again
 
 ---
 

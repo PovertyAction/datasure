@@ -18,8 +18,12 @@ import streamlit as st
 from datasure.checks.missing import mask_missing_codes
 from datasure.models.schemas import ColumnByType
 from datasure.utils.duckdb_utils import (
+    DESCRIPTIVE_COLUMNS_TABLE,
+    LEGACY_DESCRIPTIVE_SELECTION_TABLE,
+    check_table_name,
     duckdb_get_table,
     duckdb_save_table,
+    duckdb_table_exists,
     load_missing_codes_from_db,
 )
 from datasure.utils.navigations_utils import demo_callout, show_demo_next_action
@@ -231,70 +235,60 @@ def _create_new_column_selection_df(
     """Create a DataFrame for the column selector with descriptive type labels."""
     all_cols = df.columns
     selected = [False] * len(all_cols)
-    col_types = []
-    for col in all_cols:
-        if col in columns.datetime_columns:
-            col_types.append("datetime")
-        elif col in columns.numeric_columns:
-            col_types.append("numeric")
-        elif col in columns.categorical_columns:
-            col_types.append("categorical")
-        elif col in columns.string_columns:
-            col_types.append("string")
-        else:
-            col_types.append("other")
-
+    col_types = [_get_column_type_label(col, columns) for col in all_cols]
     return pl.DataFrame({"Selected": selected, "column": all_cols, "type": col_types})
 
 
-def _modify_column_selection_df(
-    column_selection_df: pl.DataFrame, current_cols: set[str]
+def _selection_table(page_name_id: str) -> str:
+    """Return the logs table holding a page's descriptive column selection."""
+    return check_table_name(DESCRIPTIVE_COLUMNS_TABLE, page_name_id)
+
+
+def _apply_saved_selection(
+    selection: pl.DataFrame, saved: pl.DataFrame
 ) -> pl.DataFrame:
-    """Modify the column selection DataFrame to match the current dataset columns."""
-    existing_cols = set(column_selection_df["column"])
-    cols_to_add = current_cols - existing_cols
-    cols_to_remove = existing_cols - current_cols
+    """Tick the columns ``saved`` selected, keeping ``selection``'s columns.
 
-    # Remove columns that no longer exist
-    if cols_to_remove:
-        column_selection_df = column_selection_df.filter(
-            ~pl.col("column").is_in(list(cols_to_remove))
-        )
-
-    # Add new columns that are not in the existing DataFrame
-    for col in cols_to_add:
-        column_selection_df = column_selection_df.concat(
-            pl.DataFrame(
-                {
-                    "Selected": [False],
-                    "column": [col],
-                    "type": [_get_column_type_label(col, existing_cols)],
-                }
-            ),
-            allow_duplicates=False,
-        )
-
-    return column_selection_df
+    Saved columns no longer in the data are dropped; new columns start
+    unselected.
+    """
+    chosen = saved.filter(pl.col("Selected").cast(pl.Boolean))["column"].to_list()
+    return selection.with_columns(pl.col("column").is_in(chosen).alias("Selected"))
 
 
 def get_column_selection_df(
-    project_id: str, df: pl.DataFrame, columns: ColumnByType
+    project_id: str, page_name_id: str, df: pl.DataFrame, columns: ColumnByType
 ) -> pl.DataFrame:
-    """Retrieve the column selection DataFrame from duckdb or create a new one."""
-    try:
-        column_selection_df = duckdb_get_table(
-            project_id,
-            "selected_columns_df",
-            "intermediate",
-        )
-        current_cols = set(df.columns)
-        if not set(column_selection_df["column"]).issubset(current_cols):
-            return _modify_column_selection_df(column_selection_df, current_cols)
-    except Exception:
-        # If the table doesn't exist or columns mismatch, create a new one
-        return _create_new_column_selection_df(df, columns)
-    else:
-        return column_selection_df
+    """Return the page's descriptive column selection for the current data.
+
+    One row per column of ``df`` with its type and whether the page selected
+    it. The selection is saved per page in the ``logs`` database.
+
+    Older versions saved one selection for the whole project. A page with no
+    selection of its own starts from that one, keeping only the page's
+    columns, and saves it as its own; the old table is left in place.
+    """
+    selection = _create_new_column_selection_df(df, columns)
+    table = _selection_table(page_name_id)
+    if duckdb_table_exists(project_id, table, "logs"):
+        saved = duckdb_get_table(project_id, table, "logs")
+        return _apply_saved_selection(selection, saved)
+
+    legacy = duckdb_get_table(
+        project_id, LEGACY_DESCRIPTIVE_SELECTION_TABLE, "intermediate"
+    )
+    if legacy.is_empty():
+        return selection
+    seeded = _apply_saved_selection(selection, legacy)
+    save_column_selection(project_id, page_name_id, seeded)
+    return seeded
+
+
+def save_column_selection(
+    project_id: str, page_name_id: str, selection: pl.DataFrame
+) -> None:
+    """Save the page's descriptive column selection to the ``logs`` database."""
+    duckdb_save_table(project_id, selection, _selection_table(page_name_id), "logs")
 
 
 # =============================================================================
@@ -318,16 +312,19 @@ def _get_column_type_label(col: str, columns: ColumnByType) -> str:
 @st.fragment
 def _render_column_selector(
     project_id: str,
+    page_name_id: str,
     column_selection_df: pl.DataFrame,
 ) -> ColumnByType:
     """Render the inline column selector with descriptive type labels.
 
     Parameters
     ----------
-    df : pl.DataFrame
-        Dataset (used to determine available columns).
-    columns : ColumnByType
-        Column type information.
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page identifier; the selection is saved per page.
+    column_selection_df : pl.DataFrame
+        The page's current column selection.
 
     Returns
     -------
@@ -410,12 +407,7 @@ def _render_column_selector(
             type="primary",
             width="stretch",
         ):
-            duckdb_save_table(
-                project_id,
-                selected_columns_df,
-                "selected_columns_df",
-                "intermediate",
-            )
+            save_column_selection(project_id, page_name_id, selected_columns_df)
             st.rerun()
 
     selected_numeric_cols = selected_columns_df.filter(
@@ -700,6 +692,7 @@ def _render_value_counts(
 @demo_output_onboarding(TAB_NAME)
 def descriptive_report(
     project_id: str,
+    page_name_id: str,
     data: pl.DataFrame,
     setting_file: str,
     survey_columns: ColumnByType,
@@ -712,9 +705,15 @@ def descriptive_report(
 
     Parameters
     ----------
-    df : pl.DataFrame | pd.DataFrame
-        Survey dataset to analyse. Pandas DataFrames are converted automatically.
-    columns : ColumnByType
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page identifier; the column selection is saved per page.
+    data : pl.DataFrame
+        Survey dataset to analyse.
+    setting_file : str
+        Path to the page's settings file.
+    survey_columns : ColumnByType
         Column type metadata for the dataset.
     """
     # No settings section here, so the action sits beside the title.
@@ -726,10 +725,14 @@ def descriptive_report(
         st.warning("The selected dataset is empty.")
         return
 
-    column_selection_df = get_column_selection_df(project_id, data, survey_columns)
+    column_selection_df = get_column_selection_df(
+        project_id, page_name_id, data, survey_columns
+    )
 
     # Inline column selector
-    selected_columns = _render_column_selector(project_id, column_selection_df)
+    selected_columns = _render_column_selector(
+        project_id, page_name_id, column_selection_df
+    )
 
     if not selected_columns.all_columns:
         st.info("No columns selected. Use the column selector above to select columns.")

@@ -956,17 +956,18 @@ class TestDemoDataGenerator:
 
     def test_gen_consent_status(self):
         """Test generating consent status column."""
-        df = pl.DataFrame({"id": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]})
+        # Large sample so the weighted-draw check below cannot flake
+        df = pl.DataFrame({"id": list(range(1000))})
         generator = DemoDataGenerator(df)
         result_df = generator._gen_consent_status()
 
         assert "consent" in result_df.columns
-        assert result_df.height == 10
+        assert result_df.height == 1000
         # Check that values are either 'yes' or 'no'
         consent_values = result_df["consent"].to_list()
         assert all(val in ["yes", "no"] for val in consent_values)
-        # Most should be 'yes' given 98% weight
-        assert consent_values.count("yes") >= 8
+        # Most should be 'yes' given 98% weight (expected ~980, sd ~4.4)
+        assert consent_values.count("yes") >= 900
 
     def test_gen_completion_status(self):
         """Test generating completion status column."""

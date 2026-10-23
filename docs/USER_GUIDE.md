@@ -106,6 +106,47 @@ You're working with household survey data from rural communities in India, inclu
 - **Select Existing Project**: Choose from previously created projects
 - **Start Demo**: Launch the interactive tutorial with sample data
 
+#### Copying a Project's Setup
+
+To reuse a project's setup, open **More** on its project card and choose
+**Export configuration**. In the dialog that opens, choose what to include and
+click **Download configuration** to save a configuration file. To use it,
+choose **From a configuration file** when you create a new project, or choose
+**Update from configuration** under **More** on an existing project.
+
+The configuration file includes:
+
+- Your import sources, without passwords or file paths. You sign in to
+  SurveyCTO again and pick the local files on the computer doing the import.
+- Prep steps.
+- Check pages, with their settings and check tables: duplicate, outlier, GPS
+  and back check columns, Descriptive Stats column selections, and back check
+  mismatch attributions.
+- Missing codes.
+- Corrections.
+
+It does not include survey data or remembered filters.
+
+Corrections and back check mismatch attributions are record-level decisions:
+they apply to particular submissions rather than to the setup. The **Include
+record-level decisions (corrections and backcheck attribution)** option in the
+export dialog is ticked by default. Untick it to share only the setup, for
+example when starting a new survey round with the same checks. The file then
+has no corrections or attributions, and it imports the same way.
+
+When you import a configuration file:
+
+- A check page is only created when the project has no page with that name
+  and the page's dataset was imported. A skipped page is listed after the
+  import, and an existing page keeps its own settings and check tables.
+- Missing codes are merged with the project's own. A code with the same label
+  as one in the project replaces it; the project's other codes are kept.
+- A configuration file exported by an older version of DataSure has no check
+  tables or missing codes. It still imports, with a warning, and you set
+  those up again by hand.
+- Whatever the file contains is applied without asking. An attribution for a
+  submission that isn't in the imported data is kept but has no effect.
+
 ---
 
 ### Step 2: Import Data
@@ -1226,6 +1267,12 @@ Configure parameters:
 - **Consent**: Consent column and value
 - **Outcome**: Completion column and value
 
+The report uses the consent and outcome settings as soon as you change them,
+and again after every data refresh; there is nothing to apply. Each check
+page keeps its own consent and outcome settings. The % consent and %
+completed columns appear in the Enumerator Summary only once you choose both
+a column and its values.
+
 ##### Enumerator Overview
 
 High-level metrics:
@@ -1295,8 +1342,12 @@ Temporal performance trends:
 
 Configure analysis:
 
-- Select columns to analyze
+- Select columns to analyze, then click **Apply Selection**
 - Separate report per column
+
+Each check page keeps its own column selection. After upgrading from a
+version that shared one selection across pages, each page starts from that
+shared selection, keeping only the columns in the page's dataset.
 
 ##### For Each Selected Column
 
