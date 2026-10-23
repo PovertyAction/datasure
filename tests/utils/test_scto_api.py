@@ -224,13 +224,30 @@ class TestDatasetEndpoints:
 
         with patch.object(api_client, "_make_request") as mock_request:
             mock_response = Mock()
-            mock_response.json.return_value = expected_data
+            mock_response.json.return_value = {
+                "data": expected_data,
+                "nextCursor": None,
+            }
             mock_request.return_value = mock_response
 
             result = api_client.list_datasets()
 
             mock_request.assert_called_once_with("GET", "/datasets")
             assert result == expected_data
+
+    def test_list_datasets_follows_next_cursor(self, api_client):
+        """Test listing datasets reads every page."""
+        first, second = Mock(), Mock()
+        first.json.return_value = {"data": [{"id": "a"}], "nextCursor": "c1"}
+        second.json.return_value = {"data": [{"id": "b"}], "nextCursor": None}
+
+        with patch.object(
+            api_client, "_make_request", side_effect=[first, second]
+        ) as mock_request:
+            result = api_client.list_datasets()
+
+        assert result == [{"id": "a"}, {"id": "b"}]
+        mock_request.assert_called_with("GET", "/datasets", params={"cursor": "c1"})
 
     def test_get_dataset_info(self, api_client):
         """Test getting dataset information."""
@@ -565,6 +582,33 @@ class TestFormEndpoints:
                 api_client.download_form_data_json("form1", private_key=b"test_key")
 
 
+class TestFormXml:
+    """Test downloading the compiled form XML."""
+
+    def test_download_form_xml(self, api_client):
+        """Test the XML comes back as the server's bytes."""
+        with patch.object(api_client.session, "get") as mock_get:
+            mock_get.return_value.content = b"<h:html/>"
+
+            assert api_client.download_form_xml("farm") == b"<h:html/>"
+
+        url = mock_get.call_args[0][0]
+        assert (
+            url
+            == f"https://{api_client.config.server_name}.surveycto.com/forms/farm/xml"
+        )
+
+    def test_download_form_xml_http_error(self, api_client):
+        """Test an HTTP error raises SurveyCTOAPIError."""
+        with patch.object(api_client.session, "get") as mock_get:
+            mock_get.return_value.raise_for_status.side_effect = (
+                requests.exceptions.HTTPError("404")
+            )
+
+            with pytest.raises(SurveyCTOAPIError, match="Failed to download form XML"):
+                api_client.download_form_xml("farm")
+
+
 class TestSubmissionEndpoints:
     """Test submission-related endpoints."""
 
@@ -678,7 +722,10 @@ class TestIntegration:
         with patch.object(api_client, "_make_request") as mock_request:
             # First call - list datasets
             mock_response1 = Mock()
-            mock_response1.json.return_value = [{"id": "dataset1"}]
+            mock_response1.json.return_value = {
+                "data": [{"id": "dataset1"}],
+                "nextCursor": None,
+            }
 
             # Second call - list form IDs
             mock_response2 = Mock()

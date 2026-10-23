@@ -1,191 +1,74 @@
 ---
 name: surveycto-api
-description: Use this skill when working with the SurveyCTO API in this project — fetching form submissions, handling rate limits, encrypted forms, or credential configuration. Covers the pysurveycto client, fetch_submissions(), RateLimitError, and all related environment variables.
+description: Use this skill when working with the SurveyCTO API in DataSure — downloading submissions, the compiled form XML, server datasets or attachments, encrypted forms, the typed import, or SurveyCTO credentials. Covers utils/scto_api.py, connectors/scto.py and the vendored scto_dict contract and cast.
 ---
 
-# SurveyCTO API Skill
+# SurveyCTO API in DataSure
 
-This skill covers how the GiveWell VCS dashboard interacts with SurveyCTO to pull form submissions.
-
-## Architecture overview
+## Layers
 
 ```text
-.env (credentials)
-  └─ src/utils/config_utils.py   load_credentials(), load_private_key_path()
-       └─ src/connectors/scto.py  fetch_submissions() → pysurveycto.SurveyCTOObject
-            └─ src/processing/processor.py  load_submissions() / append_submissions()
-                 └─ data/submissions.duckdb  (local cache)
+utils/secure_credentials.py   password in the OS keyring, never on disk
+  └─ utils/scto_api.py         SurveyCTOAPIClient: HTTP only, raises SurveyCTOAPIError
+       └─ connectors/scto.py   SurveyCTOClient.import_data(): routing, typing, storage
+            ├─ vendor/scto_dict/   parse_contract (XML -> FormContract), cast_wide
+            └─ utils/duckdb_utils.py   raw.duckdb; form_definitions in logs.duckdb
 ```
 
-The connector layer is intentionally thin: it calls the SurveyCTO API and returns raw dicts. All caching, transformation, and querying happen downstream.
+`SurveyCTOAPIClient` uses a `requests` session with Basic auth. The base URL is
+`https://{server}.surveycto.com/api/v2`; the console and form endpoints sit at the
+server root.
 
-## Environment variables
+## Endpoints
 
-| Variable | Required | Description |
+| Method | Endpoint | Returns |
 | --- | --- | --- |
-| `SURVEYCTO_SERVER` | Yes | Server name or full URL (`ipa3`, `https://ipa3.surveycto.com`) |
-| `SURVEYCTO_USERNAME` | Yes | SurveyCTO account email |
-| `SURVEYCTO_PASSWORD` | Yes | SurveyCTO account password |
-| `SURVEYCTO_FORM_ID` | Yes | Form ID to pull submissions from |
-| `SURVEYCTO_PRIVATE_KEY_PATH` | No | Path to PEM private key for encrypted forms |
+| `download_form_data_json(form_id, params, private_key)` | `GET /api/v2/forms/data/wide/json/{id}`; `POST` with the key as multipart `private_key` | Wide JSON rows; every value is a string |
+| `download_form_xml(form_id)` | `GET /forms/{id}/xml` | Compiled XForm bytes |
+| `list_datasets()` | `GET /api/v2/datasets`, following `nextCursor` | Dataset metadata (`id`, `title`, ...) |
+| `download_dataset_csv(dataset_id)` | `GET /api/v2/datasets/data/csv/{id}` | CSV bytes |
+| `list_forms()` | Console `forms-groups-datasets/get`, CSRF login | Forms with `encrypted` |
+| `download_form_definition(form_id)` | Console `/forms/{id}/design/`, CSRF login | XLSForm design JSON |
+| `download_attachment_from_url(url, private_key)` | Attachment URL | Bytes |
 
-All four required vars are loaded by `load_credentials()` in `src/utils/config_utils.py`. If any are missing it raises `OSError` with the missing variable names listed.
+The design JSON serves the replication package's XLSForm and the media field list
+for attachments. Typing uses the XML.
 
-## Credential loading
+## Import (`SurveyCTOClient.import_data`)
 
-```python
-from src.utils.config_utils import load_credentials, load_private_key_path
+1. An ID on `list_datasets()` (listed once per client) imports as a server dataset
+   CSV with no typing. Every other ID imports as a form, and its errors propagate:
+   there is no fallback.
+2. A form import downloads the XML, parses it with `parse_contract`, casts the rows
+   with `cast_wide` and converts with `typed_frame`. That gives form types (int ->
+   Int64, decimal -> Float64, date -> Date, select_multiple binaries -> Int8,
+   numeric select_one -> Int64), naive UTC timestamps and an Int64
+   `formdef_version`.
+3. It stores the XML with `save_form_definition` (one row per alias and form
+   version), then saves the frame to `raw.duckdb`. `load_form_definition(alias)`
+   returns the latest version's XML, or `None`.
 
-server, username, password, form_id = load_credentials()
-private_key_path = load_private_key_path()  # returns str | None
-```
+## Requests
 
-`load_private_key_path()` returns `None` if the env var is unset, empty, or points to a missing file — never raises.
+- **Date filter.** `date` is the oldest `CompletionDate` in epoch seconds.
+  `date=0` is throttled to one full pull per quiet period (HTTP 417), so the floor
+  is `SurveyCTOConfig.default_date` (2010-01-01 UTC). Every refresh is a full pull
+  until #340 is fixed.
+- **Encrypted forms.** The import log stores the `.pem` path. `_import_private_key`
+  reads the key at import time. Without a key, the API returns only the publishable
+  fields.
 
-## fetch_submissions()
+## Vendored contract
 
-**Location:** `src/connectors/scto.py`
+`src/datasure/vendor/scto_dict/` is copied from surveycto_python_dict by
+`just vendor-scto <checkout> <ref>`; see its `VENDORED.md`. Do not edit it. Change
+the code upstream and re-vendor.
 
-```python
-def fetch_submissions(
-    server: str,
-    username: str,
-    password: str,
-    form_id: str,
-    since_date: date | None = None,
-    private_key_path: str | None = None,
-) -> list[dict]:
-```
+## Tests
 
-### Parameters
-
-| Parameter | Type | Notes |
-| --- | --- | --- |
-| `server` | `str` | Bare name, URL, or full subdomain — normalised internally |
-| `username` | `str` | SurveyCTO account email |
-| `password` | `str` | SurveyCTO account password |
-| `form_id` | `str` | Form ID as shown in SurveyCTO console |
-| `since_date` | `date \| None` | Fetch only submissions on or after this date |
-| `private_key_path` | `str \| None` | Path to PEM file for encrypted forms |
-
-### Returns
-
-A `list[dict]` where each dict is one submission row in SurveyCTO JSON wide format. Field names match the form's variable names. The submission key is stored under `"KEY"`.
-
-### Server name normalisation
-
-`_server_name()` strips scheme (`https://`, `http://`), `.surveycto.com` suffix, trailing slashes, and whitespace so any of these work equivalently:
-
-```python
-fetch_submissions("ipa3", ...)
-fetch_submissions("https://ipa3.surveycto.com/", ...)
-fetch_submissions("ipa3.surveycto.com", ...)
-```
-
-### Unencrypted form (default)
-
-```python
-records = fetch_submissions(server, username, password, form_id)
-```
-
-Uses `pysurveycto.SurveyCTOObject.get_form_data()` as a plain GET request.
-
-### Encrypted form
-
-```python
-records = fetch_submissions(
-    server,
-    username,
-    password,
-    form_id,
-    private_key_path="/path/to/private_key.pem",
-)
-```
-
-When `private_key_path` is provided the PEM file is opened and passed as the `key=` argument to `get_form_data()`. SurveyCTO requires a multipart POST with the key attached for encrypted forms.
-
-### Incremental pull (append mode)
-
-```python
-from src.processing.processor import latest_submission_date
-
-since = latest_submission_date("data/submissions.duckdb")
-records = fetch_submissions(server, username, password, form_id, since_date=since)
-```
-
-When `since_date` is `None`, a hardcoded epoch of `2026-04-01` is used as the lower bound so all submissions are returned.
-
-## Rate limiting
-
-SurveyCTO returns HTTP **417** when a rate limit is hit. The connector translates this into a `RateLimitError`:
-
-```python
-from src.connectors.scto import RateLimitError, fetch_submissions
-
-try:
-    records = fetch_submissions(server, username, password, form_id)
-except RateLimitError as exc:
-    print(f"Rate limited — {exc}")  # exc message is the wait instruction from SCTO
-```
-
-The 417 response body contains `{"error": {"message": "..."}}` with the wait time. All other `HTTPError` statuses are re-raised unchanged.
-
-**Rate limit guidance:** SurveyCTO rate-limits bulk data pulls. If you hit a 417, wait the period specified in the error message before retrying. The app's "Refresh data" button surfaces this to the user via `st.warning`.
-
-## pysurveycto client
-
-The project uses the [`pysurveycto`](https://github.com/PovertyAction/pysurveycto) library:
-
-```python
-import pysurveycto
-
-client = pysurveycto.SurveyCTOObject(server_name, username, password)
-data = client.get_form_data(
-    form_id,
-    format="json",
-    oldest_completion_date=datetime(2025, 1, 1),  # lower bound
-    key=open("key.pem", "rb"),  # only for encrypted forms
-)
-```
-
-`get_form_data` returns a `list[dict]`. Each dict has string values for all fields.
-
-## Adding new connector behaviour
-
-If you need to extend the connector (e.g. pull a different data endpoint):
-
-1. Add a new function to `src/connectors/scto.py` — keep it a thin wrapper around `pysurveycto`
-2. All env-var loading belongs in `src/utils/config_utils.py`, not in the connector
-3. The connector must never import from `src.processing` or `src.views` (no circular deps)
-4. If the new function can rate-limit, raise `RateLimitError` on HTTP 417 the same way `fetch_submissions` does
-
-## Common errors
-
-| HTTP status | Meaning | Handler |
-| --- | --- | --- |
-| 401 | Bad credentials | Fix `SURVEYCTO_USERNAME` / `SURVEYCTO_PASSWORD` in `.env` |
-| 403 | Permission denied | Ensure the account has access to the form |
-| 404 | Form not found | Check `SURVEYCTO_FORM_ID` in `.env` |
-| 417 | Rate limit | Caught as `RateLimitError`; wait and retry |
-| 500 | Server error | Re-raised as `HTTPError`; usually transient |
-
-## Testing the connector
-
-Tests live in `tests/connectors/test_scto.py`. The client is mocked via `unittest.mock.patch`:
-
-```python
-with patch("src.connectors.scto.pysurveycto.SurveyCTOObject") as mock_cls:
-    mock_cls.return_value.get_form_data.return_value = [{"KEY": "uuid:001"}]
-    result = fetch_submissions("ipa3", "user", "pass", "form1")
-```
-
-To test the 417 path:
-
-```python
-from requests.exceptions import HTTPError
-
-mock_response = MagicMock()
-mock_response.status_code = 417
-mock_response.json.return_value = {"error": {"message": "wait 60s"}}
-mock_client.get_form_data.side_effect = HTTPError(response=mock_response)
-```
+- `tests/connectors/test_scto.py` mocks `SurveyCTOAPIClient`. `TestTypedImport`
+  drives the import with the synthetic farm form,
+  `tests/vendor/scto_dict/farm_form.py` (`XML`, `ROWS`).
+- `tests/utils/test_scto_api.py` patches `_make_request` or `session.get`.
+- `tests/vendor/scto_dict/` holds upstream's offline tests, re-synced by the
+  vendor recipe.
