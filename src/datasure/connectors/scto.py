@@ -1,4 +1,3 @@
-import contextlib
 import logging
 import os
 import re
@@ -8,11 +7,17 @@ from enum import StrEnum
 from pathlib import Path
 
 import polars as pl
+import polars.selectors as cs
+import pyarrow as pa
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
 
 from datasure.utils.dataframe_utils import standardize_missing_values
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.duckdb_utils import (
+    duckdb_get_table,
+    duckdb_save_table,
+    save_form_definition,
+)
 from datasure.utils.scto_api import (
     SurveyCTOAPIClient,
     SurveyCTOAPIConfig,
@@ -25,6 +30,8 @@ from datasure.utils.secure_credentials import (
     retrieve_scto_credentials,
     store_scto_credentials,
 )
+from datasure.vendor.scto_dict.cast import cast_wide
+from datasure.vendor.scto_dict.xml_contract import parse_contract
 
 # --- Constants --- #
 SCTO_KEY_IMPORT_OPTIONS = ("Import from File", "Paste private key text")
@@ -66,7 +73,6 @@ class SurveyCTOConfig:
     # licensed quiet period (HTTP 417), and every refresh is currently a full
     # pull. Revisit once incremental refresh works (#340).
     default_date: datetime = datetime(2010, 1, 1, tzinfo=UTC)
-    date_format: str = "%b %d, %Y %I:%M:%S %p"
 
 
 class ServerCredentials(BaseModel):
@@ -204,115 +210,24 @@ class CacheManager:
                 return existing_data, self.default_date
 
 
-class DataProcessor:
-    """Handles data processing and type conversion."""
+def typed_frame(table: pa.Table) -> pl.DataFrame:
+    """Return a cast submissions table as a Polars frame for the raw database.
 
-    def __init__(self):
-        self.date_format = SurveyCTOConfig().date_format
-        self.logger = logging.getLogger(__name__)
+    SurveyCTO timestamps are UTC. They are stored naive, as DataSure has always
+    stored them, because the checks compare them with naive dates and times.
+    ``formdef_version`` is cast to an integer because the enumerator check picks it
+    from the numeric columns and takes its maximum as the latest version.
+    """
+    return pl.from_arrow(table).with_columns(
+        cs.datetime(time_zone="UTC").dt.replace_time_zone(None).cast(pl.Datetime("us")),
+        cs.by_name("formdef_version", require_all=False).cast(pl.Int64),
+    )
 
-    def get_repeat_fields(self, questions: pl.DataFrame) -> list[str]:
-        """Extract repeat field names from form definition."""
-        fields = questions.select(["type", "name"])
-        repeat_fields = []
-        begin_count = 0
-        end_count = 0
 
-        for row in fields.iter_rows(named=True):
-            if row["type"] == "begin repeat":
-                begin_count += 1
-            elif row["type"] == "end repeat":
-                end_count += 1
-            elif (
-                begin_count > end_count
-                and len(str(row["name"])) > 1
-                and row["type"] not in ["begin group", "end group"]
-            ):
-                repeat_fields.append(row["name"])
-
-        return repeat_fields
-
-    def get_repeat_columns(self, field: str, data_cols: list[str]) -> list[str]:
-        """Get all columns that belong to a repeat group."""
-        pattern = rf"\b{re.escape(field)}_[0-9]+_{{,1}}[0-9]*_{{,1}}[0-9]*\b"
-        return [col for col in data_cols if re.fullmatch(pattern, col)] or [field]
-
-    def _convert_standard_datetime_columns(self, data: pl.DataFrame) -> pl.DataFrame:
-        """Convert standard datetime columns to datetime type."""
-        datetime_cols = ["CompletionDate", "SubmissionDate", "starttime", "endtime"]
-        for col in datetime_cols:
-            if col in data.columns:
-                with contextlib.suppress(Exception):
-                    data = data.with_columns(
-                        pl.col(col).str.strptime(
-                            pl.Datetime, format=self.date_format, strict=False
-                        )
-                    )
-        return data
-
-    def _convert_standard_numeric_columns(self, data: pl.DataFrame) -> pl.DataFrame:
-        """Convert standard numeric columns to float type."""
-        numeric_cols = ["duration", "formdef_version"]
-        for col in numeric_cols:
-            if col in data.columns:
-                with contextlib.suppress(Exception):
-                    data = data.with_columns(pl.col(col).cast(pl.Float64, strict=False))
-        return data
-
-    def _get_field_columns(
-        self, field_name: str, repeat_fields: list[str], data_cols: list[str]
-    ) -> list[str]:
-        """Get all columns for a field, including repeat columns."""
-        if field_name in repeat_fields:
-            cols = self.get_repeat_columns(field_name, data_cols)
-        else:
-            cols = [field_name]
-        return [col for col in cols if col in data_cols]
-
-    def _convert_column_by_type(
-        self, data: pl.DataFrame, col: str, field_type: str
-    ) -> pl.DataFrame:
-        """Convert a single column based on its field type."""
-        try:
-            if field_type in ["date", "datetime", "time"]:
-                return data.with_columns(
-                    pl.col(col).str.strptime(pl.Datetime, format="%+", strict=False)
-                )
-            elif field_type in ["integer", "decimal"]:
-                return data.with_columns(pl.col(col).cast(pl.Float64, strict=False))
-            elif field_type == "note":
-                return data.drop(col)
-            return data  # noqa: TRY300
-        except pl.exceptions.PolarsError as e:
-            self.logger.warning(f"Failed to convert column {col}: {e}")
-            return data
-
-    def _convert_form_definition_fields(
-        self, data: pl.DataFrame, questions: pl.DataFrame
-    ) -> pl.DataFrame:
-        """Convert fields based on form definition."""
-        repeat_fields = self.get_repeat_fields(questions)
-        data_cols = data.columns
-
-        for row in questions.select(["type", "name"]).iter_rows(named=True):
-            field_name = row["name"]
-            field_type = row["type"]
-
-            cols = self._get_field_columns(field_name, repeat_fields, data_cols)
-
-            for col in cols:
-                data = self._convert_column_by_type(data, col, field_type)
-
-        return data
-
-    def convert_data_types(
-        self, data: pl.DataFrame, questions: pl.DataFrame
-    ) -> pl.DataFrame:
-        """Convert data types based on form definition."""
-        data = self._convert_standard_datetime_columns(data)
-        data = self._convert_standard_numeric_columns(data)
-        data = self._convert_form_definition_fields(data, questions)
-        return data
+def get_repeat_columns(field: str, data_cols: list[str]) -> list[str]:
+    """Get all columns that belong to a repeat group."""
+    pattern = rf"{re.escape(field)}_[0-9]+_{{,1}}[0-9]*_{{,1}}[0-9]*"
+    return [col for col in data_cols if re.fullmatch(pattern, col)] or [field]
 
 
 class MediaDownloader:
@@ -344,8 +259,7 @@ class MediaDownloader:
         encryption_key: str | None,
     ) -> None:
         """Download media files for a specific field."""
-        processor = DataProcessor()
-        cols = processor.get_repeat_columns(field, data.columns)
+        cols = get_repeat_columns(field, data.columns)
 
         for col in cols:
             media_data = (
@@ -405,9 +319,9 @@ class SurveyCTOClient:
         self.project_id = project_id
         self.config = config or SurveyCTOConfig()
         self.cache_manager = CacheManager(project_id)
-        self.data_processor = DataProcessor()
         self.logger = logging.getLogger(__name__)
         self._scto_client: SurveyCTOAPIClient | None = None
+        self._dataset_ids: set[str] | None = None
 
     def connect(
         self, credentials: ServerCredentials, validate_permissions: bool = False
@@ -633,18 +547,15 @@ class SurveyCTOClient:
                 self._scto_client = SurveyCTOAPIClient(api_config)
             except SurveyCTOAPIError as e:
                 raise ConnectionError(f"Not connected to server: {e}") from e
-        try:
-            # downloading as regular form with incremental updates.
-            # If it fails (e.g., for server datasets), fallback to full download
-            return self._import_regular_form(form_config)
-        except Exception:
-            self.logger.info(
-                "Regular form import failed for %s; falling back to server "
-                "dataset import",
-                form_config.form_id,
-                exc_info=True,
-            )
+        if form_config.form_id in self._server_dataset_ids():
             return self._import_server_dataset(form_config)
+        return self._import_regular_form(form_config)
+
+    def _server_dataset_ids(self) -> set[str]:
+        """Return the IDs of the server's datasets, listed once per client."""
+        if self._dataset_ids is None:
+            self._dataset_ids = {d["id"] for d in self._scto_client.list_datasets()}
+        return self._dataset_ids
 
     def _import_server_dataset(self, form_config: FormConfig) -> int:
         """Import from server dataset."""
@@ -690,6 +601,10 @@ class SurveyCTOClient:
         if form_config.private_key:
             private_key = self._import_private_key(form_config.private_key)
 
+        # The deployed form's compiled XML types the submissions
+        xml = self._scto_client.download_form_xml(form_config.form_id)
+        contract = parse_contract(xml)
+
         # Get new data
         new_data_json = self._scto_client.download_form_data_json(
             form_id=form_config.form_id,
@@ -697,7 +612,7 @@ class SurveyCTOClient:
             private_key=private_key,
         )
 
-        new_data = pl.DataFrame(new_data_json)
+        new_data = typed_frame(cast_wide(new_data_json, contract))
         new_count = len(new_data)
 
         # Combine data
@@ -706,17 +621,21 @@ class SurveyCTOClient:
         else:
             combined_data = new_data
 
-        # Standardize missing values BEFORE type conversion
         combined_data = standardize_missing_values(combined_data)
 
-        # Process data types
-        questions, _ = self.get_form_definition(form_config.form_id)
-        if "disabled" in questions.columns:
-            questions = questions.filter(pl.col("disabled") != "yes")
-        combined_data = self.data_processor.convert_data_types(combined_data, questions)
+        save_form_definition(
+            self.project_id,
+            form_config.alias,
+            form_config.form_id,
+            contract.formdef_version,
+            xml,
+        )
 
         # Download media if requested
         if form_config.attachments and form_config.save_to:
+            questions, _ = self.get_form_definition(form_config.form_id)
+            if "disabled" in questions.columns:
+                questions = questions.filter(pl.col("disabled") != "yes")
             self._download_attachments(questions, new_data, form_config, private_key)
 
         # Save to DuckDB

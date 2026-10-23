@@ -10,6 +10,7 @@ from datasure.connectors.scto import (
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.processing.prep import prep_apply_action
 from datasure.utils.duckdb_utils import (
+    FORM_DEFINITIONS_TABLE,
     duckdb_delete_rows,
     duckdb_get_aliases,
     duckdb_get_imported_datasets,
@@ -412,6 +413,14 @@ with st.container(border=True):
                 value=alias,
             )
             duckdb_remove_table(project_id, alias=alias, db_name="raw")
+            if duckdb_table_exists(project_id, FORM_DEFINITIONS_TABLE, "logs"):
+                duckdb_delete_rows(
+                    project_id=project_id,
+                    alias=FORM_DEFINITIONS_TABLE,
+                    db_name="logs",
+                    column="alias",
+                    value=alias,
+                )
             # check if the table exist in prep, if yes remove it
             if duckdb_table_exists(project_id, alias=alias, db_name="prep"):
                 duckdb_remove_table(project_id, alias=alias, db_name="prep")

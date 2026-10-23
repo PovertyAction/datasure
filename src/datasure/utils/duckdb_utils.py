@@ -491,3 +491,66 @@ def delete_missing_code(project_id: str, code_id: str) -> None:
     existing_codes = load_missing_codes_from_db(project_id)
     existing_codes = [mc for mc in existing_codes if mc.id != code_id]
     save_missing_codes_to_db(project_id, existing_codes)
+
+
+# --- SurveyCTO form definitions ---#
+
+FORM_DEFINITIONS_TABLE = "form_definitions"
+
+
+def save_form_definition(
+    project_id: str, alias: str, form_id: str, formdef_version: str, xml: bytes
+) -> None:
+    """Save a SurveyCTO form's compiled XML in the ``logs`` database.
+
+    One row per alias and form version; downloading the same version again
+    replaces its row.
+
+    Parameters
+    ----------
+    project_id : str
+        The project identifier.
+    alias : str
+        The dataset alias the form imports into.
+    form_id : str
+        The SurveyCTO form ID.
+    formdef_version : str
+        The form version the XML declares.
+    xml : bytes
+        The compiled XForm XML.
+    """
+    with duckdb.connect(database_path(project_id, "logs")) as conn:
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {FORM_DEFINITIONS_TABLE} (
+                alias VARCHAR,
+                form_id VARCHAR,
+                formdef_version VARCHAR,
+                xml BLOB,
+                downloaded_at TIMESTAMP,
+                PRIMARY KEY (alias, formdef_version)
+            )
+            """
+        )
+        conn.execute(
+            f"INSERT OR REPLACE INTO {FORM_DEFINITIONS_TABLE} "
+            "VALUES (?, ?, ?, ?, current_timestamp)",
+            [alias, form_id, formdef_version, xml],
+        )
+
+
+def load_form_definition(project_id: str, alias: str) -> bytes | None:
+    """Return the compiled XML of an alias's latest downloaded form version.
+
+    ``None`` when the alias has no stored form definition (local files,
+    server datasets, or SurveyCTO imports from before definitions were kept).
+    """
+    if not duckdb_table_exists(project_id, FORM_DEFINITIONS_TABLE, "logs"):
+        return None
+    with duckdb.connect(database_path(project_id, "logs")) as conn:
+        rows = conn.execute(
+            f"SELECT xml FROM {FORM_DEFINITIONS_TABLE} WHERE alias = ? "
+            "ORDER BY downloaded_at DESC, formdef_version DESC LIMIT 1",
+            [alias],
+        ).fetchall()
+    return rows[0][0] if rows else None
