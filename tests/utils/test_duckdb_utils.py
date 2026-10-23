@@ -16,8 +16,10 @@ from datasure.utils.duckdb_utils import (
     duckdb_get_imported_datasets,
     duckdb_get_table,
     duckdb_save_table,
+    load_form_definition,
     missing_codes_table_name,
     name_id,
+    save_form_definition,
 )
 
 
@@ -583,3 +585,36 @@ class TestDuckdbDeleteRows:
 
             remaining = duckdb_get_table("test_project", "import_log", "logs")
             assert remaining.shape[0] == 2
+
+
+class TestFormDefinitions:
+    """SurveyCTO form XML stored per alias and form version in logs."""
+
+    @pytest.fixture(autouse=True)
+    def logs_in_tmp(self, tmp_path):
+        with patch(
+            "datasure.utils.duckdb_utils.get_cache_path",
+            return_value=tmp_path / "logs.duckdb",
+        ):
+            yield
+
+    def test_no_definition_is_none(self):
+        assert load_form_definition("p", "farm") is None
+
+    def test_round_trip(self):
+        save_form_definition("p", "farm", "farm", "3", b"<v3/>")
+
+        assert load_form_definition("p", "farm") == b"<v3/>"
+        assert load_form_definition("p", "other") is None
+
+    def test_latest_version_wins(self):
+        save_form_definition("p", "farm", "farm", "3", b"<v3/>")
+        save_form_definition("p", "farm", "farm", "4", b"<v4/>")
+
+        assert load_form_definition("p", "farm") == b"<v4/>"
+
+    def test_same_version_replaces_its_row(self):
+        save_form_definition("p", "farm", "farm", "3", b"<old/>")
+        save_form_definition("p", "farm", "farm", "3", b"<new/>")
+
+        assert load_form_definition("p", "farm") == b"<new/>"

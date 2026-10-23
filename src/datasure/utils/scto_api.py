@@ -31,6 +31,10 @@ class SurveyCTOAPIError(Exception):
     pass
 
 
+class FormNotFoundError(SurveyCTOAPIError):
+    """The server has no deployed form with this ID (HTTP 404)."""
+
+
 class SurveyCTOAPIClient:
     """Client for interacting with SurveyCTO Server API v2.
 
@@ -120,14 +124,20 @@ class SurveyCTOAPIClient:
     # --- Datasets Endpoints --- #
 
     def list_datasets(self) -> list[dict[str, Any]]:
-        """List all datasets on the server.
+        """List all datasets on the server, following ``nextCursor``.
 
         Returns
         -------
             List of dataset information dictionaries
         """
-        response = self._make_request("GET", "/datasets")
-        return response.json()
+        page = self._make_request("GET", "/datasets").json()
+        datasets = page["data"]
+        while page["nextCursor"]:
+            page = self._make_request(
+                "GET", "/datasets", params={"cursor": page["nextCursor"]}
+            ).json()
+            datasets += page["data"]
+        return datasets
 
     def get_dataset_info(self, dataset_id: str) -> dict[str, Any]:
         """Get information about a specific dataset.
@@ -346,6 +356,43 @@ class SurveyCTOAPIClient:
                 f"Unexpected error downloading form definition from {url}"
             )
             raise SurveyCTOAPIError(f"Unexpected error: {e}") from e
+
+    def download_form_xml(self, form_id: str) -> bytes:
+        """Download the deployed form's compiled XForm XML.
+
+        Parameters
+        ----------
+            form_id: Form identifier
+
+        Returns
+        -------
+            The compiled XML as bytes
+
+        Raises
+        ------
+            SurveyCTOAPIError: If the request fails
+
+        Notes
+        -----
+            Uses the /forms/{form_id}/xml endpoint with the session's Basic
+            auth, the same credentials that download the submissions.
+        """
+        url = f"https://{self.config.server_name}.surveycto.com/forms/{form_id}/xml"
+
+        try:
+            response = self.session.get(url, timeout=self.config.timeout)
+            response.raise_for_status()
+            return response.content  # noqa: TRY300
+
+        except requests.exceptions.HTTPError as e:
+            self.logger.exception(f"HTTP error downloading form XML from {url}")
+            if e.response is not None and e.response.status_code == 404:
+                raise FormNotFoundError(f"No deployed form {form_id!r}: {e}") from e
+            raise SurveyCTOAPIError(f"Failed to download form XML: {e}") from e
+
+        except requests.exceptions.RequestException as e:
+            self.logger.exception(f"Request error downloading form XML from {url}")
+            raise SurveyCTOAPIError(f"Failed to download form XML: {e}") from e
 
     def download_form_xlsx(self, form_id: str) -> tuple[bytes, dict]:
         """Build an XLSForm-compatible XLSX from the form definition JSON.

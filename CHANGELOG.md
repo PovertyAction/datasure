@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Typed SurveyCTO import**: `SurveyCTOClient._import_regular_form`
+  (`connectors/scto.py`) downloads the deployed form's compiled XML
+  (`SurveyCTOAPIClient.download_form_xml`, `GET /forms/{id}/xml` with the same
+  Basic auth as the data), parses it with `parse_contract` and casts the wide
+  JSON with `cast_wide`. `typed_frame` converts the Arrow table to Polars,
+  strips the UTC zone from timestamps (stored naive, as before) and keeps
+  `formdef_version` as `Int64` for the enumerator check
+- **Form definitions**: `save_form_definition` / `load_form_definition`
+  (`utils/duckdb_utils.py`) keep the XML in `form_definitions` in
+  `logs.duckdb`, one row per alias and form version. Removing an import
+  removes its rows
+- **`datasure.surveycto`**: the form contract (`xml_contract`, `xpath`) and
+  the typed cast (`cast`), adapted from surveycto_python_dict at `d6f54f9`
+  and maintained in DataSure from now on; `parse_contract` also reads XML
+  bytes. Upstream's offline tests for them are in `tests/surveycto/`
+
 - **Prep concat** (#388): Add Column has a `concat` method
   (`PrepFunctions.concat`) that joins two or more text columns in selection
   order with a separator stored in the step's `value` (`""`, `" "`, `","`,
@@ -56,6 +72,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking, SurveyCTO column types**: columns take the form's types instead
+  of `DataProcessor`'s. Integers are `Int64` (were `Float64`), dates `Date`
+  (were `Datetime`), numeric select_one codes `Int64` and select_multiple
+  binaries `Int8` with 0 for unchosen options of an answered question (both
+  were `String`), `duration` `Int64` (was `Float64`). A field the cast cannot parse in every
+  row stays `String`. Prep or correction steps that relied on the old types
+  report `Failed` on the next replay
+- **Form or dataset routing**: `import_data` imports an ID as a server dataset
+  only when its form XML is not found (`FormNotFoundError`, HTTP 404) and the
+  ID is on `list_datasets()`. Any other failed form import raises instead of
+  being retried as a dataset, which turned XML, decryption or network errors
+  into a silent untyped CSV import. A form import makes no dataset call, so
+  accounts without dataset access import forms as before
+- **`SurveyCTOAPIClient.list_datasets`** follows `nextCursor` and returns the
+  `data` entries (it returned the first raw page)
+
 - **Check table names in one place**: `CHECK_TABLE_PREFIXES`, one constant
   per prefix, `check_table_name()` and `missing_codes_table_name()` live in
   `utils/duckdb_utils.py`, and every check module and the export registry
@@ -73,6 +105,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   falling back to `String`
 
 ### Removed
+
+- **`DataProcessor`** and `SurveyCTOConfig.date_format` (`connectors/scto.py`):
+  replaced by `surveycto.cast`. `get_repeat_columns` is a module function for
+  the media download
 
 - **Apply Consent and Outcome Settings** (#353): The Enumerator settings
   button and the project-wide `enumerator_data_with_consent_outcome` table
