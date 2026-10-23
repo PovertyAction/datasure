@@ -227,11 +227,12 @@ class RemoveRowsOperation(PrepOperation):
             value = prep_args.value
             condition = prep_args.condition
             source_columns = prep_args.source_columns or []
+            additional_info = None
 
             if method == PrepMethods.row_index.value:
                 results = self._remove_by_index(data, value)
             elif method == PrepMethods.condition.value:
-                results = self._remove_by_condition(
+                results, additional_info = self._remove_by_condition(
                     data, condition, source_columns, value
                 )
             else:
@@ -248,7 +249,7 @@ class RemoveRowsOperation(PrepOperation):
                 "source_columns": source_columns,
                 "condition": condition,
                 "failed_count": 0,
-                "additional_info": None,
+                "additional_info": additional_info,
             }
 
             return results, PrepActionResult(**updated_prep_args)
@@ -278,22 +279,25 @@ class RemoveRowsOperation(PrepOperation):
 
     def _remove_by_condition(
         self, data: pl.DataFrame, condition: str, columns: list[str], value: Any
-    ) -> pl.DataFrame:
-        """Remove rows based on conditions."""
-        # Parse columns
+    ) -> tuple[pl.DataFrame, str | None]:
+        """Remove rows where the condition is true in any selected column.
+
+        A row whose condition is unknown because of a missing value is kept.
+        Returns the remaining data and a notice counting those kept rows.
+        """
         self._validate_columns_exist(data, columns)
 
         if condition == PrepRowConditions.missing.value:
-            return data.filter(~pl.any_horizontal(pl.col(columns).is_null()))
+            masks = [pl.col(col).is_null() for col in columns]
 
         elif condition == PrepRowConditions.not_missing.value:
-            return data.filter(pl.any_horizontal(pl.col(columns).is_null()))
+            masks = [pl.col(col).is_not_null() for col in columns]
 
         elif condition in [
             PrepRowConditions.equal_to.value,
             PrepRowConditions.not_equal_to.value,
         ]:
-            return self._filter_by_equality(data, condition, columns, value)
+            masks = self._equality_masks(condition, columns, value)
 
         elif condition in [
             PrepRowConditions.greater_than.value,
@@ -301,119 +305,94 @@ class RemoveRowsOperation(PrepOperation):
             PrepRowConditions.less_than.value,
             PrepRowConditions.less_than_or_equal_to.value,
         ]:
-            return self._filter_by_comparison(data, condition, columns, value)
+            masks = self._comparison_masks(condition, columns, value)
 
         elif condition in [
             PrepRowConditions.between.value,
             PrepRowConditions.not_between.value,
         ]:
-            return self._filter_by_range(data, condition, columns, value)
+            masks = self._range_masks(condition, columns, value)
 
         elif condition in [
             PrepRowConditions.like.value,
             PrepRowConditions.not_like.value,
         ]:
-            return self._filter_by_pattern(data, condition, columns, value)
+            masks = self._pattern_masks(condition, columns, value)
 
         else:
             raise ValidationError(f"Unknown condition: {condition}")
 
-    def _filter_by_equality(
-        self, data: pl.DataFrame, condition: str, columns: list[str], value: Any
-    ) -> pl.DataFrame:
-        """Filter by equality conditions."""
+        return self._drop_where(data, pl.any_horizontal(masks), columns)
+
+    @staticmethod
+    def _drop_where(
+        data: pl.DataFrame, mask: pl.Expr, columns: list[str]
+    ) -> tuple[pl.DataFrame, str | None]:
+        """Drop rows where ``mask`` is true; keep rows where it is null."""
+        kept_missing = data.select(mask.is_null().sum()).item()
+        results = data.filter(~mask.fill_null(False))
+
+        if not kept_missing:
+            return results, None
+        row_text = "row" if kept_missing == 1 else "rows"
+        column_display = ", ".join(f'"{col}"' for col in columns)
+        return (
+            results,
+            f"{kept_missing} {row_text} kept because a value is missing in "
+            f"{column_display}.",
+        )
+
+    def _equality_masks(
+        self, condition: str, columns: list[str], value: Any
+    ) -> list[pl.Expr]:
+        """Build remove-masks for equality conditions."""
         # Ensure value is a list for is_in() to treat as literal values
         value_list = value if isinstance(value, list) else [value]
 
-        filter_expr = pl.any_horizontal(
-            [pl.col(col).is_in(value_list) for col in columns]
-        )
-
+        masks = [pl.col(col).is_in(value_list) for col in columns]
         if condition == PrepRowConditions.not_equal_to.value:
-            # "Remove rows where value is not equal to X" - keep only the
-            # matching rows, i.e. drop everything the filter doesn't match.
-            return data.filter(filter_expr)
-        else:
-            # "Remove rows where value is equal to X" - keep everything
-            # that doesn't match.
-            return data.filter(~filter_expr)
+            return [~mask for mask in masks]
+        return masks
 
-    def _filter_by_comparison(
-        self, data: pl.DataFrame, condition: str, columns: list[str], value: Any
-    ) -> pl.DataFrame:
-        """Filter by comparison conditions."""
+    def _comparison_masks(
+        self, condition: str, columns: list[str], value: Any
+    ) -> list[pl.Expr]:
+        """Build remove-masks for comparison conditions."""
         # Handle both single values and lists
         raw_value = value[0] if isinstance(value, list) else value
         value_use = float(raw_value)
 
-        # Build filter expression for each column
         if condition == PrepRowConditions.greater_than.value:
-            filter_expr = pl.any_horizontal(
-                [pl.col(col) <= value_use for col in columns]
-            )
-        elif condition == PrepRowConditions.greater_than_or_equal_to.value:
-            filter_expr = pl.any_horizontal(
-                [pl.col(col) < value_use for col in columns]
-            )
-        elif condition == PrepRowConditions.less_than.value:
-            filter_expr = pl.any_horizontal(
-                [pl.col(col) >= value_use for col in columns]
-            )
-        elif condition == PrepRowConditions.less_than_or_equal_to.value:
-            filter_expr = pl.any_horizontal(
-                [pl.col(col) > value_use for col in columns]
-            )
-        else:
-            return data
+            return [pl.col(col) > value_use for col in columns]
+        if condition == PrepRowConditions.greater_than_or_equal_to.value:
+            return [pl.col(col) >= value_use for col in columns]
+        if condition == PrepRowConditions.less_than.value:
+            return [pl.col(col) < value_use for col in columns]
+        return [pl.col(col) <= value_use for col in columns]
 
-        return data.filter(filter_expr)
-
-    def _filter_by_range(
-        self, data: pl.DataFrame, condition: str, columns: list[str], value: Any
-    ) -> pl.DataFrame:
-        """Filter by range conditions."""
+    def _range_masks(
+        self, condition: str, columns: list[str], value: Any
+    ) -> list[pl.Expr]:
+        """Build remove-masks for range conditions."""
         # Handle both single values and lists for value
         value_list = value if isinstance(value, list) else [value, value]
         if len(value_list) != 2:
             raise ValidationError(f"Expected 2 values for range, got: {value_list}")
+        lower, upper = (float(bound) for bound in value_list)
 
-        if condition == "value is between":
-            # Keep rows outside the range
-            filter_expr = pl.any_horizontal(
-                [
-                    (pl.col(col) < value_list[0]) | (pl.col(col) > value_list[1])
-                    for col in columns
-                ]
-            )
-        else:
-            # Keep rows inside the range
-            filter_expr = pl.any_horizontal(
-                [
-                    (pl.col(col) >= value_list[0]) & (pl.col(col) <= value_list[1])
-                    for col in columns
-                ]
-            )
+        masks = [pl.col(col).is_between(lower, upper) for col in columns]
+        if condition == PrepRowConditions.not_between.value:
+            return [~mask for mask in masks]
+        return masks
 
-        return data.filter(filter_expr)
-
-    def _filter_by_pattern(
-        self, data: pl.DataFrame, condition: str, columns: list[str], value: str
-    ) -> pl.DataFrame:
-        """Filter by pattern matching."""
-        if condition == PrepRowConditions.like.value:
-            # Keep rows that don't match the pattern
-            filter_expr = pl.all_horizontal(
-                [~pl.col(col).str.contains(value) for col in columns]
-            )
-            return data.filter(filter_expr)
-        elif condition == PrepRowConditions.not_like.value:
-            # Keep rows that match the pattern
-            filter_expr = pl.any_horizontal(
-                [pl.col(col).str.contains(value) for col in columns]
-            )
-            return data.filter(filter_expr)
-        else:
-            raise ValidationError(f"Unknown pattern condition: {condition}")
+    def _pattern_masks(
+        self, condition: str, columns: list[str], value: str
+    ) -> list[pl.Expr]:
+        """Build remove-masks for pattern conditions."""
+        masks = [pl.col(col).str.contains(value) for col in columns]
+        if condition == PrepRowConditions.not_like.value:
+            return [~mask for mask in masks]
+        return masks
 
 
 class TransformColumnsOperation(PrepOperation):

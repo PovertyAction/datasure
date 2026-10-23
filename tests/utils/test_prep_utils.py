@@ -546,6 +546,28 @@ class TestPrepConfirmationMessages:
 
         assert '"age" value is between 18 and 65' in message
 
+    def test_remove_rows_message_reports_rows_kept_for_missing_values(self):
+        """Test remove_rows message includes the rows kept for missing values."""
+        result = PrepActionResult(
+            action="remove row(s)",
+            affected_count=1,
+            remaining_rows=2,
+            remaining_columns=2,
+            method="by condition",
+            source_columns=["age"],
+            condition="value is greater than",
+            value=60,
+            additional_info='1 row kept because a value is missing in "age".',
+        )
+
+        message = PrepConfirmationMessages.remove_rows(result)
+
+        assert message == (
+            '✓ 1 row removed where "age" value is greater than 60. '
+            '1 row kept because a value is missing in "age". '
+            "Dataset now has 2 rows and 2 columns."
+        )
+
     def test_remove_rows_message_by_index(self):
         """Test remove_rows message for row-index removal states the indexes."""
         result = PrepActionResult(
