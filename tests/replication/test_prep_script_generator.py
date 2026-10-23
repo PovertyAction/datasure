@@ -12,6 +12,7 @@ from datasure.replication.prep_script_generator import (
     _stata_add_column,
     _stata_remove_columns,
     _stata_remove_rows,
+    _stata_str_literal,
     _stata_transform_column,
     _val,
     _val_list,
@@ -287,6 +288,93 @@ class TestStataTransformColumn:
         )
         assert "destring" in lines[0]
 
+    def test_to_string_drops_whole_float_suffix_in_text_columns(self):
+        # The CSV import keeps "12.0" as text; DataSure would show "12".
+        lines = _stata_transform_column(
+            {"source_columns": ["hhid"], "method": "to string"}, ""
+        )
+        assert lines[0] == "capture confirm string variable hhid"
+        assert "    quietly count if !missing(hhid) & missing(real(hhid))" in lines
+        assert (
+            "        quietly replace hhid = substr(hhid, 1, strlen(hhid) - 2) "
+            'if substr(hhid, -2, 2) == ".0"'
+        ) in lines
+
+    def test_to_string_does_not_destring_text_columns(self):
+        # destring would round IDs above 2^53 through a double.
+        text = "\n".join(
+            _stata_transform_column(
+                {"source_columns": ["hhid"], "method": "to string"}, ""
+            )
+        )
+        assert "destring" not in text
+
+    def test_to_string_formats_csv_datetimes_like_datasure(self):
+        # write_csv gives "2025-08-18T19:49:00.000000"; DataSure uses a space.
+        lines = _stata_transform_column(
+            {"source_columns": ["t"], "method": "to string"}, ""
+        )
+        assert (
+            "    quietly count if !missing(t) & "
+            '!ustrregexm(t, "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]")'
+        ) in lines
+        assert (
+            '        quietly replace t = substr(t, 1, 10) + " " '
+            "+ substr(t, 12, .) if !missing(t)"
+        ) in lines
+
+    def test_to_string_avoids_global_macro_syntax(self):
+        # A do-file would expand "$..." as a global macro.
+        text = "\n".join(
+            _stata_transform_column(
+                {"source_columns": ["t"], "method": "to string"}, ""
+            )
+        )
+        assert "$" not in text
+
+    def test_to_string_formats_dates_like_datasure(self):
+        # SurveyCTO dates are datetimes in DataSure, not day counts.
+        text = "\n".join(
+            _stata_transform_column(
+                {"source_columns": ["d"], "method": "to string"}, ""
+            )
+        )
+        assert '"%tdCCYY-NN-DD") + " 00:00:00.000000"' in text
+        assert '"%tcCCYY-NN-DD_HH:MM:SS.sss") + "000"' in text
+
+    def test_to_string_keeps_missing_values_empty(self):
+        # tostring would turn missing into ".", which concat then joins.
+        text = "\n".join(
+            _stata_transform_column(
+                {"source_columns": ["n"], "method": "to string"}, ""
+            )
+        )
+        assert "tostring" not in text
+        assert 'string(n, "%17.0g") if !missing(n)' in text
+
+    def test_to_string_keeps_column_position(self):
+        lines = _stata_transform_column(
+            {"source_columns": ["n"], "method": "to string"}, ""
+        )
+        assert "    order `s', after(n)" in lines
+
+    def test_to_number_maps_true_false_text(self):
+        # The raw CSV holds booleans as "true"/"false" text.
+        lines = _stata_transform_column(
+            {"source_columns": ["consent"], "method": "to number"}, ""
+        )
+        assert lines[0] == "capture confirm string variable consent"
+        assert '    gen byte `n\' = 1 if consent == "true"' in lines
+        assert '    replace `n\' = 0 if consent == "false"' in lines
+
+    def test_to_number_keeps_column_name_and_position(self):
+        lines = _stata_transform_column(
+            {"source_columns": ["consent"], "method": "to number"}, ""
+        )
+        assert "    order `n', after(consent)" in lines
+        assert "    drop consent" in lines
+        assert "    rename `n' consent" in lines
+
     def test_floor(self):
         lines = _stata_transform_column(
             {"source_columns": ["col"], "method": "floor"}, ""
@@ -298,6 +386,23 @@ class TestStataTransformColumn:
             {"source_columns": ["dob"], "method": "year"}, ""
         )
         assert "year(" in lines[0]
+
+
+class TestStataStrLiteral:
+    def test_plain_text(self):
+        assert _stata_str_literal("_") == '"_"'
+
+    def test_empty(self):
+        assert _stata_str_literal("") == '""'
+
+    def test_local_macro_syntax(self):
+        assert _stata_str_literal("`v'") == 'char(96) + "v\'"'
+
+    def test_global_macro_syntax(self):
+        assert _stata_str_literal("$raw") == 'char(36) + "raw"'
+
+    def test_quotes(self):
+        assert _stata_str_literal("a\"'b") == '"a" + char(34) + "\'b"'
 
 
 class TestStataAddColumn:
@@ -316,6 +421,47 @@ class TestStataAddColumn:
     def test_index(self):
         lines = _stata_add_column({"column_names": "idx", "method": "index"}, "")
         assert "gen idx = _n" in lines[0]
+
+    def test_concat_joins_columns_skipping_empty_values(self):
+        lines = _stata_add_column(
+            {
+                "column_names": "uid",
+                "method": "concat",
+                "source_columns": ["region", "hhid"],
+                "value": "_",
+            },
+            "",
+        )
+        assert lines == [
+            'gen uid = ""',
+            "foreach v in region hhid {",
+            '    replace uid = uid + cond(uid == "" | `v\' == "", "", "_") + `v\'',
+            "}",
+        ]
+
+    def test_concat_without_separator(self):
+        lines = _stata_add_column(
+            {
+                "column_names": "uid",
+                "method": "concat",
+                "source_columns": ["a", "b"],
+                "value": None,
+            },
+            "",
+        )
+        assert 'cond(uid == "" | `v\' == "", "", "")' in lines[2]
+
+    def test_concat_separator_is_not_expanded_as_a_macro(self):
+        lines = _stata_add_column(
+            {
+                "column_names": "uid",
+                "method": "concat",
+                "source_columns": ["a", "b"],
+                "value": "`v'",
+            },
+            "",
+        )
+        assert 'cond(uid == "" | `v\' == "", "", char(96) + "v\'")' in lines[2]
 
     def test_uuid_note(self):
         lines = _stata_add_column({"column_names": "uid", "method": "uuid"}, "")

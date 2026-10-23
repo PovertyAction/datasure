@@ -155,6 +155,89 @@ def _stata_remove_rows(args: dict, _desc: str) -> list[str]:
     return _drop_by_condition(cols[0], condition, values)
 
 
+def _stata_to_string(col: str) -> list[str]:
+    """Convert a column to text the way DataSure's ``to string`` does.
+
+    The CSV import keeps every column as text, so a text column is fixed up
+    as text rather than destrung, which would round large IDs through a
+    double. A column of numbers drops a whole float's ".0" ("12.0" becomes
+    "12"), and a column of CSV timestamps swaps the "T" for DataSure's
+    space. SurveyCTO dates and datetimes are both datetimes in DataSure, so
+    they get its full timestamp text. Missing values become "" instead of
+    ".", and Stata's ".5" gets DataSure's leading zero. The code avoids "$",
+    which a do-file would expand as a global macro.
+    """
+    return [
+        f"capture confirm string variable {col}",
+        "if !_rc {",
+        f"    quietly count if !missing({col}) & missing(real({col}))",
+        "    if r(N) == 0 {",
+        (
+            f"        quietly replace {col} = substr({col}, 1, strlen({col}) - 2) "
+            f'if substr({col}, -2, 2) == ".0"'
+        ),
+        "    }",
+        (
+            f"    quietly count if !missing({col}) & "
+            f'!ustrregexm({col}, "^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}T[0-9]")'
+        ),
+        "    if r(N) == 0 {",
+        (
+            f'        quietly replace {col} = substr({col}, 1, 10) + " " '
+            f"+ substr({col}, 12, .) if !missing({col})"
+        ),
+        "    }",
+        "}",
+        f"capture confirm numeric variable {col}",
+        "if !_rc {",
+        "    tempvar s",
+        f"    local fmt : format {col}",
+        '    if strpos("`fmt\'", "%td") {',
+        (
+            f'        gen `s\' = string({col}, "%tdCCYY-NN-DD") '
+            f'+ " 00:00:00.000000" if !missing({col})'
+        ),
+        "    }",
+        '    else if strpos("`fmt\'", "%tc") {',
+        (
+            f'        gen `s\' = string({col}, "%tcCCYY-NN-DD_HH:MM:SS.sss") '
+            f'+ "000" if !missing({col})'
+        ),
+        "    }",
+        "    else {",
+        f'        gen `s\' = string({col}, "%17.0g") if !missing({col})',
+        '        replace `s\' = "0" + `s\' if substr(`s\', 1, 1) == "."',
+        (
+            "        replace `s' = \"-0\" + substr(`s', 2, .) "
+            'if substr(`s\', 1, 2) == "-."'
+        ),
+        "    }",
+        f"    order `s', after({col})",
+        f"    drop {col}",
+        f"    rename `s' {col}",
+        "}",
+    ]
+
+
+def _stata_to_number(col: str) -> list[str]:
+    """Convert a true/false column to 1/0 the way DataSure's ``to number`` does.
+
+    The raw CSV holds booleans as "true"/"false" text. Any other value,
+    including "", becomes missing. A numeric column is left as it is.
+    """
+    return [
+        f"capture confirm string variable {col}",
+        "if !_rc {",
+        "    tempvar n",
+        f'    gen byte `n\' = 1 if {col} == "true"',
+        f'    replace `n\' = 0 if {col} == "false"',
+        f"    order `n', after({col})",
+        f"    drop {col}",
+        f"    rename `n' {col}",
+        "}",
+    ]
+
+
 def _stata_transform_column(args: dict, _desc: str) -> list[str]:
     cols = _cols(args)
     method = (args.get("method") or "").lower()
@@ -196,6 +279,12 @@ def _stata_transform_column(args: dict, _desc: str) -> list[str]:
     if method in simple_stata:
         return [simple_stata[method]]
 
+    if method == "to string":
+        return _stata_to_string(col)
+
+    if method == "to number":
+        return _stata_to_number(col)
+
     if method in arith_ops and values:
         op = arith_ops[method]
         fv = _fmt_val(values[0])
@@ -235,6 +324,50 @@ _ADD_COL_EXPRS: dict[str, tuple[int, Callable[[list[str]], str]]] = {
 }
 
 
+# Characters Stata would read as macro syntax or a quote delimiter, even
+# inside compound quotes.
+_STATA_UNSAFE_CHARS = frozenset('`$"')
+
+
+def _stata_str_literal(text: str) -> str:
+    """Stata string expression that evaluates to exactly ``text``.
+
+    Runs of unsafe characters become ``char()`` calls so a separator like
+    ``"`v'"`` or ``"$raw"`` is not expanded as a macro.
+    """
+    parts: list[str] = []
+    run = ""
+    for ch in text:
+        if ch in _STATA_UNSAFE_CHARS:
+            if run:
+                parts.append(f'"{run}"')
+                run = ""
+            parts.append(f"char({ord(ch)})")
+        else:
+            run += ch
+    if run or not parts:
+        parts.append(f'"{run}"')
+    return " + ".join(parts)
+
+
+def _stata_concat(new_col: str, src_cols: list[str], separator: str) -> list[str]:
+    """Join string columns, skipping empty values like DataSure's concat.
+
+    ``egen concat()`` would keep a separator for every empty value, so the
+    columns are joined one at a time instead. Stata has no string missing
+    value apart from "", so a value that was an empty string (not missing)
+    in DataSure is skipped here too.
+    """
+    sep = _stata_str_literal(separator)
+    return [
+        f'gen {new_col} = ""',
+        f"foreach v in {_col_list(src_cols)} {{",
+        f"    replace {new_col} = {new_col} + "
+        f'cond({new_col} == "" | `v\' == "", "", {sep}) + `v\'',
+        "}",
+    ]
+
+
 def _stata_add_column(args: dict, _desc: str) -> list[str]:
     new_col = args.get("column_names") or ""
     method = (args.get("method") or "").lower()
@@ -244,6 +377,9 @@ def _stata_add_column(args: dict, _desc: str) -> list[str]:
     if method == "constant":
         raw = values[0] if values else (args.get("value") or "")
         return [f"gen {new_col} = {_fmt_val(raw)}"]
+
+    if method == "concat" and len(src_cols) >= 2:
+        return _stata_concat(new_col, src_cols, args.get("value") or "")
 
     if method == "uuid":
         return [f"{_C} NOTE: uuid column '{new_col}' — no direct Stata equivalent"]

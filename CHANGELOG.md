@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Prep concat** (#388): Add Column has a `concat` method
+  (`PrepFunctions.concat`) that joins two or more text columns in selection
+  order with a separator stored in the step's `value` (`""`, `" "`, `","`,
+  `"_"`, `"-"` or custom text; a null `value` means none).
+  `AddNewColumnOperation._add_concat_column` uses
+  `pl.concat_str(..., ignore_nulls=True)` and returns null only when every
+  source is null. It raises `ValidationError` naming any missing or non-text
+  source, so a reapplied step whose source changed type is skipped. The form
+  lists only text columns and stores the separator through
+  `prep_view._concat_separator`; `_is_add_column_incomplete` requires two
+  columns and a non-empty **Specify** separator. The Stata prepare-data script
+  joins the columns in a `foreach` loop that skips empty values
+- **Prep to string** (#388): Transform Column has a `to string` operation
+  (`PrepOperations.to_string`) for numeric, datetime, date and boolean
+  columns. It casts in place with Polars' default string cast; floats drop a
+  trailing `.0` and nulls stay null. Date and boolean columns get their own
+  input path (`PrepDescriptions.CONVERSION_FUNCTIONS`,
+  `_render_conversion_function_inputs`)
+- **Prep to number** (#388): Transform Column has a `to number` operation
+  (`PrepOperations.to_number`) for boolean columns. It casts in place to
+  `Int64` (true → 1, false → 0, nulls stay null). Boolean columns get their own
+  menu (`PrepDescriptions.BOOLEAN_FUNCTIONS`) with `to string` and `to number`.
+  Imports keep boolean columns as booleans; this replaces the import-time cast
+  proposed in #386. The Stata prepare-data script maps `"true"`/`"false"` text
+  from the raw CSV to 1/0 and any other value to missing
+
 ### Fixed
 
 - **Missing codes counted as values** (#379): The codes set on the Missing
