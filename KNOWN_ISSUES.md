@@ -16,6 +16,14 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ## Open issues
 
+### KI-031: New installs fail to import data with `Resource In Use Error` or `no attribute 'pl'`
+
+- **Status:** 🟡 Planned for 1.2.0
+- **Affected versions:** 1.0.0 – 1.2.0a6, when installed on or after 2026-10-21
+- **Symptom:** On a new install, importing data or opening a check page fails with `Resource In Use Error: connection has an unfinished result from execute()` or `'DuckDBPyConnection' object has no attribute 'pl'`. Installs made before 21 October 2026 are not affected unless you reinstall or upgrade.
+- **Workaround:** Reinstall with an older DuckDB: `uv tool install datasure --force --with "duckdb<2"`.
+- **Issue:** [#393](https://github.com/PovertyAction/datasure/issues/393)
+
 ### KI-030: Outliers & Constraints and GPS Checks tabs crash with `cannot compare string with numeric type (i32)` after applying a project setup
 
 - **Status:** 🟡 Planned for 1.2.0 (fixed in 1.2.0a6)
