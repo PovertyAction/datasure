@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **SurveyCTO data dictionary** (`processing/form_dictionary.py`):
+  `build_form_dictionary(project_id, alias, missing_codes)` builds an alias's
+  variable dictionary, rule-based PII flags (trusting publishable fields; no
+  Presidio, so what the rules leave open is `may_contain_pii` / `unscanned`)
+  and `stats_rows`, which count each column only over the rows where its
+  question was asked and set the project's whole-number missing codes apart
+  (`sentinels_from_missing_codes`). `None` without a stored form definition.
+  `dictionary_xlsx` writes the workbook (Variables, Summary stats) with
+  upstream's `save_codebook`; flagged columns show counts, never values
+- **Replication package**: SurveyCTO aliases get
+  `1_docs/2_codebooks/{survey}_dictionary.xlsx`, listed in the README
+  (`generate_readme(include_form_dictionary=...)`)
 - **Typed SurveyCTO import**: `SurveyCTOClient._import_regular_form`
   (`connectors/scto.py`) downloads the deployed form's compiled XML
   (`SurveyCTOAPIClient.download_form_xml`, `GET /forms/{id}/xml` with the same
@@ -17,15 +29,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   strips the UTC zone from timestamps (stored naive, as before) and keeps
   `formdef_version` as `Int64` for the enumerator check
 - **Form definitions**: `save_form_definition` / `load_form_definition`
-  (`utils/duckdb_utils.py`) keep the XML in `form_definitions` in
-  `logs.duckdb`, one row per alias and form version. Removing an import
+  (`utils/duckdb_utils.py`) keep the XML and the cast's serialized Arrow
+  schema in `form_definitions` in `logs.duckdb`, one row per alias and form
+  version. `form_table` casts raw back to that schema, restoring the field
+  metadata Polars drops. Removing an import
   removes its rows
 - **Vendored surveycto_python_dict**: `src/datasure/vendor/scto_dict/` holds
-  its `xpath`, `xml_contract`, `questions` and `cast` modules at `d6f54f9`, copied by
+  its `xpath`, `xml_contract`, `questions`, `cast`, `contract`, `survey`,
+  `dictionary`, `stats`, `codebook` and `pii` modules at `3f5de31`, copied by
   `just vendor-scto <checkout> <ref>` (`scripts/vendor_scto.py`), which also
-  copies upstream's offline tests to `tests/vendor/scto_dict/`. One patch
-  (`parse_contract` accepts bytes) is pending upstream. Excluded from ruff
-  (`force-exclude`) and coverage
+  copies upstream's offline tests to `tests/vendor/scto_dict/`. Excluded
+  from ruff (`force-exclude`), coverage and Sonar
 
 - **Prep concat** (#388): Add Column has a `concat` method
   (`PrepFunctions.concat`) that joins two or more text columns in selection

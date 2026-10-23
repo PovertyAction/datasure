@@ -47,10 +47,13 @@ src/datasure/
 ├── processing/
 │   ├── prep.py             # Data preparation operations (Polars)
 │   ├── corrections.py      # Corrections and accept entries (CorrectionProcessor)
-│   └── correction_log.py   # Correction log schema/backfill, Action enum (no Streamlit)
+│   ├── correction_log.py   # Correction log schema/backfill, Action enum (no Streamlit)
+│   └── form_dictionary.py  # SurveyCTO data dictionary: labels, relevance, PII
+│                           # rules and skip-logic stats (no Streamlit)
 ├── replication/            # Stata/Python replication package export
 ├── vendor/
-│   └── scto_dict/          # surveycto_python_dict's form contract and cast.
+│   └── scto_dict/          # surveycto_python_dict's form contract, cast,
+│                           # dictionary, stats, codebook writer and PII rules.
 │                           # Copied by `just vendor-scto`; see its VENDORED.md
 ├── models/
 │   ├── schemas.py          # Pydantic models
@@ -78,8 +81,10 @@ The `archived/` directory holds legacy code and is gitignored.
 1. **Import** (`views/import_view.py` + `connectors/`): SurveyCTO API or local
    files. A SurveyCTO form is typed from its compiled XML: `connectors/scto.py`
    downloads it, parses it with the vendored `parse_contract`, casts the wide
-   JSON with `cast_wide` and keeps the XML per form version in `logs.duckdb`
-   (`form_definitions`). An ID on the server's dataset list imports as a server
+   JSON with `cast_wide` and keeps the XML and the cast's Arrow schema per form
+   version in `logs.duckdb` (`form_definitions`). The schema holds the field
+   metadata Polars drops; `processing/form_dictionary.py` casts raw back to it
+   to build the data dictionary. An ID on the server's dataset list imports as a server
    dataset CSV instead; any other error fails the import
 2. **Storage**: per-project DuckDB databases via `utils/duckdb_utils.py`
 3. **Preparation** (`views/prep_view.py` + `processing/prep.py`): Polars
@@ -363,7 +368,8 @@ Per project (UUID-keyed):
   each check page's check tables, such as the Descriptive Stats column
   selection `descriptive_columns_{page_name_id}`, and the project's missing
   codes `missing_codes_{project_id}`, and the SurveyCTO form XML
-  `form_definitions`, one row per alias and form version), JSON settings
+  `form_definitions`: XML and cast Arrow schema, one row per alias and form
+  version), JSON settings
   (including
   each check page's, Prepare Data's and Corrections'
   [view state](#view-state)), and credential metadata

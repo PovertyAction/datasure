@@ -42,7 +42,7 @@ Version 1.0 - Comprehensive Guide to Survey Data Quality Management
 - **Interactive Visualizations**: Charts, tables, and heatmaps for easy interpretation
 - **Audit Trails**: Complete tracking of all data corrections and modifications
 - **Demo Mode**: Guided tutorial with sample household survey data
-- **Replication Package Export**: Generate Stata or Python scripts that reproduce your complete data pipeline for sharing or archiving
+- **Replication Package Export**: Generate Stata or Python scripts that reproduce your complete data pipeline for sharing or archiving. For a SurveyCTO dataset the package also holds a data dictionary to share with PIs: each question's label, choices and relevance, with summary stats counted only where the question was asked
 
 ---
 

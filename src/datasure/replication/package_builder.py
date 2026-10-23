@@ -15,6 +15,7 @@ from datasure.processing.correction_log import (
     Action,
     ensure_log_columns,
 )
+from datasure.processing.form_dictionary import build_form_dictionary, dictionary_xlsx
 from datasure.replication.codebook import generate_codebook
 from datasure.replication.prep_script_generator import (
     generate_prepare_data_script,
@@ -30,7 +31,7 @@ from datasure.replication.script_generators import (
 from datasure.replication.scto_import_generator import (
     generate_scto_import_script,
 )
-from datasure.utils.duckdb_utils import duckdb_get_table
+from datasure.utils.duckdb_utils import duckdb_get_table, load_missing_codes_from_db
 
 logger = logging.getLogger(__name__)
 
@@ -277,6 +278,13 @@ def build_replication_package(
     )
     _step("`0_main.do` generated")
 
+    # SurveyCTO aliases only: built from the stored form definition.
+    form_dictionary = build_form_dictionary(
+        project_id, alias, load_missing_codes_from_db(project_id)
+    )
+    if form_dictionary is not None:
+        _step("Data dictionary generated")
+
     readme = generate_readme(
         project_name=project_name,
         survey_name=survey_name,
@@ -288,6 +296,7 @@ def build_replication_package(
         corrected_rows=corrected_df.height if not corrected_df.is_empty() else 0,
         n_corrections_by_action=n_by_action,
         include_scto_form=scto_form_xlsx is not None,
+        include_form_dictionary=form_dictionary is not None,
     )
     _step("README generated")
 
@@ -333,6 +342,11 @@ def build_replication_package(
         else:
             zf.writestr(f"{root}/1_docs/1_surveys/.gitkeep", "")
         zf.writestr(f"{root}/1_docs/2_codebooks/codebook.csv", codebook_csv)
+        if form_dictionary is not None:
+            zf.writestr(
+                f"{root}/1_docs/2_codebooks/{safe_survey}_dictionary.xlsx",
+                dictionary_xlsx(form_dictionary),
+            )
         zf.writestr(f"{root}/1_docs/3_notes/.gitkeep", "")
 
         # 2_scripts/

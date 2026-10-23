@@ -17,32 +17,22 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 DEST = ROOT / "src" / "datasure" / "vendor" / "scto_dict"
 TESTS_DEST = ROOT / "tests" / "vendor" / "scto_dict"
-# The typed import, plus questions, which the xml_contract tests use. The
-# dictionary, stats, codebook and PII modules join when features use them.
-MODULES = ("xpath", "xml_contract", "questions", "cast")
+MODULES = (
+    "xpath",
+    "xml_contract",
+    "questions",
+    "cast",
+    "contract",
+    "survey",
+    "dictionary",
+    "stats",
+    "codebook",
+    "pii",
+)
 # The offline tests for the modules the import uses, and their fixture.
 TESTS = ("farm_form", "test_xpath", "test_xml_contract", "test_cast")
 # (module, upstream text, replacement), each pending an upstream PR.
-PATCHES = (
-    (
-        "xml_contract",
-        '''def parse_contract(xml_path) -> FormContract:
-    """Parse a compiled XForm XML into a FormContract."""
-    import xml.etree.ElementTree as ET
-
-    root = ET.parse(str(xml_path)).getroot()
-''',
-        '''def parse_contract(xml_path) -> FormContract:
-    """Parse a compiled XForm XML, as a path or as bytes, into a FormContract."""
-    import xml.etree.ElementTree as ET
-
-    if isinstance(xml_path, bytes):
-        root = ET.fromstring(xml_path)
-    else:
-        root = ET.parse(str(xml_path)).getroot()
-''',
-    ),
-)
+PATCHES: tuple[tuple[str, str, str], ...] = ()
 
 
 def _show(repo: str, ref: str, path: str) -> str:

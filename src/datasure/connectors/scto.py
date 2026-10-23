@@ -612,7 +612,8 @@ class SurveyCTOClient:
             private_key=private_key,
         )
 
-        new_data = typed_frame(cast_wide(new_data_json, contract))
+        table = cast_wide(new_data_json, contract)
+        new_data = typed_frame(table)
         new_count = len(new_data)
 
         # Combine data
@@ -629,6 +630,7 @@ class SurveyCTOClient:
             form_config.form_id,
             contract.formdef_version,
             xml,
+            table.schema.serialize().to_pybytes(),
         )
 
         # Download media if requested
