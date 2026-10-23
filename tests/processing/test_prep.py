@@ -1,6 +1,7 @@
 """Comprehensive tests for the prep module."""
 
 import json
+from datetime import date, datetime
 from unittest.mock import patch
 
 import polars as pl
@@ -693,6 +694,94 @@ class TestRemoveRowsMissingValues:
         result, args = op.execute(data, prep_args)
         assert result["id"].to_list() == ["r2"]
         assert args.additional_info is None
+
+    @pytest.mark.parametrize(
+        ("condition", "value", "expected_kept"),
+        [
+            ("value is not like", "^s", ["B", "C"]),
+            ("value is not equal to", ["south"], ["B", "C"]),
+            ("value is missing", None, ["A", "B"]),
+        ],
+    )
+    def test_empty_string_is_missing(self, condition, value, expected_kept):
+        """An empty string counts as missing, as it does in Stata."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame({"hh": ["A", "B", "C"], "village": ["north", "south", ""]})
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["village"],
+            condition=condition,
+            value=value,
+        )
+        result, _ = op.execute(data, prep_args)
+        assert result["hh"].to_list() == expected_kept
+        assert result["village"].to_list() == (
+            ["north", "south"] if condition == "value is missing" else ["south", ""]
+        )
+
+
+VISIT_DATES = (date(2024, 1, 1), date(2024, 1, 15), date(2024, 2, 1), None)
+VISIT_DATETIMES = (
+    datetime(2024, 1, 1, 8),
+    datetime(2024, 1, 15, 8),
+    datetime(2024, 2, 1, 8),
+    None,
+)
+
+
+class TestRemoveRowsTemporalBounds:
+    """Comparison and range conditions work on date and datetime columns."""
+
+    @pytest.mark.parametrize(
+        ("column", "lower", "upper"),
+        [
+            (VISIT_DATES, date(2024, 1, 10), date(2024, 1, 20)),
+            (VISIT_DATES, "2024-01-10", "2024-01-20"),
+            (VISIT_DATETIMES, datetime(2024, 1, 10), datetime(2024, 1, 20)),
+            (VISIT_DATETIMES, "2024-01-10 00:00:00", "2024-01-20 00:00:00"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        ("condition", "expected_kept"),
+        [
+            ("value is between", ["A", "C", "D"]),
+            ("value is not between", ["B", "D"]),
+        ],
+    )
+    def test_range_on_temporal_column(
+        self, column, lower, upper, condition, expected_kept
+    ):
+        """Date bounds, live or saved as text, filter a date column."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame({"hh": ["A", "B", "C", "D"], "visit": list(column)})
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["visit"],
+            condition=condition,
+            value=[lower, upper],
+        )
+        result, args = op.execute(data, prep_args)
+        assert result["hh"].to_list() == expected_kept
+        assert (
+            args.additional_info == '1 row kept because a value is missing in "visit".'
+        )
+
+    @pytest.mark.parametrize("bound", [date(2024, 1, 10), "2024-01-10"])
+    def test_comparison_on_date_column(self, bound):
+        """A date bound, live or saved as text, filters a date column."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame({"hh": ["A", "B", "C", "D"], "visit": list(VISIT_DATES)})
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["visit"],
+            condition="value is greater than",
+            value=[bound],
+        )
+        result, _ = op.execute(data, prep_args)
+        assert result["hh"].to_list() == ["A", "D"]
 
 
 # === TRANSFORM COLUMNS OPERATION TESTS === #

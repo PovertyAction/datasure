@@ -75,8 +75,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `1 row kept because a value is missing in "age".`
     `PrepConfirmationMessages.remove_rows` adds it to the step description in
     the prep log
-  - Range bounds are converted with `float()`, as comparisons already were,
-    so bounds saved as strings work on numeric columns
+  - An empty string in a text column counts as missing, as `missing()` does
+    in Stata, so DataSure and the exported do-file keep the same rows
+  - Comparison and range bounds are converted to each column's type by
+    `_bound`: numbers with `float()`, so bounds saved as strings work on
+    numeric columns, and dates saved as text with `str.strptime`. Comparison
+    steps on date columns had always failed with a `float()` error
   - Stata: `_stata_remove_rows` (`replication/prep_script_generator.py`)
     writes one `drop if` line per selected column with a missing-value
     guard, for example `drop if age > 60 & !missing(age)`. Before, it used

@@ -283,9 +283,15 @@ class RemoveRowsOperation(PrepOperation):
         """Remove rows where the condition is true in any selected column.
 
         A row whose condition is unknown because of a missing value is kept.
+        An empty string counts as missing, as it does in Stata.
         Returns the remaining data and a notice counting those kept rows.
         """
         self._validate_columns_exist(data, columns)
+        schema = data.schema
+        view = data.select(
+            pl.col(col).replace("", None) if schema[col] == pl.String else pl.col(col)
+            for col in dict.fromkeys(columns)
+        )
 
         if condition == PrepRowConditions.missing.value:
             masks = [pl.col(col).is_null() for col in columns]
@@ -305,13 +311,13 @@ class RemoveRowsOperation(PrepOperation):
             PrepRowConditions.less_than.value,
             PrepRowConditions.less_than_or_equal_to.value,
         ]:
-            masks = self._comparison_masks(condition, columns, value)
+            masks = self._comparison_masks(condition, columns, value, schema)
 
         elif condition in [
             PrepRowConditions.between.value,
             PrepRowConditions.not_between.value,
         ]:
-            masks = self._range_masks(condition, columns, value)
+            masks = self._range_masks(condition, columns, value, schema)
 
         elif condition in [
             PrepRowConditions.like.value,
@@ -322,14 +328,15 @@ class RemoveRowsOperation(PrepOperation):
         else:
             raise ValidationError(f"Unknown condition: {condition}")
 
-        return self._drop_where(data, pl.any_horizontal(masks), columns)
+        mask = view.select(pl.any_horizontal(masks)).to_series()
+        return self._drop_where(data, mask, columns)
 
     @staticmethod
     def _drop_where(
-        data: pl.DataFrame, mask: pl.Expr, columns: list[str]
+        data: pl.DataFrame, mask: pl.Series, columns: list[str]
     ) -> tuple[pl.DataFrame, str | None]:
         """Drop rows where ``mask`` is true; keep rows where it is null."""
-        kept_missing = data.select(mask.is_null().sum()).item()
+        kept_missing = mask.null_count()
         results = data.filter(~mask.fill_null(False))
 
         if not kept_missing:
@@ -354,33 +361,41 @@ class RemoveRowsOperation(PrepOperation):
             return [~mask for mask in masks]
         return masks
 
+    @staticmethod
+    def _bound(dtype: pl.DataType, raw: Any) -> Any:
+        """Convert a bound to the column's type; saved date bounds are text."""
+        if dtype.is_temporal():
+            return pl.lit(raw).str.strptime(dtype) if isinstance(raw, str) else raw
+        return float(raw)
+
     def _comparison_masks(
-        self, condition: str, columns: list[str], value: Any
+        self, condition: str, columns: list[str], value: Any, schema: pl.Schema
     ) -> list[pl.Expr]:
         """Build remove-masks for comparison conditions."""
         # Handle both single values and lists
         raw_value = value[0] if isinstance(value, list) else value
-        value_use = float(raw_value)
+        bounds = {col: self._bound(schema[col], raw_value) for col in columns}
 
         if condition == PrepRowConditions.greater_than.value:
-            return [pl.col(col) > value_use for col in columns]
+            return [pl.col(col) > bounds[col] for col in columns]
         if condition == PrepRowConditions.greater_than_or_equal_to.value:
-            return [pl.col(col) >= value_use for col in columns]
+            return [pl.col(col) >= bounds[col] for col in columns]
         if condition == PrepRowConditions.less_than.value:
-            return [pl.col(col) < value_use for col in columns]
-        return [pl.col(col) <= value_use for col in columns]
+            return [pl.col(col) < bounds[col] for col in columns]
+        return [pl.col(col) <= bounds[col] for col in columns]
 
     def _range_masks(
-        self, condition: str, columns: list[str], value: Any
+        self, condition: str, columns: list[str], value: Any, schema: pl.Schema
     ) -> list[pl.Expr]:
         """Build remove-masks for range conditions."""
         # Handle both single values and lists for value
         value_list = value if isinstance(value, list) else [value, value]
         if len(value_list) != 2:
             raise ValidationError(f"Expected 2 values for range, got: {value_list}")
-        lower, upper = (float(bound) for bound in value_list)
-
-        masks = [pl.col(col).is_between(lower, upper) for col in columns]
+        masks = [
+            pl.col(col).is_between(*(self._bound(schema[col], b) for b in value_list))
+            for col in columns
+        ]
         if condition == PrepRowConditions.not_between.value:
             return [~mask for mask in masks]
         return masks
