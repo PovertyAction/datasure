@@ -163,6 +163,10 @@ test-mod-cov mod:
     @$mod = "{{mod}}"; $testFile = Get-ChildItem -Path "tests" -Recurse -Filter "test_$mod.py" | Select-Object -First 1; if (-not $testFile) { Write-Host "Error: no test file matching 'test_$mod.py' found under tests/"; exit 1 }; $srcFile = Get-ChildItem -Path "src\datasure" -Recurse -Filter "$mod.py" | Select-Object -First 1; if (-not $srcFile) { Write-Host "Error: no source file matching '$mod.py' found under src\datasure\"; exit 1 }; $srcIdx = $srcFile.FullName.IndexOf("src\") + 4; $covModule = $srcFile.FullName.Substring($srcIdx) -replace "\\", "." -replace "\.py$", ""; Write-Host "Test file : $($testFile.FullName)"; Write-Host "Coverage  : $covModule"; uv run python -m pytest $testFile.FullName -v --cov=$covModule --cov-report=term-missing
 
 
+# Copy surveycto_python_dict's library modules at a git ref into src/datasure/vendor/scto_dict
+vendor-scto repo ref:
+    uv run python scripts/vendor_scto.py "{{ repo }}" "{{ ref }}"
+
 # Run pre-commit hooks on all files
 pre-commit-run:
     uv tool run pre-commit run --all-files

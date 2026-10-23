@@ -99,7 +99,9 @@ line-length = 88
 fix = true
 # Assume Python 3.11
 target-version = "py311"
-exclude = ["archived/"]
+exclude = ["archived/", "src/datasure/vendor/", "tests/vendor/"]
+# Pre-commit passes file names explicitly; keep the excludes for them too.
+force-exclude = true
 
 [tool.ruff.lint]
 # docs: https://docs.astral.sh/ruff/rules/
@@ -178,7 +180,7 @@ markers = [
 
 [tool.coverage.run]
 source = ["src"]
-omit = ["tests/*", "**/__init__.py", "*/migrations/*", "*/venv/*", "*/.venv/*"]
+omit = ["tests/*", "src/datasure/vendor/*", "**/__init__.py", "*/migrations/*", "*/venv/*", "*/.venv/*"]
 branch = true
 
 [tool.coverage.report]
