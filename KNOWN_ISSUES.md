@@ -98,7 +98,7 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ### KI-020: "Remove rows" also removes rows with a missing value in the selected column
 
-- **Status:** 🟡 Planned for 1.3.0
+- **Status:** 🟡 Planned for 1.2.0
 - **Affected versions:** 1.0.0 and later
 - **Symptom:** A prep step such as "remove rows where `age` is greater than 60" also removes rows where `age` is blank. The step's affected-row count includes those rows. Replication scripts exported from DataSure do the same.
 - **Workaround:** Before you add the step, count the rows where the column is blank. Then check the step's affected-row count against what you expect.

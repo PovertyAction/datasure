@@ -536,6 +536,253 @@ class TestRemoveRowsOperation:
         values = result["a"].to_list()
         assert all(v < 20 or v > 20 for v in values)
 
+    def test_filter_by_range_string_bounds_on_numeric_column(self):
+        """Test range bounds given as strings are compared as numbers."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame({"a": [10, 20, 30, 40, 50]})
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["a"],
+            condition="value is between",
+            value=["20", "40"],
+        )
+        result, _ = op.execute(data, prep_args)
+        assert result["a"].to_list() == [10, 50]
+
+
+class TestRemoveRowsMissingValues:
+    """Rows are removed only when the condition is definitely true (#351)."""
+
+    @pytest.mark.parametrize(
+        ("condition", "value", "expected_kept"),
+        [
+            ("value is greater than", [60], ["A", "C"]),
+            ("value is greater than or equal to", [70], ["A", "C"]),
+            ("value is less than", [50], ["B", "C"]),
+            ("value is less than or equal to", [45], ["B", "C"]),
+            ("value is equal to", [70], ["A", "C"]),
+            ("value is not equal to", [70], ["B", "C"]),
+            ("value is between", [60, 80], ["A", "C"]),
+            ("value is not between", [60, 80], ["B", "C"]),
+        ],
+    )
+    def test_numeric_conditions_keep_missing_age(self, condition, value, expected_kept):
+        """Household C has no age, so every numeric condition keeps it."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame({"hh": ["A", "B", "C"], "age": [45, 70, None]})
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["age"],
+            condition=condition,
+            value=value,
+        )
+        result, args = op.execute(data, prep_args)
+        assert result["hh"].to_list() == expected_kept
+        assert args.affected_count == 1
+        assert args.additional_info == '1 row kept because a value is missing in "age".'
+
+    @pytest.mark.parametrize(
+        ("condition", "expected_kept"),
+        [
+            ("value is like", ["A", "C"]),
+            ("value is not like", ["B", "C"]),
+        ],
+    )
+    def test_pattern_conditions_keep_missing_village(self, condition, expected_kept):
+        """Household C has no village, so both pattern conditions keep it."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame(
+            {"hh": ["A", "B", "C"], "village": ["north", "south", None]}
+        )
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["village"],
+            condition=condition,
+            value="^s",
+        )
+        result, args = op.execute(data, prep_args)
+        assert result["hh"].to_list() == expected_kept
+        assert args.affected_count == 1
+        assert "1 row kept" in args.additional_info
+
+    def test_no_missing_values_has_no_notice(self):
+        """additional_info stays empty when no row was kept for a missing value."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame({"age": [45, 70]})
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["age"],
+            condition="value is greater than",
+            value=[60],
+        )
+        _, args = op.execute(data, prep_args)
+        assert args.additional_info is None
+
+    def test_notice_counts_every_kept_row(self):
+        """The notice counts each row kept for a missing value."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame({"age": [45, 70, None, None]})
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["age"],
+            condition="value is greater than",
+            value=[60],
+        )
+        _, args = op.execute(data, prep_args)
+        assert args.additional_info.startswith("2 rows kept")
+
+    # Rows: r1 a matches; r2 nothing matches; r3 a missing, b matches;
+    # r4 a missing, b does not match.
+    @pytest.mark.parametrize(
+        ("condition", "value", "match", "no_match"),
+        [
+            ("value is greater than", [60], 70, 10),
+            ("value is greater than or equal to", [60], 60, 10),
+            ("value is less than", [60], 10, 70),
+            ("value is less than or equal to", [60], 60, 70),
+            ("value is equal to", [5], 5, 1),
+            ("value is not equal to", [5], 1, 5),
+            ("value is between", [60, 80], 70, 10),
+            ("value is not between", [60, 80], 10, 70),
+            ("value is like", "^s", "south", "north"),
+            ("value is not like", "^s", "north", "south"),
+        ],
+    )
+    def test_multi_column_removes_when_any_column_matches(
+        self, condition, value, match, no_match
+    ):
+        """A row is removed if any selected column definitely matches."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame(
+            {
+                "id": ["r1", "r2", "r3", "r4"],
+                "a": [match, no_match, None, None],
+                "b": [no_match, no_match, match, no_match],
+            }
+        )
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["a", "b"],
+            condition=condition,
+            value=value,
+        )
+        result, args = op.execute(data, prep_args)
+        assert result["id"].to_list() == ["r2", "r4"]
+        assert args.affected_count == 2
+        assert args.additional_info == (
+            '1 row kept because a value is missing in "a", "b".'
+        )
+
+    def test_multi_column_not_missing_removes_when_any_column_has_value(self):
+        """Not missing also removes a row if any selected column has a value."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame(
+            {"id": ["r1", "r2", "r3"], "a": [1, None, 1], "b": [None, None, 1]}
+        )
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["a", "b"],
+            condition="value is not missing",
+        )
+        result, args = op.execute(data, prep_args)
+        assert result["id"].to_list() == ["r2"]
+        assert args.additional_info is None
+
+    @pytest.mark.parametrize(
+        ("condition", "value", "expected_kept"),
+        [
+            ("value is not like", "^s", ["B", "C"]),
+            ("value is not equal to", ["south"], ["B", "C"]),
+            ("value is missing", None, ["A", "B"]),
+        ],
+    )
+    def test_empty_string_is_missing(self, condition, value, expected_kept):
+        """An empty string counts as missing, as it does in Stata."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame({"hh": ["A", "B", "C"], "village": ["north", "south", ""]})
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["village"],
+            condition=condition,
+            value=value,
+        )
+        result, _ = op.execute(data, prep_args)
+        assert result["hh"].to_list() == expected_kept
+        assert result["village"].to_list() == (
+            ["north", "south"] if condition == "value is missing" else ["south", ""]
+        )
+
+
+VISIT_DATES = (date(2024, 1, 1), date(2024, 1, 15), date(2024, 2, 1), None)
+VISIT_DATETIMES = (
+    datetime(2024, 1, 1, 8),
+    datetime(2024, 1, 15, 8),
+    datetime(2024, 2, 1, 8),
+    None,
+)
+
+
+class TestRemoveRowsTemporalBounds:
+    """Comparison and range conditions work on date and datetime columns."""
+
+    @pytest.mark.parametrize(
+        ("column", "lower", "upper"),
+        [
+            (VISIT_DATES, date(2024, 1, 10), date(2024, 1, 20)),
+            (VISIT_DATES, "2024-01-10", "2024-01-20"),
+            (VISIT_DATETIMES, datetime(2024, 1, 10), datetime(2024, 1, 20)),
+            (VISIT_DATETIMES, "2024-01-10 00:00:00", "2024-01-20 00:00:00"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        ("condition", "expected_kept"),
+        [
+            ("value is between", ["A", "C", "D"]),
+            ("value is not between", ["B", "D"]),
+        ],
+    )
+    def test_range_on_temporal_column(
+        self, column, lower, upper, condition, expected_kept
+    ):
+        """Date bounds, live or saved as text, filter a date column."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame({"hh": ["A", "B", "C", "D"], "visit": list(column)})
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["visit"],
+            condition=condition,
+            value=[lower, upper],
+        )
+        result, args = op.execute(data, prep_args)
+        assert result["hh"].to_list() == expected_kept
+        assert (
+            args.additional_info == '1 row kept because a value is missing in "visit".'
+        )
+
+    @pytest.mark.parametrize("bound", [date(2024, 1, 10), "2024-01-10"])
+    def test_comparison_on_date_column(self, bound):
+        """A date bound, live or saved as text, filters a date column."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame({"hh": ["A", "B", "C", "D"], "visit": list(VISIT_DATES)})
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["visit"],
+            condition="value is greater than",
+            value=[bound],
+        )
+        result, _ = op.execute(data, prep_args)
+        assert result["hh"].to_list() == ["A", "D"]
+
 
 # === TRANSFORM COLUMNS OPERATION TESTS === #
 

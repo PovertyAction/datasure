@@ -43,15 +43,13 @@ _COND_NOT_BETWEEN = "value is not between"
 _COND_LIKE = "value is like"
 _COND_NOT_LIKE = "value is not like"
 
-# Comparison conditions map to the KEEP operator (opposite of the condition)
-# e.g. "remove where col > val" → keep where col <= val
-_KEEP_OP: dict[str, str] = {
-    _COND_GT: "<=",
-    _COND_GTE: "<",
-    _COND_LT: ">=",
-    _COND_LTE: ">",
-    _COND_EQ: "!=",
-    _COND_NEQ: "==",
+# Comparison conditions map to the operator of the condition itself
+# e.g. "remove where col > val" → drop if col > val
+_DROP_OP: dict[str, str] = {
+    _COND_GT: ">",
+    _COND_GTE: ">=",
+    _COND_LT: "<",
+    _COND_LTE: "<=",
 }
 
 # ---------------------------------------------------------------------------
@@ -118,26 +116,37 @@ def _drop_by_index(values: list) -> list[str]:
     return [f"drop if {conditions}"]
 
 
+def _remove_expr(col: str, condition: str, values: list) -> str | None:
+    """Stata expression that is true where the row should be removed."""
+    if condition in (_COND_LIKE, _COND_NOT_LIKE):
+        pattern = values[0] if values else ""
+        expr = f'regexm({col}, "{pattern}")'
+        return expr if condition == _COND_LIKE else f"!{expr}"
+    if condition in (_COND_BETWEEN, _COND_NOT_BETWEEN) and len(values) >= 2:
+        expr = f"inrange({col}, {values[0]}, {values[1]})"
+        return expr if condition == _COND_BETWEEN else f"!{expr}"
+    if condition in (_COND_EQ, _COND_NEQ) and values:
+        if len(values) == 1:
+            op = "==" if condition == _COND_EQ else "!="
+            return f"{col} {op} {_fmt_val(values[0])}"
+        expr = "(" + " | ".join(f"{col} == {_fmt_val(v)}" for v in values) + ")"
+        return expr if condition == _COND_EQ else f"!{expr}"
+    op = _DROP_OP.get(condition)
+    if op and values:
+        return f"{col} {op} {_fmt_val(values[0])}"
+    return None
+
+
 def _drop_by_condition(col: str, condition: str, values: list) -> list[str]:
     if condition == _COND_MISSING:
         return [f"drop if missing({col})"]
     if condition == _COND_NOT_MISSING:
-        return [f"keep if missing({col})"]
-    if condition in (_COND_LIKE, _COND_NOT_LIKE):
-        pattern = values[0] if values else ""
-        if condition == _COND_LIKE:
-            return [f'drop if regexm({col}, "{pattern}")']
-        return [f'keep if regexm({col}, "{pattern}")']
-    if condition in (_COND_BETWEEN, _COND_NOT_BETWEEN) and len(values) >= 2:
-        lo, hi = values[0], values[1]
-        if condition == _COND_BETWEEN:
-            return [f"drop if inrange({col}, {lo}, {hi})"]
-        return [f"keep if inrange({col}, {lo}, {hi})"]
-    op = _KEEP_OP.get(condition)
-    if op and values:
-        fv = _fmt_val(values[0] if isinstance(values, list) else values)
-        return [f"keep if {col} {op} {fv}"]
-    return [f"{_C} NOTE: condition '{condition}' could not be translated"]
+        return [f"drop if !missing({col})"]
+    expr = _remove_expr(col, condition, values)
+    if expr is None:
+        return [f"{_C} NOTE: condition '{condition}' could not be translated"]
+    # A missing value makes the condition unknown, so the row is kept
+    return [f"drop if {expr} & !missing({col})"]
 
 
 def _stata_remove_rows(args: dict, _desc: str) -> list[str]:
@@ -152,7 +161,11 @@ def _stata_remove_rows(args: dict, _desc: str) -> list[str]:
     if not cols or not condition:
         return [f"{_C} NOTE: remove row step could not be translated"]
 
-    return _drop_by_condition(cols[0], condition, values)
+    # One drop per column: a row is removed if any selected column matches
+    lines: list[str] = []
+    for col in cols:
+        lines.extend(_drop_by_condition(col, condition, values))
+    return lines
 
 
 def _stata_to_string(col: str) -> list[str]:
