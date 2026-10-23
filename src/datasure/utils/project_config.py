@@ -32,6 +32,7 @@ from datasure.models.schemas import (
     ProjectConfigBundle,
     ProjectPageBundle,
 )
+from datasure.processing.correction_log import ensure_log_columns
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.processing.prep import prep_apply_action
 from datasure.utils.cache_utils import get_cache_path
@@ -451,6 +452,9 @@ def _seed_correction_log(project_id: str, alias: str, rows: list[dict]) -> None:
     log_df = pl.DataFrame(rows)
     if log_df.schema.get("date") == pl.String:
         log_df = log_df.with_columns(pl.col("date").str.to_datetime(strict=False))
+    # Type all-null columns (e.g. `check_type` with no acceptances) as strings;
+    # DuckDB would otherwise save them as INTEGER
+    log_df = ensure_log_columns(log_df)
     duckdb_save_table(project_id, log_df, alias=f"corr_log_{alias}", db_name="logs")
 
 

@@ -48,6 +48,21 @@ class TestEnsureLogColumns:
         assert result["status"].to_list() == ["Successful"]
         assert "user" in result.columns
 
+    def test_casts_all_null_columns_to_schema_types(self):
+        """DuckDB reads an all-null column back as Int32 (#352)."""
+        log = pl.DataFrame(
+            {"action": ["modify value"], "check_type": [None], "severity": [None]},
+            schema_overrides={"check_type": pl.Int32, "severity": pl.Int32},
+        )
+        result = ensure_log_columns(log)
+        assert result.schema["check_type"] == pl.String
+        assert result.schema["severity"] == pl.String
+        assert result.filter(pl.col("check_type") == "outliers").is_empty()
+
+    def test_keeps_columns_that_hold_values(self):
+        log = pl.DataFrame({"action": ["accept"], "check_type": ["outliers"]})
+        assert ensure_log_columns(log)["check_type"].to_list() == ["outliers"]
+
     def test_log_without_action_reads_as_no_log(self):
         """The 1.1.0 reapply saved a 0-row log of only the status columns."""
         log = pl.DataFrame(schema={"status": pl.String, "status_reason": pl.String})

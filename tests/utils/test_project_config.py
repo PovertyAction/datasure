@@ -865,6 +865,35 @@ class TestCheckTablesAndMissingCodes:
             CHECK_TABLES["bc_attribution"],
         )
 
+    def test_imported_log_without_acceptances_keeps_string_columns(
+        self, mock_service_cls, mock_load_local, mock_correction_cls
+    ):
+        """All-null check_type and severity are not saved as INTEGER (#352)."""
+        mock_service_cls.return_value = _page_config_service()
+        _seed_source_project()
+        duckdb_save_table(
+            SRC_PROJECT,
+            pl.DataFrame(
+                {
+                    "date": [datetime(2026, 8, 28, 9, 0, 0)],
+                    "KEY": ["1"],
+                    "action": ["modify value"],
+                    "check_type": [None],
+                    "severity": [None],
+                },
+                schema_overrides={"check_type": pl.String, "severity": pl.String},
+            ),
+            "corr_log_household",
+            "logs",
+        )
+
+        apply_project_config(DST_PROJECT, self._export_and_parse(), self.local_paths)
+
+        log = duckdb_get_table(DST_PROJECT, "corr_log_household", "logs")
+        assert log.schema["check_type"] == pl.String
+        assert log.schema["severity"] == pl.String
+        assert log.filter(pl.col("check_type") == "outliers").is_empty()
+
     def test_export_without_record_level_decisions_imports_cleanly(
         self, mock_service_cls, mock_load_local, mock_correction_cls
     ):

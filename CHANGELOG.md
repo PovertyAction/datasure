@@ -147,6 +147,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now computed when the report runs (see Changed). Changing the consent or
   outcome column also saves its values, so old values are not read against
   the new column
+- **Imported correction logs crashed Outliers & Constraints and GPS Checks**
+  (#352): After applying a bundle whose corrections had no acceptances, these
+  pages failed with `ComputeError: cannot compare string with numeric type
+  (i32)`
+  - Root cause: `_seed_correction_log` (`utils/project_config.py`) built the
+    log with no schema, so the all-null `check_type` and `severity` columns
+    had Polars' `Null` type, which DuckDB saves as `INTEGER`.
+    `get_active_acceptances` then compared the Int32 `check_type` with a
+    string
+  - Solution: `ensure_log_columns` (`processing/correction_log.py`) casts any
+    all-null column to its `CORRECTION_LOG_SCHEMA` type, which repairs logs
+    already saved this way when they are read. `_seed_correction_log` runs
+    the log through it before saving
 
 ## [1.2.0a3] - 2026-10-21
 

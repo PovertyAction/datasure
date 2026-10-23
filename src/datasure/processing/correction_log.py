@@ -83,6 +83,10 @@ def ensure_log_columns(df: pl.DataFrame) -> pl.DataFrame:
     A log with no `action` column holds no entries and reads as no log. 1.1.0
     saved one, with only the status columns, when it reapplied corrections to
     an alias that had none.
+
+    A column with no values is cast to its schema type. DuckDB saves an
+    all-null column as INTEGER, so a log imported from a bundle with no
+    acceptances read `check_type` back as Int32 (#352).
     """
     if "action" not in df.columns:
         return pl.DataFrame()
@@ -91,7 +95,13 @@ def ensure_log_columns(df: pl.DataFrame) -> pl.DataFrame:
             df = df.with_columns(
                 pl.lit(default, dtype=CORRECTION_LOG_SCHEMA[column]).alias(column)
             )
-    return df
+    return df.with_columns(
+        pl.col(column).cast(dtype)
+        for column, dtype in CORRECTION_LOG_SCHEMA.items()
+        if column in df.columns
+        and df.schema[column] != dtype
+        and df[column].null_count() == df.height
+    )
 
 
 def empty_correction_log() -> pl.DataFrame:

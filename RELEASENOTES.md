@@ -48,6 +48,10 @@ The Enumerator report now uses the page's saved consent and outcome settings eve
 
 The back check comparison and coverage now use the same records as the Duplicates tab: the **Records to Include** filters apply, and the page says how many surveys and back checks are compared. The **Duplicate Handling** setting is gone. Records whose ID is duplicated are always left out of the comparison until you resolve the duplicate, and a warning above Comparison Results Details counts them. If a page was set to keep the first or last duplicate, it now leaves duplicates out.
 
+### Bug Fixes
+
+- **Fixed**: After you applied a project setup that included corrections, the **Outliers & Constraints** and **GPS Checks** tabs could fail with `cannot compare string with numeric type (i32)`. Projects already affected work again after you update; you don't need to import the setup again
+
 ---
 
 ## Version 1.1.0 — Reusable Project Setups

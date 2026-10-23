@@ -16,6 +16,14 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ## Open issues
 
+### KI-030: Outliers & Constraints and GPS Checks tabs crash with `cannot compare string with numeric type (i32)` after applying a project setup
+
+- **Status:** 🟡 Planned for 1.2.0 (fixed in 1.2.0a6)
+- **Affected versions:** 1.2.0a2 – 1.2.0a5
+- **Symptom:** After you apply an exported project setup that includes corrections, the **Outliers & Constraints** and **GPS Checks** tabs show `ComputeError: cannot compare string with numeric type (i32)`.
+- **Workaround:** Update to 1.2.0a6 or later. Projects that already show the error load again after the update.
+- **Issue:** [#352](https://github.com/PovertyAction/datasure/issues/352)
+
 ### KI-029: Missing codes such as -99 are counted as values in Outliers, Descriptive Stats and Enumerator Stats
 
 - **Status:** 🟡 Planned for 1.2.0
