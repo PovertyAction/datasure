@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import polars as pl
+import pytest
 
 from datasure.replication.prep_script_generator import (
     _col_list,
@@ -130,7 +131,7 @@ class TestStataRemoveRows:
         lines = _stata_remove_rows(
             {"source_columns": ["col"], "condition": "value is not missing"}, ""
         )
-        assert lines == ["keep if missing(col)"]
+        assert lines == ["drop if !missing(col)"]
 
     def test_like_condition(self):
         lines = _stata_remove_rows(
@@ -141,7 +142,7 @@ class TestStataRemoveRows:
             },
             "",
         )
-        assert 'regexm(name, "^test")' in lines[0]
+        assert lines == ['drop if regexm(name, "^test") & !missing(name)']
 
     def test_not_like_condition(self):
         lines = _stata_remove_rows(
@@ -152,7 +153,7 @@ class TestStataRemoveRows:
             },
             "",
         )
-        assert "keep if" in lines[0]
+        assert lines == ['drop if !regexm(name, "^test") & !missing(name)']
 
     def test_between_condition(self):
         lines = _stata_remove_rows(
@@ -163,7 +164,7 @@ class TestStataRemoveRows:
             },
             "",
         )
-        assert "inrange(age, 18, 65)" in lines[0]
+        assert lines == ["drop if inrange(age, 18, 65) & !missing(age)"]
 
     def test_not_between_condition(self):
         lines = _stata_remove_rows(
@@ -174,20 +175,31 @@ class TestStataRemoveRows:
             },
             "",
         )
-        assert "keep if inrange" in lines[0]
+        assert lines == ["drop if !inrange(age, 18, 65) & !missing(age)"]
 
-    def test_greater_than_condition(self):
+    @pytest.mark.parametrize(
+        ("condition", "op"),
+        [
+            ("value is greater than", ">"),
+            ("value is greater than or equal to", ">="),
+            ("value is less than", "<"),
+            ("value is less than or equal to", "<="),
+            ("value is equal to", "=="),
+            ("value is not equal to", "!="),
+        ],
+    )
+    def test_comparison_conditions(self, condition, op):
         lines = _stata_remove_rows(
             {
                 "source_columns": ["score"],
-                "condition": "value is greater than",
+                "condition": condition,
                 "value": [100],
             },
             "",
         )
-        assert "keep if score <= 100" in lines[0]
+        assert lines == [f"drop if score {op} 100 & !missing(score)"]
 
-    def test_equal_condition(self):
+    def test_equal_condition_text_value(self):
         lines = _stata_remove_rows(
             {
                 "source_columns": ["status"],
@@ -196,7 +208,50 @@ class TestStataRemoveRows:
             },
             "",
         )
-        assert "keep if status !=" in lines[0]
+        assert lines == ['drop if status == "active" & !missing(status)']
+
+    def test_equal_condition_several_values(self):
+        lines = _stata_remove_rows(
+            {
+                "source_columns": ["code"],
+                "condition": "value is equal to",
+                "value": [1, 3],
+            },
+            "",
+        )
+        assert lines == ["drop if (code == 1 | code == 3) & !missing(code)"]
+
+    def test_not_equal_condition_several_values(self):
+        lines = _stata_remove_rows(
+            {
+                "source_columns": ["code"],
+                "condition": "value is not equal to",
+                "value": [1, 3],
+            },
+            "",
+        )
+        assert lines == ["drop if !(code == 1 | code == 3) & !missing(code)"]
+
+    def test_one_line_per_column(self):
+        lines = _stata_remove_rows(
+            {
+                "source_columns": ["a", "b"],
+                "condition": "value is greater than",
+                "value": [60],
+            },
+            "",
+        )
+        assert lines == [
+            "drop if a > 60 & !missing(a)",
+            "drop if b > 60 & !missing(b)",
+        ]
+
+    def test_one_line_per_column_missing(self):
+        lines = _stata_remove_rows(
+            {"source_columns": ["a", "b"], "condition": "value is not missing"},
+            "",
+        )
+        assert lines == ["drop if !missing(a)", "drop if !missing(b)"]
 
     def test_no_cols_no_condition_returns_note(self):
         lines = _stata_remove_rows({}, "")

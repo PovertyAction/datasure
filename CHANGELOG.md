@@ -81,6 +81,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     past 7 days" agrees with the summary. The summary table
     (`checks/enumerator/report_ui.py`) shows a "Data as of" note with the
     latest submission date from the new `compute_latest_submission_date`
+- **Remove rows dropped rows with missing values** (#351): A "Remove rows"
+  step with a condition also removed rows where the selected column was
+  missing, and counted them as matches. With several columns selected, `>`,
+  `>=`, `<`, `<=` and `between` removed a row only when all columns matched,
+  while `equal to` and `like` removed it when any column matched
+  - Root cause: `RemoveRowsOperation` (`processing/prep.py`) built the
+    opposite of the condition and kept those rows (for example
+    `filter(age <= 60)` for "greater than 60"). Comparing a null gives null,
+    and `filter` drops null rows. The Stata replication script used the same
+    `keep if` form, and Stata treats missing as larger than any number
+  - Solution: each condition now builds a remove-mask that says what the UI
+    says (`_equality_masks`, `_comparison_masks`, `_range_masks`,
+    `_pattern_masks`). The column masks are combined with
+    `pl.any_horizontal` and applied by one helper, `_drop_where`, which runs
+    `filter(~mask.fill_null(False))`. A row is removed only when the
+    condition is definitely true in at least one selected column, for every
+    condition including `not equal to`, `not between`, `not like` and
+    `not missing`. `_drop_where` counts the rows kept because of a missing
+    value and puts the count in `additional_info`, for example
+    `1 row kept because a value is missing in "age".`
+    `PrepConfirmationMessages.remove_rows` adds it to the step description in
+    the prep log
+  - An empty string in a text column counts as missing, as `missing()` does
+    in Stata, so DataSure and the exported do-file keep the same rows
+  - Comparison and range bounds are converted to each column's type by
+    `_bound`: numbers with `float()`, so bounds saved as strings work on
+    numeric columns, and dates saved as text with `str.strptime`. Comparison
+    steps on date columns had always failed with a `float()` error
+  - Stata: `_stata_remove_rows` (`replication/prep_script_generator.py`)
+    writes one `drop if` line per selected column with a missing-value
+    guard, for example `drop if age > 60 & !missing(age)`. Before, it used
+    only the first selected column. Several `equal to` values become
+    `(code == 1 | code == 3)`
+  - Row counts may change for saved steps: steps on columns with missing
+    values keep more rows, and multi-column comparison, `between` and
+    `not missing` steps may remove more rows
 
 ## [1.2.0a3] - 2026-10-21
 

@@ -385,6 +385,8 @@ class PrepConfirmationMessages:
                 result.source_columns, result.condition, result.value
             )
         message = f"✓ {result.affected_count} {row_text} removed {detail}."
+        if result.additional_info:
+            message = f"{message} {result.additional_info}"
         return cls._with_remaining(message, result)
 
     # Add Column Methods
