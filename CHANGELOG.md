@@ -82,9 +82,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   row stays `String`. Prep or correction steps that relied on the old types
   report `Failed` on the next replay
 - **Form or dataset routing**: `import_data` imports an ID as a server dataset
-  only when it is on `list_datasets()`, listed once per client. It no longer
-  retries any failed form import as a dataset, which turned XML, decryption
-  or network errors into a silent untyped CSV import
+  only when its form XML is not found (`FormNotFoundError`, HTTP 404) and the
+  ID is on `list_datasets()`. Any other failed form import raises instead of
+  being retried as a dataset, which turned XML, decryption or network errors
+  into a silent untyped CSV import. A form import makes no dataset call, so
+  accounts without dataset access import forms as before
 - **`SurveyCTOAPIClient.list_datasets`** follows `nextCursor` and returns the
   `data` entries (it returned the first raw page)
 

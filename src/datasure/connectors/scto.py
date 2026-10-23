@@ -19,6 +19,7 @@ from datasure.utils.duckdb_utils import (
     save_form_definition,
 )
 from datasure.utils.scto_api import (
+    FormNotFoundError,
     SurveyCTOAPIClient,
     SurveyCTOAPIConfig,
     SurveyCTOAPIError,
@@ -220,7 +221,7 @@ def typed_frame(table: pa.Table) -> pl.DataFrame:
     """
     return pl.from_arrow(table).with_columns(
         cs.datetime(time_zone="UTC").dt.replace_time_zone(None).cast(pl.Datetime("us")),
-        cs.by_name("formdef_version", require_all=False).cast(pl.Int64),
+        pl.col("formdef_version").cast(pl.Int64),
     )
 
 
@@ -321,7 +322,6 @@ class SurveyCTOClient:
         self.cache_manager = CacheManager(project_id)
         self.logger = logging.getLogger(__name__)
         self._scto_client: SurveyCTOAPIClient | None = None
-        self._dataset_ids: set[str] | None = None
 
     def connect(
         self, credentials: ServerCredentials, validate_permissions: bool = False
@@ -547,15 +547,14 @@ class SurveyCTOClient:
                 self._scto_client = SurveyCTOAPIClient(api_config)
             except SurveyCTOAPIError as e:
                 raise ConnectionError(f"Not connected to server: {e}") from e
-        if form_config.form_id in self._server_dataset_ids():
+        try:
+            return self._import_regular_form(form_config)
+        except FormNotFoundError:
+            # A server dataset has no form XML. Any other ID raises.
+            dataset_ids = {d["id"] for d in self._scto_client.list_datasets()}
+            if form_config.form_id not in dataset_ids:
+                raise
             return self._import_server_dataset(form_config)
-        return self._import_regular_form(form_config)
-
-    def _server_dataset_ids(self) -> set[str]:
-        """Return the IDs of the server's datasets, listed once per client."""
-        if self._dataset_ids is None:
-            self._dataset_ids = {d["id"] for d in self._scto_client.list_datasets()}
-        return self._dataset_ids
 
     def _import_server_dataset(self, form_config: FormConfig) -> int:
         """Import from server dataset."""
@@ -623,14 +622,6 @@ class SurveyCTOClient:
 
         combined_data = standardize_missing_values(combined_data)
 
-        save_form_definition(
-            self.project_id,
-            form_config.alias,
-            form_config.form_id,
-            contract.formdef_version,
-            xml,
-        )
-
         # Download media if requested
         if form_config.attachments and form_config.save_to:
             questions, _ = self.get_form_definition(form_config.form_id)
@@ -641,6 +632,14 @@ class SurveyCTOClient:
         # Save to DuckDB
         duckdb_save_table(
             self.project_id, combined_data, alias=form_config.alias, db_name="raw"
+        )
+        # After raw, so a definition always describes data raw holds.
+        save_form_definition(
+            self.project_id,
+            form_config.alias,
+            form_config.form_id,
+            contract.formdef_version,
+            xml,
         )
 
         return new_count

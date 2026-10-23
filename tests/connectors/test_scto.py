@@ -27,7 +27,7 @@ from datasure.connectors.scto import (
 from datasure.connectors.scto import (
     ValidationError as SctoValidationError,
 )
-from datasure.utils.scto_api import SurveyCTOAPIError
+from datasure.utils.scto_api import FormNotFoundError, SurveyCTOAPIError
 from datasure.utils.settings_utils import ProjectID
 from datasure.vendor.scto_dict.cast import cast_wide
 from datasure.vendor.scto_dict.xml_contract import parse_contract
@@ -2215,27 +2215,54 @@ class TestTypedImport:
         questions = client._download_attachments.call_args[0][0]
         assert questions["name"].to_list() == ["photo"]
 
-    def test_server_datasets_take_the_dataset_path(self, client):
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_a_form_import_lists_no_datasets(
+        self, mock_save, mock_save_definition, client, form_config
+    ):
+        form_config.username = "a@b.org"
+
+        client.import_data(form_config)
+
+        client._scto_client.list_datasets.assert_not_called()
+
+    def test_an_id_without_form_xml_on_the_dataset_list_imports_as_a_dataset(
+        self, client
+    ):
+        client._scto_client.download_form_xml.side_effect = FormNotFoundError("404")
         client._import_server_dataset = Mock(return_value=4)
-        client._import_regular_form = Mock()
         form_config = FormConfig(
             alias="prev", form_id="prev_round", server="testserver", username="a@b.org"
         )
 
         assert client.import_data(form_config) == 4
-        client._import_regular_form.assert_not_called()
 
-    def test_form_errors_are_not_retried_as_a_dataset(self, client, form_config):
+    def test_an_id_without_form_xml_or_dataset_raises(self, client, form_config):
+        client._scto_client.download_form_xml.side_effect = FormNotFoundError("404")
         client._import_server_dataset = Mock()
-        client._import_regular_form = Mock(side_effect=SurveyCTOAPIError("boom"))
         form_config.username = "a@b.org"
 
-        with pytest.raises(SurveyCTOAPIError, match="boom"):
+        with pytest.raises(FormNotFoundError):
             client.import_data(form_config)
         client._import_server_dataset.assert_not_called()
 
-    def test_datasets_are_listed_once_per_client(self, client):
-        client._server_dataset_ids()
-        client._server_dataset_ids()
+    def test_other_form_errors_are_not_retried_as_a_dataset(self, client, form_config):
+        client._scto_client.download_form_xml.side_effect = SurveyCTOAPIError("500")
+        client._import_server_dataset = Mock()
+        form_config.username = "a@b.org"
 
-        client._scto_client.list_datasets.assert_called_once()
+        with pytest.raises(SurveyCTOAPIError, match="500"):
+            client.import_data(form_config)
+        client._scto_client.list_datasets.assert_not_called()
+        client._import_server_dataset.assert_not_called()
+
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_a_failed_raw_save_stores_no_definition(
+        self, mock_save, mock_save_definition, client, form_config
+    ):
+        mock_save.side_effect = OSError("disk full")
+
+        with pytest.raises(OSError, match="disk full"):
+            client._import_regular_form(form_config)
+        mock_save_definition.assert_not_called()

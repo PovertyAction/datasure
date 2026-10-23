@@ -36,16 +36,17 @@ for attachments. Typing uses the XML.
 
 ## Import (`SurveyCTOClient.import_data`)
 
-1. An ID on `list_datasets()` (listed once per client) imports as a server dataset
-   CSV with no typing. Every other ID imports as a form, and its errors propagate:
-   there is no fallback.
+1. Every ID imports as a form first. If its XML download raises
+   `FormNotFoundError` (404) and the ID is on `list_datasets()`, it imports as a
+   server dataset CSV with no typing. Every other error propagates: there is no
+   fallback.
 2. A form import downloads the XML, parses it with `parse_contract`, casts the rows
    with `cast_wide` and converts with `typed_frame`. That gives form types (int ->
    Int64, decimal -> Float64, date -> Date, select_multiple binaries -> Int8,
    numeric select_one -> Int64), naive UTC timestamps and an Int64
    `formdef_version`.
-3. It stores the XML with `save_form_definition` (one row per alias and form
-   version), then saves the frame to `raw.duckdb`. `load_form_definition(alias)`
+3. It saves the frame to `raw.duckdb`, then stores the XML with
+   `save_form_definition` (one row per alias and form version). `load_form_definition(alias)`
    returns the latest version's XML, or `None`.
 
 ## Requests

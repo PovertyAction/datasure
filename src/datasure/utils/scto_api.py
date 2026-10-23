@@ -31,6 +31,10 @@ class SurveyCTOAPIError(Exception):
     pass
 
 
+class FormNotFoundError(SurveyCTOAPIError):
+    """The server has no deployed form with this ID (HTTP 404)."""
+
+
 class SurveyCTOAPIClient:
     """Client for interacting with SurveyCTO Server API v2.
 
@@ -382,15 +386,13 @@ class SurveyCTOAPIClient:
 
         except requests.exceptions.HTTPError as e:
             self.logger.exception(f"HTTP error downloading form XML from {url}")
+            if e.response is not None and e.response.status_code == 404:
+                raise FormNotFoundError(f"No deployed form {form_id!r}: {e}") from e
             raise SurveyCTOAPIError(f"Failed to download form XML: {e}") from e
 
-        except requests.exceptions.ConnectionError as e:
-            self.logger.exception(f"Connection error downloading form XML from {url}")
-            raise SurveyCTOAPIError(f"Connection failed: {e}") from e
-
-        except requests.exceptions.Timeout as e:
-            self.logger.exception(f"Timeout downloading form XML from {url}")
-            raise SurveyCTOAPIError(f"Request timeout: {e}") from e
+        except requests.exceptions.RequestException as e:
+            self.logger.exception(f"Request error downloading form XML from {url}")
+            raise SurveyCTOAPIError(f"Failed to download form XML: {e}") from e
 
     def download_form_xlsx(self, form_id: str) -> tuple[bytes, dict]:
         """Build an XLSForm-compatible XLSX from the form definition JSON.

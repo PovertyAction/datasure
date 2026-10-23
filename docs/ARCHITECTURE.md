@@ -79,8 +79,9 @@ The `archived/` directory holds legacy code and is gitignored.
    files. A SurveyCTO form is typed from its compiled XML: `connectors/scto.py`
    downloads it, parses it with the vendored `parse_contract`, casts the wide
    JSON with `cast_wide` and keeps the XML per form version in `logs.duckdb`
-   (`form_definitions`). An ID on the server's dataset list imports as a server
-   dataset CSV instead; any other error fails the import
+   (`form_definitions`), after the raw save. An ID with no form XML (404) that
+   is on the server's dataset list imports as a server dataset CSV instead; any
+   other error fails the import
 2. **Storage**: per-project DuckDB databases via `utils/duckdb_utils.py`
 3. **Preparation** (`views/prep_view.py` + `processing/prep.py`): Polars
    operations recorded in a prep log for reproducibility

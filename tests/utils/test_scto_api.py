@@ -6,6 +6,7 @@ import pytest
 import requests
 
 from datasure.utils.scto_api import (
+    FormNotFoundError,
     SurveyCTOAPIClient,
     SurveyCTOAPIConfig,
     SurveyCTOAPIError,
@@ -600,13 +601,30 @@ class TestFormXml:
 
     def test_download_form_xml_http_error(self, api_client):
         """Test an HTTP error raises SurveyCTOAPIError."""
+        error = requests.exceptions.HTTPError("500", response=Mock(status_code=500))
         with patch.object(api_client.session, "get") as mock_get:
-            mock_get.return_value.raise_for_status.side_effect = (
-                requests.exceptions.HTTPError("404")
-            )
+            mock_get.return_value.raise_for_status.side_effect = error
 
             with pytest.raises(SurveyCTOAPIError, match="Failed to download form XML"):
                 api_client.download_form_xml("farm")
+
+    def test_download_form_xml_not_found(self, api_client):
+        """Test a 404 raises FormNotFoundError."""
+        error = requests.exceptions.HTTPError("404", response=Mock(status_code=404))
+        with patch.object(api_client.session, "get") as mock_get:
+            mock_get.return_value.raise_for_status.side_effect = error
+
+            with pytest.raises(FormNotFoundError, match="farm"):
+                api_client.download_form_xml("farm")
+
+    def test_download_form_xml_other_request_error(self, api_client):
+        """Test any other requests error is wrapped too."""
+        with patch.object(
+            api_client.session,
+            "get",
+            side_effect=requests.exceptions.ChunkedEncodingError("cut"),
+        ), pytest.raises(SurveyCTOAPIError, match="cut"):
+            api_client.download_form_xml("farm")
 
 
 class TestSubmissionEndpoints:
