@@ -16,6 +16,7 @@ def generate_readme(
     corrected_rows: int,
     n_corrections_by_action: dict[str, int],
     include_scto_form: bool = False,
+    include_form_dictionary: bool = False,
 ) -> str:
     """Generate a plain-text README for the Stata replication package.
 
@@ -41,6 +42,8 @@ def generate_readme(
         Count of corrections keyed by action type.
     include_scto_form : bool
         Whether the SurveyCTO XLS questionnaire was included in the package.
+    include_form_dictionary : bool
+        Whether the data dictionary built from the SurveyCTO form was included.
 
     Returns
     -------
@@ -156,6 +159,14 @@ def generate_readme(
         f"| {'3_data/2_intermediate/' + safe_survey + '_prepped.dta':<45} | {'Dataset after prep steps (generated)':<40} |",
         f"| {'3_data/3_final/' + safe_survey + '_corrected.dta':<45} | {'Final corrected dataset (generated)':<40} |",
         f"| {'1_docs/2_codebooks/codebook.xlsx':<45} | {'Variable codebook (generated)':<40} |",
+        *(
+            [
+                f"| {'1_docs/2_codebooks/' + safe_survey + '_dictionary.xlsx':<45}"
+                f" | {'Form labels, skip logic, raw-data stats':<40} |"
+            ]
+            if include_form_dictionary
+            else []
+        ),
         *(
             [
                 f"| {'1_docs/1_surveys/' + safe_survey + '_questionnaire.xlsx':<45}"

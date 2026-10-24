@@ -61,6 +61,22 @@ def _mock_loader(project_id, alias, db_name):
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def no_form_dictionary():
+    """Aliases here have no stored SurveyCTO form, unless a test says so."""
+    with (
+        patch(
+            "datasure.replication.package_builder.load_missing_codes_from_db",
+            return_value=pl.DataFrame(),
+        ),
+        patch(
+            "datasure.replication.package_builder.build_form_dictionary",
+            return_value=None,
+        ) as build,
+    ):
+        yield build
+
+
 class TestLoadDataset:
     def test_returns_dataframe_on_success(self):
         with patch(
@@ -507,3 +523,38 @@ class TestExcludeReviewerNames:
         save.assert_not_called()
         remove.assert_not_called()
         delete.assert_not_called()
+
+
+class TestFormDictionary:
+    """A SurveyCTO alias's data dictionary goes into 1_docs/2_codebooks."""
+
+    def _build(self) -> zipfile.ZipFile:
+        with patch(
+            "datasure.replication.package_builder.duckdb_get_table",
+            side_effect=_mock_loader,
+        ):
+            zip_bytes = build_replication_package(
+                project_id="p",
+                project_name="P",
+                survey_name="S",
+                alias="s",
+                key_col="key",
+            )
+        return zipfile.ZipFile(BytesIO(zip_bytes))
+
+    def test_included_with_its_readme_line(self, no_form_dictionary):
+        no_form_dictionary.return_value = object()
+        with patch(
+            "datasure.replication.package_builder.dictionary_xlsx",
+            return_value=b"xlsx",
+        ):
+            zf = self._build()
+        names = zf.namelist()
+        path = next(n for n in names if n.endswith("2_codebooks/s_dictionary.xlsx"))
+        assert zf.read(path) == b"xlsx"
+        readme = zf.read(next(n for n in names if n.endswith("0_README.txt")))
+        assert b"s_dictionary.xlsx" in readme
+
+    def test_left_out_without_a_form_definition(self):
+        names = self._build().namelist()
+        assert not any(n.endswith("_dictionary.xlsx") for n in names)

@@ -602,19 +602,19 @@ class TestFormDefinitions:
         assert load_form_definition("p", "farm") is None
 
     def test_round_trip(self):
-        save_form_definition("p", "farm", "farm", "3", b"<v3/>")
+        save_form_definition("p", "farm", "farm", "3", b"<v3/>", b"s-v3")
 
-        assert load_form_definition("p", "farm") == b"<v3/>"
+        assert load_form_definition("p", "farm") == (b"<v3/>", b"s-v3")
         assert load_form_definition("p", "other") is None
 
     def test_latest_version_wins(self):
-        save_form_definition("p", "farm", "farm", "3", b"<v3/>")
-        save_form_definition("p", "farm", "farm", "4", b"<v4/>")
+        save_form_definition("p", "farm", "farm", "3", b"<v3/>", b"s-v3")
+        save_form_definition("p", "farm", "farm", "4", b"<v4/>", b"s-v4")
 
-        assert load_form_definition("p", "farm") == b"<v4/>"
+        assert load_form_definition("p", "farm") == (b"<v4/>", b"s-v4")
 
     def test_same_version_replaces_its_row(self):
-        save_form_definition("p", "farm", "farm", "3", b"<old/>")
-        save_form_definition("p", "farm", "farm", "3", b"<new/>")
+        save_form_definition("p", "farm", "farm", "3", b"<old/>", b"s-old")
+        save_form_definition("p", "farm", "farm", "3", b"<new/>", b"s-new")
 
-        assert load_form_definition("p", "farm") == b"<new/>"
+        assert load_form_definition("p", "farm") == (b"<new/>", b"s-new")
