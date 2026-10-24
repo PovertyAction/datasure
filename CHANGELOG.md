@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **SurveyCTO data dictionary** (#398, `processing/form_dictionary.py`):
+  `build_form_dictionary(project_id, alias, raw, missing_codes)` builds an alias's
+  variable dictionary, rule-based PII flags (trusting publishable fields; no
+  Presidio, so what the rules leave open is `may_contain_pii` / `unscanned`)
+  and `stats_rows`, which count each column only over the rows where its
+  question was asked and set the project's whole-number missing codes apart
+  (`sentinels_from_missing_codes`; a code under two labels raises). `None`
+  without a stored form definition. `form_table` raises when raw's columns
+  and the stored schema differ, instead of dropping columns.
+  `dictionary_xlsx` writes the workbook (Variables, Summary stats) with
+  upstream's `save_codebook`; flagged columns show counts, never values
+- **Replication package** (#398): SurveyCTO aliases get
+  `1_docs/2_codebooks/{survey}_dictionary.xlsx`, listed in the README
+  (`generate_readme(include_form_dictionary=...)`)
 - **Typed SurveyCTO import** (#397): `SurveyCTOClient._import_regular_form`
   (`connectors/scto.py`) downloads the deployed form's compiled XML
   (`SurveyCTOAPIClient.download_form_xml`, `GET /forms/{id}/xml` with the same
@@ -41,6 +55,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to 500 characters of the response body, where SurveyCTO explains statuses
   such as its non-standard 430. A failed submission download keeps the
   status instead of becoming an "Unexpected error"
+- **Form definitions keep the cast's Arrow schema** (#398):
+  `save_form_definition` / `load_form_definition` also store the
+  cast's serialized Arrow schema. `form_table` casts raw back to it,
+  restoring the field metadata Polars drops. When raw holds earlier
+  batches, `merged_schema` adds their columns, so a refresh with few or no
+  new rows keeps them. Importing an alias as a server dataset deletes its
+  definitions (`delete_form_definitions`)
+- **`utils/missing_codes.py`** (#398): `codes_by_label` and
+  `whole_number_code`, moved from `checks/missing.py` (were
+  `_get_missing_code_pairs`, `_whole_number_code`) so non-UI code can parse
+  missing codes without importing the Missing tab
+- **`datasure.surveycto` dictionary modules** (#398): the dictionary
+  (`questions`, `dictionary`, `survey`), skip-logic stats (`stats`),
+  workbook writer (`codebook`) and PII rules (`pii`), adapted from
+  surveycto_python_dict at `d6f54f9` and maintained in DataSure from now
+  on. `stats_rows`, `save_codebook` and `classify(analyzer=None)` run from
+  in-memory objects
 
 - **Enumerator Report: Needs attention**: a list near the top of the report
   of the enumerators any check singles out, each with Flagged or Watch

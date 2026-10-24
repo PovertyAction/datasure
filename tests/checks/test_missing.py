@@ -13,7 +13,6 @@ from datasure.checks.missing import (
     _compute_missing_data_paired,
     _create_binary_missing_indicator,
     _get_all_missing_codes,
-    _get_missing_code_pairs,
     _safe_percentage,
     _try_convert_code_to_column_type,
     compute_filtered_missing_columns,
@@ -35,6 +34,7 @@ from datasure.checks.missing import (
     missing_summary,
     render_missing_codes_table,
 )
+from datasure.utils.missing_codes import codes_by_label
 
 # ==============================================================================
 # Mock Streamlit Helper
@@ -553,7 +553,7 @@ def test_mask_missing_codes_without_codes(land_area_data):
     assert result.equals(land_area_data)
 
 
-def test_get_missing_code_pairs():
+def test_codes_by_label():
     """Test _get_missing_code_pairs creates correct mapping."""
     missing_codes_df = pl.DataFrame(
         {
@@ -562,7 +562,7 @@ def test_get_missing_code_pairs():
         }
     )
 
-    result = _get_missing_code_pairs(missing_codes_df)
+    result = codes_by_label(missing_codes_df)
 
     assert len(result) == 2
     assert result["DontKnow"] == ["-999", "-998"]
@@ -1300,10 +1300,10 @@ def test_compute_missing_data_paired_temporal_types():
     assert result["value"][1] == 2
 
 
-def test_get_missing_code_pairs_empty():
-    """_get_missing_code_pairs returns empty dict for empty DataFrame."""
+def test_codes_by_label_empty():
+    """codes_by_label returns empty dict for empty DataFrame."""
     empty_df = pl.DataFrame(schema={"label": pl.Utf8, "codes": pl.Utf8})
-    result = _get_missing_code_pairs(empty_df)
+    result = codes_by_label(empty_df)
     assert result == {}
 
 
