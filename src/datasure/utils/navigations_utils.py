@@ -2,11 +2,15 @@
 
 import streamlit as st
 
+from datasure.utils.demo_lifecycle import (
+    RESTART_DEMO_MESSAGE,
+    exit_demo,
+    reset_demo_project,
+)
 from datasure.utils.onboarding_utils import (
     OnboardingSteps,
     get_onboarding_step,
     is_demo_project,
-    load_demo_data,
     set_onboarding_step,
     show_demo_banner,
     show_next_steps,
@@ -130,22 +134,21 @@ def demo_sidebar_help():
             st.session_state["_sidebar_confirm_restart"] = True
 
         if st.session_state.get("_sidebar_confirm_restart"):
-            st.warning(
-                "This will reset all demo progress and data.",
-                icon=":material/warning:",
-            )
+            st.warning(RESTART_DEMO_MESSAGE, icon=":material/warning:")
             if st.button(
                 "Confirm restart", type="primary", key="_sidebar_restart_confirm"
             ):
-                st.session_state.pop("_sidebar_confirm_restart", None)
-                load_demo_data()
-                set_onboarding_step(2)
-                st.switch_page(st.session_state.st_import_data_page)
+                if reset_demo_project():
+                    st.switch_page(st.session_state.st_import_data_page)
+                else:
+                    st.error(
+                        "Failed to reset the demo. Close any other DataSure "
+                        "windows and try again."
+                    )
             if st.button("Cancel", key="_sidebar_restart_cancel"):
                 st.session_state.pop("_sidebar_confirm_restart", None)
                 st.rerun()
 
         if st.button("Exit Demo", width="stretch"):
-            st.session_state.st_project_id = ""
-            st.session_state.pop("onboarding_step", None)
+            exit_demo()
             st.switch_page(st.session_state.st_start_page)

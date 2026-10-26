@@ -510,6 +510,13 @@ travel.
 on every rerun and guard on `st_project_id`, calling `st.stop()` when no
 project is selected. If cross-page state looks corrupted, check `app.py` first.
 
+The demo project (`demoproject`) is started, restarted and exited through
+`utils/demo_lifecycle.py`. `reset_demo_project()` deletes everything under
+`cache/demoproject/` and reloads the bundled demo data; both Restart actions
+use it. `exit_demo()` clears the demo's session state (onboarding step,
+dataset lists, page handles and every key containing the demo project ID) so
+the next project opens without demo datasets or pages.
+
 The check page last viewed is not session state: see
 [View state](#view-state) ("Last viewed check page").
 
