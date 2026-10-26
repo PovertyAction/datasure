@@ -291,7 +291,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Solution: `show_demo_completion_message` moved to
     `utils/navigations_utils.py` and is called once, from
     `views/replication_view.py` after the PII confirmation is ticked. Its
-    Restart opens the same confirm dialog as the sidebar Restart and runs
+    balloons show once per demo run (session flag `DEMO_CELEBRATED_KEY`,
+    cleared by Restart and Exit with the rest of the demo's session state),
+    not on every rerun of the page. Its Restart opens the same confirm dialog as the sidebar Restart and runs
     `reset_demo_project()` (`_restart_demo`, shared by both); Create Real
     Project calls `exit_demo()` and opens the Start page. The other endings
     are removed, along with the unreachable "Congratulations" branch of
@@ -344,14 +346,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `utils/onboarding_utils.py`, collected in `DEMO_GUIDANCE_COLUMNS` by
     dataset alias) list every demo column guidance names, and the guidance
     f-strings use them, so adding a column to guidance means adding a member.
-    Labels, section counts and metric names now match the Missing, Summary,
+    The demo values guidance names (the duplicate `hhid`s, their KEYs and
+    new IDs in `DEMO_DUPLICATES`, and the `land_acre` correction 75.5 to 5.5
+    in `DEMO_LAND_CORRECTION`) are named once next to them, and the Prepare
+    page's check for the `submissiondate` conversion reads the column from
+    them too. Labels, section counts and metric names now match the Missing, Summary,
     Progress, Outliers, GPS, Enumerator, Backchecks, Prepare and Configure
     pages (for example `household_count` for `household_size`, no GPS
     accuracy or form version column, "Auto-Clustering (LOF)", "Total
     Columns"). Worked examples use the seeded data: a progress target of 3 a
     day against the demo's ~2.4, `household_count` and `land_acre` as
     outlier columns, and Modify ID / Drop on the Duplicates cards for all
-    three duplicate `hhid`s (UP015-005, GJ013-025, AN002-003). The
+    three duplicate `hhid`s (UP015-005, GJ013-025, and AN002-003, whose
+    dropped record is a near-empty submission). The
     `summary_check_health` guidance describes the Check health columns,
     statuses and Comparison period. The Correct Data page keeps only the
     `OnboardingSteps.CORRECT` step guidance, now a `land_acre` correction;
@@ -359,7 +366,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `correction_view.render_page_header` are removed. The Replication page
     drops its copy of the `OnboardingSteps.REPLICATION` text
   - Tests (#364): `TestRealDemoData.test_every_column_named_in_guidance_exists`
-    checks every `DEMO_GUIDANCE_COLUMNS` member against the real demo data
+    checks every `DEMO_GUIDANCE_COLUMNS` member against the real demo data;
+    the `TestRealDemoData` duplicate and correction tests check that each
+    duplicate pair and KEY exists, each new ID is unused, the dropped
+    AN002-003 record is the emptier one, and 75.5 is an IQR outlier while
+    5.5 is not
   - Files: `src/datasure/utils/onboarding_utils.py`,
     `src/datasure/checks/duplicates.py`,
     `src/datasure/checks/backchecks/report_ui.py`,
