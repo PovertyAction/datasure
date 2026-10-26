@@ -91,7 +91,7 @@ def _sentinel_counts(
 _COMPARED = (
     re.compile(r"selected\(\s*\$\{([^}]+)\}\s*,\s*'([^']+)'\s*\)"),
     re.compile(r"\$\{([^}]+)\}\s*!?=\s*'([^']+)'"),
-    re.compile(r"\$\{([^}]+)\}\s*!?=\s*(-?[0-9]+)(?![\w.])"),
+    re.compile(r"\$\{([^}]+)\}\s*!?=\s*(-?\d+)(?![\w.])"),
 )
 
 
