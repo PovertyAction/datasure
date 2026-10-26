@@ -1,7 +1,8 @@
 """Summary's check health rows: status, numbers and cached headlines."""
 
+import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import polars as pl
 import pytest
@@ -14,6 +15,7 @@ from datasure.checks.health import (
     clear_headline_cache,
     group_rows,
     health_rows,
+    render_health_rows,
 )
 from datasure.utils.dataframe_utils import get_df_columns
 from datasure.utils.duckdb_utils import duckdb_save_table
@@ -244,6 +246,23 @@ class TestGroupRows:
         assert [
             (group, [row.item.slug for row in members]) for group, members in grouped
         ] == [("Overview", ["a", "c"]), ("Data", ["b"])]
+
+
+class TestRenderHealthRows:
+    def test_each_check_gets_its_own_bordered_container(self, monkeypatch):
+        st = MagicMock()
+        st.columns.side_effect = lambda spec, **_: [MagicMock() for _ in spec]
+        monkeypatch.setitem(sys.modules, "streamlit", st)
+        rows = [
+            HealthRow(NavItem("a", "A", ":material/a:", "Overview")),
+            HealthRow(NavItem("b", "B", ":material/b:", "Data")),
+            HealthRow(NavItem("c", "C", ":material/c:", "Data")),
+        ]
+
+        with patch("datasure.utils.ui_utils.section_header"):
+            render_health_rows(rows, on_select=MagicMock())
+
+        assert st.container.call_args_list == [call(border=True)] * len(rows)
 
 
 class TestHeadlineCache:

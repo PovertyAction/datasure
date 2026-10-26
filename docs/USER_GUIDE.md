@@ -860,7 +860,7 @@ Collection progress metrics:
 After Progress, Summary lists every other check in one row each, so you can see
 where to start triage. The rows are grouped like the check navigation
 (**Overview**, **Data integrity**, **Field team** and **Exploration**) under
-one shared column header. Each row shows:
+one shared column header, and each check sits in its own box. Each row shows:
 
 - **Check**: the check's name
 - **Status**: a coloured pill with an icon and a label, so the status does not

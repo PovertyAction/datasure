@@ -346,7 +346,8 @@ def render_health_rows(
 ) -> None:
     """Draw the check health list: a row per check, grouped like the navigation.
 
-    One column header is shared by every group. Each row shows the check's
+    One column header is shared by every group, and each row sits in its own
+    bordered container so its numbers read as one check. Each row shows the check's
     label, status pill, outstanding number with its detail line (or the
     reason the check is not ready, or the error), resolved count and action
     button. "Open →" and "Set up →" call ``on_select`` with the check's slug.
@@ -363,8 +364,8 @@ def render_health_rows(
     for group, members in group_rows(rows):
         if group:
             st.caption(f"**{group}**")
-        with st.container(border=True):
-            for row in members:
+        for row in members:
+            with st.container(border=True):
                 _render_row(st, row, on_select)
 
 
