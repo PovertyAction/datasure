@@ -256,11 +256,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the sidebar now confirms with `confirm_dialog` like the Start page, and
     both queue an error (`DEMO_RESET_FAILED_MESSAGE`) with `queue_notice` when
     the folder cannot be deleted, so the dialog's rerun no longer hides it.
+    A failed reset removes the demo from `projects.json` and leaves it, so a
+    partly deleted demo is not offered for Resume, and both Restart actions
+    show the error on the Start page's demo row.
     `exit_demo()` and `reset_demo_project()` clear every session key except
     the app-wide page handles, the reviewer name, queued messages and other
     projects' navigation keys, then restore the defaults that `app.py` sets
     (now in `utils/session_defaults.py`), so no demo datasets, replication
-    package or import log carry over. The Restart dialog
+    package or import log carry over. Demo keys are cleared even when a page
+    name ends in 8 hex digits, like another project's ID. The Restart dialog
     (`RESTART_DEMO_MESSAGE`) lists what is deleted
   - Tests (#364): `tests/utils/test_demo_lifecycle.py` checks that Restart
     leaves only freshly loaded demo data and that a project opened after
@@ -268,7 +272,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Files: `src/datasure/utils/demo_lifecycle.py`,
     `src/datasure/utils/session_defaults.py`, `src/datasure/app.py`,
     `src/datasure/views/start_view.py`,
-    `src/datasure/utils/navigations_utils.py`
+    `src/datasure/utils/navigations_utils.py`,
+    `src/datasure/utils/onboarding_utils.py`
 - **Demo data seeded and complete** (#360, #365): Every Start or Restart
   Demo drew new random dates, consent and completion values, so reports
   changed between runs; backchecks could predate their survey; and several

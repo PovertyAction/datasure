@@ -19,6 +19,7 @@ from datasure.utils.onboarding_utils import (
     create_demo_project,
     load_demo_data,
     set_onboarding_step,
+    unregister_demo_project,
 )
 from datasure.utils.reviewer import _REVIEWER_NAME_WIDGET_KEY
 from datasure.utils.session_defaults import init_app_session_state
@@ -37,6 +38,10 @@ DEMO_RESET_FAILED_MESSAGE = (
     "Failed to reset the demo. Close any other DataSure windows and try again."
 )
 
+# `queue_notice` scope of the Start page demo row's messages. A failed reset
+# leaves the demo, so both Restart actions show their error there.
+DEMO_NOTICE_SCOPE = "start_demo"
+
 # Session state that is not the demo's: the page handles app.py builds on
 # every run (callers still switch page with them), the reviewer name and
 # messages queued for the next run. Every other key is cleared, so state a
@@ -54,8 +59,15 @@ _APP_WIDE_KEYS = frozenset(
 
 # A key ``project_nav_key`` built for another project, which is kept:
 # "<name>__<project id>[__<suffix>]", where the ID is 8 hex characters
-# (``start_view.get_project_id``).
+# (``start_view.get_project_id``). A demo page name can also hold 8 hex
+# characters (e.g. "HFC - 20251026"), so demo keys are checked for first.
 _OTHER_PROJECT_KEY = re.compile(r"__[0-9a-f]{8}(?:__|$)")
+_DEMO_KEY_PART = f"__{DEMO_PROJECT_ID}"
+
+
+def _is_other_project_key(key: str) -> bool:
+    """Return True if ``key`` is another project's navigation key."""
+    return _DEMO_KEY_PART not in key and bool(_OTHER_PROJECT_KEY.search(key))
 
 
 def _clear_demo_session_state() -> None:
@@ -65,7 +77,7 @@ def _clear_demo_session_state() -> None:
     """
     state = st.session_state
     for key in list(state):
-        if key in _APP_WIDE_KEYS or _OTHER_PROJECT_KEY.search(str(key)):
+        if key in _APP_WIDE_KEYS or _is_other_project_key(str(key)):
             continue
         state.pop(key, None)
     init_app_session_state()
@@ -100,6 +112,16 @@ def _delete_demo_folder() -> None:
         shutil.rmtree(project_path)
 
 
+def _abandon_demo() -> None:
+    """Leave a demo that could not be rebuilt and stop offering Resume.
+
+    The folder may be partly deleted or loaded, so the demo is removed from
+    ``projects.json`` and the Start page offers only Start Demo.
+    """
+    unregister_demo_project()
+    exit_demo()
+
+
 def reset_demo_project() -> bool:
     """Delete the demo project and rebuild it from the demo data.
 
@@ -107,6 +129,9 @@ def reset_demo_project() -> bool:
     app's cached results, deletes everything under ``cache/demoproject/``,
     registers the demo project again,
     loads the demo data and makes the demo the active project at step 2.
+
+    On failure the demo is unregistered and left, so the caller shows the
+    error on the Start page (``DEMO_NOTICE_SCOPE``).
 
     Returns
     -------
@@ -121,12 +146,14 @@ def reset_demo_project() -> bool:
         _delete_demo_folder()
     except OSError:
         logger.exception("Could not delete the demo project folder")
+        _abandon_demo()
         return False
 
     project_id = create_demo_project()
     st.session_state.st_project_id = project_id
     set_onboarding_step(1)
     if not load_demo_data():
+        _abandon_demo()
         return False
     set_onboarding_step(2)
     return True

@@ -513,7 +513,10 @@ project is selected. If cross-page state looks corrupted, check `app.py` first.
 The demo project (`demoproject`) is started, restarted and exited through
 `utils/demo_lifecycle.py`. `reset_demo_project()` deletes everything under
 `cache/demoproject/` and reloads the bundled demo data; both Restart actions
-use it. Both `reset_demo_project()` and `exit_demo()` clear every session
+use it. If the folder cannot be deleted or the data cannot be loaded, it
+removes the demo from `projects.json` and leaves it, so a partly deleted demo
+is never offered for Resume; both Restart actions then show the error on the
+Start page's demo row (`DEMO_NOTICE_SCOPE`). Both `reset_demo_project()` and `exit_demo()` clear every session
 key except the app-wide ones (the page handles `app.py` builds each run, the
 reviewer name and queued messages) and other projects' navigation keys, then
 restore the defaults in `utils/session_defaults.py` that `app.py` also sets.

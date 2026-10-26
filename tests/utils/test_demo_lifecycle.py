@@ -1,6 +1,7 @@
 """Tests for restarting and exiting the demo (#357)."""
 
 import json
+import shutil
 
 import duckdb
 import polars as pl
@@ -126,6 +127,51 @@ class TestResetDemoProject:
 
         assert "st_prep_dataset_list" not in session_state
         assert not [k for k in session_state if DEMO_PROJECT_ID in k]
+
+    def test_restart_forgets_demo_keys_that_look_like_another_project(
+        self, demo_cache, session_state
+    ):
+        """A demo page name ending in 8 hex digits is not kept as another project's."""
+        page_key = f"check_nav_hfc___20251026__{DEMO_PROJECT_ID}"
+        session_state[f"{page_key}__selected"] = "x"
+        session_state[page_key] = "y"
+
+        assert reset_demo_project()
+
+        assert not [k for k in session_state if DEMO_PROJECT_ID in k]
+
+    def test_failed_delete_leaves_and_unregisters_demo(
+        self, demo_cache, session_state, monkeypatch
+    ):
+        """A partly deleted demo is not offered for Resume."""
+        assert reset_demo_project()
+        session_state["st_prep_dataset_list"] = ["demo_survey"]
+
+        def locked(path, *args, **kwargs):
+            raise PermissionError("file is in use")
+
+        monkeypatch.setattr(shutil, "rmtree", locked)
+
+        assert not reset_demo_project()
+
+        projects = json.loads(get_cache_path("projects.json").read_text())
+        assert DEMO_PROJECT_ID not in projects
+        assert session_state["st_project_id"] == ""
+        assert "onboarding_step" not in session_state
+        assert "st_prep_dataset_list" not in session_state
+
+    def test_failed_load_leaves_and_unregisters_demo(
+        self, demo_cache, session_state, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "datasure.utils.demo_lifecycle.load_demo_data", lambda: False
+        )
+
+        assert not reset_demo_project()
+
+        projects = json.loads(get_cache_path("projects.json").read_text())
+        assert DEMO_PROJECT_ID not in projects
+        assert session_state["st_project_id"] == ""
 
 
 class TestExitDemo:
