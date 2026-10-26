@@ -55,7 +55,6 @@ from datasure.utils.navigations_utils import (
     demo_sidebar_help,
     page_navigation,
 )
-from datasure.utils.onboarding_utils import ImportDemoInfo, demo_expander
 from datasure.utils.reapply_utils import highlight_status, warn_reapply_failures
 from datasure.utils.settings_utils import (
     get_check_config_settings,
@@ -956,16 +955,14 @@ def render_correction_tab(
 
 
 def render_page_header() -> None:
-    """Render the page header and demo information."""
+    """Render the page header.
+
+    In the demo, the Correct Data step guidance above the header is the page's
+    only instruction set.
+    """
     page_header(
         "Correct Data",
         "Make corrections to data based on issues identified in checks.",
-    )
-
-    demo_expander(
-        "How to add correction steps",
-        ImportDemoInfo.get_info_message("add_correction_step_info"),
-        expanded=True,
     )
 
 

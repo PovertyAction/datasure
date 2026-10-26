@@ -83,6 +83,7 @@ from datasure.utils.duckdb_utils import (
 )
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
+from datasure.utils.onboarding_utils import DemoBackcheckColumn
 from datasure.utils.reviewer import get_reviewer_name
 from datasure.utils.ui_utils import (
     metric_row,
@@ -2448,28 +2449,30 @@ def backchecks_report(
     st.subheader("Backchecks Columns Configuration")
 
     demo_callout(
-        """
+        f"""
         ##### Backchecks Columns Configuration
         Use the :material/add: **Add Backcheck Column** button to configure which
         columns to compare between the survey and backcheck datasets. For each column
         you can set:
-        - **Category**: A numeric group (e.g., 1 for critical questions, 2 for
-          secondary questions) used to aggregate error rates in the summary.
-        - **OK Range**: An acceptable difference threshold for numeric columns.
-        - **Comparison Condition**: How to handle missing values
-          (e.g., ignore_missing_values).
+        - **Select Backcheck Category**: A numeric group (e.g., 1 for critical questions,
+          2 for secondary questions) used to aggregate error rates in the summary.
+        - **Select OK Range Type**: An acceptable difference for numeric columns, as a
+          **Value Range** or a **Percentage Range**.
+        - **Select Backcheck Statistical Test**: An optional test comparing the survey
+          and backcheck values.
 
         ##### Instructions for Demo:
-        Add the following columns using the :material/add: **Add Backcheck Column** button:
+        Add the following columns using the :material/add: **Add Backcheck Column** button.
+        Columns with the same settings can be added together in one configuration.
 
-        | Column          | Category | OK Range | Comparison Condition  |
-        |-----------------|----------|----------|-----------------------|
-        | age             | 1        | 1        | ignore_missing_values |
-        | household_count | 2        | None     | ignore_missing_values |
-        | minc_pri        | 1        | None     | ignore_missing_values |
-        | npinc_out       | 1        | None     | ignore_missing_values |
-        | no_save         | 1        | None     | ignore_missing_values |
-        | pri_govt_sch    | 1        | None     | ignore_missing_values |
+        | Column | Category | OK Range |
+        |--------|----------|----------|
+        | {DemoBackcheckColumn.AGE} | 1 | Value Range, -1 to 1 |
+        | {DemoBackcheckColumn.HOUSEHOLD_COUNT} | 2 | None |
+        | {DemoBackcheckColumn.MINC_PRI} | 1 | None |
+        | {DemoBackcheckColumn.NPINC_OUT} | 1 | None |
+        | {DemoBackcheckColumn.NO_SAVE} | 1 | None |
+        | {DemoBackcheckColumn.PRI_GOVT_SCH} | 1 | None |
         """
     )
 

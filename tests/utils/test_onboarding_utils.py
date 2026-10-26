@@ -10,6 +10,7 @@ import polars as pl
 import pytest
 
 from datasure.utils.onboarding_utils import (
+    DEMO_GUIDANCE_COLUMNS,
     DEMO_OUTPUT_FUNCTIONS,
     DEMO_PROJECT_ID,
     DEMO_PROJECT_NAME,
@@ -93,9 +94,6 @@ class TestImportDemoInfo:
         message = ImportDemoInfo.get_info_message("add_prep_steps_info")
         assert "convert the submissiondate" in message
 
-        message = ImportDemoInfo.get_info_message("add_correction_step_info")
-        assert "targeted corrections" in message
-
     def test_get_info_message_invalid_id(self):
         """Test getting info message with invalid ID returns default message."""
         message = ImportDemoInfo.get_info_message("invalid_message_id")
@@ -111,7 +109,6 @@ class TestImportDemoInfo:
         assert hasattr(ImportDemoInfo, "PROCEED_TO_HFCS_INFO")
         assert hasattr(ImportDemoInfo, "ADD_CHECK_CONFIG_INFO")
         assert hasattr(ImportDemoInfo, "ADD_PREP_STEPS_INFO")
-        assert hasattr(ImportDemoInfo, "ADD_CORRECTION_STEP_INFO")
 
 
 class TestOnboardingSteps:
@@ -199,7 +196,7 @@ class TestOutputOnboardingInfo:
             "summary", "summary_report"
         )
         assert message["title"] == "Data Quality Summary"
-        assert "overview of the data quality checks" in message["content"]
+        assert "overview of your survey data" in message["content"]
 
         # Test other summary messages
         message = OutputOnboardingInfo.get_onboarding_message(
@@ -1378,3 +1375,17 @@ class TestRealDemoData:
 
         for col in guidance:
             assert mismatches.get(col, 0) >= 2, col
+
+    def test_every_column_named_in_guidance_exists(self, load_real_demo):
+        """Demo guidance only names columns the demo data has (#356)."""
+        survey, backcheck = load_real_demo(today=date(2026, 3, 10))
+        data = {"demo_survey": survey, "demo_backcheck": backcheck}
+
+        assert set(DEMO_GUIDANCE_COLUMNS) == set(data)
+        missing = sorted(
+            (alias, str(col))
+            for alias, columns in DEMO_GUIDANCE_COLUMNS.items()
+            for col in columns
+            if col not in data[alias].columns
+        )
+        assert not missing, f"guidance names columns not in the demo data: {missing}"

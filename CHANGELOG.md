@@ -304,6 +304,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `src/datasure/assets/demo_survey.csv`,
     `src/datasure/assets/demo_backcheck.csv`,
     `scripts/benchmark_check_health.py`
+- **Stale demo guidance** (#356, #365): Demo guidance named columns, widget
+  labels and counts that no longer matched the demo data or the UI, showed
+  two instruction sets on the Correct Data and Replication pages, and gave
+  worked examples that produced little or nothing
+  - Root cause: guidance text hard-coded column names and labels, so it
+    drifted as the UI and the demo data changed
+  - Solution: `DemoColumn` and `DemoBackcheckColumn` (`StrEnum`s in
+    `utils/onboarding_utils.py`, collected in `DEMO_GUIDANCE_COLUMNS` by
+    dataset alias) list every demo column guidance names, and the guidance
+    f-strings use them, so adding a column to guidance means adding a member.
+    Labels, section counts and metric names now match the Missing, Summary,
+    Progress, Outliers, GPS, Enumerator, Backchecks, Prepare and Configure
+    pages (for example `household_count` for `household_size`, no GPS
+    accuracy or form version column, "Auto-Clustering (LOF)", "Total
+    Columns"). Worked examples use the seeded data: a progress target of 3 a
+    day against the demo's ~2.4, `household_count` and `land_acre` as
+    outlier columns, and Modify ID / Drop on the Duplicates cards for all
+    three duplicate `hhid`s (UP015-005, GJ013-025, AN002-003). The
+    `summary_check_health` guidance describes the Check health columns,
+    statuses and Comparison period. The Correct Data page keeps only the
+    `OnboardingSteps.CORRECT` step guidance, now a `land_acre` correction;
+    `ImportDemoInfo.ADD_CORRECTION_STEP_INFO` and its expander in
+    `correction_view.render_page_header` are removed. The Replication page
+    drops its copy of the `OnboardingSteps.REPLICATION` text
+  - Tests (#364): `TestRealDemoData.test_every_column_named_in_guidance_exists`
+    checks every `DEMO_GUIDANCE_COLUMNS` member against the real demo data
+  - Files: `src/datasure/utils/onboarding_utils.py`,
+    `src/datasure/checks/duplicates.py`,
+    `src/datasure/checks/backchecks/report_ui.py`,
+    `src/datasure/checks/enumerator/report_ui.py`,
+    `src/datasure/checks/gpschecks/report_ui.py`,
+    `src/datasure/checks/outliers/report_ui.py`,
+    `src/datasure/views/correction_view.py`,
+    `src/datasure/views/prep_view.py`, `src/datasure/views/replication_view.py`
 - **DuckDB 2.0 compatibility** (#393): Fresh installs that resolved duckdb
   2.0 failed on the first table read or write, so data could not be imported
   - Root cause: duckdb 2.0 removed `.pl()` from `execute()` results and

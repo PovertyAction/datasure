@@ -85,7 +85,7 @@ from datasure.utils.duckdb_utils import (
 )
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
-from datasure.utils.onboarding_utils import is_demo_project
+from datasure.utils.onboarding_utils import DemoColumn, is_demo_project
 from datasure.utils.ui_utils import (
     queue_notice,
     row_styler,
@@ -1974,16 +1974,20 @@ def outliers_report(
         demo_callout(
             "Click **Add Outlier/Constraint Column** to select which numeric columns to "
             "analyse. In the dialog that opens:\n\n"
-            "1. Leave **Search type** as **exact** and select **age** and "
-            "**household_count** from the column list.\n"
-            "2. Under **Outlier Options**, keep the default IQR method (multiplier 1.5, "
-            "threshold 20).\n"
-            "3. Under **Constraint Options**, optionally enter bounds — for example, "
-            "for **age** set **Hard Min = 0**, **Soft Min = 15**, **Soft Max = 60**, "
-            "**Hard Max = 100**. Hard bounds flag impossible values; soft bounds flag "
-            "values that are unusual but may be legitimate.\n"
+            "1. Leave **Search type** as **exact** and, under **Select columns to "
+            f"check**, select **{DemoColumn.AGE}**.\n"
+            "2. Under **Outlier Options**, keep the default Interquartile Range (IQR) "
+            "method (multiplier 1.5, threshold 20).\n"
+            "3. Under **Constraint Options**, enter bounds for respondent age: "
+            "**(OPTIONAL) Hard minimum = 18**, **(OPTIONAL) Soft minimum = 25**, "
+            "**(OPTIONAL) Soft maximum = 60** and **(OPTIONAL) Hard maximum = 100**. "
+            "Hard bounds flag impossible values; soft bounds flag values that are "
+            "unusual but may be legitimate.\n"
             "4. Click **Add Outlier & Constraint Configuration** to save.\n\n"
-            "Repeat the steps to add **land_acre** as a second column."
+            "Then click **Add Outlier/Constraint Column** again, select "
+            f"**{DemoColumn.HOUSEHOLD_COUNT}** and **{DemoColumn.LAND_ACRE}**, leave "
+            "the constraint bounds empty and save. A few households report far more "
+            "land or members than the rest, so outliers show below."
         )
 
     _render_outlier_column_actions(project_id, page_name_id, numeric_columns)
@@ -2022,7 +2026,8 @@ def outliers_report(
             "unexpected but may be legitimate (e.g., a very large land holding).\n\n"
             "Six metrics show how many records breach each bound type. "
             "Use **:material/clarify: Show more columns in report** to add context "
-            "columns such as **enum_name** or **state** to the violations table."
+            f"columns such as **{DemoColumn.ENUM_NAME}** or **{DemoColumn.STATE}** to "
+            "the violations table."
         )
 
     # Missing codes such as -99 are neither breaches nor outliers
@@ -2066,10 +2071,11 @@ def outliers_report(
         demo_callout(
             "This section flags records that fall outside the **statistical bounds** "
             "computed by the method you chose (IQR or Standard Deviation).\n\n"
-            "Four metrics summarise the findings: **Columns Checked**, "
+            "Four metrics summarise the findings: **Number of columns checked**, "
             "**Columns with Outliers**, **Total Outliers**, and "
             "**Enumerators with Outliers**.\n\n"
-            "Under **Inspect Columns**, select a column from the dropdown to see "
+            "Under **Inspect Columns**, select a column from **Select outlier columns "
+            f"to inspect** (try **{DemoColumn.LAND_ACRE}**) to see "
             "its descriptive statistics and a **box plot** showing where flagged values "
             "sit relative to the distribution. Expand "
             "**:material/clarify: Show more columns in report** to add context columns "

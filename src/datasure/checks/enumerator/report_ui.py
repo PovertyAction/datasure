@@ -39,6 +39,7 @@ from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import load_missing_codes_from_db
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
+from datasure.utils.onboarding_utils import DemoColumn
 from datasure.utils.settings_utils import load_check_settings
 from datasure.utils.view_state import (
     ViewState,
@@ -1102,7 +1103,7 @@ def enumerator_report(
         """
         This check tracks enumerator performance across your survey dataset.
 
-        It has four sections:
+        It has five sections:
         - **Enumerator Overview**: 8 summary metrics at the top.
         - **Enumerator Summary**: Tabular breakdown by enumerator with pill-based view switching.
         - **Enumerator Productivity**: Submission counts per enumerator over time.
@@ -1206,14 +1207,14 @@ def enumerator_report(
     st.subheader("Column Statistics by Enumerator")
 
     demo_callout(
-        """
+        f"""
         ##### Column Statistics by Enumerator
-        Use the **column multiselect** to choose one or more numeric columns to analyse,
-        then use the **statistics multiselect** to choose which statistics to display
+        Use **Select columns:** to choose one or more numeric columns to analyse,
+        then use **Select statistics:** to choose which statistics to display
         (count, mean, median, min, max, std, 25th percentile, 75th percentile).
 
         ##### Instructions for Demo:
-        Select **household_size** as the column and choose **count**, **mean**, **min**,
+        Select **{DemoColumn.HOUSEHOLD_COUNT}** as the column and choose **count**, **mean**, **min**,
         and **max** to check whether enumerators are recording consistent household sizes.
         """
     )
@@ -1233,16 +1234,16 @@ def enumerator_report(
     st.subheader("Enumerator Statistics Over Time")
 
     demo_callout(
-        """
+        f"""
         ##### Enumerator Statistics Over Time
         This section renders a line chart showing how a selected statistic for a chosen
-        column changes over time, broken down per enumerator. Use the **column selectbox**
-        to pick the variable, the **statistic selectbox** to choose the metric
+        column changes over time, broken down per enumerator. Use **Select column:**
+        to pick the variable, **Select statistic:** to choose the metric
         (e.g., mean, count, missing), and the **Daily / Weekly / Monthly** pills to set
         the time granularity.
 
         ##### Instructions for Demo:
-        Select **household_size** as the column and **mean** as the statistic, then switch
+        Select **{DemoColumn.HOUSEHOLD_COUNT}** as the column and **mean** as the statistic, then switch
         to **Weekly** to see whether average household size varies by enumerator over time.
         """
     )
