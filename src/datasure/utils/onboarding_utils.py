@@ -96,17 +96,29 @@ DEMO_REPEAT_SUBMISSION = DemoDuplicate(
 DEMO_DUPLICATES = (DEMO_WRONG_ID, DEMO_SHARED_ID, DEMO_REPEAT_SUBMISSION)
 
 
-class DemoCorrection(NamedTuple):
-    """A demo survey value the Correct Data guidance changes."""
+class DemoRecord(NamedTuple):
+    """A demo survey record that guidance names by ID and KEY."""
 
+    hhid: str
     key: str
+
+
+class DemoFlag(NamedTuple):
+    """A demo survey value that guidance corrects or accepts as valid."""
+
+    record: DemoRecord
     column: DemoColumn
-    old_value: float
-    new_value: float
+    value: float
+    # The value to correct it to, or None to accept it as valid
+    new_value: float | None = None
 
 
-DEMO_LAND_CORRECTION = DemoCorrection(
-    "uuid:2pb7nd59-391r-425l-40h1-t18527gn249i", DemoColumn.LAND_ACRE, 75.5, 5.5
+# Fixed on the Correct Data page
+DEMO_LAND_CORRECTION = DemoFlag(
+    DemoRecord("UP015-001", "uuid:2pb7nd59-391r-425l-40h1-t18527gn249i"),
+    DemoColumn.LAND_ACRE,
+    75.5,
+    5.5,
 )
 
 
@@ -135,36 +147,19 @@ class DemoBounds(NamedTuple):
 DEMO_AGE_BOUNDS = DemoBounds(18, 25, 60, 100)
 
 
-class DemoFlag(NamedTuple):
-    """A flagged demo survey value that guidance reviews on a check page."""
-
-    hhid: str
-    key: str
-    column: DemoColumn
-    value: float
-    # The value to correct it to, or None to Accept it as valid
-    new_value: float | None = None
-
-
 # Age 24 is below the soft minimum only: unusual but plausible, so accepted
 DEMO_OUTLIER_ACCEPT = DemoFlag(
-    "AN016-034", "uuid:3xf5wk03-411r-454r-42q4-n97169wt312n", DemoColumn.AGE, 24
+    DemoRecord("AN016-034", "uuid:3xf5wk03-411r-454r-42q4-n97169wt312n"),
+    DemoColumn.AGE,
+    24,
 )
 # A misplaced decimal point, corrected in the Review dialog
 DEMO_OUTLIER_CORRECTION = DemoFlag(
-    "AN016-008",
-    "uuid:7yq2ff04-784p-181b-06f6-y09055jv628g",
+    DemoRecord("AN016-008", "uuid:7yq2ff04-784p-181b-06f6-y09055jv628g"),
     DemoColumn.LAND_ACRE,
     62.0,
     6.2,
 )
-
-
-class DemoRecord(NamedTuple):
-    """A demo survey record that guidance names by ID and KEY."""
-
-    hhid: str
-    key: str
 
 
 # Surveyed in Deesa, north Gujarat, far from the other Gujarat households but
@@ -175,33 +170,50 @@ DEMO_GPS_ACCEPT = DemoRecord("GJ047-006", "uuid:8tp6pf85-928c-834t-16f0-g13614ux
 class DemoMismatch(NamedTuple):
     """A demo backcheck mismatch and the error source guidance attributes it to."""
 
-    hhid: str
-    # Survey KEY; the backcheck record has its own KEY
-    key: str
+    # The survey record; the backcheck record has its own KEY
+    record: DemoRecord
     column: DemoBackcheckColumn
     survey_value: float
     backcheck_value: float
     source: ErrorSource
 
 
-# Attributed without a note, then with the note a Respondent attribution needs
-DEMO_BACKCHECK_ATTRIBUTIONS = (
-    DemoMismatch(
-        "AN043-029",
-        "uuid:6lh1ml39-090a-285w-09t0-l42895pr073w",
-        DemoBackcheckColumn.AGE,
-        30,
-        40,
-        ErrorSource.ENUMERATOR,
-    ),
-    DemoMismatch(
-        "UP053-004",
-        "uuid:8um8wz44-940o-168k-35l3-z62845ol734i",
-        DemoBackcheckColumn.HOUSEHOLD_COUNT,
-        9,
-        10,
-        ErrorSource.RESPONDENT,
-    ),
+# Enumerator attributions need no note
+DEMO_ATTRIBUTION_NO_NOTE = DemoMismatch(
+    DemoRecord("AN043-029", "uuid:6lh1ml39-090a-285w-09t0-l42895pr073w"),
+    DemoBackcheckColumn.AGE,
+    30,
+    40,
+    ErrorSource.ENUMERATOR,
+)
+# Respondent attributions need a note
+DEMO_ATTRIBUTION_WITH_NOTE = DemoMismatch(
+    DemoRecord("UP053-004", "uuid:8um8wz44-940o-168k-35l3-z62845ol734i"),
+    DemoBackcheckColumn.HOUSEHOLD_COUNT,
+    9,
+    10,
+    ErrorSource.RESPONDENT,
+)
+
+
+def demo_accept_steps(review_label: str, dialog_title: str, reason: str) -> str:
+    """Return guidance steps 2 and 3: accept a flag in a Review dialog.
+
+    Step 1, finding the row, is the caller's. The Outliers and GPS checks
+    share the dialog's **Select Action**, **Reason for Correction** and
+    **Apply** inputs, so their guidance shares these steps.
+    """
+    return (
+        f"2. Click **{review_label}** on that row. The **{dialog_title}** "
+        "dialog opens.\n"
+        "3. Set **Select Action** to **accept**, enter a **Reason for "
+        f"Correction** (e.g., *{reason}*) and click **Apply**.\n\n"
+    )
+
+
+# How the Outliers and GPS guidance shows a reviewed flag again
+DEMO_SHOW_REVIEWED = (
+    "Turn on **Show reviewed** to list it again, highlighted green with your reason"
 )
 
 
@@ -435,7 +447,8 @@ class OnboardingSteps:
         - **Exploration:** Descriptive Stats
 
         **Before you correct or accept anything:** open **:material/person: Reviewer:**
-        at the bottom of the sidebar and type your name under **Reviewer name**.
+        in the sidebar, below the page list and just above **Demo Help**, and type
+        your name under **Reviewer name**.
         DataSure records it as the user on every correction and acceptance, for
         example in the Correction Log. Left blank, your computer login is used.
         The name is saved for the whole app, so it stays set after the demo.
@@ -454,35 +467,40 @@ class OnboardingSteps:
         single downloadable zip file — raw data, Stata do-files (import, prepare,
         correct), correction and prep logs, codebooks, and a README.
 
-        ##### Instructions for Demo:
-        1. Under **Page Name**, select **{DEMO_PAGE_NAME}**.
-        2. Review the configuration details that appear, then expand
-           **What's inside the zip?** to see the full directory structure.
-        3. Tick **Exclude reviewer names**. The `correction_log.csv` in the zip then
-           leaves the user column blank, so the package does not show who made each
-           correction. The project's own Correction Log keeps the names.
-        4. Click **Build Replication Package**. DataSure will assemble the zip in seconds.
-        5. Once the build completes, check the PII confirmation box and click
-           **Download replication package (.zip)**.
-
-        The demo dataset is synthetic and contains no real PII. In a live project the
-        zip would include raw respondent data and must be stored on an encrypted,
-        access-controlled drive in accordance with IPA data policy.
-
-        ##### Export the project setup:
+        ##### First, export the project setup:
         A replication package shares the data; a configuration file shares the
-        setup, so a colleague can start the same project.
+        setup, so a colleague can start the same project. Export it before you build
+        the package: ticking the PII confirmation at the end completes the demo.
         1. Open **Start Here** in the sidebar. On the **{DEMO_PROJECT_NAME}** row,
            click **Export**.
         2. Keep **Include record-level decisions (corrections and backcheck
            attribution)** ticked to include your corrections, or untick it to share
            only the setup.
         3. Click **Download configuration** to save the `.json` file.
+        4. Click **Export Replication Package** in the sidebar to come back here.
 
         For your own projects, the **More** menu on each Start Here row also has
         **Update from configuration**, which applies a configuration file to an
         existing project, and **Delete project**, which permanently deletes the
         project and its data. The demo row has neither: use **Restart** to reset it.
+
+        ##### Then build the replication package:
+        1. Under **Page Name**, select **{DEMO_PAGE_NAME}**.
+        2. Just below it, tick **Exclude reviewer names**. The `correction_log.csv`
+           in the zip then leaves the user column blank, so the package does not
+           show who made each correction. The project's own Correction Log keeps
+           the names.
+        3. Review the configuration in **Selected page details**, then expand
+           **What's inside the zip?** at the bottom of the page to see the full
+           directory structure.
+        4. Click **Build Replication Package**. DataSure will assemble the zip in seconds.
+        5. Once the build completes, check the PII confirmation box and click
+           **Download replication package (.zip)**. The completion message then appears:
+           **Restart Demo** starts again, and **Create Real Project** leaves the demo.
+
+        The demo dataset is synthetic and contains no real PII. In a live project the
+        zip would include raw respondent data and must be stored on an encrypted,
+        access-controlled drive in accordance with IPA data policy.
         """,
     }
 
@@ -517,14 +535,14 @@ class OnboardingSteps:
         1. In the **Correction Log**, find the three duplicate ID corrections you
            saved on the **Duplicates** check.
         2. Fix a typing slip found by the Outliers check: the household with key
-           **{DEMO_LAND_CORRECTION.key}** has **{DEMO_LAND_CORRECTION.old_value}** acres in
+           **{DEMO_LAND_CORRECTION.record.key}** has **{DEMO_LAND_CORRECTION.value}** acres in
            **{DEMO_LAND_CORRECTION.column}**; the enumerator confirmed an extra 7 was typed
            and the household owns **{DEMO_LAND_CORRECTION.new_value}** acres.
            - Click **:material/add: Add correction step**.
-           - Under **Select KEY**, choose **{DEMO_LAND_CORRECTION.key}**.
+           - Under **Select KEY**, choose **{DEMO_LAND_CORRECTION.record.key}**.
            - Under **Select Action**, choose **modify value**.
            - Under **Select Column to Modify**, choose **{DEMO_LAND_CORRECTION.column}**.
-             The current value (**{DEMO_LAND_CORRECTION.old_value}**) loads automatically.
+             The current value (**{DEMO_LAND_CORRECTION.value}**) loads automatically.
            - Under **New Value**, enter **{DEMO_LAND_CORRECTION.new_value}**.
            - Under **Reason for Correction**, enter *Typing slip confirmed by enumerator*.
            - Click **Apply**.

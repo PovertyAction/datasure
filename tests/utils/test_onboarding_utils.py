@@ -12,7 +12,8 @@ import pytest
 
 from datasure.utils.onboarding_utils import (
     DEMO_AGE_BOUNDS,
-    DEMO_BACKCHECK_ATTRIBUTIONS,
+    DEMO_ATTRIBUTION_NO_NOTE,
+    DEMO_ATTRIBUTION_WITH_NOTE,
     DEMO_DUPLICATES,
     DEMO_GPS_ACCEPT,
     DEMO_GUIDANCE_COLUMNS,
@@ -1366,8 +1367,9 @@ class TestRealDemoData:
 
         survey, _ = load_real_demo(today=date(2026, 3, 10))
         fix = DEMO_LAND_CORRECTION
-        row = survey.filter(pl.col(DemoColumn.KEY) == fix.key)
-        assert row[fix.column].to_list() == [fix.old_value]
+        row = survey.filter(pl.col(DemoColumn.KEY) == fix.record.key)
+        assert row[DemoColumn.HHID].to_list() == [fix.record.hhid]
+        assert row[fix.column].to_list() == [fix.value]
 
         def bounds(data):
             # Negative values are missing codes such as -99, not answers
@@ -1376,9 +1378,9 @@ class TestRealDemoData:
             return stats.lower_bound, stats.upper_bound
 
         low, high = bounds(survey)
-        assert not low <= fix.old_value <= high
+        assert not low <= fix.value <= high
         corrected = survey.with_columns(
-            pl.when(pl.col(DemoColumn.KEY) == fix.key)
+            pl.when(pl.col(DemoColumn.KEY) == fix.record.key)
             .then(fix.new_value)
             .otherwise(pl.col(fix.column))
             .alias(fix.column)
@@ -1418,6 +1420,35 @@ class TestProjectGuidance:
             "utils/reviewer.py",
             [":material/person: Reviewer:", "Reviewer name"],
         )
+
+    def test_shared_accept_steps_name_the_review_form_labels(self):
+        """Outliers and GPS share the Review dialog's form inputs."""
+        from datasure.utils.onboarding_utils import (
+            DEMO_SHOW_REVIEWED,
+            demo_accept_steps,
+        )
+
+        steps = demo_accept_steps("Review", "Some dialog", "A reason")
+        self._assert_names_real_labels(
+            steps,
+            "utils/correction_form.py",
+            ["Select Action", "Reason for Correction", "Apply"],
+        )
+        assert "**Some dialog**" in steps
+        assert "*A reason*" in steps
+        for check in ("checks/outliers/report_ui.py", "checks/gpschecks/report_ui.py"):
+            self._assert_names_real_labels(DEMO_SHOW_REVIEWED, check, ["Show reviewed"])
+
+    def test_reports_guidance_places_the_reviewer_above_demo_help(self):
+        """The reviewer setting renders before the page adds Demo Help."""
+        guidance = OnboardingSteps.OUTPUTS["guidance_content"]
+        app = _source("app.py")
+        # The sidebar footer renders before the page, and the page adds Demo Help
+        assert app.index("render_reviewer_setting()") < app.rindex("nav_menu.run()")
+        assert "### Demo Help" in _source("utils/navigations_utils.py")
+
+        assert "bottom of the sidebar" not in guidance
+        assert "above **Demo Help**" in guidance
 
     def test_configure_guidance_edits_only_the_target(self):
         """Editing changes the target, never the page name the walkthrough uses."""
@@ -1489,6 +1520,47 @@ class TestProjectGuidance:
             guidance,
             "views/replication_view.py",
             ["Exclude reviewer names", "correction_log.csv"],
+        )
+
+    def test_replication_guidance_follows_the_page_order(self):
+        """Exclude reviewer names sits under Page Name, above the page details."""
+        guidance = OnboardingSteps.REPLICATION["guidance_content"]
+        page = _source("views/replication_view.py")
+        order = [
+            '"Page Name"',
+            '"Exclude reviewer names"',
+            "_render_config_details(configs",
+        ]
+        positions = [page.index(marker) for marker in order]
+        assert positions == sorted(positions)
+        self._assert_names_real_labels(
+            guidance, "views/replication_view.py", ["Selected page details"]
+        )
+
+        steps = [
+            "**Page Name**",
+            "**Exclude reviewer names**",
+            "**Selected page details**",
+        ]
+        positions = [guidance.index(step) for step in steps]
+        assert positions == sorted(positions)
+
+    def test_replication_guidance_exports_before_the_demo_completes(self):
+        """Ticking the PII box completes the demo, so the export comes first."""
+        guidance = OnboardingSteps.REPLICATION["guidance_content"]
+        # Ticking the PII confirmation shows the completion message
+        page = _source("views/replication_view.py")
+        assert page.index("_replication_pii_confirmed") < page.index(
+            "show_demo_completion_message()"
+        )
+        self._assert_names_real_labels(
+            guidance,
+            "utils/navigations_utils.py",
+            ["Restart Demo", "Create Real Project"],
+        )
+
+        assert guidance.index("**Download configuration**") < guidance.index(
+            "check the PII confirmation box"
         )
 
     def test_replication_guidance_exports_the_demo_project(self):
@@ -1580,14 +1652,14 @@ class TestReviewGuidanceValues:
         """The age guidance accepts is unusual (soft) but not impossible (hard)."""
         survey, _ = load_real_demo(today=date(2026, 3, 10))
         flag = DEMO_OUTLIER_ACCEPT
-        row = survey.filter(pl.col(DemoColumn.KEY) == flag.key)
-        assert row[DemoColumn.HHID].to_list() == [flag.hhid]
+        row = survey.filter(pl.col(DemoColumn.KEY) == flag.record.key)
+        assert row[DemoColumn.HHID].to_list() == [flag.record.hhid]
         assert row[flag.column].to_list() == [flag.value]
         assert flag.new_value is None
 
         _, violations = _demo_flags(survey, flag, DEMO_AGE_BOUNDS)
 
-        reasons = violations.filter(pl.col(DemoColumn.KEY) == flag.key)[
+        reasons = violations.filter(pl.col(DemoColumn.KEY) == flag.record.key)[
             "violation reason"
         ].to_list()
         assert len(reasons) == 1
@@ -1598,23 +1670,23 @@ class TestReviewGuidanceValues:
         """The land value guidance corrects in the Review dialog is flagged."""
         survey, _ = load_real_demo(today=date(2026, 3, 10))
         flag = DEMO_OUTLIER_CORRECTION
-        row = survey.filter(pl.col(DemoColumn.KEY) == flag.key)
-        assert row[DemoColumn.HHID].to_list() == [flag.hhid]
+        row = survey.filter(pl.col(DemoColumn.KEY) == flag.record.key)
+        assert row[DemoColumn.HHID].to_list() == [flag.record.hhid]
         assert row[flag.column].to_list() == [flag.value]
         # The Correct Data step still has its own value left to fix
-        assert flag.key != DEMO_LAND_CORRECTION.key
+        assert flag.record.key != DEMO_LAND_CORRECTION.record.key
 
         outliers, _ = _demo_flags(survey, flag)
 
-        assert flag.key in outliers[DemoColumn.KEY].to_list()
+        assert flag.record.key in outliers[DemoColumn.KEY].to_list()
         corrected = survey.with_columns(
-            pl.when(pl.col(DemoColumn.KEY) == flag.key)
+            pl.when(pl.col(DemoColumn.KEY) == flag.record.key)
             .then(flag.new_value)
             .otherwise(pl.col(flag.column))
             .alias(flag.column)
         )
         outliers, _ = _demo_flags(corrected, flag)
-        assert flag.key not in outliers[DemoColumn.KEY].to_list()
+        assert flag.record.key not in outliers[DemoColumn.KEY].to_list()
 
     def test_gps_outlier_to_accept_is_flagged_by_state(self, load_real_demo):
         """Cluster by Column on state, after the Duplicates Drop, flags the record."""
@@ -1636,24 +1708,31 @@ class TestReviewGuidanceValues:
         outlier_keys = flagged.loc[flagged["Outlier"], DemoColumn.KEY].tolist()
         assert record.key in outlier_keys
 
+    def test_attributions_cover_a_source_with_and_without_a_note(self):
+        """One attribution saves without a note, the other needs one."""
+        from datasure.checks.backchecks.attribution import note_required
+
+        assert not note_required(DEMO_ATTRIBUTION_NO_NOTE.source)
+        assert note_required(DEMO_ATTRIBUTION_WITH_NOTE.source)
+
     @pytest.mark.parametrize(
         "mismatch",
-        DEMO_BACKCHECK_ATTRIBUTIONS,
-        ids=lambda m: f"{m.hhid}-{m.column}",
+        (DEMO_ATTRIBUTION_NO_NOTE, DEMO_ATTRIBUTION_WITH_NOTE),
+        ids=lambda m: f"{m.record.hhid}-{m.column}",
     )
     def test_mismatch_to_attribute_is_a_backcheck_mismatch(
         self, load_real_demo, mismatch
     ):
         """Each mismatch the attribution guidance names shows as a mismatch."""
         survey, backcheck = load_real_demo(today=date(2026, 3, 10))
-        assert survey.filter(pl.col(DemoColumn.KEY) == mismatch.key)[
+        assert survey.filter(pl.col(DemoColumn.KEY) == mismatch.record.key)[
             DemoColumn.HHID
-        ].to_list() == [mismatch.hhid]
+        ].to_list() == [mismatch.record.hhid]
 
         analysis = _demo_backcheck_analysis(survey, backcheck)
 
         row = analysis.filter(
-            (pl.col(DemoColumn.KEY) == mismatch.key)
+            (pl.col(DemoColumn.KEY) == mismatch.record.key)
             & (pl.col("column_name") == mismatch.column)
         )
         assert row["match_status"].to_list() == ["mismatch"]

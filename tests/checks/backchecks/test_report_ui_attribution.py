@@ -355,3 +355,18 @@ def test_summary_error_rate_cards_show_adjusted_rate_as_delta(mock_st):
 def test_summary_error_rate_cards_need_configured_columns(mock_st):
     assert _error_rate_cards(mock_st, pl.DataFrame()) == {}
     assert any("Error rates" in c.args[0] for c in mock_st.info.call_args_list)
+
+
+def test_attribution_guidance_names_the_real_error_source_header():
+    """The demo callout names the column header users see, not its data name."""
+    from datasure.checks.backchecks.report_ui import (
+        _attribution_guidance,
+        _error_source_column,
+    )
+
+    header = _error_source_column(pinned=True)["label"]
+    guidance = _attribution_guidance()
+
+    assert header == "Error Source"
+    assert f"pinned **{header}** column" in guidance
+    assert ERROR_SOURCE_COL not in guidance

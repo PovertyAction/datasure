@@ -89,7 +89,9 @@ from datasure.utils.onboarding_utils import (
     DEMO_AGE_BOUNDS,
     DEMO_OUTLIER_ACCEPT,
     DEMO_OUTLIER_CORRECTION,
+    DEMO_SHOW_REVIEWED,
     DemoColumn,
+    demo_accept_steps,
     is_demo_project,
 )
 from datasure.utils.ui_utils import (
@@ -2042,18 +2044,17 @@ def outliers_report(
             "**Accept a value that is unusual but correct.** Each flag can be "
             "corrected or accepted right here:\n\n"
             "1. In **Constraint Violations Details**, find KEY "
-            f"**{accept.key}** ({DemoColumn.HHID} **{accept.hhid}**), where "
-            f"**{accept.column}** is **{accept.value}**: below the soft minimum, "
-            "but a plausible age.\n"
-            "2. Click **:material/edit_note: Review** in the first column of that "
-            "row. The **Correct or accept flagged value** dialog opens.\n"
-            "3. Set **Select Action** to **accept**, enter a **Reason for "
-            "Correction** (e.g., *Age confirmed with the respondent*) and click "
-            "**Apply**.\n\n"
-            "The flag leaves the table and the metrics. Turn on **Show reviewed** "
-            "above the table to see it again, highlighted green with your reason. "
-            "Every review is saved to the Correction Log on the **Correct Data** "
-            "page."
+            f"**{accept.record.key}** ({DemoColumn.HHID} **{accept.record.hhid}**), "
+            f"where **{accept.column}** is **{accept.value}**: below the soft "
+            "minimum, but a plausible age.\n"
+            + demo_accept_steps(
+                REVIEW_BUTTON_LABEL,
+                "Correct or accept flagged value",
+                "Age confirmed with the respondent",
+            )
+            + "The flag leaves the table and the metrics. "
+            f"{DEMO_SHOW_REVIEWED}. Every review is saved to the Correction Log "
+            "on the **Correct Data** page."
         )
 
     # Missing codes such as -99 are neither breaches nor outliers
@@ -2111,16 +2112,15 @@ def outliers_report(
         demo_callout(
             "**Correct a value that is wrong.** With "
             f"**{fix.column}** selected under **Inspect Columns**, find KEY "
-            f"**{fix.key}** ({DemoColumn.HHID} **{fix.hhid}**) with "
+            f"**{fix.record.key}** ({DemoColumn.HHID} **{fix.record.hhid}**) with "
             f"**{fix.value}** acres, a misplaced decimal point:\n\n"
-            "1. Click **:material/edit_note: Review** on that row.\n"
+            f"1. Click **{REVIEW_BUTTON_LABEL}** on that row.\n"
             f"2. Set **Select Action** to **modify value**, enter **{fix.new_value}** "
             "as the **New Value**, add a **Reason for Correction** (e.g., *Decimal "
             "point misplaced*) and click **Apply**.\n\n"
             "A message confirms the correction and links to the Correction Log. "
-            "Turn on **Show reviewed** to see the corrected value highlighted "
-            "green, or **Show only reviewed** to list just the values you have "
-            "reviewed."
+            f"{DEMO_SHOW_REVIEWED}, or **Show only reviewed** to list just the "
+            "values you have reviewed."
         )
 
     # Compute outliers
