@@ -411,6 +411,19 @@ def sample_date_data_10000():
 
 
 @pytest.fixture(autouse=True)
+def isolated_cache(tmp_path, monkeypatch):
+    """Give each test its own cache directory, so tests leave no files behind.
+
+    In a checkout, the cache is ``./cache``, which also holds the developer's
+    local projects.
+    """
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    monkeypatch.setattr("datasure.utils.cache_utils.get_cache_base_dir", lambda: cache)
+    return cache
+
+
+@pytest.fixture(autouse=True)
 def cleanup_test_cache():
     """Clean up test cache directory after tests."""
     yield

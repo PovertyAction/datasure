@@ -24,6 +24,7 @@ from datasure.utils.duckdb_utils import (
     load_missing_codes_from_db,
     missing_codes_table_name,
 )
+from datasure.utils.missing_codes import codes_by_label, whole_number_code
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding, is_demo_project
 from datasure.utils.ui_utils import ensure_styler_limit
@@ -203,7 +204,7 @@ def _compute_missing_data_paired(
         - 1 for NULL values
         - 2+ for special missing codes based on their position in missing_code_pairs
     """
-    missing_code_pairs = _get_missing_code_pairs(missing_codes_df)
+    missing_code_pairs = codes_by_label(missing_codes_df)
     expressions = []
 
     for col in data.columns:
@@ -279,24 +280,6 @@ def _numeric_missing_codes(missing_codes_df: pl.DataFrame) -> list[str]:
     return codes
 
 
-def _whole_number_code(code: str) -> str | None:
-    """Return `code` as an integer string, or None if it is not a whole number.
-
-    `-999.0` becomes `-999`, so it still matches an integer column. Decimal
-    codes such as `.999` are kept for float columns but cannot occur in an
-    integer one; truncating them to `0` would flag every real zero as missing.
-    """
-    try:
-        return str(int(code))  # exact for large integers
-    except ValueError:
-        pass
-    try:
-        value = float(code)
-    except ValueError:
-        return None
-    return str(int(value)) if value.is_integer() else None
-
-
 def _codes_as_dtype(codes: list[str], dtype: pl.DataType) -> list:
     """Parse the codes straight into `dtype`, so matching keeps its precision.
 
@@ -305,7 +288,7 @@ def _codes_as_dtype(codes: list[str], dtype: pl.DataType) -> list:
     integer column or `-99` in an unsigned one, are dropped.
     """
     if dtype.is_integer():
-        codes = [w for c in codes if (w := _whole_number_code(c)) is not None]
+        codes = [w for c in codes if (w := whole_number_code(c)) is not None]
     parsed = pl.Series(codes, dtype=pl.String).cast(dtype, strict=False)
     return parsed.drop_nulls().to_list()
 
@@ -343,28 +326,6 @@ def mask_missing_codes(
         .alias(c)
         for c in numeric_cols
     )
-
-
-def _get_missing_code_pairs(missing_codes_df: pl.DataFrame) -> dict[str, list[str]]:
-    """Get missing code label to codes mapping.
-
-    Parameters
-    ----------
-    missing_codes_df : pl.DataFrame
-        The missing codes configuration.
-
-    Returns
-    -------
-    dict[str, list[str]]
-        Mapping of missing code labels to their codes.
-    """
-    code_map = {}
-    if not missing_codes_df.is_empty():
-        for row in missing_codes_df.iter_rows(named=True):
-            label = row["label"]
-            codes = [code.strip() for code in row["codes"].split(",") if code.strip()]
-            code_map[label] = codes
-    return code_map
 
 
 @st.cache_data
@@ -452,7 +413,7 @@ def compute_missing_columns(
         The summary of missing values in each column with counts and percentages.
     """
     n_rows = missing_data.height
-    missing_code_pairs = _get_missing_code_pairs(missing_codes_df)
+    missing_code_pairs = codes_by_label(missing_codes_df)
 
     # Build aggregation expressions for all columns at once
     agg_expressions = []

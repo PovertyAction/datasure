@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **SurveyCTO data dictionary** (`processing/form_dictionary.py`):
+  `build_form_dictionary(project_id, alias, raw, missing_codes)` builds an alias's
+  variable dictionary, rule-based PII flags (trusting publishable fields; no
+  Presidio, so what the rules leave open is `may_contain_pii` / `unscanned`)
+  and `stats_rows`, which count each column only over the rows where its
+  question was asked and set the project's whole-number missing codes apart
+  (`sentinels_from_missing_codes`; a code under two labels raises). `None`
+  without a stored form definition. `form_table` raises when raw's columns
+  and the stored schema differ, instead of dropping columns.
+  `dictionary_xlsx` writes the workbook (Variables, Summary stats) with
+  upstream's `save_codebook`; flagged columns show counts, never values
+- **Replication package**: SurveyCTO aliases get
+  `1_docs/2_codebooks/{survey}_dictionary.xlsx`, listed in the README
+  (`generate_readme(include_form_dictionary=...)`)
 - **Typed SurveyCTO import**: `SurveyCTOClient._import_regular_form`
   (`connectors/scto.py`) downloads the deployed form's compiled XML
   (`SurveyCTOAPIClient.download_form_xml`, `GET /forms/{id}/xml` with the same
@@ -17,13 +31,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   strips the UTC zone from timestamps (stored naive, as before) and keeps
   `formdef_version` as `Int64` for the enumerator check
 - **Form definitions**: `save_form_definition` / `load_form_definition`
-  (`utils/duckdb_utils.py`) keep the XML in `form_definitions` in
-  `logs.duckdb`, one row per alias and form version. Removing an import
+  (`utils/duckdb_utils.py`) keep the XML and the cast's serialized Arrow
+  schema in `form_definitions` in `logs.duckdb`, one row per alias and form
+  version. `form_table` casts raw back to that schema, restoring the field
+  metadata Polars drops. When raw holds earlier batches, `merged_schema` adds
+  their columns, so a refresh with few or no new rows keeps them. Importing an
+  alias as a server dataset deletes its definitions
+  (`delete_form_definitions`)
+- **`utils/missing_codes.py`**: `codes_by_label` and `whole_number_code`,
+  moved from `checks/missing.py` (were `_get_missing_code_pairs`,
+  `_whole_number_code`) so non-UI code can parse missing codes without
+  importing the Missing tab Removing an import
   removes its rows
-- **`datasure.surveycto`**: the form contract (`xml_contract`, `xpath`) and
-  the typed cast (`cast`), adapted from surveycto_python_dict at `d6f54f9`
-  and maintained in DataSure from now on; `parse_contract` also reads XML
-  bytes. Upstream's offline tests for them are in `tests/surveycto/`
+- **`datasure.surveycto`**: the form contract (`xml_contract`, `xpath`), the
+  typed cast (`cast`), and the dictionary (`questions`, `dictionary`,
+  `survey`), skip-logic stats (`stats`), workbook writer (`codebook`) and PII
+  rules (`pii`), adapted from surveycto_python_dict at `d6f54f9` with only
+  the functions DataSure calls, and maintained in DataSure from now on.
+  `parse_contract` also reads XML bytes; `stats_rows`, `save_codebook` and
+  `classify(analyzer=None)` run from in-memory objects. Upstream's offline
+  tests for the contract, xpath and cast are in `tests/surveycto/`
 
 - **Prep concat** (#388): Add Column has a `concat` method
   (`PrepFunctions.concat`) that joins two or more text columns in selection

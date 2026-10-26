@@ -12,6 +12,7 @@ from datasure.checks.enumerator.models import (
     EnumeratorOverviewMetrics,
 )
 from datasure.utils.duckdb_utils import load_missing_codes_from_db
+from datasure.utils.missing_codes import codes_by_label
 
 # =============================================================================
 # Consent and Outcome Flags
@@ -304,7 +305,7 @@ def compute_enumerator_missing_table(
 
     # If missing_codes_config is provided, calculate missingness by category
     # Get missing code pairs from the config
-    missing_code_pairs = missing._get_missing_code_pairs(missing_codes_config)
+    missing_code_pairs = codes_by_label(missing_codes_config)
 
     # Compute missing data with paired encoding
     missing_data_encoded = missing._compute_missing_data_paired(
