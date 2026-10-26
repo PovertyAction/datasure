@@ -1,9 +1,12 @@
 """Tests for the navigation utilities module."""
 
+import re
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+import datasure
 from datasure.utils.demo_lifecycle import (
     DEMO_NOTICE_SCOPE,
     DEMO_RESET_FAILED_MESSAGE,
@@ -768,3 +771,32 @@ class TestShowDemoCompletionMessage:
 
         mock_exit.assert_called_once_with()
         mock_st.switch_page.assert_called_once_with("views/start.py")
+
+
+# Wording that tells the user the demo is over.
+_DEMO_COMPLETE_WORDING = re.compile(
+    r"(completed|end of|finished) (the )?(DataSure )?demo|demo complete|congratulations",
+    re.IGNORECASE,
+)
+_GENERATED_VIEW = re.compile(r"output_view_[0-9a-z]\.py$")
+
+
+def test_completion_message_is_the_only_demo_complete_message():
+    """Only show_demo_completion_message tells the user the demo is complete.
+
+    The demo used to end in three places at once (Backchecks, Correct Data and
+    Replication); this catches a second completion message coming back.
+    """
+    src = Path(datasure.__file__).parent
+    found = [
+        f"{path.relative_to(src)}:{lineno}"
+        for path in sorted(src.rglob("*.py"))
+        if not _GENERATED_VIEW.search(path.name)
+        for lineno, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        )
+        if _DEMO_COMPLETE_WORDING.search(line)
+    ]
+
+    assert len(found) == 1, found
+    assert found[0].startswith(str(Path("utils", "navigations_utils.py")))

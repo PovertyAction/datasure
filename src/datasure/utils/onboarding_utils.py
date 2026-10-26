@@ -184,11 +184,6 @@ class ImportDemoInfo:
 
         Once applied, check the **Correction Log** to confirm the entry, and return to
         the **Duplicates** check in the quality reports to verify the duplicate is resolved.
-
-        **You have completed the DataSure demo!** You have imported data, prepared it,
-        configured quality checks, reviewed every check's report, and applied a
-        correction. Return to the quality reports at any time to see how corrections
-        have improved data quality.
     """
 
     @classmethod
@@ -1040,7 +1035,11 @@ def show_demo_banner():
 
 
 def show_next_steps(current_step: int):
-    """Show next steps and navigation options."""
+    """Show the next onboarding step.
+
+    Nothing is shown after the last step: the demo's completion message is
+    ``navigations_utils.show_demo_completion_message``.
+    """
     if not is_demo_project():
         return
 
@@ -1059,23 +1058,6 @@ def show_next_steps(current_step: int):
             st.markdown("""
             **Ready to continue?** Click "Import Data" in the navigation menu to start importing your demo survey data!
             """)
-    else:
-        st.success("""
-        **Congratulations!** You've completed the DataSure demo.
-
-        **What you've learned:**
-        - How to import and prepare survey data
-        - How to run comprehensive data quality checks
-        - How to interpret quality reports and take action
-
-        **Ready to use DataSure with your own data?**
-        """)
-
-        if st.button("Start New Project", type="primary"):
-            # Clear demo project and redirect to start
-            st.session_state.st_project_id = ""
-            st.session_state.pop("onboarding_step", None)
-            st.rerun()
 
 
 def create_demo_project():
