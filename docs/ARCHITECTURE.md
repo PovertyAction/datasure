@@ -194,7 +194,9 @@ to appear.
   computed the way the check computes it but without rendering it. A row's
   state (`RowState`) is derived, not stored: grey not set up or not
   applicable and red error come from the config-only `CheckStatus`; a ready
-  row is red if its headline raised, amber (flagged) if it has more than 0
+  row is red if its headline raised (a headline raises, through
+  `settings_no_longer_fit`, rather than returning None when the saved
+  settings no longer fit the data), amber (flagged) if it has more than 0
   outstanding and is not informational, else green. Headlines run only for
   ready checks and are cached in a small in-process LRU keyed on the page's
   data (row hashes), settings files (content hash, leaving out

@@ -56,33 +56,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking: headline functions return `CheckHeadline`** (#399, #365):
+  `progress_headline`, `missing_headline`, `duplicates_headline`,
+  `outliers_headline`, `enumerator_headline` and `backchecks_headline` return
+  a `CheckHeadline` (`checks/headline.py`: value, detail, outstanding,
+  resolved, informational) instead of a sentence (`str`), and
+  `CheckEntry.headline` is typed `Callable[[CheckContext], CheckHeadline |
+  None]`. `duplicates_headline(data, setting_file, config)` becomes
+  `duplicates_headline(project_id, data, setting_file, config, alias=None)`.
+  `outliers_headline` and `backchecks_headline` raise `ValueError` (built by
+  `settings_no_longer_fit`) when the saved settings no longer fit the data,
+  instead of returning None
+  - Migration: read `headline.value` and `headline.detail` where the
+    sentence was used; pass `project_id` first and the survey alias to
+    `duplicates_headline`; catch `ValueError` where a None was expected
+    for stale settings (`overall_error_rate_percent` still returns None)
 - **Check health rows** (#399, #365): Summary's check health card grid is
   replaced by one row per check, grouped by navigation group under a shared
   Check · Status · Outstanding · Resolved header (`checks/health.py`:
-  `health_rows` and `render_health_rows` replace `health_cards` and
-  `render_health_grid`; `HealthCard` becomes `HealthRow`). Adding a catalogue
-  entry adds a row with no layout change
-  - Headline functions return a `CheckHeadline` (`checks/headline.py`:
-    value, detail, outstanding, resolved, informational) instead of a
-    sentence; `CheckEntry.headline` is typed accordingly
-  - The status pill (`st.badge`) has a `RowState` derived per row: grey
-    **Not set up** and **Not applicable** and red **Error** from the
-    config-only `CheckStatus`; a ready row is red when its headline raises
-    (the other rows still render), amber **Flagged** when it has more than 0
-    outstanding and is not informational, else green **No issues**
+  `health_rows` builds the `HealthRow`s, `render_health_rows` draws them,
+  `group_rows` groups them once each in navigation order). Adding a
+  catalogue entry adds a row with no layout change
+  - The status pill (`st.badge`, `RowState.pill`: a `Pill` of colour, icon
+    and label) has a `RowState` derived per row: grey **Not set up** and
+    **Not applicable** and red **Error** from the config-only
+    `CheckStatus`; a ready row is red when its headline raises, including
+    when saved settings no longer fit the data (the other rows still
+    render), amber **Flagged** when it has more than 0 outstanding and is
+    not informational, else green **No issues**. The row's action comes
+    from its state (`RowState.action`)
+  - A ready check with no headline (Descriptive Stats, GPS Checks) shows
+    "Status only" (`STATUS_ONLY`) as its detail
   - `missing_headline` reports the % of columns all missing (was the mean %
     of values missing); `MissingSummaryStats` gains `all_missing_count` and
     `column_count`
-  - `duplicates_headline` takes `project_id` first and an optional `alias`,
-    and adds the resolved IDs (`_resolved_ids`, the check's survey
-    "Resolved" count)
+  - `duplicates_headline` adds the resolved IDs (`_resolved_ids`, the
+    check's survey "Resolved" count); without an alias the resolved count
+    is None, shown as "—", since it cannot be computed
   - `outliers_headline` reports outliers plus violations as outstanding and,
     through `count_resolved_flags` (`checks/outliers/review.py`), accepted
     flags plus corrected cells no longer flagged as resolved
   - `backchecks_headline` reports mismatches with no error source as
     outstanding and attributed mismatches as resolved, over the categories
-    of the total error rate (`TOTAL_CATEGORIES`); the detail is the total
-    error rate. `_saved_backcheck_analysis` is shared with
+    of the total error rate (`TOTAL_CATEGORIES`, filtered by
+    `in_total_categories` in `checks/backchecks/compute.py`); the detail is
+    the total error rate. `_total_errors` is shared with
     `overall_error_rate_percent`
   - Progress and Enumerator Stats headlines are informational ("310 / 500",
     "4 / 12"), so their rows are never flagged; GPS Checks stays status only
@@ -110,6 +128,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **Breaking: check health cards** (#399, #365): `health_cards`,
+  `render_health_grid` and `HealthCard` are removed from `checks/health.py`
+  - Migration: use `health_rows(ctx, items, headlines)` for the rows and
+    `render_health_rows(rows, on_select)` to draw them; `HealthRow` replaces
+    `HealthCard`, with `headline` a `CheckHeadline` and `state` a `RowState`
 - **Apply Consent and Outcome Settings** (#353): The Enumerator settings
   button and the project-wide `enumerator_data_with_consent_outcome` table
   are removed; the flags are computed when the report runs
