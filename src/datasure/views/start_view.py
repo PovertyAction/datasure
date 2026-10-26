@@ -12,14 +12,9 @@ from pydantic import ValidationError
 from datasure.models.schemas import ProjectConfigBundle
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
+from datasure.utils.demo_lifecycle import RESTART_DEMO_MESSAGE, reset_demo_project
 from datasure.utils.duckdb_utils import duckdb_get_aliases
-from datasure.utils.onboarding_utils import (
-    DEMO_PROJECT_ID,
-    create_demo_project,
-    load_demo_data,
-    set_onboarding_step,
-    show_demo_intro,
-)
+from datasure.utils.onboarding_utils import DEMO_PROJECT_ID, show_demo_intro
 from datasure.utils.project_config import (
     export_project_config,
     parse_project_config,
@@ -185,17 +180,15 @@ def _activate_project(project_id: str) -> None:
 
 
 def _launch_fresh_demo():
-    """Create a clean demo project and navigate to the import page."""
-    demo_project_id = create_demo_project()
-    st.session_state.st_project_id = demo_project_id
-    set_onboarding_step(1)
+    """Rebuild the demo project from scratch and navigate to the import page."""
     with st.spinner("Loading demo data..."):
-        if load_demo_data():
-            st.session_state.st_project_id = demo_project_id
-            set_onboarding_step(2)
+        if reset_demo_project():
             st.switch_page(st.session_state.st_import_data_page)
         else:
-            st.error("Failed to load demo data. Please try again.")
+            st.error(
+                "Failed to reset the demo. Close any other DataSure windows "
+                "and try again."
+            )
 
 
 def _render_demo_row() -> None:
@@ -222,10 +215,7 @@ def _render_demo_row() -> None:
                     if st.button("Restart", width="stretch", key="demo_restart"):
                         confirm_dialog(
                             "Restart demo",
-                            "Restarting will permanently delete all your demo "
-                            "progress, including any corrections and data "
-                            "preparation steps you have made. This cannot be "
-                            "undone.",
+                            RESTART_DEMO_MESSAGE,
                             confirm_label="Restart demo",
                             on_confirm=_launch_fresh_demo,
                         )
