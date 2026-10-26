@@ -34,6 +34,7 @@ from datasure.checks.enumerator.settings_ui import (
     enumerator_report_settings,
     load_default_enumerator_settings,
 )
+from datasure.checks.headline import CheckHeadline
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import load_missing_codes_from_db
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
@@ -1320,12 +1321,12 @@ def enumerator_report_data(data: pl.DataFrame, setting_file: str) -> pl.DataFram
 
 def enumerator_headline(
     project_id: str, data: pl.DataFrame, setting_file: str, config: dict
-) -> str | None:
-    """Return the enumerator headline for the Summary health grid.
+) -> CheckHeadline | None:
+    """Return the enumerator headline for Summary's check health row.
 
     The active enumerators (past 7 days) out of all enumerators, as the
-    check's overview shows them. The check has no flagged-enumerator count,
-    so the headline does not invent one.
+    check's overview shows them. Informational: the check has no
+    flagged-enumerator count, so the headline does not invent one.
 
     Parameters
     ----------
@@ -1340,10 +1341,9 @@ def enumerator_headline(
 
     Returns
     -------
-    str | None
-        For example "4 of 12 enumerators active in the past 7 days", or None
-        when the enumerator or survey date column is not set or there is no
-        data.
+    CheckHeadline | None
+        For example "4 / 12" active in the past 7 days, or None when the
+        enumerator or survey date column is not set or there is no data.
     """
     settings = load_default_enumerator_settings(
         setting_file, EnumeratorSettings(**config)
@@ -1353,7 +1353,8 @@ def enumerator_headline(
     metrics = compute_enumerator_overview(
         data, settings.survey_date, settings.enumerator, settings.team
     )
-    return (
-        f"{metrics.num_active_enumerators:,} of {metrics.num_enumerators:,} "
-        "enumerators active in the past 7 days"
+    return CheckHeadline(
+        f"{metrics.num_active_enumerators:,} / {metrics.num_enumerators:,}",
+        "active in the past 7 days",
+        informational=True,
     )

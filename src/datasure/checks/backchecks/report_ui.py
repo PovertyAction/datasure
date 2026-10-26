@@ -18,6 +18,7 @@ from datasure.checks.backchecks.attribution import (
     attribution_history,
     backcheck_key_col,
     build_attribution_entries,
+    count_error_sources,
     is_mismatch,
     load_attribution_log,
     mark_error_sources,
@@ -26,6 +27,7 @@ from datasure.checks.backchecks.attribution import (
     save_attributions,
 )
 from datasure.checks.backchecks.compute import (
+    TOTAL_CATEGORIES,
     compute_backcheck_analysis,
     compute_backchecker_productivity,
     compute_column_stats,
@@ -61,6 +63,7 @@ from datasure.checks.backchecks.scope import (
     scope_captions,
 )
 from datasure.checks.backchecks.settings_ui import backchecks_report_settings
+from datasure.checks.headline import CheckHeadline
 from datasure.utils.dataframe_utils import (
     ColumnByType,
     TableState,
@@ -772,6 +775,28 @@ def overall_error_rate_percent(
         The error rate, or None when no backcheck columns are configured,
         no values were compared, or the saved settings no longer fit the data.
     """
+    saved = _saved_backcheck_analysis(
+        project_id, page_name_id, survey_data, backcheck_data, setting_file, config
+    )
+    if saved is None:
+        return None
+    rates = compute_overall_error_rates(saved[0])
+    return rates[0].error_rate if rates else None
+
+
+def _saved_backcheck_analysis(
+    project_id: str,
+    page_name_id: str,
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+) -> tuple[pl.DataFrame, BackcheckSettings] | None:
+    """Compare the values the Backchecks tab compares, without rendering it.
+
+    Returns the comparison results and the saved settings, or None when the
+    saved settings no longer fit the data.
+    """
     try:
         settings = load_saved_backchecks_settings(
             setting_file, settings_from_page_config(config)
@@ -789,8 +814,7 @@ def overall_error_rate_percent(
             exc_info=True,
         )
         return None
-    rates = compute_overall_error_rates(analysis)
-    return rates[0].error_rate if rates else None
+    return analysis, settings
 
 
 def backchecks_headline(
@@ -800,21 +824,45 @@ def backchecks_headline(
     backcheck_data: pl.DataFrame,
     setting_file: str,
     config: dict,
-) -> str | None:
-    """Return the backchecks headline for the Summary health grid.
+) -> CheckHeadline | None:
+    """Return the backchecks headline for Summary's check health row.
 
-    The check's total error rate, from `overall_error_rate_percent`, which
-    takes the same parameters.
+    Outstanding: the mismatches with no error source attributed. Resolved:
+    the mismatches attributed to the enumerator, backchecker or respondent.
+    Both count the mismatches behind the check's "Error Rate (Total)", which
+    the detail shows. Takes the parameters of `overall_error_rate_percent`.
+
+    The error rate is above 0 on nearly every project, so the outstanding
+    number is the unattributed mismatches rather than the rate.
 
     Returns
     -------
-    str | None
-        For example "4.25% error rate", or None when no values were compared.
+    CheckHeadline | None
+        For example 3 outstanding, "4.25% error rate", or None when no values
+        were compared.
     """
-    rate = overall_error_rate_percent(
+    saved = _saved_backcheck_analysis(
         project_id, page_name_id, survey_data, backcheck_data, setting_file, config
     )
-    return None if rate is None else f"{rate:.2f}% error rate"
+    if saved is None:
+        return None
+    analysis, settings = saved
+    rates = compute_overall_error_rates(analysis)
+    if not rates or rates[0].error_rate is None:
+        return None
+    marked = mark_error_sources(
+        analysis.filter(pl.col("category").is_in(TOTAL_CATEGORIES)),
+        load_attribution_log(project_id, page_name_id),
+        settings.survey_key,
+    )
+    sources = count_error_sources(marked)
+    unattributed = sources[ErrorSource.UNATTRIBUTED]
+    return CheckHeadline(
+        f"{unattributed:,}",
+        f"{rates[0].error_rate:.2f}% error rate",
+        outstanding=unattributed,
+        resolved=sum(sources.values()) - unattributed,
+    )
 
 
 def _render_overall_error_rates(backcheck_analysis: pl.DataFrame) -> None:

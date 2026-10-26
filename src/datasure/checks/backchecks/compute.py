@@ -1385,6 +1385,10 @@ def compute_column_stats(
     return pl.DataFrame(stats_list)
 
 
+# The categories the total error rate is computed over.
+TOTAL_CATEGORIES = (1, 2, 3)
+
+
 @dataclass(frozen=True)
 class OverallErrorRate:
     """Error rates over every compared value in a category, or in total.
@@ -1437,7 +1441,7 @@ def compute_overall_error_rates(
     if backcheck_analysis.is_empty():
         return []
 
-    categories = [1, 2, 3]
+    categories = list(TOTAL_CATEGORIES)
     in_categories = backcheck_analysis.filter(pl.col("category").is_in(categories))
     return [
         _overall_error_rate("Total", in_categories),

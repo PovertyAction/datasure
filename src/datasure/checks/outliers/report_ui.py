@@ -10,6 +10,7 @@ import polars as pl
 import streamlit as st
 from pydantic import BaseModel, ValidationError
 
+from datasure.checks.headline import CheckHeadline
 from datasure.checks.outliers.compute import (
     _build_include_cols,
     _compute_constraint_metrics,
@@ -48,6 +49,7 @@ from datasure.checks.outliers.review import (
     TableFilters,
     allowed_actions,
     clear_reviewed_flags,
+    count_resolved_flags,
     filter_table,
     highlight_reviewed_row,
     join_survey_columns,
@@ -1459,6 +1461,7 @@ class _ReviewedFlags:
 
     outliers: pl.DataFrame
     violations: pl.DataFrame
+    survey_key: str
 
 
 def _reviewed_flags(
@@ -1508,7 +1511,7 @@ def _reviewed_flags(
             _with_review_status(violations, settings, CONSTRAINTS, review),
             CONSTRAINTS,
         )
-    return _ReviewedFlags(outlier_data, violations)
+    return _ReviewedFlags(outlier_data, violations, settings.survey_key)
 
 
 def _plural(count: int, noun: str) -> str:
@@ -1523,12 +1526,13 @@ def outliers_headline(
     setting_file: str,
     config: dict,
     alias: str | None,
-) -> str | None:
-    """Return the outliers headline for the Summary health grid.
+) -> CheckHeadline | None:
+    """Return the outliers headline for Summary's check health row.
 
-    The check's "Total Outliers", with the share of checked values flagged,
-    and "Total Violations", leaving out accepted flags. Computed without
-    rendering the tab.
+    Outstanding: the check's "Total Outliers" plus "Total Violations",
+    leaving out accepted flags, with each total and the share of checked
+    values flagged in the detail. Resolved: the flags accepted or corrected
+    (see `count_resolved_flags`). Computed without rendering the tab.
 
     Parameters
     ----------
@@ -1550,11 +1554,11 @@ def outliers_headline(
 
     Returns
     -------
-    str | None
-        For example "3 outliers (1.4% of values), 1 constraint violation".
-        The share is left out when no values were checked. None when no
-        outlier columns are configured or the saved settings no longer fit
-        the data.
+    CheckHeadline | None
+        For example 4 outstanding, "3 outliers (1.4% of values), 1
+        constraint violation". The share is left out when no values were
+        checked. None when no outlier columns are configured or the saved
+        settings no longer fit the data.
     """
     flags = _reviewed_flags(
         project_id, page_name_id, data, survey_columns, setting_file, config, alias
@@ -1573,9 +1577,15 @@ def outliers_headline(
     )
     percent = flagged_value_percent(flags.outliers)
     rate = "" if percent is None else f" ({percent:.1f}% of values)"
-    return (
+    return CheckHeadline(
+        f"{outliers + violations:,}",
         f"{_plural(outliers, 'outlier')}{rate}, "
-        f"{_plural(violations, 'constraint violation')}"
+        f"{_plural(violations, 'constraint violation')}",
+        outstanding=outliers + violations,
+        resolved=count_resolved_flags(
+            [(flags.outliers, OUTLIERS), (flags.violations, CONSTRAINTS)],
+            flags.survey_key,
+        ),
     )
 
 

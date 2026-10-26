@@ -1,4 +1,4 @@
-"""Summary's check health cards: status, headline and cached headlines."""
+"""Summary's check health rows: status, numbers and cached headlines."""
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -7,7 +7,12 @@ import polars as pl
 import pytest
 
 from datasure.checks.context import CheckContext, CheckData, PageConfig
-from datasure.checks.health import clear_headline_cache, health_cards
+from datasure.checks.headline import CheckHeadline
+from datasure.checks.health import (
+    RowState,
+    clear_headline_cache,
+    health_rows,
+)
 from datasure.utils.dataframe_utils import get_df_columns
 from datasure.utils.duckdb_utils import duckdb_save_table
 from datasure.utils.navigation import CheckStatus, NavItem
@@ -94,114 +99,179 @@ OUTLIERS = NavItem(
 DESCRIPTIVE = NavItem("descriptive", "Descriptive Stats", ":material/bar_chart:", "X")
 
 
-def _cards(ctx, items, headlines):
-    return {card.item.slug: card for card in health_cards(ctx, items, headlines)}
+def _rows(ctx, items, headlines):
+    return {row.item.slug: row for row in health_rows(ctx, items, headlines)}
 
 
-class TestHealthCards:
-    def test_ready_checks_show_their_headline_and_open(self, tmp_path):
+TWO_DUPLICATES = CheckHeadline("2", "duplicate IDs", outstanding=2, resolved=1)
+NO_DUPLICATES = CheckHeadline("0", "duplicate IDs", outstanding=0, resolved=3)
+PROGRESS = CheckHeadline("5 / 20", "25.0% of target", informational=True)
+ERROR_ITEM = NavItem(
+    "enumerator",
+    "Enumerator Stats",
+    ":material/groups:",
+    "Field team",
+    CheckStatus.ERROR,
+    "KeyError: 'enum'",
+)
+
+
+class TestHealthRows:
+    def test_ready_checks_show_their_numbers_and_open(self, tmp_path):
         ctx = _ctx(_config(tmp_path), DATA)
 
-        card = _cards(ctx, [DUPLICATES], {"duplicates": lambda _: "2 duplicate IDs"})[
+        row = _rows(ctx, [DUPLICATES], {"duplicates": lambda _: TWO_DUPLICATES})[
             "duplicates"
         ]
 
-        assert card.headline == "2 duplicate IDs"
-        assert card.action == "Open →"
+        assert row.headline == TWO_DUPLICATES
+        assert row.action == "Open →"
 
-    def test_not_ready_checks_show_their_reason_without_a_headline(self, tmp_path):
+    def test_not_ready_checks_show_their_reason_without_numbers(self, tmp_path):
         ctx = _ctx(_config(tmp_path), DATA)
-        headline = MagicMock(return_value="12 outliers")
+        headline = MagicMock(return_value=TWO_DUPLICATES)
 
-        cards = _cards(ctx, [GPS, OUTLIERS], {"gps": headline, "outliers": headline})
+        rows = _rows(ctx, [GPS, OUTLIERS], {"gps": headline, "outliers": headline})
 
         headline.assert_not_called()
-        assert cards["gps"].headline is None
-        assert cards["gps"].item.reason == "No GPS column found in this dataset."
-        assert cards["gps"].action is None
-        assert cards["outliers"].action == "Set up →"
+        assert rows["gps"].headline is None
+        assert rows["gps"].item.reason == "No GPS column found in this dataset."
+        assert rows["gps"].action is None
+        assert rows["outliers"].action == "Set up →"
 
     def test_checks_without_a_headline_show_status_only(self, tmp_path):
         ctx = _ctx(_config(tmp_path), DATA)
 
-        card = _cards(ctx, [DESCRIPTIVE], {})["descriptive"]
+        row = _rows(ctx, [DESCRIPTIVE], {})["descriptive"]
 
-        assert card.headline is None
-        assert card.action == "Open →"
+        assert row.headline is None
+        assert row.action == "Open →"
 
-    def test_a_headline_that_raises_is_reported_on_its_card_only(self, tmp_path):
+    def test_a_number_that_fails_shows_an_error_row_only(self, tmp_path):
         ctx = _ctx(_config(tmp_path), DATA)
         headlines = {
             "duplicates": MagicMock(side_effect=ValueError("boom")),
-            "descriptive": lambda _: "fine",
+            "descriptive": lambda _: PROGRESS,
         }
 
-        cards = _cards(ctx, [DUPLICATES, DESCRIPTIVE], headlines)
+        rows = _rows(ctx, [DUPLICATES, DESCRIPTIVE], headlines)
 
-        assert cards["duplicates"].headline is None
-        assert "ValueError: boom" in cards["duplicates"].headline_error
-        assert cards["descriptive"].headline == "fine"
+        assert rows["duplicates"].headline is None
+        assert "ValueError: boom" in rows["duplicates"].error
+        assert rows["duplicates"].state is RowState.ERROR
+        assert rows["descriptive"].headline == PROGRESS
+        assert rows["descriptive"].state is RowState.NO_ISSUES
+
+
+class TestRowStatus:
+    """The status pill: colour, icon and label for each row state."""
+
+    @pytest.mark.parametrize(
+        ("item", "headline", "state", "colour", "label"),
+        [
+            (OUTLIERS, None, RowState.NOT_SET_UP, "gray", "Not set up"),
+            (GPS, None, RowState.NOT_APPLICABLE, "gray", "Not applicable"),
+            (ERROR_ITEM, None, RowState.ERROR, "red", "Error"),
+            (DUPLICATES, TWO_DUPLICATES, RowState.FLAGGED, "orange", "Flagged"),
+            (DUPLICATES, NO_DUPLICATES, RowState.NO_ISSUES, "green", "No issues"),
+            (DUPLICATES, PROGRESS, RowState.NO_ISSUES, "green", "No issues"),
+            (DESCRIPTIVE, None, RowState.NO_ISSUES, "green", "No issues"),
+        ],
+        ids=[
+            "not-set-up",
+            "not-applicable",
+            "status-error",
+            "outstanding",
+            "none-outstanding",
+            "informational",
+            "status-only",
+        ],
+    )
+    def test_status_follows_the_check_status_and_outstanding_number(
+        self, tmp_path, item, headline, state, colour, label
+    ):
+        ctx = _ctx(_config(tmp_path), DATA)
+        headlines = {} if headline is None else {item.slug: lambda _: headline}
+
+        row = _rows(ctx, [item], headlines)[item.slug]
+
+        assert row.state is state
+        pill_colour, icon, pill_label = row.pill
+        assert (pill_colour, pill_label) == (colour, label)
+        assert icon.startswith(":material/")
+
+    def test_informational_checks_are_never_flagged(self, tmp_path):
+        ctx = _ctx(_config(tmp_path), DATA)
+        progress = CheckHeadline("5 / 20", "", outstanding=15, informational=True)
+
+        row = _rows(ctx, [DUPLICATES], {"duplicates": lambda _: progress})
+
+        assert row["duplicates"].state is RowState.NO_ISSUES
+
+    def test_each_state_has_its_own_icon_and_label(self):
+        pills = {RowState(state).pill for state in RowState}
+
+        assert len({icon for _, icon, _ in pills}) == len(RowState)
+        assert len({label for _, _, label in pills}) == len(RowState)
 
 
 class TestHeadlineCache:
     def test_headlines_are_cached_for_the_same_data_and_settings(self, tmp_path):
         config = _config(tmp_path)
-        headline = MagicMock(return_value="2 duplicate IDs")
+        headline = MagicMock(return_value=TWO_DUPLICATES)
 
-        _cards(_ctx(config, DATA), [DUPLICATES], {"duplicates": headline})
-        cards = _cards(
-            _ctx(config, DATA.clone()), [DUPLICATES], {"duplicates": headline}
-        )
+        _rows(_ctx(config, DATA), [DUPLICATES], {"duplicates": headline})
+        rows = _rows(_ctx(config, DATA.clone()), [DUPLICATES], {"duplicates": headline})
 
         headline.assert_called_once()
-        assert cards["duplicates"].headline == "2 duplicate IDs"
+        assert rows["duplicates"].headline == TWO_DUPLICATES
 
     def test_recomputed_when_the_data_changes(self, tmp_path):
         config = _config(tmp_path)
-        headline = MagicMock(return_value="x")
+        headline = MagicMock(return_value=TWO_DUPLICATES)
 
-        _cards(_ctx(config, DATA), [DUPLICATES], {"duplicates": headline})
+        _rows(_ctx(config, DATA), [DUPLICATES], {"duplicates": headline})
         changed = DATA.with_columns(pl.Series("age", [30, 41]))
-        _cards(_ctx(config, changed), [DUPLICATES], {"duplicates": headline})
+        _rows(_ctx(config, changed), [DUPLICATES], {"duplicates": headline})
 
         assert headline.call_count == 2
 
     def test_recomputed_when_the_page_settings_change(self, tmp_path):
         config = _config(tmp_path)
-        headline = MagicMock(return_value="x")
+        headline = MagicMock(return_value=TWO_DUPLICATES)
 
-        _cards(_ctx(config, DATA), [DUPLICATES], {"duplicates": headline})
+        _rows(_ctx(config, DATA), [DUPLICATES], {"duplicates": headline})
         config.setting_file.write_text('{"duplicates": {"survey_id": "age"}}')
-        _cards(_ctx(config, DATA), [DUPLICATES], {"duplicates": headline})
+        _rows(_ctx(config, DATA), [DUPLICATES], {"duplicates": headline})
 
         assert headline.call_count == 2
 
     def test_not_recomputed_when_only_view_state_changes(self, tmp_path):
         config = _config(tmp_path)
-        headline = MagicMock(return_value="x")
+        headline = MagicMock(return_value=TWO_DUPLICATES)
 
-        _cards(_ctx(config, DATA), [DUPLICATES], {"duplicates": headline})
+        _rows(_ctx(config, DATA), [DUPLICATES], {"duplicates": headline})
         save_selection(config.setting_file, "gps")
         ViewState(config.setting_file, "gps").save("gps_color_by", "team")
-        _cards(_ctx(config, DATA), [DUPLICATES], {"duplicates": headline})
+        _rows(_ctx(config, DATA), [DUPLICATES], {"duplicates": headline})
 
         headline.assert_called_once()
 
     def test_recomputed_when_a_settings_table_changes(self, tmp_path):
         config = _config(tmp_path)
-        headline = MagicMock(return_value="x")
+        headline = MagicMock(return_value=TWO_DUPLICATES)
 
-        _cards(_ctx(config, DATA), [DUPLICATES], {"duplicates": headline})
+        _rows(_ctx(config, DATA), [DUPLICATES], {"duplicates": headline})
         duckdb_save_table(PROJECT_ID, pl.DataFrame({"a": [1]}), "outliers_hfcs", "logs")
-        _cards(_ctx(config, DATA), [DUPLICATES], {"duplicates": headline})
+        _rows(_ctx(config, DATA), [DUPLICATES], {"duplicates": headline})
 
         assert headline.call_count == 2
 
     def test_a_failed_headline_is_not_cached(self, tmp_path):
         ctx = _ctx(_config(tmp_path), DATA)
-        headline = MagicMock(side_effect=[ValueError("boom"), "2 duplicate IDs"])
+        headline = MagicMock(side_effect=[ValueError("boom"), TWO_DUPLICATES])
 
-        _cards(ctx, [DUPLICATES], {"duplicates": headline})
-        cards = _cards(ctx, [DUPLICATES], {"duplicates": headline})
+        _rows(ctx, [DUPLICATES], {"duplicates": headline})
+        rows = _rows(ctx, [DUPLICATES], {"duplicates": headline})
 
-        assert cards["duplicates"].headline == "2 duplicate IDs"
+        assert rows["duplicates"].headline == TWO_DUPLICATES

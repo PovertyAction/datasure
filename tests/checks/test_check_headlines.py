@@ -1,4 +1,4 @@
-"""Each triage check's headline: the number Summary shows on its health card.
+"""Each check's headline: the numbers Summary shows on its check health row.
 
 A headline must match what the check itself reports, so these tests build the
 same inputs the check uses (saved settings, logs tables) and assert the
@@ -6,16 +6,21 @@ number the check shows.
 """
 
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
 
+from datasure.checks.backchecks.attribution import (
+    ATTRIBUTION_LOG_SCHEMA,
+    save_attributions,
+)
 from datasure.checks.backchecks.report_ui import backchecks_headline
 from datasure.checks.duplicates import duplicates_headline
 from datasure.checks.enumerator import report_ui as enumerator_ui
 from datasure.checks.enumerator.report_ui import enumerator_headline
+from datasure.checks.headline import CheckHeadline
 from datasure.checks.missing import missing_headline
 from datasure.checks.outliers.report_ui import outliers_headline
 from datasure.checks.progress import progress_headline
@@ -73,36 +78,58 @@ class TestProgressHeadline:
 
     def test_submissions_without_a_target(self, setting_file):
         assert progress_headline(SURVEY, setting_file, self.CONFIG) == (
-            "5 submitted interviews"
+            CheckHeadline("5", "submitted interviews", informational=True)
         )
 
-    def test_share_of_the_target_from_the_page_config(self, setting_file):
+    def test_submitted_out_of_the_target_from_the_page_config(self, setting_file):
         config = {**self.CONFIG, "survey_target": 20}
 
         assert progress_headline(SURVEY, setting_file, config) == (
-            "25.00% of target (5 of 20)"
+            CheckHeadline("5 / 20", "25.00% of target", informational=True)
         )
 
     def test_a_target_saved_in_the_check_settings_wins(self, setting_file):
         _save_settings(setting_file, "progress", {"survey_target": 8})
         config = {**self.CONFIG, "survey_target": 20}
 
-        assert progress_headline(SURVEY, setting_file, config) == (
-            "62.50% of target (5 of 8)"
-        )
+        headline = progress_headline(SURVEY, setting_file, config)
+
+        assert (headline.value, headline.detail) == ("5 / 8", "62.50% of target")
 
 
 class TestMissingHeadline:
-    DATA = pl.DataFrame({"a": [1, None, 3, 4], "b": [-99, 2, 3, 4]})
+    DATA = pl.DataFrame(
+        {
+            "a": [1, None, 3, 4],
+            "b": [-99, 2, 3, 4],
+            "c": [None, None, None, None],
+            "d": [-99, -99, None, -99],
+        }
+    )
 
-    def test_mean_share_of_missing_values(self):
-        # a is 25% missing, b has none: 12.5% on average, as the check shows.
-        assert missing_headline(PROJECT_ID, self.DATA) == "12.50% of values missing"
+    def test_share_of_columns_all_missing(self):
+        # Only c is all missing: 1 of 4 columns, the check's "% columns all
+        # missing".
+        assert missing_headline(PROJECT_ID, self.DATA) == CheckHeadline(
+            "25.00%", "of columns all missing (1 of 4)", outstanding=25.0
+        )
 
     def test_missing_codes_count_as_missing(self):
         add_missing_code(PROJECT_ID, "Don't know", "-99")
 
-        assert missing_headline(PROJECT_ID, self.DATA) == "25.00% of values missing"
+        # d is now all missing too.
+        headline = missing_headline(PROJECT_ID, self.DATA)
+
+        assert (headline.value, headline.detail) == (
+            "50.00%",
+            "of columns all missing (2 of 4)",
+        )
+
+    def test_no_columns_all_missing_is_not_outstanding(self):
+        headline = missing_headline(PROJECT_ID, self.DATA.select("a", "b"))
+
+        assert headline.outstanding == 0
+        assert not headline.flagged
 
 
 class TestDuplicatesHeadline:
@@ -110,9 +137,29 @@ class TestDuplicatesHeadline:
 
     def test_counts_duplicate_ids(self, setting_file):
         # h2 and h3 are each on two records.
-        assert duplicates_headline(SURVEY, setting_file, self.CONFIG) == (
-            "2 duplicate IDs"
+        assert duplicates_headline(PROJECT_ID, SURVEY, setting_file, self.CONFIG) == (
+            CheckHeadline("2", "duplicate IDs", outstanding=2, resolved=0)
         )
+
+    def test_resolved_ids_are_the_duplicates_corrections_removed(self, setting_file):
+        # Before corrections h1 and h4 were also duplicated; the survey data
+        # is the corrected data, as on the check, which shows "Resolved: 2".
+        uncorrected = pl.concat(
+            [
+                SURVEY,
+                pl.DataFrame(
+                    {"key": ["k6", "k7"], "hhid": ["h1", "h4"], "age": [35, 36]}
+                ),
+                pl.DataFrame({"key": ["k8"], "hhid": ["h4"], "age": [37]}),
+            ]
+        )
+        duckdb_save_table(PROJECT_ID, uncorrected, "survey", "prep")
+
+        headline = duplicates_headline(
+            PROJECT_ID, SURVEY, setting_file, self.CONFIG, alias="survey"
+        )
+
+        assert (headline.outstanding, headline.resolved) == (2, 2)
 
     def test_uses_the_saved_records_to_include_filter(self, setting_file):
         _save_settings(
@@ -126,12 +173,11 @@ class TestDuplicatesHeadline:
         )
 
         # Only k3 (h2), k4 (h3) and k5 (h3) are checked.
-        assert duplicates_headline(SURVEY, setting_file, self.CONFIG) == (
-            "1 duplicate ID"
-        )
+        headline = duplicates_headline(PROJECT_ID, SURVEY, setting_file, self.CONFIG)
+        assert (headline.value, headline.detail) == ("1", "duplicate ID")
 
     def test_invalid_records_to_include_filter_raises(self, setting_file):
-        # The check shows the filter error; the card must not show zero.
+        # The check shows the filter error; the row must not show zero.
         _save_settings(
             setting_file,
             "duplicates",
@@ -143,14 +189,13 @@ class TestDuplicatesHeadline:
         )
 
         with pytest.raises(ValueError, match="Records to Include"):
-            duplicates_headline(SURVEY, setting_file, self.CONFIG)
+            duplicates_headline(PROJECT_ID, SURVEY, setting_file, self.CONFIG)
 
     def test_uses_the_saved_survey_id(self, setting_file):
         _save_settings(setting_file, "duplicates", {"survey_id": "key"})
 
-        assert duplicates_headline(SURVEY, setting_file, self.CONFIG) == (
-            "0 duplicate IDs"
-        )
+        headline = duplicates_headline(PROJECT_ID, SURVEY, setting_file, self.CONFIG)
+        assert (headline.value, headline.outstanding) == ("0", 0)
 
 
 class TestOutliersHeadline:
@@ -195,35 +240,68 @@ class TestOutliersHeadline:
         duckdb_save_table(PROJECT_ID, self.COLUMNS, f"outliers_{PAGE}", "logs")
 
         # 100 is an IQR outlier and above the soft maximum of 50.
-        assert (
-            self._headline(setting_file)
-            == "1 outlier (20.0% of values), 1 constraint violation"
+        assert self._headline(setting_file) == CheckHeadline(
+            "2",
+            "1 outlier (20.0% of values), 1 constraint violation",
+            outstanding=2,
+            resolved=0,
         )
 
-    def test_accepted_flags_are_left_out(self, setting_file):
-        from datasure.processing.correction_log import empty_correction_log
-
+    def _reviewed_headline(self, setting_file, acceptances, corrections):
         duckdb_save_table(PROJECT_ID, self.COLUMNS, f"outliers_{PAGE}", "logs")
-        acceptances = pl.DataFrame(
+        with patch(
+            "datasure.checks.outliers.report_ui.CorrectionProcessor"
+        ) as processor:
+            processor.return_value.get_active_acceptances.return_value = acceptances
+            processor.return_value.get_active_corrections.return_value = corrections
+            return self._headline(setting_file, alias="survey")
+
+    @staticmethod
+    def _log(action: str, key: str) -> pl.DataFrame:
+        return pl.DataFrame(
             {
-                "KEY": ["k4"],
-                "action": ["accept"],
+                "KEY": [key],
+                "action": [action],
                 "column": ["income"],
                 "reason": ["checked"],
                 "severity": [None],
             },
             schema_overrides={"severity": pl.String},
         )
-        with patch(
-            "datasure.checks.outliers.report_ui.CorrectionProcessor"
-        ) as processor:
-            processor.return_value.get_active_acceptances.return_value = acceptances
-            processor.return_value.get_active_corrections.return_value = (
-                empty_correction_log()
-            )
-            headline = self._headline(setting_file, alias="survey")
 
-        assert headline == "0 outliers (0.0% of values), 0 constraint violations"
+    def test_accepted_flags_are_resolved_not_outstanding(self, setting_file):
+        from datasure.processing.correction_log import empty_correction_log
+
+        headline = self._reviewed_headline(
+            setting_file, self._log("accept", "k4"), empty_correction_log()
+        )
+
+        # The outlier and the constraint violation on k4 were both accepted.
+        assert headline == CheckHeadline(
+            "0",
+            "0 outliers (0.0% of values), 0 constraint violations",
+            outstanding=0,
+            resolved=2,
+        )
+
+    def test_a_corrected_value_no_longer_flagged_is_resolved_once(self, setting_file):
+        from datasure.processing.correction_log import empty_correction_log
+
+        # k2's income was corrected; its cell is in both checks' results.
+        headline = self._reviewed_headline(
+            setting_file, empty_correction_log(), self._log("modify", "k2")
+        )
+
+        assert (headline.outstanding, headline.resolved) == (2, 1)
+
+    def test_a_corrected_value_still_flagged_stays_outstanding(self, setting_file):
+        from datasure.processing.correction_log import empty_correction_log
+
+        headline = self._reviewed_headline(
+            setting_file, empty_correction_log(), self._log("modify", "k4")
+        )
+
+        assert (headline.outstanding, headline.resolved) == (2, 0)
 
     def test_none_without_outlier_columns(self, setting_file):
         assert self._headline(setting_file) is None
@@ -252,7 +330,7 @@ class TestEnumeratorHeadline:
         data = self._data(["e1", "e1", "e2", "e3"], [1, 20, 2, 30])
 
         assert enumerator_headline(PROJECT_ID, data, setting_file, self.CONFIG) == (
-            "2 of 3 enumerators active in the past 7 days"
+            CheckHeadline("2 / 3", "active in the past 7 days", informational=True)
         )
 
     @staticmethod
@@ -300,7 +378,7 @@ class TestEnumeratorHeadline:
 
         active = shown[r"\# of Active enumerators (past 7 days)"]
         total = shown[r"\# of enumerators"]
-        assert headline == f"{active} of {total} enumerators active in the past 7 days"
+        assert headline.value == f"{active} / {total}"
 
 
 class TestBackchecksHeadline:
@@ -342,11 +420,53 @@ class TestBackchecksHeadline:
             PROJECT_ID, PAGE, self.SURVEY, self.BACKCHECK, setting_file, self.CONFIG
         )
 
-    def test_total_error_rate(self, setting_file):
+    def test_unattributed_mismatches_with_the_total_error_rate(self, setting_file):
         duckdb_save_table(PROJECT_ID, self.COLUMNS, f"backchecks_{PAGE}", "logs")
 
-        # h2's age differs (31 vs 99): 1 of 3 values compared.
-        assert self._headline(setting_file) == "33.33% error rate"
+        # h2's age differs (31 vs 99): 1 of 3 values compared, as the check's
+        # "Error Rate (Total)" shows.
+        assert self._headline(setting_file) == CheckHeadline(
+            "1", "33.33% error rate", outstanding=1, resolved=0
+        )
+
+    def _attribute(self, survey_value: str) -> None:
+        save_attributions(
+            PROJECT_ID,
+            PAGE,
+            pl.DataFrame(
+                {
+                    "survey_key": ["k2"],
+                    "backcheck_key": ["b2"],
+                    "column_name": ["age"],
+                    "survey_value": [survey_value],
+                    "backcheck_value": ["99"],
+                    "source": ["Respondent"],
+                    "note": ["Misheard"],
+                    "user": ["tester"],
+                    "date": [datetime(2026, 10, 1)],
+                },
+                schema=ATTRIBUTION_LOG_SCHEMA,
+            ),
+        )
+
+    def test_attributed_mismatches_are_resolved(self, setting_file):
+        duckdb_save_table(PROJECT_ID, self.COLUMNS, f"backchecks_{PAGE}", "logs")
+        self._attribute("31")
+
+        headline = self._headline(setting_file)
+
+        # The error rate still counts the mismatch, as on the check.
+        assert headline == CheckHeadline(
+            "0", "33.33% error rate", outstanding=0, resolved=1
+        )
+
+    def test_an_attribution_whose_values_changed_no_longer_applies(self, setting_file):
+        duckdb_save_table(PROJECT_ID, self.COLUMNS, f"backchecks_{PAGE}", "logs")
+        self._attribute("32")
+
+        headline = self._headline(setting_file)
+
+        assert (headline.outstanding, headline.resolved) == (1, 0)
 
     def test_none_without_backcheck_columns(self, setting_file):
         assert self._headline(setting_file) is None
