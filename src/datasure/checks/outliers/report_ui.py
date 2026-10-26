@@ -1611,7 +1611,16 @@ def _reviewed(
     return _ReviewedFlags(outlier_data, violations, settings.survey_key, flagged_before)
 
 
-def _reviewed_flags(
+@dataclass(frozen=True)
+class _OutliersBasis:
+    """What the outliers headline computed, for `outliers_delta` to reuse."""
+
+    flags: _Flags
+    review: ReviewContext | None
+    reviewed: _ReviewedFlags
+
+
+def _outliers_basis(
     project_id: str,
     page_name_id: str,
     data: pl.DataFrame,
@@ -1619,7 +1628,7 @@ def _reviewed_flags(
     setting_file: str,
     config: dict,
     alias: str | None,
-) -> _ReviewedFlags | None:
+) -> _OutliersBasis | None:
     """Compute the check's results without rendering it, for the health rows.
 
     Uses the saved settings and outlier columns, and clears accepted flags,
@@ -1636,9 +1645,8 @@ def _reviewed_flags(
     )
     if flags is None:
         return None
-    return _reviewed(
-        flags, _review_context(project_id, alias, flags.settings.survey_key)
-    )
+    review = _review_context(project_id, alias, flags.settings.survey_key)
+    return _OutliersBasis(flags, review, _reviewed(flags, review))
 
 
 def _outstanding(flags: _ReviewedFlags) -> tuple[int, int]:
@@ -1722,11 +1730,12 @@ def outliers_headline(
         If the saved settings no longer fit the data, so Summary shows the
         row as an error with the reason.
     """
-    flags = _reviewed_flags(
+    basis = _outliers_basis(
         project_id, page_name_id, data, survey_columns, setting_file, config, alias
     )
-    if flags is None:
+    if basis is None:
         return None
+    flags = basis.reviewed
     outliers, violations = _outstanding(flags)
     percent = flagged_value_percent(flags.outliers)
     rate = "" if percent is None else f" ({percent:.1f}% of values)"
@@ -1738,6 +1747,7 @@ def outliers_headline(
         resolved=count_resolved_flags(
             flags.results, flags.survey_key, flags.flagged_before_correction
         ),
+        basis=basis,
     )
 
 
@@ -1751,6 +1761,7 @@ def outliers_delta(
     alias: str | None,
     date_col: str,
     as_of: date,
+    basis: _OutliersBasis | None = None,
 ) -> CheckDelta | None:
     """Return the outliers row's change since `as_of`, for Summary.
 
@@ -1760,7 +1771,8 @@ def outliers_delta(
     deviation bounds. Resolved: the flags accepted or corrected by log
     entries made after `as_of` that are still in effect; undone corrections
     and acceptances that no longer apply drop out. Takes the parameters of
-    `outliers_headline`.
+    `outliers_headline`, and `basis`: the headline's basis, computed on
+    `data`, so the flags are not computed again; None computes them.
 
     Returns
     -------
@@ -1773,14 +1785,14 @@ def outliers_delta(
     ValueError
         If the saved settings no longer fit the data.
     """
-    flags = _computed_flags(
-        project_id, page_name_id, data, survey_columns, setting_file, config
-    )
-    if flags is None:
+    if basis is None:
+        basis = _outliers_basis(
+            project_id, page_name_id, data, survey_columns, setting_file, config, alias
+        )
+    if basis is None:
         return None
+    flags, review, now = basis.flags, basis.review, basis.reviewed
     key = flags.settings.survey_key
-    review = _review_context(project_id, alias, key)
-    now = _reviewed(flags, review)
     new_keys = data.filter(dated_after(data, date_col, as_of))[key].cast(pl.String)
     resolved = None
     if review is not None:

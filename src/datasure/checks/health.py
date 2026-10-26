@@ -16,7 +16,7 @@ import logging
 import threading
 from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
-from dataclasses import astuple, dataclass
+from dataclasses import astuple, dataclass, replace
 from datetime import date
 from enum import StrEnum
 from pathlib import Path
@@ -229,10 +229,39 @@ _cache: "OrderedDict[Hashable, CheckHeadline | None]" = OrderedDict()
 _cache_lock = threading.Lock()
 
 
+# By check slug, the cache key and basis of the check's latest computed
+# headline (see `CheckHeadline.basis`). A basis can hold a copy of the data,
+# so only one per check is kept, outside the headline cache.
+_bases: dict[str, tuple[Hashable, object]] = {}
+
+
 def clear_headline_cache() -> None:
-    """Forget every cached headline."""
+    """Forget every cached headline and basis."""
     with _cache_lock:
         _cache.clear()
+        _bases.clear()
+
+
+def _keep_basis(
+    slug: str, key: Hashable, headline: CheckHeadline | None
+) -> CheckHeadline | None:
+    """Keep a computed headline's basis aside; return the headline without it."""
+    if headline is None or headline.basis is None:
+        return headline
+    with _cache_lock:
+        _bases[slug] = (key, headline.basis)
+    return replace(headline, basis=None)
+
+
+def _with_basis(
+    slug: str, key: Hashable, headline: CheckHeadline | None
+) -> CheckHeadline | None:
+    """Return a cached headline with its basis, if it is still kept."""
+    with _cache_lock:
+        kept = _bases.get(slug)
+    if headline is None or kept is None or kept[0] != key:
+        return headline
+    return replace(headline, basis=kept[1])
 
 
 def _frame_fingerprint(data: pl.DataFrame | None) -> Hashable | None:
@@ -417,7 +446,14 @@ def health_rows(
         try:
             if fingerprint is not None:
                 key = (item.slug, fingerprint, view_key(ctx) if view_key else None)
-            value = _cached_or_computed(key, lambda h=headline: h(ctx))
+            if key is None:
+                value = headline(ctx)
+            else:
+                value = _cached(
+                    key,
+                    lambda h=headline, s=item.slug, k=key: _keep_basis(s, k, h(ctx)),
+                )
+                value = _with_basis(item.slug, key, value)
         # UI boundary: one check's numbers must not stop the other rows. The
         # error is shown on the row by render_health_rows (deferred display,
         # see CONTRIBUTING "Error Handling Conventions").

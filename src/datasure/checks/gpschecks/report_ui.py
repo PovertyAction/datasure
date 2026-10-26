@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import date
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
@@ -40,6 +41,7 @@ from datasure.checks.gpschecks.review import (
     OUTLIER_STATUS,
     CoordinateColumns,
     GPSAction,
+    GPSOutlierSummary,
     GPSReviewLog,
     GPSSelection,
     allowed_gps_actions,
@@ -56,7 +58,12 @@ from datasure.checks.gpschecks.review import (
     validate_coordinates,
 )
 from datasure.checks.gpschecks.settings_ui import gpschecks_report_settings
-from datasure.checks.headline import CheckHeadline, settings_no_longer_fit
+from datasure.checks.headline import (
+    CheckDelta,
+    CheckHeadline,
+    settings_no_longer_fit,
+)
+from datasure.checks.health_period import dated_after, logged_after
 from datasure.checks.outliers.review import (
     REVIEW_COLUMNS,
     REVIEW_STATUS_COL,
@@ -2217,46 +2224,17 @@ def _detect_saved_outliers(
     )
 
 
-def gpschecks_headline(
+def _gps_summary(
     project_id: str,
     page_name_id: str,
     data: pl.DataFrame,
     config: dict,
-    alias: str | None = None,
-) -> CheckHeadline | None:
-    """Return the GPS headline for Summary's check health row.
+    alias: str | None,
+) -> GPSOutlierSummary | None:
+    """Detect and review the outliers as the check does, without rendering it.
 
-    Outstanding: the outliers section's "Outliers Detected", leaving out
-    accepted outliers, for the GPS configuration, detection method and
-    Auto-Clustering settings saved in the check's view. Resolved: points
-    accepted or corrected from the check (see `summarize_gps_outliers`).
-    Computed without rendering the check, and without a Mapbox token.
-
-    Parameters
-    ----------
-    project_id : str
-        The project identifier.
-    page_name_id : str
-        Page name identifier.
-    data : pl.DataFrame
-        The survey data of the page.
-    config : dict
-        The page configuration the check starts from (`GPSSettings`).
-    alias : str | None
-        The survey dataset alias, whose correction log reviews the outliers.
-        If None, every outlier is counted and nothing is resolved.
-
-    Returns
-    -------
-    CheckHeadline | None
-        None when the check shows no count: no GPS configuration, no valid
-        coordinates, too few points for Auto-Clustering, or no clustering
-        column chosen.
-
-    Raises
-    ------
-    ValueError
-        If the saved GPS configuration no longer fits the data.
+    Takes the parameters of `gpschecks_headline` and returns None when it
+    does.
     """
     gps_settings = _get_gps_column_settings(project_id, page_name_id)
     if gps_settings.is_empty() or data.is_empty():
@@ -2294,15 +2272,118 @@ def gpschecks_headline(
             survey_key,
             coordinate_columns(selected_config),
         )
-    summary = summarize_gps_outliers(outlier_df, survey_key, review=review_log)
-    total = len(outlier_df)
+    return summarize_gps_outliers(outlier_df, survey_key, review=review_log)
+
+
+def gpschecks_headline(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    config: dict,
+    alias: str | None = None,
+) -> CheckHeadline | None:
+    """Return the GPS headline for Summary's check health row.
+
+    Outstanding: the outliers section's "Outliers Detected", leaving out
+    accepted outliers, for the GPS configuration, detection method and
+    Auto-Clustering settings saved in the check's view. Resolved: points
+    accepted or corrected from the check (see `summarize_gps_outliers`).
+    Computed without rendering the check, and without a Mapbox token. The
+    headline's basis is the reviewed outliers, for `gpschecks_delta`.
+
+    Parameters
+    ----------
+    project_id : str
+        The project identifier.
+    page_name_id : str
+        Page name identifier.
+    data : pl.DataFrame
+        The survey data of the page.
+    config : dict
+        The page configuration the check starts from (`GPSSettings`).
+    alias : str | None
+        The survey dataset alias, whose correction log reviews the outliers.
+        If None, every outlier is counted and nothing is resolved.
+
+    Returns
+    -------
+    CheckHeadline | None
+        None when the check shows no count: no GPS configuration, no valid
+        coordinates, too few points for Auto-Clustering, or no clustering
+        column chosen.
+
+    Raises
+    ------
+    ValueError
+        If the saved GPS configuration no longer fits the data.
+    """
+    summary = _gps_summary(project_id, page_name_id, data, config, alias)
+    if summary is None:
+        return None
+    total = len(summary.outliers)
     share = summary.outstanding / total * 100 if total else 0
     return CheckHeadline(
         f"{summary.outstanding:,}",
         f"GPS outliers ({share:.2f}% of {total:,} points)",
         outstanding=summary.outstanding,
         resolved=summary.resolved,
+        basis=summary,
     )
+
+
+def gpschecks_delta(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    config: dict,
+    alias: str | None,
+    date_col: str,
+    as_of: date,
+    summary: GPSOutlierSummary | None = None,
+) -> CheckDelta | None:
+    """Return the GPS row's change since `as_of`, for Summary.
+
+    Outstanding: the outliers `gpschecks_headline` counts on submissions
+    dated after `as_of`. Outliers are not detected again on the earlier
+    submissions alone, since that would move every point's neighbourhood.
+    Resolved: the resolved points whose latest resolving log entry was made
+    after `as_of`; undone corrections and acceptances that no longer apply
+    are not resolved. Takes the parameters of `gpschecks_headline`.
+
+    Parameters
+    ----------
+    date_col : str
+        Summary's date column.
+    as_of : date
+        The period start.
+    summary : GPSOutlierSummary | None
+        The headline's basis, computed on `data`; None computes it.
+
+    Returns
+    -------
+    CheckDelta | None
+        None when the headline is None. The resolved change is None when
+        the outliers could not be reviewed, as the headline's is.
+
+    Raises
+    ------
+    ValueError
+        If the saved GPS configuration no longer fits the data.
+    """
+    if summary is None:
+        summary = _gps_summary(project_id, page_name_id, data, config, alias)
+    if summary is None:
+        return None
+    unreviewed = summary.unreviewed()
+    new = 0
+    if not unreviewed.empty and date_col in unreviewed.columns:
+        dates = pl.from_pandas(unreviewed[[date_col]])
+        new = dates.filter(dated_after(dates, date_col, as_of)).height
+    resolved = None
+    if summary.resolved is not None:
+        resolutions = summary.resolutions
+        resolved = resolutions.filter(logged_after(resolutions, as_of)).height
+    return CheckDelta(new, resolved=resolved)
 
 
 def gpschecks_status(

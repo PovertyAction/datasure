@@ -1,7 +1,10 @@
 """Summary's check health rows: status, numbers and cached headlines."""
 
+import gc
 import json
 import sys
+import weakref
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
@@ -525,6 +528,63 @@ class TestDeltas:
         headline.assert_called_once()
         assert [c.args[2] for c in delta.call_args_list] == [YESTERDAY, WEEK_AGO]
         assert rows["duplicates"].delta == CheckDelta(outstanding=2)
+
+    def test_a_delta_reuses_what_the_headline_computed(self, tmp_path):
+        # The basis outlives the computed headline, so switching the period
+        # does not compute the check's flags again.
+        config = _config(tmp_path)
+        flags = object()
+        headline = MagicMock(return_value=replace(TWO_DUPLICATES, basis=flags))
+        delta = MagicMock(return_value=CheckDelta(outstanding=2))
+        args = ([DUPLICATES], {"duplicates": headline}, {"duplicates": delta})
+
+        _delta_rows(_ctx(config, DATA), *args, window=YESTERDAY)
+        _delta_rows(_ctx(config, DATA), *args, window=WEEK_AGO)
+
+        headline.assert_called_once()
+        assert [c.args[1].basis for c in delta.call_args_list] == [flags, flags]
+
+    def test_a_basis_is_never_reused_for_other_data(self, tmp_path):
+        config = _config(tmp_path)
+        bases = iter([object(), object()])
+        delta = MagicMock(return_value=CheckDelta(outstanding=2))
+
+        def headline(_ctx):
+            return replace(TWO_DUPLICATES, basis=next(bases))
+
+        headlines, deltas = {"duplicates": headline}, {"duplicates": delta}
+        _delta_rows(_ctx(config, DATA), [DUPLICATES], headlines, deltas)
+        _delta_rows(_ctx(config, DATA.head(1)), [DUPLICATES], headlines, deltas)
+
+        first, second = (c.args[1].basis for c in delta.call_args_list)
+        assert first is not second
+
+    def test_only_the_latest_basis_of_a_check_is_kept(self, tmp_path):
+        # A basis can hold a copy of the data, so the cache must not keep
+        # one per data version.
+        class Flags:
+            pass
+
+        config = _config(tmp_path)
+        made: list[weakref.ref] = []
+
+        def headline(_ctx):
+            flags = Flags()
+            made.append(weakref.ref(flags))
+            return replace(TWO_DUPLICATES, basis=flags)
+
+        delta = MagicMock(return_value=CheckDelta(outstanding=2))
+        for data in (DATA, DATA.head(1)):
+            _delta_rows(
+                _ctx(config, data),
+                [DUPLICATES],
+                {"duplicates": headline},
+                {"duplicates": delta},
+            )
+        delta.reset_mock()
+        gc.collect()
+
+        assert [ref() is None for ref in made] == [True, False]
 
 
 SINCE = "yesterday"

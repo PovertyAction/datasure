@@ -39,6 +39,7 @@ from datasure.checks.enumerator.report_ui import (
     enumerator_status,
 )
 from datasure.checks.gpschecks.report_ui import (
+    gpschecks_delta,
     gpschecks_headline,
     gpschecks_headline_view,
     gpschecks_report,
@@ -699,7 +700,7 @@ def _duplicates_delta(
 
 
 def _outliers_delta(
-    ctx: CheckContext, _now: CheckHeadline, window: DeltaWindow
+    ctx: CheckContext, now: CheckHeadline, window: DeltaWindow
 ) -> CheckDelta | None:
     if _before(ctx, window) is None:
         return None
@@ -714,6 +715,25 @@ def _outliers_delta(
         config.survey_data_name,
         window.survey_date,
         window.as_of,
+        basis=now.basis,
+    )
+
+
+def _gps_delta(
+    ctx: CheckContext, now: CheckHeadline, window: DeltaWindow
+) -> CheckDelta | None:
+    if _before(ctx, window) is None:
+        return None
+    config = ctx.config
+    return gpschecks_delta(
+        ctx.project_id,
+        config.page_name_id,
+        ctx.data.page_data,
+        _gps_config(ctx),
+        config.survey_data_name,
+        window.survey_date,
+        window.as_of,
+        summary=now.basis,
     )
 
 
@@ -811,6 +831,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         _render_gps,
         _gps_status,
         headline=_gps_headline,
+        delta=_gps_delta,
         settings=_gps_settings,
         headline_view=_gps_headline_view,
     ),

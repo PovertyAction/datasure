@@ -5,8 +5,9 @@ headline function. Every number must match what the check itself reports.
 Kept free of Streamlit and of the checks, so any check can import it.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -36,6 +37,12 @@ class CheckHeadline:
         The number an informational value shows, such as the submissions or
         the active enumerators, which its change over the comparison period
         compares. None when the value has no such number.
+    basis : Any
+        What the check computed the numbers from, such as its flags, so its
+        delta can reuse them instead of computing them again. Only valid for
+        the data the headline was computed on; Summary keeps it out of the
+        headline cache. Not compared, so headlines with equal numbers are
+        equal.
     """
 
     value: str
@@ -44,6 +51,7 @@ class CheckHeadline:
     resolved: int | None = None
     informational: bool = False
     count: float | None = None
+    basis: Any = field(default=None, compare=False, repr=False)
 
     @property
     def flagged(self) -> bool:

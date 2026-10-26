@@ -7,6 +7,7 @@ effect.
 """
 
 import json
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -96,8 +97,17 @@ def _save_settings(setting_file: Path, check: str, values: dict) -> None:
 
 
 def _delta(slug: str, ctx: CheckContext, window: DeltaWindow = WINDOW):
+    """The check's delta from its headline, as Summary computes it.
+
+    A delta that reuses the headline's basis must equal the delta computed
+    without it, so this checks both.
+    """
     entry = get_check(slug)
-    return entry.delta(ctx, entry.headline(ctx), window)
+    headline = entry.headline(ctx)
+    delta = entry.delta(ctx, headline, window)
+    if headline is not None and headline.basis is not None:
+        assert entry.delta(ctx, replace(headline, basis=None), window) == delta
+    return delta
 
 
 # k4 is dated in the period; k5 has no date, so it is never new.
@@ -277,6 +287,101 @@ class TestOutliersDelta:
         )
 
         assert delta == CheckDelta(outstanding=2, resolved=0)
+
+
+class TestGPSDelta:
+    # Ten points close together and two far away: with the default LOF
+    # settings k09 and k10 are the outliers. k09 is dated in the period.
+    DATA = pl.DataFrame(
+        {
+            "key": [f"k{i:02d}" for i in range(1, 13)],
+            "hhid": [f"h{i:02d}" for i in range(1, 13)],
+            "lat": [6.60 + 0.001 * (i % 4) for i in range(10)] + [7.5, 5.5],
+            "lon": [-0.18 + 0.001 * (i // 4) for i in range(10)] + [-1.5, 1.2],
+            "when": ["2026-10-20"] * 8 + ["2026-10-26", "2026-10-24"] + [None] * 2,
+        }
+    )
+    GPS_COLUMNS = pl.DataFrame(
+        {
+            "alias": ["home"],
+            "format_type": ["Separate Columns"],
+            "delimiter": [None],
+            "gps_column": [None],
+            "latitude_column": ["lat"],
+            "longitude_column": ["lon"],
+            "altitude_column": [None],
+            "accuracy_column": [None],
+        },
+        schema_overrides={
+            "delimiter": pl.String,
+            "gps_column": pl.String,
+            "altitude_column": pl.String,
+            "accuracy_column": pl.String,
+        },
+    )
+
+    @pytest.fixture(autouse=True)
+    def page_settings(self, cache_dir):
+        """The GPS check reads its view state from the page settings file."""
+
+        def fake_cache_path(*parts):
+            path = cache_dir.joinpath(*map(str, parts))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            return path
+
+        with patch("datasure.utils.settings_utils.get_cache_path", fake_cache_path):
+            yield
+
+    def _acceptance(self, key: str, when: datetime) -> pl.DataFrame:
+        row = self.DATA.filter(pl.col("key") == key).row(0, named=True)
+        return pl.DataFrame(
+            {
+                "date": [when],
+                "KEY": [key],
+                "action": ["accept"],
+                "column": [None],
+                "current_value": [json.dumps({"lat": row["lat"], "lon": row["lon"]})],
+                "reason": ["market"],
+            },
+            schema_overrides={"column": pl.String},
+        )
+
+    def _delta(self, tmp_path, acceptances: pl.DataFrame | None = None):
+        duckdb_save_table(PROJECT_ID, self.GPS_COLUMNS, f"gps_columns_{PAGE}", "logs")
+        processor = MagicMock()
+        processor.get_active_acceptances.return_value = (
+            pl.DataFrame() if acceptances is None else acceptances
+        )
+        processor.get_correction_log.return_value = pl.DataFrame()
+        processor.get_active_corrections.return_value = pl.DataFrame()
+        with patch(
+            "datasure.checks.gpschecks.report_ui.CorrectionProcessor",
+            return_value=processor,
+        ):
+            return _delta("gps", _ctx(_config(tmp_path), self.DATA))
+
+    def test_new_outliers_are_those_on_submissions_dated_in_the_period(self, tmp_path):
+        assert self._delta(tmp_path) == CheckDelta(outstanding=1, resolved=0)
+
+    def test_acceptances_logged_in_the_period_are_resolved(self, tmp_path):
+        delta = self._delta(
+            tmp_path, self._acceptance("k09", datetime(2026, 10, 26, 8))
+        )
+
+        assert delta == CheckDelta(outstanding=0, resolved=1)
+
+    def test_acceptances_logged_before_the_period_are_not(self, tmp_path):
+        delta = self._delta(
+            tmp_path, self._acceptance("k10", datetime(2026, 10, 25, 23))
+        )
+
+        assert delta == CheckDelta(outstanding=1, resolved=0)
+
+    def test_no_delta_without_a_date_column(self, tmp_path):
+        duckdb_save_table(PROJECT_ID, self.GPS_COLUMNS, f"gps_columns_{PAGE}", "logs")
+        ctx = _ctx(_config(tmp_path, survey_date=None), self.DATA)
+
+        assert _delta("gps", ctx, DeltaWindow(as_of=AS_OF)) is None
 
 
 class TestBackchecksDelta:
