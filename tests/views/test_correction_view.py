@@ -1440,13 +1440,16 @@ class TestHandleRemoveCorrection:
 class TestRenderPageHeaderAndNavigation:
     """Test the small page-chrome rendering functions."""
 
-    @patch("datasure.views.correction_view.demo_expander")
     @patch("datasure.views.correction_view.page_header")
-    def test_render_page_header(self, mock_page_header, mock_demo_expander):
-        render_page_header()
+    def test_render_page_header_adds_no_demo_guidance(self, mock_page_header):
+        """The step guidance is the Correct page's only demo instruction set."""
+        expander, info = MagicMock(), MagicMock()
+        with _patched_st(expander=expander, info=info):
+            render_page_header()
 
         mock_page_header.assert_called_once()
-        mock_demo_expander.assert_called_once()
+        expander.assert_not_called()
+        info.assert_not_called()
 
     @patch("datasure.views.correction_view.page_navigation")
     def test_render_page_navigation_without_replication_page(self, mock_nav):

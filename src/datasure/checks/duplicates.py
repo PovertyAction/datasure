@@ -57,7 +57,11 @@ from datasure.utils.duckdb_utils import (
 )
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
-from datasure.utils.onboarding_utils import demo_output_onboarding, is_demo_project
+from datasure.utils.onboarding_utils import (
+    DemoColumn,
+    demo_output_onboarding,
+    is_demo_project,
+)
 from datasure.utils.settings_utils import (
     load_check_settings,
     save_check_settings,
@@ -2309,17 +2313,35 @@ def duplicates_report(
 
     if is_demo_project():
         demo_callout(
-            "This section shows one card for each **hhid** (household ID) shared "
-            "by more than one survey record. Each card compares the records side "
-            "by side and highlights the fields that differ. "
+            f"This section shows one card for each **{DemoColumn.HHID}** (household "
+            "ID) shared by more than one survey record. Each card compares the "
+            "records side by side and highlights the fields that differ. "
             "Use **Compare all fields** on a card to see every column, and "
             "expand **:material/clarify: Show more columns in report** to add "
-            "context columns such as **enum_name** or **state** to every card.\n\n"
+            f"context columns such as **{DemoColumn.ENUM_NAME}** or "
+            f"**{DemoColumn.STATE}** to every card.\n\n"
             "To resolve a card, choose **Keep**, **Modify ID** or **Drop** for "
-            "each record so that at most one record keeps the ID, then give a "
-            "reason and a note and click **Save**. The card disappears, and "
-            "**Resolved** counts the duplicate IDs that corrections have "
-            "resolved. Undo a save on the **Correct Data** page."
+            "each record so that at most one record keeps the ID, then choose a "
+            "**Reason**, write a **Note** and click **Save**. The card disappears, "
+            "and **Resolved** counts the duplicate IDs that corrections have "
+            "resolved. Undo a save on the **Correct Data** page.\n\n"
+            "##### Instructions for Demo:\n"
+            "The demo data has three duplicate household IDs. Resolve each card:\n"
+            "- **UP015-005**: the record with KEY "
+            "**uuid:0dk0vt97-786b-250u-34k7-z34615zz820c** belongs to household "
+            "**UP015-055**. Choose **Modify ID** for it, enter **UP015-055**, and "
+            "**Keep** the other record. Reason: **Wrong ID entered**.\n"
+            "- **GJ013-025**: two different respondents share the ID. Choose "
+            "**Modify ID** for the record with KEY "
+            "**uuid:1qv2hs40-598s-540g-57l8-s35783yl358j** and enter **GJ013-026**; "
+            "**Keep** the other record. Reason: **Wrong ID entered**.\n"
+            "- **AN002-003**: the record with KEY "
+            "**uuid:0ur3to71-184r-159l-70j6-m68512uv803n** is an incomplete repeat "
+            "of the household's interview. Choose **Drop** for it and **Keep** the "
+            "other record. Reason: **Duplicate submission**.\n\n"
+            "Add a short **Note** to each card, such as *Confirmed with the field "
+            "team*, and click **Save**. When all three cards are gone, open "
+            "**Overview → Summary** to see them under **Resolved** in Check health."
         )
 
     # Build both views first: the switcher shows each one's duplicate count.
