@@ -721,11 +721,12 @@ class TestSurveyCTOClient:
         with pytest.raises(ConnectionError, match="Invalid server name"):
             client.connect(credentials)
 
+    @patch("datasure.connectors.scto.delete_form_definitions")
     @patch("datasure.connectors.scto.pl.read_csv")
     @patch("datasure.connectors.scto.duckdb_save_table")
     @patch("datasure.connectors.scto.standardize_missing_values")
     def test_import_server_dataset(
-        self, mock_standardize, mock_save_table, mock_read_csv
+        self, mock_standardize, mock_save_table, mock_read_csv, mock_delete
     ):
         """Test importing from server dataset."""
         client = SurveyCTOClient("test1234")
