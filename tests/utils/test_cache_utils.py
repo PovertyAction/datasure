@@ -13,6 +13,11 @@ from datasure.utils.cache_utils import (
 
 
 @pytest.fixture(autouse=True)
+def isolated_cache():
+    """Test the real cache root: these tests chdir into their own tmp_path."""
+
+
+@pytest.fixture(autouse=True)
 def mock_database_functions(monkeypatch):
     """Override the autouse fixture from conftest.
 
