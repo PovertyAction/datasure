@@ -1375,3 +1375,139 @@ class TestRealDemoData:
         )
         low, high = bounds(corrected)
         assert low <= fix.new_value <= high
+
+
+def _source(relative_path: str) -> str:
+    """Return the text of a datasure source file, without importing it."""
+    from pathlib import Path
+
+    import datasure
+
+    return (Path(datasure.__file__).parent / relative_path).read_text(encoding="utf-8")
+
+
+class TestProjectGuidance:
+    """Demo guidance for the project-level features of #361 (items 5-9).
+
+    Each test checks the guidance names a label and that the label exists in
+    the source file that renders it, so renaming a widget fails a test.
+    """
+
+    @staticmethod
+    def _assert_names_real_labels(guidance: str, source_path: str, labels):
+        source = _source(source_path)
+        for label in labels:
+            assert label in guidance, f"guidance does not name {label!r}"
+            assert label in source, f"{label!r} is not a label in {source_path}"
+
+    def test_reports_guidance_asks_for_the_reviewer_name(self):
+        """The sidebar reviewer name is set before the first correction (item 5)."""
+        guidance = OnboardingSteps.OUTPUTS["guidance_content"]
+        self._assert_names_real_labels(
+            guidance,
+            "utils/reviewer.py",
+            [":material/person: Reviewer:", "Reviewer name"],
+        )
+
+    def test_configure_guidance_edits_only_the_target(self):
+        """Editing changes the target, never the page name the walkthrough uses."""
+        from datasure.utils import onboarding_utils as ou
+
+        guidance = OnboardingSteps.CONFIGURE["guidance_content"]
+        self._assert_names_real_labels(
+            guidance,
+            "utils/config_utils.py",
+            [
+                "Edit Check Configuration",
+                "Select Check Configuration to Edit",
+                "Enter Target Number of responses for the Survey",
+                "Save Changes",
+            ],
+        )
+        assert f"**Page Name:** {ou.DEMO_PAGE_NAME}" in guidance
+        assert f"Target Number of responses: {ou.DEMO_SURVEY_TARGET}" in guidance
+        assert str(ou.DEMO_EDITED_TARGET) in guidance
+        assert ou.DEMO_EDITED_TARGET != ou.DEMO_SURVEY_TARGET
+
+    def test_configure_guidance_removes_only_a_throwaway_config(self):
+        """Removing uses a second config, so Household HFCs survives."""
+        from datasure.utils import onboarding_utils as ou
+
+        guidance = OnboardingSteps.CONFIGURE["guidance_content"]
+        self._assert_names_real_labels(
+            guidance,
+            "utils/config_utils.py",
+            ["Remove Check Configuration", "Select Check Configuration to Remove"],
+        )
+        assert ou.DEMO_THROWAWAY_PAGE in guidance
+        assert ou.DEMO_THROWAWAY_PAGE != ou.DEMO_PAGE_NAME
+        # Page Name accepts at most 20 characters
+        for name in (ou.DEMO_PAGE_NAME, ou.DEMO_THROWAWAY_PAGE):
+            assert len(name) <= 20, name
+
+    def test_surveycto_guidance_names_the_real_forms(self):
+        """The SurveyCTO step is explanatory: it names the real labels (item 7)."""
+        guidance = ImportDemoInfo.get_info_message("surveycto_info")
+        self._assert_names_real_labels(
+            guidance,
+            "views/import_view.py",
+            ["Add Credentials", "Add Import Configuration", "Import Type", "SurveyCTO"],
+        )
+        self._assert_names_real_labels(
+            guidance,
+            "connectors/scto.py",
+            [
+                "Server name",
+                "Email address",
+                "Password",
+                "Connect & Save Credentials",
+                "Select Server Credentials",
+                "Select Form ID",
+                "Add Form",
+            ],
+        )
+
+    def test_surveycto_guidance_needs_no_server_or_credentials(self):
+        guidance = ImportDemoInfo.get_info_message("surveycto_info").lower()
+        assert "no surveycto server" in guidance
+        assert "do not click" in guidance
+
+    def test_replication_guidance_excludes_reviewer_names(self):
+        """Item 9: the Exclude reviewer names checkbox is part of the walkthrough."""
+        guidance = OnboardingSteps.REPLICATION["guidance_content"]
+        self._assert_names_real_labels(
+            guidance,
+            "views/replication_view.py",
+            ["Exclude reviewer names", "correction_log.csv"],
+        )
+
+    def test_replication_guidance_exports_the_demo_project(self):
+        """Item 8: export runs from the demo row; update and delete are explained."""
+        from datasure.utils import onboarding_utils as ou
+
+        guidance = OnboardingSteps.REPLICATION["guidance_content"]
+        self._assert_names_real_labels(
+            guidance,
+            "views/start_view.py",
+            [
+                "Include record-level decisions",
+                "Download configuration",
+                "Update from configuration",
+                "Delete project",
+            ],
+        )
+        assert ou.DEMO_PROJECT_NAME in guidance
+        # The demo row's own button, next to Resume and Restart
+        assert "**Export**" in guidance
+        assert 'key="demo_export"' in _source("views/start_view.py")
+
+    def test_exporting_the_loaded_demo_builds_a_bundle(self, load_real_demo):
+        """The demo project exports like any other project (item 8)."""
+        from datasure.utils.project_config import export_project_config
+
+        load_real_demo(today=date(2026, 3, 10))
+        bundle = export_project_config(DEMO_PROJECT_ID, DEMO_PROJECT_NAME)
+
+        assert bundle.exported_from_project == DEMO_PROJECT_NAME
+        assert {d.alias for d in bundle.datasets} == {"demo_survey", "demo_backcheck"}
+        assert all(d.username is None for d in bundle.datasets)

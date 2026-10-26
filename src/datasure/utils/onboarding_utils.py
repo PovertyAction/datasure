@@ -109,6 +109,16 @@ DEMO_LAND_CORRECTION = DemoCorrection(
 )
 
 
+# Check configuration values that guidance names (#361). The walkthrough
+# keeps DEMO_PAGE_NAME throughout: editing changes only the target, and
+# removing uses the throwaway page, since renaming or removing the main page
+# loses its saved settings. Page Name accepts at most 20 characters.
+DEMO_PAGE_NAME = "Household HFCs"
+DEMO_SURVEY_TARGET = 200
+DEMO_EDITED_TARGET = 150
+DEMO_THROWAWAY_PAGE = "Test HFCs"
+
+
 # create a coloured container
 
 
@@ -159,6 +169,25 @@ class ImportDemoInfo:
         configured checks and the reports are ready to review.
     """
 
+    SURVEYCTO_INFO: ClassVar[str] = """
+        The sections below connect DataSure to real data sources. Your demo data is
+        already imported, so you need no SurveyCTO server or credentials here. Read
+        how a live project would import a SurveyCTO form, then scroll down to
+        **Preview Imported Data**.
+
+        1. Under **Manage Credentials**, **Add Credentials** asks for your
+           **Server name**, **Email address** and **Password**.
+           **Connect & Save Credentials** signs in and stores the password in your
+           computer's secure keyring, never in the project.
+        2. Under **Import Data From Sources**, **Add Import Configuration** with
+           **Import Type** set to **SurveyCTO** asks you to
+           **Select Server Credentials**, **Select Form ID** and enter an
+           **Alias**, then **Add Form** adds the form to the import log.
+
+        You can open these forms to look around, but do not click
+        **Connect & Save Credentials** or **Add Form** in the demo.
+    """
+
     @classmethod
     def get_info_message(cls, message_id: str) -> str:
         """Retrieve demo messages based on type."""
@@ -167,6 +196,7 @@ class ImportDemoInfo:
             "preview_data_info": cls.PREVIEW_DATA_INFO,
             "proceed_to_config_info": cls.PROCEED_TO_CONFIG_INFO,
             "proceed_to_hfcs_info": cls.PROCEED_TO_HFCS_INFO,
+            "surveycto_info": cls.SURVEYCTO_INFO,
         }
         return demo_messages.get(message_id, "Invalid message ID.")
 
@@ -251,13 +281,13 @@ class OnboardingSteps:
         One configuration covers both datasets. Click **:material/add: Add New Check Configuration**
         and fill in the form with these values:
 
-        **Page Name:** Household HFCs
+        **Page Name:** {DEMO_PAGE_NAME}
 
         **Survey dataset:** demo_survey
         - Key Column: {DemoColumn.KEY} | ID Column: {DemoColumn.HHID} | Enumerator Column: {DemoColumn.ENUM_NAME}
         - Team Column: {DemoColumn.TEAM_ID} | Duration Column: {DemoColumn.DURATION} | Date Column: {DemoColumn.SUBMISSIONDATE}
         - Form Version Column: leave empty, the demo data has none
-        - Target Number of responses: 200 (optional)
+        - Target Number of responses: {DEMO_SURVEY_TARGET} (optional)
 
         **Backcheck dataset:** demo_backcheck
         - Backcheck Date: {DemoBackcheckColumn.SUBMISSIONDATE} | Backchecker: {DemoBackcheckColumn.BCER_NAME}
@@ -265,6 +295,18 @@ class OnboardingSteps:
 
         Click **Add Check Configuration** — DataSure creates a quality analysis page automatically.
         Once created, the **View Quality Reports** button will appear at the bottom of this page.
+
+        ##### Try editing and removing a configuration (optional):
+        - **Edit:** click **:material/edit: Edit Check Configuration**, choose
+          **{DEMO_PAGE_NAME}** under **Select Check Configuration to Edit**, change
+          **Enter Target Number of responses for the Survey (Optional)** to
+          **{DEMO_EDITED_TARGET}**, and click **Save Changes**. Change only the target:
+          renaming the page would leave its saved check settings behind.
+        - **Remove:** add a second configuration named **{DEMO_THROWAWAY_PAGE}** with the
+          same survey dataset and columns. Then open **Remove Check Configuration**,
+          choose **{DEMO_THROWAWAY_PAGE}** under **Select Check Configuration to Remove**,
+          and click **Remove Check Configuration**. Do not remove **{DEMO_PAGE_NAME}**:
+          the rest of the demo uses it.
         """,
     }
 
@@ -290,6 +332,12 @@ class OnboardingSteps:
           GPS Checks
         - **Field team:** Enumerator Stats, Backchecks
         - **Exploration:** Descriptive Stats
+
+        **Before you correct or accept anything:** open **:material/person: Reviewer:**
+        at the bottom of the sidebar and type your name under **Reviewer name**.
+        DataSure records it as the user on every correction and acceptance, for
+        example in the Correction Log. Left blank, your computer login is used.
+        The name is saved for the whole app, so it stays set after the demo.
         """,
     }
 
@@ -300,22 +348,40 @@ class OnboardingSteps:
         "icon": ":material/folder_zip:",
         "page": "replication_view.py",
         "guidance_title": "Export Replication Package",
-        "guidance_content": """
+        "guidance_content": f"""
         This page bundles everything needed to reproduce your corrected dataset into a
         single downloadable zip file — raw data, Stata do-files (import, prepare,
         correct), correction and prep logs, codebooks, and a README.
 
         ##### Instructions for Demo:
-        1. Under **Page Name**, select **Household HFCs**.
+        1. Under **Page Name**, select **{DEMO_PAGE_NAME}**.
         2. Review the configuration details that appear, then expand
            **What's inside the zip?** to see the full directory structure.
-        3. Click **Build Replication Package**. DataSure will assemble the zip in seconds.
-        4. Once the build completes, check the PII confirmation box and click
+        3. Tick **Exclude reviewer names**. The `correction_log.csv` in the zip then
+           leaves the user column blank, so the package does not show who made each
+           correction. The project's own Correction Log keeps the names.
+        4. Click **Build Replication Package**. DataSure will assemble the zip in seconds.
+        5. Once the build completes, check the PII confirmation box and click
            **Download replication package (.zip)**.
 
         The demo dataset is synthetic and contains no real PII. In a live project the
         zip would include raw respondent data and must be stored on an encrypted,
         access-controlled drive in accordance with IPA data policy.
+
+        ##### Export the project setup:
+        A replication package shares the data; a configuration file shares the
+        setup, so a colleague can start the same project.
+        1. Open **Start Here** in the sidebar. On the **{DEMO_PROJECT_NAME}** row,
+           click **Export**.
+        2. Keep **Include record-level decisions (corrections and backcheck
+           attribution)** ticked to include your corrections, or untick it to share
+           only the setup.
+        3. Click **Download configuration** to save the `.json` file.
+
+        For your own projects, the **More** menu on each Start Here row also has
+        **Update from configuration**, which applies a configuration file to an
+        existing project, and **Delete project**, which permanently deletes the
+        project and its data. The demo row has neither: use **Restart** to reset it.
         """,
     }
 
