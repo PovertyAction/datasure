@@ -524,6 +524,7 @@ class OutputOnboardingInfo:
 
         - **Flagged** (amber): the check has outstanding issues to review.
         - **No issues** (green): the check has nothing outstanding, or only describes the data, like Progress.
+        - **Ready** (blue): the check is ready, but its issues are not counted here, like GPS Checks. Open it to see them.
         - **Not set up** (grey): the check needs settings first. Click **Set up →** to configure it.
         - **Not applicable** (grey): the check has nothing to work with on this page, for example Backchecks without backcheck data.
         - **Error** (red): the check or its numbers could not be computed; the row says why.

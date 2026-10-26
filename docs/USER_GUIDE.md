@@ -878,14 +878,15 @@ one shared column header, and each check sits in its own box. Each row shows:
 | **Not applicable** | Grey | The check has nothing to work with on this page, for example GPS Checks without a GPS column |
 | **Error** | Red | The check failed, or its numbers could not be worked out, for example because its saved settings no longer fit the data. The detail line says why; the other rows still show |
 | **Flagged** | Amber | The check is ready and has more than 0 outstanding issues |
-| **No issues** | Green | The check is ready and has 0 outstanding issues. Progress, Enumerator Stats, Descriptive Stats and GPS Checks only describe the data, so they are green when ready |
+| **No issues** | Green | The check is ready and has 0 outstanding issues. Progress, Enumerator Stats and Descriptive Stats only describe the data, so they are green when ready |
+| **Ready** | Blue | The check is ready, but Summary does not count its issues, so it makes no claim about them. Open the check to see them. GPS Checks shows this, as does Backchecks when no values were compared |
 
 | Check | Outstanding | Detail | Resolved |
 | --- | --- | --- | --- |
 | Progress | Submissions out of the target, for example "310 / 500", or the submissions when no target is set | Share of the target reached | — |
 | Missing Values | Share of columns where every value is missing, counting missing codes | "of columns all missing (5 of 40)" | — |
 | Duplicates | Duplicate survey IDs not yet resolved, after Records to Include | "duplicate IDs" | Duplicate IDs resolved through corrections |
-| Outliers & Constraints | Outliers plus constraint violations, leaving out accepted flags | For example "3 outliers (1.4% of values), 1 constraint violation" | Flags accepted as valid, and corrected values that are no longer flagged |
+| Outliers & Constraints | Outliers plus constraint violations, leaving out accepted flags | For example "3 outliers (1.4% of values), 1 constraint violation" | Flags accepted as valid, and corrected values that were flagged before the correction and are no longer flagged. Correcting a value that was never flagged does not count |
 | Enumerator Stats | Enumerators active in the past 7 days, out of all enumerators | "active in the past 7 days" | — |
 | Backchecks | Mismatches with no error source attributed | The total error rate, for example "4.25% error rate" | Mismatches attributed to the enumerator, backchecker or respondent |
 | Descriptive Stats, GPS Checks | Status only | — | — |

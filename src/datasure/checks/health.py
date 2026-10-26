@@ -42,6 +42,14 @@ NO_NUMBER = "—"
 STATUS_ONLY = "Status only"
 
 
+def status_only_headline(_ctx: CheckContext | None) -> CheckHeadline:
+    """Headline of a check that only describes the data and counts nothing.
+
+    Its row is green, as for any informational check, with no number.
+    """
+    return CheckHeadline(NO_NUMBER, STATUS_ONLY, informational=True)
+
+
 class Pill(NamedTuple):
     """A status pill: colour, icon and label, so status is not colour alone."""
 
@@ -61,6 +69,8 @@ class RowState(StrEnum):
     FLAGGED = "flagged"
     # Ready with no outstanding issues, or an informational check.
     NO_ISSUES = "no_issues"
+    # Ready, but its issues are not counted, so nothing is claimed about them.
+    READY = "ready"
 
     @property
     def pill(self) -> Pill:
@@ -81,6 +91,7 @@ _PILLS: dict[RowState, Pill] = {
     RowState.ERROR: Pill("red", ":material/error:", "Error"),
     RowState.FLAGGED: Pill("orange", ":material/warning:", "Flagged"),
     RowState.NO_ISSUES: Pill("green", ":material/check_circle:", "No issues"),
+    RowState.READY: Pill("blue", ":material/check:", "Ready"),
 }
 
 _ACTIONS: dict[RowState, str | None] = {
@@ -121,7 +132,9 @@ class HealthRow:
             return _STATE_BY_STATUS[self.item.status]
         if self.error:
             return RowState.ERROR
-        if self.headline is not None and self.headline.flagged:
+        if self.headline is None:
+            return RowState.READY
+        if self.headline.flagged:
             return RowState.FLAGGED
         return RowState.NO_ISSUES
 
