@@ -275,7 +275,7 @@ class TestRenderHealthRows:
         assert st.container.call_args_list == [call(border=True)] * len(rows)
 
     @staticmethod
-    def _drawn(monkeypatch, since):
+    def _drawn(monkeypatch, since, row=None):
         """Draw one row; return the column counts and every caption shown."""
         st = MagicMock()
         cells: list[MagicMock] = []
@@ -287,7 +287,7 @@ class TestRenderHealthRows:
 
         st.columns.side_effect = columns
         monkeypatch.setitem(sys.modules, "streamlit", st)
-        row = HealthRow(
+        row = row or HealthRow(
             DUPLICATES, TWO_DUPLICATES, delta=CheckDelta(outstanding=2, resolved=1)
         )
         render_health_rows([row], on_select=MagicMock(), since=since)
@@ -301,6 +301,19 @@ class TestRenderHealthRows:
         assert counts == [6, 6]
         assert "▲ 2 new since yesterday" in captions
         assert "+1 since yesterday" in captions
+
+    def test_a_failed_change_shows_its_error_in_the_change_column(self, monkeypatch):
+        counts, captions = self._drawn(
+            monkeypatch,
+            "yesterday",
+            HealthRow(DUPLICATES, TWO_DUPLICATES, delta_error="ValueError: boom"),
+        )
+
+        assert counts == [6, 6]
+        assert (
+            ":material/error: Could not compute the change: ValueError: boom"
+            in captions
+        )
 
     def test_without_dates_the_change_column_is_hidden(self, monkeypatch):
         counts, captions = self._drawn(monkeypatch, None)
@@ -514,6 +527,34 @@ class TestDeltas:
         assert row.headline == TWO_DUPLICATES
         assert row.delta is None
         assert row.state is RowState.FLAGGED
+
+    def test_a_failing_delta_shows_an_error_not_no_change(self, tmp_path):
+        ctx = _ctx(_config(tmp_path), DATA)
+
+        row = _delta_rows(
+            ctx,
+            [DUPLICATES],
+            {"duplicates": lambda _: TWO_DUPLICATES},
+            {"duplicates": MagicMock(side_effect=ValueError("boom"))},
+        )["duplicates"]
+
+        assert row.delta_error == "ValueError: boom"
+        assert row.change(SINCE) == (
+            ":material/error: Could not compute the change: ValueError: boom"
+        )
+        assert row.resolved_change(SINCE) == ""
+
+    def test_a_failed_delta_is_not_cached(self, tmp_path):
+        config = _config(tmp_path)
+        delta = MagicMock(side_effect=[ValueError("boom"), CheckDelta(outstanding=2)])
+        args = ([DUPLICATES], {"duplicates": lambda _: TWO_DUPLICATES})
+
+        _delta_rows(_ctx(config, DATA), *args, {"duplicates": delta})
+        row = _delta_rows(_ctx(config, DATA), *args, {"duplicates": delta})[
+            "duplicates"
+        ]
+
+        assert (row.delta, row.delta_error) == (CheckDelta(outstanding=2), "")
 
     def test_cached_per_period_start(self, tmp_path):
         config = _config(tmp_path)

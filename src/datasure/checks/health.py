@@ -130,13 +130,17 @@ class HealthRow:
         Why the numbers could not be computed; empty when they could.
     delta : CheckDelta | None
         The change over the comparison period; None when there is none,
-        such as for a check with no date column.
+        such as for a check with no date column, or when it failed.
+    delta_error : str
+        Why the change could not be computed; empty when it could. The row
+        keeps its numbers and shows the error in its Change column.
     """
 
     item: NavItem
     headline: CheckHeadline | None = None
     error: str = ""
     delta: CheckDelta | None = None
+    delta_error: str = ""
 
     @property
     def state(self) -> RowState:
@@ -183,11 +187,16 @@ class HealthRow:
     def change(self, since: str) -> str:
         """The outstanding change as shown, such as "▲ 3 new since yesterday".
 
+        A change that could not be computed shows an error marker and the
+        reason, so it never reads as no change.
+
         Parameters
         ----------
         since : str
             Where the comparison period starts, from `since_label`.
         """
+        if self.delta_error:
+            return f"{_ERROR_ICON} Could not compute the change: {self.delta_error}"
         if self.delta is None or self.delta.outstanding is None:
             return NO_NUMBER
         return _change_text(self.delta.outstanding, self.delta.kind, since)
@@ -197,6 +206,9 @@ class HealthRow:
         if self.delta is None or self.delta.resolved is None:
             return ""
         return f"+{self.delta.resolved:,} since {since}"
+
+
+_ERROR_ICON = ":material/error:"
 
 
 def _change_text(change: float, kind: DeltaKind, since: str) -> str:
@@ -378,20 +390,28 @@ def _row_delta(
     headline: CheckHeadline,
     window: DeltaWindow,
     headline_key: Hashable | None,
-) -> CheckDelta | None:
-    """Compute a row's delta, cached by the period start; None if it fails.
+) -> tuple[CheckDelta | None, str]:
+    """Compute a row's delta, cached by the period start, and any error.
 
     Cached under the row's headline key, so it depends on what the headline
-    depends on, plus the window.
+    depends on, plus the window. A delta that raises is not cached, so the
+    next run tries again.
+
+    Returns
+    -------
+    tuple[CheckDelta | None, str]
+        The delta, and why it could not be computed ("" when it could).
     """
     key = None if headline_key is None else ("delta", headline_key, window)
     try:
-        return _cached_or_computed(key, lambda: delta(ctx, headline, window))
-    # UI boundary: a delta that cannot be computed leaves the row's numbers;
-    # the row shows no change and the cause is logged.
-    except Exception:
+        return _cached_or_computed(key, lambda: delta(ctx, headline, window)), ""
+    # UI boundary: a delta that cannot be computed must not stop the row or
+    # the others. The error is shown on the row's Change column by
+    # render_health_rows (deferred display, see CONTRIBUTING "Error Handling
+    # Conventions"); the row keeps its numbers.
+    except Exception as exc:
         logger.exception("Could not compute the change of %r", slug)
-        return None
+        return None, f"{type(exc).__name__}: {exc}"
 
 
 def health_rows(
@@ -462,12 +482,14 @@ def health_rows(
             rows.append(HealthRow(item, error=f"{type(exc).__name__}: {exc}"))
             continue
         delta = deltas.get(item.slug)
-        change = (
-            None
+        change, delta_error = (
+            (None, "")
             if value is None or delta is None or window is None
             else _row_delta(ctx, item.slug, delta, value, window, key)
         )
-        rows.append(HealthRow(item, headline=value, delta=change))
+        rows.append(
+            HealthRow(item, headline=value, delta=change, delta_error=delta_error)
+        )
     return tuple(rows)
 
 
