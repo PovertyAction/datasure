@@ -4,7 +4,7 @@ import logging
 import random
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, NamedTuple
 
 import pandas as pd
 import polars as pl
@@ -1107,6 +1107,17 @@ def create_demo_project():
     return DEMO_PROJECT_ID
 
 
+class InterviewTimes(NamedTuple):
+    """When one demo interview started, ended and was submitted.
+
+    Field names are the demo data's date columns.
+    """
+
+    starttime: datetime
+    endtime: datetime
+    submissiondate: datetime
+
+
 class DemoDataGenerator:
     """Add seeded date, consent and completion fields to the demo data.
 
@@ -1116,7 +1127,7 @@ class DemoDataGenerator:
     are dated after the latest survey submission with the same ``hhid``.
     """
 
-    DATE_COLUMNS: ClassVar[tuple[str, ...]] = ("starttime", "endtime", "submissiondate")
+    DATE_COLUMNS: ClassVar[tuple[str, ...]] = InterviewTimes._fields
     DATE_FORMAT: ClassVar[str] = "%Y-%m-%d %H:%M:%S"
     SURVEY_ID: ClassVar[str] = "hhid"
     SPAN_DAYS: ClassVar[int] = 60
@@ -1131,16 +1142,16 @@ class DemoDataGenerator:
         self.today = today or date.today()
         self.rng = random.Random(seed)
 
-    def _interview_times(self, start: datetime) -> tuple[datetime, ...]:
+    def _interview_times(self, start: datetime) -> InterviewTimes:
         """Return start, end and submission times for an interview at ``start``."""
         end = start + timedelta(minutes=self.rng.randint(15, 136))
         submitted = end + timedelta(minutes=self.rng.randint(1, 30))
-        return start, end, submitted
+        return InterviewTimes(start, end, submitted)
 
     def _time_of_day(self) -> time:
         return time(self.rng.randint(7, 16), self.rng.randint(0, 59))
 
-    def _survey_dates(self) -> list[tuple[datetime, ...]]:
+    def _survey_dates(self) -> list[InterviewTimes]:
         """Spread interviews over the last ``SPAN_DAYS`` days, latest today."""
         draws = [
             (self.rng.randint(0, self.SPAN_DAYS - 1), self._time_of_day())
@@ -1154,7 +1165,7 @@ class DemoDataGenerator:
             for days_ago, at in draws
         ]
 
-    def _backcheck_dates(self, survey_df: pl.DataFrame) -> list[tuple[datetime, ...]]:
+    def _backcheck_dates(self, survey_df: pl.DataFrame) -> list[InterviewTimes]:
         """Date each backcheck 1-5 days after its survey, never after today."""
         surveyed = dict(
             survey_df.select(
@@ -1181,10 +1192,12 @@ class DemoDataGenerator:
             dates.append(self._interview_times(start))
         return dates
 
-    def _set_dates(self, dates: list[tuple[datetime, ...]]) -> None:
+    def _set_dates(self, dates: list[InterviewTimes]) -> None:
         self.df = self.df.with_columns(
-            pl.Series(name, [row[i].strftime(self.DATE_FORMAT) for row in dates])
-            for i, name in enumerate(self.DATE_COLUMNS)
+            pl.Series(
+                name, [getattr(row, name).strftime(self.DATE_FORMAT) for row in dates]
+            )
+            for name in self.DATE_COLUMNS
         )
 
     def _set_choice(self, name: str, values: list[str], weights: list[float]):
