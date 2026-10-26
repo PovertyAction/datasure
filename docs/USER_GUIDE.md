@@ -112,7 +112,8 @@ To reuse a project's setup, open **More** on its project card and choose
 **Export configuration**. In the dialog that opens, choose what to include and
 click **Download configuration** to save a configuration file. To use it,
 choose **From a configuration file** when you create a new project, or choose
-**Update from configuration** under **More** on an existing project.
+**Update from configuration** under **More** on an existing project. The
+**DataSure Demo** row has an **Export** button that opens the same dialog.
 
 The configuration file includes:
 
