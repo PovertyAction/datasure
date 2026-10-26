@@ -1372,33 +1372,6 @@ def is_demo_complete() -> bool:
     return get_onboarding_step() >= len(onboarding_steps)
 
 
-def show_demo_completion_message():
-    """Show completion message and options."""
-    if not is_demo_project() or not is_demo_complete():
-        return
-
-    st.balloons()
-
-    st.success("""
-    **Demo Complete!**
-
-    You've successfully learned how to use DataSure for survey data quality management!
-    """)
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if st.button("Restart Demo", width="stretch"):
-            set_onboarding_step(1)
-            st.rerun()
-
-    with col2:
-        if st.button("Create Real Project", type="primary", width="stretch"):
-            st.session_state.st_project_id = ""
-            st.session_state.pop("onboarding_step", None)
-            st.switch_page("pages/start_view.py")
-
-
 def demo_expander(title: str, content: str, expanded: bool = True):
     """Create a demo-specific expander with helpful information."""
     if not is_demo_project():
