@@ -348,10 +348,14 @@ def _row_delta(
     delta: Delta,
     headline: CheckHeadline,
     window: DeltaWindow,
-    fingerprint: Hashable | None,
+    headline_key: Hashable | None,
 ) -> CheckDelta | None:
-    """Compute a row's delta, cached by the period start; None if it fails."""
-    key = None if fingerprint is None else (slug, "delta", fingerprint, window)
+    """Compute a row's delta, cached by the period start; None if it fails.
+
+    Cached under the row's headline key, so it depends on what the headline
+    depends on, plus the window.
+    """
+    key = None if headline_key is None else ("delta", headline_key, window)
     try:
         return _cached_or_computed(key, lambda: delta(ctx, headline, window))
     # UI boundary: a delta that cannot be computed leaves the row's numbers;
@@ -367,6 +371,7 @@ def health_rows(
     headlines: Mapping[str, Headline],
     deltas: Mapping[str, Delta] | None = None,
     window: DeltaWindow | None = None,
+    view_keys: Mapping[str, Callable[[CheckContext], Hashable]] | None = None,
 ) -> tuple[HealthRow, ...]:
     """Build a health row for each check.
 
@@ -390,6 +395,9 @@ def health_rows(
         headline now and the window.
     window : DeltaWindow | None
         The comparison period and date columns; None shows no changes.
+    view_keys : Mapping[str, Callable[[CheckContext], Hashable]] | None
+        By check slug, the saved view values a headline depends on, added
+        to its cache key: the page fingerprint leaves view state out.
 
     Returns
     -------
@@ -404,8 +412,11 @@ def health_rows(
         if item.status is not CheckStatus.READY or headline is None:
             rows.append(HealthRow(item))
             continue
-        key = None if fingerprint is None else (item.slug, fingerprint)
+        view_key = (view_keys or {}).get(item.slug)
+        key = None
         try:
+            if fingerprint is not None:
+                key = (item.slug, fingerprint, view_key(ctx) if view_key else None)
             value = _cached_or_computed(key, lambda h=headline: h(ctx))
         # UI boundary: one check's numbers must not stop the other rows. The
         # error is shown on the row by render_health_rows (deferred display,
@@ -418,7 +429,7 @@ def health_rows(
         change = (
             None
             if value is None or delta is None or window is None
-            else _row_delta(ctx, item.slug, delta, value, window, fingerprint)
+            else _row_delta(ctx, item.slug, delta, value, window, key)
         )
         rows.append(HealthRow(item, headline=value, delta=change))
     return tuple(rows)

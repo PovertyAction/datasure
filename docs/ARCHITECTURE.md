@@ -205,7 +205,10 @@ to appear.
   ready checks and are cached in a small in-process LRU keyed on the page's
   data (row hashes), settings files (content hash, leaving out
   [view state](#view-state)), the logs and intermediate databases
-  (modification time and size) and today's date. A headline that raises
+  (modification time and size) and today's date. A headline that depends
+  on view state adds it through the entry's `headline_view` (GPS Checks:
+  its saved configuration, detection method, clustering column and LOF
+  sliders), which `health_rows` puts in that row's key. A headline that raises
   is logged, shown on its row and not cached; the other rows still render.
   The row buttons call `select_nav_item`, so they select the check exactly
   as the navigation does. The navigation itself never shows counts.

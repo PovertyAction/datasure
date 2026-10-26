@@ -8,7 +8,7 @@ to appear.
 """
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass, replace
 from datetime import date
 from functools import partial
@@ -39,6 +39,8 @@ from datasure.checks.enumerator.report_ui import (
     enumerator_status,
 )
 from datasure.checks.gpschecks.report_ui import (
+    gpschecks_headline,
+    gpschecks_headline_view,
     gpschecks_report,
     gpschecks_settings_section,
     gpschecks_status,
@@ -149,6 +151,11 @@ class CheckEntry:
         The row's change over Summary's comparison period, from the context,
         the headline now and the window (see `health_rows`). None for checks
         whose row shows no change.
+    headline_view : Callable[[CheckContext], Hashable] | None
+        The saved view values ``headline`` depends on, such as the GPS
+        check's Auto-Clustering sliders. Summary's cached numbers are keyed
+        on page data and settings without view state, so these are added to
+        the check's key. None for headlines that ignore view state.
     """
 
     slug: str
@@ -162,6 +169,7 @@ class CheckEntry:
     settings: Callable[[CheckContext], None] | None = None
     setup_hint: str = SET_UP_BELOW
     delta: Delta | None = None
+    headline_view: Callable[[CheckContext], Hashable] | None = None
 
 
 def _outliers_config(ctx: CheckContext) -> dict:
@@ -244,6 +252,11 @@ def summary_check_health(ctx: CheckContext) -> None:
         {entry.slug: entry.headline for entry in CHECK_CATALOGUE if entry.headline},
         deltas={entry.slug: entry.delta for entry in CHECK_CATALOGUE if entry.delta},
         window=window if window.has_dates else None,
+        view_keys={
+            entry.slug: entry.headline_view
+            for entry in CHECK_CATALOGUE
+            if entry.headline_view
+        },
     )
     render_health_rows(
         rows, on_select=partial(select_nav_item, nav_key, CHECK_PARAM), since=since
@@ -518,6 +531,21 @@ def _outliers_headline(ctx: CheckContext) -> CheckHeadline | None:
     )
 
 
+def _gps_headline(ctx: CheckContext) -> CheckHeadline | None:
+    config = ctx.config
+    return gpschecks_headline(
+        ctx.project_id,
+        config.page_name_id,
+        ctx.data.page_data,
+        _gps_config(ctx),
+        alias=config.survey_data_name,
+    )
+
+
+def _gps_headline_view(ctx: CheckContext) -> Hashable:
+    return gpschecks_headline_view(ctx.project_id, ctx.config.page_name_id)
+
+
 def _enumerator_headline(ctx: CheckContext) -> CheckHeadline | None:
     return enumerator_headline(
         ctx.project_id,
@@ -782,7 +810,9 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         DATA_INTEGRITY,
         _render_gps,
         _gps_status,
+        headline=_gps_headline,
         settings=_gps_settings,
+        headline_view=_gps_headline_view,
     ),
     CheckEntry(
         "enumerator",

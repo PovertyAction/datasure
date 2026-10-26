@@ -11,16 +11,21 @@ from datasure.checks.gpschecks.review import (
     GPS_CHECK_TYPE,
     CoordinateColumns,
     GPSAction,
+    GPSReviewLog,
     GPSSelection,
     accepted_gps_keys,
     allowed_gps_actions,
     build_gps_entries,
     coordinate_columns,
     count_unreviewed_outliers,
+    gps_corrections,
+    lof_contamination,
+    lof_neighbors,
     mark_gps_reviewed,
     outlier_status,
     outliers_table,
     select_gps_outlier,
+    summarize_gps_outliers,
     validate_coordinates,
 )
 from datasure.checks.outliers.review import (
@@ -540,3 +545,129 @@ def test_select_gps_outlier_returns_integral_float_keys_as_int(float_key_outlier
     selection = select_gps_outlier(table, [0], "KEY")
     assert selection == GPSSelection(1, reviewed=False)
     assert type(selection.key_value) is int
+
+
+# =============================================================================
+# summarize_gps_outliers: the numbers the check and Summary both show
+# =============================================================================
+
+
+def _gps_log(action, key, column=None, current_value=None, date="2025-01-02"):
+    return pl.DataFrame(
+        {
+            "date": [pd.Timestamp(date).to_pydatetime()],
+            "KEY": [key],
+            "action": [action],
+            "column": [column],
+            "current_value": [current_value],
+            "reason": ["checked"],
+            "status": ["Successful"],
+            "source": [GPS_CHECK_TYPE],
+        },
+        schema_overrides={"column": pl.String, "current_value": pl.String},
+    )
+
+
+def _acceptance(key, date="2025-01-02"):
+    return _gps_log(
+        "accept",
+        key,
+        current_value=json.dumps({"gps_lat": 1.0, "gps_lon": 2.0}),
+        date=date,
+    )
+
+
+def _no_log():
+    return _gps_log("accept", "x").clear()
+
+
+def test_summary_counts_outliers_not_yet_reviewed(outliers):
+    summary = summarize_gps_outliers(outliers, "KEY", review=None)
+    assert (summary.outstanding, summary.resolved) == (3, None)
+
+
+def test_summary_resolves_accepted_outliers(outliers):
+    review = GPSReviewLog(
+        acceptances=_acceptance("K1"), corrections=_no_log(), columns=COLUMNS
+    )
+    summary = summarize_gps_outliers(outliers, "KEY", review=review)
+    assert (summary.outstanding, summary.resolved) == (2, 1)
+    assert count_unreviewed_outliers(summary.outliers, marked=summary.marked) == 2
+
+
+def test_summary_resolves_corrected_points_no_longer_flagged(outliers):
+    corrections = pl.concat(
+        [
+            # K3 was moved and is no longer an outlier; K2 still is one.
+            _gps_log("modify value", "K3", "gps_lat", date="2025-01-03"),
+            _gps_log("modify value", "K3", "gps_lon", date="2025-01-04"),
+            _gps_log("modify value", "K2", "gps_lat"),
+            _gps_log("remove row", "K9"),
+        ]
+    )
+    review = GPSReviewLog(
+        acceptances=_acceptance("K1"), corrections=corrections, columns=COLUMNS
+    )
+    summary = summarize_gps_outliers(outliers, "KEY", review=review)
+
+    assert (summary.outstanding, summary.resolved) == (2, 3)
+    assert summary.unreviewed()["KEY"].tolist() == ["K2", 7]
+    assert summary.resolutions.to_dicts() == [
+        {"KEY": "K1", "date": pd.Timestamp("2025-01-02").to_pydatetime()},
+        {"KEY": "K3", "date": pd.Timestamp("2025-01-04").to_pydatetime()},
+        {"KEY": "K9", "date": pd.Timestamp("2025-01-02").to_pydatetime()},
+    ]
+
+
+def test_gps_corrections_keeps_gps_fixes_of_the_configuration():
+    log = pl.concat(
+        [
+            _gps_log("remove row", "K1"),
+            _gps_log("remove row", "K2").with_columns(pl.lit("Failed").alias("status")),
+            _gps_log("remove row", "K3").with_columns(
+                pl.lit("corrections_page").alias("source")
+            ),
+            _acceptance("K4"),
+        ]
+    )
+    active = pl.concat(
+        [
+            _gps_log("modify value", "K5", "gps_lat"),
+            _gps_log("modify value", "K6", "other_lat"),
+            _gps_log("modify value", "K7", "gps_lon").with_columns(
+                pl.lit("outliers").alias("source")
+            ),
+        ]
+    )
+    assert gps_corrections(log, active, COLUMNS)["KEY"].to_list() == ["K1", "K5"]
+
+
+@pytest.mark.parametrize(
+    ("saved", "n_samples", "expected"),
+    [
+        (None, 100, 20),  # default
+        (None, 10, 9),  # default capped at one less than the points
+        (30, 100, 30),
+        (60, 100, 20),  # above the slider's maximum of 50
+        (15, 10, 9),  # above the points available
+        (4, 100, 20),  # below the slider's minimum of 5
+        ("12", 100, 20),
+        (True, 100, 20),
+    ],
+)
+def test_lof_neighbors(saved, n_samples, expected):
+    assert lof_neighbors(saved, n_samples) == expected
+
+
+@pytest.mark.parametrize(
+    ("saved", "expected"),
+    [(None, 0.1), (0.25, 0.25), (0.6, 0.1), (0.0, 0.1), ("0.2", 0.1)],
+)
+def test_lof_contamination(saved, expected):
+    assert lof_contamination(saved) == expected
+
+
+def test_gps_corrections_without_coordinate_columns_keeps_removed_rows():
+    log = _gps_log("remove row", "K1")
+    active = _gps_log("modify value", "K5", "gps_lat")
+    assert gps_corrections(log, active, None)["KEY"].to_list() == ["K1"]

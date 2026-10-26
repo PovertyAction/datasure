@@ -1206,6 +1206,48 @@ def test_gpschecks_report_no_mapbox(
     gpschecks_report("proj", "page", data, "settings.json", config, survey_columns)
     mock_warning.assert_called()
     mock_coords.assert_not_called()
+    mock_comparison.assert_not_called()
+    # The outlier count needs no map, so it shows as on Summary.
+    mock_outliers.assert_called_once()
+    assert mock_outliers.call_args.kwargs["show_map"] is False
+
+
+@patch("datasure.checks.gpschecks.report_ui._render_outliers_data_table")
+@patch("datasure.checks.gpschecks.report_ui.plot_clusters_on_map")
+@patch("datasure.checks.gpschecks.report_ui.st.metric")
+@patch("datasure.checks.gpschecks.report_ui._run_lof_detection")
+@patch("datasure.checks.gpschecks.report_ui.get_df_columns")
+@patch("datasure.checks.gpschecks.report_ui.st.selectbox")
+@patch("datasure.checks.gpschecks.report_ui._load_and_parse_gps_data")
+@patch("datasure.checks.gpschecks.report_ui.st.columns")
+def test_render_gps_outliers_without_a_map(
+    mock_cols,
+    mock_load,
+    mock_selectbox,
+    mock_get_cols,
+    mock_run_lof,
+    mock_metric,
+    mock_plot,
+    mock_table,
+):
+    col_mock = MagicMock()
+    mock_cols.return_value = [col_mock, col_mock, col_mock]
+    parsed = pl.DataFrame({"latitude": [1.0, 2.0], "longitude": [3.0, 4.0]})
+    mock_load.return_value = (pl.DataFrame(), "gps1", parsed)
+    mock_get_cols.return_value = ColumnByType(categorical_columns=[])
+    mock_selectbox.return_value = GPSOutlierMethod.auto_lof.value
+    mock_run_lof.return_value = pd.DataFrame(
+        {"latitude": [1.0, 2.0], "longitude": [3.0, 4.0], "Outlier": [False, True]}
+    )
+
+    _render_gps_outliers_checks.__wrapped__(
+        "proj", "page", parsed, "key", None, None, show_map=False
+    )
+
+    metrics = {c.args[0]: c.args[1] for c in mock_metric.call_args_list}
+    assert metrics["Outliers Detected"] == "1"
+    mock_plot.assert_not_called()
+    mock_table.assert_called_once()
 
 
 @patch("datasure.checks.gpschecks.report_ui._render_gps_comparison_checks")
