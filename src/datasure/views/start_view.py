@@ -19,7 +19,11 @@ from datasure.utils.demo_lifecycle import (
     reset_demo_project,
 )
 from datasure.utils.duckdb_utils import duckdb_get_aliases
-from datasure.utils.onboarding_utils import DEMO_PROJECT_ID, show_demo_intro
+from datasure.utils.onboarding_utils import (
+    DEMO_PROJECT_ID,
+    DEMO_PROJECT_NAME,
+    show_demo_intro,
+)
 from datasure.utils.project_config import (
     export_project_config,
     parse_project_config,
@@ -210,11 +214,11 @@ def _render_demo_row() -> None:
     with st.container(border=True):
         name_col, action_col = st.columns([0.7, 0.3])
         with name_col:
-            st.markdown(":material/school: **DataSure Demo**")
+            st.markdown(f":material/school: **{DEMO_PROJECT_NAME}**")
             st.caption("A pre-loaded sample project for exploring DataSure.")
         with action_col:
             if demo_exists:
-                resume_col, restart_col = st.columns(2)
+                resume_col, restart_col, export_col = st.columns(3)
                 with resume_col:
                     if st.button(
                         "Resume", type="primary", width="stretch", key="demo_resume"
@@ -228,6 +232,14 @@ def _render_demo_row() -> None:
                             confirm_label="Restart demo",
                             on_confirm=_launch_fresh_demo,
                         )
+                with export_col:
+                    if st.button(
+                        "Export",
+                        width="stretch",
+                        key="demo_export",
+                        help="Export the demo's configuration to a file.",
+                    ):
+                        _export_config_dialog(DEMO_PROJECT_NAME, DEMO_PROJECT_ID)
             else:
                 if st.button(
                     "Start Demo", type="primary", width="stretch", key="demo_start"
