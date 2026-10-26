@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from datasure.utils.demo_lifecycle import RESTART_DEMO_MESSAGE
 from datasure.utils.navigations_utils import (
     add_demo_navigation,
     demo_callout,
@@ -535,7 +536,7 @@ class TestDemoSidebarHelp:
 
         mock_st.sidebar.__enter__.assert_not_called()
 
-    @patch("datasure.utils.navigations_utils.load_demo_data")
+    @patch("datasure.utils.navigations_utils.reset_demo_project")
     @patch("datasure.utils.navigations_utils.get_onboarding_step", return_value=99)
     @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
     @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
@@ -550,7 +551,7 @@ class TestDemoSidebarHelp:
         calls = [str(c) for c in mock_st.markdown.call_args_list]
         assert not any("title" in c.lower() for c in calls)
 
-    @patch("datasure.utils.navigations_utils.load_demo_data")
+    @patch("datasure.utils.navigations_utils.reset_demo_project")
     @patch("datasure.utils.navigations_utils.get_onboarding_step", return_value=1)
     @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
     @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
@@ -566,7 +567,7 @@ class TestDemoSidebarHelp:
         assert "Import Data" in all_markdown
         assert "Load your dataset." in all_markdown
 
-    @patch("datasure.utils.navigations_utils.load_demo_data")
+    @patch("datasure.utils.navigations_utils.reset_demo_project")
     @patch("datasure.utils.navigations_utils.get_onboarding_step", return_value=1)
     @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
     @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
@@ -574,7 +575,7 @@ class TestDemoSidebarHelp:
     def test_restart_demo_button_switches_page_and_loads_demo(
         self, mock_st, _is_demo, _get_step, mock_load
     ):
-        """Confirming restart loads demo data and switches to import page."""
+        """Confirming restart resets the demo and switches to import page."""
         # Simulate confirmation state already set (user previously clicked
         # "Restart Demo")
         mock_st.session_state.get.return_value = True
@@ -585,9 +586,42 @@ class TestDemoSidebarHelp:
         demo_sidebar_help()
 
         mock_st.switch_page.assert_called_once_with("views/import.py")
-        mock_load.assert_called_once()
+        mock_load.assert_called_once_with()
 
-    @patch("datasure.utils.navigations_utils.load_demo_data")
+    @patch("datasure.utils.navigations_utils.reset_demo_project", return_value=False)
+    @patch("datasure.utils.navigations_utils.get_onboarding_step", return_value=1)
+    @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_failed_restart_shows_error_and_stays(
+        self, mock_st, _is_demo, _get_step, _reset
+    ):
+        """A restart that cannot delete the demo shows an error."""
+        mock_st.session_state.get.return_value = True
+        mock_st.button.side_effect = [False, True, False, False]
+
+        demo_sidebar_help()
+
+        mock_st.error.assert_called_once()
+        mock_st.switch_page.assert_not_called()
+
+    @patch("datasure.utils.navigations_utils.reset_demo_project")
+    @patch("datasure.utils.navigations_utils.get_onboarding_step", return_value=1)
+    @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_restart_warning_describes_what_is_deleted(
+        self, mock_st, _is_demo, _get_step, _reset
+    ):
+        """The restart confirmation says what Restart deletes."""
+        mock_st.session_state.get.return_value = True
+        mock_st.button.return_value = False
+
+        demo_sidebar_help()
+
+        assert mock_st.warning.call_args.args[0] == RESTART_DEMO_MESSAGE
+
+    @patch("datasure.utils.navigations_utils.reset_demo_project")
     @patch("datasure.utils.navigations_utils.get_onboarding_step", return_value=1)
     @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
     @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
@@ -602,6 +636,8 @@ class TestDemoSidebarHelp:
         mock_st.button.side_effect = [False, True]
         mock_st.session_state.st_start_page = "views/start.py"
 
-        demo_sidebar_help()
+        with patch("datasure.utils.navigations_utils.exit_demo") as mock_exit:
+            demo_sidebar_help()
 
+        mock_exit.assert_called_once_with()
         mock_st.switch_page.assert_called_once_with("views/start.py")

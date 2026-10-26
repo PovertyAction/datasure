@@ -238,6 +238,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Restart Demo did not reset the demo** (#357): After Restart, correction
+  logs, page settings and per-check configs from the previous demo came back
+  when the "Household HFCs" page was recreated, and Exit Demo left demo
+  datasets in session state for the next project
+  - Root cause: both Restart paths only called `load_demo_data`, which drops
+    the raw/prep/corrected tables, prep logs and `check_config` but not
+    `corr_log_*`, `page_*_settings.json` or the per-check tables in
+    `logs.duckdb`. Exit Demo only cleared `st_project_id` and
+    `onboarding_step`, and `import_view` keeps an existing
+    `st_raw_dataset_list`
+  - Solution: new `utils/demo_lifecycle.py`. `reset_demo_project()` clears
+    `st.cache_data` and the check headline cache, deletes
+    `cache/demoproject/`, re-registers the project and reloads the demo
+    data. The Start page Restart and Start Demo buttons
+    (`start_view._launch_fresh_demo`) and the sidebar Confirm restart share
+    it, and show an error when the folder cannot be deleted. `exit_demo()`
+    removes the onboarding keys, `st_raw_dataset_list`,
+    `st_prep_dataset_list` and every key containing the demo project ID, and
+    resets the output, correction and replication page handles. The Restart
+    dialog and sidebar warning (`RESTART_DEMO_MESSAGE`) list what is deleted
+  - Files: `src/datasure/utils/demo_lifecycle.py`,
+    `src/datasure/views/start_view.py`,
+    `src/datasure/utils/navigations_utils.py`
 - **Demo data seeded and complete** (#360, #365): Every Start or Restart
   Demo drew new random dates, consent and completion values, so reports
   changed between runs; backchecks could predate their survey; and several
