@@ -4,18 +4,20 @@ Used by the `just bench-health` recipe. Builds the demo survey and backcheck
 data (``src/datasure/assets/demo_*.csv``) and a generated form of
 ``--rows`` submissions (50,000 by default) made from the demo rows, sets up
 every check on them in a throwaway cache directory, and times each
-catalogue check's headline and its change over the 7 days period (its delta),
-outside Summary's cache:
+catalogue check's headline and its change (its delta) over each comparison
+period, outside Summary's cache:
 
-- ``delta s``: the delta from the headline just computed, as Summary
-  computes it, reusing the headline's basis (``CheckHeadline.basis``).
-- ``alone s``: the delta from a headline without its basis, which computes
-  the check's flags again.
+- one column per period: the delta from the headline just computed, as
+  Summary computes it, reusing the headline's basis
+  (``CheckHeadline.basis``).
+- ``alone s``: the slowest period's delta from a headline without its basis,
+  which computes the check's flags again.
 
 It then times Summary's rows end to end (``health_rows``) on an empty cache,
-with and without deltas. A check whose ``delta s`` is over
-``DELTA_BUDGET_SECONDS`` on the generated form should only compute its
-delta on request (issue #399).
+without deltas and with each period's, and reports the delta overhead: the
+time with deltas less the time without. A check whose delta, or a period
+whose overhead, is over ``DELTA_BUDGET_SECONDS`` is flagged "over": such a
+delta should only be computed on request (issue #399).
 
 Run ``uv run python scripts/benchmark_check_health.py [--rows N] [--repeat N]``.
 """
@@ -262,13 +264,10 @@ def _time_checks(name: str, survey: pl.DataFrame, backcheck: pl.DataFrame, repea
 def _time_in_cache(name, survey, backcheck, repeat, root: Path) -> None:
     import streamlit as st
 
-    from datasure.checks.catalogue import (
-        CHECK_CATALOGUE,
-        comparison_window,
-        nav_items,
-    )
+    from datasure.checks.catalogue import CHECK_CATALOGUE, nav_items
     from datasure.checks.context import CheckContext, CheckData
     from datasure.checks.health import clear_headline_cache, health_rows
+    from datasure.checks.health_deltas import comparison_window
     from datasure.checks.health_period import ComparisonPeriod
     from datasure.utils.dataframe_utils import get_df_columns
     from datasure.utils.navigation import CheckStatus
@@ -286,12 +285,13 @@ def _time_in_cache(name, survey, backcheck, repeat, root: Path) -> None:
     ctx = CheckContext(
         PROJECT_ID, _config(root), CheckData(data, backcheck), get_df_columns(data)
     )
-    window = comparison_window(ctx, ComparisonPeriod.SEVEN_DAYS, date.today())
+    today = date.today()
+    windows = {
+        period: comparison_window(ctx, period, today) for period in ComparisonPeriod
+    }
     print(f"\n{name}: {data.height:,} submissions, {backcheck.height:,} backchecks")
-    print(
-        f"{'check':<24}{'headline s':>12}{'delta s':>10}{'alone s':>10}"
-        f"{'over budget':>13}"
-    )
+    periods = "".join(f"{period.value + ' s':>10}" for period in windows)
+    print(f"{'check':<24}{'headline s':>12}{periods}{'alone s':>10}{'over':>6}")
     for entry in CHECK_CATALOGUE:
         if entry.headline is None:
             continue
@@ -302,16 +302,20 @@ def _time_in_cache(name, survey, backcheck, repeat, root: Path) -> None:
         headline_s = _seconds(lambda e=entry: e.headline(ctx), repeat)
         now = entry.headline(ctx)
         if entry.delta is None or now is None:
-            print(f"{entry.label:<24}{headline_s:>12.3f}{'-':>10}{'-':>10}")
+            print(f"{entry.label:<24}{headline_s:>12.3f}")
             continue
-        delta_s = _seconds(lambda e=entry, n=now: e.delta(ctx, n, window), repeat)
+        delta_s = {
+            period: _seconds(lambda e=entry, n=now, w=w: e.delta(ctx, n, w), repeat)
+            for period, w in windows.items()
+        }
+        slowest = max(delta_s, key=delta_s.get)
         bare = replace(now, basis=None)
-        alone_s = _seconds(lambda e=entry, b=bare: e.delta(ctx, b, window), repeat)
-        over = "yes" if delta_s > DELTA_BUDGET_SECONDS else ""
-        print(
-            f"{entry.label:<24}{headline_s:>12.3f}{delta_s:>10.3f}{alone_s:>10.3f}"
-            f"{over:>13}"
+        alone_s = _seconds(
+            lambda e=entry, b=bare, w=windows[slowest]: e.delta(ctx, b, w), repeat
         )
+        over = "yes" if max(delta_s.values()) > DELTA_BUDGET_SECONDS else ""
+        times = "".join(f"{seconds:>10.3f}" for seconds in delta_s.values())
+        print(f"{entry.label:<24}{headline_s:>12.3f}{times}{alone_s:>10.3f}{over:>6}")
 
     # Summary's rows end to end, on an empty cache, as on a first load.
     items = [item for item in nav_items(ctx) if item.slug != "summary"]
@@ -330,9 +334,13 @@ def _time_in_cache(name, survey, backcheck, repeat, root: Path) -> None:
         )
 
     without = _seconds(lambda: rows(None), repeat)
-    with_deltas = _seconds(lambda: rows(window), repeat)
-    print(f"{'health_rows, no deltas':<34}{without:>12.3f}")
-    print(f"{'health_rows, with deltas':<34}{with_deltas:>12.3f}")
+    print(f"\n{'health_rows':<24}{'total s':>12}{'overhead s':>12}{'over':>6}")
+    print(f"{'no deltas':<24}{without:>12.3f}")
+    for period, w in windows.items():
+        total = _seconds(lambda w=w: rows(w), repeat)
+        overhead = total - without
+        over = "yes" if overhead > DELTA_BUDGET_SECONDS else ""
+        print(f"{period.value + ' deltas':<24}{total:>12.3f}{overhead:>12.3f}{over:>6}")
 
 
 def main() -> int:

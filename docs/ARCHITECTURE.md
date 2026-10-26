@@ -23,8 +23,10 @@ src/datasure/
 ├── checks/                 # Data quality check modules (one per check type)
 │   ├── catalogue.py        #   Every check on a check page: slug, label,
 │                           #   icon, group, status, render and headline
+│   ├── check_configs.py    #   The page config dict each check starts from
 │   ├── context.py          #   PageConfig, CheckData, CheckContext
 │   ├── health.py           #   Summary's check health rows, cached headlines
+│   ├── health_deltas.py    #   Each check's change over the comparison period
 │   ├── health_period.py    #   Comparison period and as-of helpers (no Streamlit)
 │   ├── summary.py          #   Data, submission and progress summary
 │   ├── missing.py          #   Missing data analysis
@@ -212,46 +214,62 @@ to appear.
   is logged, shown on its row and not cached; the other rows still render.
   The row buttons call `select_nav_item`, so they select the check exactly
   as the navigation does. The navigation itself never shows counts.
-- **Health deltas.** A catalogue entry's optional `delta` adapter returns a
-  `CheckDelta` (`checks/headline.py`): the change in the outstanding number
+- **Health deltas.** A catalogue entry's optional `delta` function, one per
+  check in `checks/health_deltas.py` (the catalogue only names them), returns
+  a `CheckDelta` (`checks/headline.py`): the change in the outstanding number
   (`DeltaKind` says how it reads: new issues, percentage points, new
   submissions or active enumerators) and the resolutions logged in the period.
   It takes the context, the headline now and a `DeltaWindow`
   (`checks/health_period.py`) holding the period start (`period_start`:
   the date whose end the period starts from, computed from an explicit
-  `today`) and the date columns (`comparison_window` in `catalogue.py`:
-  Summary's saved date, else the page survey date; the backcheck date for
-  Backchecks; a column not in the data counts as unset). There is no snapshot
-  store: adapters recompute the check on the submissions dated on or before
-  the period start (`on_or_before`, which keeps undated rows so they never
-  count as new) and subtract. Outliers and GPS Checks are the exceptions:
-  they count the current flags on submissions dated in the period, because
-  recomputing the IQR or SD bounds, or each point's LOF neighbourhood, on
-  fewer rows would move them. Their headlines put what they computed (the
-  reviewed flags; `summarize_gps_outliers`) in `CheckHeadline.basis`, which
-  their deltas reuse instead of computing the flags again. `health_rows`
-  keeps the latest basis of each check outside the LRU, matched to the
-  headline's key, so a cached headline still passes it on and no basis
-  outlives the data it was computed on. Resolved deltas count log
-  entries made after the period start that are still in effect: duplicate
-  IDs resolved now whose ID is on a recent `corr_log_{alias}` entry (undo
-  deletes the entry), flags marked with only the recent active acceptances
-  and corrections (`ReviewContext.logged_after`), and mismatches marked with
-  only the recent `bc_attribution` entries (the latest entry per cell wins,
-  so a cell counts only when its latest entry is recent), and for GPS the
+  `today` and a `Weekday` week start) and the date columns
+  (`health_deltas.comparison_window`: Summary's saved date, else the page
+  survey date; the backcheck date for Backchecks; a column not in the data
+  counts as unset). The check-level delta functions (`duplicates_delta`,
+  `outliers_delta`, `gpschecks_delta`, `backchecks_delta`) take the
+  `DeltaWindow` itself. The page config dicts both modules pass the checks
+  come from `checks/check_configs.py`. There is no snapshot store: Progress,
+  Missing Values and Enumerator Stats recompute the check on the submissions
+  dated on or before the period start (`on_or_before`, which keeps undated
+  rows so they never count as new) and subtract; a recomputed headline of
+  None gives no change. Duplicates, Outliers and GPS Checks instead count
+  the current unresolved issues on submissions dated in the period: a
+  duplicate ID held by such a submission (even one duplicated before the
+  period), a flag on one, because recomputing the IQR or SD bounds, or each
+  point's LOF neighbourhood, on fewer rows would move them. Their headlines
+  put what they computed (`DuplicatesBasis`, `OutliersBasis`,
+  `GPSOutlierSummary`; the `HeadlineBasis` union) in `CheckHeadline.basis`,
+  which their deltas take as `basis=` instead of computing it again.
+  `health_rows` keeps the latest basis of each check outside the LRU,
+  matched to the headline's key, so a cached headline still passes it on
+  and no basis outlives the data it was computed on. Resolved deltas count
+  log entries made after the period start that are still in effect:
+  duplicate IDs resolved now whose latest resolving `corr_log_{alias}` entry
+  (a removed record, or a changed or removed ID; undo deletes the entry) is
+  recent, flags marked with only the recent active acceptances and
+  corrections (`ReviewContext.entries_after`), mismatches marked with only
+  the recent `bc_attribution` entries (the latest entry per cell wins, so a
+  cell counts only when its latest entry is recent), and for GPS the
   resolved points whose latest resolving entry is recent
-  (`GPSOutlierSummary.resolutions`). Deltas share the
-  headline LRU under the key `(slug, "delta", fingerprint, window)`, so the
-  period start is part of the key. A delta that raises is logged and its row
-  shows no change. The Comparison period box (`render_comparison_period`)
-  binds the period and week start to the `check_health` scope of the
-  project-level view file; without any date column it is replaced by a
-  caption and `render_health_rows` drops the Change column. Every delta is
-  computed on load: `just bench-health` (`scripts/benchmark_check_health.py`)
-  times each check's headline and delta on the demo data and a generated
-  50,000-row form, and none is over the 1 s budget of issue #399 (the
-  slowest, Outliers, is about 0.35 s; the as-of recomputations at most about
-  0.3 s). A check over the budget should compute its delta on request.
+  (`GPSOutlierSummary.resolutions`). Deltas share the headline LRU under
+  the key `("delta", headline_key, window)`, where `headline_key` is the
+  row's headline key `(slug, fingerprint, view_key)`, so the period start
+  and the row's own view values are part of it. A delta that raises is
+  logged and not cached; its row keeps its numbers and stores the error
+  (`HealthRow.delta_error`), which `render_health_rows` shows in the Change
+  column with an error marker (deferred display). The Comparison period box
+  (`render_comparison_period`) binds the period and week start to the
+  `check_health` scope of the project-level view file; without any date
+  column it is replaced by a caption and `render_health_rows` drops the
+  Change column. Every delta is computed on load: `just bench-health`
+  (`scripts/benchmark_check_health.py`) times each check's headline and its
+  delta for every comparison period, and Summary's rows end to end with each
+  period's deltas, on the demo data and a generated 50,000-row form; it
+  flags any delta, and any period's end-to-end delta overhead, over the 1 s
+  budget of issue #399. None is over it on the generated form: the slowest
+  delta, Outliers, is about 0.3 s in every period, and the deltas add about
+  0.7 to 0.9 s to the rows end to end. A check over the budget should compute
+  its delta on request.
 - **Render wrapper.** Every check renders through `nav_ui.run_guarded`. An
   exception becomes an error state with the traceback in an expander, is
   logged, and is remembered so the navigation marks the check until it

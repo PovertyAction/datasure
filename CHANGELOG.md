@@ -62,17 +62,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   today, week_start)`, `since_label`). The choice is one project-wide view
   setting in `settings/project_view_settings.json` (scope
   `health.PERIOD_SCOPE`), so project exports leave it out
-  - `CheckEntry.delta` adapters return a `CheckDelta` (outstanding change,
-    resolved in the period, `DeltaKind`) for Progress, Missing Values,
-    Duplicates, Outliers & Constraints, Enumerator Stats and Backchecks;
-    `health_rows(..., deltas=, window=)` computes them and caches them under
-    the period start (`DeltaWindow`, built by `comparison_window`). Each
-    check is recomputed on the submissions dated on or before the period
-    start (`on_or_before`); Outliers counts current flags on submissions
-    dated in the period instead. Resolved deltas count still-active entries
-    made after the period start in `corr_log_{alias}`
-    (`duplicates_resolved_since`, `ReviewContext.logged_after`) and
-    `bc_attribution` (`backchecks_delta`); new `outliers_delta`
+  - `CheckEntry.delta` functions (`checks/health_deltas.py`) return a
+    `CheckDelta` (outstanding change, resolved in the period, `DeltaKind`)
+    for Progress, Missing Values, Duplicates, Outliers & Constraints,
+    Enumerator Stats and Backchecks; `health_rows(..., deltas=, window=)`
+    computes them and caches them under the period start (`DeltaWindow`,
+    built by `health_deltas.comparison_window`; the week start is a
+    `Weekday`). Progress, Missing Values and Enumerator Stats are recomputed
+    on the submissions dated on or before the period start
+    (`on_or_before`). Duplicates counts the unresolved duplicate IDs held by
+    a submission dated in the period, including an ID already duplicated
+    before the period that a new submission joins; Outliers counts current
+    flags on submissions dated in the period. Resolved deltas count
+    still-active entries made after the period start in `corr_log_{alias}`
+    (`duplicates_delta`: an ID counts only when its latest removed record or
+    changed or removed ID was logged in the period, not for an unrelated
+    later entry; `ReviewContext.entries_after`) and `bc_attribution`
+    (`backchecks_delta`); new `outliers_delta`. The check-level delta
+    functions take the `DeltaWindow`. Page config dicts move to
+    `checks/check_configs.py`
+  - A change that cannot be computed shows an error marker and the reason in
+    the row's Change column (`HealthRow.delta_error`) instead of "—"; the
+    row keeps its numbers and the delta is not cached
   - Rows use Summary's date column (its saved date, else the page survey
     date); Backchecks uses the backcheck date column. With no date column
     the box and Change column are hidden and a caption says "Set a date
@@ -108,15 +119,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`_render_gps_outliers_checks(..., show_map=False)`): counts and table,
     no map
 - **GPS check health change** (#399, #365): the GPS Checks row gets a
-  Change and "+N since …": `gpschecks_delta` (`_gps_delta` in
-  `catalogue.py`) counts unaccepted outliers on submissions dated in the
+  Change and "+N since …": `gpschecks_delta` (`health_deltas.gps`)
+  counts unaccepted outliers on submissions dated in the
   period (outliers are not detected again on the earlier submissions) and
   the resolved points whose latest resolving log entry is in the period
 - **Check health benchmark** (#399): `just bench-health [rows] [repeat]`
-  (`scripts/benchmark_check_health.py`) times each check's headline and
-  delta, and Summary's rows with and without deltas, on the demo data and a
-  generated 50,000-row form. No delta is over the 1 s budget, so every
-  delta is still computed on load
+  (`scripts/benchmark_check_health.py`) times each check's headline and its
+  delta for every comparison period, and Summary's rows without deltas and
+  with each period's, on the demo data and a generated 50,000-row form. It
+  flags any delta, and any period's end-to-end delta overhead, over the 1 s
+  budget. None is over it: the slowest delta, Outliers, is about 0.3 s on the
+  generated form in every period, and the deltas add 0.7 to 0.9 s to the
+  rows end to end, so every delta is still computed on load
 
 ### Changed
 
@@ -125,8 +139,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Change column)
 - **Outliers and GPS deltas reuse the headline's flags** (#399, #365):
   `CheckHeadline` gains `basis` (not compared), what a headline computed its
-  numbers from. `outliers_headline` and `gpschecks_headline` set it, and
-  `outliers_delta(..., basis=)` and `gpschecks_delta(..., summary=)` reuse it
+  numbers from. `duplicates_headline`, `outliers_headline` and
+  `gpschecks_headline` set it (typed `HeadlineBasis`), and the deltas'
+  `basis=` reuses it
   instead of computing the flags again (the Outliers delta computed them twice
   per load). `health_rows` keeps the latest basis per check outside the
   headline cache, matched to the headline's key. On a 50,000-row form the

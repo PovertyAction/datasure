@@ -898,6 +898,11 @@ the error rate is above 0 on nearly every project and would keep the row amber.
 Review each mismatch on the Backchecks tab and attribute it to an error source
 to move it from Outstanding to Resolved.
 
+A GPS point whose coordinates were corrected but that the check still flags as
+an outlier stays in **Outstanding**, not **Resolved**: the correction did not
+fix it. Accept it as valid, or correct it again, to resolve it. Only corrected
+points that are no longer outliers count as resolved.
+
 Each number is the number the check itself shows. The numbers are worked out
 again only when the data, the check's settings or its corrections change, so
 Summary stays quick. For GPS Checks, changing the GPS configuration, detection
@@ -930,7 +935,7 @@ as new.
 | --- | --- |
 | Progress | New submissions dated in the period, for example "▲ 12 new submissions since yesterday" |
 | Missing Values | The change in the share of columns all missing, in percentage points, for example "▼ 2.50 pp since yesterday" |
-| Duplicates | Duplicate IDs that submissions dated in the period added, for example "▲ 3 new since yesterday" |
+| Duplicates | Unresolved duplicate IDs held by a submission dated in the period, for example "▲ 3 new since yesterday". An ID that was already duplicated before the period counts when a submission in the period joins it |
 | Outliers & Constraints | Flags on submissions dated in the period that are not accepted or corrected. The flags are not worked out again on the earlier submissions, since that would move the outlier bounds |
 | GPS Checks | GPS outliers on submissions dated in the period that are not accepted, for example "▲ 2 new since yesterday". Outliers are not detected again on the earlier submissions, since that would change which points stand out |
 | Enumerator Stats | The change in enumerators active in the past 7 days, for example "▲ 2 more active since yesterday" |
@@ -939,9 +944,16 @@ as new.
 Under **Resolved**, "+N since …" counts the resolutions made in the period
 that are still in effect: corrections and acceptances from the correction log
 (Duplicates, Outliers & Constraints, GPS Checks) and error-source attributions
-(Backchecks). A GPS point counts when the latest correction or acceptance that
-resolved it was made in the period. An undone correction, an acceptance whose value has changed since,
+(Backchecks). A duplicate ID counts when the latest correction that removed
+one of its records, or changed or removed its ID, was made in the period;
+correcting another column of a record with that ID does not count. A GPS point
+counts when the latest correction or acceptance that resolved it was made in
+the period. An undone correction, an acceptance whose value has changed since,
 and an attribution later changed back to Unattributed drop out.
+
+If a row's change cannot be worked out, **Change** shows an error marker and
+the reason instead of a number, and the row keeps its other numbers. Open the
+check to see what is wrong.
 
 The rows use Summary's date column: the date set in Summary's settings, else the
 page's survey date. The Backchecks row uses the backcheck date column from its
