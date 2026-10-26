@@ -16,6 +16,7 @@ import polars as pl
 import pytest
 
 from datasure.checks import missing, progress, summary
+from datasure.checks.gpschecks import report_ui as gps
 from datasure.utils.view_state import ViewState, without_view_state
 
 
@@ -211,3 +212,51 @@ class TestSummary:
             "summary_progress_time_period_pill": "Weekly",
         }
         assert _read(settings_file)["summary"] == {"target": 100}
+
+
+# --- GPS Checks ------------------------------------------------------------ #
+
+GPS_POINTS = pd.DataFrame({"latitude": [1.0] * 30, "longitude": [2.0] * 30})
+
+
+class TestGPSOutliers:
+    """The LOF sliders are view state, so Summary counts with the same values."""
+
+    def _detect(self, st, settings_file, n_samples=30):
+        with patch.object(gps, "detect_outliers_with_lof") as detect:
+            _run(
+                gps,
+                st,
+                lambda: gps._run_lof_detection(
+                    GPS_POINTS,
+                    n_samples,
+                    _context(),
+                    ViewState(settings_file, gps.VIEW_SCOPE),
+                ),
+            )
+        return detect.call_args.args[3:]
+
+    def test_saved_slider_values_are_restored(self, settings_file):
+        view = ViewState(settings_file, gps.VIEW_SCOPE)
+        view.save("outlier_n_neighbors", 8)
+        view.save("outlier_contamination", 0.2)
+
+        assert self._detect(_st(), settings_file) == (8, 0.2)
+
+    def test_changed_slider_values_are_saved(self, settings_file):
+        st = _st()
+        self._detect(st, settings_file)
+
+        _change(st, "slider", "outlier_n_neighbors", 12)
+        _change(st, "slider", "outlier_contamination", 0.05)
+
+        assert ViewState(settings_file, gps.VIEW_SCOPE).values() == {
+            "outlier_n_neighbors": 12,
+            "outlier_contamination": 0.05,
+        }
+
+    def test_a_saved_neighbors_value_above_the_points_falls_back(self, settings_file):
+        ViewState(settings_file, gps.VIEW_SCOPE).save("outlier_n_neighbors", 40)
+
+        # 10 points allow at most 9 neighbors.
+        assert self._detect(_st(), settings_file, n_samples=10) == (9, 0.1)

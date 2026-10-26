@@ -311,6 +311,39 @@ class TestHeadlineCache:
 
         headline.assert_called_once()
 
+    def test_recomputed_when_a_rows_own_view_key_changes(self, tmp_path):
+        # The GPS headline uses the saved LOF sliders, which are view state,
+        # so its row adds them to the key.
+        config = _config(tmp_path)
+        ready_gps = NavItem("gps", "GPS Checks", ":material/location_on:", "Data")
+        headline = MagicMock(return_value=TWO_DUPLICATES)
+        view = ViewState(config.setting_file, "gps")
+
+        def lof_settings(_ctx):
+            return view.values().get("outlier_n_neighbors")
+
+        def rows():
+            health_rows(
+                _ctx(config, DATA),
+                [ready_gps],
+                {"gps": headline},
+                view_keys={"gps": lof_settings},
+            )
+
+        rows()
+        view.save("gps_color_by", "team")
+        rows()
+        assert headline.call_count == 1
+
+        view.save("outlier_n_neighbors", 8)
+        rows()
+        assert headline.call_count == 2
+
+        # Switching back is a cache hit.
+        view.forget("outlier_n_neighbors")
+        rows()
+        assert headline.call_count == 2
+
     def test_recomputed_when_a_settings_table_changes(self, tmp_path):
         config = _config(tmp_path)
         headline = MagicMock(return_value=TWO_DUPLICATES)

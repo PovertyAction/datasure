@@ -288,6 +288,7 @@ def health_rows(
     ctx: CheckContext,
     items: Iterable[NavItem],
     headlines: Mapping[str, Headline],
+    view_keys: Mapping[str, Callable[[CheckContext], Hashable]] | None = None,
 ) -> tuple[HealthRow, ...]:
     """Build a health row for each check.
 
@@ -304,6 +305,9 @@ def health_rows(
         The checks to show, with their status, in display order.
     headlines : Mapping[str, Headline]
         Headline function by check slug.
+    view_keys : Mapping[str, Callable[[CheckContext], Hashable]] | None
+        By check slug, the saved view values a headline depends on, added
+        to its cache key: the page fingerprint leaves view state out.
 
     Returns
     -------
@@ -321,7 +325,9 @@ def health_rows(
             if fingerprint is None:
                 value = headline(ctx)
             else:
-                value = _cached((item.slug, fingerprint), lambda h=headline: h(ctx))
+                view_key = (view_keys or {}).get(item.slug)
+                key = (item.slug, fingerprint, view_key(ctx) if view_key else None)
+                value = _cached(key, lambda h=headline: h(ctx))
         # UI boundary: one check's numbers must not stop the other rows. The
         # error is shown on the row by render_health_rows (deferred display,
         # see CONTRIBUTING "Error Handling Conventions").
