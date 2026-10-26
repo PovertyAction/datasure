@@ -18,10 +18,10 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ### KI-031: New installs fail to import data with `Resource In Use Error` or `no attribute 'pl'`
 
-- **Status:** 🟡 Planned for 1.2.0
+- **Status:** 🟡 Planned for 1.2.0 (fixed in 1.2.0a7)
 - **Affected versions:** 1.0.0 – 1.2.0a6, when installed on or after 2026-10-21
 - **Symptom:** On a new install, importing data or opening a check page fails with `Resource In Use Error: connection has an unfinished result from execute()` or `'DuckDBPyConnection' object has no attribute 'pl'`. Installs made before 21 October 2026 are not affected unless you reinstall or upgrade.
-- **Workaround:** Reinstall with an older DuckDB: `uv tool install datasure --force --with "duckdb<2"`.
+- **Workaround:** Update to 1.2.0a7 or later. On an older version, reinstall with an older DuckDB: `uv tool install datasure --force --with "duckdb<2"`.
 - **Issue:** [#393](https://github.com/PovertyAction/datasure/issues/393)
 
 ### KI-030: Outliers & Constraints and GPS Checks tabs crash with `cannot compare string with numeric type (i32)` after applying a project setup
@@ -34,18 +34,18 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ### KI-029: Missing codes such as -99 are counted as values in Outliers, Descriptive Stats and Enumerator Stats
 
-- **Status:** 🟡 Planned for 1.2.0
-- **Affected versions:** 1.0.0 and later
+- **Status:** 🟡 Planned for 1.2.0 (fixed in 1.2.0a5)
+- **Affected versions:** 1.0.0 – 1.2.0a4
 - **Symptom:** Codes you add on the Missing Values tab, such as `-99` for Don't know, are treated as real answers on other tabs. On **Outliers & Constraints**, `-99` answers are flagged as outliers or constraint violations, and they count towards the outlier % on the Summary tab. On **Descriptive Stats** and in **Column Statistics by Enumerator**, they pull down the mean and show as the minimum.
-- **Workaround:** Read the Missing Values tab for how often each code was used, and ignore flags and minimums that are a missing code. To get statistics without the codes, replace the codes with blanks in your data before you import it.
+- **Workaround:** Update to 1.2.0a5 or later.
 - **Issue:** [#379](https://github.com/PovertyAction/datasure/issues/379)
 
 ### KI-028: Enumerator summary shows wrong first and last submission dates and this week/month counts
 
-- **Status:** 🟡 Planned for 1.2.0
-- **Affected versions:** 1.0.0 and later
+- **Status:** 🟡 Planned for 1.2.0 (fixed in 1.2.0a4)
+- **Affected versions:** 1.0.0 – 1.2.0a3
 - **Symptom:** On the Enumerator tab, when your data covers more than one month, the summary table can show the wrong **first submission** and **last submission** dates, and **# submissions this week** and **# submissions this month** can include submissions from earlier months. For example, 30 Sep can be counted in October's "this month", and an enumerator who started in January can show April as their first submission.
-- **Workaround:** Check first and last submission dates and recent counts in the data itself, for example by filtering the data by enumerator and date. Don't rely on the summary table for these numbers.
+- **Workaround:** Update to 1.2.0a4 or later.
 - **Issue:** [#380](https://github.com/PovertyAction/datasure/issues/380)
 
 ### KI-027: Outliers & Constraints and GPS Checks tabs crash with `unable to find column "action"`
@@ -66,50 +66,50 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ### KI-025: The Summary tab's outlier % and back check error rate always show 0
 
-- **Status:** 🟡 Planned for 1.2.0
-- **Affected versions:** 1.0.0 and later
+- **Status:** 🟡 Planned for 1.2.0 (fixed in 1.2.0a3)
+- **Affected versions:** 1.0.0 – 1.2.0a2
 - **Symptom:** The Summary tab shows 0 for outlier % and back check error rate in every project, even when the Outliers and Backchecks tabs show flags. These tiles have not been built yet. A 0 here does not mean there are no problems.
-- **Workaround:** Read these figures from the Outliers and Backchecks tabs. In the next release, these tiles are replaced by the **Outliers & Constraints** and **Backchecks** rows in Summary's check health list, which show the same figures as those checks.
+- **Workaround:** Update to 1.2.0a3 or later. From 1.2.0a7, these tiles are replaced by the **Outliers & Constraints** and **Backchecks** rows in Summary's check health list.
 - **Issue:** [#358](https://github.com/PovertyAction/datasure/issues/358)
 
 ### KI-024: Restart Demo keeps your earlier corrections and settings
 
-- **Status:** 🟡 Planned for 1.2.0
-- **Affected versions:** 1.0.0 and later
+- **Status:** 🟡 Planned for 1.2.0 (fixed in 1.2.0a7)
+- **Affected versions:** 1.0.0 – 1.2.0a6
 - **Symptom:** After **Restart Demo**, corrections and check settings from your last demo session come back when you recreate the "Household HFCs" check page, so the demo guidance no longer matches what you see. The Restart dialog says corrections are deleted, but they are not.
-- **Workaround:** Close DataSure, delete the `demoproject` folder in the DataSure cache directory (see [Cache Directory Locations](README.md#cache-directory-locations)), then start the demo again.
+- **Workaround:** Update to 1.2.0a7 or later. On an older version, close DataSure, delete the `demoproject` folder in the DataSure cache directory (see [Cache Directory Locations](README.md#cache-directory-locations)), then start the demo again.
 - **Issue:** [#357](https://github.com/PovertyAction/datasure/issues/357)
 
 ### KI-023: Demo guidance mentions labels and columns that do not exist
 
-- **Status:** 🟡 Planned for 1.2.0
-- **Affected versions:** 1.0.0 and later
+- **Status:** 🟡 Planned for 1.2.0 (fixed in 1.2.0a7)
+- **Affected versions:** 1.0.0 – 1.2.0a6
 - **Symptom:** Some demo steps ask you to pick a column or option that is not in the demo data or on the page. For example, they mention `household_size` (the column is `household_count`) and "Select column to group by" (the label is "Group by column").
-- **Workaround:** Pick the column or label with the closest name.
+- **Workaround:** Update to 1.2.0a7 or later.
 - **Issue:** [#356](https://github.com/PovertyAction/datasure/issues/356)
 
 ### KI-022: Check pages share Descriptive Statistics columns and enumerator consent results
 
-- **Status:** 🟡 Planned for 1.2.0
-- **Affected versions:** 1.0.0 and later
+- **Status:** 🟡 Planned for 1.2.0 (fixed in 1.2.0a5)
+- **Affected versions:** 1.0.0 – 1.2.0a4
 - **Symptom:** Choosing Descriptive Statistics columns on one check page changes them on every other page in the project. The Enumerator report keeps showing old consent and outcome results after a data refresh, or after you change the settings on another page.
-- **Workaround:** Click **Apply Consent and Outcome Settings** on the Enumerator tab after every data refresh. Re-select Descriptive Statistics columns when you switch pages.
+- **Workaround:** Update to 1.2.0a5 or later.
 - **Issue:** [#353](https://github.com/PovertyAction/datasure/issues/353)
 
 ### KI-021: Exporting a project setup leaves out some check settings
 
-- **Status:** 🟡 Planned for 1.2.0
-- **Affected versions:** 1.1.0 and later
+- **Status:** 🟡 Planned for 1.2.0 (fixed in 1.2.0a5)
+- **Affected versions:** 1.1.0 – 1.2.0a4
 - **Symptom:** After you apply an exported project setup to another project, these settings are missing: missing-value codes, Descriptive Statistics columns, and the column rules for Duplicates, Outliers, GPS and Backchecks.
-- **Workaround:** Set these again in the new project after applying the setup.
+- **Workaround:** Update to 1.2.0a5 or later and export the setup again. Setups exported by an older version still leave these settings out.
 - **Issue:** [#352](https://github.com/PovertyAction/datasure/issues/352)
 
 ### KI-020: "Remove rows" also removes rows with a missing value in the selected column
 
-- **Status:** 🟡 Planned for 1.2.0
-- **Affected versions:** 1.0.0 and later
+- **Status:** 🟡 Planned for 1.2.0 (fixed in 1.2.0a7)
+- **Affected versions:** 1.0.0 – 1.2.0a6
 - **Symptom:** A prep step such as "remove rows where `age` is greater than 60" also removes rows where `age` is blank. The step's affected-row count includes those rows. Replication scripts exported from DataSure do the same.
-- **Workaround:** Before you add the step, count the rows where the column is blank. Then check the step's affected-row count against what you expect.
+- **Workaround:** Update to 1.2.0a7 or later. Check the affected-row count of saved **Remove rows** steps on columns with blank values, since they now keep more rows.
 - **Issue:** [#351](https://github.com/PovertyAction/datasure/issues/351)
 
 ### KI-019: Datasets or check pages with similar names overwrite each other
