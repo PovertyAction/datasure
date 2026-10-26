@@ -11,10 +11,14 @@ import polars as pl
 import pytest
 
 from datasure.utils.onboarding_utils import (
+    DEMO_DUPLICATES,
     DEMO_GUIDANCE_COLUMNS,
+    DEMO_LAND_CORRECTION,
     DEMO_OUTPUT_FUNCTIONS,
     DEMO_PROJECT_ID,
     DEMO_PROJECT_NAME,
+    DEMO_REPEAT_SUBMISSION,
+    DemoColumn,
     DemoDataGenerator,
     ImportDemoInfo,
     OnboardingSteps,
@@ -1321,3 +1325,53 @@ class TestRealDemoData:
             if col not in data[alias].columns
         )
         assert not missing, f"guidance names columns not in the demo data: {missing}"
+
+    def test_duplicates_named_in_guidance_match_the_demo_data(self, load_real_demo):
+        """The duplicate IDs, KEYs and new IDs the guidance names are real."""
+        survey, _ = load_real_demo(today=date(2026, 3, 10))
+        hhids = set(survey[DemoColumn.HHID])
+
+        for duplicate in DEMO_DUPLICATES:
+            records = survey.filter(pl.col(DemoColumn.HHID) == duplicate.hhid)
+            assert records.height == 2, duplicate.hhid
+            assert duplicate.key in records[DemoColumn.KEY].to_list(), duplicate
+            if duplicate.new_hhid is not None:
+                assert duplicate.new_hhid not in hhids, duplicate
+
+    def test_repeat_submission_to_drop_is_the_emptier_record(self, load_real_demo):
+        """The record the guidance drops leaves more answers blank than the other."""
+        survey, _ = load_real_demo(today=date(2026, 3, 10))
+        records = survey.filter(
+            pl.col(DemoColumn.HHID) == DEMO_REPEAT_SUBMISSION.hhid
+        ).with_columns(blanks=pl.sum_horizontal(pl.all().is_null()))
+        blanks = dict(records.select(DemoColumn.KEY, "blanks").iter_rows())
+
+        dropped = blanks.pop(DEMO_REPEAT_SUBMISSION.key)
+        (kept,) = blanks.values()
+        assert dropped > kept
+
+    def test_correction_named_in_guidance_fixes_an_outlier(self, load_real_demo):
+        """The value Correct Data fixes is an IQR outlier; the new value is not."""
+        from datasure.checks.outliers.compute import compute_outlier_stats_polars
+
+        survey, _ = load_real_demo(today=date(2026, 3, 10))
+        fix = DEMO_LAND_CORRECTION
+        row = survey.filter(pl.col(DemoColumn.KEY) == fix.key)
+        assert row[fix.column].to_list() == [fix.old_value]
+
+        def bounds(data):
+            # Negative values are missing codes such as -99, not answers
+            values = data[fix.column].filter(data[fix.column] >= 0)
+            stats = compute_outlier_stats_polars(values, None, None)
+            return stats.lower_bound, stats.upper_bound
+
+        low, high = bounds(survey)
+        assert not low <= fix.old_value <= high
+        corrected = survey.with_columns(
+            pl.when(pl.col(DemoColumn.KEY) == fix.key)
+            .then(fix.new_value)
+            .otherwise(pl.col(fix.column))
+            .alias(fix.column)
+        )
+        low, high = bounds(corrected)
+        assert low <= fix.new_value <= high

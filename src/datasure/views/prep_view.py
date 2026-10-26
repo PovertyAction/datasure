@@ -57,6 +57,7 @@ from datasure.utils.navigations_utils import (
     show_demo_next_action,
 )
 from datasure.utils.onboarding_utils import (
+    DemoBackcheckColumn,
     DemoColumn,
     ImportDemoInfo,
     demo_expander,
@@ -1484,12 +1485,13 @@ if is_demo_project():
 
     if not prep_log_survey.is_empty() and not prep_log_backcheck.is_empty():
         # check that the correct prep steps have been added
-        pattern = r'"submissiondate"\s+updated\s+using\s+string\s+to\s+datetime'
-        if prep_log_survey["description"].str.contains(pattern).any():
-            enable_next_count += 1
-
-        if prep_log_backcheck["description"].str.contains(pattern).any():
-            enable_next_count += 1
+        for prep_log, date_column in (
+            (prep_log_survey, DemoColumn.SUBMISSIONDATE),
+            (prep_log_backcheck, DemoBackcheckColumn.SUBMISSIONDATE),
+        ):
+            pattern = rf'"{date_column}"\s+updated\s+using\s+string\s+to\s+datetime'
+            if prep_log["description"].str.contains(pattern).any():
+                enable_next_count += 1
 
     if enable_next_count < 2:
         demo_callout(
