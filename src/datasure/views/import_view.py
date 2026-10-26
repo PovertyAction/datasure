@@ -260,11 +260,7 @@ def update_import_log(import_log: pl.DataFrame) -> None:
 
 # --- Credential Manager --- #
 if is_demo_project():
-    demo_callout(
-        "The sections below (credentials and import configuration) are for setting up "
-        "real data sources. For this demo, your data is already configured — scroll down "
-        "to **Preview Imported Data** to explore it."
-    )
+    demo_callout(ImportDemoInfo.get_info_message("surveycto_info"))
 with st.container(border=True):
     section_header("Manage Credentials", icon=":material/key:")
     st.write("Import and manage your credentials for data import.")

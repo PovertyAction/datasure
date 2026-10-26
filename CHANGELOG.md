@@ -137,6 +137,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   budget. None is over it: the slowest delta, Outliers, is about 0.3 s on the
   generated form in every period, and the deltas add 0.7 to 0.9 s to the
   rows end to end, so every delta is still computed on load
+- **Demo project guidance** (#361 items 5-9, #365): demo guidance now covers
+  the project-level features.
+  - The Start page demo row (`start_view._render_demo_row`) has an **Export**
+    button (key `demo_export`) next to Resume and Restart, shown once the demo
+    exists. It opens the existing `_export_config_dialog` with
+    `DEMO_PROJECT_NAME`, so the demo exports like any project; the bundle is
+    built only when the dialog opens
+  - `OnboardingSteps.OUTPUTS` asks for the sidebar **Reviewer name** before
+    the first correction. `OnboardingSteps.CONFIGURE` edits only the survey
+    target of the main page and removes a throwaway second page, so the
+    walkthrough page survives; the page names and targets are named once in
+    `DEMO_PAGE_NAME`, `DEMO_SURVEY_TARGET`, `DEMO_EDITED_TARGET` and
+    `DEMO_THROWAWAY_PAGE`. `OnboardingSteps.REPLICATION` adds an **Exclude
+    reviewer names** step and a project export from the demo row, and explains
+    Update from configuration and Delete project without running them
+  - New `ImportDemoInfo.SURVEYCTO_INFO` replaces the Import Data callout above
+    Manage Credentials. It walks through the SurveyCTO credential and import
+    forms without a server or credentials and says not to submit them
+  - Tests: `TestProjectGuidance` checks that each label the new guidance names
+    is in the guidance and in the source file that renders it, and that the
+    loaded demo exports a bundle; `TestRenderDemoRow` covers the Export button
+  - Files: `src/datasure/utils/onboarding_utils.py`,
+    `src/datasure/views/start_view.py`, `src/datasure/views/import_view.py`
 
 ### Changed
 
