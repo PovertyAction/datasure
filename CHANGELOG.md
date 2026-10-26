@@ -56,6 +56,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Check health rows** (#399, #365): Summary's check health card grid is
+  replaced by one row per check, grouped by navigation group under a shared
+  Check · Status · Outstanding · Resolved header (`checks/health.py`:
+  `health_rows` and `render_health_rows` replace `health_cards` and
+  `render_health_grid`; `HealthCard` becomes `HealthRow`). Adding a catalogue
+  entry adds a row with no layout change
+  - Headline functions return a `CheckHeadline` (`checks/headline.py`:
+    value, detail, outstanding, resolved, informational) instead of a
+    sentence; `CheckEntry.headline` is typed accordingly
+  - The status pill (`st.badge`) has a `RowState` derived per row: grey
+    **Not set up** and **Not applicable** and red **Error** from the
+    config-only `CheckStatus`; a ready row is red when its headline raises
+    (the other rows still render), amber **Flagged** when it has more than 0
+    outstanding and is not informational, else green **No issues**
+  - `missing_headline` reports the % of columns all missing (was the mean %
+    of values missing); `MissingSummaryStats` gains `all_missing_count` and
+    `column_count`
+  - `duplicates_headline` takes `project_id` first and an optional `alias`,
+    and adds the resolved IDs (`_resolved_ids`, the check's survey
+    "Resolved" count)
+  - `outliers_headline` reports outliers plus violations as outstanding and,
+    through `count_resolved_flags` (`checks/outliers/review.py`), accepted
+    flags plus corrected cells no longer flagged as resolved
+  - `backchecks_headline` reports mismatches with no error source as
+    outstanding and attributed mismatches as resolved, over the categories
+    of the total error rate (`TOTAL_CATEGORIES`); the detail is the total
+    error rate. `_saved_backcheck_analysis` is shared with
+    `overall_error_rate_percent`
+  - Progress and Enumerator Stats headlines are informational ("310 / 500",
+    "4 / 12"), so their rows are never flagged; GPS Checks stays status only
 - **Dependencies** (#393): `duckdb>=1.3.1,<3` (was `>=1.3.1`), lock moved from
   1.5.5 to 2.0.0; duckdb 3 is excluded until tested. `uv lock --upgrade` also
   moves plotly to 7.1.0, pyarrow to 26.0.0, starlette to 1.9.0 and
