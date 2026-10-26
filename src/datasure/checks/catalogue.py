@@ -35,7 +35,11 @@ from datasure.checks.gpschecks.report_ui import (
     gpschecks_status,
 )
 from datasure.checks.headline import CheckHeadline
-from datasure.checks.health import health_rows, render_health_rows
+from datasure.checks.health import (
+    health_rows,
+    render_health_rows,
+    status_only_headline,
+)
 from datasure.checks.missing import missing_headline, missing_report
 from datasure.checks.outliers.report_ui import (
     outliers_headline,
@@ -558,6 +562,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         EXPLORATION,
         _render_descriptive,
         _survey_rows_status,
+        headline=status_only_headline,
     ),
 )
 

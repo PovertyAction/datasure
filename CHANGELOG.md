@@ -84,10 +84,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `CheckStatus`; a ready row is red when its headline raises, including
     when saved settings no longer fit the data (the other rows still
     render), amber **Flagged** when it has more than 0 outstanding and is
-    not informational, else green **No issues**. The row's action comes
+    not informational, blue **Ready** when it has no headline numbers (GPS
+    Checks, or Backchecks with no values compared), so the pill claims
+    nothing about uncounted issues, else green **No issues**. The row's action comes
     from its state (`RowState.action`)
-  - A ready check with no headline (Descriptive Stats, GPS Checks) shows
-    "Status only" (`STATUS_ONLY`) as its detail
+  - A ready check with no headline numbers (Descriptive Stats, GPS Checks)
+    shows "Status only" (`STATUS_ONLY`) as its detail; Descriptive Stats
+    stays green through the informational `status_only_headline`
   - `missing_headline` reports the % of columns all missing (was the mean %
     of values missing); `MissingSummaryStats` gains `all_missing_count` and
     `column_count`
@@ -96,7 +99,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     is None, shown as "—", since it cannot be computed
   - `outliers_headline` reports outliers plus violations as outstanding and,
     through `count_resolved_flags` (`checks/outliers/review.py`), accepted
-    flags plus corrected cells no longer flagged as resolved
+    flags plus corrected cells no longer flagged as resolved; a corrected
+    cell counts only if the checks flag it in the uncorrected data, which
+    they rerun on only when some value was corrected
   - `backchecks_headline` reports mismatches with no error source as
     outstanding and attributed mismatches as resolved, over the categories
     of the total error rate (`TOTAL_CATEGORIES`, filtered by

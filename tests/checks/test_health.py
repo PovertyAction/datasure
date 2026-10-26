@@ -16,6 +16,7 @@ from datasure.checks.health import (
     group_rows,
     health_rows,
     render_health_rows,
+    status_only_headline,
 )
 from datasure.utils.dataframe_utils import get_df_columns
 from datasure.utils.duckdb_utils import duckdb_save_table
@@ -110,6 +111,7 @@ def _rows(ctx, items, headlines):
 TWO_DUPLICATES = CheckHeadline("2", "duplicate IDs", outstanding=2, resolved=1)
 NO_DUPLICATES = CheckHeadline("0", "duplicate IDs", outstanding=0, resolved=3)
 PROGRESS = CheckHeadline("5 / 20", "25.0% of target", informational=True)
+STATUS_ONLY = status_only_headline(None)
 ERROR_ITEM = NavItem(
     "enumerator",
     "Enumerator Stats",
@@ -180,7 +182,8 @@ class TestRowStatus:
             (DUPLICATES, TWO_DUPLICATES, RowState.FLAGGED, "orange", "Flagged"),
             (DUPLICATES, NO_DUPLICATES, RowState.NO_ISSUES, "green", "No issues"),
             (DUPLICATES, PROGRESS, RowState.NO_ISSUES, "green", "No issues"),
-            (DESCRIPTIVE, None, RowState.NO_ISSUES, "green", "No issues"),
+            (DESCRIPTIVE, STATUS_ONLY, RowState.NO_ISSUES, "green", "No issues"),
+            (DESCRIPTIVE, None, RowState.READY, "blue", "Ready"),
         ],
         ids=[
             "not-set-up",
@@ -190,6 +193,7 @@ class TestRowStatus:
             "none-outstanding",
             "informational",
             "status-only",
+            "uncounted",
         ],
     )
     def test_status_follows_the_check_status_and_outstanding_number(

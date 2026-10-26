@@ -198,7 +198,9 @@ to appear.
   row is red if its headline raised (a headline raises, through
   `settings_no_longer_fit`, rather than returning None when the saved
   settings no longer fit the data), amber (flagged) if it has more than 0
-  outstanding and is not informational, else green. Headlines run only for
+  outstanding and is not informational, blue (ready) if it has no headline
+  numbers, so nothing is claimed about its issues, else green. Descriptive
+  Stats is informational through `status_only_headline`. Headlines run only for
   ready checks and are cached in a small in-process LRU keyed on the page's
   data (row hashes), settings files (content hash, leaving out
   [view state](#view-state)), the logs and intermediate databases
