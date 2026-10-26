@@ -1803,7 +1803,7 @@ Demo Mode is an interactive guided tutorial that walks you through all DataSure 
 3. Follow the step-by-step guidance on each page
 
 The first time, an introduction to the demo is shown above the row. Once the
-demo exists, the row offers two buttons instead:
+demo exists, the row offers three buttons instead:
 
 - **Resume**: Reopens the demo on Import Data. Your work is kept.
 - **Restart**: Asks you to confirm, then deletes everything in the demo
@@ -1812,6 +1812,8 @@ demo exists, the row offers two buttons instead:
   data is loaded again and the demo starts from the beginning. This cannot be
   undone. If the reset fails, the row shows "Failed to reset the demo. Close
   any other DataSure windows and try again."
+- **Export**: Opens the same export dialog as **Export configuration** on
+  other projects (see [Copying a Project's Setup](#copying-a-projects-setup)).
 
 ### Demo Help in the Sidebar
 
