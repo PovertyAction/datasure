@@ -213,7 +213,8 @@ def clear_reviewed_flags(flags: pl.DataFrame, check: FlagCheck) -> pl.DataFrame:
     )
 
 
-def _cells(flags: pl.DataFrame, survey_key: str, rows: pl.Expr) -> set[tuple]:
+def _cells_where(flags: pl.DataFrame, survey_key: str, rows: pl.Expr) -> set[tuple]:
+    """Return the (KEY, column) cells of the rows of `flags` matching `rows`."""
     selected = flags.filter(rows).select(
         pl.col(survey_key).cast(pl.String), pl.col(COLUMN_NAME_COL).cast(pl.String)
     )
@@ -247,8 +248,8 @@ def count_resolved_flags(
             continue
         status = pl.col(REVIEW_STATUS_COL).fill_null("")
         accepted += flags.filter(status == REVIEWED_BADGE).height
-        corrected |= _cells(flags, survey_key, status == CORRECTED_BADGE)
-        still_flagged |= _cells(
+        corrected |= _cells_where(flags, survey_key, status == CORRECTED_BADGE)
+        still_flagged |= _cells_where(
             flags, survey_key, _is_flagged(check) & (status != REVIEWED_BADGE)
         )
     return accepted + len(corrected - still_flagged)
