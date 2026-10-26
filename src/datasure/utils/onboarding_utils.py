@@ -43,34 +43,6 @@ class ImportDemoInfo:
         then click **Prepare Your Data** below to continue to the next step.
     """
 
-    PREPARE_DATA_INFO: ClassVar[str] = """
-        What is Data Preparation?
-
-        ##### Data preparation is a crucial step that:
-        - **Cleans and transforms data**: Handles text case changes, date conversions, and mathematical operations
-        - **Creates new variables**: Add calculated fields, unique identifiers, or custom columns for analysis
-        - **Removes problematic data**: Delete unnecessary columns or filter out rows with critical data quality issues
-
-        ##### For this demo, you can:
-        1. **Explore your data**: Switch between the **demo_survey** and **demo_backcheck**
-        dataset buttons at the top to see your survey data and backcheck data.
-        2. **Transform date column**: Add data preparation steps if you want to experiment.
-        Do the following:
-            - Select the **demo_survey** dataset button
-            - Click on the ":material/add: Add data prep step" button
-            - Under "Select Action", choose "Transform Column"
-            - For "Select Column to Transform", choose "submissiondate"
-            - For "Select function", choose "string to datetime". Note that the functions
-              available depend on the type of column selected.
-            - Click on ":material/check: Apply" to save the preparation step.
-            - Review the "submissiondate" column to see the changes.
-        3. **Apply same step to backcheck data**: Select the **demo_backcheck** dataset button and repeat
-        the same steps to transform the "submissiondate" column there as well.
-
-
-        **Ready to continue?** Preview data and try additional transformations.
-    """
-
     PROCEED_TO_CONFIG_INFO: ClassVar[str] = """
         ##### Want to experiment with data preparation?** Try these features:
 
@@ -92,58 +64,11 @@ class ImportDemoInfo:
         Your demo data is already prepared for quality checks, so these steps are optional in the demo.
     """
 
-    DEMO_DATA_INFO: ClassVar[str] = """
-        **Demo Status: Data Import Complete!**
-
-        Your survey data has been successfully imported and is ready for analysis.
-
-        **Next:** Let's move to data preparation where we'll clean and prepare this data for comprehensive quality checks!
-    """
-
     PROCEED_TO_HFCS_INFO: ClassVar[str] = """
         Your configuration is set up and your data is ready for quality analysis.
 
         Click **View Quality Reports** to explore the results — DataSure has run all
         configured checks and the reports are ready to review.
-    """
-
-    ADD_CHECK_CONFIG_INFO: ClassVar[str] = """
-        ##### Follow these steps to set up data quality checks:
-
-        ##### Step 1: Click ":material/add: Add new check configuration"
-        - A dialog window will appear to guide you through the configuration process
-        - Give your configuration a descriptive name like "Household HFCs" (1-20 characters)
-
-        ##### Step 2: Select your survey dataset
-        - Choose "demo_survey" (your main household survey data) from the dropdown
-        - The column selector will automatically refresh to show available columns
-
-        ##### Step 3: Configure survey key columns:
-        DataSure will categorize your columns by type (datetime, numeric, categorical) to help you choose:
-        - **Key Column**: Choose "KEY" (unique row identifier) - this uniquely identifies each survey record
-        - **ID Column**: Choose "hhid" (Household ID) - identifies each household/respondent
-        - **Enumerator Column**: Choose "enum_name" (shows who collected the data)
-        - **Team Column**: Select "team_id" - indicates the team responsible for data collection
-        - **Form Version Column (optional)**: Select "form_version" - indicates the version of the survey form used. Skip for this demo.
-        - **Duration Column**: Select "duration" (time taken to complete survey)
-        - **Date Column**: Choose "submissiondate" (when the survey was submitted)
-        - **Survey Target** (optional): Enter expected number of interviews (e.g., 200)
-
-        ##### Step 4: Add backcheck dataset (optional)
-        - **Backcheck Dataset**: Choose "demo_backcheck" (from your imported backcheck data)
-        - Configure backcheck columns similarly (date: submissiondate, backchecker: bcer_name, backchecker team: team_id, target percentage: 10)
-
-        ##### Step 5: Click "Submit" to create the configuration
-        - DataSure validates your inputs using Pydantic models for data integrity
-        - If validation passes, a new quality analysis page is automatically created!
-
-        **:material/celebration: What happens next:** DataSure creates a comprehensive quality analysis page with all configured checks!
-    """
-
-    ADD_PREP_STEPS_INFO: ClassVar[str] = """
-        You will need to add a data preparation step to convert the submissiondate
-        column to a date format for both the survey and backcheck surveys. This is a
-        crucial step to ensure accurate date handling in your analysis.
     """
 
     ADD_CORRECTION_STEP_INFO: ClassVar[str] = """
@@ -191,13 +116,9 @@ class ImportDemoInfo:
         """Retrieve demo messages based on type."""
         demo_messages = {
             "add_to_session_info": cls.ADD_TO_SESSION_INFO,
-            "prepare_data_info": cls.PREPARE_DATA_INFO,
             "preview_data_info": cls.PREVIEW_DATA_INFO,
             "proceed_to_config_info": cls.PROCEED_TO_CONFIG_INFO,
-            "demo_data_info": cls.DEMO_DATA_INFO,
             "proceed_to_hfcs_info": cls.PROCEED_TO_HFCS_INFO,
-            "add_check_config_info": cls.ADD_CHECK_CONFIG_INFO,
-            "add_prep_steps_info": cls.ADD_PREP_STEPS_INFO,
             "add_correction_step_info": cls.ADD_CORRECTION_STEP_INFO,
         }
         return demo_messages.get(message_id, "Invalid message ID.")
@@ -436,18 +357,6 @@ class OutputOnboardingInfo:
     """Class to provide onboarding messages for check output pages."""
 
     SUMMARY: ClassVar[dict] = {
-        "summary_report": {
-            "title": "Data Quality Summary",
-            "content": """
-        ##### Summary of Data Quality Checks
-
-        This check provides an overview of the data quality checks performed on your survey data.
-        It summarizes key metrics such as the number of checks run, issues identified,
-        and overall data quality score.
-
-        **Next**: Click on the :material/settings: settings icon to configure global settings for the Summary check.
-        """,
-        },
         "summary_settings": {
             "title": "Summary Settings",
             "content": """

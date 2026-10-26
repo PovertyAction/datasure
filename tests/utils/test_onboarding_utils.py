@@ -3,12 +3,15 @@
 import importlib
 import json
 import pkgutil
+import re
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
 
+import datasure
 from datasure.utils.onboarding_utils import (
     DEMO_OUTPUT_FUNCTIONS,
     DEMO_PROJECT_ID,
@@ -71,26 +74,14 @@ class TestImportDemoInfo:
         message = ImportDemoInfo.get_info_message("add_to_session_info")
         assert "loaded successfully" in message
 
-        message = ImportDemoInfo.get_info_message("prepare_data_info")
-        assert "Data preparation is a crucial step" in message
-
         message = ImportDemoInfo.get_info_message("preview_data_info")
         assert "loaded and ready" in message
 
         message = ImportDemoInfo.get_info_message("proceed_to_config_info")
         assert "experiment with data preparation" in message
 
-        message = ImportDemoInfo.get_info_message("demo_data_info")
-        assert "Data Import Complete" in message
-
         message = ImportDemoInfo.get_info_message("proceed_to_hfcs_info")
         assert "ready for quality analysis" in message
-
-        message = ImportDemoInfo.get_info_message("add_check_config_info")
-        assert "Follow these steps to set up data quality checks" in message
-
-        message = ImportDemoInfo.get_info_message("add_prep_steps_info")
-        assert "convert the submissiondate" in message
 
         message = ImportDemoInfo.get_info_message("add_correction_step_info")
         assert "targeted corrections" in message
@@ -104,13 +95,28 @@ class TestImportDemoInfo:
         """Test that all class variables are defined."""
         assert hasattr(ImportDemoInfo, "ADD_TO_SESSION_INFO")
         assert hasattr(ImportDemoInfo, "PREVIEW_DATA_INFO")
-        assert hasattr(ImportDemoInfo, "PREPARE_DATA_INFO")
         assert hasattr(ImportDemoInfo, "PROCEED_TO_CONFIG_INFO")
-        assert hasattr(ImportDemoInfo, "DEMO_DATA_INFO")
         assert hasattr(ImportDemoInfo, "PROCEED_TO_HFCS_INFO")
-        assert hasattr(ImportDemoInfo, "ADD_CHECK_CONFIG_INFO")
-        assert hasattr(ImportDemoInfo, "ADD_PREP_STEPS_INFO")
         assert hasattr(ImportDemoInfo, "ADD_CORRECTION_STEP_INFO")
+
+    def test_every_message_is_shown_somewhere(self):
+        """Every ImportDemoInfo message is requested by a page in datasure."""
+        src_root = Path(datasure.__file__).parent
+        requested = {
+            message_id
+            for path in src_root.rglob("*.py")
+            for message_id in re.findall(
+                r"get_info_message\(\s*\"([a-z_]+)\"", path.read_text("utf-8")
+            )
+        }
+        constants = {
+            name
+            for name, value in vars(ImportDemoInfo).items()
+            if name.isupper() and isinstance(value, str)
+        }
+        assert constants, "no ImportDemoInfo messages found"
+        unused = sorted(name for name in constants if name.lower() not in requested)
+        assert not unused, f"demo messages never shown: {unused}"
 
 
 class TestOnboardingSteps:
@@ -194,13 +200,6 @@ class TestOutputOnboardingInfo:
 
     def test_get_onboarding_message_summary(self):
         """Test getting onboarding message for summary tab."""
-        message = OutputOnboardingInfo.get_onboarding_message(
-            "summary", "summary_report"
-        )
-        assert message["title"] == "Data Quality Summary"
-        assert "overview of the data quality checks" in message["content"]
-
-        # Test other summary messages
         message = OutputOnboardingInfo.get_onboarding_message(
             "summary", "summary_settings"
         )
@@ -418,10 +417,10 @@ class TestDemoOutputOnboarding:
         mock_is_demo.return_value = True
 
         @demo_output_onboarding("summary")
-        def summary_report():
+        def summary_settings():
             return "executed"
 
-        result = summary_report()
+        result = summary_settings()
         assert result == "executed"
         mock_demo_expander.assert_called_once()
 
@@ -520,6 +519,29 @@ class TestDemoOutputOnboarding:
             if OutputOnboardingInfo.get_onboarding_message(tab, name) is None
         )
         assert not missing, f"decorated functions without a message: {missing}"
+
+    def test_every_message_has_decorated_function(self):
+        """Every OutputOnboardingInfo message is shown by a decorated function."""
+        import datasure.checks
+
+        for module in pkgutil.walk_packages(
+            datasure.checks.__path__, prefix="datasure.checks."
+        ):
+            importlib.import_module(module.name)
+
+        shown = {
+            id(OutputOnboardingInfo.get_onboarding_message(tab, name))
+            for module, tab, name in DEMO_OUTPUT_FUNCTIONS
+            if module.startswith("datasure.")
+        }
+        unused = sorted(
+            f"{group}[{message_id!r}]"
+            for group, messages in vars(OutputOnboardingInfo).items()
+            if group.isupper() and isinstance(messages, dict)
+            for message_id, message in messages.items()
+            if id(message) not in shown
+        )
+        assert not unused, f"demo messages never shown: {unused}"
 
 
 class TestDemoProjectFunctions:
