@@ -36,7 +36,29 @@ An exported project setup now carries your missing-value codes, Descriptive Stat
 
 **Export configuration** in a project's **More** menu now opens a dialog with one option, **Include record-level decisions (corrections and backcheck attribution)**. Untick it to share a setup without decisions about individual records, for example when reusing it for a new survey round.
 
+#### See what changed since yesterday on the Summary tab
+
+Each check in Summary's check health list now shows a **Change** column and how many issues were resolved in the period, for example "+3 since yesterday". Pick the period in the **Comparison period** box above the list: Day (the default), 7 days, Week (week to date, with a week start you choose), 30 days or Month. The choice is saved for the project. Changes need a date column; if Summary has none, a note tells you to set one in Summary settings.
+
+GPS Checks now has its own counts in the list: outliers still to review as outstanding, and accepted or corrected points as resolved. It uses the settings you last chose on the GPS Checks tab, including the **Number of Neighbors** and **Expected Outlier Proportion** sliders, which are now remembered. Without a Mapbox token, the GPS Checks tab still lists the outliers; only the map is hidden.
+
+#### Join columns and convert columns to text or numbers on the Prep page
+
+- **Join text columns**: **Add Column** has a **concat** method that joins two or more text columns in the order you pick them, with a space, comma, underscore, hyphen, no separator or your own text between them. Blank values are skipped
+- **To text**: **Transform Column** can turn number, date, date-time and true/false columns into text
+- **To number**: **Transform Column** can turn true/false columns into 1 and 0
+
+The Stata replication script does the same steps.
+
+#### A demo that covers the whole workflow
+
+The demo now walks you through reviewing flagged values: accepting and correcting outliers, accepting a GPS outlier, and attributing back check mismatches. It also covers setting your reviewer name, editing and removing check pages, the SurveyCTO import forms (without needing a server or credentials), and exporting the demo project's setup with the new **Export** button on the Start page's demo row. The demo data is the same every time you start it, with the latest submissions dated today, and every check the demo visits has something to show.
+
 ### Changes
+
+#### Check health is a list of rows
+
+Summary's check health cards are now one row per check, grouped like the sidebar, with **Status**, **Outstanding** and **Resolved** columns. The status shows **No issues**, **Flagged**, **Ready** (set up, but nothing counted yet), **Not set up**, **Not applicable** or **Error**. If one check's saved settings no longer fit the data, its row shows the error and the other rows still load. Outliers & Constraints counts outliers and constraint violations, Backchecks counts mismatches with no error source, and Missing Values reports the share of columns that are entirely missing.
 
 #### Each check page keeps its own Descriptive Statistics columns and consent results
 
@@ -51,6 +73,14 @@ The back check comparison and coverage now use the same records as the Duplicate
 ### Bug Fixes
 
 - **Fixed**: After you applied a project setup that included corrections, the **Outliers & Constraints** and **GPS Checks** tabs could fail with `cannot compare string with numeric type (i32)`. Projects already affected work again after you update; you don't need to import the setup again
+- **Fixed**: New installs could not import data, failing with `Resource In Use Error` or `'DuckDBPyConnection' object has no attribute 'pl'`
+- **Fixed**: A **Remove rows** step with a condition also removed rows where the selected column was blank. Rows are now removed only when the condition is true, and the step says how many rows were kept because of a blank value. With several columns selected, every condition now removes a row when any column matches. Check the row counts of saved steps on columns with blank values, since they may now keep more rows. Exported Stata scripts match
+- **Fixed**: Missing-value codes such as `-99` were counted as real answers in Outliers & Constraints, Descriptive Statistics and Enumerator Statistics, so they were flagged as outliers and pulled down means and minimums
+- **Fixed**: The Enumerator summary showed wrong first and last submission dates and this week/month counts when data spanned more than one month
+- **Fixed**: **Restart Demo** brought back corrections and settings from your last demo, and **Exit Demo** left demo data behind for your next project. Restart now asks for confirmation and starts the demo from scratch
+- **Fixed**: The demo said it was complete several times before the last step. It now ends once, after the replication package, with options to restart or create a real project
+- **Fixed**: Demo guidance named columns, labels and counts that did not match the demo data or the page, and **Learn More** sat beside the settings instead of above them
+- **Fixed**: A project setup exported from the demo set up nothing when applied, yet reported success. A setup that sets up nothing now shows an error
 
 ---
 
