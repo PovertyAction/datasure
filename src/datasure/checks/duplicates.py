@@ -20,9 +20,9 @@ import streamlit as st
 
 from datasure.checks.backchecks.models import TAB_NAME as BACKCHECKS_TAB_NAME
 from datasure.checks.backchecks.models import backcheck_id_columns
-from datasure.checks.headline import CheckHeadline
-from datasure.checks.health_period import logged_after
-from datasure.checks.id_duplicates import resolved_ids
+from datasure.checks.headline import CheckDelta, CheckHeadline
+from datasure.checks.health_period import DeltaWindow, dated_after, logged_after
+from datasure.checks.id_duplicates import find_duplicate_groups, resolved_ids
 from datasure.checks.id_duplicates_ui import (
     BACKCHECK_DATA,
     IdView,
@@ -42,7 +42,7 @@ from datasure.models.schemas import (
     DuplicatesStats,
     FilterCondition,
 )
-from datasure.processing.correction_log import ensure_log_columns
+from datasure.processing.correction_log import Action, ensure_log_columns
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import (
@@ -2445,33 +2445,33 @@ def duplicates_status(
     return READY
 
 
-def duplicates_headline(
+@dataclass(frozen=True)
+class DuplicatesBasis:
+    """What the duplicates headline computed, for `duplicates_delta` to reuse.
+
+    Attributes
+    ----------
+    records : pl.DataFrame
+        The corrected records the saved Records to Include filter keeps.
+    id_col : str | None
+        The survey ID column.
+    resolved : set[str] | None
+        The duplicate IDs corrections resolved; None without an alias.
+    """
+
+    records: pl.DataFrame
+    id_col: str | None
+    resolved: set[str] | None
+
+
+def _duplicates_basis(
     project_id: str,
     data: pl.DataFrame,
     setting_file: str,
     config: dict,
-    alias: str | None = None,
-) -> CheckHeadline:
-    """Return the duplicates headline for Summary's check health row.
-
-    Outstanding: the unresolved duplicate survey IDs among the records the
-    saved Records to Include filter keeps, the count the check's Survey data
-    switcher shows. Resolved: the duplicate IDs corrections have resolved,
-    the check's survey "Resolved" count.
-
-    Parameters
-    ----------
-    project_id : str
-        The project identifier.
-    data : pl.DataFrame
-        The survey data, with corrections applied.
-    setting_file : str
-        Path to the page's settings file.
-    config : dict
-        The page configuration the check starts from.
-    alias : str | None
-        The survey dataset alias, whose uncorrected data gives the resolved
-        count. If None, the resolved count is None (shown as "—").
+    alias: str | None,
+) -> tuple[DuplicatesBasis, int]:
+    """Filter the records and find the resolved IDs; return them and the count.
 
     Raises
     ------
@@ -2502,9 +2502,9 @@ def duplicates_headline(
         )
     )
     # Without an alias there is no uncorrected data to compare with, so the
-    # resolved count is unknown rather than 0.
+    # resolved IDs are unknown rather than none.
     resolved = (
-        _resolved_ids(
+        _resolved_id_set(
             CorrectionProcessor(project_id),
             alias,
             conditions,
@@ -2514,55 +2514,134 @@ def duplicates_headline(
         if alias
         else None
     )
-    return CheckHeadline(
-        f"{count:,}",
-        f"duplicate ID{'' if count == 1 else 's'}",
-        outstanding=count,
-        resolved=resolved,
-    )
+    return DuplicatesBasis(records.data, settings.survey_id, resolved), count
 
 
-def duplicates_resolved_since(
+def duplicates_headline(
     project_id: str,
     data: pl.DataFrame,
     setting_file: str,
     config: dict,
-    alias: str | None,
-    as_of: datetime.date,
-) -> int | None:
-    """Count the duplicate IDs resolved by corrections logged after `as_of`.
+    alias: str | None = None,
+) -> CheckHeadline:
+    """Return the duplicates headline for Summary's check health row.
 
-    The IDs `duplicates_headline` counts as resolved, kept when a correction
-    log entry made after `as_of` holds the ID. An undone correction is no
-    longer in the log, so it drops out. Takes the parameters of
-    `duplicates_headline`; None without an alias, as there.
+    Outstanding: the unresolved duplicate survey IDs among the records the
+    saved Records to Include filter keeps, the count the check's Survey data
+    switcher shows. Resolved: the duplicate IDs corrections have resolved,
+    the check's survey "Resolved" count. The headline's basis is what
+    `duplicates_delta` reuses.
+
+    Parameters
+    ----------
+    project_id : str
+        The project identifier.
+    data : pl.DataFrame
+        The survey data, with corrections applied.
+    setting_file : str
+        Path to the page's settings file.
+    config : dict
+        The page configuration the check starts from.
+    alias : str | None
+        The survey dataset alias, whose uncorrected data gives the resolved
+        count. If None, the resolved count is None (shown as "—").
 
     Raises
     ------
     ValueError
         If the saved Records to Include filter cannot be applied.
     """
-    if not alias:
-        return None
-    settings = load_default_duplicates_settings(
-        setting_file, DuplicatesSettings(**config)
+    basis, count = _duplicates_basis(project_id, data, setting_file, config, alias)
+    return CheckHeadline(
+        f"{count:,}",
+        f"duplicate ID{'' if count == 1 else 's'}",
+        outstanding=count,
+        resolved=None if basis.resolved is None else len(basis.resolved),
+        basis=basis,
     )
-    conditions = saved_records_to_include(setting_file)
-    records = filter_records_to_include(data, conditions, "survey")
-    if records.error:
-        raise ValueError(
-            f"The survey Records to Include filter could not be applied: "
-            f"{records.error}"
-        )
-    processor = CorrectionProcessor(project_id)
-    resolved = _resolved_id_set(
-        processor, alias, conditions, settings.survey_id, records.data
-    )
-    # Read directly: the health rows cache their own results.
-    log = ensure_log_columns(duckdb_get_table(project_id, f"corr_log_{alias}", "logs"))
-    if not resolved or "ID" not in log.columns:
+
+
+def _ids_in_period(basis: DuplicatesBasis, window: DeltaWindow) -> int:
+    """Count the unresolved duplicate IDs held by a submission in the period."""
+    records, id_col, date_col = basis.records, basis.id_col, window.survey_date
+    if not id_col or id_col not in records.columns or date_col not in records.columns:
         return 0
-    recent = set(
-        log.filter(logged_after(log, as_of))["ID"].cast(pl.String).drop_nulls()
+    duplicated = set(find_duplicate_groups(records, id_col, None, None)["id"])
+    recent = records.filter(dated_after(records, date_col, window.as_of))
+    return len(duplicated & set(recent[id_col].cast(pl.String).drop_nulls()))
+
+
+def _resolving_entries(log: pl.DataFrame, id_col: str) -> pl.DataFrame:
+    """Return the log entries that can resolve a duplicate ID.
+
+    Removing a record, or changing or removing its ID. An entry correcting
+    another column of a record with the ID leaves the duplicate as it was.
+    """
+    if not {"action", "column", "status", "ID", "date"} <= set(log.columns):
+        return log.clear()
+    on_id = pl.col("action").is_in(
+        [Action.MODIFY_VALUE.value, Action.REMOVE_VALUE.value]
+    ) & (pl.col("column") == id_col)
+    return log.filter(
+        (pl.col("status") == "Successful")
+        & ((pl.col("action") == Action.REMOVE_ROW.value) | on_id)
     )
-    return len(resolved & recent)
+
+
+def _resolved_in_period(
+    project_id: str, alias: str, basis: DuplicatesBasis, window: DeltaWindow
+) -> int:
+    """Count the resolved IDs whose latest resolving entry is in the period."""
+    if not basis.resolved or not basis.id_col:
+        return 0
+    # Read directly: the health rows cache their own results.
+    log = _resolving_entries(
+        ensure_log_columns(duckdb_get_table(project_id, f"corr_log_{alias}", "logs")),
+        basis.id_col,
+    )
+    latest = log.group_by(pl.col("ID").cast(pl.String)).agg(pl.col("date").max())
+    recent = latest.filter(logged_after(latest, window.as_of))["ID"]
+    return len(basis.resolved & set(recent.drop_nulls()))
+
+
+def duplicates_delta(
+    project_id: str,
+    data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+    alias: str | None,
+    window: DeltaWindow,
+    basis: DuplicatesBasis | None = None,
+) -> CheckDelta | None:
+    """Return the duplicates row's change over the comparison period.
+
+    Outstanding: the unresolved duplicate IDs `duplicates_headline` counts
+    that a submission dated in the period holds, including an ID already
+    duplicated before the period that a new submission joins. Resolved: the
+    IDs the headline counts as resolved whose latest resolving correction
+    (a removed record, or a changed or removed ID) was logged in the period.
+    An undone correction is no longer in the log, so it drops out. Takes the
+    parameters of `duplicates_headline`, the window, and `basis`: the
+    headline's basis, computed on `data`; None computes it.
+
+    Returns
+    -------
+    CheckDelta | None
+        None without Summary's date column. The resolved change is None
+        without an alias, as the headline's is.
+
+    Raises
+    ------
+    ValueError
+        If the saved Records to Include filter cannot be applied.
+    """
+    if not window.survey_date or window.survey_date not in data.columns:
+        return None
+    if basis is None:
+        basis, _ = _duplicates_basis(project_id, data, setting_file, config, alias)
+    resolved = (
+        None
+        if basis.resolved is None or not alias
+        else _resolved_in_period(project_id, alias, basis, window)
+    )
+    return CheckDelta(_ids_in_period(basis, window), resolved=resolved)

@@ -32,6 +32,7 @@ from datasure.checks.health_period import (
     WEEKDAYS,
     ComparisonPeriod,
     DeltaWindow,
+    Weekday,
 )
 from datasure.utils.duckdb_utils import database_path
 from datasure.utils.navigation import CheckStatus, NavItem
@@ -529,7 +530,7 @@ def render_health_header() -> None:
 
 def render_comparison_period(
     project_view_file: str | Path, project_id: str
-) -> tuple[ComparisonPeriod, str]:
+) -> tuple[ComparisonPeriod, Weekday]:
     """Draw the collapsible Comparison period box and return its choice.
 
     One setting per project, saved as personal view state in the project's
@@ -546,8 +547,8 @@ def render_comparison_period(
 
     Returns
     -------
-    tuple[ComparisonPeriod, str]
-        The period and the first day of the week, one of ``WEEKDAYS``.
+    tuple[ComparisonPeriod, Weekday]
+        The period and the first day of the week.
     """
     import streamlit as st
 
@@ -577,10 +578,13 @@ def render_comparison_period(
                 **view.bind(
                     f"health_week_start__{project_id}",
                     options=WEEKDAYS,
-                    index=WEEKDAYS.index(DEFAULT_WEEK_START),
+                    index=WEEKDAYS.index(DEFAULT_WEEK_START.value),
                 ),
             )
-    return ComparisonPeriod(period or DEFAULT_PERIOD), week_start or DEFAULT_WEEK_START
+    return (
+        ComparisonPeriod(period or DEFAULT_PERIOD),
+        Weekday(week_start or DEFAULT_WEEK_START),
+    )
 
 
 def render_period_caption(since: str | None, latest: date | None) -> None:

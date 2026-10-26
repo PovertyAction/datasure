@@ -3,7 +3,7 @@
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any, Literal
 
 import duckdb
@@ -68,7 +68,7 @@ from datasure.checks.headline import (
     CheckHeadline,
     settings_no_longer_fit,
 )
-from datasure.checks.health_period import logged_after, on_or_before
+from datasure.checks.health_period import DeltaWindow, logged_after, on_or_before
 from datasure.utils.dataframe_utils import (
     ColumnByType,
     TableState,
@@ -918,29 +918,30 @@ def backchecks_delta(
     backcheck_data: pl.DataFrame,
     setting_file: str,
     config: dict,
-    date_col: str,
-    as_of: date,
+    window: DeltaWindow,
 ) -> CheckDelta | None:
-    """Return the backchecks row's change since `as_of`, for Summary.
+    """Return the backchecks row's change over the comparison period.
 
     Outstanding: the unattributed mismatches `backchecks_headline` counts,
-    less those on the backchecks dated on or before `as_of`. Resolved: the
-    mismatches whose latest attribution was logged after `as_of` and still
-    applies. Takes the parameters of `backchecks_headline`, plus the
-    backcheck date column.
+    less those on the backchecks dated on or before the period start.
+    Resolved: the mismatches whose latest attribution was logged after the
+    period start and still applies. Takes the parameters of
+    `backchecks_headline`, plus the window, whose backcheck date column the
+    backchecks are dated by.
 
     Returns
     -------
     CheckDelta | None
-        None when the backcheck date column is not in the backcheck data or
-        no values were compared.
+        None when the backcheck date column is not set or not in the
+        backcheck data, or no values were compared.
 
     Raises
     ------
     ValueError
         If the saved settings no longer fit the data.
     """
-    if date_col not in backcheck_data.columns:
+    date_col, as_of = window.backcheck_date, window.as_of
+    if not date_col or date_col not in backcheck_data.columns:
         return None
     total = _total_errors(
         project_id, page_name_id, survey_data, backcheck_data, setting_file, config

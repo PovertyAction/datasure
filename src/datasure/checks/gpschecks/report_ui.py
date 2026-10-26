@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
@@ -63,7 +62,7 @@ from datasure.checks.headline import (
     CheckHeadline,
     settings_no_longer_fit,
 )
-from datasure.checks.health_period import dated_after, logged_after
+from datasure.checks.health_period import DeltaWindow, dated_after, logged_after
 from datasure.checks.outliers.review import (
     REVIEW_COLUMNS,
     REVIEW_STATUS_COL,
@@ -592,29 +591,55 @@ def _load_and_parse_gps_data(
     if not selected_alias:
         return gps_settings, None, None
 
-    selected_config = gps_settings.filter(pl.col("alias") == selected_alias).to_dicts()[
-        0
-    ]
-
     try:
-        parsed_data = _parse_gps_data(data, selected_config)
+        parsed_data, problem = _valid_points(
+            data, _selected_config(gps_settings, selected_alias)
+        )
     except Exception as e:
         st.error(f"Error parsing GPS data: {e}")
         return gps_settings, selected_alias, None
 
-    if "latitude" not in parsed_data.columns or "longitude" not in parsed_data.columns:
-        st.warning("Unable to parse GPS coordinates from the selected configuration.")
-        return gps_settings, selected_alias, None
-
-    parsed_data = parsed_data.filter(
-        pl.col("latitude").is_not_null() & pl.col("longitude").is_not_null()
-    )
-
-    if parsed_data.is_empty():
-        st.warning("No valid GPS coordinates found in the data.")
+    if parsed_data is None:
+        st.warning(problem)
         return gps_settings, selected_alias, None
 
     return gps_settings, selected_alias, parsed_data
+
+
+def _selected_config(gps_settings: pl.DataFrame, selected_alias: str) -> dict:
+    """Return the GPS configuration with alias `selected_alias`."""
+    return gps_settings.filter(pl.col("alias") == selected_alias).to_dicts()[0]
+
+
+def _valid_points(
+    data: pl.DataFrame, selected_config: dict
+) -> tuple[pl.DataFrame | None, str]:
+    """Parse a configuration's coordinates and keep the points that have both.
+
+    The outliers section and Summary's check health row both use it, so
+    they detect outliers among the same points.
+
+    Returns
+    -------
+    tuple[pl.DataFrame | None, str]
+        The points with ``latitude`` and ``longitude``, or None and why
+        there are none.
+
+    Raises
+    ------
+    Exception
+        Whatever `_parse_gps_data` raises for a configuration that does not
+        fit the data.
+    """
+    parsed = _parse_gps_data(data, selected_config)
+    if "latitude" not in parsed.columns or "longitude" not in parsed.columns:
+        return None, "Unable to parse GPS coordinates from the selected configuration."
+    parsed = parsed.filter(
+        pl.col("latitude").is_not_null() & pl.col("longitude").is_not_null()
+    )
+    if parsed.is_empty():
+        return None, "No valid GPS coordinates found in the data."
+    return parsed, ""
 
 
 def _run_lof_detection(
@@ -933,6 +958,48 @@ def _can_review(alias: str | None, survey_key: str, outlier_df: pd.DataFrame) ->
         and survey_key not in REVIEW_COLUMNS
         and survey_key in outlier_df.columns
     )
+
+
+def _gps_review(
+    project_id: str,
+    alias: str | None,
+    survey_key: str,
+    data: pl.DataFrame,
+    gps_settings: pl.DataFrame,
+    selected_alias: str,
+    outlier_df: pd.DataFrame,
+    survey_id: str | None,
+) -> GPSReview | None:
+    """Return what reviewing the outliers needs, or None if they can't be.
+
+    See `_can_review`. `selected_alias` names the GPS configuration in
+    `gps_settings` whose coordinate columns acceptances apply to.
+    """
+    if not _can_review(alias, survey_key, outlier_df):
+        return None
+    return GPSReview(
+        processor=CorrectionProcessor(project_id),
+        alias=alias,
+        data=data,
+        columns=coordinate_columns(_selected_config(gps_settings, selected_alias)),
+        survey_id=survey_id,
+    )
+
+
+def _reviewed_summary(
+    outlier_df: pd.DataFrame, survey_key: str, review: GPSReview | None
+) -> GPSOutlierSummary:
+    """Mark the outliers `review`'s log entries review and count them.
+
+    The outliers section and Summary's check health row both count through
+    here, so their numbers match.
+    """
+    review_log = (
+        None
+        if review is None
+        else _gps_review_log(review.processor, review.alias, survey_key, review.columns)
+    )
+    return summarize_gps_outliers(outlier_df, survey_key, review=review_log)
 
 
 def _gps_review_log(
@@ -1416,31 +1483,24 @@ def _render_gps_outliers_checks(
     if outlier_df is None:
         return
 
-    review = None
-    review_log = None
     if alias and survey_key in REVIEW_COLUMNS:
         st.warning(
             f"Outliers can't be corrected or accepted on this page because the "
             f"Survey KEY column is named '{survey_key}', which this report uses "
             "for review results. Rename the column to review outliers here."
         )
-    elif _can_review(alias, survey_key, outlier_df):
-        selected_config = gps_settings.filter(
-            pl.col("alias") == selected_alias
-        ).to_dicts()[0]
-        review = GPSReview(
-            processor=CorrectionProcessor(project_id),
-            alias=alias,
-            data=data,
-            columns=coordinate_columns(selected_config),
-            survey_id=survey_id,
-        )
-        review_log = _gps_review_log(
-            review.processor, alias, survey_key, review.columns
-        )
-
+    review = _gps_review(
+        project_id,
+        alias,
+        survey_key,
+        data,
+        gps_settings,
+        selected_alias,
+        outlier_df,
+        survey_id,
+    )
     # The same counts as Summary's check health row (`gpschecks_headline`).
-    summary = summarize_gps_outliers(outlier_df, survey_key, review=review_log)
+    summary = _reviewed_summary(outlier_df, survey_key, review)
     outlier_df = summary.outliers
     num_outliers = summary.outstanding
     total_points = len(outlier_df)
@@ -2243,20 +2303,13 @@ def _gps_summary(
     selected_alias = _saved_option(
         saved.get("outlier_gps_config"), gps_settings["alias"].to_list()
     )
-    selected_config = gps_settings.filter(pl.col("alias") == selected_alias).to_dicts()[
-        0
-    ]
+    selected_config = _selected_config(gps_settings, selected_alias)
     try:
-        survey_key = GPSSettings(**config).survey_key
-        parsed = _parse_gps_data(data, selected_config)
+        settings = GPSSettings(**config)
+        parsed, _ = _valid_points(data, selected_config)
     except (pl.exceptions.PolarsError, ValidationError, KeyError, ValueError) as exc:
         raise settings_no_longer_fit("GPS", exc) from exc
-    if not {"latitude", "longitude"} <= set(parsed.columns):
-        return None
-    parsed = parsed.filter(
-        pl.col("latitude").is_not_null() & pl.col("longitude").is_not_null()
-    )
-    if parsed.is_empty():
+    if parsed is None:
         return None
 
     outlier_df = _detect_saved_outliers(
@@ -2264,15 +2317,18 @@ def _gps_summary(
     )
     if outlier_df is None:
         return None
-    review_log = None
-    if _can_review(alias, survey_key, outlier_df):
-        review_log = _gps_review_log(
-            CorrectionProcessor(project_id),
-            alias,
-            survey_key,
-            coordinate_columns(selected_config),
-        )
-    return summarize_gps_outliers(outlier_df, survey_key, review=review_log)
+    survey_key = settings.survey_key
+    review = _gps_review(
+        project_id,
+        alias,
+        survey_key,
+        data,
+        gps_settings,
+        selected_alias,
+        outlier_df,
+        settings.survey_id,
+    )
+    return _reviewed_summary(outlier_df, survey_key, review)
 
 
 def gpschecks_headline(
@@ -2337,41 +2393,42 @@ def gpschecks_delta(
     data: pl.DataFrame,
     config: dict,
     alias: str | None,
-    date_col: str,
-    as_of: date,
-    summary: GPSOutlierSummary | None = None,
+    window: DeltaWindow,
+    basis: GPSOutlierSummary | None = None,
 ) -> CheckDelta | None:
-    """Return the GPS row's change since `as_of`, for Summary.
+    """Return the GPS row's change over the comparison period, for Summary.
 
     Outstanding: the outliers `gpschecks_headline` counts on submissions
-    dated after `as_of`. Outliers are not detected again on the earlier
-    submissions alone, since that would move every point's neighbourhood.
-    Resolved: the resolved points whose latest resolving log entry was made
-    after `as_of`; undone corrections and acceptances that no longer apply
-    are not resolved. Takes the parameters of `gpschecks_headline`.
+    dated after the period start (`window.as_of`). Outliers are not detected
+    again on the earlier submissions alone, since that would move every
+    point's neighbourhood. Resolved: the resolved points whose latest
+    resolving log entry was made after the period start; undone corrections
+    and acceptances that no longer apply are not resolved. Takes the
+    parameters of `gpschecks_headline`.
 
     Parameters
     ----------
-    date_col : str
-        Summary's date column.
-    as_of : date
-        The period start.
-    summary : GPSOutlierSummary | None
+    window : DeltaWindow
+        The period start and Summary's date column.
+    basis : GPSOutlierSummary | None
         The headline's basis, computed on `data`; None computes it.
 
     Returns
     -------
     CheckDelta | None
-        None when the headline is None. The resolved change is None when
-        the outliers could not be reviewed, as the headline's is.
+        None when the headline is None or Summary's date column is not set.
+        The resolved change is None when the outliers could not be reviewed,
+        as the headline's is.
 
     Raises
     ------
     ValueError
         If the saved GPS configuration no longer fits the data.
     """
-    if summary is None:
-        summary = _gps_summary(project_id, page_name_id, data, config, alias)
+    date_col, as_of = window.survey_date, window.as_of
+    if not date_col:
+        return None
+    summary = basis or _gps_summary(project_id, page_name_id, data, config, alias)
     if summary is None:
         return None
     unreviewed = summary.unreviewed()

@@ -25,17 +25,22 @@ class ComparisonPeriod(StrEnum):
 
 DEFAULT_PERIOD = ComparisonPeriod.DAY
 
+
+class Weekday(StrEnum):
+    """The first day of the week for the Week period; the value is its label."""
+
+    SUNDAY = "Sunday"
+    MONDAY = "Monday"
+    TUESDAY = "Tuesday"
+    WEDNESDAY = "Wednesday"
+    THURSDAY = "Thursday"
+    FRIDAY = "Friday"
+    SATURDAY = "Saturday"
+
+
 # Week start choices for the Week period, in the order offered.
-WEEKDAYS = (
-    "Sunday",
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-)
-DEFAULT_WEEK_START = "Sunday"
+WEEKDAYS = tuple(day.value for day in Weekday)
+DEFAULT_WEEK_START = Weekday.SUNDAY
 
 _ROLLING_DAYS = {
     ComparisonPeriod.DAY: 1,
@@ -44,11 +49,11 @@ _ROLLING_DAYS = {
 }
 
 
-def _week_began(today: date, week_start: str) -> date:
+def _week_began(today: date, week_start: Weekday) -> date:
     """Return the first day of the week holding `today`."""
     try:
         # date.weekday() counts from Monday as 0.
-        first = (WEEKDAYS.index(week_start) - 1) % 7
+        first = (list(Weekday).index(Weekday(week_start)) - 1) % 7
     except ValueError:
         raise ValueError(
             f"Unknown week start '{week_start}'; expected one of {', '.join(WEEKDAYS)}"
@@ -57,7 +62,7 @@ def _week_began(today: date, week_start: str) -> date:
 
 
 def period_start(
-    period: ComparisonPeriod, today: date, week_start: str = DEFAULT_WEEK_START
+    period: ComparisonPeriod, today: date, week_start: Weekday = DEFAULT_WEEK_START
 ) -> date:
     """Return the date whose end the period's deltas compare with.
 
@@ -70,9 +75,8 @@ def period_start(
         The comparison period.
     today : date
         Today, from the computer clock in the app.
-    week_start : str
-        The first day of the week for ``ComparisonPeriod.WEEK``, one of
-        ``WEEKDAYS``.
+    week_start : Weekday
+        The first day of the week for ``ComparisonPeriod.WEEK``.
 
     Returns
     -------
@@ -83,7 +87,7 @@ def period_start(
     Raises
     ------
     ValueError
-        If `week_start` is not one of ``WEEKDAYS``.
+        If `week_start` is not a `Weekday`.
     """
     if period in _ROLLING_DAYS:
         return today - timedelta(days=_ROLLING_DAYS[period])
@@ -93,7 +97,7 @@ def period_start(
 
 
 def since_label(
-    period: ComparisonPeriod, today: date, week_start: str = DEFAULT_WEEK_START
+    period: ComparisonPeriod, today: date, week_start: Weekday = DEFAULT_WEEK_START
 ) -> str:
     """Return where the period starts, to follow "since", as in "since yesterday"."""
     if period is ComparisonPeriod.DAY:
@@ -101,7 +105,7 @@ def since_label(
     if period in _ROLLING_DAYS:
         return f"{_ROLLING_DAYS[period]} days ago"
     if period is ComparisonPeriod.WEEK:
-        return week_start
+        return Weekday(week_start).value
     first = today.replace(day=1)
     return f"{first.day} {first:%b}"
 

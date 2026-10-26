@@ -8,6 +8,7 @@ import pytest
 from datasure.checks.health_period import (
     WEEKDAYS,
     ComparisonPeriod,
+    Weekday,
     dated_after,
     latest_date,
     on_or_before,
@@ -42,17 +43,17 @@ class TestPeriodStart:
         assert period_start(ComparisonPeriod.WEEK, MONDAY) == date(2026, 10, 24)
 
     def test_week_starting_today_compares_with_yesterday(self):
-        assert period_start(ComparisonPeriod.WEEK, MONDAY, "Monday") == date(
+        assert period_start(ComparisonPeriod.WEEK, MONDAY, Weekday.MONDAY) == date(
             2026, 10, 25
         )
 
     def test_week_start_is_selectable(self):
         # Wednesday 21 Oct began the week.
-        assert period_start(ComparisonPeriod.WEEK, MONDAY, "Wednesday") == date(
+        assert period_start(ComparisonPeriod.WEEK, MONDAY, Weekday.WEDNESDAY) == date(
             2026, 10, 20
         )
         # Tuesday 20 Oct began the week.
-        assert period_start(ComparisonPeriod.WEEK, MONDAY, "Tuesday") == date(
+        assert period_start(ComparisonPeriod.WEEK, MONDAY, Weekday.TUESDAY) == date(
             2026, 10, 19
         )
 
@@ -102,7 +103,7 @@ class TestSinceLabel:
         assert since_label(period, MONDAY) == label
 
     def test_week_label_names_the_week_start(self):
-        assert since_label(ComparisonPeriod.WEEK, MONDAY, "Monday") == "Monday"
+        assert since_label(ComparisonPeriod.WEEK, MONDAY, Weekday.MONDAY) == "Monday"
 
 
 class TestDatedRows:

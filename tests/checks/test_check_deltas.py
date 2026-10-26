@@ -19,14 +19,11 @@ from datasure.checks.backchecks.attribution import (
     ATTRIBUTION_LOG_SCHEMA,
     save_attributions,
 )
-from datasure.checks.catalogue import (
-    comparison_window,
-    get_check,
-    summary_check_health,
-)
+from datasure.checks.catalogue import get_check, summary_check_health
 from datasure.checks.context import CheckContext, CheckData, PageConfig
-from datasure.checks.headline import CheckDelta, DeltaKind
-from datasure.checks.health_period import ComparisonPeriod, DeltaWindow
+from datasure.checks.headline import CheckDelta, CheckHeadline, DeltaKind
+from datasure.checks.health_deltas import comparison_window
+from datasure.checks.health_period import ComparisonPeriod, DeltaWindow, Weekday
 from datasure.processing.correction_log import CORRECTION_LOG_SCHEMA
 from datasure.utils.dataframe_utils import get_df_columns
 from datasure.utils.duckdb_utils import duckdb_save_table
@@ -138,6 +135,13 @@ class TestProgressDelta:
 
         assert _delta("progress", ctx) is None
 
+    def test_no_delta_when_the_earlier_check_has_no_headline(self, tmp_path):
+        ctx = _ctx(_config(tmp_path), SURVEY)
+        earlier = "datasure.checks.health_deltas.progress_headline"
+
+        with patch(earlier, return_value=None):
+            assert _delta("progress", ctx) is None
+
 
 class TestMissingDelta:
     def test_change_in_percentage_points(self, tmp_path):
@@ -154,6 +158,15 @@ class TestMissingDelta:
         ctx = _ctx(_config(tmp_path), data)
 
         assert _delta("missing", ctx) is None
+
+    def test_no_delta_when_the_earlier_check_has_no_number(self, tmp_path):
+        ctx = _ctx(_config(tmp_path), SURVEY)
+        earlier = "datasure.checks.health_deltas.missing_headline"
+
+        with patch(earlier, return_value=CheckHeadline("—")):
+            assert _delta("missing", ctx) is None
+        with patch(earlier, return_value=None):
+            assert _delta("missing", ctx) is None
 
 
 def _save_correction_log(entries: list[dict]) -> None:
@@ -198,6 +211,63 @@ class TestDuplicatesDelta:
         # h3 is duplicated by k4, dated in the period; h1 was resolved in it.
         assert _delta("duplicates", ctx) == CheckDelta(outstanding=1, resolved=1)
 
+    def test_new_duplicates_are_ids_on_submissions_dated_in_the_period(self, tmp_path):
+        # h3 was already duplicated by k3 and k8 before the period, and k4
+        # joins it in the period, so it is new although the count did not
+        # change. h5 is duplicated only by submissions before the period.
+        before = pl.DataFrame(
+            {
+                "key": ["k8", "k9", "k10"],
+                "hhid": ["h3", "h5", "h5"],
+                "when": ["2026-10-24", "2026-10-20", "2026-10-21"],
+            }
+        )
+        ctx = self._ctx(tmp_path, pl.concat([SURVEY, before]))
+        _save_correction_log([])
+
+        assert _delta("duplicates", ctx).outstanding == 1
+
+    def test_an_unrelated_entry_in_the_period_does_not_resolve_an_id(self, tmp_path):
+        # h1 and h2 were resolved before the period; k2, which holds h2, then
+        # had another column corrected.
+        ctx = self._ctx(tmp_path)
+        _save_correction_log(
+            [
+                self._removed("k6", "h1", datetime(2026, 10, 20, 9)),
+                self._removed("k7", "h2", datetime(2026, 10, 20, 9)),
+                {
+                    "date": datetime(2026, 10, 26, 9),
+                    "KEY": "k2",
+                    "ID": "h2",
+                    "action": "modify value",
+                    "column": "when",
+                    "current_value": "2026-10-23",
+                    "new_value": "2026-10-24",
+                },
+            ]
+        )
+
+        assert _delta("duplicates", ctx).resolved == 0
+
+    def test_changing_the_id_resolves_it_when_logged_in_the_period(self, tmp_path):
+        ctx = self._ctx(tmp_path)
+        _save_correction_log(
+            [
+                self._removed("k6", "h1", datetime(2026, 10, 20, 9)),
+                {
+                    "date": datetime(2026, 10, 26, 9),
+                    "KEY": "k7",
+                    "ID": "h2",
+                    "action": "modify value",
+                    "column": "hhid",
+                    "current_value": "h2",
+                    "new_value": "h9",
+                },
+            ]
+        )
+
+        assert _delta("duplicates", ctx).resolved == 1
+
     def test_an_undone_correction_drops_out_of_resolved(self, tmp_path):
         # Undoing k6's removal deletes its log entry and brings k6 back.
         data = pl.concat([SURVEY, self.UNCORRECTED.filter(pl.col("key") == "k6")])
@@ -236,8 +306,12 @@ class TestOutliersDelta:
         }
     )
 
-    def _delta(self, tmp_path, log_entries: list[dict]):
-        """The delta with the correction log `log_entries`, on the real processor."""
+    def _delta(self, tmp_path, log_entries: list[dict], data=None):
+        """The delta with the correction log `log_entries`, on the real processor.
+
+        `data` is the corrected data, by default the uncorrected `DATA`.
+        """
+        data = self.DATA if data is None else data
         duckdb_save_table(PROJECT_ID, self.COLUMNS, f"outliers_{PAGE}", "logs")
         log = pl.DataFrame(
             [{"status": "Successful", **entry} for entry in log_entries],
@@ -246,10 +320,10 @@ class TestOutliersDelta:
         processor = "datasure.processing.corrections.CorrectionProcessor"
         with (
             patch(f"{processor}.get_correction_log", lambda _self, _alias: log),
-            patch(f"{processor}.get_corrected_data", lambda _self, _a: self.DATA),
+            patch(f"{processor}.get_corrected_data", lambda _self, _a: data),
             patch(f"{processor}.get_uncorrected_data", lambda _self, _a: self.DATA),
         ):
-            return _delta("outliers", _ctx(_config(tmp_path), self.DATA))
+            return _delta("outliers", _ctx(_config(tmp_path), data))
 
     @staticmethod
     def _accepted(when: datetime, value: str = "100.0") -> list[dict]:
@@ -287,6 +361,39 @@ class TestOutliersDelta:
         )
 
         assert delta == CheckDelta(outstanding=2, resolved=0)
+
+    def test_a_correction_logged_in_the_period_is_resolved_until_undone(self, tmp_path):
+        corrected = self.DATA.with_columns(
+            pl.when(pl.col("key") == "k4")
+            .then(4.0)
+            .otherwise(pl.col("income"))
+            .alias("income")
+        )
+        correction = {
+            "date": datetime(2026, 10, 26, 8),
+            "KEY": "k4",
+            "action": "modify value",
+            "column": "income",
+            "current_value": "100.0",
+            "new_value": "4.0",
+            "reason": "typo",
+            "source": "outliers",
+        }
+
+        # k4's value was flagged by both checks; the corrected cell counts once.
+        assert self._delta(tmp_path, [correction], corrected) == CheckDelta(
+            outstanding=0, resolved=1
+        )
+        # Undoing it deletes the entry and puts the value back.
+        assert self._delta(tmp_path, []) == CheckDelta(outstanding=2, resolved=0)
+
+    def test_a_key_column_not_in_the_data_is_a_settings_error(self, tmp_path):
+        # As for the headline: the row shows why, not a missing column error.
+        duckdb_save_table(PROJECT_ID, self.COLUMNS, f"outliers_{PAGE}", "logs")
+        ctx = _ctx(_config(tmp_path), self.DATA.rename({"key": "id"}))
+
+        with pytest.raises(ValueError, match="Outliers settings no longer fit"):
+            get_check("outliers").delta(ctx, CheckHeadline("2"), WINDOW)
 
 
 class TestGPSDelta:
@@ -376,6 +483,37 @@ class TestGPSDelta:
         )
 
         assert delta == CheckDelta(outstanding=1, resolved=0)
+
+    def _corrected_delta(self, tmp_path, log_entries: list[dict]):
+        """The delta on the real processor, the logged KEYs removed."""
+        duckdb_save_table(PROJECT_ID, self.GPS_COLUMNS, f"gps_columns_{PAGE}", "logs")
+        log = pl.DataFrame(
+            [{"status": "Successful", **entry} for entry in log_entries],
+            schema=CORRECTION_LOG_SCHEMA,
+        )
+        removed = sorted(entry["KEY"] for entry in log_entries)
+        data = self.DATA.filter(~pl.col("key").is_in(removed))
+        processor = "datasure.processing.corrections.CorrectionProcessor"
+        with (
+            patch(f"{processor}.get_correction_log", lambda _self, _alias: log),
+            patch(f"{processor}.get_corrected_data", lambda _self, _a: data),
+        ):
+            return _delta("gps", _ctx(_config(tmp_path), data))
+
+    def test_a_correction_logged_in_the_period_is_resolved_until_undone(self, tmp_path):
+        removal = {
+            "date": datetime(2026, 10, 26, 8),
+            "KEY": "k09",
+            "action": "remove row",
+            "reason": "duplicate visit",
+            "source": "gps",
+        }
+
+        assert self._corrected_delta(tmp_path, [removal]).resolved == 1
+        # Undoing it deletes the entry and brings k09 back as an outlier.
+        assert self._corrected_delta(tmp_path, []) == CheckDelta(
+            outstanding=1, resolved=0
+        )
 
     def test_no_delta_without_a_date_column(self, tmp_path):
         duckdb_save_table(PROJECT_ID, self.GPS_COLUMNS, f"gps_columns_{PAGE}", "logs")
@@ -486,7 +624,7 @@ class TestComparisonWindow:
         ctx = _ctx(_config(tmp_path), SURVEY)
 
         window = comparison_window(
-            ctx, ComparisonPeriod.WEEK, self.TODAY, week_start="Monday"
+            ctx, ComparisonPeriod.WEEK, self.TODAY, week_start=Weekday.MONDAY
         )
 
         assert window.as_of == date(2026, 10, 25)

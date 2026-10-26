@@ -16,7 +16,7 @@ from datasure.checks.headline import (
     CheckHeadline,
     settings_no_longer_fit,
 )
-from datasure.checks.health_period import dated_after, logged_after
+from datasure.checks.health_period import DeltaWindow, dated_after, logged_after
 from datasure.checks.outliers.compute import (
     _build_include_cols,
     _compute_constraint_metrics,
@@ -223,21 +223,21 @@ class ReviewContext:
     """What the results tables need to correct or accept flagged values.
 
     One context is built per report run, so lookups shared by both tables
-    are cached on it. With `logged_after`, only log entries made after that
+    are cached on it. With `entries_after`, only log entries made after that
     date count, for the flags resolved in Summary's comparison period.
     """
 
     processor: CorrectionProcessor
     alias: str
-    logged_after: date | None = None
+    entries_after: date | None = None
     _corrections: dict[str, pl.DataFrame] = field(
         default_factory=dict, compare=False, repr=False
     )
 
     def _in_period(self, log_rows: pl.DataFrame) -> pl.DataFrame:
-        if self.logged_after is None or log_rows.is_empty():
+        if self.entries_after is None or log_rows.is_empty():
             return log_rows
-        return log_rows.filter(logged_after(log_rows, self.logged_after))
+        return log_rows.filter(logged_after(log_rows, self.entries_after))
 
     def active_acceptances(self, check_type: str, key_col: str) -> pl.DataFrame:
         """Return the acceptances of a check that still apply to the data."""
@@ -1612,7 +1612,7 @@ def _reviewed(
 
 
 @dataclass(frozen=True)
-class _OutliersBasis:
+class OutliersBasis:
     """What the outliers headline computed, for `outliers_delta` to reuse."""
 
     flags: _Flags
@@ -1628,7 +1628,7 @@ def _outliers_basis(
     setting_file: str,
     config: dict,
     alias: str | None,
-) -> _OutliersBasis | None:
+) -> OutliersBasis | None:
     """Compute the check's results without rendering it, for the health rows.
 
     Uses the saved settings and outlier columns, and clears accepted flags,
@@ -1646,7 +1646,7 @@ def _outliers_basis(
     if flags is None:
         return None
     review = _review_context(project_id, alias, flags.settings.survey_key)
-    return _OutliersBasis(flags, review, _reviewed(flags, review))
+    return OutliersBasis(flags, review, _reviewed(flags, review))
 
 
 def _outstanding(flags: _ReviewedFlags) -> tuple[int, int]:
@@ -1759,26 +1759,30 @@ def outliers_delta(
     setting_file: str,
     config: dict,
     alias: str | None,
-    date_col: str,
-    as_of: date,
-    basis: _OutliersBasis | None = None,
+    window: DeltaWindow,
+    basis: OutliersBasis | None = None,
 ) -> CheckDelta | None:
-    """Return the outliers row's change since `as_of`, for Summary.
+    """Return the outliers row's change over the comparison period, for Summary.
 
     Outstanding: the flags `outliers_headline` counts on submissions dated
-    after `as_of`, on the corrected data. The flags are not recomputed on the
-    earlier submissions alone, since that would move the IQR and standard
-    deviation bounds. Resolved: the flags accepted or corrected by log
-    entries made after `as_of` that are still in effect; undone corrections
-    and acceptances that no longer apply drop out. Takes the parameters of
-    `outliers_headline`, and `basis`: the headline's basis, computed on
-    `data`, so the flags are not computed again; None computes them.
+    after the period start (`window.as_of`), on the corrected data. The
+    flags are not recomputed on the earlier submissions alone, since that
+    would move the IQR and standard deviation bounds. Resolved: the flags
+    accepted or corrected by log entries made after the period start that
+    are still in effect; undone corrections and acceptances that no longer
+    apply drop out. Takes the parameters of
+    `outliers_headline`, the window (the period start and Summary's date
+    column), and `basis`: the headline's basis, computed on `data`, so the
+    flags are not computed again; None computes them.
 
     Returns
     -------
     CheckDelta | None
-        None when no outlier columns are configured. The resolved change is
-        None without a review context, as the headline's is 0.
+        None when no outlier columns are configured or Summary's date column
+        is not in the data. The outstanding change is None when the Survey
+        KEY column is not in the data, as flags cannot be matched to their
+        submissions' dates. The resolved change is None without a review
+        context, as the headline's is 0.
 
     Raises
     ------
@@ -1792,19 +1796,24 @@ def outliers_delta(
     if basis is None:
         return None
     flags, review, now = basis.flags, basis.review, basis.reviewed
-    key = flags.settings.survey_key
-    new_keys = data.filter(dated_after(data, date_col, as_of))[key].cast(pl.String)
+    key, date_col, as_of = flags.settings.survey_key, window.survey_date, window.as_of
+    if not date_col or date_col not in data.columns:
+        return None
+    new = None
+    if key and key in data.columns:
+        new_keys = data.filter(dated_after(data, date_col, as_of))[key]
+        new = sum(_outstanding(_on_keys(now, new_keys.cast(pl.String))))
     resolved = None
     if review is not None:
         recent = _reviewed(
             flags,
-            ReviewContext(review.processor, review.alias, logged_after=as_of),
+            ReviewContext(review.processor, review.alias, entries_after=as_of),
             now.flagged_before_correction,
         )
         resolved = count_resolved_flags(
             recent.results, key, now.flagged_before_correction
         )
-    return CheckDelta(sum(_outstanding(_on_keys(now, new_keys))), resolved=resolved)
+    return CheckDelta(new, resolved=resolved)
 
 
 def _delete_outlier_column(
