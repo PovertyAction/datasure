@@ -85,7 +85,13 @@ from datasure.utils.duckdb_utils import (
 )
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
-from datasure.utils.onboarding_utils import DemoColumn, is_demo_project
+from datasure.utils.onboarding_utils import (
+    DEMO_AGE_BOUNDS,
+    DEMO_OUTLIER_ACCEPT,
+    DEMO_OUTLIER_CORRECTION,
+    DemoColumn,
+    is_demo_project,
+)
 from datasure.utils.ui_utils import (
     queue_notice,
     row_styler,
@@ -2018,8 +2024,10 @@ def outliers_report(
             "2. Under **Outlier Options**, keep the default Interquartile Range (IQR) "
             "method (multiplier 1.5, threshold 20).\n"
             "3. Under **Constraint Options**, enter bounds for respondent age: "
-            "**(OPTIONAL) Hard minimum = 18**, **(OPTIONAL) Soft minimum = 25**, "
-            "**(OPTIONAL) Soft maximum = 60** and **(OPTIONAL) Hard maximum = 100**. "
+            f"**(OPTIONAL) Hard minimum = {DEMO_AGE_BOUNDS.hard_min}**, "
+            f"**(OPTIONAL) Soft minimum = {DEMO_AGE_BOUNDS.soft_min}**, "
+            f"**(OPTIONAL) Soft maximum = {DEMO_AGE_BOUNDS.soft_max}** and "
+            f"**(OPTIONAL) Hard maximum = {DEMO_AGE_BOUNDS.hard_max}**. "
             "Hard bounds flag impossible values; soft bounds flag values that are "
             "unusual but may be legitimate.\n"
             "4. Click **Add Outlier & Constraint Configuration** to save.\n\n"
@@ -2067,6 +2075,24 @@ def outliers_report(
             "Use **:material/clarify: Show more columns in report** to add context "
             f"columns such as **{DemoColumn.ENUM_NAME}** or **{DemoColumn.STATE}** to "
             "the violations table."
+        )
+        accept = DEMO_OUTLIER_ACCEPT
+        demo_callout(
+            "**Accept a value that is unusual but correct.** Each flag can be "
+            "corrected or accepted right here:\n\n"
+            "1. In **Constraint Violations Details**, find KEY "
+            f"**{accept.key}** ({DemoColumn.HHID} **{accept.hhid}**), where "
+            f"**{accept.column}** is **{accept.value}**: below the soft minimum, "
+            "but a plausible age.\n"
+            "2. Click **:material/edit_note: Review** in the first column of that "
+            "row. The **Correct or accept flagged value** dialog opens.\n"
+            "3. Set **Select Action** to **accept**, enter a **Reason for "
+            "Correction** (e.g., *Age confirmed with the respondent*) and click "
+            "**Apply**.\n\n"
+            "The flag leaves the table and the metrics. Turn on **Show reviewed** "
+            "above the table to see it again, highlighted green with your reason. "
+            "Every review is saved to the Correction Log on the **Correct Data** "
+            "page."
         )
 
     # Missing codes such as -99 are neither breaches nor outliers
@@ -2119,6 +2145,21 @@ def outliers_report(
             "sit relative to the distribution. Expand "
             "**:material/clarify: Show more columns in report** to add context columns "
             "to the record table below the chart."
+        )
+        fix = DEMO_OUTLIER_CORRECTION
+        demo_callout(
+            "**Correct a value that is wrong.** With "
+            f"**{fix.column}** selected under **Inspect Columns**, find KEY "
+            f"**{fix.key}** ({DemoColumn.HHID} **{fix.hhid}**) with "
+            f"**{fix.value}** acres, a misplaced decimal point:\n\n"
+            "1. Click **:material/edit_note: Review** on that row.\n"
+            f"2. Set **Select Action** to **modify value**, enter **{fix.new_value}** "
+            "as the **New Value**, add a **Reason for Correction** (e.g., *Decimal "
+            "point misplaced*) and click **Apply**.\n\n"
+            "A message confirms the correction and links to the Correction Log. "
+            "Turn on **Show reviewed** to see the corrected value highlighted "
+            "green, or **Show only reviewed** to list just the values you have "
+            "reviewed."
         )
 
     # Compute outliers
