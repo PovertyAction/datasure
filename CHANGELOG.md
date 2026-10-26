@@ -72,7 +72,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `duplicates_headline`; catch `ValueError` where a None was expected
     for stale settings (`overall_error_rate_percent` still returns None)
 - **Check health rows** (#399, #365): Summary's check health card grid is
-  replaced by one row per check, grouped by navigation group under a shared
+  replaced by one row per check, each in its own bordered box, grouped by
+  navigation group under a shared
   Check · Status · Outstanding · Resolved header (`checks/health.py`:
   `health_rows` builds the `HealthRow`s, `render_health_rows` draws them,
   `group_rows` groups them once each in navigation order). Adding a

@@ -185,8 +185,9 @@ to appear.
   not-set-up message ends with the entry's `setup_hint`, "Set it up below."
   by default; Backchecks points to the page linked below instead. Summary computes the outlier and backcheck
   rates inside its own render, so they only run when Summary is shown.
-- **Health rows.** Summary ends with one row per other check, grouped by
-  navigation group under a shared column header (`checks/health.py`:
+- **Health rows.** Summary ends with one row per other check, each in its
+  own bordered container, grouped by navigation group under a shared column
+  header (`checks/health.py`:
   `health_rows` builds them, `render_health_rows` draws them). A catalogue
   entry's optional `headline` function returns a `CheckHeadline`
   (`checks/headline.py`): the outstanding value and its detail line, the
