@@ -11,6 +11,7 @@ import streamlit as st
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.demo_lifecycle import exit_demo, reset_demo_project
 from datasure.utils.duckdb_utils import duckdb_save_table, missing_codes_table_name
+from datasure.utils.navigations_utils import DEMO_CELEBRATED_KEY
 from datasure.utils.onboarding_utils import DEMO_PROJECT_ID, get_onboarding_step
 from datasure.utils.settings_utils import page_settings_file
 
@@ -122,10 +123,12 @@ class TestResetDemoProject:
         session_state["st_project_id"] = DEMO_PROJECT_ID
         session_state["st_prep_dataset_list"] = ["demo_survey"]
         session_state[f"check_nav_household_hfcs__{DEMO_PROJECT_ID}__selected"] = "x"
+        session_state[DEMO_CELEBRATED_KEY] = True
 
         assert reset_demo_project()
 
         assert "st_prep_dataset_list" not in session_state
+        assert DEMO_CELEBRATED_KEY not in session_state
         assert not [k for k in session_state if DEMO_PROJECT_ID in k]
 
     def test_restart_forgets_demo_keys_that_look_like_another_project(
@@ -190,6 +193,7 @@ class TestExitDemo:
                 "st_corr_page": object(),
                 "st_replication_page": object(),
                 f"corrections_nav__{DEMO_PROJECT_ID}__selected": "household_hfcs",
+                DEMO_CELEBRATED_KEY: True,
                 "st_start_page": start_page,
             }
         )
@@ -201,6 +205,7 @@ class TestExitDemo:
             "onboarding_step",
             "st_raw_dataset_list",
             "st_prep_dataset_list",
+            DEMO_CELEBRATED_KEY,
         ):
             assert key not in session_state
         assert session_state["st_output_pages"] == []

@@ -5,13 +5,11 @@ import json
 import pkgutil
 import re
 from datetime import date, datetime, timedelta
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
 
-import datasure
 from datasure.utils.onboarding_utils import (
     DEMO_GUIDANCE_COLUMNS,
     DEMO_OUTPUT_FUNCTIONS,
@@ -96,15 +94,12 @@ class TestImportDemoInfo:
         assert hasattr(ImportDemoInfo, "PROCEED_TO_CONFIG_INFO")
         assert hasattr(ImportDemoInfo, "PROCEED_TO_HFCS_INFO")
 
-    def test_every_message_is_shown_somewhere(self):
+    def test_every_message_is_shown_somewhere(self, datasure_sources):
         """Every ImportDemoInfo message is requested by a page in datasure."""
-        src_root = Path(datasure.__file__).parent
         requested = {
             message_id
-            for path in src_root.rglob("*.py")
-            for message_id in re.findall(
-                r"get_info_message\(\s*\"([a-z_]+)\"", path.read_text("utf-8")
-            )
+            for _path, text in datasure_sources
+            for message_id in re.findall(r"get_info_message\(\s*\"([a-z_]+)\"", text)
         }
         constants = {
             name
@@ -526,17 +521,17 @@ class TestDemoOutputOnboarding:
         ):
             importlib.import_module(module.name)
 
-        shown = {
-            id(OutputOnboardingInfo.get_onboarding_message(tab, name))
+        shown = [
+            OutputOnboardingInfo.get_onboarding_message(tab, name)
             for module, tab, name in DEMO_OUTPUT_FUNCTIONS
             if module.startswith("datasure.")
-        }
+        ]
         unused = sorted(
             f"{group}[{message_id!r}]"
             for group, messages in vars(OutputOnboardingInfo).items()
             if group.isupper() and isinstance(messages, dict)
             for message_id, message in messages.items()
-            if id(message) not in shown
+            if message not in shown
         )
         assert not unused, f"demo messages never shown: {unused}"
 
