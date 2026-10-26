@@ -11,13 +11,19 @@ import polars as pl
 import pytest
 
 from datasure.utils.onboarding_utils import (
+    DEMO_AGE_BOUNDS,
+    DEMO_BACKCHECK_ATTRIBUTIONS,
     DEMO_DUPLICATES,
+    DEMO_GPS_ACCEPT,
     DEMO_GUIDANCE_COLUMNS,
     DEMO_LAND_CORRECTION,
+    DEMO_OUTLIER_ACCEPT,
+    DEMO_OUTLIER_CORRECTION,
     DEMO_OUTPUT_FUNCTIONS,
     DEMO_PROJECT_ID,
     DEMO_PROJECT_NAME,
     DEMO_REPEAT_SUBMISSION,
+    DEMO_SHARED_LONGITUDE,
     DemoColumn,
     DemoDataGenerator,
     ImportDemoInfo,
@@ -1173,6 +1179,46 @@ def load_real_demo(tmp_path, monkeypatch):
     return _load
 
 
+# The backcheck columns, categories and OK ranges from the demo guidance
+_BACKCHECK_GUIDANCE = {
+    "age": (1, [-1, 1]),
+    "household_count": (2, None),
+    "minc_pri": (1, None),
+    "npinc_out": (1, None),
+    "no_save": (1, None),
+    "pri_govt_sch": (1, None),
+}
+
+
+def _demo_backcheck_analysis(survey, backcheck):
+    """Compare the demo survey and backcheck as the Backchecks guidance sets up."""
+    from datasure.checks.backchecks.compute import compute_backcheck_analysis
+    from datasure.checks.backchecks.models import BackcheckSettings
+
+    guidance = _BACKCHECK_GUIDANCE
+    column_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"] * len(guidance),
+            "pattern": list(guidance),
+            "column_name": [[col] for col in guidance],
+            "category": [category for category, _ in guidance.values()],
+            "ok_range_type": ["number" if ok else None for _, ok in guidance.values()],
+            "ok_range_values": [ok for _, ok in guidance.values()],
+            "ttest": [False] * len(guidance),
+            "prtest": [False] * len(guidance),
+            "signrank": [False] * len(guidance),
+            "reliability": [False] * len(guidance),
+        }
+    )
+    settings = BackcheckSettings(
+        survey_key="KEY",
+        survey_id="hhid",
+        enumerator="enum_id",
+        backchecker="bcer_id",
+    )
+    return compute_backcheck_analysis(survey, backcheck, settings, column_settings)
+
+
 class TestRealDemoData:
     """Load the real demo assets through load_demo_data (#360, #364)."""
 
@@ -1263,45 +1309,9 @@ class TestRealDemoData:
 
     def test_recommended_backcheck_columns_have_mismatches(self, load_real_demo):
         """Each column the Backchecks guidance adds shows non-zero error rates."""
-        from datasure.checks.backchecks.compute import compute_backcheck_analysis
-        from datasure.checks.backchecks.models import BackcheckSettings
-
         survey, backcheck = load_real_demo(today=date(2026, 3, 10))
-        # The columns, categories and OK ranges from the demo guidance
-        guidance = {
-            "age": (1, [-1, 1]),
-            "household_count": (2, None),
-            "minc_pri": (1, None),
-            "npinc_out": (1, None),
-            "no_save": (1, None),
-            "pri_govt_sch": (1, None),
-        }
-        column_settings = pl.DataFrame(
-            {
-                "search_type": ["exact"] * len(guidance),
-                "pattern": list(guidance),
-                "column_name": [[col] for col in guidance],
-                "category": [category for category, _ in guidance.values()],
-                "ok_range_type": [
-                    "number" if ok else None for _, ok in guidance.values()
-                ],
-                "ok_range_values": [ok for _, ok in guidance.values()],
-                "ttest": [False] * len(guidance),
-                "prtest": [False] * len(guidance),
-                "signrank": [False] * len(guidance),
-                "reliability": [False] * len(guidance),
-            }
-        )
-        settings = BackcheckSettings(
-            survey_key="KEY",
-            survey_id="hhid",
-            enumerator="enum_id",
-            backchecker="bcer_id",
-        )
 
-        analysis = compute_backcheck_analysis(
-            survey, backcheck, settings, column_settings
-        )
+        analysis = _demo_backcheck_analysis(survey, backcheck)
         mismatches = dict(
             analysis.filter(pl.col("match_status") == "mismatch")
             .group_by("column_name")
@@ -1309,7 +1319,7 @@ class TestRealDemoData:
             .iter_rows()
         )
 
-        for col in guidance:
+        for col in _BACKCHECK_GUIDANCE:
             assert mismatches.get(col, 0) >= 2, col
 
     def test_every_column_named_in_guidance_exists(self, load_real_demo):
@@ -1375,3 +1385,158 @@ class TestRealDemoData:
         )
         low, high = bounds(corrected)
         assert low <= fix.new_value <= high
+
+
+def _demo_flags(survey, flag, bounds=None):
+    """Run the Outliers check on one flagged demo column as guidance sets it up.
+
+    Returns ``(outliers, violations)``: the column's IQR outlier rows and its
+    constraint violation rows (empty without ``bounds``).
+    """
+    from datasure.checks.outliers.compute import (
+        compute_constraint_violations,
+        compute_outlier_output,
+    )
+    from datasure.checks.outliers.models import OutlierSettings
+
+    hard_min, soft_min, soft_max, hard_max = bounds or (None,) * 4
+    config = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": [None],
+            "column_name": [[flag.column]],
+            "grouped_columns": [False],
+            "locked": [False],
+            "outlier_enabled": [True],
+            "outlier_method": ["Interquartile Range (IQR)"],
+            "outlier_multiplier": [1.5],
+            "outlier_threshold": [20],
+            "hard_min": [hard_min],
+            "soft_min": [soft_min],
+            "soft_max": [soft_max],
+            "hard_max": [hard_max],
+        },
+        schema_overrides={
+            bound: pl.Float64
+            for bound in ("hard_min", "soft_min", "soft_max", "hard_max")
+        },
+    )
+    settings = OutlierSettings(survey_key=DemoColumn.KEY, survey_id=DemoColumn.HHID)
+    # Negative values are missing codes such as -99, which the check skips
+    data = survey.with_columns(
+        pl.when(pl.col(flag.column) >= 0).then(pl.col(flag.column)).alias(flag.column)
+    )
+    outliers = compute_outlier_output(data, settings, config).filter(
+        pl.col("outlier reason") != "no outlier"
+    )
+    violations = pl.DataFrame()
+    if bounds:
+        violations = compute_constraint_violations(data, settings, config).filter(
+            pl.col("violation reason") != "no violation"
+        )
+    return outliers, violations
+
+
+class TestReviewGuidanceValues:
+    """Values the check-page review guidance names are flagged in the demo (#361)."""
+
+    def test_value_to_accept_breaches_only_a_soft_age_bound(self, load_real_demo):
+        """The age guidance accepts is unusual (soft) but not impossible (hard)."""
+        survey, _ = load_real_demo(today=date(2026, 3, 10))
+        flag = DEMO_OUTLIER_ACCEPT
+        row = survey.filter(pl.col(DemoColumn.KEY) == flag.key)
+        assert row[DemoColumn.HHID].to_list() == [flag.hhid]
+        assert row[flag.column].to_list() == [flag.value]
+        assert flag.new_value is None
+
+        _, violations = _demo_flags(survey, flag, DEMO_AGE_BOUNDS)
+
+        reasons = violations.filter(pl.col(DemoColumn.KEY) == flag.key)[
+            "violation reason"
+        ].to_list()
+        assert len(reasons) == 1
+        assert "soft" in reasons[0]
+        assert not violations["violation reason"].str.contains("hard").any()
+
+    def test_value_to_correct_on_the_check_page_is_an_outlier(self, load_real_demo):
+        """The land value guidance corrects in the Review dialog is flagged."""
+        survey, _ = load_real_demo(today=date(2026, 3, 10))
+        flag = DEMO_OUTLIER_CORRECTION
+        row = survey.filter(pl.col(DemoColumn.KEY) == flag.key)
+        assert row[DemoColumn.HHID].to_list() == [flag.hhid]
+        assert row[flag.column].to_list() == [flag.value]
+        # The Correct Data step still has its own value left to fix
+        assert flag.key != DEMO_LAND_CORRECTION.key
+
+        outliers, _ = _demo_flags(survey, flag)
+
+        assert flag.key in outliers[DemoColumn.KEY].to_list()
+        corrected = survey.with_columns(
+            pl.when(pl.col(DemoColumn.KEY) == flag.key)
+            .then(flag.new_value)
+            .otherwise(pl.col(flag.column))
+            .alias(flag.column)
+        )
+        outliers, _ = _demo_flags(corrected, flag)
+        assert flag.key not in outliers[DemoColumn.KEY].to_list()
+
+    def test_gps_outlier_to_accept_is_flagged_by_state(self, load_real_demo):
+        """Cluster by Column on state, after the Duplicates Drop, flags the record."""
+        from datasure.checks.gpschecks.compute import detect_outliers_with_clusters
+
+        survey, _ = load_real_demo(today=date(2026, 3, 10))
+        record = DEMO_GPS_ACCEPT
+        row = survey.filter(pl.col(DemoColumn.KEY) == record.key)
+        assert row[DemoColumn.HHID].to_list() == [record.hhid]
+        kept = survey.filter(pl.col(DemoColumn.KEY) != DEMO_REPEAT_SUBMISSION.key)
+
+        flagged = detect_outliers_with_clusters(
+            kept.to_pandas(),
+            DemoColumn.HOUSEHOLD_LATITUDE,
+            DemoColumn.HOUSEHOLD_LONGITUDE,
+            DemoColumn.STATE,
+        )
+
+        outlier_keys = flagged.loc[flagged["Outlier"], DemoColumn.KEY].tolist()
+        assert record.key in outlier_keys
+
+    @pytest.mark.parametrize(
+        "mismatch",
+        DEMO_BACKCHECK_ATTRIBUTIONS,
+        ids=lambda m: f"{m.hhid}-{m.column}",
+    )
+    def test_mismatch_to_attribute_is_a_backcheck_mismatch(
+        self, load_real_demo, mismatch
+    ):
+        """Each mismatch the attribution guidance names shows as a mismatch."""
+        survey, backcheck = load_real_demo(today=date(2026, 3, 10))
+        assert survey.filter(pl.col(DemoColumn.KEY) == mismatch.key)[
+            DemoColumn.HHID
+        ].to_list() == [mismatch.hhid]
+
+        analysis = _demo_backcheck_analysis(survey, backcheck)
+
+        row = analysis.filter(
+            (pl.col(DemoColumn.KEY) == mismatch.key)
+            & (pl.col("column_name") == mismatch.column)
+        )
+        assert row["match_status"].to_list() == ["mismatch"]
+        assert float(row["survey_value"].item()) == mismatch.survey_value
+        assert float(row["backcheck_value"].item()) == mismatch.backcheck_value
+
+    def test_other_duplicates_find_only_the_shared_longitude(self, load_real_demo):
+        """Of the two GPS columns guidance checks, only longitude repeats a value."""
+        from datasure.checks.duplicates import compute_column_duplicates
+
+        survey, _ = load_real_demo(today=date(2026, 3, 10))
+        shared = DEMO_SHARED_LONGITUDE
+
+        def duplicates(column):
+            return compute_column_duplicates(
+                survey, DemoColumn.HHID, DemoColumn.SUBMISSIONDATE, column
+            )
+
+        assert duplicates(DemoColumn.HOUSEHOLD_LATITUDE).is_empty()
+        found = duplicates(shared.column)
+        assert sorted(found[DemoColumn.HHID]) == sorted(shared.hhids)
+        assert set(found[shared.column].cast(pl.Float64)) == {shared.value}

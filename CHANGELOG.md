@@ -131,6 +131,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   budget. None is over it: the slowest delta, Outliers, is about 0.3 s on the
   generated form in every period, and the deltas add 0.7 to 0.9 s to the
   rows end to end, so every delta is still computed on load
+- **Demo guidance for check-page reviews** (#361, #365): `demo_callout`s walk
+  through accepting a soft age violation and correcting a land outlier in
+  the Outliers **Review** dialog (with **Show reviewed**), accepting a GPS
+  outlier, attributing two backcheck mismatches (Enumerator without a note,
+  Respondent with one) and reading the **Attribution log**, and checking the
+  GPS columns under **Other Duplicates**. The values they name are new
+  entries in `onboarding_utils.py` (`DEMO_AGE_BOUNDS`, `DEMO_OUTLIER_ACCEPT`,
+  `DEMO_OUTLIER_CORRECTION`, `DEMO_GPS_ACCEPT`,
+  `DEMO_BACKCHECK_ATTRIBUTIONS`, `DEMO_SHARED_LONGITUDE`), each tested
+  against the real demo data in `TestReviewGuidanceValues`. The GPS
+  outliers guidance moved into `_render_gps_outliers_checks`, so it also
+  shows without a Mapbox token
 
 ### Changed
 
@@ -238,6 +250,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Stale demo guidance on check pages** (#361, #365): the Backchecks Summary
+  callout said four metrics (five show, including Mismatches Attributed), the
+  GPS outliers callout said the outliers could only be downloaded, and the
+  Other Duplicates callout said to skip the section
 - **Restart Demo did not reset the demo** (#357): After Restart, correction
   logs, page settings and per-check configs from the previous demo came back
   when the "Household HFCs" page was recreated, and Exit Demo left demo
