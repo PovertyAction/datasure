@@ -79,7 +79,9 @@ from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import (
     DEMO_GPS_ACCEPT,
+    DEMO_SHOW_REVIEWED,
     DemoColumn,
+    demo_accept_steps,
     is_demo_project,
 )
 from datasure.utils.settings_utils import page_settings_file
@@ -1561,15 +1563,14 @@ def _render_gps_outliers_checks(
             f"1. Find KEY **{accept.key}** ({DemoColumn.HHID} **{accept.hhid}**). "
             "It is far from the other Gujarat households, but the household is in "
             "a real village in north Gujarat, so the point is correct.\n"
-            "2. Click **:material/edit_note: Review** on that row. The **Correct "
-            "or accept GPS outlier** dialog opens.\n"
-            "3. Set **Select Action** to **accept**, enter a **Reason for "
-            "Correction** (e.g., *Village confirmed by the field team*) and click "
-            "**Apply**.\n\n"
-            "Accepted outliers are no longer counted in **Outliers Detected**. "
-            "Turn on **Show reviewed** to list them again, highlighted green with "
-            "your reason"
-            + (", and see them in green on the map" if show_map else "")
+            + demo_accept_steps(
+                REVIEW_BUTTON_LABEL,
+                "Correct or accept GPS outlier",
+                "Village confirmed by the field team",
+            )
+            + "Accepted outliers are no longer counted in **Outliers Detected**. "
+            + DEMO_SHOW_REVIEWED
+            + (", and see it in green on the map" if show_map else "")
             + ". For a point that is truly wrong, choose **modify coordinates** to "
             "enter the right ones, **remove coordinates**, or **remove "
             "observation**. **Download Outliers Data** saves the list as a file."

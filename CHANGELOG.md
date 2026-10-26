@@ -149,9 +149,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     target of the main page and removes a throwaway second page, so the
     walkthrough page survives; the page names and targets are named once in
     `DEMO_PAGE_NAME`, `DEMO_SURVEY_TARGET`, `DEMO_EDITED_TARGET` and
-    `DEMO_THROWAWAY_PAGE`. `OnboardingSteps.REPLICATION` adds an **Exclude
-    reviewer names** step and a project export from the demo row, and explains
-    Update from configuration and Delete project without running them
+    `DEMO_THROWAWAY_PAGE`. `OnboardingSteps.REPLICATION` starts with a project
+    export from the demo row, since ticking the PII confirmation at the end
+    completes the demo, then builds the package in page order (**Page Name**,
+    **Exclude reviewer names** just below it, then **Selected page details**).
+    It explains Update from configuration and Delete project without running
+    them
   - New `ImportDemoInfo.SURVEYCTO_INFO` replaces the Import Data callout above
     Manage Credentials. It walks through the SurveyCTO credential and import
     forms without a server or credentials and says not to submit them
@@ -167,9 +170,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Respondent with one) and reading the **Attribution log**, and checking the
   GPS columns under **Other Duplicates**. The values they name are new
   entries in `onboarding_utils.py` (`DEMO_AGE_BOUNDS`, `DEMO_OUTLIER_ACCEPT`,
-  `DEMO_OUTLIER_CORRECTION`, `DEMO_GPS_ACCEPT`,
-  `DEMO_BACKCHECK_ATTRIBUTIONS`, `DEMO_SHARED_LONGITUDE`), each tested
-  against the real demo data in `TestReviewGuidanceValues`. The GPS
+  `DEMO_OUTLIER_CORRECTION`, `DEMO_GPS_ACCEPT`, `DEMO_ATTRIBUTION_NO_NOTE`,
+  `DEMO_ATTRIBUTION_WITH_NOTE`, `DEMO_SHARED_LONGITUDE`), each tested
+  against the real demo data in `TestReviewGuidanceValues`. Records are a
+  `DemoRecord` (hhid, KEY); `DemoFlag` and `DemoMismatch` hold one, and
+  `DemoFlag` also replaces `DemoCorrection` for `DEMO_LAND_CORRECTION`. The
+  Outliers and GPS callouts share `demo_accept_steps` and
+  `DEMO_SHOW_REVIEWED`, and name the Review button by `REVIEW_BUTTON_LABEL`.
+  The backcheck callout (`_attribution_guidance`) names the column by
+  `ERROR_SOURCE_LABEL` ("Error Source"), the header users see. The GPS
   outliers guidance moved into `_render_gps_outliers_checks`, so it also
   shows without a Mapbox token
 
