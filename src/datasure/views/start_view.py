@@ -12,7 +12,11 @@ from pydantic import ValidationError
 from datasure.models.schemas import ProjectConfigBundle
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
-from datasure.utils.demo_lifecycle import RESTART_DEMO_MESSAGE, reset_demo_project
+from datasure.utils.demo_lifecycle import (
+    DEMO_RESET_FAILED_MESSAGE,
+    RESTART_DEMO_MESSAGE,
+    reset_demo_project,
+)
 from datasure.utils.duckdb_utils import duckdb_get_aliases
 from datasure.utils.onboarding_utils import DEMO_PROJECT_ID, show_demo_intro
 from datasure.utils.project_config import (
@@ -21,7 +25,7 @@ from datasure.utils.project_config import (
     render_config_resolution_and_apply,
     render_project_config_wizard,
 )
-from datasure.utils.ui_utils import confirm_dialog
+from datasure.utils.ui_utils import confirm_dialog, queue_notice, show_queued_notices
 
 logger = logging.getLogger(__name__)
 
@@ -179,20 +183,28 @@ def _activate_project(project_id: str) -> None:
     st.switch_page(st.session_state.st_import_data_page)
 
 
+# `queue_notice` scope of the demo row's messages.
+_DEMO_NOTICE_SCOPE = "start_demo"
+
+
 def _launch_fresh_demo():
-    """Rebuild the demo project from scratch and navigate to the import page."""
+    """Rebuild the demo project from scratch and navigate to the import page.
+
+    On failure the error is queued and the page reruns, so it shows on the
+    demo row whether this ran from the Start button or the Restart dialog.
+    """
     with st.spinner("Loading demo data..."):
-        if reset_demo_project():
-            st.switch_page(st.session_state.st_import_data_page)
-        else:
-            st.error(
-                "Failed to reset the demo. Close any other DataSure windows "
-                "and try again."
-            )
+        reset = reset_demo_project()
+    if reset:
+        st.switch_page(st.session_state.st_import_data_page)
+        return
+    queue_notice(_DEMO_NOTICE_SCOPE, "error", DEMO_RESET_FAILED_MESSAGE)
+    st.rerun()
 
 
 def _render_demo_row() -> None:
     """Render the pinned DataSure Demo row."""
+    show_queued_notices(_DEMO_NOTICE_SCOPE)
     demo_exists = DEMO_PROJECT_ID in load_projects()
 
     if not demo_exists:

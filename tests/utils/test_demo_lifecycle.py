@@ -137,7 +137,6 @@ class TestExitDemo:
             {
                 "st_project_id": DEMO_PROJECT_ID,
                 "onboarding_step": 4,
-                "_sidebar_confirm_restart": True,
                 "st_raw_dataset_list": ["demo_survey", "demo_backcheck"],
                 "st_prep_dataset_list": ["demo_survey"],
                 "st_output_pages": [object()],
@@ -154,7 +153,6 @@ class TestExitDemo:
         assert session_state["st_project_id"] == ""
         for key in (
             "onboarding_step",
-            "_sidebar_confirm_restart",
             "st_raw_dataset_list",
             "st_prep_dataset_list",
         ):
@@ -177,3 +175,48 @@ class TestExitDemo:
         exit_demo()
 
         assert session_state["prep_nav__a1b2c3d4__selected"] == "survey"
+
+    def test_exit_keeps_app_wide_state(self, session_state):
+        session_state.update(
+            {
+                "st_project_id": DEMO_PROJECT_ID,
+                "reviewer_name_input": "Ama",
+                "st_queued_notices": {"start_demo": []},
+            }
+        )
+
+        exit_demo()
+
+        assert session_state["reviewer_name_input"] == "Ama"
+        assert session_state["st_queued_notices"] == {"start_demo": []}
+
+    def test_project_opened_after_exit_sees_no_demo_state(
+        self, demo_cache, session_state
+    ):
+        """No demo datasets or replication package carry over to the next project."""
+        assert reset_demo_project()
+        # What working through the demo leaves in session state.
+        session_state.update(
+            {
+                "_replication_build_settings": ("demo_survey",),
+                "_replication_zip": b"PK demo package",
+                "_replication_filename": "datasure_demo_replication.zip",
+                "_replication_exclude_reviewer_names": True,
+                "_replication_pii_confirmed": True,
+                "refresh_import_log": True,
+                "imported_data_select": "demo_survey",
+                "iddup_demo_survey_sort": "hhid",
+            }
+        )
+
+        exit_demo()
+        session_state["st_project_id"] = "a1b2c3d4"  # open a real project
+
+        leftover = {
+            k: v
+            for k, v in session_state.items()
+            if "demo" in str(k) or "demo" in repr(v)
+        }
+        assert leftover == {}
+        assert "st_raw_dataset_list" not in session_state
+        assert "_replication_zip" not in session_state
