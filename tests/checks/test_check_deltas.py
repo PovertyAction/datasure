@@ -135,13 +135,6 @@ class TestProgressDelta:
 
         assert _delta("progress", ctx) is None
 
-    def test_no_delta_when_the_earlier_check_has_no_headline(self, tmp_path):
-        ctx = _ctx(_config(tmp_path), SURVEY)
-        earlier = "datasure.checks.health_deltas.progress_headline"
-
-        with patch(earlier, return_value=None):
-            assert _delta("progress", ctx) is None
-
 
 class TestMissingDelta:
     def test_change_in_percentage_points(self, tmp_path):
@@ -164,8 +157,6 @@ class TestMissingDelta:
         earlier = "datasure.checks.health_deltas.missing_headline"
 
         with patch(earlier, return_value=CheckHeadline("—")):
-            assert _delta("missing", ctx) is None
-        with patch(earlier, return_value=None):
             assert _delta("missing", ctx) is None
 
 
@@ -275,6 +266,45 @@ class TestDuplicatesDelta:
         _save_correction_log([self._removed("k7", "h2", datetime(2026, 10, 20, 9))])
 
         assert _delta("duplicates", ctx) == CheckDelta(outstanding=1, resolved=0)
+
+    def test_an_entry_logged_without_the_id_resolves_it_by_key(self, tmp_path):
+        # The Correct Data page logs no Survey ID when its own is not set.
+        ctx = self._ctx(tmp_path)
+        _save_correction_log(
+            [
+                self._removed("k6", None, datetime(2026, 10, 26, 9)),
+                self._removed("k7", "h2", datetime(2026, 10, 20, 9)),
+            ]
+        )
+
+        assert _delta("duplicates", ctx).resolved == 1
+
+    def test_a_later_entry_on_an_id_resolved_before_does_not_count(self, tmp_path):
+        # h2 was resolved before the period when k7 was removed; k2, its last
+        # record, was then removed in the period.
+        data = SURVEY.filter(pl.col("key") != "k2")
+        ctx = self._ctx(tmp_path, data)
+        _save_correction_log(
+            [
+                self._removed("k6", "h1", datetime(2026, 10, 20, 9)),
+                self._removed("k7", "h2", datetime(2026, 10, 20, 9)),
+                self._removed("k2", "h2", datetime(2026, 10, 26, 9)),
+            ]
+        )
+
+        assert _delta("duplicates", ctx).resolved == 0
+
+    def test_a_log_without_entries_resolves_nothing(self, tmp_path):
+        # 1.1.0 saved a log with only the status columns.
+        ctx = self._ctx(tmp_path)
+        duckdb_save_table(
+            PROJECT_ID,
+            pl.DataFrame({"status": ["Successful"]}),
+            "corr_log_survey",
+            "logs",
+        )
+
+        assert _delta("duplicates", ctx).resolved == 0
 
 
 class TestOutliersDelta:

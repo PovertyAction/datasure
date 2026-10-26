@@ -944,9 +944,11 @@ as new.
 Under **Resolved**, "+N since …" counts the resolutions made in the period
 that are still in effect: corrections and acceptances from the correction log
 (Duplicates, Outliers & Constraints, GPS Checks) and error-source attributions
-(Backchecks). A duplicate ID counts when the latest correction that removed
-one of its records, or changed or removed its ID, was made in the period;
-correcting another column of a record with that ID does not count. A GPS point
+(Backchecks). A duplicate ID counts when it was still duplicated at the start
+of the period and a correction made in the period removed one of its records,
+or changed or removed its ID; correcting another column of a record with that
+ID does not count, and neither does a later correction to an ID that was
+already resolved. A GPS point
 counts when the latest correction or acceptance that resolved it was made in
 the period. An undone correction, an acceptance whose value has changed since,
 and an attribution later changed back to Unattributed drop out.

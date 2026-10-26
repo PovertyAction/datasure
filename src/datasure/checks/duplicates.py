@@ -13,7 +13,7 @@ import datetime
 import logging
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import polars as pl
 import streamlit as st
@@ -42,7 +42,11 @@ from datasure.models.schemas import (
     DuplicatesStats,
     FilterCondition,
 )
-from datasure.processing.correction_log import Action, ensure_log_columns
+from datasure.processing.correction_log import (
+    Action,
+    empty_correction_log,
+    ensure_log_columns,
+)
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import (
@@ -2131,13 +2135,40 @@ def _resolved_id_set(
     """
     if not alias or not id_col:
         return set()
-    uncorrected = processor.get_uncorrected_data(alias)
-    try:
-        uncorrected = apply_records_to_include(uncorrected, conditions)
-    except ValueError as e:
-        logger.warning("Records to Include failed on uncorrected %s data: %s", alias, e)
+    uncorrected = _uncorrected_included(processor, alias, conditions)
+    if uncorrected is None:
         return set()
     return resolved_ids(uncorrected, included, id_col)
+
+
+def _uncorrected_included(
+    processor: CorrectionProcessor, alias: str, conditions: dict
+) -> pl.DataFrame | None:
+    """Return the uncorrected records the Records to Include filter keeps.
+
+    None when the filter cannot be applied to them.
+    """
+    uncorrected = processor.get_uncorrected_data(alias)
+    try:
+        return apply_records_to_include(uncorrected, conditions)
+    except ValueError as e:
+        logger.warning("Records to Include failed on uncorrected %s data: %s", alias, e)
+        return None
+
+
+_RESOLVED_KEYS_SCHEMA = {"KEY": pl.String, "ID": pl.String}
+
+
+def _resolved_keys(
+    uncorrected: pl.DataFrame, resolved: set[str], id_col: str, key_col: str | None
+) -> pl.DataFrame:
+    """Return the KEY and ID, as text, of the uncorrected records with a resolved ID."""
+    if not key_col or not {key_col, id_col} <= set(uncorrected.columns):
+        return pl.DataFrame(schema=_RESOLVED_KEYS_SCHEMA)
+    return uncorrected.select(
+        pl.col(key_col).cast(pl.String).alias("KEY"),
+        pl.col(id_col).cast(pl.String).alias("ID"),
+    ).filter(pl.col("ID").is_in(list(resolved)))
 
 
 def _resolved_ids(
@@ -2457,11 +2488,17 @@ class DuplicatesBasis:
         The survey ID column.
     resolved : set[str] | None
         The duplicate IDs corrections resolved; None without an alias.
+    resolved_keys : pl.DataFrame
+        The KEY and ID, as text, of each uncorrected record holding a
+        resolved ID. Empty without them or the survey KEY column.
     """
 
     records: pl.DataFrame
     id_col: str | None
     resolved: set[str] | None
+    resolved_keys: pl.DataFrame = field(
+        default_factory=lambda: pl.DataFrame(schema=_RESOLVED_KEYS_SCHEMA)
+    )
 
 
 def _duplicates_basis(
@@ -2501,20 +2538,19 @@ def _duplicates_basis(
             display_cols_setting="id_table_display_cols",
         )
     )
+    id_col = settings.survey_id
     # Without an alias there is no uncorrected data to compare with, so the
     # resolved IDs are unknown rather than none.
-    resolved = (
-        _resolved_id_set(
-            CorrectionProcessor(project_id),
-            alias,
-            conditions,
-            settings.survey_id,
-            records.data,
-        )
-        if alias
-        else None
+    if not alias:
+        return DuplicatesBasis(records.data, id_col, None), count
+    uncorrected = _uncorrected_included(
+        CorrectionProcessor(project_id), alias, conditions
     )
-    return DuplicatesBasis(records.data, settings.survey_id, resolved), count
+    if not id_col or uncorrected is None:
+        return DuplicatesBasis(records.data, id_col, set()), count
+    resolved = resolved_ids(uncorrected, records.data, id_col)
+    held = _resolved_keys(uncorrected, resolved, id_col, settings.survey_key)
+    return DuplicatesBasis(records.data, id_col, resolved, held), count
 
 
 def duplicates_headline(
@@ -2577,8 +2613,8 @@ def _resolving_entries(log: pl.DataFrame, id_col: str) -> pl.DataFrame:
     Removing a record, or changing or removing its ID. An entry correcting
     another column of a record with the ID leaves the duplicate as it was.
     """
-    if not {"action", "column", "status", "ID", "date"} <= set(log.columns):
-        return log.clear()
+    if not {"action", "column", "status", "KEY", "date"} <= set(log.columns):
+        return empty_correction_log()
     on_id = pl.col("action").is_in(
         [Action.MODIFY_VALUE.value, Action.REMOVE_VALUE.value]
     ) & (pl.col("column") == id_col)
@@ -2591,17 +2627,34 @@ def _resolving_entries(log: pl.DataFrame, id_col: str) -> pl.DataFrame:
 def _resolved_in_period(
     project_id: str, alias: str, basis: DuplicatesBasis, window: DeltaWindow
 ) -> int:
-    """Count the resolved IDs whose latest resolving entry is in the period."""
-    if not basis.resolved or not basis.id_col:
+    """Count the resolved IDs still duplicated at the period start.
+
+    Entries match an ID through the KEYs of the records that held it before
+    corrections, so an entry logged under another Survey ID, or none, still
+    counts. A record left the ID at its first resolving entry. An ID counts
+    when two or more of its records had not left it by the period start and
+    one left it in the period, so a later entry on an ID resolved earlier
+    does not count it again.
+    """
+    if not basis.resolved or not basis.id_col or basis.resolved_keys.is_empty():
         return 0
     # Read directly: the health rows cache their own results.
     log = _resolving_entries(
         ensure_log_columns(duckdb_get_table(project_id, f"corr_log_{alias}", "logs")),
         basis.id_col,
     )
-    latest = log.group_by(pl.col("ID").cast(pl.String)).agg(pl.col("date").max())
-    recent = latest.filter(logged_after(latest, window.as_of))["ID"]
-    return len(basis.resolved & set(recent.drop_nulls()))
+    left = log.group_by(pl.col("KEY").cast(pl.String)).agg(pl.col("date").min())
+    left = left.with_columns(in_period=logged_after(left, window.as_of))
+    # A record with no entry (null) still held its ID at the period start.
+    by_id = (
+        basis.resolved_keys.join(left, on="KEY", how="left")
+        .group_by("ID")
+        .agg(
+            held=pl.col("in_period").fill_null(True).sum(),
+            left_in_period=pl.col("in_period").fill_null(False).any(),
+        )
+    )
+    return by_id.filter((pl.col("held") > 1) & pl.col("left_in_period")).height
 
 
 def duplicates_delta(
@@ -2618,8 +2671,9 @@ def duplicates_delta(
     Outstanding: the unresolved duplicate IDs `duplicates_headline` counts
     that a submission dated in the period holds, including an ID already
     duplicated before the period that a new submission joins. Resolved: the
-    IDs the headline counts as resolved whose latest resolving correction
-    (a removed record, or a changed or removed ID) was logged in the period.
+    IDs the headline counts as resolved that were still duplicated at the
+    period start and that a correction logged in the period resolved
+    (a removed record, or a changed or removed ID, matched by KEY).
     An undone correction is no longer in the log, so it drops out. Takes the
     parameters of `duplicates_headline`, the window, and `basis`: the
     headline's basis, computed on `data`; None computes it.

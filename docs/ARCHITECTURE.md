@@ -244,9 +244,11 @@ to appear.
   matched to the headline's key, so a cached headline still passes it on
   and no basis outlives the data it was computed on. Resolved deltas count
   log entries made after the period start that are still in effect:
-  duplicate IDs resolved now whose latest resolving `corr_log_{alias}` entry
-  (a removed record, or a changed or removed ID; undo deletes the entry) is
-  recent, flags marked with only the recent active acceptances and
+  duplicate IDs resolved now that two or more records still held at the
+  period start and that a recent `corr_log_{alias}` entry resolved (a removed
+  record, or a changed or removed ID; undo deletes the entry), matched to the
+  ID through the KEYs its records had before corrections
+  (`DuplicatesBasis.resolved_keys`), so the log's own `ID` is not used, flags marked with only the recent active acceptances and
   corrections (`ReviewContext.entries_after`), mismatches marked with only
   the recent `bc_attribution` entries (the latest entry per cell wins, so a
   cell counts only when its latest entry is recent), and for GPS the

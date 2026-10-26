@@ -263,7 +263,7 @@ def _keep_basis(
         return headline
     with _cache_lock:
         _bases[slug] = (key, headline.basis)
-    return replace(headline, basis=None)
+    return replace(headline, basis=None)  # NOSONAR(S5886): replace keeps the type
 
 
 def _with_basis(
@@ -274,7 +274,7 @@ def _with_basis(
         kept = _bases.get(slug)
     if headline is None or kept is None or kept[0] != key:
         return headline
-    return replace(headline, basis=kept[1])
+    return replace(headline, basis=kept[1])  # NOSONAR(S5886): replace keeps the type
 
 
 def _frame_fingerprint(data: pl.DataFrame | None) -> Hashable | None:
@@ -415,6 +415,24 @@ def _row_delta(
         return None, f"{type(exc).__name__}: {exc}"
 
 
+def _row_headline(
+    ctx: CheckContext,
+    slug: str,
+    headline: Headline,
+    fingerprint: Hashable | None,
+    view_key: Callable[[CheckContext], Hashable] | None,
+) -> tuple[CheckHeadline | None, Hashable | None]:
+    """Compute a row's headline, cached on the page and view; return it and its key.
+
+    The key is None, and the headline not cached, without a page fingerprint.
+    """
+    if fingerprint is None:
+        return headline(ctx), None
+    key = (slug, fingerprint, view_key(ctx) if view_key else None)
+    value = _cached(key, lambda: _keep_basis(slug, key, headline(ctx)))
+    return _with_basis(slug, key, value), key
+
+
 def health_rows(
     ctx: CheckContext,
     items: Iterable[NavItem],
@@ -462,19 +480,10 @@ def health_rows(
         if item.status is not CheckStatus.READY or headline is None:
             rows.append(HealthRow(item))
             continue
-        view_key = (view_keys or {}).get(item.slug)
-        key = None
         try:
-            if fingerprint is not None:
-                key = (item.slug, fingerprint, view_key(ctx) if view_key else None)
-            if key is None:
-                value = headline(ctx)
-            else:
-                value = _cached(
-                    key,
-                    lambda h=headline, s=item.slug, k=key: _keep_basis(s, k, h(ctx)),
-                )
-                value = _with_basis(item.slug, key, value)
+            value, key = _row_headline(
+                ctx, item.slug, headline, fingerprint, (view_keys or {}).get(item.slug)
+            )
         # UI boundary: one check's numbers must not stop the other rows. The
         # error is shown on the row by render_health_rows (deferred display,
         # see CONTRIBUTING "Error Handling Conventions").

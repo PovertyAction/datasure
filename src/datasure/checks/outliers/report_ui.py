@@ -1674,7 +1674,7 @@ def _on_keys(flags: _ReviewedFlags, keys: pl.Series) -> _ReviewedFlags:
             pl.col(flags.survey_key).cast(pl.String).is_in(keys.implode())
         )
 
-    return replace(
+    return replace(  # NOSONAR(S5886): replace keeps the type
         flags, outliers=kept(flags.outliers), violations=kept(flags.violations)
     )
 

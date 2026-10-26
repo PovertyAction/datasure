@@ -118,7 +118,7 @@ def _before(ctx: CheckContext, window: DeltaWindow) -> CheckContext | None:
     column, data = window.survey_date, ctx.data.page_data
     if not column or column not in data.columns:
         return None
-    return replace(
+    return replace(  # NOSONAR(S5886): replace keeps the type
         ctx,
         data=CheckData(
             on_or_before(data, column, window.as_of), ctx.data.backcheck_data
@@ -136,8 +136,6 @@ def progress(
     then = progress_headline(
         before.data.page_data, ctx.config.setting_file, progress_config(ctx)
     )
-    if then is None:
-        return None
     return CheckDelta(now.count - (then.count or 0), kind=DeltaKind.SUBMISSIONS)
 
 
@@ -150,7 +148,7 @@ def missing(
     if before is None or before.data.page_data.is_empty() or now.outstanding is None:
         return None
     then = missing_headline(ctx.project_id, before.data.page_data)
-    if then is None or then.outstanding is None:
+    if then.outstanding is None:
         return None
     return CheckDelta(now.outstanding - then.outstanding, kind=DeltaKind.POINTS)
 
