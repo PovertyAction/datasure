@@ -449,7 +449,12 @@ class TestSummaryHealthRows:
 
         check_page.render(SURVEY)
 
-        assert check_page.rows()["Descriptive Stats"] == ["No issues", "**—**", "—"]
+        assert check_page.rows()["Descriptive Stats"] == [
+            "No issues",
+            "**—**",
+            "Status only",
+            "—",
+        ]
 
     def test_not_ready_rows_show_their_status_and_reason(self, page):
         check_page = page()

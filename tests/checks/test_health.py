@@ -9,8 +9,10 @@ import pytest
 from datasure.checks.context import CheckContext, CheckData, PageConfig
 from datasure.checks.headline import CheckHeadline
 from datasure.checks.health import (
+    HealthRow,
     RowState,
     clear_headline_cache,
+    group_rows,
     health_rows,
 )
 from datasure.utils.dataframe_utils import get_df_columns
@@ -146,6 +148,7 @@ class TestHealthRows:
 
         assert row.headline is None
         assert row.action == "Open →"
+        assert (row.value, row.detail, row.resolved) == ("—", "Status only", "—")
 
     def test_a_number_that_fails_shows_an_error_row_only(self, tmp_path):
         ctx = _ctx(_config(tmp_path), DATA)
@@ -196,9 +199,9 @@ class TestRowStatus:
         row = _rows(ctx, [item], headlines)[item.slug]
 
         assert row.state is state
-        pill_colour, icon, pill_label = row.pill
-        assert (pill_colour, pill_label) == (colour, label)
-        assert icon.startswith(":material/")
+        pill = row.state.pill
+        assert (pill.colour, pill.label) == (colour, label)
+        assert pill.icon.startswith(":material/")
 
     def test_informational_checks_are_never_flagged(self, tmp_path):
         ctx = _ctx(_config(tmp_path), DATA)
@@ -211,8 +214,36 @@ class TestRowStatus:
     def test_each_state_has_its_own_icon_and_label(self):
         pills = {RowState(state).pill for state in RowState}
 
-        assert len({icon for _, icon, _ in pills}) == len(RowState)
-        assert len({label for _, _, label in pills}) == len(RowState)
+        assert len({pill.icon for pill in pills}) == len(RowState)
+        assert len({pill.label for pill in pills}) == len(RowState)
+
+    @pytest.mark.parametrize(
+        ("item", "action"),
+        [
+            (OUTLIERS, "Set up →"),
+            (GPS, None),
+            (ERROR_ITEM, "Open →"),
+            (DUPLICATES, "Open →"),
+        ],
+        ids=["not-set-up", "not-applicable", "error", "ready"],
+    )
+    def test_action_follows_the_state(self, item, action):
+        assert HealthRow(item).action == action
+
+
+class TestGroupRows:
+    def test_each_group_once_in_order_of_first_appearance(self):
+        rows = [
+            HealthRow(NavItem("a", "A", ":material/a:", "Overview")),
+            HealthRow(NavItem("b", "B", ":material/b:", "Data")),
+            HealthRow(NavItem("c", "C", ":material/c:", "Overview")),
+        ]
+
+        grouped = group_rows(rows)
+
+        assert [
+            (group, [row.item.slug for row in members]) for group, members in grouped
+        ] == [("Overview", ["a", "c"]), ("Data", ["b"])]
 
 
 class TestHeadlineCache:

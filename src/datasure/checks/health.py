@@ -19,8 +19,8 @@ from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from dataclasses import astuple, dataclass
 from datetime import date
 from enum import StrEnum
-from itertools import groupby
 from pathlib import Path
+from typing import NamedTuple
 
 import polars as pl
 
@@ -38,6 +38,16 @@ OPEN_ACTION = "Open →"
 SET_UP_ACTION = "Set up →"
 # Shown in place of a number a row does not have.
 NO_NUMBER = "—"
+# The detail of a ready check with no numbers, such as Descriptive Stats.
+STATUS_ONLY = "Status only"
+
+
+class Pill(NamedTuple):
+    """A status pill: colour, icon and label, so status is not colour alone."""
+
+    colour: str
+    icon: str
+    label: str
 
 
 class RowState(StrEnum):
@@ -53,21 +63,29 @@ class RowState(StrEnum):
     NO_ISSUES = "no_issues"
 
     @property
-    def pill(self) -> tuple[str, str, str]:
-        """The pill's colour, icon and label, so status is not colour alone."""
+    def pill(self) -> Pill:
+        """The state's status pill."""
         return _PILLS[self]
 
+    @property
+    def action(self) -> str | None:
+        """The row's button label, or None when there is nothing to do."""
+        return _ACTIONS.get(self, OPEN_ACTION)
 
-_PILLS: dict[RowState, tuple[str, str, str]] = {
-    RowState.NOT_SET_UP: ("gray", ":material/build:", "Not set up"),
-    RowState.NOT_APPLICABLE: (
-        "gray",
-        ":material/do_not_disturb_on:",
-        "Not applicable",
+
+_PILLS: dict[RowState, Pill] = {
+    RowState.NOT_SET_UP: Pill("gray", ":material/build:", "Not set up"),
+    RowState.NOT_APPLICABLE: Pill(
+        "gray", ":material/do_not_disturb_on:", "Not applicable"
     ),
-    RowState.ERROR: ("red", ":material/error:", "Error"),
-    RowState.FLAGGED: ("orange", ":material/warning:", "Flagged"),
-    RowState.NO_ISSUES: ("green", ":material/check_circle:", "No issues"),
+    RowState.ERROR: Pill("red", ":material/error:", "Error"),
+    RowState.FLAGGED: Pill("orange", ":material/warning:", "Flagged"),
+    RowState.NO_ISSUES: Pill("green", ":material/check_circle:", "No issues"),
+}
+
+_ACTIONS: dict[RowState, str | None] = {
+    RowState.NOT_SET_UP: SET_UP_ACTION,
+    RowState.NOT_APPLICABLE: None,
 }
 
 _STATE_BY_STATUS = {
@@ -108,18 +126,9 @@ class HealthRow:
         return RowState.NO_ISSUES
 
     @property
-    def pill(self) -> tuple[str, str, str]:
-        """The status pill's colour, icon and label."""
-        return self.state.pill
-
-    @property
     def action(self) -> str | None:
         """The row's button label, or None when there is nothing to do."""
-        if self.item.status is CheckStatus.NOT_SET_UP:
-            return SET_UP_ACTION
-        if self.item.status is CheckStatus.NOT_APPLICABLE:
-            return None
-        return OPEN_ACTION
+        return self.state.action
 
     @property
     def value(self) -> str:
@@ -128,12 +137,15 @@ class HealthRow:
 
     @property
     def detail(self) -> str:
-        """The line under the value: the check's detail, the error or reason."""
+        """The line under the value: the check's detail, the error or reason.
+
+        A ready check with no numbers shows ``STATUS_ONLY``.
+        """
         if self.error:
             return f"Could not compute the numbers: {self.error}"
         if self.headline:
             return self.headline.detail
-        return self.item.reason
+        return self.item.reason or STATUS_ONLY
 
     @property
     def resolved(self) -> str:
@@ -308,6 +320,21 @@ def health_rows(
     return tuple(rows)
 
 
+def group_rows(
+    rows: Iterable[HealthRow],
+) -> tuple[tuple[str | None, tuple[HealthRow, ...]], ...]:
+    """Group rows by navigation group, each group once.
+
+    Groups come in order of their first row, as in the navigation, and rows
+    keep their order within a group, even when a group's rows are not next
+    to each other.
+    """
+    groups: dict[str | None, list[HealthRow]] = {}
+    for row in rows:
+        groups.setdefault(row.item.group, []).append(row)
+    return tuple((group, tuple(members)) for group, members in groups.items())
+
+
 # Relative widths of the Check, Status, Outstanding, Resolved and action
 # columns, shared by the header and every row so the columns line up.
 _COLUMN_WIDTHS = (2.0, 1.4, 2.6, 1.0, 1.1)
@@ -333,11 +360,11 @@ def render_health_rows(
     for column, header in zip(st.columns(_COLUMN_WIDTHS), _HEADERS, strict=True):
         if header:
             column.caption(f"**{header.upper()}**")
-    for group, group_rows in groupby(rows, key=lambda row: row.item.group):
+    for group, members in group_rows(rows):
         if group:
             st.caption(f"**{group}**")
         with st.container(border=True):
-            for row in group_rows:
+            for row in members:
                 _render_row(st, row, on_select)
 
 
@@ -347,8 +374,8 @@ def _render_row(st, row: HealthRow, on_select: Callable[[str], None]) -> None:
         _COLUMN_WIDTHS, vertical_alignment="center"
     )
     name.markdown(f"**{item.label}**")
-    colour, icon, label = row.pill
-    status.badge(label, icon=icon, color=colour)
+    pill = row.state.pill
+    status.badge(pill.label, icon=pill.icon, color=pill.colour)
     outstanding.markdown(f"**{row.value}**")
     if row.detail:
         outstanding.caption(row.detail)
