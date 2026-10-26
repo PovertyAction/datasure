@@ -17,9 +17,6 @@ if TYPE_CHECKING:
     from datasure.checks.gpschecks.review import GPSOutlierSummary
     from datasure.checks.outliers.report_ui import OutliersBasis
 
-    # What a headline computed its numbers from, for its delta to reuse.
-    HeadlineBasis = DuplicatesBasis | GPSOutlierSummary | OutliersBasis
-
 
 @dataclass(frozen=True)
 class CheckHeadline:
@@ -62,7 +59,9 @@ class CheckHeadline:
     resolved: int | None = None
     informational: bool = False
     count: float | None = None
-    basis: "HeadlineBasis | None" = field(default=None, compare=False, repr=False)
+    basis: "DuplicatesBasis | GPSOutlierSummary | OutliersBasis | None" = field(
+        default=None, compare=False, repr=False
+    )
 
     @property
     def flagged(self) -> bool:
