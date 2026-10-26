@@ -29,7 +29,6 @@ from datasure.utils.onboarding_utils import (
     load_demo_data,
     set_onboarding_step,
     show_demo_banner,
-    show_demo_completion_message,
     show_demo_intro,
     show_next_steps,
     show_progress_indicator,
@@ -711,90 +710,6 @@ class TestDemoUIFunctions:
         show_next_steps(2)
 
         mock_st.markdown.assert_not_called()
-
-    @patch("datasure.utils.onboarding_utils.st")
-    @patch("datasure.utils.onboarding_utils.is_demo_project")
-    @patch("datasure.utils.onboarding_utils.is_demo_complete")
-    def test_show_demo_completion_message_complete(
-        self, mock_is_complete, mock_is_demo, mock_st
-    ):
-        """Test completion message displays when demo is complete."""
-        mock_is_demo.return_value = True
-        mock_is_complete.return_value = True
-        mock_st.button.return_value = False
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-
-        show_demo_completion_message()
-
-        mock_st.balloons.assert_called_once()
-        mock_st.success.assert_called_once()
-
-    @patch("datasure.utils.onboarding_utils.st")
-    @patch("datasure.utils.onboarding_utils.is_demo_project")
-    @patch("datasure.utils.onboarding_utils.is_demo_complete")
-    def test_show_demo_completion_message_restart_button(
-        self, mock_is_complete, mock_is_demo, mock_st
-    ):
-        """Test completion message restart button click."""
-        mock_is_demo.return_value = True
-        mock_is_complete.return_value = True
-        mock_st.button.side_effect = [True, False]  # First button clicked
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-
-        with patch("datasure.utils.onboarding_utils.set_onboarding_step") as mock_set:
-            show_demo_completion_message()
-            mock_set.assert_called_with(1)
-            mock_st.rerun.assert_called_once()
-
-    @patch("datasure.utils.onboarding_utils.st")
-    @patch("datasure.utils.onboarding_utils.is_demo_project")
-    @patch("datasure.utils.onboarding_utils.is_demo_complete")
-    def test_show_demo_completion_message_create_project_button(
-        self, mock_is_complete, mock_is_demo, mock_st
-    ):
-        """Test completion message create new project button click."""
-        mock_is_demo.return_value = True
-        mock_is_complete.return_value = True
-        mock_st.button.side_effect = [False, True]  # Second button clicked
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-
-        # Use MagicMock for session_state to support attribute assignment
-        mock_session_state = MagicMock()
-        mock_session_state.onboarding_step = 6
-        mock_st.session_state = mock_session_state
-
-        show_demo_completion_message()
-
-        assert mock_st.session_state.st_project_id == ""
-        mock_st.switch_page.assert_called_with("pages/start_view.py")
-
-    @patch("datasure.utils.onboarding_utils.st")
-    @patch("datasure.utils.onboarding_utils.is_demo_project")
-    @patch("datasure.utils.onboarding_utils.is_demo_complete")
-    def test_show_demo_completion_message_non_demo(
-        self, mock_is_complete, mock_is_demo, mock_st
-    ):
-        """Test completion message doesn't display when not in demo mode."""
-        mock_is_demo.return_value = False
-        mock_is_complete.return_value = True
-
-        show_demo_completion_message()
-
-        mock_st.balloons.assert_not_called()
-
-    @patch("datasure.utils.onboarding_utils.st")
-    @patch("datasure.utils.onboarding_utils.is_demo_project")
-    @patch("datasure.utils.onboarding_utils.is_demo_complete")
-    def test_show_demo_completion_message_incomplete(
-        self, mock_is_complete, mock_is_demo, mock_st
-    ):
-        """Test completion message doesn't display when demo incomplete."""
-        mock_is_demo.return_value = True
-        mock_is_complete.return_value = False
-
-        show_demo_completion_message()
-
-        mock_st.balloons.assert_not_called()
 
     @patch("datasure.utils.onboarding_utils.st")
     @patch("datasure.utils.onboarding_utils.is_demo_project")
