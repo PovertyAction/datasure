@@ -918,11 +918,11 @@ class TestDemoDataGenerator:
         df = pl.DataFrame({"id": list(range(50))})
         result_df = DemoDataGenerator(df, today=date(2026, 3, 10)).add_demo_fields()
 
-        for col in ("starttime", "endtime", "submissiondate"):
+        for col in DemoDataGenerator.DATE_COLUMNS:
             assert result_df[col].dtype == pl.Utf8
         start, end, submitted = (
-            result_df[col].str.to_datetime("%Y-%m-%d %H:%M:%S")
-            for col in ("starttime", "endtime", "submissiondate")
+            result_df[col].str.to_datetime(DemoDataGenerator.DATE_FORMAT)
+            for col in DemoDataGenerator.DATE_COLUMNS
         )
         assert (start < end).all()
         assert (end < submitted).all()
@@ -1255,17 +1255,16 @@ class TestRealDemoData:
         self, load_real_demo
     ):
         """A later load moves every date by whole days and changes nothing else."""
-        date_cols = ["starttime", "endtime", "submissiondate"]
+        date_cols = list(DemoDataGenerator.DATE_COLUMNS)
+        date_format = DemoDataGenerator.DATE_FORMAT
         earlier = load_real_demo(today=date(2026, 3, 10))
         later = load_real_demo(today=date(2026, 3, 17))
 
         for before, after in zip(earlier, later, strict=True):
             assert before.drop(date_cols).equals(after.drop(date_cols))
             for col in date_cols:
-                shifted = before[col].str.to_datetime("%Y-%m-%d %H:%M:%S") + timedelta(
-                    days=7
-                )
-                assert after[col].str.to_datetime("%Y-%m-%d %H:%M:%S").equals(shifted)
+                shifted = before[col].str.to_datetime(date_format) + timedelta(days=7)
+                assert after[col].str.to_datetime(date_format).equals(shifted)
 
     def test_latest_submissions_fall_on_yesterday_and_today(self, load_real_demo):
         """Check health deltas need submissions on the last two days."""
