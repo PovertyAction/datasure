@@ -520,13 +520,15 @@ class OutputOnboardingInfo:
             "title": "Check health",
             "content": """
         ##### Check health
-        This section shows a card for every other check with its status and headline number, such as the duplicate IDs found, the share of values missing, or the backcheck error rate. Each number comes from its check and uses that check's settings, so it matches what you see when you open the check.
+        This section shows a row for every other check with its status, the issues still outstanding, and the issues already resolved, such as the duplicate IDs found and those resolved through corrections. Each number comes from its check and uses that check's settings, so it matches what you see when you open the check.
 
-        - **Ready**: the check is set up and shows its headline.
-        - **Not set up**: the check needs settings first. Click **Set up →** to configure it.
-        - **Not applicable**: the check has nothing to work with on this page, for example Backchecks without backcheck data.
+        - **Flagged** (amber): the check has outstanding issues to review.
+        - **No issues** (green): the check has nothing outstanding, or only describes the data, like Progress.
+        - **Not set up** (grey): the check needs settings first. Click **Set up →** to configure it.
+        - **Not applicable** (grey): the check has nothing to work with on this page, for example Backchecks without backcheck data.
+        - **Error** (red): the check or its numbers could not be computed; the row says why.
 
-        Click **Open →** on a card to go to that check. Cards for checks you have not set up yet, such as Outliers & Constraints, show a headline once you set them up — return here afterwards to see it.
+        Click **Open →** on a row to go to that check. Rows for checks you have not set up yet, such as Outliers & Constraints, show their numbers once you set them up — return here afterwards to see them.
         """,
         },
     }

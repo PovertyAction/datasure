@@ -9,6 +9,7 @@ import polars as pl
 import pytest
 from pydantic import ValidationError
 
+from datasure.checks.headline import CheckHeadline
 from datasure.checks.outliers.models import (
     ConstraintBounds,
     OutlierMethod,
@@ -1249,7 +1250,7 @@ class TestOutliersReport:
 
 
 class TestOutliersHeadlineSavedSettings:
-    """The Summary health card's outlier count when saved settings drift."""
+    """The Summary check health row's outlier count when saved settings drift."""
 
     CONFIG: ClassVar[dict] = {
         "survey_key": "survey_key",
@@ -1259,7 +1260,12 @@ class TestOutliersHeadlineSavedSettings:
         "survey_date": "survey_date",
     }
     # numeric_col1 is [1, 2, 3, 100, 5]: 1 of the 5 checked values is flagged.
-    FLAGGED = "1 outlier (20.0% of values), 1 constraint violation"
+    FLAGGED = CheckHeadline(
+        "2",
+        "1 outlier (20.0% of values), 1 constraint violation",
+        outstanding=2,
+        resolved=0,
+    )
 
     def _headline(self, data, column_config, tmp_path, alias="s"):
         from datasure.processing.correction_log import empty_correction_log
@@ -1311,7 +1317,7 @@ class TestOutliersHeadlineSavedSettings:
         self, sample_polars_df, outlier_column_config, tmp_path
     ):
         # The settings panel shows a missing column as unset, so the tab
-        # still reports; the health card must too.
+        # still reports; the health row must too.
         data = sample_polars_df.drop("team")
         assert self._headline(data, outlier_column_config, tmp_path) == self.FLAGGED
 

@@ -18,6 +18,7 @@ import seaborn as sns
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
 
+from datasure.checks.headline import CheckHeadline
 from datasure.utils.duckdb_utils import (
     add_missing_code,
     duckdb_save_table,
@@ -86,6 +87,10 @@ class MissingSummaryStats(BaseModel):
     all_missing_pct: float = Field(
         ge=0, le=100, description="Percentage of columns with all missing"
     )
+    all_missing_count: int = Field(
+        default=0, ge=0, description="Number of columns with all missing"
+    )
+    column_count: int = Field(default=0, ge=0, description="Number of columns")
     any_missing_pct: float = Field(
         ge=0, le=100, description="Percentage of columns with any missing"
     )
@@ -427,6 +432,8 @@ def compute_missing_summary(missing_data: pl.DataFrame) -> MissingSummaryStats:
     return MissingSummaryStats(
         mean_missing_pct=mean_missing,
         all_missing_pct=(all_missing_count / n_cols) * 100,
+        all_missing_count=all_missing_count,
+        column_count=n_cols,
         any_missing_pct=(any_missing_count / n_cols) * 100,
         no_missing_pct=(no_missing_count / n_cols) * 100,
     )
@@ -1286,15 +1293,20 @@ def missing_report(
     missing_matrix(missing_data=missing_data, color_map=sns_colormap)
 
 
-def missing_headline(project_id: str, data: pl.DataFrame) -> str:
-    """Return the missing values headline for the Summary health grid.
+def missing_headline(project_id: str, data: pl.DataFrame) -> CheckHeadline:
+    """Return the missing values headline for Summary's check health row.
 
-    The check's "Percentage of missing values": the mean share of missing
-    values across columns, with the project's missing codes counted as
-    missing.
+    The check's "% columns all missing", with the project's missing codes
+    counted as missing. Each all-missing column is outstanding: a question
+    nobody answered, which may be skipped by mistake.
     """
     missing_data = _compute_missing_data_paired(
         data, load_missing_codes_from_db(project_id)
     )
     summary = compute_missing_summary(missing_data)
-    return f"{summary.mean_missing_pct:.2f}% of values missing"
+    return CheckHeadline(
+        f"{summary.all_missing_pct:.2f}%",
+        f"of columns all missing ({summary.all_missing_count:,} of "
+        f"{summary.column_count:,})",
+        outstanding=summary.all_missing_pct,
+    )

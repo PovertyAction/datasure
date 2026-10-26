@@ -213,6 +213,47 @@ def clear_reviewed_flags(flags: pl.DataFrame, check: FlagCheck) -> pl.DataFrame:
     )
 
 
+def _cells(flags: pl.DataFrame, survey_key: str, rows: pl.Expr) -> set[tuple]:
+    selected = flags.filter(rows).select(
+        pl.col(survey_key).cast(pl.String), pl.col(COLUMN_NAME_COL).cast(pl.String)
+    )
+    return set(selected.iter_rows())
+
+
+def count_resolved_flags(
+    results: Sequence[tuple[pl.DataFrame, FlagCheck]], survey_key: str
+) -> int:
+    """Count the flags resolved by an acceptance or a correction.
+
+    Each accepted flag counts, so a cell accepted as both an outlier and a
+    constraint violation counts twice. A corrected cell counts once, and
+    only when no check flags it any more: a corrected value that is still
+    flagged still needs attention.
+
+    Parameters
+    ----------
+    results : Sequence[tuple[pl.DataFrame, FlagCheck]]
+        Each check's results marked by `mark_reviewed`, before or after
+        `clear_reviewed_flags`, with the check that produced them. Results
+        without review columns resolve nothing.
+    survey_key : str
+        The Survey KEY column in the results.
+    """
+    accepted = 0
+    corrected: set[tuple] = set()
+    still_flagged: set[tuple] = set()
+    for flags, check in results:
+        if flags.is_empty() or REVIEW_STATUS_COL not in flags.columns:
+            continue
+        status = pl.col(REVIEW_STATUS_COL).fill_null("")
+        accepted += flags.filter(status == REVIEWED_BADGE).height
+        corrected |= _cells(flags, survey_key, status == CORRECTED_BADGE)
+        still_flagged |= _cells(
+            flags, survey_key, _is_flagged(check) & (status != REVIEWED_BADGE)
+        )
+    return accepted + len(corrected - still_flagged)
+
+
 _REVIEWED_ROW_STYLE = "background-color: rgba(25, 135, 84, 0.15)"
 
 
