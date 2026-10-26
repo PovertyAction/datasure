@@ -64,10 +64,11 @@ def _demo_frames() -> tuple[pl.DataFrame, pl.DataFrame]:
     backcheck = pl.read_csv(
         ASSETS / "demo_backcheck.csv", truncate_ragged_lines=True, ignore_errors=True
     )
-    return (
-        _with_dates(DemoDataGenerator(survey).add_demo_fields()),
-        _with_dates(DemoDataGenerator(backcheck).add_demo_fields("backcheck")),
+    survey = DemoDataGenerator(survey).add_demo_fields()
+    backcheck = DemoDataGenerator(backcheck).add_demo_fields(
+        "backcheck", survey_df=survey
     )
+    return _with_dates(survey), _with_dates(backcheck)
 
 
 def _generated_frames(
