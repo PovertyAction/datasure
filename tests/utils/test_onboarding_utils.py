@@ -692,14 +692,14 @@ class TestDemoUIFunctions:
     @patch("datasure.utils.onboarding_utils.st")
     @patch("datasure.utils.onboarding_utils.is_demo_project")
     def test_show_next_steps_completed(self, mock_is_demo, mock_st):
-        """Test showing next steps when all steps completed."""
+        """After the last step nothing is shown; the completion message follows."""
         mock_is_demo.return_value = True
-        mock_st.button.return_value = False
 
         show_next_steps(7)
 
-        mock_st.success.assert_called_once()
-        mock_st.button.assert_called()
+        mock_st.success.assert_not_called()
+        mock_st.info.assert_not_called()
+        mock_st.button.assert_not_called()
 
     @patch("datasure.utils.onboarding_utils.st")
     @patch("datasure.utils.onboarding_utils.is_demo_project")
