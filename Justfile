@@ -114,6 +114,11 @@ test-cov-xml:
 test-file f:
     uv run python -m pytest {{ f }}
 
+# Time Summary's check health rows on the demo data and a generated form
+# Usage: just bench-health [rows] [repeat]  e.g. just bench-health 50000 3
+bench-health rows="50000" repeat="3":
+    uv run python scripts/benchmark_check_health.py --rows {{ rows }} --repeat {{ repeat }}
+
 # Run tests for a module with coverage (auto-discovers test file and coverage module)
 # Usage: just test-mod-cov <module>  e.g. just test-mod-cov descriptive
 [linux]
