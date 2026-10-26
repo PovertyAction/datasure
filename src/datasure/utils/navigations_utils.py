@@ -3,6 +3,7 @@
 import streamlit as st
 
 from datasure.utils.demo_lifecycle import (
+    DEMO_RESET_FAILED_MESSAGE,
     RESTART_DEMO_MESSAGE,
     exit_demo,
     reset_demo_project,
@@ -16,8 +17,12 @@ from datasure.utils.onboarding_utils import (
     show_next_steps,
     show_progress_indicator,
 )
+from datasure.utils.ui_utils import confirm_dialog, queue_notice, show_queued_notices
 
 ONBOARDING_STEPS = OnboardingSteps.get_all_steps()  # List of onboarding steps
+
+# `queue_notice` scope of the demo sidebar's messages.
+_DEMO_SIDEBAR_NOTICE_SCOPE = "demo_sidebar"
 
 
 def page_navigation(prev=None, next=None):
@@ -109,6 +114,15 @@ def demo_callout(message: str, type: str = "info"):
     render.get(type, st.info)(message)
 
 
+def _restart_demo_from_sidebar() -> None:
+    """Reset the demo and open the import page, or queue the failure."""
+    if reset_demo_project():
+        st.switch_page(st.session_state.st_import_data_page)
+        return
+    # confirm_dialog reruns after this, which would clear a direct st.error.
+    queue_notice(_DEMO_SIDEBAR_NOTICE_SCOPE, "error", DEMO_RESET_FAILED_MESSAGE)
+
+
 def demo_sidebar_help():
     """Add demo-specific help to the sidebar."""
     if not is_demo_project():
@@ -116,6 +130,7 @@ def demo_sidebar_help():
 
     with st.sidebar:
         st.markdown("### Demo Help")
+        show_queued_notices(_DEMO_SIDEBAR_NOTICE_SCOPE)
 
         current_step = get_onboarding_step()
 
@@ -131,23 +146,12 @@ def demo_sidebar_help():
         st.markdown("---")
 
         if st.button("Restart Demo", width="stretch"):
-            st.session_state["_sidebar_confirm_restart"] = True
-
-        if st.session_state.get("_sidebar_confirm_restart"):
-            st.warning(RESTART_DEMO_MESSAGE, icon=":material/warning:")
-            if st.button(
-                "Confirm restart", type="primary", key="_sidebar_restart_confirm"
-            ):
-                if reset_demo_project():
-                    st.switch_page(st.session_state.st_import_data_page)
-                else:
-                    st.error(
-                        "Failed to reset the demo. Close any other DataSure "
-                        "windows and try again."
-                    )
-            if st.button("Cancel", key="_sidebar_restart_cancel"):
-                st.session_state.pop("_sidebar_confirm_restart", None)
-                st.rerun()
+            confirm_dialog(
+                "Restart demo",
+                RESTART_DEMO_MESSAGE,
+                confirm_label="Restart demo",
+                on_confirm=_restart_demo_from_sidebar,
+            )
 
         if st.button("Exit Demo", width="stretch"):
             exit_demo()

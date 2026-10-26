@@ -7,6 +7,7 @@ Exit Demo clears the demo's session state so the next project opens clean.
 
 import gc
 import logging
+import re
 import shutil
 
 import streamlit as st
@@ -19,6 +20,9 @@ from datasure.utils.onboarding_utils import (
     load_demo_data,
     set_onboarding_step,
 )
+from datasure.utils.reviewer import _REVIEWER_NAME_WIDGET_KEY
+from datasure.utils.session_defaults import init_app_session_state
+from datasure.utils.ui_utils import _QUEUED_NOTICES_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -29,37 +33,58 @@ RESTART_DEMO_MESSAGE = (
     "from the beginning. This cannot be undone."
 )
 
-# Session state keys set while a project is open, removed when the demo ends.
-_PROJECT_SESSION_KEYS = (
-    "onboarding_step",
-    "_sidebar_confirm_restart",
-    "st_raw_dataset_list",
-    "st_prep_dataset_list",
+DEMO_RESET_FAILED_MESSAGE = (
+    "Failed to reset the demo. Close any other DataSure windows and try again."
 )
 
-# Page handles app.py builds for the open project, with app.py's defaults.
-_PAGE_HANDLE_DEFAULTS = {
-    "st_output_pages": list,
-    "st_output_page1": lambda: None,
-    "st_corr_page": lambda: None,
-    "st_replication_page": lambda: None,
-}
+# Session state that is not the demo's: the page handles app.py builds on
+# every run (callers still switch page with them), the reviewer name and
+# messages queued for the next run. Every other key is cleared, so state a
+# view adds later is cleared too without being listed here.
+_APP_WIDE_KEYS = frozenset(
+    {
+        "st_start_page",
+        "st_import_data_page",
+        "st_prep_data_page",
+        "st_config_checks_page",
+        _REVIEWER_NAME_WIDGET_KEY,
+        _QUEUED_NOTICES_KEY,
+    }
+)
+
+# A key ``project_nav_key`` built for another project, which is kept:
+# "<name>__<project id>[__<suffix>]", where the ID is 8 hex characters
+# (``start_view.get_project_id``).
+_OTHER_PROJECT_KEY = re.compile(r"__[0-9a-f]{8}(?:__|$)")
 
 
 def _clear_demo_session_state() -> None:
-    """Remove the demo's session state, keeping app-wide page handles."""
+    """Clear the demo's session state back to a new session's defaults.
+
+    App-wide keys and other projects' navigation keys are kept.
+    """
     state = st.session_state
-    for key in _PROJECT_SESSION_KEYS:
+    for key in list(state):
+        if key in _APP_WIDE_KEYS or _OTHER_PROJECT_KEY.search(str(key)):
+            continue
         state.pop(key, None)
-    # Navigation and view-state keys include the project ID.
-    for key in [k for k in state if DEMO_PROJECT_ID in str(k)]:
-        state.pop(key, None)
-    for key, default in _PAGE_HANDLE_DEFAULTS.items():
-        state[key] = default()
+    init_app_session_state()
 
 
-def _delete_demo_cache() -> None:
-    """Delete ``cache/demoproject/`` and every cached result computed from it.
+def _clear_cached_results() -> None:
+    """Clear every ``st.cache_data`` result and the check headline cache.
+
+    This clears the whole app's cache, not only the demo's: ``st.cache_data``
+    can be cleared per function or all at once but not per project, and the
+    demo's results are spread over many cached functions. Other projects'
+    results are recomputed the next time they are needed.
+    """
+    st.cache_data.clear()
+    clear_headline_cache()
+
+
+def _delete_demo_folder() -> None:
+    """Delete ``cache/demoproject/``.
 
     Raises
     ------
@@ -67,9 +92,6 @@ def _delete_demo_cache() -> None:
         If the folder cannot be deleted, for example because another DataSure
         window still has one of its DuckDB files open.
     """
-    # Cached results would show the old demo's corrections and checks.
-    st.cache_data.clear()
-    clear_headline_cache()
     # Release any DuckDB connection still waiting to be garbage collected,
     # which on Windows keeps its file locked.
     gc.collect()
@@ -81,8 +103,9 @@ def _delete_demo_cache() -> None:
 def reset_demo_project() -> bool:
     """Delete the demo project and rebuild it from the demo data.
 
-    Shared by every Restart action. Clears the demo's session state, deletes
-    everything under ``cache/demoproject/``, registers the demo project again,
+    Shared by every Restart action. Clears the demo's session state and the
+    app's cached results, deletes everything under ``cache/demoproject/``,
+    registers the demo project again,
     loads the demo data and makes the demo the active project at step 2.
 
     Returns
@@ -92,8 +115,10 @@ def reset_demo_project() -> bool:
         deleted or the demo data could not be loaded.
     """
     _clear_demo_session_state()
+    # Cached results would show the old demo's corrections and checks.
+    _clear_cached_results()
     try:
-        _delete_demo_cache()
+        _delete_demo_folder()
     except OSError:
         logger.exception("Could not delete the demo project folder")
         return False

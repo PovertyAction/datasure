@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from datasure.utils.demo_lifecycle import DEMO_RESET_FAILED_MESSAGE
 from datasure.utils.onboarding_utils import DEMO_PROJECT_ID
 
 # --- Module import setup ---
@@ -763,17 +764,31 @@ class TestLaunchFreshDemo:
         mock_reset.assert_called_once_with()
         mock_switch_page.assert_called_once()
 
-    def test_failure_path_shows_error(self, monkeypatch):
+    def test_failure_shows_error_after_the_dialog_reruns(self, monkeypatch):
+        """The error survives the rerun that closes the Restart dialog."""
         mock_error = MagicMock()
         monkeypatch.setattr(_st, "error", mock_error)
         mock_switch_page = MagicMock()
         monkeypatch.setattr(_st, "switch_page", mock_switch_page)
+        monkeypatch.setattr(_st, "rerun", MagicMock())
+        monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
 
         with patch("datasure.views.start_view.reset_demo_project", return_value=False):
             start_view._launch_fresh_demo()
-
-        mock_error.assert_called_once()
         mock_switch_page.assert_not_called()
+
+        # The dialog's st.rerun() clears whatever this run rendered.
+        mock_error.reset_mock()
+        with (
+            patch("datasure.views.start_view.show_demo_intro"),
+            patch(
+                "datasure.views.start_view.load_projects",
+                return_value={DEMO_PROJECT_ID: {}},
+            ),
+        ):
+            start_view._render_demo_row()
+
+        mock_error.assert_called_once_with(DEMO_RESET_FAILED_MESSAGE)
 
 
 class TestRenderDemoRow:
