@@ -78,14 +78,14 @@ class TestProgressHeadline:
 
     def test_submissions_without_a_target(self, setting_file):
         assert progress_headline(SURVEY, setting_file, self.CONFIG) == (
-            CheckHeadline("5", "submitted interviews", informational=True)
+            CheckHeadline("5", "submitted interviews", informational=True, count=5)
         )
 
     def test_submitted_out_of_the_target_from_the_page_config(self, setting_file):
         config = {**self.CONFIG, "survey_target": 20}
 
         assert progress_headline(SURVEY, setting_file, config) == (
-            CheckHeadline("5 / 20", "25.00% of target", informational=True)
+            CheckHeadline("5 / 20", "25.00% of target", informational=True, count=5)
         )
 
     def test_a_target_saved_in_the_check_settings_wins(self, setting_file):
@@ -375,7 +375,9 @@ class TestEnumeratorHeadline:
         data = self._data(["e1", "e1", "e2", "e3"], [1, 20, 2, 30])
 
         assert enumerator_headline(PROJECT_ID, data, setting_file, self.CONFIG) == (
-            CheckHeadline("2 / 3", "active in the past 7 days", informational=True)
+            CheckHeadline(
+                "2 / 3", "active in the past 7 days", informational=True, count=2
+            )
         )
 
     @staticmethod

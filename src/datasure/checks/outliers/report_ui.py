@@ -4,13 +4,19 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from datetime import date
 from typing import Any
 
 import polars as pl
 import streamlit as st
 from pydantic import BaseModel, ValidationError
 
-from datasure.checks.headline import CheckHeadline, settings_no_longer_fit
+from datasure.checks.headline import (
+    CheckDelta,
+    CheckHeadline,
+    settings_no_longer_fit,
+)
+from datasure.checks.health_period import dated_after, logged_after
 from datasure.checks.outliers.compute import (
     _build_include_cols,
     _compute_constraint_metrics,
@@ -217,20 +223,33 @@ class ReviewContext:
     """What the results tables need to correct or accept flagged values.
 
     One context is built per report run, so lookups shared by both tables
-    are cached on it.
+    are cached on it. With `logged_after`, only log entries made after that
+    date count, for the flags resolved in Summary's comparison period.
     """
 
     processor: CorrectionProcessor
     alias: str
+    logged_after: date | None = None
     _corrections: dict[str, pl.DataFrame] = field(
         default_factory=dict, compare=False, repr=False
     )
 
+    def _in_period(self, log_rows: pl.DataFrame) -> pl.DataFrame:
+        if self.logged_after is None or log_rows.is_empty():
+            return log_rows
+        return log_rows.filter(logged_after(log_rows, self.logged_after))
+
+    def active_acceptances(self, check_type: str, key_col: str) -> pl.DataFrame:
+        """Return the acceptances of a check that still apply to the data."""
+        return self._in_period(
+            self.processor.get_active_acceptances(self.alias, check_type, key_col)
+        )
+
     def active_corrections(self, key_col: str) -> pl.DataFrame:
         """Return the active value corrections, looked up once per run."""
         if key_col not in self._corrections:
-            self._corrections[key_col] = self.processor.get_active_corrections(
-                self.alias, key_col
+            self._corrections[key_col] = self._in_period(
+                self.processor.get_active_corrections(self.alias, key_col)
             )
         return self._corrections[key_col]
 
@@ -244,9 +263,7 @@ def _with_review_status(
     """Mark accepted flags and corrected values; a no-op if already marked."""
     if review is None or flags.is_empty() or REVIEW_STATUS_COL in flags.columns:
         return flags
-    acceptances = review.processor.get_active_acceptances(
-        review.alias, check.check_type, settings.survey_key
-    )
+    acceptances = review.active_acceptances(check.check_type, settings.survey_key)
     corrections = review.active_corrections(settings.survey_key)
     return mark_reviewed(flags, acceptances, settings.survey_key, check, corrections)
 
@@ -1471,22 +1488,34 @@ class _ReviewedFlags:
     survey_key: str
     flagged_before_correction: set[tuple]
 
+    @property
+    def results(self) -> list[tuple[pl.DataFrame, FlagCheck]]:
+        """Each check's results with the check, for the review helpers."""
+        return [(self.outliers, OUTLIERS), (self.violations, CONSTRAINTS)]
 
-def _reviewed_flags(
+
+@dataclass(frozen=True)
+class _Flags:
+    """The checks' results before review, and what they were computed with."""
+
+    outliers: pl.DataFrame
+    violations: pl.DataFrame
+    settings: OutlierSettings
+    column_config: pl.DataFrame
+    missing_codes: Any
+
+
+def _computed_flags(
     project_id: str,
     page_name_id: str,
     data: pl.DataFrame,
     survey_columns: ColumnByType,
     setting_file: str,
     config: dict,
-    alias: str | None,
-) -> _ReviewedFlags | None:
-    """Compute the check's results without rendering it, for the health rows.
+) -> _Flags | None:
+    """Compute the outliers and constraint violations with the saved settings.
 
-    Uses the saved settings and outlier columns, and clears accepted flags,
-    as the Outliers tab does. When values were corrected, the checks also
-    run on the uncorrected data to find which corrected values were
-    flagged. None when no outlier columns are configured.
+    None when no outlier columns are configured.
 
     Raises
     ------
@@ -1512,50 +1541,134 @@ def _reviewed_flags(
         )
     except (pl.exceptions.PolarsError, ValidationError, ValueError) as exc:
         raise settings_no_longer_fit("Outliers", exc) from exc
-    review = _review_context(project_id, alias, settings.survey_key)
+    return _Flags(outlier_data, violations, settings, column_config, missing_codes)
+
+
+def _flagged_before_correction(flags: _Flags, review: ReviewContext) -> set[tuple]:
+    """Return the cells the checks flag in the uncorrected data."""
+    uncorrected = review.processor.get_uncorrected_data(review.alias)
+    if uncorrected.width == 0:
+        return set()
+    settings, columns = flags.settings, flags.column_config
+    try:
+        return flagged_cells(
+            [
+                (
+                    compute_outlier_output(
+                        uncorrected,
+                        settings,
+                        columns,
+                        missing_codes=flags.missing_codes,
+                    ),
+                    OUTLIERS,
+                ),
+                (
+                    compute_constraint_violations(
+                        uncorrected,
+                        settings,
+                        columns,
+                        missing_codes=flags.missing_codes,
+                    ),
+                    CONSTRAINTS,
+                ),
+            ],
+            settings.survey_key,
+        )
+    except (pl.exceptions.PolarsError, ValueError) as exc:
+        raise settings_no_longer_fit("Outliers", exc) from exc
+
+
+def _reviewed(
+    flags: _Flags,
+    review: ReviewContext | None,
+    flagged_before: set[tuple] | None = None,
+) -> _ReviewedFlags:
+    """Mark and clear the flags `review` accepts or corrects.
+
+    When values were corrected, the checks also run on the uncorrected data
+    to find which corrected values were flagged, unless `flagged_before`
+    already gives them.
+    """
+    settings = flags.settings
     outlier_data = clear_reviewed_flags(
-        _with_review_status(outlier_data, settings, OUTLIERS, review), OUTLIERS
+        _with_review_status(flags.outliers, settings, OUTLIERS, review), OUTLIERS
     )
+    violations = flags.violations
     if not violations.is_empty():
         violations = clear_reviewed_flags(
             _with_review_status(violations, settings, CONSTRAINTS, review),
             CONSTRAINTS,
         )
-    flagged_before: set[tuple] = set()
-    uncorrected = (
-        review.processor.get_uncorrected_data(review.alias)
-        if review is not None
-        and has_corrected_cells([(outlier_data, OUTLIERS), (violations, CONSTRAINTS)])
-        else pl.DataFrame()
-    )
-    if uncorrected.width > 0:
-        try:
-            flagged_before = flagged_cells(
-                [
-                    (
-                        compute_outlier_output(
-                            uncorrected,
-                            settings,
-                            column_config,
-                            missing_codes=missing_codes,
-                        ),
-                        OUTLIERS,
-                    ),
-                    (
-                        compute_constraint_violations(
-                            uncorrected,
-                            settings,
-                            column_config,
-                            missing_codes=missing_codes,
-                        ),
-                        CONSTRAINTS,
-                    ),
-                ],
-                settings.survey_key,
+    if flagged_before is None:
+        flagged_before = (
+            _flagged_before_correction(flags, review)
+            if review is not None
+            and has_corrected_cells(
+                [(outlier_data, OUTLIERS), (violations, CONSTRAINTS)]
             )
-        except (pl.exceptions.PolarsError, ValueError) as exc:
-            raise settings_no_longer_fit("Outliers", exc) from exc
+            else set()
+        )
     return _ReviewedFlags(outlier_data, violations, settings.survey_key, flagged_before)
+
+
+def _reviewed_flags(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    survey_columns: ColumnByType,
+    setting_file: str,
+    config: dict,
+    alias: str | None,
+) -> _ReviewedFlags | None:
+    """Compute the check's results without rendering it, for the health rows.
+
+    Uses the saved settings and outlier columns, and clears accepted flags,
+    as the Outliers tab does. None when no outlier columns are configured.
+
+    Raises
+    ------
+    ValueError
+        If the saved settings no longer fit the data (see
+        `settings_no_longer_fit`).
+    """
+    flags = _computed_flags(
+        project_id, page_name_id, data, survey_columns, setting_file, config
+    )
+    if flags is None:
+        return None
+    return _reviewed(
+        flags, _review_context(project_id, alias, flags.settings.survey_key)
+    )
+
+
+def _outstanding(flags: _ReviewedFlags) -> tuple[int, int]:
+    """Return the outliers and constraint violations not yet reviewed."""
+    outliers = (
+        0
+        if flags.outliers.is_empty()
+        else _compute_outlier_metrics(flags.outliers, None).total_outliers
+    )
+    violations = (
+        0
+        if flags.violations.is_empty()
+        else _compute_constraint_metrics(flags.violations).total_violations
+    )
+    return outliers, violations
+
+
+def _on_keys(flags: _ReviewedFlags, keys: pl.Series) -> _ReviewedFlags:
+    """Keep the results of the submissions with a KEY in `keys`."""
+
+    def kept(frame: pl.DataFrame) -> pl.DataFrame:
+        if frame.is_empty():
+            return frame
+        return frame.filter(
+            pl.col(flags.survey_key).cast(pl.String).is_in(keys.implode())
+        )
+
+    return replace(
+        flags, outliers=kept(flags.outliers), violations=kept(flags.violations)
+    )
 
 
 def _plural(count: int, noun: str) -> str:
@@ -1614,16 +1727,7 @@ def outliers_headline(
     )
     if flags is None:
         return None
-    outliers = (
-        0
-        if flags.outliers.is_empty()
-        else _compute_outlier_metrics(flags.outliers, None).total_outliers
-    )
-    violations = (
-        0
-        if flags.violations.is_empty()
-        else _compute_constraint_metrics(flags.violations).total_violations
-    )
+    outliers, violations = _outstanding(flags)
     percent = flagged_value_percent(flags.outliers)
     rate = "" if percent is None else f" ({percent:.1f}% of values)"
     return CheckHeadline(
@@ -1632,11 +1736,63 @@ def outliers_headline(
         f"{_plural(violations, 'constraint violation')}",
         outstanding=outliers + violations,
         resolved=count_resolved_flags(
-            [(flags.outliers, OUTLIERS), (flags.violations, CONSTRAINTS)],
-            flags.survey_key,
-            flags.flagged_before_correction,
+            flags.results, flags.survey_key, flags.flagged_before_correction
         ),
     )
+
+
+def outliers_delta(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    survey_columns: ColumnByType,
+    setting_file: str,
+    config: dict,
+    alias: str | None,
+    date_col: str,
+    as_of: date,
+) -> CheckDelta | None:
+    """Return the outliers row's change since `as_of`, for Summary.
+
+    Outstanding: the flags `outliers_headline` counts on submissions dated
+    after `as_of`, on the corrected data. The flags are not recomputed on the
+    earlier submissions alone, since that would move the IQR and standard
+    deviation bounds. Resolved: the flags accepted or corrected by log
+    entries made after `as_of` that are still in effect; undone corrections
+    and acceptances that no longer apply drop out. Takes the parameters of
+    `outliers_headline`.
+
+    Returns
+    -------
+    CheckDelta | None
+        None when no outlier columns are configured. The resolved change is
+        None without a review context, as the headline's is 0.
+
+    Raises
+    ------
+    ValueError
+        If the saved settings no longer fit the data.
+    """
+    flags = _computed_flags(
+        project_id, page_name_id, data, survey_columns, setting_file, config
+    )
+    if flags is None:
+        return None
+    key = flags.settings.survey_key
+    review = _review_context(project_id, alias, key)
+    now = _reviewed(flags, review)
+    new_keys = data.filter(dated_after(data, date_col, as_of))[key].cast(pl.String)
+    resolved = None
+    if review is not None:
+        recent = _reviewed(
+            flags,
+            ReviewContext(review.processor, review.alias, logged_after=as_of),
+            now.flagged_before_correction,
+        )
+        resolved = count_resolved_flags(
+            recent.results, key, now.flagged_before_correction
+        )
+    return CheckDelta(sum(_outstanding(_on_keys(now, new_keys))), resolved=resolved)
 
 
 def _delete_outlier_column(

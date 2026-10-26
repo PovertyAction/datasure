@@ -135,6 +135,16 @@ def _duplicated_ids(data: pl.DataFrame, id_col: str) -> set[str]:
     return set(find_duplicate_groups(data, id_col, None, None)["id"].to_list())
 
 
+def resolved_ids(
+    uncorrected: pl.DataFrame, corrected: pl.DataFrame, id_col: str
+) -> set[str]:
+    """Return the IDs duplicated before corrections and no longer after.
+
+    Corrections from any page count. IDs compare as text.
+    """
+    return _duplicated_ids(uncorrected, id_col) - _duplicated_ids(corrected, id_col)
+
+
 def count_resolved_ids(
     uncorrected: pl.DataFrame, corrected: pl.DataFrame, id_col: str
 ) -> int:
@@ -143,9 +153,7 @@ def count_resolved_ids(
     Corrections from any page count, so this is how many duplicate IDs the
     correction log has resolved. IDs compare as text.
     """
-    return len(
-        _duplicated_ids(uncorrected, id_col) - _duplicated_ids(corrected, id_col)
-    )
+    return len(resolved_ids(uncorrected, corrected, id_col))
 
 
 def card_records(data: pl.DataFrame, card: dict) -> pl.DataFrame:

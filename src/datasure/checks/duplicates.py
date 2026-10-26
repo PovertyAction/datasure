@@ -21,7 +21,8 @@ import streamlit as st
 from datasure.checks.backchecks.models import TAB_NAME as BACKCHECKS_TAB_NAME
 from datasure.checks.backchecks.models import backcheck_id_columns
 from datasure.checks.headline import CheckHeadline
-from datasure.checks.id_duplicates import count_resolved_ids
+from datasure.checks.health_period import logged_after
+from datasure.checks.id_duplicates import resolved_ids
 from datasure.checks.id_duplicates_ui import (
     BACKCHECK_DATA,
     IdView,
@@ -41,6 +42,7 @@ from datasure.models.schemas import (
     DuplicatesStats,
     FilterCondition,
 )
+from datasure.processing.correction_log import ensure_log_columns
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import (
@@ -2115,6 +2117,29 @@ def render_filter_messages(records: FilteredRecords) -> None:
         )
 
 
+def _resolved_id_set(
+    processor: CorrectionProcessor,
+    alias: str | None,
+    conditions: dict,
+    id_col: str | None,
+    included: pl.DataFrame,
+) -> set[str]:
+    """Return the duplicate IDs corrections resolved among the included records.
+
+    Compares the included corrected records with the records the same
+    Records to Include filter keeps from the uncorrected data.
+    """
+    if not alias or not id_col:
+        return set()
+    uncorrected = processor.get_uncorrected_data(alias)
+    try:
+        uncorrected = apply_records_to_include(uncorrected, conditions)
+    except ValueError as e:
+        logger.warning("Records to Include failed on uncorrected %s data: %s", alias, e)
+        return set()
+    return resolved_ids(uncorrected, included, id_col)
+
+
 def _resolved_ids(
     processor: CorrectionProcessor,
     alias: str | None,
@@ -2122,20 +2147,8 @@ def _resolved_ids(
     id_col: str | None,
     included: pl.DataFrame,
 ) -> int:
-    """Count the duplicate IDs corrections resolved among the included records.
-
-    Compares the included corrected records with the records the same
-    Records to Include filter keeps from the uncorrected data.
-    """
-    if not alias or not id_col:
-        return 0
-    uncorrected = processor.get_uncorrected_data(alias)
-    try:
-        uncorrected = apply_records_to_include(uncorrected, conditions)
-    except ValueError as e:
-        logger.warning("Records to Include failed on uncorrected %s data: %s", alias, e)
-        return 0
-    return count_resolved_ids(uncorrected, included, id_col)
+    """Count the duplicate IDs corrections resolved among the included records."""
+    return len(_resolved_id_set(processor, alias, conditions, id_col, included))
 
 
 def _backcheck_view(
@@ -2507,3 +2520,49 @@ def duplicates_headline(
         outstanding=count,
         resolved=resolved,
     )
+
+
+def duplicates_resolved_since(
+    project_id: str,
+    data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+    alias: str | None,
+    as_of: datetime.date,
+) -> int | None:
+    """Count the duplicate IDs resolved by corrections logged after `as_of`.
+
+    The IDs `duplicates_headline` counts as resolved, kept when a correction
+    log entry made after `as_of` holds the ID. An undone correction is no
+    longer in the log, so it drops out. Takes the parameters of
+    `duplicates_headline`; None without an alias, as there.
+
+    Raises
+    ------
+    ValueError
+        If the saved Records to Include filter cannot be applied.
+    """
+    if not alias:
+        return None
+    settings = load_default_duplicates_settings(
+        setting_file, DuplicatesSettings(**config)
+    )
+    conditions = saved_records_to_include(setting_file)
+    records = filter_records_to_include(data, conditions, "survey")
+    if records.error:
+        raise ValueError(
+            f"The survey Records to Include filter could not be applied: "
+            f"{records.error}"
+        )
+    processor = CorrectionProcessor(project_id)
+    resolved = _resolved_id_set(
+        processor, alias, conditions, settings.survey_id, records.data
+    )
+    # Read directly: the health rows cache their own results.
+    log = ensure_log_columns(duckdb_get_table(project_id, f"corr_log_{alias}", "logs"))
+    if not resolved or "ID" not in log.columns:
+        return 0
+    recent = set(
+        log.filter(logged_after(log, as_of))["ID"].cast(pl.String).drop_nulls()
+    )
+    return len(resolved & recent)

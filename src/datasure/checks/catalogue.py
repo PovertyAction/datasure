@@ -7,21 +7,30 @@ catalogue, so adding an entry here is the only change needed for a new check
 to appear.
 """
 
+import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import date
 from functools import partial
 
+import polars as pl
+from pydantic import ValidationError
+
+from datasure.checks.backchecks.compute import load_default_backchecks_settings
+from datasure.checks.backchecks.coverage import settings_from_page_config
 from datasure.checks.backchecks.report_ui import (
+    backchecks_delta,
     backchecks_headline,
     backchecks_report,
     backchecks_settings_section,
     backchecks_status,
 )
-from datasure.checks.context import CheckContext
+from datasure.checks.context import CheckContext, CheckData
 from datasure.checks.descriptive import descriptive_report
 from datasure.checks.duplicates import (
     duplicates_headline,
     duplicates_report,
+    duplicates_resolved_since,
     duplicates_status,
 )
 from datasure.checks.enumerator.report_ui import (
@@ -34,23 +43,40 @@ from datasure.checks.gpschecks.report_ui import (
     gpschecks_settings_section,
     gpschecks_status,
 )
-from datasure.checks.headline import CheckHeadline
+from datasure.checks.headline import CheckDelta, CheckHeadline, DeltaKind
 from datasure.checks.health import (
+    Delta,
     health_rows,
+    render_comparison_period,
+    render_health_header,
     render_health_rows,
+    render_period_caption,
     status_only_headline,
+)
+from datasure.checks.health_period import (
+    DEFAULT_PERIOD,
+    DEFAULT_WEEK_START,
+    ComparisonPeriod,
+    DeltaWindow,
+    latest_date,
+    on_or_before,
+    period_start,
+    since_label,
 )
 from datasure.checks.missing import missing_headline, missing_report
 from datasure.checks.outliers.report_ui import (
+    outliers_delta,
     outliers_headline,
     outliers_report,
     outliers_settings_section,
     outliers_status,
 )
 from datasure.checks.progress import progress_headline, progress_report
-from datasure.checks.summary import summary_report
+from datasure.checks.summary import SummarySettings, summary_defaults, summary_report
+from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.dataframe_utils import get_df_columns
 from datasure.utils.nav_ui import (
+    PROJECT_VIEW_FILE,
     SET_UP_BELOW,
     guarded_status,
     project_nav_key,
@@ -66,6 +92,8 @@ from datasure.utils.navigation import (
 )
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding
+
+logger = logging.getLogger(__name__)
 
 OVERVIEW = "Overview"
 DATA_INTEGRITY = "Data integrity"
@@ -117,6 +145,10 @@ class CheckEntry:
         checks that cannot be not applicable or have no settings section.
     setup_hint : str
         Ends the not-set-up message; it must say where the setup happens.
+    delta : Delta | None
+        The row's change over Summary's comparison period, from the context,
+        the headline now and the window (see `health_rows`). None for checks
+        whose row shows no change.
     """
 
     slug: str
@@ -129,6 +161,7 @@ class CheckEntry:
     headline: Callable[[CheckContext], CheckHeadline | None] | None = None
     settings: Callable[[CheckContext], None] | None = None
     setup_hint: str = SET_UP_BELOW
+    delta: Delta | None = None
 
 
 def _outliers_config(ctx: CheckContext) -> dict:
@@ -171,22 +204,50 @@ def _render_summary(ctx: CheckContext) -> None:
     summary_check_health(ctx)
 
 
+def _latest_submission(ctx: CheckContext, window: DeltaWindow) -> date | None:
+    """The latest survey submission date, else the latest backcheck date."""
+    if window.survey_date:
+        return latest_date(ctx.data.page_data, window.survey_date)
+    if window.backcheck_date and ctx.data.backcheck_data is not None:
+        return latest_date(ctx.data.backcheck_data, window.backcheck_date)
+    return None
+
+
 @demo_output_onboarding("summary")
 def summary_check_health(ctx: CheckContext) -> None:
     """Draw a check health row for every check but Summary, under its sections.
 
     Replaces Summary's former Data Quality section: each row's numbers come
-    from its check, with that check's settings and corrections.
+    from its check, with that check's settings and corrections. Above the
+    rows, the Comparison period box sets what their changes compare with;
+    without any date column it is replaced by a caption saying how to get
+    changes.
     """
     nav_key = check_nav_key(ctx.project_id, ctx.config.page_name_id)
     items = with_errors(nav_items(ctx), render_errors(nav_key))
-    entries = {entry.slug: entry for entry in CHECK_CATALOGUE}
+    render_health_header()
+    # Today is the computer clock's date.
+    today = date.today()
+    window = comparison_window(ctx, DEFAULT_PERIOD, today)
+    since = None
+    if window.has_dates:
+        period, week_start = render_comparison_period(
+            get_cache_path(ctx.project_id, "settings", PROJECT_VIEW_FILE),
+            ctx.project_id,
+        )
+        window = comparison_window(ctx, period, today, week_start)
+        since = since_label(period, today, week_start)
+    render_period_caption(since, _latest_submission(ctx, window))
     rows = health_rows(
         ctx,
         [item for item in items if item.slug != "summary"],
-        {slug: entry.headline for slug, entry in entries.items() if entry.headline},
+        {entry.slug: entry.headline for entry in CHECK_CATALOGUE if entry.headline},
+        deltas={entry.slug: entry.delta for entry in CHECK_CATALOGUE if entry.delta},
+        window=window if window.has_dates else None,
     )
-    render_health_rows(rows, on_select=partial(select_nav_item, nav_key, CHECK_PARAM))
+    render_health_rows(
+        rows, on_select=partial(select_nav_item, nav_key, CHECK_PARAM), since=since
+    )
     demo_callout(
         "**Next**: :material/arrow_upward: Scroll up and select **Overview → Progress**."
     )
@@ -478,6 +539,192 @@ def _backchecks_headline(ctx: CheckContext) -> CheckHeadline | None:
     )
 
 
+def _column_in(column: str | None, data: pl.DataFrame | None) -> str | None:
+    return column if column and data is not None and column in data.columns else None
+
+
+def comparison_window(
+    ctx: CheckContext,
+    period: ComparisonPeriod,
+    today: date,
+    week_start: str = DEFAULT_WEEK_START,
+) -> DeltaWindow:
+    """Return the comparison window of a page's health rows.
+
+    Rows compare by Summary's date column: Summary's saved date setting,
+    else the page's survey date. The Backchecks row compares by the
+    backcheck date column. A column that is not in its data counts as not
+    set, so its rows show no change.
+
+    Parameters
+    ----------
+    ctx : CheckContext
+        The check page's context.
+    period : ComparisonPeriod
+        The comparison period.
+    today : date
+        Today, from the computer clock.
+    week_start : str
+        The first day of the week, for the Week period.
+    """
+    config = ctx.config
+    survey_date, _ = summary_defaults(
+        str(config.setting_file), SummarySettings(survey_date=config.survey_date)
+    )
+    backcheck_date = None
+    if ctx.data.backcheck_data is not None:
+        try:
+            backcheck_date = load_default_backchecks_settings(
+                str(config.setting_file),
+                settings_from_page_config(_backcheck_config(ctx)),
+            ).backcheck_date
+        except ValidationError:
+            # The Backchecks row shows the settings error; it has no change.
+            logger.warning("Could not load the backcheck settings", exc_info=True)
+    return DeltaWindow(
+        as_of=period_start(period, today, week_start),
+        survey_date=_column_in(survey_date, ctx.data.page_data),
+        backcheck_date=_column_in(backcheck_date, ctx.data.backcheck_data),
+    )
+
+
+# --- Delta adapters --------------------------------------------------------
+# Each takes the context, the check's headline now and the comparison window,
+# and returns the row's change over the period, or None without a date
+# column. A new check gets a delta by adding an adapter here.
+
+
+def _before(ctx: CheckContext, window: DeltaWindow) -> CheckContext | None:
+    """Return the context on the submissions dated on or before the period start.
+
+    None when Summary's date column is not set or not in the data.
+    """
+    column, data = window.survey_date, ctx.data.page_data
+    if not column or column not in data.columns:
+        return None
+    return replace(
+        ctx,
+        data=CheckData(
+            on_or_before(data, column, window.as_of), ctx.data.backcheck_data
+        ),
+    )
+
+
+def _progress_delta(
+    ctx: CheckContext, now: CheckHeadline, window: DeltaWindow
+) -> CheckDelta | None:
+    before = _before(ctx, window)
+    if before is None or now.count is None:
+        return None
+    then = _progress_headline(before)
+    return CheckDelta(now.count - (then.count or 0), kind=DeltaKind.SUBMISSIONS)
+
+
+def _missing_delta(
+    ctx: CheckContext, now: CheckHeadline, window: DeltaWindow
+) -> CheckDelta | None:
+    before = _before(ctx, window)
+    # With no submissions before the period there is no share to compare.
+    if before is None or before.data.page_data.is_empty() or now.outstanding is None:
+        return None
+    then = _missing_headline(before)
+    return CheckDelta(now.outstanding - (then.outstanding or 0), kind=DeltaKind.POINTS)
+
+
+def _new_issues(now: CheckHeadline, then: CheckHeadline | None) -> float | None:
+    """The issues among the submissions in the period: now less the as-of count.
+
+    The as-of count is on fewer submissions of the same corrected data, so it
+    is never larger; it is floored at 0 all the same.
+    """
+    if now.outstanding is None:
+        return None
+    before = then.outstanding if then is not None else None
+    return max(now.outstanding - (before or 0), 0)
+
+
+def _duplicates_delta(
+    ctx: CheckContext, now: CheckHeadline, window: DeltaWindow
+) -> CheckDelta | None:
+    before = _before(ctx, window)
+    if before is None:
+        return None
+    config = ctx.config
+    # No alias: the as-of resolved count is not needed, so it is skipped.
+    then = duplicates_headline(
+        ctx.project_id,
+        before.data.page_data,
+        config.setting_file,
+        _duplicates_config(ctx),
+    )
+    return CheckDelta(
+        _new_issues(now, then),
+        resolved=duplicates_resolved_since(
+            ctx.project_id,
+            ctx.data.page_data,
+            config.setting_file,
+            _duplicates_config(ctx),
+            config.survey_data_name,
+            window.as_of,
+        ),
+    )
+
+
+def _outliers_delta(
+    ctx: CheckContext, _now: CheckHeadline, window: DeltaWindow
+) -> CheckDelta | None:
+    if _before(ctx, window) is None:
+        return None
+    config = ctx.config
+    return outliers_delta(
+        ctx.project_id,
+        config.page_name_id,
+        ctx.data.page_data,
+        ctx.survey_columns,
+        config.setting_file,
+        _outliers_config(ctx),
+        config.survey_data_name,
+        window.survey_date,
+        window.as_of,
+    )
+
+
+def _backchecks_delta(
+    ctx: CheckContext, _now: CheckHeadline, window: DeltaWindow
+) -> CheckDelta | None:
+    # The Backchecks row uses the backcheck date column, never the survey's.
+    if not window.backcheck_date or ctx.data.backcheck_data is None:
+        return None
+    return backchecks_delta(
+        ctx.project_id,
+        ctx.config.page_name_id,
+        ctx.data.page_data,
+        ctx.data.backcheck_data,
+        ctx.config.setting_file,
+        _backcheck_config(ctx),
+        window.backcheck_date,
+        window.as_of,
+    )
+
+
+def _enumerator_delta(
+    ctx: CheckContext, now: CheckHeadline, window: DeltaWindow
+) -> CheckDelta | None:
+    before = _before(ctx, window)
+    if before is None or now.count is None:
+        return None
+    # Active in the 7 days up to the period start, on what was submitted then.
+    then = enumerator_headline(
+        ctx.project_id,
+        before.data.page_data,
+        ctx.config.setting_file,
+        _enumerator_config(ctx),
+        today=window.as_of,
+    )
+    active = then.count if then is not None and then.count is not None else 0
+    return CheckDelta(now.count - active, kind=DeltaKind.ACTIVE)
+
+
 CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
     CheckEntry(
         "summary",
@@ -495,6 +742,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         _render_progress,
         _survey_rows_status,
         headline=_progress_headline,
+        delta=_progress_delta,
     ),
     CheckEntry(
         "missing",
@@ -504,6 +752,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         _render_missing,
         _survey_rows_status,
         headline=_missing_headline,
+        delta=_missing_delta,
     ),
     CheckEntry(
         "duplicates",
@@ -513,6 +762,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         _render_duplicates,
         _duplicates_status,
         headline=_duplicates_headline,
+        delta=_duplicates_delta,
     ),
     CheckEntry(
         "outliers",
@@ -522,6 +772,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         _render_outliers,
         _outliers_status,
         headline=_outliers_headline,
+        delta=_outliers_delta,
         settings=_outliers_settings,
     ),
     CheckEntry(
@@ -541,6 +792,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         _render_enumerator,
         _enumerator_status,
         headline=_enumerator_headline,
+        delta=_enumerator_delta,
     ),
     CheckEntry(
         "backchecks",
@@ -551,6 +803,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         _backchecks_status,
         setup=_setup_backchecks,
         headline=_backchecks_headline,
+        delta=_backchecks_delta,
         settings=_backchecks_settings,
         # The backcheck dataset is chosen and imported on other pages.
         setup_hint="Fix it on the page linked below.",

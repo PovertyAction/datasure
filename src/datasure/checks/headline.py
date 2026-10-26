@@ -6,6 +6,7 @@ Kept free of Streamlit and of the checks, so any check can import it.
 """
 
 from dataclasses import dataclass
+from enum import StrEnum
 
 from pydantic import ValidationError
 
@@ -31,6 +32,10 @@ class CheckHeadline:
     informational : bool
         The value describes the data rather than counting issues, as for
         Progress and Enumerator Stats, so the row is never flagged.
+    count : float | None
+        The number an informational value shows, such as the submissions or
+        the active enumerators, which its change over the comparison period
+        compares. None when the value has no such number.
     """
 
     value: str
@@ -38,6 +43,7 @@ class CheckHeadline:
     outstanding: float | None = None
     resolved: int | None = None
     informational: bool = False
+    count: float | None = None
 
     @property
     def flagged(self) -> bool:
@@ -47,6 +53,40 @@ class CheckHeadline:
             and self.outstanding is not None
             and self.outstanding > 0
         )
+
+
+class DeltaKind(StrEnum):
+    """What a row's outstanding change measures, which sets how it reads."""
+
+    # Issues among the submissions dated in the period: "▲ 3 new".
+    NEW = "new"
+    # A change in percentage points, as for Missing Values.
+    POINTS = "points"
+    # Submissions dated in the period, as for Progress.
+    SUBMISSIONS = "submissions"
+    # A change in active enumerators, as for Enumerator Stats.
+    ACTIVE = "active"
+
+
+@dataclass(frozen=True)
+class CheckDelta:
+    """How a check's health row changed over the comparison period.
+
+    Attributes
+    ----------
+    outstanding : float | None
+        The change in the outstanding number, read as `kind` says; None when
+        it cannot be computed.
+    resolved : int | None
+        Resolutions logged in the period that are still in effect; None for
+        checks that resolve nothing.
+    kind : DeltaKind
+        What `outstanding` measures.
+    """
+
+    outstanding: float | None = None
+    resolved: int | None = None
+    kind: DeltaKind = DeltaKind.NEW
 
 
 def settings_no_longer_fit(check: str, cause: Exception) -> ValueError:

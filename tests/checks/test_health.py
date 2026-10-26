@@ -1,6 +1,8 @@
 """Summary's check health rows: status, numbers and cached headlines."""
 
+import json
 import sys
+from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
@@ -8,16 +10,18 @@ import polars as pl
 import pytest
 
 from datasure.checks.context import CheckContext, CheckData, PageConfig
-from datasure.checks.headline import CheckHeadline
+from datasure.checks.headline import CheckDelta, CheckHeadline, DeltaKind
 from datasure.checks.health import (
     HealthRow,
     RowState,
     clear_headline_cache,
     group_rows,
     health_rows,
+    render_comparison_period,
     render_health_rows,
     status_only_headline,
 )
+from datasure.checks.health_period import ComparisonPeriod, DeltaWindow
 from datasure.utils.dataframe_utils import get_df_columns
 from datasure.utils.duckdb_utils import duckdb_save_table
 from datasure.utils.navigation import CheckStatus, NavItem
@@ -263,10 +267,85 @@ class TestRenderHealthRows:
             HealthRow(NavItem("c", "C", ":material/c:", "Data")),
         ]
 
-        with patch("datasure.utils.ui_utils.section_header"):
-            render_health_rows(rows, on_select=MagicMock())
+        render_health_rows(rows, on_select=MagicMock())
 
         assert st.container.call_args_list == [call(border=True)] * len(rows)
+
+    @staticmethod
+    def _drawn(monkeypatch, since):
+        """Draw one row; return the column counts and every caption shown."""
+        st = MagicMock()
+        cells: list[MagicMock] = []
+
+        def columns(spec, **_):
+            made = [MagicMock() for _ in spec]
+            cells.extend(made)
+            return made
+
+        st.columns.side_effect = columns
+        monkeypatch.setitem(sys.modules, "streamlit", st)
+        row = HealthRow(
+            DUPLICATES, TWO_DUPLICATES, delta=CheckDelta(outstanding=2, resolved=1)
+        )
+        render_health_rows([row], on_select=MagicMock(), since=since)
+        counts = [len(c.args[0]) for c in st.columns.call_args_list]
+        captions = [c.args[0] for cell in cells for c in cell.caption.call_args_list]
+        return counts, captions
+
+    def test_changes_show_in_their_own_column(self, monkeypatch):
+        counts, captions = self._drawn(monkeypatch, "yesterday")
+
+        assert counts == [6, 6]
+        assert "▲ 2 new since yesterday" in captions
+        assert "+1 since yesterday" in captions
+
+    def test_without_dates_the_change_column_is_hidden(self, monkeypatch):
+        counts, captions = self._drawn(monkeypatch, None)
+
+        assert counts == [5, 5]
+        assert not [text for text in captions if "since" in text]
+
+
+def _widget_st(monkeypatch) -> MagicMock:
+    """A mock Streamlit whose radios and selectboxes return their state."""
+    st = MagicMock(session_state={})
+
+    def widget(_label, options, index=0, key=None, **_):
+        return st.session_state.get(key, options[index])
+
+    st.radio.side_effect = widget
+    st.selectbox.side_effect = widget
+    st.columns.side_effect = lambda spec, **_: [MagicMock() for _ in spec]
+    monkeypatch.setitem(sys.modules, "streamlit", st)
+    return st
+
+
+class TestComparisonPeriodBox:
+    def test_day_with_a_sunday_week_start_by_default(self, tmp_path, monkeypatch):
+        _widget_st(monkeypatch)
+
+        chosen = render_comparison_period(tmp_path / "project_view.json", PROJECT_ID)
+
+        assert chosen == (ComparisonPeriod.DAY, "Sunday")
+
+    def test_the_saved_period_is_restored_for_the_project(self, tmp_path, monkeypatch):
+        view_file = tmp_path / "project_view.json"
+        st = _widget_st(monkeypatch)
+        render_comparison_period(view_file, PROJECT_ID)
+        period_key = st.radio.call_args.kwargs["key"]
+        week_key = st.selectbox.call_args.kwargs["key"]
+        # The user picks Week starting on Monday.
+        for key, value in ((period_key, "Week"), (week_key, "Monday")):
+            st.session_state[key] = value
+        for call_ in (st.radio.call_args, st.selectbox.call_args):
+            call_.kwargs["on_change"]()
+
+        st.session_state.clear()  # a new session, on any check page
+        chosen = render_comparison_period(view_file, PROJECT_ID)
+
+        assert chosen == (ComparisonPeriod.WEEK, "Monday")
+        saved = json.loads(view_file.read_text())
+        assert "view_state" in saved
 
 
 class TestHeadlineCache:
@@ -329,3 +408,152 @@ class TestHeadlineCache:
         rows = _rows(ctx, [DUPLICATES], {"duplicates": headline})
 
         assert rows["duplicates"].headline == TWO_DUPLICATES
+
+
+YESTERDAY = DeltaWindow(as_of=date(2026, 10, 25), survey_date="when")
+WEEK_AGO = DeltaWindow(as_of=date(2026, 10, 19), survey_date="when")
+
+
+def _delta_rows(ctx, items, headlines, deltas, window=YESTERDAY):
+    rows = health_rows(ctx, items, headlines, deltas=deltas, window=window)
+    return {row.item.slug: row for row in rows}
+
+
+class TestDeltas:
+    """Each row's change over the comparison period."""
+
+    def test_ready_rows_get_their_delta(self, tmp_path):
+        ctx = _ctx(_config(tmp_path), DATA)
+        delta = MagicMock(return_value=CheckDelta(outstanding=2, resolved=1))
+
+        row = _delta_rows(
+            ctx,
+            [DUPLICATES],
+            {"duplicates": lambda _: TWO_DUPLICATES},
+            {"duplicates": delta},
+        )["duplicates"]
+
+        assert row.delta == CheckDelta(outstanding=2, resolved=1)
+        delta.assert_called_once_with(ctx, TWO_DUPLICATES, YESTERDAY)
+
+    def test_no_window_means_no_deltas(self, tmp_path):
+        ctx = _ctx(_config(tmp_path), DATA)
+        delta = MagicMock(return_value=CheckDelta(outstanding=2))
+
+        row = _delta_rows(
+            ctx,
+            [DUPLICATES],
+            {"duplicates": lambda _: TWO_DUPLICATES},
+            {"duplicates": delta},
+            window=None,
+        )["duplicates"]
+
+        delta.assert_not_called()
+        assert row.delta is None
+
+    def test_rows_without_numbers_get_no_delta(self, tmp_path):
+        ctx = _ctx(_config(tmp_path), DATA)
+        delta = MagicMock(return_value=CheckDelta(outstanding=2))
+
+        rows = _delta_rows(
+            ctx,
+            [GPS, DUPLICATES],
+            {"duplicates": lambda _: None},
+            {"gps": delta, "duplicates": delta},
+        )
+
+        delta.assert_not_called()
+        assert rows["gps"].delta is None
+
+    def test_a_failing_delta_keeps_the_row_numbers(self, tmp_path):
+        ctx = _ctx(_config(tmp_path), DATA)
+
+        row = _delta_rows(
+            ctx,
+            [DUPLICATES],
+            {"duplicates": lambda _: TWO_DUPLICATES},
+            {"duplicates": MagicMock(side_effect=ValueError("boom"))},
+        )["duplicates"]
+
+        assert row.headline == TWO_DUPLICATES
+        assert row.delta is None
+        assert row.state is RowState.FLAGGED
+
+    def test_cached_per_period_start(self, tmp_path):
+        config = _config(tmp_path)
+        headline = MagicMock(return_value=TWO_DUPLICATES)
+        delta = MagicMock(return_value=CheckDelta(outstanding=2))
+        args = ([DUPLICATES], {"duplicates": headline}, {"duplicates": delta})
+
+        _delta_rows(_ctx(config, DATA), *args, window=YESTERDAY)
+        _delta_rows(_ctx(config, DATA), *args, window=WEEK_AGO)
+        rows = _delta_rows(_ctx(config, DATA), *args, window=YESTERDAY)
+
+        headline.assert_called_once()
+        assert [c.args[2] for c in delta.call_args_list] == [YESTERDAY, WEEK_AGO]
+        assert rows["duplicates"].delta == CheckDelta(outstanding=2)
+
+
+SINCE = "yesterday"
+
+
+class TestDeltaText:
+    """How a row shows its changes, with the period's "since" label."""
+
+    @pytest.mark.parametrize(
+        ("delta", "text"),
+        [
+            (CheckDelta(outstanding=3), "▲ 3 new since yesterday"),
+            (CheckDelta(outstanding=0), "No new issues since yesterday"),
+            (
+                CheckDelta(outstanding=1.5, kind=DeltaKind.POINTS),
+                "▲ 1.50 pp since yesterday",
+            ),
+            (
+                CheckDelta(outstanding=-0.25, kind=DeltaKind.POINTS),
+                "▼ 0.25 pp since yesterday",
+            ),
+            (
+                CheckDelta(outstanding=0, kind=DeltaKind.POINTS),
+                "No change since yesterday",
+            ),
+            (
+                CheckDelta(outstanding=12, kind=DeltaKind.SUBMISSIONS),
+                "▲ 12 new submissions since yesterday",
+            ),
+            (
+                CheckDelta(outstanding=1, kind=DeltaKind.SUBMISSIONS),
+                "▲ 1 new submission since yesterday",
+            ),
+            (
+                CheckDelta(outstanding=0, kind=DeltaKind.SUBMISSIONS),
+                "No new submissions since yesterday",
+            ),
+            (
+                CheckDelta(outstanding=2, kind=DeltaKind.ACTIVE),
+                "▲ 2 more active since yesterday",
+            ),
+            (
+                CheckDelta(outstanding=-1, kind=DeltaKind.ACTIVE),
+                "▼ 1 fewer active since yesterday",
+            ),
+            (
+                CheckDelta(outstanding=0, kind=DeltaKind.ACTIVE),
+                "No change since yesterday",
+            ),
+            (CheckDelta(), "—"),
+        ],
+    )
+    def test_outstanding_change(self, delta, text):
+        row = HealthRow(DUPLICATES, TWO_DUPLICATES, delta=delta)
+
+        assert row.change(SINCE) == text
+
+    def test_a_row_without_a_delta_shows_no_change(self):
+        assert HealthRow(DUPLICATES, TWO_DUPLICATES).change(SINCE) == "—"
+
+    def test_resolved_change(self):
+        row = HealthRow(DUPLICATES, TWO_DUPLICATES, delta=CheckDelta(resolved=4))
+
+        assert row.resolved_change(SINCE) == "+4 since yesterday"
+        assert HealthRow(DUPLICATES, TWO_DUPLICATES).resolved_change(SINCE) == ""
