@@ -280,6 +280,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `src/datasure/views/start_view.py`,
     `src/datasure/utils/navigations_utils.py`,
     `src/datasure/utils/onboarding_utils.py`
+- **Demo ended three times** (#362, #365): The Backchecks comparison
+  callout and the Correct Data guidance both said the demo was complete
+  before the Replication step, and Replication said it again in a text-only
+  callout; the completion message with Restart and Create Real Project was
+  never shown
+  - Root cause: each page added its own ending, and
+    `show_demo_completion_message` was never called. Its Restart only set the
+    onboarding step to 1, so it would not have reset the demo
+  - Solution: `show_demo_completion_message` moved to
+    `utils/navigations_utils.py` and is called once, from
+    `views/replication_view.py` after the PII confirmation is ticked. Its
+    Restart opens the same confirm dialog as the sidebar Restart and runs
+    `reset_demo_project()` (`_restart_demo`, shared by both); Create Real
+    Project calls `exit_demo()` and opens the Start page. The other endings
+    are removed, along with the unreachable "Congratulations" branch of
+    `show_next_steps`
+  - Tests (#364): `TestShowDemoCompletionMessage` and
+    `test_completion_message_is_the_only_demo_complete_message` in
+    `tests/utils/test_navigations_utils.py`; `TestDemoCompletion` in
+    `tests/views/test_replication_view.py`
+  - Files: `src/datasure/utils/navigations_utils.py`,
+    `src/datasure/utils/onboarding_utils.py`,
+    `src/datasure/views/replication_view.py`,
+    `src/datasure/checks/backchecks/report_ui.py`
 - **Demo data seeded and complete** (#360, #365): Every Start or Restart
   Demo drew new random dates, consent and completion values, so reports
   changed between runs; backchecks could predate their survey; and several
