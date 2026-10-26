@@ -258,13 +258,18 @@ class TestOutliersHeadline:
             resolved=0,
         )
 
-    def _reviewed_headline(self, setting_file, acceptances, corrections):
+    def _reviewed_headline(
+        self, setting_file, acceptances, corrections, uncorrected=None
+    ):
         duckdb_save_table(PROJECT_ID, self.COLUMNS, f"outliers_{PAGE}", "logs")
         with patch(
             "datasure.checks.outliers.report_ui.CorrectionProcessor"
         ) as processor:
             processor.return_value.get_active_acceptances.return_value = acceptances
             processor.return_value.get_active_corrections.return_value = corrections
+            processor.return_value.get_uncorrected_data.return_value = (
+                self.DATA if uncorrected is None else uncorrected
+            )
             return self._headline(setting_file, alias="survey")
 
     @staticmethod
@@ -295,15 +300,34 @@ class TestOutliersHeadline:
             resolved=2,
         )
 
-    def test_a_corrected_value_no_longer_flagged_is_resolved_once(self, setting_file):
+    def test_a_corrected_flag_no_longer_flagged_is_resolved_once(self, setting_file):
         from datasure.processing.correction_log import empty_correction_log
 
-        # k2's income was corrected; its cell is in both checks' results.
+        # k5's income was 500, an outlier and above the soft maximum, before
+        # it was corrected to 5.
+        uncorrected = self.DATA.with_columns(
+            pl.when(pl.col("key") == "k5")
+            .then(500.0)
+            .otherwise(pl.col("income"))
+            .alias("income")
+        )
+        headline = self._reviewed_headline(
+            setting_file, empty_correction_log(), self._log("modify", "k5"), uncorrected
+        )
+
+        assert (headline.outstanding, headline.resolved) == (2, 1)
+
+    def test_a_corrected_value_that_was_never_flagged_is_not_resolved(
+        self, setting_file
+    ):
+        from datasure.processing.correction_log import empty_correction_log
+
+        # k2's income was corrected, but no check ever flagged it.
         headline = self._reviewed_headline(
             setting_file, empty_correction_log(), self._log("modify", "k2")
         )
 
-        assert (headline.outstanding, headline.resolved) == (2, 1)
+        assert (headline.outstanding, headline.resolved) == (2, 0)
 
     def test_a_corrected_value_still_flagged_stays_outstanding(self, setting_file):
         from datasure.processing.correction_log import empty_correction_log

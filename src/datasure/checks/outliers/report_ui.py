@@ -51,6 +51,8 @@ from datasure.checks.outliers.review import (
     clear_reviewed_flags,
     count_resolved_flags,
     filter_table,
+    flagged_cells,
+    has_corrected_cells,
     highlight_reviewed_row,
     join_survey_columns,
     key_has_conflicting_values,
@@ -1457,11 +1459,17 @@ def _review_context(
 
 @dataclass(frozen=True)
 class _ReviewedFlags:
-    """Outlier and constraint results with accepted flags cleared."""
+    """Outlier and constraint results with accepted flags cleared.
+
+    `flagged_before_correction` holds the (KEY, column) cells flagged in the
+    uncorrected data, so only corrections of flagged values count as
+    resolved.
+    """
 
     outliers: pl.DataFrame
     violations: pl.DataFrame
     survey_key: str
+    flagged_before_correction: set[tuple]
 
 
 def _reviewed_flags(
@@ -1476,7 +1484,9 @@ def _reviewed_flags(
     """Compute the check's results without rendering it, for the health rows.
 
     Uses the saved settings and outlier columns, and clears accepted flags,
-    as the Outliers tab does. None when no outlier columns are configured.
+    as the Outliers tab does. When values were corrected, the checks also
+    run on the uncorrected data to find which corrected values were
+    flagged. None when no outlier columns are configured.
 
     Raises
     ------
@@ -1511,7 +1521,41 @@ def _reviewed_flags(
             _with_review_status(violations, settings, CONSTRAINTS, review),
             CONSTRAINTS,
         )
-    return _ReviewedFlags(outlier_data, violations, settings.survey_key)
+    flagged_before: set[tuple] = set()
+    uncorrected = (
+        review.processor.get_uncorrected_data(review.alias)
+        if review is not None
+        and has_corrected_cells([(outlier_data, OUTLIERS), (violations, CONSTRAINTS)])
+        else pl.DataFrame()
+    )
+    if uncorrected.width > 0:
+        try:
+            flagged_before = flagged_cells(
+                [
+                    (
+                        compute_outlier_output(
+                            uncorrected,
+                            settings,
+                            column_config,
+                            missing_codes=missing_codes,
+                        ),
+                        OUTLIERS,
+                    ),
+                    (
+                        compute_constraint_violations(
+                            uncorrected,
+                            settings,
+                            column_config,
+                            missing_codes=missing_codes,
+                        ),
+                        CONSTRAINTS,
+                    ),
+                ],
+                settings.survey_key,
+            )
+        except (pl.exceptions.PolarsError, ValueError) as exc:
+            raise settings_no_longer_fit("Outliers", exc) from exc
+    return _ReviewedFlags(outlier_data, violations, settings.survey_key, flagged_before)
 
 
 def _plural(count: int, noun: str) -> str:
@@ -1590,6 +1634,7 @@ def outliers_headline(
         resolved=count_resolved_flags(
             [(flags.outliers, OUTLIERS), (flags.violations, CONSTRAINTS)],
             flags.survey_key,
+            flags.flagged_before_correction,
         ),
     )
 

@@ -221,15 +221,39 @@ def _cells_where(flags: pl.DataFrame, survey_key: str, rows: pl.Expr) -> set[tup
     return set(selected.iter_rows())
 
 
-def count_resolved_flags(
+def has_corrected_cells(results: Sequence[tuple[pl.DataFrame, FlagCheck]]) -> bool:
+    """Whether any results marked by `mark_reviewed` hold a corrected cell."""
+    return any(
+        REVIEW_STATUS_COL in flags.columns
+        and (flags[REVIEW_STATUS_COL] == CORRECTED_BADGE).any()
+        for flags, _ in results
+    )
+
+
+def flagged_cells(
     results: Sequence[tuple[pl.DataFrame, FlagCheck]], survey_key: str
+) -> set[tuple]:
+    """Return the (KEY, column) cells any of the checks flags."""
+    cells: set[tuple] = set()
+    for flags, check in results:
+        if not flags.is_empty():
+            cells |= _cells_where(flags, survey_key, _is_flagged(check))
+    return cells
+
+
+def count_resolved_flags(
+    results: Sequence[tuple[pl.DataFrame, FlagCheck]],
+    survey_key: str,
+    flagged_before_correction: set[tuple],
 ) -> int:
     """Count the flags resolved by an acceptance or a correction.
 
     Each accepted flag counts, so a cell accepted as both an outlier and a
     constraint violation counts twice. A corrected cell counts once, and
-    only when no check flags it any more: a corrected value that is still
-    flagged still needs attention.
+    only when a check flagged its uncorrected value and no check flags it
+    any more: a corrected value that is still flagged still needs
+    attention, and correcting a value that was never flagged resolves
+    nothing.
 
     Parameters
     ----------
@@ -239,6 +263,9 @@ def count_resolved_flags(
         without review columns resolve nothing.
     survey_key : str
         The Survey KEY column in the results.
+    flagged_before_correction : set[tuple]
+        The (KEY, column) cells the checks flag in the uncorrected data, as
+        returned by `flagged_cells`.
     """
     accepted = 0
     corrected: set[tuple] = set()
@@ -252,7 +279,7 @@ def count_resolved_flags(
         still_flagged |= _cells_where(
             flags, survey_key, _is_flagged(check) & (status != REVIEWED_BADGE)
         )
-    return accepted + len(corrected - still_flagged)
+    return accepted + len((corrected & flagged_before_correction) - still_flagged)
 
 
 _REVIEWED_ROW_STYLE = "background-color: rgba(25, 135, 84, 0.15)"
