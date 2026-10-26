@@ -25,6 +25,7 @@ src/datasure/
 │                           #   icon, group, status, render and headline
 │   ├── context.py          #   PageConfig, CheckData, CheckContext
 │   ├── health.py           #   Summary's check health rows, cached headlines
+│   ├── health_period.py    #   Comparison period and as-of helpers (no Streamlit)
 │   ├── summary.py          #   Data, submission and progress summary
 │   ├── missing.py          #   Missing data analysis
 │   ├── duplicates.py       #   Duplicate detection
@@ -208,6 +209,33 @@ to appear.
   is logged, shown on its row and not cached; the other rows still render.
   The row buttons call `select_nav_item`, so they select the check exactly
   as the navigation does. The navigation itself never shows counts.
+- **Health deltas.** A catalogue entry's optional `delta` adapter returns a
+  `CheckDelta` (`checks/headline.py`): the change in the outstanding number
+  (`DeltaKind` says how it reads: new issues, percentage points, new
+  submissions or active enumerators) and the resolutions logged in the period.
+  It takes the context, the headline now and a `DeltaWindow`
+  (`checks/health_period.py`) holding the period start (`period_start`:
+  the date whose end the period starts from, computed from an explicit
+  `today`) and the date columns (`comparison_window` in `catalogue.py`:
+  Summary's saved date, else the page survey date; the backcheck date for
+  Backchecks; a column not in the data counts as unset). There is no snapshot
+  store: adapters recompute the check on the submissions dated on or before
+  the period start (`on_or_before`, which keeps undated rows so they never
+  count as new) and subtract. Outliers is the exception: it counts the
+  current flags on submissions dated in the period, because recomputing the
+  IQR or SD bounds on fewer rows would move them. Resolved deltas count log
+  entries made after the period start that are still in effect: duplicate
+  IDs resolved now whose ID is on a recent `corr_log_{alias}` entry (undo
+  deletes the entry), flags marked with only the recent active acceptances
+  and corrections (`ReviewContext.logged_after`), and mismatches marked with
+  only the recent `bc_attribution` entries (the latest entry per cell wins,
+  so a cell counts only when its latest entry is recent). Deltas share the
+  headline LRU under the key `(slug, "delta", fingerprint, window)`, so the
+  period start is part of the key. A delta that raises is logged and its row
+  shows no change. The Comparison period box (`render_comparison_period`)
+  binds the period and week start to the `check_health` scope of the
+  project-level view file; without any date column it is replaced by a
+  caption and `render_health_rows` drops the Change column.
 - **Render wrapper.** Every check renders through `nav_ui.run_guarded`. An
   exception becomes an error state with the traceback in an expander, is
   logged, and is remembered so the navigation marks the check until it
@@ -315,6 +343,11 @@ On a check page this is the page settings file
   page in `settings/correction_view_settings.json`, with one scope per check
   page (its `page_name_id`) holding the Survey data / Backcheck data choice
   and the Correction Log filters.
+- **Check health comparison period.** Summary saves its Comparison period
+  and week start in the `check_health` scope of the project-level
+  `settings/project_view_settings.json` (`health.PERIOD_SCOPE`), keyed by
+  project, so one choice applies to Summary on every check page. Export never
+  reads this file.
 - **Last viewed check page.** `render_checks` records the `page_name_id` of
   the check page being viewed as `view_state.last_check_page` in the
   project-level `settings/project_view_settings.json`

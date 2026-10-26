@@ -900,6 +900,53 @@ Each number is the number the check itself shows. The numbers are worked out
 again only when the data, the check's settings or its corrections change, so
 Summary stays quick.
 
+###### Comparison period
+
+The collapsible **Comparison period** box above the rows sets what the
+**Change** column compares with. "Today" is your computer's date.
+
+| Option | Compares with |
+| --- | --- |
+| **Day** (default) | The end of yesterday |
+| **7 days** | The end of the day 7 days ago |
+| **Week** | The start of this week. Choose the first day of the week under **Week starts on** (default Sunday) |
+| **30 days** | The end of the day 30 days ago |
+| **Month** | The start of this month (the 1st) |
+
+The choice is one setting for the whole project: it applies to Summary on
+every check page and is remembered next time. It is personal, so project
+exports leave it out.
+
+Each check is worked out again on the submissions dated on or before the start
+of the period, and compared with now. Submissions without a date never count
+as new.
+
+| Check | Change shows |
+| --- | --- |
+| Progress | New submissions dated in the period, for example "▲ 12 new submissions since yesterday" |
+| Missing Values | The change in the share of columns all missing, in percentage points, for example "▼ 2.50 pp since yesterday" |
+| Duplicates | Duplicate IDs that submissions dated in the period added, for example "▲ 3 new since yesterday" |
+| Outliers & Constraints | Flags on submissions dated in the period that are not accepted or corrected. The flags are not worked out again on the earlier submissions, since that would move the outlier bounds |
+| Enumerator Stats | The change in enumerators active in the past 7 days, for example "▲ 2 more active since yesterday" |
+| Backchecks | Unattributed mismatches on backchecks dated in the period |
+
+Under **Resolved**, "+N since …" counts the resolutions made in the period
+that are still in effect: corrections and acceptances from the correction log
+(Duplicates, Outliers & Constraints) and error-source attributions
+(Backchecks). An undone correction, an acceptance whose value has changed since,
+and an attribution later changed back to Unattributed drop out.
+
+The rows use Summary's date column: the date set in Summary's settings, else the
+page's survey date. The Backchecks row uses the backcheck date column from its
+settings. A caption under the box shows the latest submission date, so a
+change of zero is explained. A row without a date column shows "—" in
+**Change**. When no row has a date column, the box and the **Change** column
+are hidden and Summary says "Set a date column in Summary settings to see
+changes over time."; the Resolved totals still show.
+
+Changes are worked out once per comparison period and kept with the other
+numbers, so switching back to a period you have already viewed is instant.
+
 Click **Open →** on a row to go to that check, or **Set up →** to open a check
 that is not set up and configure it. Both update the page address, like
 choosing the check in the navigation. Checks that do not apply to your data

@@ -53,8 +53,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configuration** entry opens `_export_config_dialog` (`views/start_view.py`)
   with an "Include record-level decisions" checkbox, so the bundle is built
   only when the dialog opens instead of for every card on every rerun
+- **Check health changes over a comparison period** (#399, #365): Summary's
+  check health rows gain a Change column and "+N since …" under Resolved. A
+  collapsible **Comparison period** box above the rows offers Day (default,
+  vs the end of yesterday), 7 days, Week (week to date, week start
+  selectable, default Sunday), 30 days and Month (month to date)
+  (`checks/health_period.py`: `ComparisonPeriod`, `period_start(period,
+  today, week_start)`, `since_label`). The choice is one project-wide view
+  setting in `settings/project_view_settings.json` (scope
+  `health.PERIOD_SCOPE`), so project exports leave it out
+  - `CheckEntry.delta` adapters return a `CheckDelta` (outstanding change,
+    resolved in the period, `DeltaKind`) for Progress, Missing Values,
+    Duplicates, Outliers & Constraints, Enumerator Stats and Backchecks;
+    `health_rows(..., deltas=, window=)` computes them and caches them under
+    the period start (`DeltaWindow`, built by `comparison_window`). Each
+    check is recomputed on the submissions dated on or before the period
+    start (`on_or_before`); Outliers counts current flags on submissions
+    dated in the period instead. Resolved deltas count still-active entries
+    made after the period start in `corr_log_{alias}`
+    (`duplicates_resolved_since`, `ReviewContext.logged_after`) and
+    `bc_attribution` (`backchecks_delta`); new `outliers_delta`
+  - Rows use Summary's date column (its saved date, else the page survey
+    date); Backchecks uses the backcheck date column. With no date column
+    the box and Change column are hidden and a caption says "Set a date
+    column in Summary settings to see changes over time." A caption shows
+    the latest submission date
+  - `CheckHeadline` gains `count` (Progress submissions, Enumerator Stats
+    active enumerators); `enumerator_headline` takes `today`;
+    `id_duplicates.resolved_ids` returns the resolved ID set
 
 ### Changed
+
+- **`render_health_rows` no longer draws the section header** (#399, #365):
+  call `render_health_header()` first. It takes `since` (None hides the
+  Change column)
 
 - **Breaking: headline functions return `CheckHeadline`** (#399, #365):
   `progress_headline`, `missing_headline`, `duplicates_headline`,
