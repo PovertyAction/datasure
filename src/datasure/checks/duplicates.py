@@ -58,6 +58,9 @@ from datasure.utils.duckdb_utils import (
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import (
+    DEMO_REPEAT_SUBMISSION,
+    DEMO_SHARED_ID,
+    DEMO_WRONG_ID,
     DemoColumn,
     demo_output_onboarding,
     is_demo_project,
@@ -2327,18 +2330,20 @@ def duplicates_report(
             "resolved. Undo a save on the **Correct Data** page.\n\n"
             "##### Instructions for Demo:\n"
             "The demo data has three duplicate household IDs. Resolve each card:\n"
-            "- **UP015-005**: the record with KEY "
-            "**uuid:0dk0vt97-786b-250u-34k7-z34615zz820c** belongs to household "
-            "**UP015-055**. Choose **Modify ID** for it, enter **UP015-055**, and "
+            f"- **{DEMO_WRONG_ID.hhid}**: the record with KEY "
+            f"**{DEMO_WRONG_ID.key}** belongs to household "
+            f"**{DEMO_WRONG_ID.new_hhid}**. Choose **Modify ID** for it, enter "
+            f"**{DEMO_WRONG_ID.new_hhid}**, and **Keep** the other record. "
+            "Reason: **Wrong ID entered**.\n"
+            f"- **{DEMO_SHARED_ID.hhid}**: two different respondents share the ID. "
+            "Choose **Modify ID** for the record with KEY "
+            f"**{DEMO_SHARED_ID.key}** and enter **{DEMO_SHARED_ID.new_hhid}**; "
             "**Keep** the other record. Reason: **Wrong ID entered**.\n"
-            "- **GJ013-025**: two different respondents share the ID. Choose "
-            "**Modify ID** for the record with KEY "
-            "**uuid:1qv2hs40-598s-540g-57l8-s35783yl358j** and enter **GJ013-026**; "
-            "**Keep** the other record. Reason: **Wrong ID entered**.\n"
-            "- **AN002-003**: the record with KEY "
-            "**uuid:0ur3to71-184r-159l-70j6-m68512uv803n** is an incomplete repeat "
-            "of the household's interview. Choose **Drop** for it and **Keep** the "
-            "other record. Reason: **Duplicate submission**.\n\n"
+            f"- **{DEMO_REPEAT_SUBMISSION.hhid}**: the record with KEY "
+            f"**{DEMO_REPEAT_SUBMISSION.key}** is a near-empty submission for the "
+            "same household: it lists no household members and leaves most "
+            "answers blank. Choose **Drop** for it and **Keep** the other record. "
+            "Reason: **Duplicate submission**.\n\n"
             "Add a short **Note** to each card, such as *Confirmed with the field "
             "team*, and click **Save**. When all three cards are gone, open "
             "**Overview → Summary** to see them under **Resolved** in Check health."

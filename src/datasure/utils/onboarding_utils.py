@@ -53,8 +53,6 @@ class DemoColumn(StrEnum):
 class DemoBackcheckColumn(StrEnum):
     """Backcheck columns that demo guidance names, like ``DemoColumn``."""
 
-    KEY = "KEY"
-    HHID = "hhid"
     SUBMISSIONDATE = "submissiondate"
     BCER_NAME = "bcer_name"
     TEAM_ID = "team_id"
@@ -71,6 +69,44 @@ DEMO_GUIDANCE_COLUMNS: dict[str, type[StrEnum]] = {
     "demo_survey": DemoColumn,
     "demo_backcheck": DemoBackcheckColumn,
 }
+
+
+# Demo survey values that guidance names. A test loads the demo data and
+# checks each one, so name a new value here before using it in guidance.
+class DemoDuplicate(NamedTuple):
+    """A duplicated ``hhid`` in the demo survey and how guidance resolves it."""
+
+    hhid: str
+    # KEY of the record guidance changes; the other record is kept
+    key: str
+    # The ID to give that record with Modify ID, or None to Drop it
+    new_hhid: str | None = None
+
+
+DEMO_WRONG_ID = DemoDuplicate(
+    "UP015-005", "uuid:0dk0vt97-786b-250u-34k7-z34615zz820c", "UP015-055"
+)
+DEMO_SHARED_ID = DemoDuplicate(
+    "GJ013-025", "uuid:1qv2hs40-598s-540g-57l8-s35783yl358j", "GJ013-026"
+)
+DEMO_REPEAT_SUBMISSION = DemoDuplicate(
+    "AN002-003", "uuid:0ur3to71-184r-159l-70j6-m68512uv803n"
+)
+DEMO_DUPLICATES = (DEMO_WRONG_ID, DEMO_SHARED_ID, DEMO_REPEAT_SUBMISSION)
+
+
+class DemoCorrection(NamedTuple):
+    """A demo survey value the Correct Data guidance changes."""
+
+    key: str
+    column: DemoColumn
+    old_value: float
+    new_value: float
+
+
+DEMO_LAND_CORRECTION = DemoCorrection(
+    "uuid:2pb7nd59-391r-425l-40h1-t18527gn249i", DemoColumn.LAND_ACRE, 75.5, 5.5
+)
 
 
 # create a coloured container
@@ -314,15 +350,15 @@ class OnboardingSteps:
         1. In the **Correction Log**, find the three duplicate ID corrections you
            saved on the **Duplicates** check.
         2. Fix a typing slip found by the Outliers check: the household with key
-           **uuid:2pb7nd59-391r-425l-40h1-t18527gn249i** has **75.5** acres in
-           **{DemoColumn.LAND_ACRE}**; the enumerator confirmed an extra 7 was typed
-           and the household owns **5.5** acres.
+           **{DEMO_LAND_CORRECTION.key}** has **{DEMO_LAND_CORRECTION.old_value}** acres in
+           **{DEMO_LAND_CORRECTION.column}**; the enumerator confirmed an extra 7 was typed
+           and the household owns **{DEMO_LAND_CORRECTION.new_value}** acres.
            - Click **:material/add: Add correction step**.
-           - Under **Select KEY**, choose **uuid:2pb7nd59-391r-425l-40h1-t18527gn249i**.
+           - Under **Select KEY**, choose **{DEMO_LAND_CORRECTION.key}**.
            - Under **Select Action**, choose **modify value**.
-           - Under **Select Column to Modify**, choose **{DemoColumn.LAND_ACRE}**.
-             The current value (**75.5**) loads automatically.
-           - Under **New Value**, enter **5.5**.
+           - Under **Select Column to Modify**, choose **{DEMO_LAND_CORRECTION.column}**.
+             The current value (**{DEMO_LAND_CORRECTION.old_value}**) loads automatically.
+           - Under **New Value**, enter **{DEMO_LAND_CORRECTION.new_value}**.
            - Under **Reason for Correction**, enter *Typing slip confirmed by enumerator*.
            - Click **Apply**.
         3. Check the new entry in the **Correction Log**, then return to
@@ -387,11 +423,11 @@ class OutputOnboardingInfo:
     SUMMARY: ClassVar[dict] = {
         "summary_settings": {
             "title": "Summary Settings",
-            "content": """
+            "content": f"""
         ##### Setup for Summary
         In this section, you can configure global settings for the Summary check, you will notice that some settings are pre-filled based on your check configuration.
         This check contains the following settings:
-        - Survey Date: The date when the survey was conducted or submitted. (e.g., submissiondate, starttime).
+        - Survey Date: The date when the survey was conducted or submitted (e.g., {DemoColumn.SUBMISSIONDATE}).
         - Total Expected Interviews: The total number of survey interviews you expect to have in your dataset (e.g., 1000).
 
         ##### Instructions for Demo:
