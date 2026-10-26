@@ -24,7 +24,7 @@ src/datasure/
 │   ├── catalogue.py        #   Every check on a check page: slug, label,
 │                           #   icon, group, status, render and headline
 │   ├── context.py          #   PageConfig, CheckData, CheckContext
-│   ├── health.py           #   Summary's check health grid, cached headlines
+│   ├── health.py           #   Summary's check health rows, cached headlines
 │   ├── summary.py          #   Data, submission and progress summary
 │   ├── missing.py          #   Missing data analysis
 │   ├── duplicates.py       #   Duplicate detection
@@ -185,16 +185,24 @@ to appear.
   not-set-up message ends with the entry's `setup_hint`, "Set it up below."
   by default; Backchecks points to the page linked below instead. Summary computes the outlier and backcheck
   rates inside its own render, so they only run when Summary is shown.
-- **Health grid.** Summary ends with a card per other check
-  (`checks/health.py`). A catalogue entry's optional `headline` function
-  returns the number its card shows, computed the way the check computes it
-  but without rendering it. Headlines run only for ready checks and are
-  cached in a small in-process LRU keyed on the page's data (row hashes),
-  settings files (content hash, leaving out
+- **Health rows.** Summary ends with one row per other check, grouped by
+  navigation group under a shared column header (`checks/health.py`:
+  `health_rows` builds them, `render_health_rows` draws them). A catalogue
+  entry's optional `headline` function returns a `CheckHeadline`
+  (`checks/headline.py`): the outstanding value and its detail line, the
+  outstanding number, the resolved count and an informational flag, each
+  computed the way the check computes it but without rendering it. A row's
+  state (`RowState`) is derived, not stored: grey not set up or not
+  applicable and red error come from the config-only `CheckStatus`; a ready
+  row is red if its headline raised, amber (flagged) if it has more than 0
+  outstanding and is not informational, else green. Headlines run only for
+  ready checks and are cached in a small in-process LRU keyed on the page's
+  data (row hashes), settings files (content hash, leaving out
   [view state](#view-state)), the logs and intermediate databases
-  (modification time and size) and today's date. The card buttons call
-  `select_nav_item`, so they select the check exactly as the navigation
-  does. The navigation itself never shows counts.
+  (modification time and size) and today's date. A headline that raises
+  is logged, shown on its row and not cached; the other rows still render.
+  The row buttons call `select_nav_item`, so they select the check exactly
+  as the navigation does. The navigation itself never shows counts.
 - **Render wrapper.** Every check renders through `nav_ui.run_guarded`. An
   exception becomes an error state with the traceback in an expander, is
   logged, and is remembered so the navigation marks the check until it
