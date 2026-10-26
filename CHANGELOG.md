@@ -244,6 +244,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Demo data seeded and complete** (#360, #365): Every Start or Restart
+  Demo drew new random dates, consent and completion values, so reports
+  changed between runs; backchecks could predate their survey; and several
+  checks the demo walks through showed nothing
+  - Root cause: `DemoDataGenerator` (`utils/onboarding_utils.py`) used the
+    global `random` module unseeded and dated backchecks independently of
+    surveys, and the demo CSVs had no -88 values, almost no backcheck
+    mismatches, an empty `land_acre` and the district "Anantapur" in `state`
+  - Solution: `DemoDataGenerator(df, today=None, seed=DEMO_SEED)` draws from
+    its own `random.Random(seed)`, so every load is identical apart from a
+    whole-day offset that puts the latest survey submission on `today` (the
+    current date by default; seeded data also has submissions yesterday, so
+    Check health deltas show). `add_demo_fields("backcheck",
+    survey_df=...)` dates each backcheck 1-5 days after the latest survey
+    with its `hhid`, capped at `today` and always after the survey
+    submission. `load_demo_data(today=None)` passes both through and no
+    longer reads the backcheck CSV twice. The demo CSVs now have 13 -88
+    values (`rooms`, `dist_sch`, `min_dist`, `pvt_sch`, `land_acre`),
+    2-5 backcheck mismatches on each column the Backchecks guidance adds,
+    `land_acre` filled for every household (8 blank, some -99/-88, three
+    large outliers), and `state` "Andhra Pradesh" in place of "Anantapur".
+    The data stays synthetic
+  - Files: `src/datasure/utils/onboarding_utils.py`,
+    `src/datasure/assets/demo_survey.csv`,
+    `src/datasure/assets/demo_backcheck.csv`,
+    `scripts/benchmark_check_health.py`
 - **DuckDB 2.0 compatibility** (#393): Fresh installs that resolved duckdb
   2.0 failed on the first table read or write, so data could not be imported
   - Root cause: duckdb 2.0 removed `.pl()` from `execute()` results and
