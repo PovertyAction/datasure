@@ -2574,13 +2574,7 @@ def backchecks_report(
         columns, and the **Filter by Match Status** pills to show all results or
         mismatches only. You can also add extra columns from the survey or backcheck
         dataset to provide more context alongside each comparison.
-
-        You have reached the end of the DataSure demo. You now have a full picture of
-        how DataSure tracks data quality across your survey — from progress and
-        missingness through to GPS validation, enumerator performance, and back check
-        verification.
-        """,
-        type="success",
+        """
     )
 
     _render_id_problem_warning(scope, all_survey_data, backcheck_settings.survey_id)

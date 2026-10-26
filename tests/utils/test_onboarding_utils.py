@@ -3,12 +3,15 @@
 import importlib
 import json
 import pkgutil
+import re
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
 
+import datasure
 from datasure.utils.onboarding_utils import (
     DEMO_GUIDANCE_COLUMNS,
     DEMO_OUTPUT_FUNCTIONS,
@@ -29,7 +32,6 @@ from datasure.utils.onboarding_utils import (
     load_demo_data,
     set_onboarding_step,
     show_demo_banner,
-    show_demo_completion_message,
     show_demo_intro,
     show_next_steps,
     show_progress_indicator,
@@ -73,26 +75,14 @@ class TestImportDemoInfo:
         message = ImportDemoInfo.get_info_message("add_to_session_info")
         assert "loaded successfully" in message
 
-        message = ImportDemoInfo.get_info_message("prepare_data_info")
-        assert "Data preparation is a crucial step" in message
-
         message = ImportDemoInfo.get_info_message("preview_data_info")
         assert "loaded and ready" in message
 
         message = ImportDemoInfo.get_info_message("proceed_to_config_info")
         assert "experiment with data preparation" in message
 
-        message = ImportDemoInfo.get_info_message("demo_data_info")
-        assert "Data Import Complete" in message
-
         message = ImportDemoInfo.get_info_message("proceed_to_hfcs_info")
         assert "ready for quality analysis" in message
-
-        message = ImportDemoInfo.get_info_message("add_check_config_info")
-        assert "Follow these steps to set up data quality checks" in message
-
-        message = ImportDemoInfo.get_info_message("add_prep_steps_info")
-        assert "convert the submissiondate" in message
 
     def test_get_info_message_invalid_id(self):
         """Test getting info message with invalid ID returns default message."""
@@ -103,12 +93,27 @@ class TestImportDemoInfo:
         """Test that all class variables are defined."""
         assert hasattr(ImportDemoInfo, "ADD_TO_SESSION_INFO")
         assert hasattr(ImportDemoInfo, "PREVIEW_DATA_INFO")
-        assert hasattr(ImportDemoInfo, "PREPARE_DATA_INFO")
         assert hasattr(ImportDemoInfo, "PROCEED_TO_CONFIG_INFO")
-        assert hasattr(ImportDemoInfo, "DEMO_DATA_INFO")
         assert hasattr(ImportDemoInfo, "PROCEED_TO_HFCS_INFO")
-        assert hasattr(ImportDemoInfo, "ADD_CHECK_CONFIG_INFO")
-        assert hasattr(ImportDemoInfo, "ADD_PREP_STEPS_INFO")
+
+    def test_every_message_is_shown_somewhere(self):
+        """Every ImportDemoInfo message is requested by a page in datasure."""
+        src_root = Path(datasure.__file__).parent
+        requested = {
+            message_id
+            for path in src_root.rglob("*.py")
+            for message_id in re.findall(
+                r"get_info_message\(\s*\"([a-z_]+)\"", path.read_text("utf-8")
+            )
+        }
+        constants = {
+            name
+            for name, value in vars(ImportDemoInfo).items()
+            if name.isupper() and isinstance(value, str)
+        }
+        assert constants, "no ImportDemoInfo messages found"
+        unused = sorted(name for name in constants if name.lower() not in requested)
+        assert not unused, f"demo messages never shown: {unused}"
 
 
 class TestOnboardingSteps:
@@ -192,13 +197,6 @@ class TestOutputOnboardingInfo:
 
     def test_get_onboarding_message_summary(self):
         """Test getting onboarding message for summary tab."""
-        message = OutputOnboardingInfo.get_onboarding_message(
-            "summary", "summary_report"
-        )
-        assert message["title"] == "Data Quality Summary"
-        assert "overview of your survey data" in message["content"]
-
-        # Test other summary messages
         message = OutputOnboardingInfo.get_onboarding_message(
             "summary", "summary_settings"
         )
@@ -416,10 +414,10 @@ class TestDemoOutputOnboarding:
         mock_is_demo.return_value = True
 
         @demo_output_onboarding("summary")
-        def summary_report():
+        def summary_settings():
             return "executed"
 
-        result = summary_report()
+        result = summary_settings()
         assert result == "executed"
         mock_demo_expander.assert_called_once()
 
@@ -518,6 +516,29 @@ class TestDemoOutputOnboarding:
             if OutputOnboardingInfo.get_onboarding_message(tab, name) is None
         )
         assert not missing, f"decorated functions without a message: {missing}"
+
+    def test_every_message_has_decorated_function(self):
+        """Every OutputOnboardingInfo message is shown by a decorated function."""
+        import datasure.checks
+
+        for module in pkgutil.walk_packages(
+            datasure.checks.__path__, prefix="datasure.checks."
+        ):
+            importlib.import_module(module.name)
+
+        shown = {
+            id(OutputOnboardingInfo.get_onboarding_message(tab, name))
+            for module, tab, name in DEMO_OUTPUT_FUNCTIONS
+            if module.startswith("datasure.")
+        }
+        unused = sorted(
+            f"{group}[{message_id!r}]"
+            for group, messages in vars(OutputOnboardingInfo).items()
+            if group.isupper() and isinstance(messages, dict)
+            for message_id, message in messages.items()
+            if id(message) not in shown
+        )
+        assert not unused, f"demo messages never shown: {unused}"
 
 
 class TestDemoProjectFunctions:
@@ -693,14 +714,14 @@ class TestDemoUIFunctions:
     @patch("datasure.utils.onboarding_utils.st")
     @patch("datasure.utils.onboarding_utils.is_demo_project")
     def test_show_next_steps_completed(self, mock_is_demo, mock_st):
-        """Test showing next steps when all steps completed."""
+        """After the last step nothing is shown; the completion message follows."""
         mock_is_demo.return_value = True
-        mock_st.button.return_value = False
 
         show_next_steps(7)
 
-        mock_st.success.assert_called_once()
-        mock_st.button.assert_called()
+        mock_st.success.assert_not_called()
+        mock_st.info.assert_not_called()
+        mock_st.button.assert_not_called()
 
     @patch("datasure.utils.onboarding_utils.st")
     @patch("datasure.utils.onboarding_utils.is_demo_project")
@@ -711,90 +732,6 @@ class TestDemoUIFunctions:
         show_next_steps(2)
 
         mock_st.markdown.assert_not_called()
-
-    @patch("datasure.utils.onboarding_utils.st")
-    @patch("datasure.utils.onboarding_utils.is_demo_project")
-    @patch("datasure.utils.onboarding_utils.is_demo_complete")
-    def test_show_demo_completion_message_complete(
-        self, mock_is_complete, mock_is_demo, mock_st
-    ):
-        """Test completion message displays when demo is complete."""
-        mock_is_demo.return_value = True
-        mock_is_complete.return_value = True
-        mock_st.button.return_value = False
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-
-        show_demo_completion_message()
-
-        mock_st.balloons.assert_called_once()
-        mock_st.success.assert_called_once()
-
-    @patch("datasure.utils.onboarding_utils.st")
-    @patch("datasure.utils.onboarding_utils.is_demo_project")
-    @patch("datasure.utils.onboarding_utils.is_demo_complete")
-    def test_show_demo_completion_message_restart_button(
-        self, mock_is_complete, mock_is_demo, mock_st
-    ):
-        """Test completion message restart button click."""
-        mock_is_demo.return_value = True
-        mock_is_complete.return_value = True
-        mock_st.button.side_effect = [True, False]  # First button clicked
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-
-        with patch("datasure.utils.onboarding_utils.set_onboarding_step") as mock_set:
-            show_demo_completion_message()
-            mock_set.assert_called_with(1)
-            mock_st.rerun.assert_called_once()
-
-    @patch("datasure.utils.onboarding_utils.st")
-    @patch("datasure.utils.onboarding_utils.is_demo_project")
-    @patch("datasure.utils.onboarding_utils.is_demo_complete")
-    def test_show_demo_completion_message_create_project_button(
-        self, mock_is_complete, mock_is_demo, mock_st
-    ):
-        """Test completion message create new project button click."""
-        mock_is_demo.return_value = True
-        mock_is_complete.return_value = True
-        mock_st.button.side_effect = [False, True]  # Second button clicked
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-
-        # Use MagicMock for session_state to support attribute assignment
-        mock_session_state = MagicMock()
-        mock_session_state.onboarding_step = 6
-        mock_st.session_state = mock_session_state
-
-        show_demo_completion_message()
-
-        assert mock_st.session_state.st_project_id == ""
-        mock_st.switch_page.assert_called_with("pages/start_view.py")
-
-    @patch("datasure.utils.onboarding_utils.st")
-    @patch("datasure.utils.onboarding_utils.is_demo_project")
-    @patch("datasure.utils.onboarding_utils.is_demo_complete")
-    def test_show_demo_completion_message_non_demo(
-        self, mock_is_complete, mock_is_demo, mock_st
-    ):
-        """Test completion message doesn't display when not in demo mode."""
-        mock_is_demo.return_value = False
-        mock_is_complete.return_value = True
-
-        show_demo_completion_message()
-
-        mock_st.balloons.assert_not_called()
-
-    @patch("datasure.utils.onboarding_utils.st")
-    @patch("datasure.utils.onboarding_utils.is_demo_project")
-    @patch("datasure.utils.onboarding_utils.is_demo_complete")
-    def test_show_demo_completion_message_incomplete(
-        self, mock_is_complete, mock_is_demo, mock_st
-    ):
-        """Test completion message doesn't display when demo incomplete."""
-        mock_is_demo.return_value = True
-        mock_is_complete.return_value = False
-
-        show_demo_completion_message()
-
-        mock_st.balloons.assert_not_called()
 
     @patch("datasure.utils.onboarding_utils.st")
     @patch("datasure.utils.onboarding_utils.is_demo_project")

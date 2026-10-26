@@ -12,6 +12,7 @@ from datasure.utils.demo_lifecycle import (
 from datasure.utils.onboarding_utils import (
     OnboardingSteps,
     get_onboarding_step,
+    is_demo_complete,
     is_demo_project,
     set_onboarding_step,
     show_demo_banner,
@@ -112,8 +113,10 @@ def demo_callout(message: str, type: str = "info"):
     render.get(type, st.info)(message)
 
 
-def _restart_demo_from_sidebar() -> None:
+def _restart_demo() -> None:
     """Reset the demo and open the import page.
+
+    Shared by the sidebar and the completion message's Restart actions.
 
     A failed reset has left the demo, so the error is queued for the Start
     page's demo row and the Start page is opened.
@@ -123,6 +126,46 @@ def _restart_demo_from_sidebar() -> None:
         return
     queue_notice(DEMO_NOTICE_SCOPE, "error", DEMO_RESET_FAILED_MESSAGE)
     st.switch_page(st.session_state.st_start_page)
+
+
+def _confirm_restart_demo() -> None:
+    """Open the Restart confirm dialog; confirming resets the whole demo."""
+    confirm_dialog(
+        "Restart demo",
+        RESTART_DEMO_MESSAGE,
+        confirm_label="Restart demo",
+        on_confirm=_restart_demo,
+    )
+
+
+def show_demo_completion_message():
+    """Show the demo's completion message and what to do next.
+
+    This is the demo's only completion message, shown after the last step
+    (Replication). Restart resets the whole demo, as the sidebar Restart does;
+    Create Real Project leaves the demo for the Start page.
+    """
+    if not is_demo_project() or not is_demo_complete():
+        return
+
+    st.balloons()
+
+    st.success("""
+    **Demo Complete!**
+
+    You've successfully learned how to use DataSure for survey data quality management!
+    """)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("Restart Demo", width="stretch"):
+            _confirm_restart_demo()
+
+    with col2:
+        if st.button("Create Real Project", type="primary", width="stretch"):
+            exit_demo()
+            st.switch_page(st.session_state.st_start_page)
 
 
 def demo_sidebar_help():
@@ -147,12 +190,7 @@ def demo_sidebar_help():
         st.markdown("---")
 
         if st.button("Restart Demo", width="stretch"):
-            confirm_dialog(
-                "Restart demo",
-                RESTART_DEMO_MESSAGE,
-                confirm_label="Restart demo",
-                on_confirm=_restart_demo_from_sidebar,
-            )
+            _confirm_restart_demo()
 
         if st.button("Exit Demo", width="stretch"):
             exit_demo()

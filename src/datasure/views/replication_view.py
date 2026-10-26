@@ -15,8 +15,8 @@ from datasure.utils.config_utils import ConfigurationService
 from datasure.utils.duckdb_utils import duckdb_get_table
 from datasure.utils.navigations_utils import (
     add_demo_navigation,
-    demo_callout,
     demo_sidebar_help,
+    show_demo_completion_message,
 )
 from datasure.utils.scto_api import (
     SurveyCTOAPIClient,
@@ -393,15 +393,8 @@ if "_replication_zip" in st.session_state:
     )
 
     if pii_confirmed:
-        demo_callout(
-            "You have completed the DataSure demo! You have gone through the full "
-            "workflow — importing data, preparing it, configuring quality checks, "
-            "reviewing reports, correcting data issues, and exporting a replication "
-            "package.\n\n"
-            "To exit the demo and return to the project selection screen, click the "
-            "**Exit Demo** button in the sidebar.",
-            type="success",
-        )
+        # Replication is the demo's last step, so the demo ends here.
+        show_demo_completion_message()
 
 # ── Preview ───────────────────────────────────────────────────────────────────
 
