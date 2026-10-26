@@ -1107,6 +1107,19 @@ def create_demo_project():
     return DEMO_PROJECT_ID
 
 
+def unregister_demo_project() -> None:
+    """Remove the demo project from ``projects.json``, leaving its folder."""
+    projects_file = get_cache_path("projects.json")
+    if not projects_file.exists():
+        return
+    with open(projects_file) as f:
+        projects = json.load(f)
+    if projects.pop(DEMO_PROJECT_ID, None) is None:
+        return
+    with open(projects_file, "w") as f:
+        json.dump(projects, f, indent=4)
+
+
 class InterviewTimes(NamedTuple):
     """When one demo interview started, ended and was submitted.
 

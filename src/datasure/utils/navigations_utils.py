@@ -3,6 +3,7 @@
 import streamlit as st
 
 from datasure.utils.demo_lifecycle import (
+    DEMO_NOTICE_SCOPE,
     DEMO_RESET_FAILED_MESSAGE,
     RESTART_DEMO_MESSAGE,
     exit_demo,
@@ -17,12 +18,9 @@ from datasure.utils.onboarding_utils import (
     show_next_steps,
     show_progress_indicator,
 )
-from datasure.utils.ui_utils import confirm_dialog, queue_notice, show_queued_notices
+from datasure.utils.ui_utils import confirm_dialog, queue_notice
 
 ONBOARDING_STEPS = OnboardingSteps.get_all_steps()  # List of onboarding steps
-
-# `queue_notice` scope of the demo sidebar's messages.
-_DEMO_SIDEBAR_NOTICE_SCOPE = "demo_sidebar"
 
 
 def page_navigation(prev=None, next=None):
@@ -115,12 +113,16 @@ def demo_callout(message: str, type: str = "info"):
 
 
 def _restart_demo_from_sidebar() -> None:
-    """Reset the demo and open the import page, or queue the failure."""
+    """Reset the demo and open the import page.
+
+    A failed reset has left the demo, so the error is queued for the Start
+    page's demo row and the Start page is opened.
+    """
     if reset_demo_project():
         st.switch_page(st.session_state.st_import_data_page)
         return
-    # confirm_dialog reruns after this, which would clear a direct st.error.
-    queue_notice(_DEMO_SIDEBAR_NOTICE_SCOPE, "error", DEMO_RESET_FAILED_MESSAGE)
+    queue_notice(DEMO_NOTICE_SCOPE, "error", DEMO_RESET_FAILED_MESSAGE)
+    st.switch_page(st.session_state.st_start_page)
 
 
 def demo_sidebar_help():
@@ -130,7 +132,6 @@ def demo_sidebar_help():
 
     with st.sidebar:
         st.markdown("### Demo Help")
-        show_queued_notices(_DEMO_SIDEBAR_NOTICE_SCOPE)
 
         current_step = get_onboarding_step()
 

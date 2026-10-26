@@ -13,6 +13,7 @@ from datasure.models.schemas import ProjectConfigBundle
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
 from datasure.utils.demo_lifecycle import (
+    DEMO_NOTICE_SCOPE,
     DEMO_RESET_FAILED_MESSAGE,
     RESTART_DEMO_MESSAGE,
     reset_demo_project,
@@ -183,10 +184,6 @@ def _activate_project(project_id: str) -> None:
     st.switch_page(st.session_state.st_import_data_page)
 
 
-# `queue_notice` scope of the demo row's messages.
-_DEMO_NOTICE_SCOPE = "start_demo"
-
-
 def _launch_fresh_demo():
     """Rebuild the demo project from scratch and navigate to the import page.
 
@@ -198,13 +195,13 @@ def _launch_fresh_demo():
     if reset:
         st.switch_page(st.session_state.st_import_data_page)
         return
-    queue_notice(_DEMO_NOTICE_SCOPE, "error", DEMO_RESET_FAILED_MESSAGE)
+    queue_notice(DEMO_NOTICE_SCOPE, "error", DEMO_RESET_FAILED_MESSAGE)
     st.rerun()
 
 
 def _render_demo_row() -> None:
     """Render the pinned DataSure Demo row."""
-    show_queued_notices(_DEMO_NOTICE_SCOPE)
+    show_queued_notices(DEMO_NOTICE_SCOPE)
     demo_exists = DEMO_PROJECT_ID in load_projects()
 
     if not demo_exists:

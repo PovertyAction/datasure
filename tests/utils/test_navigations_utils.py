@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from datasure.utils.demo_lifecycle import (
+    DEMO_NOTICE_SCOPE,
     DEMO_RESET_FAILED_MESSAGE,
     RESTART_DEMO_MESSAGE,
 )
@@ -617,23 +618,19 @@ class TestDemoSidebarHelp:
     @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
     @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
     @patch("datasure.utils.navigations_utils.st")
-    def test_failed_restart_shows_error_after_the_dialog_reruns(
+    def test_failed_restart_opens_start_page_with_the_error(
         self, mock_st, _is_demo, _get_step, _reset
     ):
-        """A failed restart's error is queued and shown in the sidebar next run."""
+        """A failed reset has left the demo, so its error shows on the Start page."""
+        mock_st.session_state.st_start_page = "views/start.py"
         dialog = self._click_restart(mock_st)
         with patch("datasure.utils.navigations_utils.queue_notice") as queue:
             dialog.call_args.kwargs["on_confirm"]()
-        mock_st.switch_page.assert_not_called()
-        scope, level, message = queue.call_args.args
-        assert (level, message) == ("error", DEMO_RESET_FAILED_MESSAGE)
 
-        # Next run, after the dialog's st.rerun().
-        mock_st.button.side_effect = None
-        mock_st.button.return_value = False
-        with patch("datasure.utils.navigations_utils.show_queued_notices") as show:
-            demo_sidebar_help()
-        show.assert_called_once_with(scope)
+        queue.assert_called_once_with(
+            DEMO_NOTICE_SCOPE, "error", DEMO_RESET_FAILED_MESSAGE
+        )
+        mock_st.switch_page.assert_called_once_with("views/start.py")
 
     @patch("datasure.utils.navigations_utils.reset_demo_project")
     @patch("datasure.utils.navigations_utils.get_onboarding_step", return_value=1)
