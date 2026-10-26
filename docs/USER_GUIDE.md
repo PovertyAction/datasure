@@ -868,14 +868,15 @@ one shared column header. Each row shows:
 - **Outstanding**: the issues still to deal with, with a detail line under the
   number. For a check that is not ready, the reason instead
 - **Resolved**: the issues already resolved through corrections, acceptances
-  or error-source attributions, or "—" for checks that resolve nothing
+  or error-source attributions, or "—" for checks that resolve nothing or
+  when the count can't be worked out
 - **Open →** or **Set up →**
 
 | Status | Colour | When |
 | --- | --- | --- |
 | **Not set up** | Grey | The check needs settings first |
 | **Not applicable** | Grey | The check has nothing to work with on this page, for example GPS Checks without a GPS column |
-| **Error** | Red | The check failed, or its numbers could not be worked out. The detail line says why; the other rows still show |
+| **Error** | Red | The check failed, or its numbers could not be worked out, for example because its saved settings no longer fit the data. The detail line says why; the other rows still show |
 | **Flagged** | Amber | The check is ready and has more than 0 outstanding issues |
 | **No issues** | Green | The check is ready and has 0 outstanding issues. Progress, Enumerator Stats, Descriptive Stats and GPS Checks only describe the data, so they are green when ready |
 
