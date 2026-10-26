@@ -53,6 +53,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configuration** entry opens `_export_config_dialog` (`views/start_view.py`)
   with an "Include record-level decisions" checkbox, so the bundle is built
   only when the dialog opens instead of for every card on every rerun
+- **GPS check health row** (#399, #365): GPS Checks moves off "Status only".
+  `gpschecks_headline` (`checks/gpschecks/report_ui.py`) detects outliers
+  with the GPS configuration, detection method, clustering column and LOF
+  sliders saved in the check's view, without rendering it or needing a Mapbox
+  token. Outstanding is the check's **Outliers Detected**; resolved counts
+  accepted points plus points with a `source="gps"` correction still in
+  effect that are not outliers now. It returns None (blue **Ready**) with
+  fewer than `LOF_MIN_POINTS` points or no clustering column, and raises
+  `settings_no_longer_fit` when the GPS configuration no longer parses
+  - `summarize_gps_outliers` (`checks/gpschecks/review.py`, pure) gives both
+    the check's metric and Summary's row; `GPSOutlierSummary` exposes the
+    marked outliers, `unreviewed()` rows (with every data column, including
+    the survey date) and `resolutions` (KEY and latest log `date`) for a
+    later delta. `gps_corrections` picks the in-effect GPS corrections,
+    `GPSReviewLog` carries them with the active acceptances. Replaces
+    `_mark_accepted_outliers`
+  - The **Number of Neighbors** and **Expected Outlier Proportion** sliders
+    are bound to the GPS view state (`outlier_n_neighbors`,
+    `outlier_contamination`); `lof_neighbors` and `lof_contamination` apply
+    the same defaults and fallback for a saved value out of range
+  - `health_rows` takes `view_keys`, and `CheckEntry` gains `headline_view`
+    (GPS: `gpschecks_headline_view`, the `HEADLINE_VIEW_KEYS` values), added
+    to a row's cache key because the page fingerprint leaves view state out
+  - Without a Mapbox token the GPS page still renders the outliers section
+    (`_render_gps_outliers_checks(..., show_map=False)`): counts and table,
+    no map
 
 ### Changed
 
@@ -85,10 +111,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     when saved settings no longer fit the data (the other rows still
     render), amber **Flagged** when it has more than 0 outstanding and is
     not informational, blue **Ready** when it has no headline numbers (GPS
-    Checks, or Backchecks with no values compared), so the pill claims
+    Checks before outliers can be detected, or Backchecks with no values
+    compared), so the pill claims
     nothing about uncounted issues, else green **No issues**. The row's action comes
     from its state (`RowState.action`)
-  - A ready check with no headline numbers (Descriptive Stats, GPS Checks)
+  - A ready check with no headline numbers (Descriptive Stats)
     shows "Status only" (`STATUS_ONLY`) as its detail; Descriptive Stats
     stays green through the informational `status_only_headline`
   - `missing_headline` reports the % of columns all missing (was the mean %

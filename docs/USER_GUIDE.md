@@ -487,7 +487,8 @@ extra attempted-interview columns, the Missing Values threshold, date,
 grouping, comparison and correlation choices, the duplicates sort order, the
 outlier table toggles and inspected column, the extra columns shown in the
 duplicates and outliers reports, the GPS map colour and filter, detection
-method, clustering column and distance threshold, the enumerator summary
+method, Auto-Clustering **Number of Neighbors** and **Expected Outlier
+Proportion**, clustering column and distance threshold, the enumerator summary
 information, periods, columns and statistics, the backcheck comparison filters,
 productivity period and staff statistics view, and the Descriptive Stats
 histogram and value counts choices. They stay set when you switch to another
@@ -879,7 +880,7 @@ one shared column header, and each check sits in its own box. Each row shows:
 | **Error** | Red | The check failed, or its numbers could not be worked out, for example because its saved settings no longer fit the data. The detail line says why; the other rows still show |
 | **Flagged** | Amber | The check is ready and has more than 0 outstanding issues |
 | **No issues** | Green | The check is ready and has 0 outstanding issues. Progress, Enumerator Stats and Descriptive Stats only describe the data, so they are green when ready |
-| **Ready** | Blue | The check is ready, but Summary does not count its issues, so it makes no claim about them. Open the check to see them. GPS Checks shows this, as does Backchecks when no values were compared |
+| **Ready** | Blue | The check is ready, but Summary does not count its issues, so it makes no claim about them. Open the check to see them. GPS Checks shows this until outliers can be detected (fewer than 6 points for Auto-Clustering, or no clustering column chosen for Cluster by Column), as does Backchecks when no values were compared |
 
 | Check | Outstanding | Detail | Resolved |
 | --- | --- | --- | --- |
@@ -887,9 +888,10 @@ one shared column header, and each check sits in its own box. Each row shows:
 | Missing Values | Share of columns where every value is missing, counting missing codes | "of columns all missing (5 of 40)" | — |
 | Duplicates | Duplicate survey IDs not yet resolved, after Records to Include | "duplicate IDs" | Duplicate IDs resolved through corrections |
 | Outliers & Constraints | Outliers plus constraint violations, leaving out accepted flags | For example "3 outliers (1.4% of values), 1 constraint violation" | Flags accepted as valid, and corrected values that were flagged before the correction and are no longer flagged. Correcting a value that was never flagged does not count |
+| GPS Checks | The check's **Outliers Detected**: GPS outliers not yet accepted, for the GPS configuration, detection method and settings last chosen in the outliers section | For example "GPS outliers (4.00% of 250 points)" | Points accepted as valid, and points whose coordinates were corrected or that were removed from the GPS outliers table and are not outliers now. Each point counts once |
 | Enumerator Stats | Enumerators active in the past 7 days, out of all enumerators | "active in the past 7 days" | — |
 | Backchecks | Mismatches with no error source attributed | The total error rate, for example "4.25% error rate" | Mismatches attributed to the enumerator, backchecker or respondent |
-| Descriptive Stats, GPS Checks | Status only | — | — |
+| Descriptive Stats | Status only | — | — |
 
 Backchecks counts unattributed mismatches rather than the error rate because
 the error rate is above 0 on nearly every project and would keep the row amber.
@@ -898,7 +900,10 @@ to move it from Outstanding to Resolved.
 
 Each number is the number the check itself shows. The numbers are worked out
 again only when the data, the check's settings or its corrections change, so
-Summary stays quick.
+Summary stays quick. For GPS Checks, changing the GPS configuration, detection
+method, clustering column or Auto-Clustering sliders in the outliers section
+also counts again; other GPS view choices, such as the map colour, do not. The
+GPS count needs no Mapbox token.
 
 Click **Open →** on a row to go to that check, or **Set up →** to open a check
 that is not set up and configure it. Both update the page address, like
@@ -1657,7 +1662,11 @@ latitude and one for longitude, with the same reason. Both are applied or
 neither is. Every entry has source `gps`. The page reloads after a save.
 
 Accepted outliers are hidden from the table and are not counted in
-**Outliers Detected**. On the map they are drawn in green and labelled
+**Outliers Detected**, here or on Summary's GPS Checks row. Without a Mapbox
+token the outliers section still shows its counts and table, but no map.
+Remembered **Number of Neighbors** values that no longer fit the data, for
+example more neighbours than points, go back to the default. On the map
+accepted outliers are drawn in green and labelled
 Accepted. Turn on **Show reviewed** to list them in the table, highlighted in
 green, with the reason. An acceptance lapses, and the point is flagged again,
 if either coordinate changes. You can also remove the acceptance on the Correct
