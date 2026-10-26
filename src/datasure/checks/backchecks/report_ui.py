@@ -27,13 +27,13 @@ from datasure.checks.backchecks.attribution import (
     save_attributions,
 )
 from datasure.checks.backchecks.compute import (
-    TOTAL_CATEGORIES,
     compute_backcheck_analysis,
     compute_backchecker_productivity,
     compute_column_stats,
     compute_enumerator_backchecker_stats,
     compute_overall_error_rates,
     expand_col_names,
+    in_total_categories,
     load_saved_backchecks_settings,
 )
 from datasure.checks.backchecks.coverage import (
@@ -63,7 +63,7 @@ from datasure.checks.backchecks.scope import (
     scope_captions,
 )
 from datasure.checks.backchecks.settings_ui import backchecks_report_settings
-from datasure.checks.headline import CheckHeadline
+from datasure.checks.headline import CheckHeadline, settings_no_longer_fit
 from datasure.utils.dataframe_utils import (
     ColumnByType,
     TableState,
@@ -775,27 +775,57 @@ def overall_error_rate_percent(
         The error rate, or None when no backcheck columns are configured,
         no values were compared, or the saved settings no longer fit the data.
     """
-    saved = _saved_backcheck_analysis(
-        project_id, page_name_id, survey_data, backcheck_data, setting_file, config
-    )
-    if saved is None:
+    try:
+        total = _total_errors(
+            project_id, page_name_id, survey_data, backcheck_data, setting_file, config
+        )
+    except ValueError:
+        logger.warning(
+            "Could not compute the backcheck error rate for page %s",
+            page_name_id,
+            exc_info=True,
+        )
         return None
-    rates = compute_overall_error_rates(saved[0])
-    return rates[0].error_rate if rates else None
+    return None if total is None else total.error_rate
 
 
-def _saved_backcheck_analysis(
+@dataclass(frozen=True)
+class _TotalErrors:
+    """The comparisons behind the Backchecks tab's "Error Rate (Total)".
+
+    Attributes
+    ----------
+    comparisons : pl.DataFrame
+        The compared values in `TOTAL_CATEGORIES`.
+    error_rate : float
+        The total error rate, in percent.
+    survey_key : str
+        The saved Survey KEY column, which attributions are logged by.
+    """
+
+    comparisons: pl.DataFrame
+    error_rate: float
+    survey_key: str
+
+
+def _total_errors(
     project_id: str,
     page_name_id: str,
     survey_data: pl.DataFrame,
     backcheck_data: pl.DataFrame,
     setting_file: str,
     config: dict,
-) -> tuple[pl.DataFrame, BackcheckSettings] | None:
+) -> _TotalErrors | None:
     """Compare the values the Backchecks tab compares, without rendering it.
 
-    Returns the comparison results and the saved settings, or None when the
-    saved settings no longer fit the data.
+    Returns None when no backcheck columns are configured or no values were
+    compared.
+
+    Raises
+    ------
+    ValueError
+        If the saved settings no longer fit the data (see
+        `settings_no_longer_fit`).
     """
     try:
         settings = load_saved_backchecks_settings(
@@ -807,14 +837,14 @@ def _saved_backcheck_analysis(
             comparison_scope(survey_data, backcheck_data, setting_file),
             settings,
         )
-    except (pl.exceptions.PolarsError, ValidationError, ValueError):
-        logger.warning(
-            "Could not compute the backcheck error rate for page %s",
-            page_name_id,
-            exc_info=True,
-        )
+    except (pl.exceptions.PolarsError, ValidationError, ValueError) as exc:
+        raise settings_no_longer_fit("Backchecks", exc) from exc
+    rates = compute_overall_error_rates(analysis)
+    if not rates or rates[0].error_rate is None:
         return None
-    return analysis, settings
+    return _TotalErrors(
+        in_total_categories(analysis), rates[0].error_rate, settings.survey_key
+    )
 
 
 def backchecks_headline(
@@ -840,26 +870,28 @@ def backchecks_headline(
     CheckHeadline | None
         For example 3 outstanding, "4.25% error rate", or None when no values
         were compared.
+
+    Raises
+    ------
+    ValueError
+        If the saved settings no longer fit the data, so Summary shows the
+        row as an error with the reason.
     """
-    saved = _saved_backcheck_analysis(
+    total = _total_errors(
         project_id, page_name_id, survey_data, backcheck_data, setting_file, config
     )
-    if saved is None:
-        return None
-    analysis, settings = saved
-    rates = compute_overall_error_rates(analysis)
-    if not rates or rates[0].error_rate is None:
+    if total is None:
         return None
     marked = mark_error_sources(
-        analysis.filter(pl.col("category").is_in(TOTAL_CATEGORIES)),
+        total.comparisons,
         load_attribution_log(project_id, page_name_id),
-        settings.survey_key,
+        total.survey_key,
     )
     sources = count_error_sources(marked)
     unattributed = sources[ErrorSource.UNATTRIBUTED]
     return CheckHeadline(
         f"{unattributed:,}",
-        f"{rates[0].error_rate:.2f}% error rate",
+        f"{total.error_rate:.2f}% error rate",
         outstanding=unattributed,
         resolved=sum(sources.values()) - unattributed,
     )
