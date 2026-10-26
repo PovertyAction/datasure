@@ -2458,7 +2458,7 @@ def duplicates_headline(
         The page configuration the check starts from.
     alias : str | None
         The survey dataset alias, whose uncorrected data gives the resolved
-        count. If None, nothing is resolved.
+        count. If None, the resolved count is None (shown as "—").
 
     Raises
     ------
@@ -2488,12 +2488,18 @@ def duplicates_headline(
             display_cols_setting="id_table_display_cols",
         )
     )
-    resolved = _resolved_ids(
-        CorrectionProcessor(project_id),
-        alias,
-        conditions,
-        settings.survey_id,
-        records.data,
+    # Without an alias there is no uncorrected data to compare with, so the
+    # resolved count is unknown rather than 0.
+    resolved = (
+        _resolved_ids(
+            CorrectionProcessor(project_id),
+            alias,
+            conditions,
+            settings.survey_id,
+            records.data,
+        )
+        if alias
+        else None
     )
     return CheckHeadline(
         f"{count:,}",

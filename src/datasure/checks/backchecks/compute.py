@@ -1389,6 +1389,11 @@ def compute_column_stats(
 TOTAL_CATEGORIES = (1, 2, 3)
 
 
+def in_total_categories(backcheck_analysis: pl.DataFrame) -> pl.DataFrame:
+    """Return the comparisons the total error rate counts (`TOTAL_CATEGORIES`)."""
+    return backcheck_analysis.filter(pl.col("category").is_in(TOTAL_CATEGORIES))
+
+
 @dataclass(frozen=True)
 class OverallErrorRate:
     """Error rates over every compared value in a category, or in total.
@@ -1441,16 +1446,14 @@ def compute_overall_error_rates(
     if backcheck_analysis.is_empty():
         return []
 
-    categories = list(TOTAL_CATEGORIES)
-    in_categories = backcheck_analysis.filter(pl.col("category").is_in(categories))
     return [
-        _overall_error_rate("Total", in_categories),
+        _overall_error_rate("Total", in_total_categories(backcheck_analysis)),
         *(
             _overall_error_rate(
                 f"Cat {category}",
                 backcheck_analysis.filter(pl.col("category") == category),
             )
-            for category in categories
+            for category in TOTAL_CATEGORIES
         ),
     ]
 

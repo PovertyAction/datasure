@@ -1305,13 +1305,15 @@ class TestOutliersHeadlineSavedSettings:
             == self.FLAGGED
         )
 
-    def test_none_when_a_saved_option_is_invalid(
+    def test_a_saved_option_that_is_invalid_raises(
         self, sample_polars_df, outlier_column_config, tmp_path
     ):
+        # Summary shows the row as an error, not as having no issues.
         column_config = outlier_column_config.with_columns(
             pl.lit(-1.0).alias("outlier_multiplier")
         )
-        assert self._headline(sample_polars_df, column_config, tmp_path) is None
+        with pytest.raises(ValueError, match="no longer fit the data"):
+            self._headline(sample_polars_df, column_config, tmp_path)
 
     def test_ignores_a_saved_team_column_that_is_gone(
         self, sample_polars_df, outlier_column_config, tmp_path
@@ -1321,11 +1323,12 @@ class TestOutliersHeadlineSavedSettings:
         data = sample_polars_df.drop("team")
         assert self._headline(data, outlier_column_config, tmp_path) == self.FLAGGED
 
-    def test_none_when_a_configured_column_is_gone(
+    def test_a_configured_column_that_is_gone_raises(
         self, sample_polars_df, outlier_column_config, tmp_path
     ):
         data = sample_polars_df.drop("numeric_col1")
-        assert self._headline(data, outlier_column_config, tmp_path) is None
+        with pytest.raises(ValueError, match="numeric_col1"):
+            self._headline(data, outlier_column_config, tmp_path)
 
     def test_missing_codes_are_not_counted(
         self, sample_polars_df, outlier_column_config, tmp_path, monkeypatch

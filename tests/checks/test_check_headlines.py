@@ -137,9 +137,20 @@ class TestDuplicatesHeadline:
 
     def test_counts_duplicate_ids(self, setting_file):
         # h2 and h3 are each on two records.
-        assert duplicates_headline(PROJECT_ID, SURVEY, setting_file, self.CONFIG) == (
-            CheckHeadline("2", "duplicate IDs", outstanding=2, resolved=0)
+        headline = duplicates_headline(
+            PROJECT_ID, SURVEY, setting_file, self.CONFIG, alias="survey"
         )
+
+        assert headline == CheckHeadline(
+            "2", "duplicate IDs", outstanding=2, resolved=0
+        )
+
+    def test_resolved_is_unknown_without_an_alias(self, setting_file):
+        # Without the uncorrected data, resolved can't be computed: the row
+        # shows "—", not 0.
+        headline = duplicates_headline(PROJECT_ID, SURVEY, setting_file, self.CONFIG)
+
+        assert (headline.outstanding, headline.resolved) == (2, None)
 
     def test_resolved_ids_are_the_duplicates_corrections_removed(self, setting_file):
         # Before corrections h1 and h4 were also duplicated; the survey data
@@ -306,6 +317,16 @@ class TestOutliersHeadline:
     def test_none_without_outlier_columns(self, setting_file):
         assert self._headline(setting_file) is None
 
+    def test_saved_settings_that_no_longer_fit_raise_with_the_reason(
+        self, setting_file
+    ):
+        duckdb_save_table(PROJECT_ID, self.COLUMNS, f"outliers_{PAGE}", "logs")
+        _save_settings(setting_file, "outliers", {"survey_key": ""})
+
+        # Summary shows the reason on a red row instead of "No issues".
+        with pytest.raises(ValueError, match="saved Outliers settings"):
+            self._headline(setting_file)
+
 
 class TestEnumeratorHeadline:
     CONFIG = {  # noqa: RUF012
@@ -470,3 +491,23 @@ class TestBackchecksHeadline:
 
     def test_none_without_backcheck_columns(self, setting_file):
         assert self._headline(setting_file) is None
+
+    def test_none_when_no_values_were_compared(self, setting_file):
+        duckdb_save_table(PROJECT_ID, self.COLUMNS, f"backchecks_{PAGE}", "logs")
+        backcheck = self.BACKCHECK.with_columns(pl.lit(None, pl.Int64).alias("age"))
+
+        headline = backchecks_headline(
+            PROJECT_ID, PAGE, self.SURVEY, backcheck, setting_file, self.CONFIG
+        )
+
+        assert headline is None
+
+    def test_saved_settings_that_no_longer_fit_raise_with_the_reason(
+        self, setting_file
+    ):
+        duckdb_save_table(PROJECT_ID, self.COLUMNS, f"backchecks_{PAGE}", "logs")
+        _save_settings(setting_file, "backchecks", {"no_differences_values": 5})
+
+        # Summary shows the reason on a red row instead of "No issues".
+        with pytest.raises(ValueError, match="saved Backchecks settings"):
+            self._headline(setting_file)

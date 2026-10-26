@@ -10,7 +10,7 @@ import polars as pl
 import streamlit as st
 from pydantic import BaseModel, ValidationError
 
-from datasure.checks.headline import CheckHeadline
+from datasure.checks.headline import CheckHeadline, settings_no_longer_fit
 from datasure.checks.outliers.compute import (
     _build_include_cols,
     _compute_constraint_metrics,
@@ -1473,11 +1473,16 @@ def _reviewed_flags(
     config: dict,
     alias: str | None,
 ) -> _ReviewedFlags | None:
-    """Compute the check's results without rendering it, for the health grid.
+    """Compute the check's results without rendering it, for the health rows.
 
     Uses the saved settings and outlier columns, and clears accepted flags,
-    as the Outliers tab does. None when no outlier columns are configured or
-    the saved settings no longer fit the data.
+    as the Outliers tab does. None when no outlier columns are configured.
+
+    Raises
+    ------
+    ValueError
+        If the saved settings no longer fit the data (see
+        `settings_no_longer_fit`).
     """
     column_config = _load_outlier_settings(project_id, page_name_id)
     if column_config.is_empty():
@@ -1495,13 +1500,8 @@ def _reviewed_flags(
         violations = compute_constraint_violations(
             data, settings, column_config, missing_codes=missing_codes
         )
-    except (pl.exceptions.PolarsError, ValidationError, ValueError):
-        logger.warning(
-            "Could not compute the outlier results for page %s",
-            page_name_id,
-            exc_info=True,
-        )
-        return None
+    except (pl.exceptions.PolarsError, ValidationError, ValueError) as exc:
+        raise settings_no_longer_fit("Outliers", exc) from exc
     review = _review_context(project_id, alias, settings.survey_key)
     outlier_data = clear_reviewed_flags(
         _with_review_status(outlier_data, settings, OUTLIERS, review), OUTLIERS
@@ -1557,8 +1557,13 @@ def outliers_headline(
     CheckHeadline | None
         For example 4 outstanding, "3 outliers (1.4% of values), 1
         constraint violation". The share is left out when no values were
-        checked. None when no outlier columns are configured or the saved
-        settings no longer fit the data.
+        checked. None when no outlier columns are configured.
+
+    Raises
+    ------
+    ValueError
+        If the saved settings no longer fit the data, so Summary shows the
+        row as an error with the reason.
     """
     flags = _reviewed_flags(
         project_id, page_name_id, data, survey_columns, setting_file, config, alias
