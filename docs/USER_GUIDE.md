@@ -932,13 +932,15 @@ as new.
 | Missing Values | The change in the share of columns all missing, in percentage points, for example "▼ 2.50 pp since yesterday" |
 | Duplicates | Duplicate IDs that submissions dated in the period added, for example "▲ 3 new since yesterday" |
 | Outliers & Constraints | Flags on submissions dated in the period that are not accepted or corrected. The flags are not worked out again on the earlier submissions, since that would move the outlier bounds |
+| GPS Checks | GPS outliers on submissions dated in the period that are not accepted, for example "▲ 2 new since yesterday". Outliers are not detected again on the earlier submissions, since that would change which points stand out |
 | Enumerator Stats | The change in enumerators active in the past 7 days, for example "▲ 2 more active since yesterday" |
 | Backchecks | Unattributed mismatches on backchecks dated in the period |
 
 Under **Resolved**, "+N since …" counts the resolutions made in the period
 that are still in effect: corrections and acceptances from the correction log
-(Duplicates, Outliers & Constraints) and error-source attributions
-(Backchecks). An undone correction, an acceptance whose value has changed since,
+(Duplicates, Outliers & Constraints, GPS Checks) and error-source attributions
+(Backchecks). A GPS point counts when the latest correction or acceptance that
+resolved it was made in the period. An undone correction, an acceptance whose value has changed since,
 and an attribution later changed back to Unattributed drop out.
 
 The rows use Summary's date column: the date set in Summary's settings, else the

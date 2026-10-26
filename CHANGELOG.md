@@ -107,12 +107,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Without a Mapbox token the GPS page still renders the outliers section
     (`_render_gps_outliers_checks(..., show_map=False)`): counts and table,
     no map
+- **GPS check health change** (#399, #365): the GPS Checks row gets a
+  Change and "+N since …": `gpschecks_delta` (`_gps_delta` in
+  `catalogue.py`) counts unaccepted outliers on submissions dated in the
+  period (outliers are not detected again on the earlier submissions) and
+  the resolved points whose latest resolving log entry is in the period
+- **Check health benchmark** (#399): `just bench-health [rows] [repeat]`
+  (`scripts/benchmark_check_health.py`) times each check's headline and
+  delta, and Summary's rows with and without deltas, on the demo data and a
+  generated 50,000-row form. No delta is over the 1 s budget, so every
+  delta is still computed on load
 
 ### Changed
 
 - **`render_health_rows` no longer draws the section header** (#399, #365):
   call `render_health_header()` first. It takes `since` (None hides the
   Change column)
+- **Outliers and GPS deltas reuse the headline's flags** (#399, #365):
+  `CheckHeadline` gains `basis` (not compared), what a headline computed its
+  numbers from. `outliers_headline` and `gpschecks_headline` set it, and
+  `outliers_delta(..., basis=)` and `gpschecks_delta(..., summary=)` reuse it
+  instead of computing the flags again (the Outliers delta computed them twice
+  per load). `health_rows` keeps the latest basis per check outside the
+  headline cache, matched to the headline's key. On a 50,000-row form the
+  Outliers delta drops from about 0.9 s to 0.35 s and the GPS delta from about
+  1.3 s to under 0.05 s. `_reviewed_flags` becomes `_outliers_basis`
 
 - **Breaking: headline functions return `CheckHeadline`** (#399, #365):
   `progress_headline`, `missing_headline`, `duplicates_headline`,
