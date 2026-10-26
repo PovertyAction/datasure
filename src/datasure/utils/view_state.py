@@ -543,9 +543,16 @@ def reset_filters_beside(
     vertical_alignment : {"top", "center"}
         Use "top" beside an expander, so the action stays level with its
         header when it opens, and "center" beside a title.
+
+    In the demo, the block's "Learn More" guidance draws above the row.
     """
     import streamlit as st
 
-    with st.container(horizontal=True, vertical_alignment=vertical_alignment):
+    from datasure.utils.onboarding_utils import demo_guidance_above
+
+    with (
+        demo_guidance_above(),
+        st.container(horizontal=True, vertical_alignment=vertical_alignment),
+    ):
         yield
         reset_filters_button(view, key=view.settings_file.stem)

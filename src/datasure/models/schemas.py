@@ -8,7 +8,7 @@ robust data processing and transformation operations.
 """
 
 import datetime
-from typing import Any
+from typing import Any, Literal
 
 import polars as pl
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -361,11 +361,15 @@ class ImportSourceEntry(BaseModel):
     no password, no private key file path, no local save-to path. A local
     storage entry's ``filename``/``sheet_name`` are kept only as a hint for
     the person resolving the import - the actual path must be re-supplied
-    on the machine doing the import.
+    on the machine doing the import. A "Demo Data" entry is rebuilt from the
+    packaged demo files rather than imported.
+
+    The source is validated, so a bundle naming a source DataSure can't
+    import is rejected when it is read, not skipped when it is applied.
     """
 
     alias: str = Field(..., min_length=1)
-    source: str = Field(..., description="'SurveyCTO' or 'local storage'")
+    source: Literal["SurveyCTO", "local storage", "Demo Data"]
     server: str | None = None
     form_id: str | None = None
     username: str | None = None

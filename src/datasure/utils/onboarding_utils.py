@@ -2,6 +2,9 @@ import functools
 import json
 import logging
 import random
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from datetime import date, datetime, time, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -19,6 +22,9 @@ logger = logging.getLogger(__name__)
 
 DEMO_PROJECT_NAME = "DataSure Demo"
 DEMO_PROJECT_ID = "demoproject"
+# import_log source of the demo datasets; applying a configuration file
+# rebuilds them with build_demo_datasets instead of importing a file.
+DEMO_DATA_SOURCE = "Demo Data"
 # Seed for the demo data generator, so every demo load draws the same values.
 DEMO_SEED = 360
 
@@ -1439,6 +1445,41 @@ def load_csv_flexibly(file_path: Path) -> pl.DataFrame:
     return df
 
 
+def build_demo_datasets(today: date | None = None) -> dict[str, pl.DataFrame]:
+    """Build the demo survey and backcheck data, keyed by alias.
+
+    The packaged CSVs only hold the base records; the generated fields
+    (dates, backcheck fields) are added here, so anything that needs the
+    demo data - the demo itself or a project set up from a demo
+    configuration file - builds it through this function.
+
+    Parameters
+    ----------
+    today : date | None
+        The day the latest demo survey submission falls on. Defaults to the
+        current date; every other value in the data is the same on every load.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the packaged demo files are missing.
+    """
+    assets_dir = Path(__file__).parent.parent / "assets"
+    survey_path = assets_dir / "demo_survey.csv"
+    backcheck_path = assets_dir / "demo_backcheck.csv"
+
+    if not survey_path.exists() or not backcheck_path.exists():
+        raise FileNotFoundError("Demo data files not found")
+
+    survey_df = DemoDataGenerator(
+        load_csv_flexibly(survey_path), today=today
+    ).add_demo_fields()
+    backcheck_df = DemoDataGenerator(
+        load_csv_flexibly(backcheck_path), today=today
+    ).add_demo_fields("backcheck", survey_df=survey_df)
+    return {"demo_survey": survey_df, "demo_backcheck": backcheck_df}
+
+
 def load_demo_data(today: date | None = None) -> bool:
     """Load demo data files into the demo project.
 
@@ -1448,41 +1489,25 @@ def load_demo_data(today: date | None = None) -> bool:
         The day the latest demo survey submission falls on. Defaults to the
         current date; every other value in the data is the same on every load.
     """
-    # Get asset paths
-    assets_dir = Path(__file__).parent.parent / "assets"
-    survey_path = assets_dir / "demo_survey.csv"
-    backcheck_path = assets_dir / "demo_backcheck.csv"
-
-    if not survey_path.exists() or not backcheck_path.exists():
+    try:
+        datasets = build_demo_datasets(today)
+    except FileNotFoundError:
         st.error("Demo data files not found. Please check the installation.")
         return False
-
-    # Load survey data with flexible CSV parsing
-    try:
-        survey_df = load_csv_flexibly(survey_path)
     except Exception:
         return False
-
-    try:
-        backcheck_df = load_csv_flexibly(backcheck_path)
-    except Exception:
-        return False
-
-    survey_df = DemoDataGenerator(survey_df, today=today).add_demo_fields()
 
     # Save to raw database (for import system)
-    duckdb_save_table(DEMO_PROJECT_ID, survey_df, "demo_survey", "raw")
+    duckdb_save_table(DEMO_PROJECT_ID, datasets["demo_survey"], "demo_survey", "raw")
 
     # clean prep/corrected entries
     duckdb_remove_table(DEMO_PROJECT_ID, "demo_survey", "prep")
     duckdb_remove_table(DEMO_PROJECT_ID, "demo_survey", "corrected")
 
-    backcheck_df = DemoDataGenerator(backcheck_df, today=today).add_demo_fields(
-        "backcheck", survey_df=survey_df
-    )
-
     # Save to raw database (for import system)
-    duckdb_save_table(DEMO_PROJECT_ID, backcheck_df, "demo_backcheck", "raw")
+    duckdb_save_table(
+        DEMO_PROJECT_ID, datasets["demo_backcheck"], "demo_backcheck", "raw"
+    )
 
     # clean prep/corrected entries
     duckdb_remove_table(DEMO_PROJECT_ID, "demo_backcheck", "prep")
@@ -1501,7 +1526,7 @@ def load_demo_data(today: date | None = None) -> bool:
             "alias": "demo_survey",
             "filename": "demo_survey.csv",
             "sheet_name": None,
-            "source": "Demo Data",
+            "source": DEMO_DATA_SOURCE,
             "server": None,
             "username": None,
             "form_id": None,
@@ -1515,7 +1540,7 @@ def load_demo_data(today: date | None = None) -> bool:
             "alias": "demo_backcheck",
             "filename": "demo_backcheck.csv",
             "sheet_name": None,
-            "source": "Demo Data",
+            "source": DEMO_DATA_SOURCE,
             "server": None,
             "username": None,
             "form_id": None,
@@ -1545,10 +1570,35 @@ def is_demo_complete() -> bool:
     return get_onboarding_step() >= len(onboarding_steps)
 
 
+# Where demo_expander draws while a demo_guidance_above block is open.
+_DEMO_GUIDANCE_SLOT: ContextVar = ContextVar("demo_guidance_slot", default=None)
+
+
+@contextmanager
+def demo_guidance_above() -> Iterator[None]:
+    """Draw the demo guidance raised inside the block above it.
+
+    Wrap a block whose elements sit on one row, such as a settings expander
+    with an action beside it, so the guidance a decorated function draws
+    comes above the row instead of joining it. The slot is a placeholder, so
+    it draws nothing when the block has no guidance.
+    """
+    slot = st.empty() if is_demo_project() else None
+    token = _DEMO_GUIDANCE_SLOT.set(slot)
+    try:
+        yield
+    finally:
+        _DEMO_GUIDANCE_SLOT.reset(token)
+
+
 def demo_expander(title: str, content: str, expanded: bool = True):
     """Create a demo-specific expander with helpful information."""
     if not is_demo_project():
         return
 
-    with st.expander(f"**Learn More: {title}**", expanded=expanded):
+    slot = _DEMO_GUIDANCE_SLOT.get()
+    with (
+        slot.container() if slot is not None else nullcontext(),
+        st.expander(f"**Learn More: {title}**", expanded=expanded),
+    ):
         demo_container(content)

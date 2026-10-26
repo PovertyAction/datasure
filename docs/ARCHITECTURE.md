@@ -488,6 +488,15 @@ travel.
   ticked by default, and builds the bundle only once the dialog opens. Apply
   writes whatever the bundle holds; attribution rows for records that don't
   exist are kept but match nothing.
+- **Import sources.** `ImportSourceEntry.source` is `"SurveyCTO"`,
+  `"local storage"` or `"Demo Data"`; any other value fails
+  `parse_project_config`, so a bundle that can't import is rejected before
+  apply. Apply asks for a sign-in per SurveyCTO server and a path per local
+  file. A `"Demo Data"` dataset needs neither: `_import_demo_dataset` rebuilds
+  it with `onboarding_utils.build_demo_datasets`, the same builder the demo
+  uses, because the demo's raw tables carry generated fields the packaged
+  CSVs don't. The apply result shows as an error, not a success, when no
+  dataset was imported and no page created.
 - **Pages.** Apply creates a page only when no page has its name and its
   survey dataset was imported. Only then are its settings file and check
   tables written, so an existing page keeps its own.
