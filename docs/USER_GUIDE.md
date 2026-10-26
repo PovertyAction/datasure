@@ -114,6 +114,8 @@ click **Download configuration** to save a configuration file. To use it,
 choose **From a configuration file** when you create a new project, or choose
 **Update from configuration** under **More** on an existing project. The
 **DataSure Demo** row has an **Export** button that opens the same dialog.
+Applying a configuration file exported from the demo rebuilds the demo data,
+so it needs no file or sign-in.
 
 The configuration file includes:
 

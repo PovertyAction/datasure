@@ -288,6 +288,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Demo Learn More shared a row with check settings** (#365): on Summary,
+  Progress, Duplicates, Outliers, GPS, Enumerator and Backchecks, the "Learn
+  More" expander sat beside the settings expander instead of above it. The
+  settings function draws it, and `reset_filters_beside` runs that function in
+  a horizontal row. `reset_filters_beside` now wraps the row in
+  `onboarding_utils.demo_guidance_above`, which reserves an `st.empty()` slot
+  above the row, and `demo_expander` draws there
+- **Demo configuration file set up nothing** (#365): a configuration exported
+  from the demo's **Export** button imported 0 datasets and created 0 pages,
+  and the result still showed as a success
+  - Root cause: the demo's import_log rows use source `"Demo Data"`, which
+    `_import_dataset` did not handle. `ImportSourceEntry.source` was a plain
+    string, so the bundle passed validation and the Import button was enabled
+  - Solution: `_import_dataset` dispatches to one helper per source, and the
+    new `_import_demo_dataset` rebuilds the dataset with
+    `onboarding_utils.build_demo_datasets`, split out of `load_demo_data`.
+    The packaged CSVs can't be imported as local files instead: they lack the
+    generated date and backcheck fields the pages use.
+    `ImportSourceEntry.source` is now `Literal["SurveyCTO", "local storage",
+    "Demo Data"]`, so a bundle with any other source is rejected when read.
+    `_render_config_apply_result` shows an error when nothing was set up
 - **Stale demo guidance on check pages** (#361, #365): the Backchecks Summary
   callout said four metrics (five show, including Mismatches Attributed), the
   GPS outliers callout said the outliers could only be downloaded, and the
