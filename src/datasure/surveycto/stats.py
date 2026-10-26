@@ -358,7 +358,7 @@ def _describe(valid: list, entry: dict, q: dict | None, is_binary: bool) -> dict
     if q is not None and q["type"] == "select_one":
         # A withheld list has no labels here, only the codes found.
         labels = {} if q["choices_withheld"] else choice_labels(q["choices"])
-        counts = {code: 0 for code in labels}
+        counts = dict.fromkeys(labels, 0)
         for v in valid:
             counts[str(v)] = counts.get(str(v), 0) + 1
         return {

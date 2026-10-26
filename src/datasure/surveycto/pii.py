@@ -19,7 +19,7 @@ Each column gets ``{"status", "basis"[, "presidio"]}``; the first matching rule 
    questions; selects with inline choices; calculates whose every reference is
    cleared or whitelisted and that do not ``pulldata()``.
 4. ``may_contain_pii`` / ``no_hits``: everything else, scanned with Presidio on its
-   distinct non-null values (sampled with ``seed`` above ``max_distinct``). Without
+   distinct non-null values (evenly spaced above ``max_distinct``). Without
    an analyzer it is ``may_contain_pii`` / ``unscanned``. With
    ``no_personal_data`` the project declares it holds none: every column past the
    device and system columns is ``whitelisted`` / ``project``, and Presidio never runs.
@@ -28,18 +28,13 @@ Presidio, when given an analyzer, runs on submission values. Blocks hold entity
 counts, the number of hit rows and up to five of their KEYs, never matched text.
 """
 
-import random
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
 import pyarrow as pa
 
 from datasure.surveycto.survey import code_reasons
-
-if TYPE_CHECKING:
-    pass
 
 _DEVICE_COLUMNS = {
     "deviceid",
@@ -106,7 +101,6 @@ class PiiConfig:
     # Presidio scores bare phone numbers 0.4.
     score_threshold: float = 0.4
     max_distinct: int = 1000
-    seed: int = 0
     # Column or question names the user reviewed and cleared.
     whitelist: tuple[str, ...] = ()
     # Column or question names the user reviewed as personal data; above publishable.
@@ -145,13 +139,17 @@ class _Rules:
         # whitelisted, so they carry nothing.
         self.personal_types = set() if no_personal_data else _CONTAINS_TYPES
         self._memo: dict[str, dict | None] = {}
+        self._deciding: set[str] = set()
         self._carried: dict[str, str | None] = {}
 
     def static(self, name: str) -> dict | None:
         """Return the block when a rule decides it without the data, else None."""
+        if name in self._deciding:
+            return None  # a reference cycle resolves to "scan"
         if name not in self._memo:
-            self._memo[name] = None  # a reference cycle resolves to "scan"
+            self._deciding.add(name)
             self._memo[name] = self._decide(self.by_name[name])
+            self._deciding.discard(name)
         return self._memo[name]
 
     def _decide(self, q: dict) -> dict | None:
@@ -284,11 +282,11 @@ class _Scans:
         values = [None if v is None else str(v) for v in column.to_pylist()]
         distinct = sorted({v for v in values if v is not None})
         if len(distinct) > self.config.max_distinct:
-            distinct = sorted(
-                random.Random(self.config.seed).sample(
-                    distinct, self.config.max_distinct
-                )
-            )
+            # Evenly spaced over the sorted values: the same sample on every run.
+            step = len(distinct) / self.config.max_distinct
+            distinct = [
+                distinct[int(i * step)] for i in range(self.config.max_distinct)
+            ]
         self.columns[name] = (values, distinct, keys, basis)
 
     def run(self, analyzer) -> None:
