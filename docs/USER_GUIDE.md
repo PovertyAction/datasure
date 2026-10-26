@@ -75,7 +75,7 @@ The application will open in your default web browser at `http://localhost:8501`
 1. **Launch DataSure**: Run the `datasure` command
 2. **Choose Demo Mode** (recommended for first-time users):
    - Click "Start Demo" on the welcome screen
-   - Follow the guided 6-step tutorial
+   - Follow the guided 7-step tutorial
 3. **Or Create New Project**:
    - Click "Create New Project"
    - Enter project name
@@ -85,7 +85,7 @@ The application will open in your default web browser at `http://localhost:8501`
 
 ## Step-by-Step Workflow
 
-DataSure follows a 6-step workflow for complete data quality management:
+DataSure follows a 7-step workflow for complete data quality management:
 
 ### Step 1: Start Here
 
@@ -386,7 +386,7 @@ Convert `submissiondate` column to datetime format for both survey and backcheck
 
 1. Click "Add New Check Configuration" (+ button)
 2. **Configuration Details**:
-   - **Name**: Descriptive name (e.g., "Household Survey Checks")
+   - **Name**: Descriptive name of up to 20 characters (e.g., "Household HFCs")
    - **Survey Dataset**: Select main survey dataset (e.g., "demo_survey")
 
 3. **Configure Key Columns**:
@@ -432,13 +432,17 @@ DataSure automatically creates a comprehensive quality analysis page with:
 
 **Demo Configuration**:
 
-- **Name**: "Household Survey Checks"
+- **Name**: "Household HFCs"
 - **Survey Dataset**: "demo_survey"
 - **Key Column**: "KEY"
 - **ID Column**: "hhid"
 - **Enumerator Column**: "enum_name"
 - **Date Column**: "submissiondate"
-- **Backcheck Dataset**: "demo_backcheck"
+- **Team Column**: "team_id"; **Duration Column**: "duration"
+- **Target Number of Responses**: 200 (optional)
+- **Backcheck Dataset**: "demo_backcheck", with Backcheck Date
+  "submissiondate", Backchecker "bcer_name", Backchecker Team "team_id" and
+  Target Percentage 10
 
 ---
 
@@ -804,6 +808,19 @@ Correcting duplicate household ID:
 
 The same correction can be made on the Correct Data page with "modify value"
 on the "hhid" column.
+
+---
+
+### Step 7: Replication Package
+
+**Purpose**: Export everything needed to reproduce your corrected dataset
+
+On the **Export Replication Package** page, select a check page under **Page
+Name**, review **Selected page details** and **What's inside the zip?**, then
+click **Build Replication Package**. Confirm the PII notice and click
+**Download replication package (.zip)**. See
+[Correction Audit Trail](#correction-audit-trail) for the **Exclude reviewer
+names** option.
 
 ---
 
@@ -1777,9 +1794,31 @@ Demo Mode is an interactive guided tutorial that walks you through all DataSure 
 ### Starting Demo Mode
 
 1. Launch DataSure
-2. Click "Start Demo" on welcome screen
-3. Follow step-by-step guidance
-4. Interactive tutorials in each section
+2. On the Start page, find the **DataSure Demo** row and click **Start
+   Demo**. The demo data loads and the demo opens on Import Data.
+3. Follow the step-by-step guidance on each page
+
+The first time, an introduction to the demo is shown above the row. Once the
+demo exists, the row offers two buttons instead:
+
+- **Resume**: Reopens the demo on Import Data. Your work is kept.
+- **Restart**: Asks you to confirm, then deletes everything in the demo
+  project (the `cache/demoproject/` folder): imported and prepared data, data
+  preparation steps, corrections, check pages and their settings. The demo
+  data is loaded again and the demo starts from the beginning. This cannot be
+  undone. If the reset fails, the row shows "Failed to reset the demo. Close
+  any other DataSure windows and try again."
+
+### Demo Help in the Sidebar
+
+While the demo is open, the sidebar shows a **Demo Help** section with the
+current step ("Current Step: N of 7"), its title and description, and two
+buttons:
+
+- **Restart Demo**: The same confirmation and reset as **Restart** on the
+  Start page.
+- **Exit Demo**: Leaves the demo and opens the Start page. Your demo work is
+  kept, so you can **Resume** later.
 
 ### Demo Progress Indicator
 
@@ -1792,22 +1831,31 @@ At the top of each page, see:
 
 ### Demo Instructions
 
-Look for expandable "**Learn More:**" sections throughout the demo:
+Demo guidance appears as blue callouts next to the parts of the page it
+describes, and as expandable "**Learn More:**" sections with a blue
+background. They cover:
 
-- Yellow background containers
 - Step-by-step instructions
 - Best practices
 - What to expect next
 
+The guidance also walks you through setting your **Reviewer name**, editing
+and removing a check configuration, what SurveyCTO import involves, exporting
+the demo's configuration, and excluding reviewer names from the replication
+package.
+
 ### Completing the Demo
 
-After completing all 6 steps:
+The demo ends on its last step, the Export Replication Package page (step 7
+of 7). After you click **Build Replication Package** and check the PII
+confirmation box:
 
-- Celebration animation (balloons!)
-- Demo completion message
-- Options:
-  - **Restart Demo**: Go through again
-  - **Create Real Project**: Start with your own data
+- Balloons appear once per demo run
+- A **Demo Complete!** message is shown, with two options:
+  - **Restart Demo**: Asks you to confirm, then resets the whole demo as
+    **Restart** does and reopens Import Data
+  - **Create Real Project**: Leaves the demo and opens the Start page, where
+    you can create a project with your own data
 
 ---
 
