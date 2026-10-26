@@ -11,6 +11,7 @@ import pandas as pd
 import polars as pl
 import streamlit as st
 
+from datasure.checks.backchecks.attribution import ErrorSource
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.duckdb_utils import duckdb_remove_table, duckdb_save_table
 
@@ -117,6 +118,106 @@ DEMO_PAGE_NAME = "Household HFCs"
 DEMO_SURVEY_TARGET = 200
 DEMO_EDITED_TARGET = 150
 DEMO_THROWAWAY_PAGE = "Test HFCs"
+
+
+# --- Check-page review guidance (#361) ---
+
+
+class DemoBounds(NamedTuple):
+    """Constraint bounds the Outliers guidance enters for a column."""
+
+    hard_min: float
+    soft_min: float
+    soft_max: float
+    hard_max: float
+
+
+DEMO_AGE_BOUNDS = DemoBounds(18, 25, 60, 100)
+
+
+class DemoFlag(NamedTuple):
+    """A flagged demo survey value that guidance reviews on a check page."""
+
+    hhid: str
+    key: str
+    column: DemoColumn
+    value: float
+    # The value to correct it to, or None to Accept it as valid
+    new_value: float | None = None
+
+
+# Age 24 is below the soft minimum only: unusual but plausible, so accepted
+DEMO_OUTLIER_ACCEPT = DemoFlag(
+    "AN016-034", "uuid:3xf5wk03-411r-454r-42q4-n97169wt312n", DemoColumn.AGE, 24
+)
+# A misplaced decimal point, corrected in the Review dialog
+DEMO_OUTLIER_CORRECTION = DemoFlag(
+    "AN016-008",
+    "uuid:7yq2ff04-784p-181b-06f6-y09055jv628g",
+    DemoColumn.LAND_ACRE,
+    62.0,
+    6.2,
+)
+
+
+class DemoRecord(NamedTuple):
+    """A demo survey record that guidance names by ID and KEY."""
+
+    hhid: str
+    key: str
+
+
+# Surveyed in Deesa, north Gujarat, far from the other Gujarat households but
+# a real village, so the GPS outlier is accepted as valid
+DEMO_GPS_ACCEPT = DemoRecord("GJ047-006", "uuid:8tp6pf85-928c-834t-16f0-g13614ux693g")
+
+
+class DemoMismatch(NamedTuple):
+    """A demo backcheck mismatch and the error source guidance attributes it to."""
+
+    hhid: str
+    # Survey KEY; the backcheck record has its own KEY
+    key: str
+    column: DemoBackcheckColumn
+    survey_value: float
+    backcheck_value: float
+    source: ErrorSource
+
+
+# Attributed without a note, then with the note a Respondent attribution needs
+DEMO_BACKCHECK_ATTRIBUTIONS = (
+    DemoMismatch(
+        "AN043-029",
+        "uuid:6lh1ml39-090a-285w-09t0-l42895pr073w",
+        DemoBackcheckColumn.AGE,
+        30,
+        40,
+        ErrorSource.ENUMERATOR,
+    ),
+    DemoMismatch(
+        "UP053-004",
+        "uuid:8um8wz44-940o-168k-35l3-z62845ol734i",
+        DemoBackcheckColumn.HOUSEHOLD_COUNT,
+        9,
+        10,
+        ErrorSource.RESPONDENT,
+    ),
+)
+
+
+class DemoSharedValue(NamedTuple):
+    """A value several demo survey records share in one column."""
+
+    column: DemoColumn
+    value: float
+    hhids: tuple[str, ...]
+
+
+# Other Duplicates on the two GPS columns finds only this repeated longitude;
+# the latitudes differ, so the households are not at the same place
+DEMO_SHARED_LONGITUDE = DemoSharedValue(
+    DemoColumn.HOUSEHOLD_LONGITUDE, 77.074387, ("AN043-038", "AN043-006")
+)
 
 
 # create a coloured container

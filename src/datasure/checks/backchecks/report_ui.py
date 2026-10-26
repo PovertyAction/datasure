@@ -83,7 +83,10 @@ from datasure.utils.duckdb_utils import (
 )
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
-from datasure.utils.onboarding_utils import DemoBackcheckColumn
+from datasure.utils.onboarding_utils import (
+    DEMO_BACKCHECK_ATTRIBUTIONS,
+    DemoBackcheckColumn,
+)
 from datasure.utils.reviewer import get_reviewer_name
 from datasure.utils.ui_utils import (
     metric_row,
@@ -2501,8 +2504,10 @@ def backchecks_report(
     demo_callout(
         """
         ##### Backchecks Summary
-        Four metrics appear here: Survey Observations, Backcheck Observations,
-        Total Enumerators, and Total Back Checkers. Below them, the **Targets**
+        Five metrics appear here: Survey Observations, Backcheck Observations,
+        Total Enumerators, Total Back Checkers, and Mismatches Attributed (the
+        share of mismatches you have attributed to an error source in
+        Comparison Results Details below). Below them, the **Targets**
         section shows Backcheck Coverage, the share of eligible unique surveys
         that have been backchecked, with how far it is above or below the
         backcheck target. When the survey's target number of responses is set
@@ -2576,6 +2581,29 @@ def backchecks_report(
         dataset to provide more context alongside each comparison.
         """
     )
+    first, second = DEMO_BACKCHECK_ATTRIBUTIONS
+    demo_callout(
+        "**Attribute mismatches to an error source.** A mismatch is not always "
+        "the enumerator's fault. Select **Mismatches Only**, then:\n\n"
+        f"1. Find the **{first.column}** mismatch for KEY **{first.key}** "
+        f"(survey **{first.survey_value}**, backcheck **{first.backcheck_value}**). "
+        "Click **:material/edit_note: Review** in its first column. The "
+        "**Attribute mismatches to an error source** dialog opens.\n"
+        f"2. Choose **{first.source}** under **Error source** (the survey value "
+        "is wrong). The **Note (optional)** can stay blank. Click **Save "
+        "attribution**.\n"
+        f"3. Review the **{second.column}** mismatch for KEY **{second.key}** "
+        f"(survey **{second.survey_value}**, backcheck "
+        f"**{second.backcheck_value}**) and choose **{second.source}**. This "
+        "source needs a reason, so enter one under **Note (required)** (e.g., "
+        "*A member moved in after the survey*) and click **Save attribution**.\n\n"
+        "The pinned **error_source** column shows each attribution. "
+        "Attribution never changes the data or the regular error rate: it only "
+        "feeds the adjusted error rate on the **Error Rates** cards and the "
+        "**Mismatches Attributed** metric. To attribute several mismatches at "
+        "once, select their rows and click **Review** on one of them; choose "
+        "**Unattributed** to clear an attribution."
+    )
 
     _render_id_problem_warning(scope, all_survey_data, backcheck_settings.survey_id)
     _render_comparison_results_section(
@@ -2585,6 +2613,10 @@ def backchecks_report(
         backcheck_settings,
         review,
         check_view(setting_file),
+    )
+    demo_callout(
+        "Expand **Attribution log** to see every attribution you saved, newest "
+        "first, with its **Error Source**, **Note**, **User** and **Date**."
     )
     _render_attribution_log(review.log)
 

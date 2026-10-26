@@ -60,6 +60,7 @@ from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import (
     DEMO_REPEAT_SUBMISSION,
     DEMO_SHARED_ID,
+    DEMO_SHARED_LONGITUDE,
     DEMO_WRONG_ID,
     DemoColumn,
     demo_output_onboarding,
@@ -2404,10 +2405,22 @@ def duplicates_report(
 
     if is_demo_project():
         demo_callout(
-            "Use **Add Duplicates Column(s)** to check any column for duplicate values — "
-            "for example, a phone number or unique ID number. "
-            "The demo dataset has no additional columns that should be duplicate-free beyond "
-            "the household ID, so you can skip adding columns here."
+            "Use **Add Duplicates Column(s)** to check any other column for duplicate "
+            "values, such as a phone number or national ID number. Two households "
+            "rarely share exact GPS coordinates, so check those:\n\n"
+            "1. Click **Add Duplicates Column(s)**. Leave **Search type** as "
+            "**exact** and, under **Select columns to check for duplicates**, select "
+            f"**{DemoColumn.HOUSEHOLD_LATITUDE}** and "
+            f"**{DemoColumn.HOUSEHOLD_LONGITUDE}**.\n"
+            "2. Click **Add Duplicates Configuration**.\n\n"
+            "**Columns Checked** shows 2 and **Columns with Duplicates** shows 1. "
+            "Under **Select column to check for duplicates**, choose "
+            f"**{DEMO_SHARED_LONGITUDE.column}**: households "
+            f"**{' and '.join(DEMO_SHARED_LONGITUDE.hhids)}** share the longitude "
+            f"**{DEMO_SHARED_LONGITUDE.value}**. Their latitudes differ, so they "
+            "are not at the same place and need no correction. Use "
+            "**:material/clarify: Show more columns in report** to add "
+            f"**{DemoColumn.HOUSEHOLD_LATITUDE}** to the table and compare."
         )
 
     all_columns = data.columns
