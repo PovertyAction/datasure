@@ -23,6 +23,11 @@ from datasure.utils.ui_utils import confirm_dialog, queue_notice
 
 ONBOARDING_STEPS = OnboardingSteps.get_all_steps()  # List of onboarding steps
 
+# Set once the completion message has shown its balloons, so reruns of the
+# Replication page do not repeat them. Restart and Exit clear it with the rest
+# of the demo's session state.
+DEMO_CELEBRATED_KEY = "demo_completion_celebrated"
+
 
 def page_navigation(prev=None, next=None):
     """
@@ -138,17 +143,20 @@ def _confirm_restart_demo() -> None:
     )
 
 
-def show_demo_completion_message():
+def show_demo_completion_message() -> None:
     """Show the demo's completion message and what to do next.
 
     This is the demo's only completion message, shown after the last step
-    (Replication). Restart resets the whole demo, as the sidebar Restart does;
+    (Replication). Balloons show once per demo run; the message stays on
+    reruns. Restart resets the whole demo, as the sidebar Restart does;
     Create Real Project leaves the demo for the Start page.
     """
     if not is_demo_project() or not is_demo_complete():
         return
 
-    st.balloons()
+    if not st.session_state.get(DEMO_CELEBRATED_KEY):
+        st.session_state[DEMO_CELEBRATED_KEY] = True
+        st.balloons()
 
     st.success("""
     **Demo Complete!**

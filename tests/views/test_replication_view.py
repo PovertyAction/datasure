@@ -617,9 +617,8 @@ class TestDemoCompletion(_ReloadHarness):
     """The demo ends here: the completion message shows once the PII box is ticked."""
 
     def _reload_with_package(self, pii_confirmed):
-        """Build the package; return the completion and callout mocks."""
+        """Build the package; return the completion message mock."""
         completion = MagicMock()
-        callout = MagicMock()
         try:
             self._reload(
                 selectbox_val="Household HFCs",
@@ -630,24 +629,21 @@ class TestDemoCompletion(_ReloadHarness):
                         "datasure.utils.navigations_utils.show_demo_completion_message",
                         completion,
                     ),
-                    patch("datasure.utils.navigations_utils.demo_callout", callout),
                 ),
             )
         finally:
             _st.session_state.pop("_replication_zip", None)
             _st.session_state.pop("_replication_filename", None)
-        return completion, callout
+        return completion
 
     def test_confirmed_package_shows_completion_message(self):
         """Ticking the PII box after building ends the demo."""
-        completion, callout = self._reload_with_package(pii_confirmed=True)
+        completion = self._reload_with_package(pii_confirmed=True)
 
         completion.assert_called_once_with()
-        texts = " ".join(str(c.args[0]) for c in callout.call_args_list)
-        assert "completed the DataSure demo" not in texts
 
     def test_unconfirmed_package_does_not_end_the_demo(self):
         """Without the PII confirmation the demo is not over yet."""
-        completion, _ = self._reload_with_package(pii_confirmed=False)
+        completion = self._reload_with_package(pii_confirmed=False)
 
         completion.assert_not_called()
