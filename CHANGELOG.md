@@ -146,7 +146,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Outliers and GPS deltas reuse the headline's flags** (#399, #365):
   `CheckHeadline` gains `basis` (not compared), what a headline computed its
   numbers from. `duplicates_headline`, `outliers_headline` and
-  `gpschecks_headline` set it (typed `HeadlineBasis`), and the deltas'
+  `gpschecks_headline` set it, and the deltas'
   `basis=` reuses it
   instead of computing the flags again (the Outliers delta computed them twice
   per load). `health_rows` keeps the latest basis per check outside the

@@ -238,7 +238,7 @@ to appear.
   period), a flag on one, because recomputing the IQR or SD bounds, or each
   point's LOF neighbourhood, on fewer rows would move them. Their headlines
   put what they computed (`DuplicatesBasis`, `OutliersBasis`,
-  `GPSOutlierSummary`; the `HeadlineBasis` union) in `CheckHeadline.basis`,
+  `GPSOutlierSummary`) in `CheckHeadline.basis`,
   which their deltas take as `basis=` instead of computing it again.
   `health_rows` keeps the latest basis of each check outside the LRU,
   matched to the headline's key, so a cached headline still passes it on

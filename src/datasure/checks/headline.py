@@ -43,7 +43,7 @@ class CheckHeadline:
         The number an informational value shows, such as the submissions or
         the active enumerators, which its change over the comparison period
         compares. None when the value has no such number.
-    basis : HeadlineBasis | None
+    basis : DuplicatesBasis | GPSOutlierSummary | OutliersBasis | None
         What the check computed the numbers from, such as its flags, so its
         delta can reuse them instead of computing them again: Duplicates'
         ``DuplicatesBasis``, Outliers' ``OutliersBasis`` and GPS Checks'
