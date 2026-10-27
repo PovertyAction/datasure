@@ -1461,15 +1461,15 @@ def _review_context(
 class _ReviewedFlags:
     """Outlier and constraint results with accepted flags cleared.
 
-    `flagged_before_correction` holds the (KEY, column) cells flagged in the
-    uncorrected data, so only corrections of flagged values count as
-    resolved.
+    `flagged_before_correction` holds the (KEY, column) cells each check
+    flags in the uncorrected data, by check type, so only corrections of
+    flagged values count as resolved.
     """
 
     outliers: pl.DataFrame
     violations: pl.DataFrame
     survey_key: str
-    flagged_before_correction: set[tuple]
+    flagged_before_correction: dict[str, set[tuple]]
 
 
 def _reviewed_flags(
@@ -1521,7 +1521,7 @@ def _reviewed_flags(
             _with_review_status(violations, settings, CONSTRAINTS, review),
             CONSTRAINTS,
         )
-    flagged_before: set[tuple] = set()
+    flagged_before: dict[str, set[tuple]] = {}
     uncorrected = (
         review.processor.get_uncorrected_data(review.alias)
         if review is not None

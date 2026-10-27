@@ -100,8 +100,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `outliers_headline` reports outliers plus violations as outstanding and,
     through `count_resolved_flags` (`checks/outliers/review.py`), accepted
     flags plus corrected cells no longer flagged as resolved; a corrected
-    cell counts only if the checks flag it in the uncorrected data, which
-    they rerun on only when some value was corrected
+    cell counts once for each check that flags it in the uncorrected data,
+    which they rerun on only when some value was corrected
   - `backchecks_headline` reports mismatches with no error source as
     outstanding and attributed mismatches as resolved, over the categories
     of the total error rate (`TOTAL_CATEGORIES`, filtered by

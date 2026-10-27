@@ -886,7 +886,7 @@ one shared column header, and each check sits in its own box. Each row shows:
 | Progress | Submissions out of the target, for example "310 / 500", or the submissions when no target is set | Share of the target reached | — |
 | Missing Values | Share of columns where every value is missing, counting missing codes | "of columns all missing (5 of 40)" | — |
 | Duplicates | Duplicate survey IDs not yet resolved, after Records to Include | "duplicate IDs" | Duplicate IDs resolved through corrections |
-| Outliers & Constraints | Outliers plus constraint violations, leaving out accepted flags | For example "3 outliers (1.4% of values), 1 constraint violation" | Flags accepted as valid, and corrected values that were flagged before the correction and are no longer flagged. Correcting a value that was never flagged does not count |
+| Outliers & Constraints | Outliers plus constraint violations, leaving out accepted flags | For example "3 outliers (1.4% of values), 1 constraint violation" | Flags accepted as valid, and corrected values that were flagged before the correction and are no longer flagged, once for each check that flagged them. Correcting a value that was never flagged does not count |
 | Enumerator Stats | Enumerators active in the past 7 days, out of all enumerators | "active in the past 7 days" | — |
 | Backchecks | Mismatches with no error source attributed | The total error rate, for example "4.25% error rate" | Mismatches attributed to the enumerator, backchecker or respondent |
 | Descriptive Stats, GPS Checks | Status only | — | — |

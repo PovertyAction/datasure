@@ -300,7 +300,7 @@ class TestOutliersHeadline:
             resolved=2,
         )
 
-    def test_a_corrected_flag_no_longer_flagged_is_resolved_once(self, setting_file):
+    def test_a_corrected_value_counts_once_per_flag_it_cleared(self, setting_file):
         from datasure.processing.correction_log import empty_correction_log
 
         # k5's income was 500, an outlier and above the soft maximum, before
@@ -315,7 +315,8 @@ class TestOutliersHeadline:
             setting_file, empty_correction_log(), self._log("modify", "k5"), uncorrected
         )
 
-        assert (headline.outstanding, headline.resolved) == (2, 1)
+        # Both flags on k5 are resolved, as if both had been accepted.
+        assert (headline.outstanding, headline.resolved) == (2, 2)
 
     def test_a_corrected_value_that_was_never_flagged_is_not_resolved(
         self, setting_file
